@@ -1,0 +1,8 @@
+id: list-agents
+kind: skill
+version: 0.1.0
+description: Enumerate all subagents under .claude/agents/ with name, description, tools, and model from each file's frontmatter.
+tags:
+  - query
+  - primitive
+depends_on: []

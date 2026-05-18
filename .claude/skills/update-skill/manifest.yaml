@@ -1,0 +1,14 @@
+id: update-skill
+kind: skill
+version: 0.1.0
+description: Dependency-aware mutator for a skill under .claude/skills/<id>/. Runs mechanical scans plus advisory semantic review plus epistemic loop before any write.
+tags:
+  - mutation
+  - primitive
+  - deep-loop
+depends_on:
+  - create-skill
+  - create-agent
+  - list-skills
+  - list-agents
+  - update-agent

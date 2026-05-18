@@ -1,0 +1,10 @@
+id: create-skill
+kind: skill
+version: 0.1.0
+description: Scaffold a new Claude Code skill under .claude/skills/<id>/ with the fixed marketplace shape.
+tags:
+  - creation
+  - primitive
+  - deep-loop
+depends_on:
+  - list-skills

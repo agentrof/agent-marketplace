@@ -27,7 +27,7 @@ If any required field is missing, ask the user. Do not guess.
 
 2. **Verify target**. Confirm `.claude/skills/<target_skill_id>/manifest.yaml` exists; if not, ask the user.
 
-3. **Run epistemic loop** per `references/loop-spec.md`, using `references/personas.md`. The loop interrogates the proposed change itself: is it the right change, is the wording correct, are there hidden side effects. Iterations land in `.run/<uuid>/artifacts/iter-<N>/`. Loop exits on consensus.
+3. **Run epistemic loop** per the canonical specs at `.claude/skills/create-agent/references/loop-spec.md` and `.claude/skills/create-agent/references/personas.md`. The loop interrogates the proposed change itself: is it the right change, is the wording correct, are there hidden side effects. Iterations land in `.run/<uuid>/artifacts/iter-<N>/`. Loop exits on consensus.
 
 4. **Mechanical scan (deterministic gate)**. Run three scripts in sequence and persist their raw JSON outputs:
    - `scripts/dep_scan.py --target <target_skill_id> --output .run/<uuid>/artifacts/dep_scan.json`

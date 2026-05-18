@@ -8,3 +8,4 @@ tags:
   - deep-loop
 depends_on:
   - list-skills
+  - create-agent

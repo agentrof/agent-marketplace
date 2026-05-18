@@ -12,10 +12,10 @@ Runs three mechanical scans (dependency BFS with cycle detection, content grep, 
 
 ## Key files
 
-- `references/dep-check-rules.md` - procedural rules Claude applies for each dependent.
-- `references/skill-rules.md` - skill spec (must still hold after the mutation).
-- `references/personas.md` - 10 epistemic personas used by the loop.
-- `references/loop-spec.md` - loop mechanics.
+- `references/dep-check-rules.md` - procedural rules Claude applies for each dependent (local).
+- `references/skill-rules.md` - skill spec (local, must still hold after the mutation).
+- Canonical loop spec (read at runtime): `.claude/skills/create-agent/references/loop-spec.md`.
+- Canonical persona set (read at runtime): `.claude/skills/create-agent/references/personas.md`.
 - `scripts/dep_scan.py` - manifest depends_on graph walker, BFS with cycle detection.
 - `scripts/content_scan.py` - greps SKILL.md, AGENT.md, README.md, manifest.yaml bodies.
 - `scripts/path_scan.py` - greps for old path references when files move.

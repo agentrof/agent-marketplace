@@ -25,7 +25,7 @@ If any required field is missing, ask the user. Do not guess.
 
 2. **Verify id uniqueness**. Read `.claude/skills/` listing; if `skill_id` already exists, ask the user for a new id.
 
-3. **Run epistemic loop** per `references/loop-spec.md`. Use `references/personas.md` as persona spec. Each iteration writes to `.run/<uuid>/artifacts/iter-<N>/`. Loop exits early on consensus.
+3. **Run epistemic loop** per the canonical specs at `.claude/skills/create-agent/references/loop-spec.md` and `.claude/skills/create-agent/references/personas.md` (single source of truth for the whole marketplace). Each iteration writes to `.run/<uuid>/artifacts/iter-<N>/`. Loop exits early on consensus.
 
 4. **Synthesize**. Write `.run/<uuid>/artifacts/final-design.md` summarizing the agreed-on skill design (frontmatter, body outline, scripts/assets/references/examples plan).
 

@@ -97,32 +97,64 @@ def load_graph(root: Path) -> tuple[dict, dict]:
     return forward, reverse
 
 
-def bfs_dependents(reverse: dict, target: str) -> tuple[list, dict, list]:
-    """Returns (direct, transitive_by_depth, cycles)."""
-    direct = list(reverse.get(target, []))
-    transitive: dict = {}
+def find_cycles(forward: dict) -> list:
+    """DFS-based cycle detection across the whole forward graph.
+
+    Returns a list of cycle node sequences. A node colored GRAY when revisited
+    indicates a back-edge; the cycle is the portion of the recursion stack from
+    that node onward.
+    """
+    WHITE, GRAY, BLACK = 0, 1, 2
+    color = {node: WHITE for node in forward}
     cycles: list = []
+
+    def dfs(u: str, stack: list) -> None:
+        color[u] = GRAY
+        stack.append(u)
+        for v in forward.get(u, []):
+            if color.get(v, WHITE) == GRAY:
+                idx = stack.index(v)
+                cycles.append(stack[idx:] + [v])
+            elif color.get(v, WHITE) == WHITE:
+                color.setdefault(v, WHITE)
+                dfs(v, stack)
+        stack.pop()
+        color[u] = BLACK
+
+    for node in list(forward.keys()):
+        if color.get(node, WHITE) == WHITE:
+            dfs(node, [])
+    return cycles
+
+
+def bfs_dependents(reverse: dict, target: str) -> tuple[list, dict]:
+    """Walks the reverse graph from target. Returns (direct, transitive_by_depth).
+
+    No cycle detection here; cycles are a property of the global forward graph,
+    detected separately by find_cycles. Visited-set prevents revisiting nodes
+    (which is needed in diamond patterns where one node reaches another via
+    multiple paths) without conflating diamonds with cycles.
+    """
+    direct = sorted(set(reverse.get(target, [])))
+    transitive: dict = {}
     visited = {target}
+    visited.update(direct)
     frontier = list(direct)
-    for node in frontier:
-        visited.add(node)
     depth = 2
     while frontier:
-        next_frontier = []
+        next_frontier_set: set = set()
         for node in frontier:
             for parent in reverse.get(node, []):
-                if parent == target or parent in visited:
-                    if parent == target or parent in {target, *direct}:
-                        # cycle: from parent back into already-visited set
-                        cycles.append([parent, node])
+                if parent in visited:
                     continue
                 visited.add(parent)
-                next_frontier.append(parent)
+                next_frontier_set.add(parent)
+        next_frontier = sorted(next_frontier_set)
         if next_frontier:
-            transitive[f"depth_{depth}"] = sorted(set(next_frontier))
+            transitive[f"depth_{depth}"] = next_frontier
             depth += 1
         frontier = next_frontier
-    return sorted(set(direct)), transitive, cycles
+    return direct, transitive
 
 
 def main() -> int:
@@ -137,7 +169,8 @@ def main() -> int:
     if args.target not in forward:
         sys.exit(f"error: target '{args.target}' not found in marketplace")
 
-    direct, transitive, cycles = bfs_dependents(reverse, args.target)
+    direct, transitive = bfs_dependents(reverse, args.target)
+    cycles = find_cycles(forward)
 
     result = {
         "target": args.target,

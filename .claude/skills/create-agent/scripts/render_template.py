@@ -41,6 +41,15 @@ def validate_model(model: str) -> None:
         sys.exit(f"error: model '{model}' not in {sorted(VALID_MODELS)}")
 
 
+DEEP_SNIPPET = (
+    "0. **Deep mode**. This agent inherits the marketplace epistemic reasoning loop. Before any other step:\n"
+    "   - `Read .claude/skills/create-agent/references/personas.md`\n"
+    "   - `Read .claude/skills/create-agent/references/loop-spec.md`\n"
+    "   - Apply the loop per `loop-spec.md` (10 iterations, 10 questions, 10 personas, 10 critics, early-exit on consensus) to the inbound request. Persist iteration artifacts under `.run/<uuid>/artifacts/iter-<N>/`. Synthesize a final approach. Only then proceed to step 1.\n"
+    "\n"
+)
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("agent_id")
@@ -52,6 +61,7 @@ def main() -> int:
     parser.add_argument("--input-2", default="")
     parser.add_argument("--step-1", default="")
     parser.add_argument("--step-2", default="")
+    parser.add_argument("--deep", action="store_true", help="Embed the deep-mode preamble that reads canonical personas.md and loop-spec.md and runs the epistemic loop on every invocation.")
     args = parser.parse_args()
 
     validate_id(args.agent_id)
@@ -81,6 +91,7 @@ def main() -> int:
         "INPUT_2": args.input_2,
         "STEP_1": args.step_1,
         "STEP_2": args.step_2,
+        "DEEP_SECTION": DEEP_SNIPPET if args.deep else "",
     }
 
     rendered = raw

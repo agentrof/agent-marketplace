@@ -12,8 +12,8 @@ Runs three mechanical scans (depends_on graph BFS with cycle detection, content 
 
 ## Key files
 
-- `references/dep-check-rules.md` - procedural rules for each dependent.
-- `references/agent-rules.md` - subagent spec (must still hold after the mutation).
-- `references/personas.md` - 10 epistemic personas used by the loop.
-- `references/loop-spec.md` - loop mechanics.
+- `references/dep-check-rules.md` - procedural rules for each dependent (local).
+- `references/agent-rules.md` - subagent spec (local, must still hold after the mutation).
+- Canonical loop spec (read at runtime): `.claude/skills/create-agent/references/loop-spec.md`.
+- Canonical persona set (read at runtime): `.claude/skills/create-agent/references/personas.md`.
 - `scripts/dep_scan.py`, `content_scan.py`, `path_scan.py` - same as `update-skill`, duplicated here per Phase 1 convention.

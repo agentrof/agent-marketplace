@@ -12,8 +12,8 @@ Asks for missing inputs, runs a 10-iteration multi-persona reasoning loop, prese
 
 ## Key files
 
-- `references/skill-rules.md` - full skill spec.
-- `references/personas.md` - 10 epistemic personas used by the loop.
-- `references/loop-spec.md` - loop mechanics.
+- `references/skill-rules.md` - full skill spec (local).
 - `assets/skill-template/` - skeleton folder cloned into the target.
 - `scripts/render_template.py` - copies and substitutes placeholders.
+- Canonical loop spec (read at runtime): `.claude/skills/create-agent/references/loop-spec.md`.
+- Canonical persona set (read at runtime): `.claude/skills/create-agent/references/personas.md`.

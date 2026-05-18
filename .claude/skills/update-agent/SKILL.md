@@ -16,6 +16,7 @@ Mutate an existing subagent file safely. Three mechanical scans plus an advisory
   - frontmatter field rename or update (`description`, `tools`, `model`)
   - body edit
   - id rename (which also renames the file)
+  - **deep-mode toggle**: enable or disable the marketplace epistemic loop on this agent (inserts or removes the `0. **Deep mode** ...` preamble block under `## Flow` and the two canonical Read instructions per `.claude/skills/create-agent/references/agent-rules.md`)
   - removal
 
 If any required field is missing, ask the user.
@@ -26,7 +27,7 @@ If any required field is missing, ask the user.
 
 2. **Verify target**. Confirm `.claude/agents/<target_agent_id>.md` exists; if not, ask the user.
 
-3. **Run epistemic loop** per `references/loop-spec.md`, using `references/personas.md`. The loop interrogates the proposed change. Iterations land in `.run/<uuid>/artifacts/iter-<N>/`. Loop exits on consensus.
+3. **Run epistemic loop** per the canonical specs at `.claude/skills/create-agent/references/loop-spec.md` and `.claude/skills/create-agent/references/personas.md`. The loop interrogates the proposed change. Iterations land in `.run/<uuid>/artifacts/iter-<N>/`. Loop exits on consensus.
 
 4. **Mechanical scan (deterministic gate)**:
    - `scripts/dep_scan.py --target <target_agent_id> --output .run/<uuid>/artifacts/dep_scan.json` - finds skills whose `manifest.yaml.depends_on` lists this agent id.
@@ -39,7 +40,7 @@ If any required field is missing, ask the user.
 
 7. **Ask the user**: `Apply target only`, `Cascade to all affected`, or `Cancel`. Cycles flagged; cycle cascading needs per-component approval.
 
-8. **On Apply or Cascade**: perform writes. If id renamed, move `.claude/agents/<old>.md` to `.claude/agents/<new>.md` and update consumer manifests. Save `.run/<uuid>/artifacts/applied-changes.diff`.
+8. **On Apply or Cascade**: perform writes. If id renamed, move `.claude/agents/<old>.md` to `.claude/agents/<new>.md` and update consumer manifests. For deep-mode toggle, insert or remove the canonical deep snippet block precisely as defined in `.claude/skills/create-agent/references/agent-rules.md` (two Read lines plus loop wrapper as step 0 of `## Flow`). Save `.run/<uuid>/artifacts/applied-changes.diff`.
 
 9. **Close run workspace**. Update `META.md`: `status`, `ended`, `## Outputs`, `## Artifacts`. Print `Task <uuid-short> done. See .run/<uuid-full>/META.md.`
 

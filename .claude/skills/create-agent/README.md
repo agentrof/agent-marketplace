@@ -13,7 +13,7 @@ Asks for missing inputs, runs a 10-iteration multi-persona reasoning loop, prese
 ## Key files
 
 - `references/agent-rules.md` - subagent file spec.
-- `references/personas.md` - 10 epistemic personas used by the loop.
-- `references/loop-spec.md` - loop mechanics.
-- `assets/agent-template.md` - skeleton subagent file.
-- `scripts/render_template.py` - writes the substituted file.
+- `references/personas.md` - 10 epistemic personas (canonical for the whole marketplace; read by every deep primitive and every deep generated agent).
+- `references/loop-spec.md` - loop mechanics (canonical, same).
+- `assets/agent-template.md` - skeleton subagent file with `{{DEEP_SECTION}}` placeholder.
+- `scripts/render_template.py` - writes the substituted file. `--deep` flag enables the canonical loop preamble in the generated agent body.

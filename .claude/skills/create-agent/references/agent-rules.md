@@ -53,6 +53,26 @@ And close on exit:
 
 Agents do not carry a `manifest.yaml`. Other components may declare `depends_on: [<agent-id>]` in their own manifests; agents themselves do not declare dependencies in Phase 1.
 
+## Deep mode (optional, opt-in at create or update time)
+
+A generated agent may be marked **deep**. A deep agent inherits the marketplace epistemic reasoning loop and runs it on every invocation before producing any output. Non-deep agents skip the loop entirely.
+
+When deep is enabled, the body **must** contain a step `0` block at the very top of `## Flow`, immediately above the existing step `1`. The block has this exact shape (verbatim, except for whitespace):
+
+```
+0. **Deep mode**. This agent inherits the marketplace epistemic reasoning loop. Before any other step:
+   - `Read .claude/skills/create-agent/references/personas.md`
+   - `Read .claude/skills/create-agent/references/loop-spec.md`
+   - Apply the loop per `loop-spec.md` (10 iterations, 10 questions, 10 personas, 10 critics, early-exit on consensus) to the inbound request. Persist iteration artifacts under `.run/<uuid>/artifacts/iter-<N>/`. Synthesize a final approach. Only then proceed to step 1.
+
+```
+
+The two repo-root-relative paths inside the Read instructions are the **canonical** location for the persona and loop specs. They are the single source of truth for the entire marketplace; the other deep primitives (`create-skill`, `update-skill`, `update-agent`) also read these same files.
+
+A non-deep agent's body has no step `0`; `## Flow` begins directly at step `1`.
+
+`create-agent`'s `scripts/render_template.py --deep` produces the deep block; without `--deep` it is omitted. `update-agent` inserts or removes the same block when toggling deep mode on an existing agent.
+
 ## Banned content
 
 - The em dash character (U+2014). Use comma, colon, hyphen, or two sentences.

@@ -16,6 +16,7 @@ Create a conformant new subagent file at `.claude/agents/<new-id>.md` following 
 - `tools`: optional comma-separated tool list (e.g. `Read, Grep, Bash`).
 - `model`: optional, one of `opus`, `sonnet`, `haiku`.
 - `purpose`: a paragraph for the loop to reason about. Required.
+- `deep`: boolean. Ask explicitly: "Should this be a deep agent? Deep agents inherit the marketplace epistemic loop and run 10 iterations of multi-persona reasoning on every invocation. Slower and token-heavy. Recommended for agents whose outputs feed marketplace state or critical decisions; not recommended for trivial Q&A agents." Default: ask, no default.
 
 If any required field is missing, ask the user. Do not guess.
 
@@ -25,13 +26,13 @@ If any required field is missing, ask the user. Do not guess.
 
 2. **Verify id uniqueness**. Check `.claude/agents/<agent_id>.md` does not exist; ask the user for a new id if it does.
 
-3. **Run epistemic loop** per `references/loop-spec.md`, using `references/personas.md`. Each iteration writes to `.run/<uuid>/artifacts/iter-<N>/`. Loop exits early on consensus.
+3. **Run epistemic loop** per `references/loop-spec.md`, using `references/personas.md` (these are the canonical specs for the whole marketplace). Each iteration writes to `.run/<uuid>/artifacts/iter-<N>/`. Loop exits early on consensus.
 
 4. **Synthesize**. Write `.run/<uuid>/artifacts/final-design.md` summarizing the agreed-on agent design (frontmatter fields, system-prompt outline).
 
 5. **Present** the synthesis in chat. Ask: "Apply, Revise, or Cancel?"
 
-6. **On Apply**: invoke `scripts/render_template.py <agent_id> <description> [--tools ...] [--model ...]`. Then customize the body with the loop's synthesized system prompt. Write `.run/<uuid>/artifacts/summary.md`.
+6. **On Apply**: invoke `scripts/render_template.py <agent_id> <description> [--tools ...] [--model ...] [--deep]`. Pass `--deep` if and only if the user said yes to the deep-agent question. Then customize the body with the loop's synthesized system prompt. Write `.run/<uuid>/artifacts/summary.md`, recording the deep choice.
 
 7. **Close run workspace**. Update `META.md`: `status: done`, `ended` set, `## Outputs` lists `.claude/agents/<agent_id>.md`, `## Artifacts` lists `summary.md`, `final-design.md`, iter folders. Print `Task <uuid-short> done. See .run/<uuid-full>/META.md.`
 

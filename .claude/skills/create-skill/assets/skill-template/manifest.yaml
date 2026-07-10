@@ -1,6 +1,0 @@
-id: {{SKILL_ID}}
-kind: skill
-version: 0.1.0
-description: {{DESCRIPTION}}
-tags: []
-depends_on: []

@@ -1,8 +1,0 @@
-id: list-skills
-kind: skill
-version: 0.1.0
-description: Enumerate all skills under .claude/skills/ with id, version, description, tags, and depends_on.
-tags:
-  - query
-  - primitive
-depends_on: []

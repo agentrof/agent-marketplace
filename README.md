@@ -22,7 +22,7 @@ hand anywhere in this repository.
 ## Install
 
 ```
-/plugin marketplace add xbarslan/agent-marketplace
+/plugin marketplace add agentrof/agent-marketplace
 /plugin install software-team
 ```
 

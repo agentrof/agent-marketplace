@@ -91,7 +91,7 @@ PLUGIN_JSON_TEMPLATE = {
     "name": "",
     "version": "0.1.0",
     "description": "",
-    "author": {"name": "xbarslan"},
+    "author": {"name": "Agentrof", "url": "https://github.com/agentrof"},
     "license": "MIT",
 }
 

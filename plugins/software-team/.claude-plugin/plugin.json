@@ -1,0 +1,9 @@
+{
+  "name": "software-team",
+  "version": "1.1.0",
+  "description": "A complete, orchestrated software and product development team: analysis, planning, architecture, design system, implementation, review and verification.",
+  "author": {
+    "name": "xbarslan"
+  },
+  "license": "MIT"
+}

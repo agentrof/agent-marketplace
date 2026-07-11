@@ -1,0 +1,19 @@
+# OS noise
+.DS_Store
+
+# Logs
+*.log
+
+# Environment
+.env
+.env.*
+!.env.example
+
+# Claude Code local settings
+.claude/settings.local.json
+
+# Team run state (transient; durable knowledge lives in docs/ and git)
+workspace/runs/
+
+# Suite artifacts (regenerated on every run)
+workspace/junit-*.xml

@@ -17,7 +17,7 @@ folder or an existing repository; it completes gaps and breaks nothing.
 
 1. Git check: resolve the project git root and anchor everything there.
    No repository: offer to initialize one; the team cannot work without
-   git (every package ends in a pull request). Sub-directory invocation
+   git (every story ends in a pull request). Sub-directory invocation
    still anchors at the root.
 2. Workspace collision: a foreign workspace/ directory at the root: ask
    for an alternative name and use it consistently, substituting it for
@@ -43,7 +43,16 @@ folder or an existing repository; it completes gaps and breaks nothing.
    workspace/sketches/, workspace/runs/. Git does not track empty
    directories: drop a .gitkeep in each folder created empty (runs/ is
    gitignored and needs none).
-5. Build workspace/config.json interactively. Its first key is always
+5. PMO backbone: resolve the PMO CLI (the launcher at
+   "${AGENTROF_HOME:-$HOME/.agentrof}/bin/pmo_cli.py", falling back to
+   the pmo plugin's own scripts copy; absent entirely means the pmo
+   plugin is missing: stop and tell the user to reinstall this plugin,
+   the dependency brings pmo in). Run init-db, then register the
+   project: project register --key <kebab project name> --name "<name>"
+   --team software-team --stamp-config workspace/config.json (stamps
+   project_key into the config; idempotent). Every flow resolves the
+   project by that key.
+6. Build workspace/config.json interactively. Its first key is always
    "managed_by": "software-team plugin; change only through the
    configure entry". An existing config.json is never re-interviewed:
    only missing keys are asked for and added. Detect from project
@@ -55,18 +64,18 @@ folder or an existing repository; it completes gaps and breaks nothing.
    test_command (the one command that runs the whole suite; point it at
    a script or make target when several stacks must run),
    mutation_command (the mutation-testing runner for the stacks, with a
-   {{changed_files}} placeholder for per-package scope; the QA gate
-   requires it on code packages and treats its absence as a blocking
+   {{changed_files}} placeholder for per-story scope; the QA gate
+   requires it on code stories and treats its absence as a blocking
    finding; verify it by running it once on one file before writing the
    config), source_dirs, output_language (default English). A
    stack outside the supported set is refused honestly: this team ships
    tested stacks only, and new stacks arrive as maintainer releases.
-6. Continuous integration: no PR-triggered test workflow in the
+7. Continuous integration: no PR-triggered test workflow in the
    repository's CI directory (for GitHub, .github/workflows/): offer to
    add one from ${CLAUDE_PLUGIN_ROOT}/templates/ci-tests.yml with the
    configured test command substituted for its placeholder. The template
    also carries a dependency-audit job over the lockfiles; keep it, and
    route any advisory it raises through the request entry as a
    fix-atomic lockfile bump.
-7. Close with the summary and pointers: start with business-analysis for
+8. Close with the summary and pointers: start with business-analysis for
    the first topic, design-system before any screen work, then request.

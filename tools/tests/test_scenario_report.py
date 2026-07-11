@@ -74,6 +74,25 @@ class ScenarioReportMatching(unittest.TestCase):
         second = self.run_report(brief, xml)
         self.assertEqual(first, second)
 
+    def test_json_out_matches_coverage_import_shape(self):
+        import json
+
+        brief = "- AC-001: criterion.\n- AC-002: other.\n"
+        with tempfile.TemporaryDirectory() as tmp:
+            b = Path(tmp) / "brief.md"
+            j = Path(tmp) / "results.xml"
+            o = Path(tmp) / "coverage.json"
+            b.write_text(brief, encoding="utf-8")
+            j.write_text(junit(["test_one[AC-001]"]), encoding="utf-8")
+            with redirect_stdout(io.StringIO()):
+                scenario_report.main([
+                    "--brief", str(b), "--junit", str(j), "--json-out", str(o),
+                ])
+            data = json.loads(o.read_text(encoding="utf-8"))
+            rows = {r["id"]: r["result"] for r in data["rows"]}
+            self.assertEqual(rows, {"AC-001": "PASS", "AC-002": "NO-TEST"})
+            self.assertEqual(data["summary"]["no_test"], 1)
+
 
 if __name__ == "__main__":
     unittest.main()

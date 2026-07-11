@@ -94,6 +94,13 @@ def make_valid_root(root: Path) -> None:
     }, indent=2))
     write(root / "plugins" / PLUGIN / "agents" / "planner.md", VALID_AGENT)
     write(root / "plugins" / PLUGIN / "skills" / "notes" / "SKILL.md", VALID_SKILL)
+    # Hook event names are the host platform's PascalCase schema and are
+    # exempt from the snake_case law at exactly $.hooks in hooks/hooks.json.
+    write(root / "plugins" / PLUGIN / "hooks" / "hooks.json", json.dumps({
+        "hooks": {
+            "SessionStart": [{"hooks": [{"type": "command", "command": "true"}]}],
+        },
+    }, indent=2))
 
 
 # --- one builder per validator check -------------------------------------

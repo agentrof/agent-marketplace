@@ -20,10 +20,10 @@ ONE markdown file per verified increment. It evolves in place across QA iteratio
 - Right-reason spot-checks performed: which passes were inspected and why they are trusted.
 
 ## Mutation Results
-- Command and scope (the package's changed files), mutant totals
+- Command and scope (the story's changed files), mutant totals
   (generated, killed, survived, timed out), every survivor with file,
   line, mutation and its finding id or ACCEPTED reasoning.
-- Exempt packages (no code changed) say so explicitly.
+- Exempt stories (no code changed) say so explicitly.
 
 ## Budget Verification
 One row per quantified budget from the brief:

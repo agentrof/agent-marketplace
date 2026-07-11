@@ -1,8 +1,8 @@
 # Develop Flow
 
-State-machine procedure for delivering ONE work package (or one atomic
-change) end to end. Loaded and executed by entry skills; the spec it must
-match lives in the repository's orchestration document.
+State-machine procedure for delivering ONE story (or one atomic change)
+end to end. Loaded and executed by entry skills; the spec it must match
+lives in the repository's orchestration document.
 
 ## Critical behavioral rules
 
@@ -10,8 +10,9 @@ You MUST follow these rules exactly. Violating any of them is a failure.
 
 1. Execute steps in the declared order. Do NOT skip, reorder or merge.
 2. State and artifacts are the source of truth. Read prior steps from
-   FILES, never from conversation memory. After any compaction, re-read
-   state.json and the relevant artifacts before acting.
+   the PMO database and from FILES, never from conversation memory.
+   After any compaction, run the CLI's resume-info and re-read the
+   relevant artifacts before acting.
 3. Stop at every GATE and CHECKPOINT and wait for explicit user approval.
    Offer exactly: Approve / Request changes (revise, then re-gate) /
    Pause (save state and stop).
@@ -22,24 +23,54 @@ You MUST follow these rules exactly. Violating any of them is a failure.
 
 ## State contract
 
-Run directory: workspace/runs/<yyyymmdd>-<kebab-slug>/ (gitignored).
-Contents: state.json, constitution.md (copied at init), and transient
-review.md / qa.md finding records. Nothing else is ever written here.
+All process state lives in the central PMO database, owned by the pmo
+plugin (installed together with this plugin as a dependency). The
+database has ONE writer: you, the main conversation, through the PMO CLI
+only. Spawned agents never touch it; the pmo hooks record spawn and stop
+mechanics through the same CLI; direct file writes to the database are
+blocked by a guard hook.
 
-state.json has ONE writer: you, the main conversation, and you write it
-ONLY through ${CLAUDE_PLUGIN_ROOT}/scripts/state_tool.py (init, set-step,
-record-gate, bump, set-ownership, set-run-status, validate,
-release-lock). The tool enforces the enums, the transition guard, the
-run-complete guard and the timestamps; hand-editing state.json is a
-contract violation. Keys, all snake_case: run_id, request, status,
-current_step, steps (per step: status, artifact, attempts), gates
-(decision, decided_at), iterations (review, qa), bindings (role to
-skill), ownership (role to paths; keys are snake_case role names such as
-backend_developer, never agent file names), created_at, updated_at.
+CLI resolution, once per run: the launcher at
+"${AGENTROF_HOME:-$HOME/.agentrof}/bin/pmo_cli.py". When the launcher is
+missing, run the pmo plugin's status entry once to bootstrap it; if the
+pmo plugin itself is absent, STOP and tell the user to reinstall this
+plugin from the marketplace (the dependency brings pmo in). Run the
+idempotent init-db subcommand before first use.
 
-The run reads the SNAPSHOTS init copied into the run directory
-(brief.snapshot.md, config.snapshot.json) for its whole duration; a
-brief or config edited mid-run does not change a running package.
+Run identity: project_key comes from workspace/config.json (stamped by
+setup); the run key is <yyyymmdd>-<kebab-slug>. Subcommands in play:
+run init / set-step / record-gate / bump / set-ownership / set-status /
+release / validate; task open / close; finding open / update / list;
+coverage import; budget set; ledger checkpoint; item import / update /
+list; render backlog / ledger; resume-info. The CLI enforces the enums,
+the step transition guard (a step starts only when its predecessors are
+done), the run-complete guard (steps done, findings closed), snake_case
+ownership roles, and ownership-overlap refusal across ALL active runs of
+the project. Advance step status with run set-step as you move.
+
+Claims, enforced atomically at run init: one active run per worktree; a
+story claimed by an active run cannot be claimed again; ownership path
+prefixes must stay disjoint across the project's active runs. A refused
+init means resume the holder (resume-info names it), never archive it
+blind.
+
+The run directory workspace/runs/<run-key>/ (gitignored) holds ONLY the
+snapshots init copied there: constitution.md, brief.snapshot.md,
+config.snapshot.json. The run reads these snapshots for its whole
+duration; a brief or config edited mid-run does not change a running
+story. Nothing else is ever written there.
+
+Findings, coverage rows, budget verdicts, round counters and tasks are
+DATABASE rows, not files. Reviewer and verifier spawns RETURN their
+findings in the reply; you record them with finding open/update and pass
+the current set back into re-review spawns from finding list --json.
+Severity enum: critical, high, medium, low (map a reviewer's "major" to
+high and "minor" to low when recording).
+
+Task trail: before each spawned step, open its task (task open --run-key
+<key> --role <snake_case role> --step <n> --title "<step title>"); after
+the post-step check passes, close it (task close ... --outcome done).
+Hooks stamp started and finished times; the semantic fields are yours.
 
 Suite artifacts (junit output and the like) are written to gitignored
 workspace/ paths (workspace/junit-<suite>.xml), never into the run
@@ -47,19 +78,12 @@ directory.
 
 Step status: pending | in_progress | done | blocked | escalated.
 Run status: running | waiting_gate | blocked | escalated | complete.
-Transition guard: a step starts only when its predecessor is done.
-
-Single-active-run lock: state_tool init acquires workspace/runs/.lock
-exclusively and REFUSES when another run holds it; a refused init means
-resume the holder, never archive it blind. The lock is released by
-state_tool release-lock at finalize or pause. Never run two develop flows
-concurrently in one repository.
 
 ## Spawn prompt template
 
 Every agent spawn assembles, in this order:
 
-1. Identity: "You are <agent-name>, executing step <n> of run <run_id>.
+1. Identity: "You are <agent-name>, executing step <n> of run <run-key>.
    Run directory: <path>."
 2. The constitution body, pasted verbatim:
 
@@ -67,11 +91,11 @@ Every agent spawn assembles, in this order:
 
 3. Inputs: an explicit file list, split into read-fully (this step's
    declared inputs) and summary-only (other prior artifacts).
-4. Skill binding: the knowledge skill(s) bound to this role in
-   state.json bindings, read from workspace/config.json.
+4. Skill binding: the knowledge skill(s) bound to this role in the run's
+   bindings, read from workspace/config.json.
 5. The task, with its acceptance criteria, each carrying a verify line.
 6. Output: the exact artifact path(s), the requirement to end with
-   SELF-CHECK, write nothing else, and never touch state.json.
+   SELF-CHECK, write nothing else, and never touch the PMO database.
 
 Parallel dispatch: independent spawns go out as multiple Task calls in a
 single message; consume their artifacts from disk afterwards.
@@ -82,13 +106,13 @@ After every spawned step, BEFORE advancing state, run
 ${CLAUDE_PLUGIN_ROOT}/scripts/artifact_check.py --path <artifact>
 --require-sections "<the artifact's mandated sections>" (data model:
 "Summary, Entities"; contract: "Summary, Error cases"; brief: "Purpose
-and Scope, Business Rules, Acceptance Criteria"; records: their format's
-sections). Exit 1 is the violation: re-spawn the SAME step exactly once
-with the violation named ("your prior attempt produced no artifact at
-PATH / is missing SECTIONS; write it now"). On a second failure, set the
-step blocked, write state, and halt with the reason and resume
-instructions. The script proves structure; you still read the artifact
-for semantic sanity before presenting any gate.
+and Scope, Business Rules, Acceptance Criteria"). Exit 1 is the
+violation: re-spawn the SAME step exactly once with the violation named
+("your prior attempt produced no artifact at PATH / is missing SECTIONS;
+write it now"). On a second failure, set the step blocked via set-step,
+and halt with the reason and resume instructions. The script proves
+structure; you still read the artifact for semantic sanity before
+presenting any gate.
 
 ## Steps
 
@@ -96,40 +120,46 @@ for semantic sanity before presenting any gate.
 
 - Resolve the project git root; anchor everything there. No git
   repository: stop and offer to initialize one.
-- Read workspace/config.json. Missing: stop and route the user to the
-  setup entry. Unsupported stack values: refuse honestly and stop.
-- Initialize the run with ${CLAUDE_PLUGIN_ROOT}/scripts/state_tool.py
-  init --workspace workspace --run-id <id> --request "<request>"
-  --constitution ${CLAUDE_PLUGIN_ROOT}/constitution.md --brief <brief
-  path> --bindings '<json>'. It creates the run directory, copies the
-  constitution, snapshots the brief and config, acquires the lock and
-  writes the state skeleton. Bindings from config: backend role to the
-  backend stack skill, frontend role to the frontend stack skill,
-  architect to the architecture skill plus every database skill in the
-  databases set, planner to the planning skill, analyst to the
+- Read workspace/config.json. Missing, or carrying no project_key: stop
+  and route the user to the setup entry. Unsupported stack values:
+  refuse honestly and stop.
+- Resolve the PMO CLI per the state contract and run init-db.
+- Initialize the run: run init --project-key <key> --run-key <id>
+  --request "<request>" --worktree <git root> --story <WP-##>
+  --bindings '<json>' --run-dir workspace/runs/<run-key>
+  --constitution ${CLAUDE_PLUGIN_ROOT}/constitution.md
+  --brief <brief path> --config workspace/config.json. It claims the
+  worktree and the story, marks the story in_development, writes the
+  step skeleton and copies the snapshots. Bindings from config: backend
+  role to the backend stack skill, frontend role to the frontend stack
+  skill, architect to the architecture skill plus every database skill
+  in the databases set, planner to the planning skill, analyst to the
   requirements-analysis skill, reviewer to the review skill, verifier to
   the verification skill.
 - Ensure workspace/runs/ is gitignored; append the rule when missing.
-- Create the work branch for this package from the main line, named
+- Create the work branch for this story from the main line, named
   wp-<nn>-<kebab-slug> (atomic route: atomic-<kebab-slug>).
 
 ### Step 0.5: readiness gate
 
-- Check every item of this package's Definition of Ready from the
-  backlog against reality (dependencies actually merged, criteria
-  unambiguous, preview present when required). Any item failing: the
-  package is NOT ready; return it to the product owner with the failing
-  items named, note it in the backlog on the main line, set the run
-  status blocked via state_tool and release the lock. Never start
-  implementation on an unready package.
+- Read this story's row (item list --kind story --json) and check every
+  item of its Definition of Ready against reality (dependencies actually
+  merged, criteria unambiguous, preview present when required). Any item
+  failing: the story is NOT ready; return it to the product owner with
+  the failing items named, set the story back (item update
+  --external-id <WP-##> --status planned), set the run status blocked
+  via run set-status, and stop. Never start implementation on an unready
+  story.
 
 ### Step 1: architecture delta
 
 - Spawn software-team-software-architect with the snapshotted brief, the
   living documents under workspace/docs/system-architecture/, and this
-  package's scope from the backlog.
+  story's scope from its backlog row.
 - The architect applies its delta to the living documents and returns
-  the ownership map; store the map via state_tool set-ownership.
+  the ownership map; store it via run set-ownership. The CLI refuses
+  overlapping prefixes, inside the run and against every other active
+  run; a refusal routes back to the architect as the named violation.
 
 ### GATE: model and contract
 
@@ -139,156 +169,171 @@ for semantic sanity before presenting any gate.
 - Mechanical half, run BEFORE presenting the gate:
   ${CLAUDE_PLUGIN_ROOT}/scripts/contract_check.py --contract
   workspace/docs/system-architecture/api-contract.md (every endpoint
-  declares error cases) and ${CLAUDE_PLUGIN_ROOT}/scripts/
-  ownership_check.py --state <run>/state.json (no overlapping paths).
-  Either exiting nonzero blocks the gate; route the output back to the
-  architect as the named violation.
+  declares error cases) and run validate. Either exiting nonzero blocks
+  the gate; route the output back to the architect as the named
+  violation.
 - Judgment half at the gate: error-case completeness in substance,
   boundary sanity, budget citations. The gate cannot pass otherwise.
-- Approve / Request changes / Pause.
+- Approve / Request changes / Pause. Record the outcome with
+  record-gate --gate model_contract.
 
 ### Step 2: implementation (parallel)
 
-- If this package's Definition of Ready requires a screen and no approved
+- If this story's Definition of Ready requires a screen and no approved
   preview exists: run the design flow now (flows/design.md) and return.
 - Spawn software-team-backend-developer and
   software-team-frontend-developer in one message, each bounded to its
   ownership paths, each with read-fully inputs: the architecture delta,
   the contract, the approved preview (frontend), the design master
-  (frontend). Packages without client or server work spawn only the
+  (frontend). Stories without client or server work spawn only the
   relevant developer.
 - Ownership overlap discovered mid-flight: serialize (backend first),
-  note it in state.
+  note it in the run's events (event append).
 - Re-slice branch: when a developer reports the scope is larger than the
-  package (new entities, endpoints or screens the backlog never sliced),
+  story (new entities, endpoints or screens the backlog never sliced),
   halt the step, present the discovery, and route to the product owner
-  for a re-slice; the backlog delta passes a mini backlog gate, then
-  resume this package with its corrected scope or abort it in favor of
-  the new slices. Never absorb discovered scope silently.
+  for a re-slice; the backlog delta passes a mini backlog gate and is
+  imported (item import), then resume this story with its corrected
+  scope or abort it in favor of the new slices. Never absorb discovered
+  scope silently.
 - Post-step check: the configured test command passes per developer's
   SELF-CHECK; code changes exist only inside ownership paths; on
-  server-touching packages the exported interface schema exists and the
+  server-touching stories the exported interface schema exists and the
   client-shape check in the suite ran against it (contract drift is a
   red suite, not an opinion).
 
 ### Step 3: review loop (max 3 rounds)
 
 - Spawn software-team-code-reviewer with the diff scope, the living
-  architecture documents, and the transient record path
-  <run>/review.md.
+  architecture documents, and the currently open findings from finding
+  list --json (empty on round one).
+- The reviewer RETURNS its verdict and findings; record each new finding
+  with finding open --source review before acting on it.
 - Verdict approve: continue. Verdict fix_required (issued only when a
-  critical or major finding is open; minors never spin the loop): route
-  each finding to the developer owning its file; the reviewer then
-  re-checks only the fixes on the same evolving record. Increment
-  iterations.review.
-- Churn guard: at re-review, a NEW critical or major finding on
+  critical or high finding is open; lower severities never spin the
+  loop): route each finding to the developer owning its file; after the
+  fix, the reviewer re-checks only the fixes against the same finding
+  set; flip resolved findings with finding update --status fixed
+  --round <n>. Increment the counter with run bump --counter review.
+- Churn guard: at re-review, a NEW critical or high finding on
   untouched, already-passed lines is accepted only when the reviewer
   cites what changed to justify it; otherwise reject the finding and
   keep the round scoped to the fixes.
 - A finding that implicates the approved architecture does NOT enter the
-  fix loop: set escalated, present it, and stop for the owner's decision.
-  Exits: the owner records the decision retroactively (an owner-decision
-  entry in the decision log, supersede mechanics) and the loop resumes;
-  or the architect revises the delta through a mini model gate, then
-  resume here.
-- iterations.review reaching 3 without approve: blocked, escalate, halt.
+  fix loop: set the step escalated, present it, and stop for the owner's
+  decision. Exits: the owner records the decision retroactively (an
+  owner-decision entry in the decision log, supersede mechanics) and the
+  loop resumes; or the architect revises the delta through a mini model
+  gate, then resume here.
+- The review counter reaching 3 without approve: blocked, escalate, halt.
 
 ### Step 4: verification loop (max 3 rounds)
 
-- Spawn software-team-qa-engineer with the brief's criteria, the record
-  path <run>/qa.md, and the configured commands (test_command and
-  mutation_command).
-- The mutation gate is mandatory on code packages: QA runs the
-  configured mutation command scoped to this package's changed files;
-  every surviving mutant in changed lines is a finding (major on a
-  BR/AC-tagged path, minor otherwise); a missing mutation_command on a
-  code package is itself a blocking finding.
-- Pass: continue. Fail: route findings to the owning developer exactly as
-  in review; increment iterations.qa; re-verify only what changed.
+- Spawn software-team-qa-engineer with the brief's criteria, the
+  currently open findings from finding list --json, and the configured
+  commands (test_command and mutation_command).
+- The mutation gate is mandatory on code stories: QA runs the configured
+  mutation command scoped to this story's changed files; every surviving
+  mutant in changed lines is a finding (high on a BR/AC-tagged path, low
+  otherwise); a missing mutation_command on a code story is itself a
+  blocking finding.
+- The verifier RETURNS findings, the coverage matrix and the budget
+  table. Record them: finding open --source qa per finding; run the
+  coverage script with --json-out and import it (coverage import);
+  record each budget verdict with budget set (verified, or unverified
+  with the reason; load-only budgets are never faked green).
+- Pass: continue. Fail: route findings to the owning developer exactly
+  as in review; run bump --counter qa; re-verify only what changed and
+  flip fixed findings.
 - Requirement gaps escalate to the owner; they are never patched
-  silently. iterations.qa reaching 3 without pass: blocked, escalate,
+  silently. The qa counter reaching 3 without pass: blocked, escalate,
   halt.
 
-### Step 4.5: design verification (screenful packages only)
+### Step 4.5: design verification (screenful stories only)
 
 - After QA passes, spawn software-team-ux-designer READ-ONLY with the
   approved preview, the design master and the built screens (run the app
   via the configured command): it re-judges the realization with its
   pre-delivery checklist and self-critique (contrast, spacing rhythm,
   motion character, hierarchy, token fidelity) against the spec it
-  authored. Findings route like review findings (token drift to the
-  frontend developer; spec ambiguity escalates); one fix round, then
-  re-judge once.
+  authored. Findings are recorded with finding open --source design_qa
+  and route like review findings (token drift to the frontend developer;
+  spec ambiguity escalates); one fix round, then re-judge once.
 
 ### GATE: delivery
 
-- Present the package summary: what was built, review verdict and rounds,
-  verification results, minors carried as notes.
-- Approve / Request changes / Pause.
+- Present the story summary: what was built, review verdict and rounds,
+  verification results (coverage, mutation, budgets from the database),
+  low-severity findings carried as notes.
+- Approve / Request changes / Pause. Record the outcome with
+  record-gate --gate delivery.
 
 ### Step 5: finalize
 
 - Commit on the work branch and open the pull request; its body carries
   the compact quality summary (review verdict and rounds, coverage
-  matrix result, mutation result, live verification result, minor notes)
-  and, when the package authored migrations, the migration notes:
+  matrix result, mutation result, live verification result, low-severity
+  notes) and, when the story authored migrations, the migration notes:
   which migrations, their order, the safe-to-run-twice statement and the
-  rollback note. The handoff is complete or the package is not done.
+  rollback note. The handoff is complete or the story is not done.
 - Backlog updates NEVER ride this branch. At the checkpoint after merge,
   on the main line:
-  - update workspace/docs/backlog.md: mark the package done, reconcile
-    ordering;
-  - append the package's line to workspace/CHANGELOG.md from the PR
+  - mark the story done (item update --external-id <WP-##> --status
+    done) and append the quality line (ledger checkpoint --run-key
+    <key>, with --escaped-defect when a fix-atomic traced back to this
+    story);
+  - regenerate the committed views from the database: render backlog
+    --out workspace/docs/backlog.md and render ledger --out
+    workspace/docs/quality-ledger.md (both are generated files; never
+    hand-edit them);
+  - append the story's line to workspace/CHANGELOG.md from the PR
     quality summary (append-only);
   - publish the exported interface schema under workspace/docs/api/;
-  - append the package's line to workspace/docs/quality-ledger.md:
-    finding categories, counts by severity, review and qa
-    rounds-to-green, and the escaped-defect marker when a fix-atomic
-    traced back to this package;
   - update the brief's BR-### entries changed by fix-atomic work since
     the last checkpoint;
-  - record deployed_verified in the backlog's checkpoint fields when the
-    owner confirms the merged package runs in its target environment
+  - record deployed_verified (item update --deployed-verified true) when
+    the owner confirms the merged story runs in its target environment
     (merged is not working-in-the-world);
   - every tenth checkpoint, or on demand, run the architecture
     reconciliation: an architect audit of the living documents against
     the code as implemented, and of page overrides against the design
     master (stable overrides fold back in; contradictions become
     findings);
-  then ask "continue with the next package?".
-- Set the run complete only when every step's status is done and every
-  gate carries decision and decided_at; a complete run with pending
-  steps is a contract violation. The run directory keeps only
-  state.json, the constitution copy and the transient records.
+  then ask "continue with the next story?".
+- Set the run complete (run set-status --status complete) only when
+  every step is done, every gate is recorded and every finding is
+  closed; the CLI's run-complete guard refuses otherwise.
 
 ## Atomic route variant
 
-Atomic work has two tiers; the entry names the tier at classification:
+Atomic work has two tiers; the entry names the tier at classification.
+Both tiers run step 0 as written, except: pass --story only when the
+change maps to an existing backlog story; most atomic work has none.
 
 COSMETIC-ATOMIC (no behavior change: copy, a label, an existing-token
-swap): run step 0 as written; skip step 1, both gates, and the review
-and verification loops; spawn only the owning developer with the task
-and ownership bounded to the touched files; finalize with a small pull
-request whose body states the route (cosmetic-atomic), the diff summary
-and the test command result.
+swap): skip step 1, both gates, and the review and verification loops;
+spawn only the owning developer with the task and ownership bounded to
+the touched files; finalize with a small pull request whose body states
+the route (cosmetic-atomic), the diff summary and the test command
+result.
 
-FIX-ATOMIC (any behavior change: a bug fix, a rule correction): run step
-0 as written, then, in order:
+FIX-ATOMIC (any behavior change: a bug fix, a rule correction): after
+step 0, in order:
 1. Reproduction first: the owning developer writes a FAILING test that
    reproduces the defect, tagged to the violated BR-### (or a newly
    minted id when the behavior was never specified), before touching the
    fix. The test is permanent regression-suite growth.
 2. Fix until the reproduction test and the whole suite are green.
-3. ONE reviewer pass (single round): findings routed once to the
-   developer, re-checked once; an architecture-implicating finding
-   escalates as in the large route.
+3. ONE reviewer pass (single round): findings recorded and routed once
+   to the developer, re-checked once; an architecture-implicating
+   finding escalates as in the large route.
 4. Finalize with a small pull request whose body states the route
    (fix-atomic), the reproduction test name, the diff summary and the
    test command result.
 5. At the merge checkpoint ON MAIN, update or add the BR-### in the
    brief when the fix changed or defined specified behavior (the
-   backlog-main rule extended to the brief), and mark the ledger entry
-   as an escaped defect when the fix traces to a prior package.
+   backlog-main rule extended to the brief), and append the ledger line
+   with --escaped-defect when the fix traces to a prior story.
 
 Both tiers: UI-touching atomic work still draws every visual value from
 the design master's tokens. No master in the project: a change that
@@ -299,8 +344,8 @@ Tripwire, BEFORE finalize on both tiers: run
 ${CLAUDE_PLUGIN_ROOT}/scripts/atomic_tripwire.py --repo . --range
 main...HEAD. Exit 1 proves the work was never atomic: STOP, report "not
 atomic" with the flagged files, and hand the request to the large route
-unchanged. Disposition: set the run escalated and archive it, delete the
-abandoned atomic branch (state_tool release-lock), and let the large
-route start its own run. The judgment-level escape hatch stands
-independently: the moment the work touches the data model, the contract
-or the schema, stop without waiting for the tripwire.
+unchanged. Disposition: set the run escalated (run set-status), delete
+the abandoned atomic branch, and let the large route start its own run.
+The judgment-level escape hatch stands independently: the moment the
+work touches the data model, the contract or the schema, stop without
+waiting for the tripwire.

@@ -55,7 +55,10 @@ DON'T inflate to look thorough or deflate to pass the gate.
 
 ## Single Evolving Record
 
-One finding record per review loop, updated in place across re-reviews.
+One finding set per review loop, evolving across re-reviews. The
+canonical copy lives in the orchestrator's PMO database; the spawn
+prompt hands you the currently open findings, and your reply returns the
+updated set for the orchestrator to record.
 
 - DO keep `F-###` ids stable: a re-review updates each existing finding's
   status (open, fixed, wont-fix) on the same id.

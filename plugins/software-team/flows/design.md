@@ -2,7 +2,7 @@
 
 State-machine procedure for a design handshake: N genuinely divergent
 directions, a pick, refinement rounds, an approved preview. Used by the
-sketch entry, the demo entry, and screenful packages inside the develop
+sketch entry, the demo entry, and screenful stories inside the develop
 flow. It never creates the design master.
 
 ## Critical behavioral rules
@@ -41,8 +41,8 @@ then pasted verbatim:
 then inputs (the brief read fully; MASTER.md read fully; the relevant
 page override when one exists), the task with the requested direction
 count, and the exact output path. Standalone runs have no run directory
-and no state.json; the state-touching clauses of the develop template do
-not apply.
+and no PMO run row; the state-touching clauses of the develop template
+do not apply.
 
 ## Steps
 
@@ -53,7 +53,7 @@ not apply.
   preview file with realistic placeholder data, every value drawn from
   MASTER tokens, and the axis of difference plus rationale stated per
   direction.
-- Output path by mode: sketch mode and in-package mode write
+- Output path by mode: sketch mode and in-story mode write
   workspace/sketches/<slug>/preview.html; demo mode writes the working
   file under workspace/demos/<slug>/.
 - Mechanical check: the file exists, opens standalone, contains the
@@ -89,6 +89,7 @@ not apply.
   and is committed; it seeds later demo or develop work.
 - Demo mode: the final package is committed as
   workspace/demos/<slug>/demo.html.
-- In-package mode: the approved preview stays under
-  workspace/sketches/<wp-slug>/, is committed with the package, and its
-  path is recorded in the run's state.json for the frontend developer.
+- In-story mode: the approved preview stays under
+  workspace/sketches/<wp-slug>/, is committed with the story, and its
+  path is recorded as the run's step artifact (run set-step --artifact)
+  for the frontend developer.

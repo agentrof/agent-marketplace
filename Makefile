@@ -15,7 +15,7 @@ test:
 	$(PY) -m unittest discover -s tools/tests -p 'test_*.py' -v
 
 eval:
-	$(PY) -m unittest tools.tests.test_scenario_report tools.tests.test_runtime_scripts -v
+	$(PY) -m unittest tools.tests.test_scenario_report tools.tests.test_runtime_scripts tools.tests.test_pmo_cli tools.tests.test_pmo_hooks -v
 	@echo "eval: deterministic behavior assertions green"
 
 check: validate counts-check test

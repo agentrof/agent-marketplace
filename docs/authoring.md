@@ -172,3 +172,21 @@ ADR); otherwise paraphrase the procedure and drop the brand.
 Use `tools/scaffold.py` to create components; its output passes
 `make check` with zero findings by construction, and a test keeps it that
 way.
+
+## Depending on the operations backbone
+
+Every team plugin records its process state (runs, stories, tasks,
+findings) through the pmo plugin, never in its own files:
+
+- Declare the dependency in plugin.json: `"dependencies": ["pmo"]`;
+  installing the team then installs pmo automatically.
+- Invoke the CLI through the synced launcher in the user-level data
+  directory (see the develop flow's state contract for the resolution
+  line); never reference another plugin's install path, it is not a
+  stable location.
+- Register the team's agent-name prefix in pmo's hook registry
+  (TEAM_AGENT_PREFIXES in the hook common module) so subagent spawns are
+  recorded as task activity.
+- The single-writer rule is absolute: flows call the CLI; spawned agents
+  never do; anything the owner must review in git is rendered from the
+  database as a generated view, not hand-written.

@@ -90,6 +90,10 @@ KEBAB_RE = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
 
 SNAKE_KEY_RE = re.compile(r"^[a-z0-9_]+$")
 
+# Hook event names inside a plugin's hooks/hooks.json follow the host
+# platform's PascalCase schema (SessionStart, PreToolUse, ...).
+HOOK_EVENT_KEY_RE = re.compile(r"^[A-Z][A-Za-z]+$")
+
 COUNTS_START = "<!-- counts:start -->"
 COUNTS_END = "<!-- counts:end -->"
 
@@ -718,9 +722,13 @@ def check_json_hygiene(tree: Tree, findings: list[Finding]) -> None:
                 "fix the syntax",
             ))
             continue
+        is_hooks_manifest = path.name == "hooks.json" and path.parent.name == "hooks"
         keys: list[tuple[str, str]] = []
         _walk_keys(data, "$", keys)
         for where, key in keys:
+            if (is_hooks_manifest and where == "$.hooks"
+                    and HOOK_EVENT_KEY_RE.match(key)):
+                continue  # hook event names are the host platform's schema
             if not SNAKE_KEY_RE.match(key):
                 findings.append(Finding(
                     "error", rel(tree, path), 1, "json_hygiene",

@@ -12,7 +12,7 @@ asserts nothing about that behavior.
 - The command comes from `workspace/config.json` `mutation_command`; the
   project's setup configured a runner per stack and verified it runs.
   Never hardcode a tool.
-- Scope: the files this package changed, never the whole tree. The
+- Scope: the files this story changed, never the whole tree. The
   command carries a `{{changed_files}}` placeholder QA substitutes with
   the space-joined list (git diff --name-only against the main line);
   a runner that scopes only through its config file gets the scope
@@ -43,14 +43,14 @@ scope for judgment, whether or not its exact line changed.
   deleting the mutant's target.
 - Equivalent mutants (behavior genuinely unchanged) are recorded as
   ACCEPTED with one line of reasoning; more than a handful of "equivalent"
-  calls in one package is itself a smell that the tests assert too little.
+  calls in one story is itself a smell that the tests assert too little.
 
 ## Gate semantics
 
 - Pass: zero unaccepted survivors in the changed files.
-- A missing `mutation_command` on a package that changed code is a
+- A missing `mutation_command` on a story that changed code is a
   blocking finding routed to the owner: configure the runner via the
-  configure entry. Documentation-only or asset-only packages are exempt;
+  configure entry. Documentation-only or asset-only stories are exempt;
   say so in the record.
 - The gate reads the runner's exit code and report; QA never overrides a
   survivor by judgment alone.

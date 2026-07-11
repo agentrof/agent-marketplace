@@ -123,6 +123,11 @@ def main(argv: list[str] | None = None) -> int:
         "--junit", nargs="+", required=True, type=Path, metavar="XML",
         help="JUnit XML result file(s)",
     )
+    parser.add_argument(
+        "--json-out", type=Path, default=None, metavar="JSON",
+        help="also write the matrix rows and summary as JSON (the shape"
+             " the PMO CLI's coverage import consumes)",
+    )
     args = parser.parse_args(argv)
 
     for path in list(args.brief) + list(args.junit):
@@ -151,6 +156,18 @@ def main(argv: list[str] | None = None) -> int:
         "verdict": verdict,
     }
     print("scenario_report_summary " + json.dumps(summary, sort_keys=True))
+    if args.json_out is not None:
+        document = {
+            "rows": [
+                {"id": req_id, "result": result, "tests": names}
+                for req_id, names, result in rows
+            ],
+            "summary": summary,
+        }
+        args.json_out.write_text(
+            json.dumps(document, indent=2, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
     return 0 if verdict == "PASS" else 1
 
 

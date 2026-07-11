@@ -16,9 +16,10 @@ Config changes go through this gate, never through hand edits.
 ## Procedure
 
 1. Read workspace/config.json; missing: route to the setup entry and
-   stop. A develop run with status running or waiting_gate
-   (workspace/runs/): REFUSE the change and point at the run; the run
-   reads its config snapshot, so a mid-run change would fork the spec.
+   stop. An active develop run reported by the PMO CLI's resume-info
+   --project-key <key> (running or waiting_gate): REFUSE the change and
+   point at the run; the run reads its config snapshot, so a mid-run
+   change would fork the spec.
    When present, remind the user the file is machine-managed (its
    managed_by note says so) and this gate is its only supported writer;
    hand edits are unsupported and carry no guarantee of surviving later

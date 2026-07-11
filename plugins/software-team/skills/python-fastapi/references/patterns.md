@@ -186,7 +186,7 @@ Path("openapi.json").write_text(json.dumps(app.openapi(), indent=2))
 - The frontend's suite validates its typed client against this file (see
   the client stack's testing reference); a shape drift is a red suite on
   either side, never a runtime surprise.
-- The finalize step publishes the exported schema as the package's API
+- The finalize step publishes the exported schema as the story's API
   documentation.
 
 ## Performance Assertions: the honest floor

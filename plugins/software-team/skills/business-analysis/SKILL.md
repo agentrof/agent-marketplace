@@ -15,11 +15,11 @@ Turn an idea into one approved, testable brief through conversation.
 ## Procedure
 
 1. Pre-flight: read workspace/config.json when present (its
-   output_language governs the brief's language; default English). A
-   develop run with status running or waiting_gate (workspace/runs/):
-   REFUSE brief edits for the topics that run builds on; the run reads
-   its snapshot, so a mid-run edit would fork the spec; resume or finish
-   the run first. An existing brief for this topic under
+   output_language governs the brief's language; default English). An
+   active develop run reported by the PMO CLI's resume-info
+   --project-key <key> (running or waiting_gate): REFUSE brief edits for
+   the topics that run builds on; the run reads its snapshot, so a
+   mid-run edit would fork the spec; resume or finish the run first. An existing brief for this topic under
    workspace/docs/business-analysis/ means UPDATE mode: the brief is a
    living file; never create a second version.
 2. Adopt the business-analyst role IN THIS CONVERSATION: this is an

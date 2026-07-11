@@ -1,7 +1,7 @@
 # Slicing Patterns
 
-How to cut an approved brief into work packages. The unit throughout is
-the package: one review unit, independently revertable, a backlog entry
+How to cut an approved brief into stories. The unit throughout is
+the story: one review unit, independently revertable, a backlog entry
 with its own Definition of Done. It is not a sprint story; nothing here
 assumes iterations or estimates.
 
@@ -28,17 +28,17 @@ After:
 - WP-03 Export approved reports: finance pulls approved reports as a file
   (AC-3).
 
-Each package crosses every layer it needs and is demonstrable alone. WP-02
+Each story crosses every layer it needs and is demonstrable alone. WP-02
 depends on WP-01 only because a report must exist before it can be
 decided; that is a real edge, not chain slicing.
 
 DO cut at the state transitions named in the brief's process analysis.
-DON'T cut inside a transition: a "validate submission" package is a layer
+DON'T cut inside a transition: a "validate submission" story is a layer
 in disguise, nothing new is observable when it lands.
 
 ## Pattern 2: Split by Business-Rule Variation
 
-Ship the base rule first; each variation becomes its own package.
+Ship the base rule first; each variation becomes its own story.
 
 Before:
 
@@ -55,14 +55,14 @@ After:
 - WP-05 Delegate decisions (BR-013): observable as the delegate seeing and
   deciding the absent approver's queue.
 
-DO write the excluded variations into the base package's "does NOT
+DO write the excluded variations into the base story's "does NOT
 include" scope line, so the coverage map still traces BR-012 and BR-013 to
-a package instead of losing them. DON'T split below one whole rule: half a
+a story instead of losing them. DON'T split below one whole rule: half a
 business rule has no verifiable Definition of Done.
 
 ## Pattern 3: Split by Data Variation
 
-Ship the simplest data shape first; each harder shape is its own package.
+Ship the simplest data shape first; each harder shape is its own story.
 
 Before:
 
@@ -78,13 +78,13 @@ After:
   approver can open from the report.
 
 DO pick the shape the walking skeleton needs as the base. DON'T label the
-base package "temporary": its Definition of Done must still hold unchanged
-after the variation packages land.
+base story "temporary": its Definition of Done must still hold unchanged
+after the variation stories land.
 
 ## Pattern 4: Split by Interface Subset
 
 When one surface serves several actor needs, ship the operation subsets as
-separate packages.
+separate stories.
 
 Before:
 
@@ -103,20 +103,20 @@ horizontal slice wearing a subset's name.
 
 ## Pattern 5: Spike, Last Resort Only
 
-When a package cannot be sliced or ordered because a question is open
-(feasibility, an external system's actual behavior), cut a spike package.
+When a story cannot be sliced or ordered because a question is open
+(feasibility, an external system's actual behavior), cut a spike story.
 
 - A spike's Definition of Done is the answered question, written into the
   backlog's open questions section; when the answer is architectural, flag
   it for the architect's decision log. Never code.
-- State the question in the package title, size it to one review unit, and
-  give every package it unblocks a dependency edge onto it.
+- State the question in the story title, size it to one review unit, and
+  give every story it unblocks a dependency edge onto it.
 - If reading the brief or asking the owner could answer the question, do
   that instead; a spike that one question could replace is waste.
 
 ## The Too-Big Test
 
-Split the package when any of these holds:
+Split the story when any of these holds:
 
 - It exceeds one review unit: a reviewer cannot verify it in one pass, or
   it bundles more than one concern.
@@ -126,7 +126,7 @@ Split the package when any of these holds:
 
 ## The Too-Small Test
 
-The slice is not a package when:
+The slice is not a story when:
 
 - Its Definition of Done cites no acceptance criterion and no BR-###:
   nothing observable proves it done.
@@ -135,21 +135,21 @@ The slice is not a package when:
 
 ## Merge Rules
 
-- Merge a too-small slice into the smallest package that makes it
+- Merge a too-small slice into the smallest story that makes it
   observable, never into a grab-bag.
-- Merge two packages only when they cite the same brief criterion and
+- Merge two stories only when they cite the same brief criterion and
   neither is verifiable alone; propose the merge at a checkpoint (splits
   and merges need owner approval, never happen silently).
 - Never merge across concerns to shorten the backlog; two concerns stay
-  two packages even when both are small.
+  two stories even when both are small.
 
 ## Anti-Pattern Gallery
 
 | Anti-pattern | Smell in the backlog | Fix |
 |---|---|---|
-| Horizontal layer | "Build the schema", "all endpoints" | Re-slice by workflow step; each package carries its own slice of every layer |
-| Plumbing package | "Project setup" with no criterion cited | Fold the setup into the walking skeleton package |
-| Grab-bag | "Misc fixes and polish" | One concern per package; the cosmetic tail becomes named packages |
-| Dependent chain | Each package only verifiable after the next | Re-cut at state transitions; remove or reverse the edges |
-| Interface shell first | A screen package with no behavior behind it | Make the screen the thin end of a vertical slice |
-| Iceberg base | "Basic submit" silently hiding most of the brief's rules | Move each named rule to a variation package; the scope line lists exclusions |
+| Horizontal layer | "Build the schema", "all endpoints" | Re-slice by workflow step; each story carries its own slice of every layer |
+| Plumbing story | "Project setup" with no criterion cited | Fold the setup into the walking skeleton story |
+| Grab-bag | "Misc fixes and polish" | One concern per story; the cosmetic tail becomes named stories |
+| Dependent chain | Each story only verifiable after the next | Re-cut at state transitions; remove or reverse the edges |
+| Interface shell first | A screen story with no behavior behind it | Make the screen the thin end of a vertical slice |
+| Iceberg base | "Basic submit" silently hiding most of the brief's rules | Move each named rule to a variation story; the scope line lists exclusions |

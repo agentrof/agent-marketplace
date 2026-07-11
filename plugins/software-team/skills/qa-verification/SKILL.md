@@ -33,7 +33,7 @@ Classify every planned check into exactly one category. A plan missing any categ
 - DO read the test-suite command, the application run command and the mutation command from `workspace/config.json`.
 - DON'T hardcode tool invocations or ports. This skill is stack-agnostic; the configured commands are the only entry points.
 - DO record the exact commands executed in the report, so the run is reproducible.
-- The mutation gate is mandatory on code packages: run the mutation command scoped to the package's changed files; a surviving mutant in changed lines is a finding, a missing mutation_command on a code package is a blocking finding. Method: [mutation](references/mutation.md). Read when running the mutation gate or judging a survivor.
+- The mutation gate is mandatory on code stories: run the mutation command scoped to the story's changed files; a surviving mutant in changed lines is a finding, a missing mutation_command on a code story is a blocking finding. Method: [mutation](references/mutation.md). Read when running the mutation gate or judging a survivor.
 
 ## Severity Classification
 
@@ -64,7 +64,7 @@ Automated green is necessary, not sufficient. After the suite passes, start the 
 
 ## Report
 
-Maintain ONE evolving verification record per increment: coverage matrix, suite results, live results, findings by severity, verdict. Update it in place across iterations; never fork parallel reports.
+Maintain ONE evolving verification record per increment: coverage matrix, suite results, live results, findings by severity, verdict. Its canonical copy is the orchestrator's PMO database: the spawn prompt hands you the currently open findings, your reply returns the full record (the orchestrator persists findings, coverage rows and budget verdicts from it). Update the same finding ids across iterations; never fork parallel reports.
 
 - [report-format](references/report-format.md): the record skeleton and per-section update rules. Read when creating or updating the verification record.
 

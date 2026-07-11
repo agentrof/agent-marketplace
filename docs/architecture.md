@@ -11,7 +11,9 @@ tested, end-to-end team; users install a team and run at the goal. Parts
 are not sold separately: agents and knowledge skills are encapsulated
 behind a small user surface of entry skills. Supported stacks are fixed
 and tested; new stacks are added by the maintainer as a skills folder plus
-a config enum value plus tests.
+a config enum value plus tests. One plugin is not a team: pmo is the
+shared operations backbone every team plugin depends on (declared in
+plugin.json dependencies, so it installs automatically).
 
 ## Invariants
 
@@ -40,17 +42,27 @@ a config enum value plus tests.
    read-only product content.
 7. **Files over conversation memory.** Durable knowledge exits through git
    channels: code, pull request bodies, living architecture documents,
-   design system, demo packages. There are no memory tiers or mind maps; a
-   missing-context problem is a step-contract bug.
+   design system, demo packages, and the generated backlog and ledger
+   views. There are no memory tiers or mind maps; a missing-context
+   problem is a step-contract bug.
 8. **One constitution.** Behavioral law lives in a single constitution file
    per plugin, pasted into every spawn prompt with a run-folder copy as
    fallback. Never per-agent copies, never an on-demand skill.
+9. **Single-writer operations backbone.** Process state (projects, epics,
+   stories, tasks, runs, findings, audit events) lives in the pmo
+   plugin's central database in the user-level data directory, written
+   ONLY through the pmo CLI. Spawned agents never touch it; pmo's hooks
+   record spawn/stop mechanics through the same CLI and a guard hook
+   denies direct file writes. What must be reviewable in git is rendered
+   from the database as generated views, never hand-written.
 
 ## Repository layout
 
 - `.claude-plugin/marketplace.json`: the catalog registry.
 - `plugins/<team>/`: one complete team per plugin (agents, skills, flows,
   templates, constitution).
+- `plugins/pmo/`: the operations backbone (central database CLI, hooks,
+  status entry); a dependency of every team plugin, never a team itself.
 - `docs/`: this map, the authoring guide, the orchestration spec.
 - `tools/`: validator, counts injector, scaffolder and their tests.
 - `memory/`: maintainer rules; excluded from all tooling.

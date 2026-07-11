@@ -14,9 +14,11 @@ Front door for real work: classify, confirm, deliver.
 
 ## Procedure
 
-1. Pre-flight: read workspace/config.json (missing: route to the setup
-   entry and stop). Check workspace/runs/ for a run with status running
-   or waiting_gate: offer Resume or Archive; never start a second run.
+1. Pre-flight: read workspace/config.json (missing, or without a
+   project_key: route to the setup entry and stop). Run the PMO CLI's
+   resume-info --project-key <key> (launcher per the develop flow's
+   state contract): an active run in this worktree means offer Resume or
+   Release; never start a second run here.
 2. Classify BINARY, in this conversation (this is the product-owner hat
    as instruction text, not an agent spawn; classification must be able
    to question the user, and spawned agents cannot talk to the user):
@@ -41,13 +43,18 @@ Front door for real work: classify, confirm, deliver.
       workspace/docs/business-analysis/ means the business-analysis entry
       flow runs first, here, in this conversation.
    b. Spawn software-team-product-owner with the approved brief and its
-      bound planning knowledge skill to produce or extend
-      workspace/docs/backlog.md (first large job creates it). Use the
-      develop flow's spawn template.
-   c. BACKLOG GATE: present the backlog summary and the coverage map;
-      Approve / Request changes / Pause.
-   d. Package loop: for each ready package in order, execute
+      bound planning knowledge skill to produce or extend the backlog as
+      an epics-and-stories JSON import file (the agent's output
+      contract). Use the develop flow's spawn template.
+   c. BACKLOG GATE: present the epic and story summary with the coverage
+      map; Approve / Request changes / Pause. On approve, load it into
+      the PMO database (item import --project-key <key> --json-file
+      <file>; the CLI rejects stories with empty scope, exclusions, DoR
+      or DoD) and regenerate the committed view (render backlog --out
+      workspace/docs/backlog.md).
+   d. Story loop: for each ready story in order, execute
       ${CLAUDE_PLUGIN_ROOT}/flows/develop.md end to end. After each
-      package's merge checkpoint, update the backlog on the main line and
-      ask whether to continue with the next package.
+      story's merge checkpoint (which updates the database and re-renders
+      the backlog view on the main line), ask whether to continue with
+      the next story.
 5. All gates are manual; there is no autonomous mode.

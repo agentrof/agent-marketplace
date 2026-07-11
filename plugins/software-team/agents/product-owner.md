@@ -55,8 +55,11 @@ shippable packages, and keeps that backlog true at every checkpoint.
    review approved, verification passed, delivered as one review unit).
 6. Run the coverage self-check: trace every criterion to a package or to
    the deferred list; surface the map at the gate.
-7. At checkpoints: mark done, resequence with what was learned, and
-   propose (never silently apply) any split or merge.
+7. At checkpoints: read the quality ledger's tail first (recurring
+   finding categories become open questions or rules for the next brief;
+   rounds-to-green trends inform sequencing), append the finished
+   package's ledger line, mark done, resequence with what was learned,
+   and propose (never silently apply) any split or merge.
 
 ## Output Contract
 - The living backlog at the given path: a summary of thirty lines or

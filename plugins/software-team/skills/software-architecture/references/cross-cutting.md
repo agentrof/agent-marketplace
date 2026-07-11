@@ -46,4 +46,4 @@ Every cross-module or external call declares these as interface obligations in t
 2. Name the principals (user roles, service identities, anonymous) that can reach each entry point.
 3. Trace each data classification crossing a boundary: what leaves, to whom, where it is logged.
 4. At each crossing check: authentication demanded, authorization declared (role plus object condition), input validated at the boundary, secrets absent from payloads and logs.
-5. Output an attack-surface delta: entry points touched, protection status, new data exposures. Attach it to the escalation and stop there.
+5. Output an attack-surface delta: entry points touched, protection status, new data exposures. Attach it to the escalation, and persist it: the walk seeds or updates the living workspace/docs/system-architecture/threat-model.md (entry points, principals, classifications, protection status), so the security picture accumulates instead of dying with the escalation.

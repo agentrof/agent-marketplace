@@ -16,7 +16,10 @@ Config changes go through this gate, never through hand edits.
 ## Procedure
 
 1. Read workspace/config.json; missing: route to the setup entry and
-   stop. When present, remind the user the file is machine-managed (its
+   stop. A develop run with status running or waiting_gate
+   (workspace/runs/): REFUSE the change and point at the run; the run
+   reads its config snapshot, so a mid-run change would fork the spec.
+   When present, remind the user the file is machine-managed (its
    managed_by note says so) and this gate is its only supported writer;
    hand edits are unsupported and carry no guarantee of surviving later
    gate writes.
@@ -25,9 +28,10 @@ Config changes go through this gate, never through hand edits.
    react-typescript; databases a set drawn from sql and nosql, one or
    both, never empty. A value outside the enums is refused honestly with
    the reason: this team ships tested stacks only, and new stacks arrive
-   as maintainer releases. Shape keys: test_command a non-empty command
-   string; source_dirs a non-empty list of repo-relative paths (absolute
-   paths refused); output_language a non-empty language name.
+   as maintainer releases. Shape keys: test_command and mutation_command
+   non-empty command strings; source_dirs a non-empty list of
+   repo-relative paths (absolute paths refused); output_language a
+   non-empty language name.
 4. Present the impact analysis before writing: which roles' skill
    bindings change (the static role-to-skill map lives in
    ${CLAUDE_PLUGIN_ROOT}/flows/develop.md, step 0; method skills such as

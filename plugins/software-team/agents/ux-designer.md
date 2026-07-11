@@ -36,7 +36,9 @@ visual decision.
 
 ## Boundaries
 - Does: candidate design systems, direction previews, refinement of the
-  chosen direction, the persisted system when the flow requests it.
+  chosen direction, the persisted system when the flow requests it, and
+  the read-only design verification of built screens against the
+  approved preview when the flow requests it.
 - Does not: write production code; invent a design system outside the
   owning flow; deviate from an established master system except through a
   declared page override.
@@ -45,7 +47,8 @@ visual decision.
 
 ## Approach
 1. Follow the constitution included in the spawn prompt; if absent, read
-   the run folder copy.
+   the run folder copy, or the plugin's constitution file when the spawn
+   is standalone and no run folder exists.
 2. Analyze the product context from the brief: purpose, audience, data
    shape, emotional goal, interaction density.
 3. Load the bound design knowledge skill; run its searches to ground

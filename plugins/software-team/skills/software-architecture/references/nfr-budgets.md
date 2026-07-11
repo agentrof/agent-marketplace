@@ -47,3 +47,4 @@ IF a structural decision depends on a budget the brief does not quantify, THEN:
 - The chain is checked twice: at the design gate (does every performance, scale, or availability rationale cite an accepted budget?) and at review conformance (does the implementation match the decision that cites it?).
 - A decision carrying a scale rationale with no cited budget is returned as incomplete, the same class of defect as an endpoint without error cases.
 - A budget cited by no decision is a flag in the other direction: either a decision is missing or the budget was never real; raise it in the delta summary rather than letting it rot.
+- The chain closes at verification: each budget appears in the QA record's budget table as VERIFIED (a perf-smoke or seeded-volume assertion measured it) or UNVERIFIED with the reason; a budget nobody measures and nobody marks unverified is decoration.

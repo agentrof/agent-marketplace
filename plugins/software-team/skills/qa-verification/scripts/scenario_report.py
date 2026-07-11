@@ -80,11 +80,15 @@ def collect_tests(junit_paths: list[Path]) -> list[tuple[str, str, str]]:
 
 
 def build_matrix(ids: list[str], tests: list[tuple[str, str, str]]):
-    """Return rows of (id, [test names], result)."""
+    """Return rows of (id, [test names], result).
+
+    Ids match on token boundaries, never as substrings: AC-1 must not map
+    a test tagged AC-10, or an untested id scores a false PASS.
+    """
     rows = []
     for req_id in ids:
-        needle = req_id.lower()
-        mapped = [(n, s) for n, ident, s in tests if needle in ident.lower()]
+        needle = re.compile(rf"\b{re.escape(req_id)}\b", re.IGNORECASE)
+        mapped = [(n, s) for n, ident, s in tests if needle.search(ident)]
         live = [(n, s) for n, s in mapped if s != "skipped"]
         if not live:
             result = "NO-TEST"

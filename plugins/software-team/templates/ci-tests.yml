@@ -12,3 +12,13 @@ jobs:
       - uses: actions/checkout@v4
       - name: Run the configured test suite
         run: {{test_command}}
+
+  dependency_audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Audit locked dependencies for known advisories
+        # Setup substitutes the per-stack audit commands over the lockfiles
+        # (server and client). An advisory routes through the request entry
+        # as a fix-atomic lockfile bump.
+        run: {{audit_command}}

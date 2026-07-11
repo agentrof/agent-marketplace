@@ -57,6 +57,7 @@ export function createUserFixture(overrides?: Partial<User>): User {
 - One factory per entity, colocated under a fixtures directory; compose factories for nested shapes.
 - Deterministic defaults; randomize only where the test needs variation.
 - Network responses are mocked at the request boundary (a request-interception mock layer), not by stubbing the API client functions, so the typed client code is exercised too.
+- Contract check against the exported schema: the suite includes a check that validates the typed client's request and response shapes against the backend's exported schema artifact (generate types from the schema and diff, or validate the mock fixtures against it). Hand-written mock shapes with no schema check are the classic parallel-build escape; a drift must be a red suite, not a runtime surprise.
 
 ## Hook Testing
 

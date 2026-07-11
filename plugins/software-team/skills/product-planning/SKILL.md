@@ -56,6 +56,11 @@ Two passes; the second never overrides the first.
 
 - The priority field carries the reason, not just a rank: "P1: unblocks
   WP-04 and WP-05", never a bare "P1".
+- The quality ledger (workspace/docs/quality-ledger.md) is an ordering
+  input: read its tail before planning; a recurring finding category is
+  risk evidence (sequence the next package touching that area earlier,
+  or mint a rule for the brief), and rising rounds-to-green on a module
+  argues for smaller slices there.
 - At the backlog gate, negotiate scope in plain must/should/deferred
   language; every "deferred" lands on the deferred list with a written
   reason, never as a silent drop.

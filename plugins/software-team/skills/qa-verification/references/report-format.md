@@ -19,6 +19,20 @@ ONE markdown file per verified increment. It evolves in place across QA iteratio
 - Failures listed by test name with one-line cause each.
 - Right-reason spot-checks performed: which passes were inspected and why they are trusted.
 
+## Mutation Results
+- Command and scope (the package's changed files), mutant totals
+  (generated, killed, survived, timed out), every survivor with file,
+  line, mutation and its finding id or ACCEPTED reasoning.
+- Exempt packages (no code changed) say so explicitly.
+
+## Budget Verification
+One row per quantified budget from the brief:
+| Budget | Method | Measured | Result |
+|---|---|---|---|
+Result is VERIFIED (a perf-smoke or seeded-volume assertion measured it),
+or UNVERIFIED with the reason stated (load-dependent, no harness). An
+UNVERIFIED row is honest; a faked green is a reporting defect.
+
 ## Live Runtime Results
 Per surface:
 | Surface | Console | Network | Render | Notes |

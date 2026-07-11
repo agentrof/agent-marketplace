@@ -165,6 +165,45 @@ No percentage thresholds. A backend deliverable is covered when, for each endpoi
 
 Anything short of that list is a named gap in the QA report, not a percentage.
 
+## Executable Contract: Schema Export
+
+The interface contract is executable, not prose. The stack generates the
+schema for free; export it as a build artifact and let the client check
+against it:
+
+```python
+# scripts/export_schema.py (or a make target the test command calls)
+import json
+from pathlib import Path
+
+from app.main import app
+
+Path("openapi.json").write_text(json.dumps(app.openapi(), indent=2))
+```
+
+- The export runs inside the configured test command, so a schema that no
+  longer matches the code cannot go stale silently.
+- The frontend's suite validates its typed client against this file (see
+  the client stack's testing reference); a shape drift is a red suite on
+  either side, never a runtime surprise.
+- The finalize step publishes the exported schema as the package's API
+  documentation.
+
+## Performance Assertions: the honest floor
+
+Budgets from the brief get the cheapest real measurement, never a fake
+green:
+
+- Perf-smoke: a marked test fires one request against the running app and
+  asserts an order-of-magnitude bound; label it plainly as a smoke, not a
+  proof of the p95-under-load budget.
+- Seeded-volume assertion: where a budget names a data volume, seed it
+  (bulk-insert the named row count in the fixture) and assert the query
+  path meets its bound on one request; slow but deterministic, run behind
+  a marker.
+- Budgets only load can prove (concurrency, sustained p95) are reported
+  UNVERIFIED with the reason in the QA record's budget table.
+
 ## Message-Driven Work and Caching
 
 [conditional] Read when the contract declares asynchronous behavior (accepted-then-processed endpoints, webhooks, scheduled jobs) or cached behavior. When the contract declares neither, introducing a queue or a cache is an architecture change: route it to the architecture owner, do not implement it as a local optimization.

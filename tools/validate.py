@@ -773,8 +773,9 @@ FALLBACK_STDLIB = frozenset(
 def check_stdlib_only(tree: Tree, findings: list[Finding]) -> None:
     stdlib = set(getattr(sys, "stdlib_module_names", ())) or FALLBACK_STDLIB
     for plugin in plugin_dirs(tree):
-        for sdir in skill_dirs(plugin):
-            scripts = sdir / "scripts"
+        script_dirs = [sdir / "scripts" for sdir in skill_dirs(plugin)]
+        script_dirs.append(plugin / "scripts")  # plugin-level runtime scripts
+        for scripts in script_dirs:
             if not scripts.is_dir():
                 continue
             local = {p.stem for p in scripts.glob("*.py")}

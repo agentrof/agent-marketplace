@@ -1,4 +1,4 @@
-.PHONY: validate counts counts-check test check scaffold
+.PHONY: validate counts counts-check test eval check scaffold
 
 PY := python3
 
@@ -13,6 +13,10 @@ counts-check:
 
 test:
 	$(PY) -m unittest discover -s tools/tests -p 'test_*.py' -v
+
+eval:
+	$(PY) -m unittest tools.tests.test_scenario_report tools.tests.test_runtime_scripts -v
+	@echo "eval: deterministic behavior assertions green"
 
 check: validate counts-check test
 	@echo "check: all gates green"

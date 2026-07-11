@@ -17,16 +17,23 @@ Routes:
 
 - **request** classifies BINARY in the main conversation (the PO hat is
   the entry's own instruction text, never an agent spawn) and confirms the
-  route in one line. Atomic: owning dev agent, small diff, pull request on
-  an atomic-<slug> branch; UI-touching atomic work still draws every
-  visual value from the design master's tokens (no master: a change that
-  would introduce a new visual value routes to the design-system entry).
-  Escape hatch: work that turns out to touch model, contract or schema
-  stops, reports "not atomic", sets the run escalated and archives it,
-  deletes the atomic branch, and hands over to the large route, which
-  starts its own run. Large: brief precondition, then product-owner
-  produces the backlog, then packages run one by one through the develop
-  flow (branch wp-<nn>-<slug>) with checkpoints between packages.
+  route in one line. Atomic has two tiers: cosmetic-atomic (no behavior
+  change: owning dev agent, small diff, pull request on an atomic-<slug>
+  branch) and fix-atomic (behavior change: failing reproduction test
+  first, tagged to the violated or newly minted BR, then the fix, then
+  one reviewer pass; the BR updates in the brief on main at the
+  checkpoint). UI-touching atomic work still draws every visual value
+  from the design master's tokens (no master: a change that would
+  introduce a new visual value routes to the design-system entry). The
+  escape hatch is mechanical and judgmental: the tripwire script scans
+  the diff for model/contract/schema touches before finalize, and the
+  moment such a touch is recognized in judgment the run stops, reports
+  "not atomic", sets the run escalated and archives it, deletes the
+  atomic branch, and hands over to the large route, which starts its own
+  run. Large: brief precondition, then product-owner produces the
+  backlog, then packages run one by one through the develop flow (branch
+  wp-<nn>-<slug>) with a readiness gate before each package and
+  checkpoints between packages.
 - **sketch / demo** require a brief (business-analysis runs first when
   missing) and a design system MASTER (the design-system entry owns its
   creation; other flows only redirect).
@@ -53,10 +60,13 @@ Routes:
 ## State contract
 
 One run directory per run under the workspace runs folder, gitignored,
-containing only state.json, the constitution copy, and transient
-review/qa finding files. state.json has a single writer: the main
-conversation. It is rewritten before a step starts (in_progress) and after
-it finishes (done).
+containing only state.json, the constitution copy, the brief and config
+snapshots init takes (the run reads the snapshots for its whole
+duration), and transient review/qa finding files. state.json has a
+single writer: the main conversation, writing ONLY through the plugin's
+state_tool script (init, set-step, record-gate, bump, set-ownership,
+set-run-status, validate, release-lock); the tool enforces the enums,
+the transition guard, the run-complete guard and the timestamps.
 
 Step status enum: pending, in_progress, done, blocked, escalated.
 Run status enum: running, waiting_gate, blocked, escalated, complete.
@@ -73,9 +83,12 @@ updated_at. A run may be set complete only when every step is done and
 every gate carries decision and decided_at. Suite artifacts (junit
 output) go to gitignored workspace paths, never into the run directory.
 
-Single-active-run lock: a state.json with status running or waiting_gate
-IS the lock; a second develop invocation must offer resume or archive,
-never run concurrently.
+Single-active-run lock: state_tool init acquires an exclusive lock file
+under the runs folder and refuses when another run holds it; a refused
+init means resume the holder, never archive it blind. The lock releases
+at finalize or pause. While a run is running or waiting_gate, the
+business-analysis and configure entries refuse edits that would fork the
+running spec.
 
 ## Spawn prompt contract
 
@@ -95,11 +108,13 @@ Every Task spawn assembles, in order:
 ## Step output contract
 
 A step emits exactly one artifact at its declared path (plus code changes
-for implementation steps). No sidecar reports, no memory writes, no
-changelogs. Mechanical post-step check before state advances: the artifact
-exists at the exact path and carries its mandated sections. On violation:
+for implementation steps). No sidecar reports, no memory writes. The
+mechanical post-step check runs the plugin's artifact_check script (path,
+non-empty, mandated sections) before state advances. On violation:
 exactly one retry with the violation named in the prompt; a second failure
-sets blocked and halts with resume instructions.
+sets blocked and halts with resume instructions. The model gate's
+mechanical half runs the contract_check and ownership_check scripts
+before the gate is presented.
 
 ## Gates and loops
 
@@ -119,10 +134,27 @@ workspace/demos/<slug>/demo.html.
 
 Review and QA run sequentially after implementation, each a bounded loop:
 findings route to the owning developer by file; only the fix is
-re-checked; maximum three rounds each, then blocked plus escalation.
-Findings that implicate the approved architecture never enter the fix
-loop; they escalate immediately. Severity policy: fix_required only for
-critical and major findings; minors become pull request notes.
+re-checked (a new critical or major on untouched, already-passed lines
+at re-review must cite what changed); maximum three rounds each, then
+blocked plus escalation. Findings that implicate the approved
+architecture never enter the fix loop; they escalate immediately, and
+the owner may overrule by recording an owner-decision entry in the
+decision log. Severity policy: fix_required only for critical and major
+findings; minors become pull request notes. QA's gates include the
+coverage matrix, the mandatory mutation gate scoped to the package's
+changed files, the budget-verification table (verified or honestly
+unverified per quantified budget) and the live protocol; screenful
+packages add a read-only design verification by the designer against
+the approved preview.
+
+At the merge checkpoint on the main line: backlog reconciliation, the
+changelog append from the PR quality summary, the published interface
+schema, the quality-ledger line (finding categories, severity counts,
+rounds-to-green, escaped-defect marker), brief BR updates from fix-atomic
+work, the deployed_verified field once the owner confirms the package
+runs in its target environment, and every tenth checkpoint the
+architecture reconciliation (living docs vs code; page overrides vs the
+design master).
 
 ## Concurrency and git
 

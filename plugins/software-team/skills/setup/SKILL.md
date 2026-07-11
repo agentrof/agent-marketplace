@@ -53,13 +53,20 @@ folder or an existing repository; it completes gaps and breaks nothing.
    python-fastapi), frontend_stack (supported: react-typescript),
    databases (set drawn from sql, nosql; one or both, never empty),
    test_command (the one command that runs the whole suite; point it at
-   a script or make target when several stacks must run), source_dirs,
-   output_language (default English). A
+   a script or make target when several stacks must run),
+   mutation_command (the mutation-testing runner for the stacks, with a
+   {{changed_files}} placeholder for per-package scope; the QA gate
+   requires it on code packages and treats its absence as a blocking
+   finding; verify it by running it once on one file before writing the
+   config), source_dirs, output_language (default English). A
    stack outside the supported set is refused honestly: this team ships
    tested stacks only, and new stacks arrive as maintainer releases.
 6. Continuous integration: no PR-triggered test workflow in the
    repository's CI directory (for GitHub, .github/workflows/): offer to
    add one from ${CLAUDE_PLUGIN_ROOT}/templates/ci-tests.yml with the
-   configured test command substituted for its placeholder.
+   configured test command substituted for its placeholder. The template
+   also carries a dependency-audit job over the lockfiles; keep it, and
+   route any advisory it raises through the request entry as a
+   fix-atomic lockfile bump.
 7. Close with the summary and pointers: start with business-analysis for
    the first topic, design-system before any screen work, then request.

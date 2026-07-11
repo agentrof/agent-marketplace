@@ -12,6 +12,8 @@ Decision rules for evolving the living architecture documents: structure, bounda
 
 Load for every architecture-delta step: system structure, module boundaries, interface contract conventions, non-functional budgets, and cross-cutting decisions (authorization, consistency, caching, resilience, observability). Do NOT load for store schema detail; the sql-database-design and nosql-database-design siblings own that. Do NOT load for implementation; realization lives in the bound stack skills.
 
+Living-document hygiene: each living document carries a head summary and section index, maintained with every delta; reads are summary-first, full sections only where the delta touches. A head that no longer matches its body is a defect of the delta that changed it.
+
 ## Style Selection
 
 - The default verdict is a modular monolith: one repo, one backend app, one frontend app, module boundaries enforced inside the codebase. Any departure is a recorded decision in the decision log, never a preference.

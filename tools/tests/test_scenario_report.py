@@ -1,0 +1,79 @@
+"""Guards on the coverage-audit script's matching semantics."""
+
+import importlib.util
+import io
+import sys
+import tempfile
+import unittest
+from contextlib import redirect_stdout
+from pathlib import Path
+
+REPO = Path(__file__).resolve().parents[2]
+SCRIPT = REPO / "plugins" / "software-team" / "skills" / "qa-verification" / "scripts" / "scenario_report.py"
+
+spec = importlib.util.spec_from_file_location("scenario_report", SCRIPT)
+scenario_report = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(scenario_report)
+
+
+JUNIT_TEMPLATE = """<?xml version="1.0" encoding="utf-8"?>
+<testsuite name="pytest" tests="{count}">
+{cases}
+</testsuite>
+"""
+
+
+def junit(cases: list[str]) -> str:
+    rendered = "\n".join(
+        f'  <testcase classname="tests.t" name="{name}" time="0.1"/>' for name in cases
+    )
+    return JUNIT_TEMPLATE.format(count=len(cases), cases=rendered)
+
+
+class ScenarioReportMatching(unittest.TestCase):
+    def run_report(self, brief: str, junit_xml: str):
+        with tempfile.TemporaryDirectory() as tmp:
+            b = Path(tmp) / "brief.md"
+            j = Path(tmp) / "results.xml"
+            b.write_text(brief, encoding="utf-8")
+            j.write_text(junit_xml, encoding="utf-8")
+            out = io.StringIO()
+            with redirect_stdout(out):
+                code = scenario_report.main(["--brief", str(b), "--junit", str(j)])
+            return code, out.getvalue()
+
+    def test_short_id_does_not_match_longer_id(self):
+        """AC-1 untested + AC-10 tested must yield AC-1 NO-TEST, not a false PASS."""
+        brief = "\n".join(f"- AC-{n}: criterion {n}." for n in range(1, 11))
+        cases = [f"test_thing_{n}[AC-{n}]" for n in range(2, 11)]  # AC-1 deliberately untested
+        code, out = self.run_report(brief, junit(cases))
+        self.assertEqual(code, 1)
+        ac1_row = next(line for line in out.splitlines() if line.startswith("| AC-1 "))
+        self.assertIn("NO-TEST", ac1_row)
+        ac10_row = next(line for line in out.splitlines() if line.startswith("| AC-10"))
+        self.assertIn("PASS", ac10_row)
+
+    def test_boundary_match_still_maps_bracketed_and_property_tags(self):
+        brief = "- BR-001: rule one.\n- BR-002: rule two.\n"
+        xml = """<?xml version="1.0" encoding="utf-8"?>
+<testsuite name="pytest" tests="2">
+  <testcase classname="tests.t" name="test_one[BR-001]" time="0.1"/>
+  <testcase classname="tests.t" name="test_two" time="0.1">
+    <properties><property name="scenario" value="BR-002"/></properties>
+  </testcase>
+</testsuite>
+"""
+        code, out = self.run_report(brief, xml)
+        self.assertEqual(code, 0)
+        self.assertIn('"verdict": "PASS"', out)
+
+    def test_determinism(self):
+        brief = "- BR-001: rule.\n- AC-001: criterion.\n"
+        xml = junit(["test_a[BR-001]"])
+        first = self.run_report(brief, xml)
+        second = self.run_report(brief, xml)
+        self.assertEqual(first, second)
+
+
+if __name__ == "__main__":
+    unittest.main()

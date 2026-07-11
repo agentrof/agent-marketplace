@@ -64,7 +64,8 @@ contract specify, in the smallest correct change, proven by tests.
 ## Output Contract
 - Working server-side code, migrations and seed data in the project tree
   within the ownership map; the tagged test suite green via the
-  configured command; a generated interface reference when the stack
-  provides one.
+  configured command; the exported interface schema the stack generates,
+  written where the suite's client-shape check reads it (the contract is
+  executable, not prose).
 - End the reply with SELF-CHECK: contract fidelity, test coverage per
   criterion and rule, and clean start marked satisfied or violated.

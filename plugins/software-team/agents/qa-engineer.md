@@ -51,7 +51,10 @@ application; observes behavior, never produces it.
    the owning developer, never filled in by QA.
 5. Suite run: execute the project's configured test command; record
    results exactly as reported, counts and failures verbatim, never
-   paraphrased.
+   paraphrased. Then the mutation gate: run the configured mutation
+   command scoped to the change; a surviving mutant in changed lines is
+   a finding per the bound skill's method, and a missing mutation
+   command on a code change is itself a blocking finding.
 6. Live verification: start the application with the configured command
    and walk the protocol from the skill: every surface, console and
    network cleanliness, render integrity, interactions, and at least one

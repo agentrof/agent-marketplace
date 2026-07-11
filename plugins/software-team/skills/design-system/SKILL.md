@@ -43,7 +43,12 @@ The only place the design master is born or changed.
 5. UPDATE mode: interpret the requested change, show its impact, apply
    it to MASTER.md or as a page override at
    workspace/docs/design-system/pages/<page>.md (deviations only; no
-   deviation, no file). Silent deviation is a violation.
+   deviation, no file). Silent deviation is a violation. Override
+   consolidation is part of UPDATE: when the same deviation recurs
+   across pages, fold it into MASTER and delete the overrides it
+   absorbs; an override that contradicts MASTER is a finding, not a
+   preference. Run the consolidation sweep when asked (the develop
+   flow's periodic reconciliation requests it).
 6. HARD SCOPE LIMIT: this flow writes ONLY under
    workspace/docs/design-system/. Requests to design product pages or
    write code are refused and routed to sketch or request.

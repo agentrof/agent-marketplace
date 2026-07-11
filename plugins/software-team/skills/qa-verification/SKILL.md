@@ -30,9 +30,10 @@ Classify every planned check into exactly one category. A plan missing any categ
 
 ## Command Indirection
 
-- DO read the test-suite command and the application run command from `workspace/config.json`.
+- DO read the test-suite command, the application run command and the mutation command from `workspace/config.json`.
 - DON'T hardcode tool invocations or ports. This skill is stack-agnostic; the configured commands are the only entry points.
 - DO record the exact commands executed in the report, so the run is reproducible.
+- The mutation gate is mandatory on code packages: run the mutation command scoped to the package's changed files; a surviving mutant in changed lines is a finding, a missing mutation_command on a code package is a blocking finding. Method: [mutation](references/mutation.md). Read when running the mutation gate or judging a survivor.
 
 ## Severity Classification
 
@@ -94,4 +95,4 @@ Rules:
 - ALWAYS report bugs with reproduction steps, expected vs actual, severity.
 - NEVER edit product code or tests; document and route back.
 - NEVER change requirements; escalate gaps to a human.
-- NEVER verify beyond the current scope, except a regression pass on adjacent surfaces.
+- NEVER verify beyond the current scope, except the regression pass: adjacent surfaces by default, widened to every consumer of a shared module when the change touched one.

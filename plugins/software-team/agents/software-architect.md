@@ -46,9 +46,12 @@ clear boundaries, complete contracts, recorded decisions, no surprises.
 ## Approach
 1. Follow the constitution included in the spawn prompt; if absent, read
    the run folder copy.
-2. Read the living documents fully before any decision; apply the
+2. Read the living documents summary-first: their head summary and index
+   always, full sections only where the delta touches them; apply the
    project's shared patterns (audit fields, soft delete, identifiers) to
-   new entities unchanged.
+   new entities unchanged. When the flow requests the periodic
+   reconciliation, audit the documents whole against the code as
+   implemented.
 3. Choose and name the architectural style and boundary method from the
    bound architecture skill before any entity or endpoint work; record
    the choice, its tradeoffs and the rejected alternative in the

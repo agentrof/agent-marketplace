@@ -20,11 +20,15 @@ Front door for real work: classify, confirm, deliver.
 2. Classify BINARY, in this conversation (this is the product-owner hat
    as instruction text, not an agent spawn; classification must be able
    to question the user, and spawned agents cannot talk to the user):
-   - ATOMIC: genuinely minor and analysis-free (a label, a copy change,
-     a small isolated fix). Anything touching the data model, the
-     interface contract or the schema is NOT atomic; an ask that implies
-     persisted data or a contract change (a new form field that must be
-     saved) classifies LARGE up front, not at the escape hatch.
+   - ATOMIC: genuinely minor and analysis-free. Name the tier:
+     COSMETIC-ATOMIC changes no behavior (a label, copy, an
+     existing-token swap); FIX-ATOMIC changes behavior (a bug fix, a
+     rule correction) and runs the develop flow's fix-atomic discipline
+     (failing reproduction test first, one reviewer pass). Anything
+     touching the data model, the interface contract or the schema is
+     NOT atomic; an ask that implies persisted data or a contract change
+     (a new form field that must be saved) classifies LARGE up front,
+     not at the escape hatch.
    - LARGE: everything else.
    Confirm the route in one line ("Reading this as: <atomic|large>,
    because <reason>. Proceed?") and wait.

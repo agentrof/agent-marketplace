@@ -67,7 +67,9 @@ folder or an existing repository; it completes gaps and breaks nothing.
    {{changed_files}} placeholder for per-story scope; the QA gate
    requires it on code stories and treats its absence as a blocking
    finding; verify it by running it once on one file before writing the
-   config), source_dirs, output_language (default English). A
+   config, and in a project with no code yet record it as unverified so
+   the first code story's QA gate performs the verification),
+   source_dirs, output_language (default English). A
    stack outside the supported set is refused honestly: this team ships
    tested stacks only, and new stacks arrive as maintainer releases.
 7. Continuous integration: no PR-triggered test workflow in the

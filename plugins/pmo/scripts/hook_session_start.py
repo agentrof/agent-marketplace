@@ -48,6 +48,12 @@ def main() -> int:
                 f" {run['review_rounds']}, qa rounds {run['qa_rounds']})"
             )
         lines.append(
+            "To resume, invoke the owning team plugin's entry skill (for"
+            " software-team: the request entry); its pre-flight routes back"
+            " into the run's flow at the recorded step. Do NOT continue the"
+            " work free-form: every state change goes through the PMO CLI."
+        )
+        lines.append(
             "Details: resume-info --project-key " + project_key
             + " via the PMO CLI launcher in the data directory."
         )

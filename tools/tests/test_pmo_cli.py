@@ -168,7 +168,8 @@ class PmoCliTests(unittest.TestCase):
         self.assertEqual(code, 1)
         self.assertIn("transition guard", err)
 
-    def test_run_complete_guard_steps_and_findings(self):
+    def test_run_complete_guard_full_chain(self):
+        """Story runs: steps, findings, coverage and ledger all guard complete."""
         self.import_backlog()
         self.init_run()
         code, _, err = run(["run", "set-status", "--run-key", "r1",
@@ -189,6 +190,37 @@ class PmoCliTests(unittest.TestCase):
         run(["finding", "update", "--run-key", "r1", "--finding", "F-001",
              "--status", "fixed", "--round", "1"])
         code, _, err = run(["run", "set-status", "--run-key", "r1",
+                            "--status", "complete"])
+        self.assertEqual(code, 1)
+        self.assertIn("no coverage rows", err)
+        run(["coverage", "import", "--run-key", "r1",
+             "--json-file", self.coverage_file()])
+        code, _, err = run(["run", "set-status", "--run-key", "r1",
+                            "--status", "complete"])
+        self.assertEqual(code, 1)
+        self.assertIn("no ledger line", err)
+        docs = Path(self.tmp.name) / "docs"
+        code, _, err = run(["checkpoint", "--run-key", "r1",
+                            "--docs-dir", str(docs)])
+        self.assertEqual(code, 0, err)
+        self.assertTrue((docs / "backlog.md").is_file())
+        self.assertTrue((docs / "quality-ledger.md").is_file())
+        code, _, err = run(["run", "set-status", "--run-key", "r1",
+                            "--status", "complete"])
+        self.assertEqual(code, 0, err)
+
+    def test_storyless_run_completes_without_coverage(self):
+        self.import_backlog()
+        code, _, err = run(["run", "init", "--project-key", "shop",
+                            "--run-key", "atomic1", "--request", "small fix",
+                            "--worktree", "/w/atomic"])
+        self.assertEqual(code, 0, err)
+        for step in ("0", "1", "2", "3", "4", "5"):
+            run(["run", "set-step", "--run-key", "atomic1", "--step", step,
+                 "--status", "in_progress"])
+            run(["run", "set-step", "--run-key", "atomic1", "--step", step,
+                 "--status", "done"])
+        code, _, err = run(["run", "set-status", "--run-key", "atomic1",
                             "--status", "complete"])
         self.assertEqual(code, 0, err)
 

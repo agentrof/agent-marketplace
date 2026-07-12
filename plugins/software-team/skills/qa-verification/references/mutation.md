@@ -54,3 +54,16 @@ scope for judgment, whether or not its exact line changed.
   say so in the record.
 - The gate reads the runner's exit code and report; QA never overrides a
   survivor by judgment alone.
+
+## Environment pitfalls
+
+- Fork-based mutation runners abort their workers on macOS: the OS kills
+  forked children of processes that touched system frameworks, and every
+  mutant then reports as a crash instead of a kill/survive verdict. On
+  macOS configure a subprocess-based runner, or delegate the mutation
+  gate to a Linux CI job; either way the runner must be verified by one
+  real invocation before the config records it.
+- A runner that cannot produce kill/survive verdicts in this environment
+  is a blocking finding with the waiver path, never a silent skip: the
+  record names the constraint, the owner waives with a reason, and the
+  CI lane carries the gate.

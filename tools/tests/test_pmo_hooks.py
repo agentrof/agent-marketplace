@@ -176,6 +176,27 @@ class PmoHookTests(unittest.TestCase):
         ), self.env)
         self.assertEqual(code, 0)
 
+    def test_guard_denies_generated_view_edits(self):
+        docs = self.project_root / "workspace" / "docs"
+        run_cli(["render", "backlog", "--project-key", "shop",
+                 "--out", str(docs / "backlog.md")], self.env)
+        code, _, err = run_hook("hook_guard_db.py", self.payload(
+            hook_event_name="PreToolUse", tool_name="Edit",
+            tool_use_id="t3",
+            tool_input={"file_path": str(docs / "backlog.md"),
+                        "old_string": "planned", "new_string": "done"},
+        ), self.env)
+        self.assertEqual(code, 2)
+        self.assertIn("GENERATED view", err)
+        (docs / "notes.md").write_text("# Notes\n", encoding="utf-8")
+        code, _, _ = run_hook("hook_guard_db.py", self.payload(
+            hook_event_name="PreToolUse", tool_name="Edit",
+            tool_use_id="t4",
+            tool_input={"file_path": str(docs / "notes.md"),
+                        "old_string": "Notes", "new_string": "Team notes"},
+        ), self.env)
+        self.assertEqual(code, 0)
+
 
 if __name__ == "__main__":
     unittest.main()

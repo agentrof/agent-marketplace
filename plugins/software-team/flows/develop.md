@@ -38,15 +38,18 @@ plugin from the marketplace (the dependency brings pmo in). Run the
 idempotent init-db subcommand before first use.
 
 Run identity: project_key comes from workspace/config.json (stamped by
-setup); the run key is <yyyymmdd>-<kebab-slug>. Subcommands in play:
+setup); the run key is <yyyymmdd>-<kebab-slug> (suffix -2, -3 when a
+prior abandoned run already holds the key). Subcommands in play:
 run init / set-step / record-gate / bump / set-ownership / set-status /
 release / validate; task open / close; finding open / update / list;
-coverage import; budget set; ledger checkpoint; item import / update /
-list; render backlog / ledger; resume-info. The CLI enforces the enums,
-the step transition guard (a step starts only when its predecessors are
-done), the run-complete guard (steps done, findings closed), snake_case
-ownership roles, and ownership-overlap refusal across ALL active runs of
-the project. Advance step status with run set-step as you move.
+coverage import; budget set; checkpoint; item import / update / list;
+render backlog / ledger; resume-info. The CLI enforces the enums, the
+step transition guard (a step starts only when its predecessors are
+done), the run-complete guard (steps done, findings closed; a story run
+additionally requires imported coverage and a ledger checkpoint),
+snake_case ownership roles, and ownership-overlap refusal across ALL
+active runs of the project. Advance step status with run set-step as
+you move.
 
 Claims, enforced atomically at run init: one active run per worktree; a
 story claimed by an active run cannot be claimed again; ownership path
@@ -70,7 +73,11 @@ high and "minor" to low when recording).
 Task trail: before each spawned step, open its task (task open --run-key
 <key> --role <snake_case role> --step <n> --title "<step title>"); after
 the post-step check passes, close it (task close ... --outcome done).
-Hooks stamp started and finished times; the semantic fields are yours.
+Role names are the FULL agent role names (software_architect,
+backend_developer, frontend_developer, code_reviewer, qa_engineer,
+ux_designer, product_owner); a shortened name breaks the hooks'
+reconciliation and forks the task trail. Hooks stamp started and
+finished times; the semantic fields are yours.
 
 Suite artifacts (junit output and the like) are written to gitignored
 workspace/ paths (workspace/junit-<suite>.xml), never into the run
@@ -142,6 +149,8 @@ presenting any gate.
 
 ### Step 0.5: readiness gate
 
+- This gate lives inside step 0's state row; it has no step id of its
+  own and advances nothing when it passes.
 - Read this story's row (item list --kind story --json) and check every
   item of its Definition of Ready against reality (dependencies actually
   merged, criteria unambiguous, preview present when required). Any item
@@ -207,8 +216,10 @@ presenting any gate.
 - Spawn software-team-code-reviewer with the diff scope, the living
   architecture documents, and the currently open findings from finding
   list --json (empty on round one).
-- The reviewer RETURNS its verdict and findings; record each new finding
-  with finding open --source review before acting on it.
+- The reviewer RETURNS its verdict and findings; your FIRST action on
+  that reply, before any fix is routed or any code is touched, is
+  recording every new finding with finding open --source review. A fix
+  applied to an unrecorded finding is a contract violation.
 - Verdict approve: continue. Verdict fix_required (issued only when a
   critical or high finding is open; lower severities never spin the
   loop): route each finding to the developer owning its file; after the
@@ -238,10 +249,12 @@ presenting any gate.
   otherwise); a missing mutation_command on a code story is itself a
   blocking finding.
 - The verifier RETURNS findings, the coverage matrix and the budget
-  table. Record them: finding open --source qa per finding; run the
-  coverage script with --json-out and import it (coverage import);
-  record each budget verdict with budget set (verified, or unverified
-  with the reason; load-only budgets are never faked green).
+  table. Your FIRST action on that reply is recording them: finding
+  open --source qa per finding; run the coverage script with --json-out
+  and import it (coverage import); record each budget verdict with
+  budget set (verified, or unverified with the reason; load-only
+  budgets are never faked green). Routing a fix before the findings are
+  recorded is a contract violation.
 - Pass: continue. Fail: route findings to the owning developer exactly
   as in review; run bump --counter qa; re-verify only what changed and
   flip fixed findings.
@@ -279,13 +292,14 @@ presenting any gate.
 - Backlog updates NEVER ride this branch. At the checkpoint after merge,
   on the main line:
   - mark the story done (item update --external-id <WP-##> --status
-    done) and append the quality line (ledger checkpoint --run-key
+    done), then run the checkpoint subcommand (checkpoint --run-key
     <key>, with --escaped-defect when a fix-atomic traced back to this
-    story);
-  - regenerate the committed views from the database: render backlog
-    --out workspace/docs/backlog.md and render ledger --out
-    workspace/docs/quality-ledger.md (both are generated files; never
-    hand-edit them);
+    story): it appends the quality-ledger line AND regenerates both
+    committed views (workspace/docs/backlog.md and
+    workspace/docs/quality-ledger.md) in one call; the views are
+    generated files, hand edits are a contract violation and a guard
+    hook denies them (wrong content in a view means wrong data: fix it
+    with the CLI, the checkpoint re-renders);
   - append the story's line to workspace/CHANGELOG.md from the PR
     quality summary (append-only);
   - publish the exported interface schema under workspace/docs/api/;
@@ -301,14 +315,18 @@ presenting any gate.
     findings);
   then ask "continue with the next story?".
 - Set the run complete (run set-status --status complete) only when
-  every step is done, every gate is recorded and every finding is
-  closed; the CLI's run-complete guard refuses otherwise.
+  every step is done, every gate is recorded, every finding is closed,
+  and the story run's coverage and ledger line are in the database; the
+  CLI's run-complete guard refuses otherwise.
 
 ## Atomic route variant
 
 Atomic work has two tiers; the entry names the tier at classification.
 Both tiers run step 0 as written, except: pass --story only when the
 change maps to an existing backlog story; most atomic work has none.
+Steps a tier skips are marked done explicitly before finalize (run
+set-step --status done --artifact "skipped: <tier>"), so the
+run-complete guard stays honest about what actually ran.
 
 COSMETIC-ATOMIC (no behavior change: copy, a label, an existing-token
 swap): skip step 1, both gates, and the review and verification loops;
@@ -318,11 +336,13 @@ the route (cosmetic-atomic), the diff summary and the test command
 result.
 
 FIX-ATOMIC (any behavior change: a bug fix, a rule correction): after
-step 0, in order:
-1. Reproduction first: the owning developer writes a FAILING test that
-   reproduces the defect, tagged to the violated BR-### (or a newly
-   minted id when the behavior was never specified), before touching the
-   fix. The test is permanent regression-suite growth.
+step 0, in order (every item below is SPAWNED agent work with its task
+trail; writing the test, the fix or the review in the main conversation
+is a contract violation):
+1. Reproduction first: the spawned owning developer writes a FAILING
+   test that reproduces the defect, tagged to the violated BR-### (or a
+   newly minted id when the behavior was never specified), before
+   touching the fix. The test is permanent regression-suite growth.
 2. Fix until the reproduction test and the whole suite are green.
 3. ONE reviewer pass (single round): findings recorded and routed once
    to the developer, re-checked once; an architecture-implicating
@@ -332,8 +352,9 @@ step 0, in order:
    test command result.
 5. At the merge checkpoint ON MAIN, update or add the BR-### in the
    brief when the fix changed or defined specified behavior (the
-   backlog-main rule extended to the brief), and append the ledger line
-   with --escaped-defect when the fix traces to a prior story.
+   backlog-main rule extended to the brief), and run the checkpoint
+   subcommand with --escaped-defect when the fix traces to a prior
+   story.
 
 Both tiers: UI-touching atomic work still draws every visual value from
 the design master's tokens. No master in the project: a change that

@@ -1,6 +1,6 @@
 {
   "name": "pmo",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Project Management Office: the shared operations backbone for every team plugin. One central database for projects, epics, stories, tasks, run state, findings and audit events, written only through its CLI and recorded deterministically via hooks.",
   "author": {
     "name": "Agentrof",

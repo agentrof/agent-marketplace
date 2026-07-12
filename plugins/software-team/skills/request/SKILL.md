@@ -18,7 +18,11 @@ Front door for real work: classify, confirm, deliver.
    project_key: route to the setup entry and stop). Run the PMO CLI's
    resume-info --project-key <key> (launcher per the develop flow's
    state contract): an active run in this worktree means offer Resume or
-   Release; never start a second run here.
+   Release; never start a second run here. Resume means: load
+   ${CLAUDE_PLUGIN_ROOT}/flows/develop.md, read the run's state
+   (resume-info), and continue from the first step that is not done,
+   under the full state contract; never redo done steps and never work
+   outside the flow.
 2. Classify BINARY, in this conversation (this is the product-owner hat
    as instruction text, not an agent spawn; classification must be able
    to question the user, and spawned agents cannot talk to the user):

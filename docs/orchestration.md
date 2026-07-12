@@ -103,8 +103,12 @@ decided_by, decided_at), ownership rows, finding rows (stable F-### ids,
 source review/qa/design_qa, severity, open/fixed/waived), coverage rows,
 budget rows, ledger lines. The CLI enforces the enums, the step
 transition guard, the run-complete guard (steps done, gates recorded,
-findings closed), snake_case ownership roles and ownership-overlap
-refusal across all of the project's active runs.
+findings closed; story runs additionally require imported coverage and
+a ledger line), snake_case ownership roles and ownership-overlap
+refusal across all of the project's active runs. The checkpoint
+subcommand bundles the merge-checkpoint bookkeeping (ledger line plus
+both regenerated views) into one call; the generated views are also
+protected by a guard hook against hand edits.
 
 Step status enum: pending, in_progress, done, blocked, escalated.
 Run status enum: running, waiting_gate, blocked, escalated, complete.

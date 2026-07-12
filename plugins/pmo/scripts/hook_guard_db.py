@@ -1,9 +1,12 @@
 #!/usr/bin/env python3
-"""PreToolUse guard: deny direct Write/Edit access to the PMO database files.
+"""PreToolUse guard: deny direct Write/Edit access to the PMO database files
+and to the generated view files it renders.
 
-The database has exactly one writer, the CLI. Any agent or session trying to
-edit the database (or its WAL sidecars) directly is blocked with exit 2,
-which cancels the tool call and feeds the reason back to the model."""
+The database has exactly one writer, the CLI; the rendered views (files whose
+first line carries the generated-by-pmo header) are written only by the
+render subcommand. Any agent or session trying to edit either directly is
+blocked with exit 2, which cancels the tool call and feeds the reason back
+to the model."""
 
 from __future__ import annotations
 
@@ -34,6 +37,21 @@ def main() -> int:
             file=sys.stderr,
         )
         return 2
+    try:
+        if target.is_file():
+            with target.open("r", encoding="utf-8", errors="replace") as fh:
+                first_line = fh.readline()
+            if pmo_cli.GENERATED_HEADER in first_line:
+                print(
+                    "pmo guard: this file is a GENERATED view of the PMO"
+                    " database; hand edits are not allowed and would be lost."
+                    " Change the data through the CLI (item update, ledger"
+                    " checkpoint, ...) and re-run the render subcommand.",
+                    file=sys.stderr,
+                )
+                return 2
+    except Exception:
+        return 0
     return 0
 
 

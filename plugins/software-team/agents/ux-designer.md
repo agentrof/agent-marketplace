@@ -47,8 +47,8 @@ visual decision.
 
 ## Approach
 1. Follow the constitution included in the spawn prompt; if absent, read
-   the run folder copy, or the plugin's constitution file when the spawn
-   is standalone and no run folder exists.
+   the order-directory copy, or the plugin's constitution file when the
+   spawn is standalone and no order directory exists.
 2. Analyze the product context from the brief: purpose, audience, data
    shape, emotional goal, interaction density.
 3. Load the bound design knowledge skill; run its searches to ground

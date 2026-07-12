@@ -12,11 +12,10 @@ this skill says how to cut one and where it goes in the queue.
 
 ## When to Use
 
-Loaded when producing the backlog import (epics and stories loaded into
-the PMO database; workspace/docs/backlog.md is its generated view) from
-an approved brief, or reconciling it at a merge checkpoint. Not for
-writing the brief (analyst work) and not for technical choices
-(architect work).
+Loaded when producing the backlog import (epics and stories in the PMO
+database; workspace/docs/backlog.md is its generated view) from an
+approved brief, or reconciling at a merge checkpoint. Not for the brief
+(analyst work) and not for technical choices (architect work).
 
 ## Hierarchy and Sizing
 
@@ -27,10 +26,10 @@ Three levels, only two authored:
   progress; nothing is ever built from an epic directly. Few and broad
   beats many and thin; an epic with one story is a label, not a group.
 - Story: the only planning unit. One demonstrable capability, one review
-  unit, one develop run, worked by several roles together (analysis fed
+  unit, one work order, worked by several roles together (analysis fed
   in, architecture delta, implementation, review, verification). Carries
   scope, what it excludes, Definition of Ready, Definition of Done.
-- Task: NEVER authored here. The develop run generates task rows from
+- Task: NEVER authored here. The work order generates task rows from
   its own steps and spawns; writing "backend task, frontend task" into
   the backlog duplicates the flow and drifts from it.
 - The broad-story tripwire: a story named for a module or a screen
@@ -39,7 +38,8 @@ Three levels, only two authored:
   one user-observable behavior with a named criterion.
 - The micro-story tripwire: a story whose whole scope is one role's few
   edits (rename a field, restyle a button) is not a story; it is atomic
-  work for the request entry, or a task the run will record itself.
+  work for the request entry, or a task the work order will record
+  itself.
 
 ## Slicing Rules
 
@@ -63,6 +63,22 @@ Three levels, only two authored:
   (acceptance criterion or BR-###): it is either too small (merge it) or
   invented scope (raise it in open questions).
 
+## Dependency Authoring
+
+- Each dependency is an {item, reason} edge, real only when the story
+  CONSUMES the target's output; the reason names that need, never the
+  ordering. Cycles are rejected at import.
+- Edges are the parallelization contract: an unnecessary edge serializes
+  concurrent work orders, a missing one starts a story too early. A
+  shared contract is not a dependency; mark SHARES with its name.
+
+## DoD Items
+
+- The dod field summarizes; dod_items is its checkable decomposition:
+  ONE verifiable property per item, pass/fail without interpretation,
+  each tracing to a brief criterion; exempt from brevity, as many items
+  as the story has properties.
+
 ## Ordering Method
 
 Two passes; the second never overrides the first.
@@ -79,8 +95,9 @@ Two passes; the second never overrides the first.
    - Cosmetic tail (polish, copy, layout refinement) last, as named
      stories, never as padding inside earlier ones.
 
-- The priority field carries the reason, not just a rank: "P1: unblocks
-  WP-04 and WP-05", never a bare "P1".
+- The priority field carries the reason, not just a rank: "high: unblocks
+  WP-04 and WP-05", never bare; tiers are critical/high/medium/low and
+  the import rejects anything else.
 - The quality ledger (workspace/docs/quality-ledger.md, the database's
   generated view) is an ordering input: read its tail before planning; a
   recurring finding category is risk evidence (sequence the next story
@@ -99,5 +116,6 @@ Two passes; the second never overrides the first.
 ## References
 
 - [slicing-patterns](references/slicing-patterns.md): each split pattern with a worked before/after, the size tests, merge rules, anti-pattern gallery. Read when a story fails a size test or resists vertical slicing.
+- [structured-records](references/structured-records.md): dependency-edge rules with reasons, the SHARES definition with a worked example, DoD item authoring rules, both anti-pattern galleries. Read when authoring depends_on or dod_items.
 - [prioritization](references/prioritization.md): risk-adjusted sequencing step by step, one worked value/risk/size weighing, deferral discipline. Read when ordering the backlog or defending the order at the gate.
 - [flow-metrics](references/flow-metrics.md): cadence, throughput and cycle-time concepts, explicitly not ordering inputs. Read when the owner asks for schedule forecasting.

@@ -43,7 +43,7 @@ contract specify, in the smallest correct change, proven by tests.
 
 ## Approach
 1. Follow the constitution included in the spawn prompt; if absent, read
-   the run folder copy.
+   the order-directory copy.
 2. Load the bound stack skill; read the input files named in the spawn
    prompt, summaries first, contracts fully.
 3. Model data and validation first, then implement endpoints per the

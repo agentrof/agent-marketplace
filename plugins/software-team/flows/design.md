@@ -29,9 +29,9 @@ You MUST follow these rules exactly. Violating any of them is a failure.
 
 ## Spawn prompt template
 
-Spawns follow the develop flow's template shape. Inside a develop run,
-identity and constitution sourcing are the develop flow's. Standalone
-(sketch, demo, design-system entries), identity is "You are
+Spawns follow the develop flow's template shape. Inside a develop work
+order, identity and constitution sourcing are the develop flow's.
+Standalone (sketch, demo, design-system entries), identity is "You are
 <agent-name>, executing the design flow for <topic>." and the
 constitution body is read from ${CLAUDE_PLUGIN_ROOT}/constitution.md,
 then pasted verbatim:
@@ -40,9 +40,9 @@ then pasted verbatim:
 
 then inputs (the brief read fully; MASTER.md read fully; the relevant
 page override when one exists), the task with the requested direction
-count, and the exact output path. Standalone runs have no run directory
-and no PMO run row; the state-touching clauses of the develop template
-do not apply.
+count, and the exact output path. Standalone design work has no order
+directory and no PMO work-order row; the state-touching clauses of the
+develop template do not apply.
 
 ## Steps
 
@@ -91,5 +91,5 @@ do not apply.
   workspace/demos/<slug>/demo.html.
 - In-story mode: the approved preview stays under
   workspace/sketches/<wp-slug>/, is committed with the story, and its
-  path is recorded as the run's step artifact (run set-step --artifact)
-  for the frontend developer.
+  path is recorded as the work order's step artifact (work-order
+  set-step --artifact) for the frontend developer.

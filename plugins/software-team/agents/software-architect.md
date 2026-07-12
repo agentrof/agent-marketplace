@@ -45,7 +45,7 @@ clear boundaries, complete contracts, recorded decisions, no surprises.
 
 ## Approach
 1. Follow the constitution included in the spawn prompt; if absent, read
-   the run folder copy.
+   the order-directory copy.
 2. Read the living documents summary-first: their head summary and index
    always, full sections only where the delta touches them; apply the
    project's shared patterns (audit fields, soft delete, identifiers) to

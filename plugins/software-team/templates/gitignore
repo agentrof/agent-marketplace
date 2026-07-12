@@ -12,8 +12,8 @@
 # Claude Code local settings
 .claude/settings.local.json
 
-# Team run state (transient; durable knowledge lives in docs/ and git)
-workspace/runs/
+# Team work-order state (transient; durable knowledge lives in docs/ and git)
+workspace/work-orders/
 
 # Suite artifacts (regenerated on every run)
 workspace/junit-*.xml

@@ -46,15 +46,18 @@ plugin.json dependencies, so it installs automatically).
    views. There are no memory tiers or mind maps; a missing-context
    problem is a step-contract bug.
 8. **One constitution.** Behavioral law lives in a single constitution file
-   per plugin, pasted into every spawn prompt with a run-folder copy as
-   fallback. Never per-agent copies, never an on-demand skill.
+   per plugin, pasted into every spawn prompt with an order-directory copy
+   as fallback. Never per-agent copies, never an on-demand skill.
 9. **Single-writer operations backbone.** Process state (projects, epics,
-   stories, tasks, runs, findings, audit events) lives in the pmo
-   plugin's central database in the user-level data directory, written
-   ONLY through the pmo CLI. Spawned agents never touch it; pmo's hooks
-   record spawn/stop mechanics through the same CLI and a guard hook
-   denies direct file writes. What must be reviewable in git is rendered
-   from the database as generated views, never hand-written.
+   stories, tasks with attempt history, dependency edges, DoD records,
+   work orders, findings, audit events) lives in the pmo plugin's central
+   database in the user-level data directory, written ONLY through the
+   pmo CLI. Spawned agents never touch it; pmo's hooks record spawn/stop
+   mechanics through the same CLI and a guard hook denies direct file
+   writes. What must be reviewable in git is rendered from the database
+   as generated views, never hand-written. The web dashboard is a READER:
+   it opens the database read-only (mode=ro), exposes GET routes only,
+   and scans the plugin catalog from the filesystem; it never writes.
 
 ## Repository layout
 
@@ -62,7 +65,8 @@ plugin.json dependencies, so it installs automatically).
 - `plugins/<team>/`: one complete team per plugin (agents, skills, flows,
   templates, constitution).
 - `plugins/pmo/`: the operations backbone (central database CLI, hooks,
-  status entry); a dependency of every team plugin, never a team itself.
+  status entry, read-only web dashboard); a dependency of every team
+  plugin, never a team itself.
 - `docs/`: this map, the authoring guide, the orchestration spec.
 - `tools/`: validator, counts injector, scaffolder and their tests.
 - `memory/`: maintainer rules; excluded from all tooling.

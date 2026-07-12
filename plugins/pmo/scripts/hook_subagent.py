@@ -19,7 +19,8 @@ def main() -> int:
         hook_common.log(f"subagent hook called with bad phase: {phase!r}")
         return 0
     payload = hook_common.read_payload()
-    role = hook_common.team_role(payload.get("agent_type", ""))
+    agent_type = payload.get("agent_type", "")
+    role = hook_common.team_role(agent_type)
     if role is None:
         return 0
     resolved = hook_common.resolve_project(payload.get("cwd", ""))
@@ -32,6 +33,8 @@ def main() -> int:
         "--role", role,
         "--phase", phase,
         "--worktree", project_root,
+        "--session-id", str(payload.get("session_id", "")),
+        "--agent", agent_type.split(":", 1)[-1],
     ])
     return 0
 

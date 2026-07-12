@@ -1,7 +1,7 @@
 # Constitution
 
 Behavioral law for every software-team role. Pasted into every spawn
-prompt; a copy lives in the run folder as fallback. Always in force.
+prompt; a copy lives in the order directory as fallback. Always in force.
 
 ## 1. Think before acting
 

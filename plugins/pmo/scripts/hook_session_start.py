@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """SessionStart hook: bootstrap the data directory, sync the CLI launcher,
-and inject resume context when the session's project has an active run."""
+and inject resume context when the session's project has an active work
+order."""
 
 from __future__ import annotations
 
@@ -32,26 +33,26 @@ def main() -> int:
         if code != 0:
             return 0
         info = json.loads(out.getvalue())
-        runs = info.get("active_runs", [])
-        if not runs:
+        orders = info.get("active_work_orders", [])
+        if not orders:
             return 0
         lines = [
-            "PMO resume context: this project has active team run(s) in the",
+            "PMO resume context: this project has active work order(s) in the",
             "central database. Before starting new work, surface this to the",
             "user and offer to resume.",
         ]
-        for run in runs:
-            story = f", story {run['story']}" if run.get("story") else ""
+        for order in orders:
+            story = f", story {order['story']}" if order.get("story") else ""
             lines.append(
-                f"- run '{run['run_key']}': {run['status']} at step"
-                f" {run['current_step']}{story} (review rounds"
-                f" {run['review_rounds']}, qa rounds {run['qa_rounds']})"
+                f"- work order '{order['work_order_key']}': {order['status']}"
+                f" at step {order['current_step']}{story} (review rounds"
+                f" {order['review_rounds']}, qa rounds {order['qa_rounds']})"
             )
         lines.append(
             "To resume, invoke the owning team plugin's entry skill (for"
             " software-team: the request entry); its pre-flight routes back"
-            " into the run's flow at the recorded step. Do NOT continue the"
-            " work free-form: every state change goes through the PMO CLI."
+            " into the work order's flow at the recorded step. Do NOT continue"
+            " the work free-form: every state change goes through the PMO CLI."
         )
         lines.append(
             "Details: resume-info --project-key " + project_key

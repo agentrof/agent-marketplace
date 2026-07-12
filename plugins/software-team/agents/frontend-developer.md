@@ -47,7 +47,7 @@ design master's tokens.
 
 ## Approach
 1. Follow the constitution included in the spawn prompt; if absent, read
-   the run folder copy.
+   the order-directory copy.
 2. Load the bound stack skill; read the three inputs named in the spawn
    prompt: preview, contract, design master (plus any page override).
 3. Wire tokens first, then build components small to large, then routing

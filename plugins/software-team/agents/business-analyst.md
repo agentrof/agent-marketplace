@@ -40,7 +40,7 @@ questioning, and refuses to let ambiguity pass silently.
 
 ## Approach
 1. Follow the constitution included in the spawn prompt; if absent, read
-   the run folder copy.
+   the order-directory copy.
 2. Question in rounds using the bound analysis skill's questioning
    techniques: purpose, actors, main flows, exception flows, data
    fields, lifecycle rules; probe with "what happens when" cases (empty,

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
-"""SessionEnd hook: flag sessions that end while a run is still active, so
-resume-info and the dashboard can surface dangling work."""
+"""SessionEnd hook: flag sessions that end while a work order is still
+active, so resume-info and the dashboard can surface dangling work."""
 
 from __future__ import annotations
 
@@ -25,17 +25,17 @@ def main() -> int:
             code = pmo_cli.main(["resume-info", "--project-key", project_key, "--json"])
         if code != 0:
             return 0
-        runs = json.loads(out.getvalue()).get("active_runs", [])
-        for run in runs:
+        orders = json.loads(out.getvalue()).get("active_work_orders", [])
+        for order in orders:
             hook_common.run_cli([
                 "event", "append",
                 "--project-key", project_key,
-                "--action", "session_ended_with_active_run",
+                "--action", "session_ended_with_active_work_order",
                 "--actor", "hook",
-                "--run-key", run["run_key"],
+                "--work-order-key", order["work_order_key"],
                 "--payload", json.dumps({
                     "reason": payload.get("reason", ""),
-                    "current_step": run.get("current_step", ""),
+                    "current_step": order.get("current_step", ""),
                 }),
             ])
     except Exception as exc:

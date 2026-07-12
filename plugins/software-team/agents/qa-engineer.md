@@ -36,7 +36,7 @@ application; observes behavior, never produces it.
 
 ## Approach
 1. Follow the constitution included in the spawn prompt; if absent, read
-   the run folder copy.
+   the order-directory copy.
 2. Load the bound verification skill and the stack checklists it names.
 3. Build the plan first, from the brief's criteria and rules plus the
    standard scenarios: empty, boundary, invalid input, concurrent or

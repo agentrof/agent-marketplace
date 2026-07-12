@@ -22,7 +22,7 @@ folder or an existing repository; it completes gaps and breaks nothing.
 2. Workspace collision: a foreign workspace/ directory at the root: ask
    for an alternative name and use it consistently, substituting it for
    workspace/ in every materialized template content and skeleton path
-   (the .gitignore runs rule, the CLAUDE.md import, source_dirs). The
+   (the .gitignore work-orders rule, the CLAUDE.md import, source_dirs). The
    team's own layout is recognized by a config.json carrying the
    managed_by note, or by the docs/ plus memory/ pair; a directory
    matching neither is foreign. Record the chosen name as a one-line
@@ -31,7 +31,7 @@ folder or an existing repository; it completes gaps and breaks nothing.
    where missing (idempotency: never overwrite an existing file, only
    add):
    - .gitignore: create from the template, or append only its missing
-     lines (the runs/ ignore rule is mandatory).
+     lines (the work-orders/ ignore rule is mandatory).
    - CLAUDE.md: create from the template with the memory import.
    - workspace/memory/: ask "do you have personal rule files (a me.md
      and a profile.md, or a directory containing them)?"; given paths
@@ -40,9 +40,9 @@ folder or an existing repository; it completes gaps and breaks nothing.
 4. Create the skeleton, only missing parts: workspace/apps/,
    workspace/docs/business-analysis/, workspace/docs/system-architecture/,
    workspace/docs/design-system/pages/, workspace/demos/,
-   workspace/sketches/, workspace/runs/. Git does not track empty
-   directories: drop a .gitkeep in each folder created empty (runs/ is
-   gitignored and needs none).
+   workspace/sketches/, workspace/work-orders/. Git does not track empty
+   directories: drop a .gitkeep in each folder created empty
+   (work-orders/ is gitignored and needs none).
 5. PMO backbone: resolve the PMO CLI (the launcher at
    "${AGENTROF_HOME:-$HOME/.agentrof}/bin/pmo_cli.py", falling back to
    the pmo plugin's own scripts copy; absent entirely means the pmo

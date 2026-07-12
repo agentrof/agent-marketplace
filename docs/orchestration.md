@@ -27,9 +27,10 @@ Routes:
   introduce a new visual value routes to the design-system entry). The
   escape hatch is mechanical and judgmental: the tripwire script scans
   the diff for model/contract/schema touches before finalize, and the
-  moment such a touch is recognized in judgment the run stops, reports
-  "not atomic", sets the run escalated, deletes the atomic branch, and
-  hands over to the large route, which starts its own run. Large: brief
+  moment such a touch is recognized in judgment the work order stops,
+  reports "not atomic", sets the work order escalated, deletes the
+  atomic branch, and hands over to the large route, which starts its own
+  work order. Large: brief
   precondition, then product-owner produces the backlog import (epics
   and stories), the backlog gate approves it, the import loads it into
   the PMO database, then stories run one by one through the develop flow
@@ -65,10 +66,10 @@ The software-team plugin declares the pmo plugin as a dependency;
 installing the team installs the backbone. Pmo owns the user-level data
 directory (default: .agentrof under the user's home; AGENTROF_HOME
 overrides) holding one central SQLite database for every project and
-every future team: projects, epics, stories, machine-generated tasks,
-runs with step state and gates, findings, coverage rows, budget
-verdicts, the quality ledger and an append-only audit event per
-mutation.
+every future team: projects, epics, stories, machine-generated tasks with their attempt
+history, dependency edges with reasons, DoD records, work orders with
+step state and gates, findings, coverage rows, budget verdicts, the
+quality ledger and an append-only audit event per mutation.
 
 The database has exactly ONE writer: the PMO CLI. Flows call the synced
 launcher (bin/pmo_cli.py under the data directory; pmo's SessionStart
@@ -79,16 +80,20 @@ Hooks carry the mechanics, flows carry the semantics: pmo's
 SubagentStart/SubagentStop hooks stamp task start and finish times for
 team agents automatically; the orchestrator's CLI calls carry which
 step, which round and which outcome. SessionStart injects resume context
-when the project has an active run; SessionEnd flags a session that dies
-with a run still active.
+when the project has an active work order; SessionEnd flags a session
+that dies with a work order still active.
 
 ## Work-item hierarchy
 
 Epic (PO-authored grouping with a business goal) > story (PO-authored;
 the only planning unit; WP-## ids; carries scope, exclusions, Definition
 of Ready, Definition of Done) > task (machine-generated: the develop
-flow opens one per spawned step and the hooks stamp its timing; nobody
-authors tasks). The CLI's import rejects stories with empty scope,
+flow opens one per spawned step and the hooks stamp its timing and
+attempt rows; nobody authors tasks). Stories carry structured
+dependency edges ({item, reason}; the import rejects cycles), dod_items
+(one verifiable statement each, flipped verified or failed at QA) and a
+priority whose tier is critical, high, medium or low with the reason
+after a colon. The CLI's import rejects stories with empty scope,
 exclusions, DoR or DoD. workspace/docs/backlog.md and
 workspace/docs/quality-ledger.md are GENERATED views rendered from the
 database at checkpoints; they are committed for review and durability
@@ -96,44 +101,49 @@ and never hand-edited.
 
 ## State contract
 
-Run state lives in the database: run row (project, claimed story, run
-key, status, current step, review and qa round counters, worktree),
+Work-order state lives in the database: work-order row (project,
+claimed story, work order key, status, current step, review and qa
+round counters, worktree),
 step rows (status, artifact path, attempts), gate rows (decision,
 decided_by, decided_at), ownership rows, finding rows (stable F-### ids,
 source review/qa/design_qa, severity, open/fixed/waived), coverage rows,
 budget rows, ledger lines. The CLI enforces the enums, the step
-transition guard, the run-complete guard (steps done, gates recorded,
-findings closed; story runs additionally require imported coverage and
-a ledger line), snake_case ownership roles and ownership-overlap
-refusal across all of the project's active runs. The checkpoint
+transition guard, the complete guard (steps done, gates recorded,
+findings closed; story work orders additionally require imported
+coverage and a ledger line), snake_case ownership roles and
+ownership-overlap refusal across all of the project's active work
+orders. The checkpoint
 subcommand bundles the merge-checkpoint bookkeeping (ledger line plus
 both regenerated views) into one call; the generated views are also
 protected by a guard hook against hand edits.
 
 Step status enum: pending, in_progress, done, blocked, escalated.
-Run status enum: running, waiting_gate, blocked, escalated, complete.
+Work order status enum: running, waiting_gate, blocked, escalated,
+complete.
 
-Claims, atomic at run init: one active run per worktree; one active run
-per story; disjoint ownership path prefixes across active runs. A
-refused init means resume the holder (resume-info names it), never
-archive it blind. Claims free when the run leaves the active statuses
-(running, waiting_gate). While a run is active, the business-analysis
-and configure entries refuse edits that would fork the running spec.
+Claims, atomic at work-order init: one active work order per worktree;
+one active work order per story; disjoint ownership path prefixes
+across active work orders. A refused init means resume the holder
+(resume-info names it), never archive it blind. Claims free when the
+work order leaves the active statuses (running, waiting_gate). While a
+work order is active, the business-analysis and configure entries
+refuse edits that would fork the running spec.
 
-The run directory (workspace/runs/<run-key>/, gitignored) holds ONLY the
-snapshots init copies there: the constitution, the brief snapshot and
-the config snapshot; the run reads the snapshots for its whole duration.
-Suite artifacts (junit output) go to gitignored workspace paths, never
-into the run directory.
+The order directory (workspace/work-orders/<key>/, gitignored) holds
+ONLY the snapshots init copies there: the constitution, the brief
+snapshot and the config snapshot; the work order reads the snapshots
+for its whole duration. Suite artifacts (junit output) go to gitignored
+workspace paths, never into the order directory.
 
 ## Spawn prompt contract
 
 Every Task spawn assembles, in order:
 
-1. Identity: role name, step, run key, run directory. Standalone design
-   spawns (sketch, demo, design-system entries) have no run directory or
-   run row; identity names the flow and topic instead, and the
-   constitution body is read from the plugin's constitution file.
+1. Identity: role name, step, work order key, order directory.
+   Standalone design spawns (sketch, demo, design-system entries) have
+   no order directory or work-order row; identity names the flow and
+   topic instead, and the constitution body is read from the plugin's
+   constitution file.
 2. The constitution body, pasted verbatim (placeholder: `{{constitution}}`).
 3. Inputs: explicit file list, split into read-fully and summary-only.
 4. Skill binding: the knowledge skill(s) bound to the role from config.
@@ -149,8 +159,8 @@ mechanical post-step check runs the plugin's artifact_check script (path,
 non-empty, mandated sections) before state advances. On violation:
 exactly one retry with the violation named in the prompt; a second failure
 sets the step blocked and halts with resume instructions. The model
-gate's mechanical half runs the contract_check script and the CLI's run
-validate before the gate is presented (ownership overlap is already
+gate's mechanical half runs the contract_check script and the CLI's
+work-order validate before the gate is presented (ownership overlap is already
 refused at set-ownership). Review and verification findings are not
 files: the reviewer and verifier return them in the reply and the
 orchestrator records them through the CLI, passing the open set back
@@ -201,11 +211,12 @@ master).
 
 ## Concurrency and git
 
-One active run per worktree, one active run per story, disjoint
-ownership across a project's active runs: the claim system is designed
-for parallel worktrees, while the shipped flows still drive one run at a
-time (a parallel-orchestration flow is future work and needs no schema
-change). Backlog updates never ride feature branches; the database is
+One active work order per worktree, one active work order per story,
+disjoint ownership across a project's active work orders: the claim
+system is designed for parallel worktrees, while the shipped flows
+still drive one work order at a time (a parallel-orchestration flow is
+future work and needs no schema change; the dependency edges stories
+carry are the scheduling contract it will consume). Backlog updates never ride feature branches; the database is
 updated and the views re-render on the main line at the checkpoint after
 merge. Architecture deltas deliberately ride the story branch so model
 and code merge atomically. Each story ends in its own pull request;

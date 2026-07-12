@@ -61,7 +61,8 @@ class PmoHookTests(unittest.TestCase):
         }), encoding="utf-8")
         run_cli(["item", "import", "--project-key", "shop",
                  "--json-file", str(backlog)], self.env)
-        run_cli(["run", "init", "--project-key", "shop", "--run-key", "r1",
+        run_cli(["work-order", "init", "--project-key", "shop",
+                 "--work-order-key", "wo1",
                  "--request", "build", "--worktree", str(self.project_root),
                  "--story", "WP-01"], self.env)
 
@@ -139,10 +140,15 @@ class PmoHookTests(unittest.TestCase):
         self.assertEqual(code, 0, err)
         data = json.loads(out)
         context = data["hookSpecificOutput"]["additionalContext"]
-        self.assertIn("r1", context)
+        self.assertIn("wo1", context)
         self.assertIn("WP-01", context)
+        self.assertIn("work order", context)
         launcher = Path(self.env["AGENTROF_HOME"]) / "bin" / "pmo_cli.py"
         self.assertTrue(launcher.is_file())
+        dashboard_module = Path(self.env["AGENTROF_HOME"]) / "bin" / "pmo_dashboard.py"
+        self.assertTrue(dashboard_module.is_file())
+        dashboard_index = Path(self.env["AGENTROF_HOME"]) / "dashboard" / "index.html"
+        self.assertTrue(dashboard_index.is_file())
 
     def test_session_start_quiet_outside_projects(self):
         code, out, _ = run_hook("hook_session_start.py", self.payload(
@@ -151,12 +157,49 @@ class PmoHookTests(unittest.TestCase):
         self.assertEqual(code, 0)
         self.assertEqual(out.strip(), "")
 
-    def test_session_end_flags_dangling_run(self):
+    def test_session_end_flags_dangling_work_order(self):
         code, _, _ = run_hook("hook_session_end.py", self.payload(
             hook_event_name="SessionEnd", reason="other",
         ), self.env)
         self.assertEqual(code, 0)
-        self.assertIn("session_ended_with_active_run", self.events())
+        self.assertIn("session_ended_with_active_work_order", self.events())
+
+    def attempts(self):
+        import sqlite3
+        con = sqlite3.connect(Path(self.env["AGENTROF_HOME"]) / "agentrof.db")
+        con.row_factory = sqlite3.Row
+        rows = [dict(r) for r in con.execute(
+            "SELECT * FROM task_attempts ORDER BY attempt")]
+        con.close()
+        return rows
+
+    def test_subagent_lifecycle_records_attempts(self):
+        run_hook("hook_subagent.py", self.payload(
+            hook_event_name="SubagentStart",
+            agent_id="a1", agent_type="software-team:software-team-backend-developer",
+        ), self.env, ["start"])
+        first = self.attempts()
+        self.assertEqual(len(first), 1)
+        self.assertEqual(first[0]["outcome"], "running")
+        self.assertEqual(first[0]["session_id"], "s1")
+        self.assertEqual(first[0]["agent_name"], "software-team-backend-developer")
+        # a second dispatch before the first stop supersedes the dangling one
+        run_hook("hook_subagent.py", self.payload(
+            hook_event_name="SubagentStart", session_id="s2",
+            agent_id="a2", agent_type="software-team:software-team-backend-developer",
+        ), self.env, ["start"])
+        run_hook("hook_subagent.py", self.payload(
+            hook_event_name="SubagentStop", session_id="s2",
+            agent_id="a2", agent_type="software-team:software-team-backend-developer",
+        ), self.env, ["stop"])
+        attempts = self.attempts()
+        self.assertEqual(len(attempts), 2)
+        self.assertEqual(attempts[0]["outcome"], "failed")
+        self.assertIn("superseded", attempts[0]["failure_reason"])
+        self.assertEqual(attempts[1]["outcome"], "done")
+        self.assertTrue(attempts[1]["finished_at"])
+        self.assertIn("attempt_started", self.events())
+        self.assertIn("attempt_finished", self.events())
 
     def test_guard_denies_db_writes_and_allows_others(self):
         db = Path(self.env["AGENTROF_HOME"]) / "agentrof.db"

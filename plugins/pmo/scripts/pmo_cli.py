@@ -2,9 +2,10 @@
 """Project Management Office CLI: the single writer of the central database.
 
 Every team plugin records its process state here: projects, epics, stories,
-machine-generated tasks, runs with step state and gates, findings, coverage,
-budgets and the quality ledger. Nothing else ever writes the database; agents
-and hooks go through this CLI, and every mutation appends an audit event.
+machine-generated tasks, work orders with step state and gates, findings,
+coverage, budgets and the quality ledger. Nothing else ever writes the
+database; agents and hooks go through this CLI, and every mutation appends
+an audit event.
 
 The database lives in the user-level data directory: AGENTROF_HOME when set,
 otherwise .agentrof under the user's home. Stdlib only.
@@ -15,6 +16,7 @@ Exit codes: 0 success, 1 rule violation, 2 usage or input error.
 from __future__ import annotations
 
 import argparse
+import heapq
 import json
 import os
 import shutil
@@ -23,12 +25,12 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
-PMO_VERSION = "0.2.0"
-SCHEMA_VERSION = 1
+PMO_VERSION = "0.3.0"
+SCHEMA_VERSION = 2
 DB_NAME = "agentrof.db"
 
-RUN_STATUSES = {"running", "waiting_gate", "blocked", "escalated", "complete"}
-ACTIVE_RUN_STATUSES = ("running", "waiting_gate")
+WO_STATUSES = {"running", "waiting_gate", "blocked", "escalated", "complete"}
+ACTIVE_WO_STATUSES = ("running", "waiting_gate")
 STEP_STATUSES = {"pending", "in_progress", "done", "blocked", "escalated"}
 STEP_IDS = ["0", "1", "2", "3", "4", "5"]
 EPIC_STATUSES = {"open", "done"}
@@ -40,7 +42,14 @@ FINDING_STATUSES = {"open", "fixed", "waived"}
 FINDING_SEVERITIES = {"critical", "high", "medium", "low"}
 BUDGET_VERDICTS = {"verified", "unverified"}
 COVERAGE_VERDICTS = {"pass", "fail", "no_test"}
+DOD_STATUSES = {"pending", "verified", "failed"}
+ATTEMPT_OUTCOMES = {"running", "done", "blocked", "failed"}
 STORY_REQUIRED_FIELDS = ["title", "scope", "excludes", "dor", "dod", "epic"]
+
+# Work-item priority: the token before the first ':' must be one of these;
+# free text after the colon carries the reason ("high: unblocks WP-04").
+PRIORITIES = ("critical", "high", "medium", "low")
+PRIORITY_RANK = {tier: rank for rank, tier in enumerate(PRIORITIES)}
 
 DDL = """
 CREATE TABLE IF NOT EXISTS projects (
@@ -75,7 +84,7 @@ CREATE TABLE IF NOT EXISTS work_items (
   dor TEXT NOT NULL DEFAULT '',
   dod TEXT NOT NULL DEFAULT '',
   deployed_verified INTEGER NOT NULL DEFAULT 0,
-  run_id INTEGER REFERENCES runs(id),
+  work_order_id INTEGER REFERENCES work_orders(id),
   role TEXT NOT NULL DEFAULT '',
   step_id TEXT NOT NULL DEFAULT '',
   started_at TEXT NOT NULL DEFAULT '',
@@ -83,6 +92,43 @@ CREATE TABLE IF NOT EXISTS work_items (
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL,
   UNIQUE (project_id, external_id)
+);
+CREATE TABLE IF NOT EXISTS work_item_deps (
+  id INTEGER PRIMARY KEY,
+  project_id INTEGER NOT NULL REFERENCES projects(id),
+  item_id INTEGER NOT NULL REFERENCES work_items(id),
+  depends_on_id INTEGER NOT NULL REFERENCES work_items(id),
+  reason TEXT NOT NULL DEFAULT '',
+  created_at TEXT NOT NULL,
+  UNIQUE (item_id, depends_on_id),
+  CHECK (item_id != depends_on_id)
+);
+CREATE TABLE IF NOT EXISTS dod_items (
+  id INTEGER PRIMARY KEY,
+  item_id INTEGER NOT NULL REFERENCES work_items(id),
+  statement TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'pending'
+    CHECK (status IN ('pending', 'verified', 'failed')),
+  verified_at TEXT NOT NULL DEFAULT '',
+  failure_reason TEXT NOT NULL DEFAULT '',
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  UNIQUE (item_id, statement)
+);
+CREATE TABLE IF NOT EXISTS task_attempts (
+  id INTEGER PRIMARY KEY,
+  task_id INTEGER NOT NULL REFERENCES work_items(id),
+  attempt INTEGER NOT NULL,
+  agent_name TEXT NOT NULL DEFAULT '',
+  role TEXT NOT NULL DEFAULT '',
+  session_id TEXT NOT NULL DEFAULT '',
+  started_at TEXT NOT NULL,
+  finished_at TEXT NOT NULL DEFAULT '',
+  outcome TEXT NOT NULL DEFAULT 'running'
+    CHECK (outcome IN ('running', 'done', 'blocked', 'failed')),
+  failure_reason TEXT NOT NULL DEFAULT '',
+  cost_usd REAL,
+  UNIQUE (task_id, attempt)
 );
 CREATE TABLE IF NOT EXISTS story_criteria (
   id INTEGER PRIMARY KEY,
@@ -100,11 +146,11 @@ CREATE TABLE IF NOT EXISTS open_questions (
   status TEXT NOT NULL DEFAULT 'open' CHECK (status IN ('open', 'resolved')),
   created_at TEXT NOT NULL
 );
-CREATE TABLE IF NOT EXISTS runs (
+CREATE TABLE IF NOT EXISTS work_orders (
   id INTEGER PRIMARY KEY,
   project_id INTEGER NOT NULL REFERENCES projects(id),
   story_id INTEGER REFERENCES work_items(id),
-  run_key TEXT NOT NULL UNIQUE,
+  work_order_key TEXT NOT NULL UNIQUE,
   request TEXT NOT NULL,
   status TEXT NOT NULL CHECK
     (status IN ('running', 'waiting_gate', 'blocked', 'escalated', 'complete')),
@@ -116,34 +162,34 @@ CREATE TABLE IF NOT EXISTS runs (
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL
 );
-CREATE TABLE IF NOT EXISTS run_steps (
-  run_id INTEGER NOT NULL REFERENCES runs(id),
+CREATE TABLE IF NOT EXISTS work_order_steps (
+  work_order_id INTEGER NOT NULL REFERENCES work_orders(id),
   step_id TEXT NOT NULL,
   status TEXT NOT NULL CHECK
     (status IN ('pending', 'in_progress', 'done', 'blocked', 'escalated')),
   artifact_path TEXT NOT NULL DEFAULT '',
   attempts INTEGER NOT NULL DEFAULT 0,
-  UNIQUE (run_id, step_id)
+  UNIQUE (work_order_id, step_id)
 );
 CREATE TABLE IF NOT EXISTS gates (
   id INTEGER PRIMARY KEY,
-  run_id INTEGER NOT NULL REFERENCES runs(id),
+  work_order_id INTEGER NOT NULL REFERENCES work_orders(id),
   name TEXT NOT NULL,
   decision TEXT NOT NULL,
   decided_by TEXT NOT NULL DEFAULT 'owner',
   decided_at TEXT NOT NULL,
-  UNIQUE (run_id, name)
+  UNIQUE (work_order_id, name)
 );
 CREATE TABLE IF NOT EXISTS ownership (
-  run_id INTEGER NOT NULL REFERENCES runs(id),
+  work_order_id INTEGER NOT NULL REFERENCES work_orders(id),
   role TEXT NOT NULL,
   path_prefix TEXT NOT NULL,
-  UNIQUE (run_id, role, path_prefix)
+  UNIQUE (work_order_id, role, path_prefix)
 );
 CREATE TABLE IF NOT EXISTS findings (
   id INTEGER PRIMARY KEY,
   project_id INTEGER NOT NULL REFERENCES projects(id),
-  run_id INTEGER NOT NULL REFERENCES runs(id),
+  work_order_id INTEGER NOT NULL REFERENCES work_orders(id),
   story_id INTEGER REFERENCES work_items(id),
   external_id TEXT NOT NULL,
   source TEXT NOT NULL CHECK (source IN ('review', 'qa', 'design_qa')),
@@ -160,27 +206,27 @@ CREATE TABLE IF NOT EXISTS findings (
   UNIQUE (project_id, external_id)
 );
 CREATE TABLE IF NOT EXISTS coverage (
-  run_id INTEGER NOT NULL REFERENCES runs(id),
+  work_order_id INTEGER NOT NULL REFERENCES work_orders(id),
   requirement_id TEXT NOT NULL,
   test_names TEXT NOT NULL DEFAULT '',
   verdict TEXT NOT NULL CHECK (verdict IN ('pass', 'fail', 'no_test')),
   recorded_at TEXT NOT NULL,
-  UNIQUE (run_id, requirement_id)
+  UNIQUE (work_order_id, requirement_id)
 );
 CREATE TABLE IF NOT EXISTS budgets (
-  run_id INTEGER NOT NULL REFERENCES runs(id),
+  work_order_id INTEGER NOT NULL REFERENCES work_orders(id),
   budget_id TEXT NOT NULL,
   description TEXT NOT NULL DEFAULT '',
   verdict TEXT NOT NULL CHECK (verdict IN ('verified', 'unverified')),
   reason TEXT NOT NULL DEFAULT '',
   recorded_at TEXT NOT NULL,
-  UNIQUE (run_id, budget_id)
+  UNIQUE (work_order_id, budget_id)
 );
 CREATE TABLE IF NOT EXISTS ledger (
   id INTEGER PRIMARY KEY,
   project_id INTEGER NOT NULL REFERENCES projects(id),
   story_id INTEGER REFERENCES work_items(id),
-  run_id INTEGER REFERENCES runs(id),
+  work_order_id INTEGER REFERENCES work_orders(id),
   checkpoint_at TEXT NOT NULL,
   finding_counts_json TEXT NOT NULL,
   review_rounds INTEGER NOT NULL,
@@ -191,12 +237,38 @@ CREATE TABLE IF NOT EXISTS events (
   id INTEGER PRIMARY KEY,
   ts TEXT NOT NULL,
   project_id INTEGER,
-  run_id INTEGER,
+  work_order_id INTEGER,
   actor TEXT NOT NULL,
   action TEXT NOT NULL,
   payload_json TEXT NOT NULL DEFAULT '{}'
 );
+CREATE INDEX IF NOT EXISTS idx_work_item_deps_reverse ON work_item_deps(depends_on_id);
+CREATE INDEX IF NOT EXISTS idx_task_attempts_task ON task_attempts(task_id);
+CREATE INDEX IF NOT EXISTS idx_events_project ON events(project_id, id);
+CREATE INDEX IF NOT EXISTS idx_work_items_pks ON work_items(project_id, kind, status);
+CREATE INDEX IF NOT EXISTS idx_findings_wo_status ON findings(work_order_id, status);
 """
+
+# Stepwise schema migrations, keyed by the version they upgrade FROM. The DDL
+# block above always describes the final shape; each step only transforms what
+# an older database already holds. events rows are history and are never
+# rewritten: consumers that match action names accept old and new vocabulary.
+MIGRATIONS: dict[int, list[str]] = {
+    1: [
+        "ALTER TABLE runs RENAME TO work_orders",
+        "ALTER TABLE work_orders RENAME COLUMN run_key TO work_order_key",
+        "ALTER TABLE run_steps RENAME TO work_order_steps",
+        "ALTER TABLE work_order_steps RENAME COLUMN run_id TO work_order_id",
+        "ALTER TABLE work_items RENAME COLUMN run_id TO work_order_id",
+        "ALTER TABLE gates RENAME COLUMN run_id TO work_order_id",
+        "ALTER TABLE ownership RENAME COLUMN run_id TO work_order_id",
+        "ALTER TABLE findings RENAME COLUMN run_id TO work_order_id",
+        "ALTER TABLE coverage RENAME COLUMN run_id TO work_order_id",
+        "ALTER TABLE budgets RENAME COLUMN run_id TO work_order_id",
+        "ALTER TABLE ledger RENAME COLUMN run_id TO work_order_id",
+        "ALTER TABLE events RENAME COLUMN run_id TO work_order_id",
+    ],
+}
 
 
 def now() -> str:
@@ -247,11 +319,13 @@ def mutate(con: sqlite3.Connection):
     return _Tx()
 
 
-def record(con, action: str, project_id=None, run_id=None, actor="orchestrator", payload=None) -> None:
+def record(con, action: str, project_id=None, work_order_id=None,
+           actor="orchestrator", payload=None) -> None:
     con.execute(
-        "INSERT INTO events (ts, project_id, run_id, actor, action, payload_json)"
+        "INSERT INTO events (ts, project_id, work_order_id, actor, action, payload_json)"
         " VALUES (?, ?, ?, ?, ?, ?)",
-        (now(), project_id, run_id, actor, action, json.dumps(payload or {}, sort_keys=True)),
+        (now(), project_id, work_order_id, actor, action,
+         json.dumps(payload or {}, sort_keys=True)),
     )
 
 
@@ -262,10 +336,12 @@ def get_project(con, key: str) -> sqlite3.Row:
     return row
 
 
-def get_run(con, run_key: str) -> sqlite3.Row:
-    row = con.execute("SELECT * FROM runs WHERE run_key = ?", (run_key,)).fetchone()
+def get_work_order(con, wo_key: str) -> sqlite3.Row:
+    row = con.execute(
+        "SELECT * FROM work_orders WHERE work_order_key = ?", (wo_key,)
+    ).fetchone()
     if row is None:
-        raise Rule(f"no run with key '{run_key}'")
+        raise Rule(f"no work order with key '{wo_key}'")
     return row
 
 
@@ -276,11 +352,11 @@ def get_item(con, project_id: int, external_id: str) -> sqlite3.Row | None:
     ).fetchone()
 
 
-def active_runs(con, project_id: int) -> list[sqlite3.Row]:
-    marks = ", ".join("?" for _ in ACTIVE_RUN_STATUSES)
+def active_work_orders(con, project_id: int) -> list[sqlite3.Row]:
+    marks = ", ".join("?" for _ in ACTIVE_WO_STATUSES)
     return con.execute(
-        f"SELECT * FROM runs WHERE project_id = ? AND status IN ({marks})",
-        (project_id, *ACTIVE_RUN_STATUSES),
+        f"SELECT * FROM work_orders WHERE project_id = ? AND status IN ({marks})",
+        (project_id, *ACTIVE_WO_STATUSES),
     ).fetchall()
 
 
@@ -325,6 +401,152 @@ def next_finding_id(con, project_id: int) -> str:
     return f"F-{highest + 1:03d}"
 
 
+def priority_tier(value: str) -> str:
+    """The validated token of a priority value: lowercased text before the
+    first ':'. 'high: unblocks WP-04' -> 'high'."""
+    return value.split(":", 1)[0].strip().lower()
+
+
+def check_priority(value: str, context: str) -> None:
+    if value and priority_tier(value) not in PRIORITIES:
+        raise Rule(
+            f"{context}: priority tier '{priority_tier(value)}' not in"
+            f" {'/'.join(PRIORITIES)}; use 'tier: reason'"
+        )
+
+
+def priority_rank(value: str) -> int:
+    return PRIORITY_RANK.get(priority_tier(value), len(PRIORITIES))
+
+
+# ---------------------------------------------------------------------------
+# Dependency graph helpers (shared with the dashboard)
+# ---------------------------------------------------------------------------
+
+
+def topo_order(nodes: dict[str, str], edges: dict[str, set[str]]):
+    """Deterministic Kahn sort, one node at a time: of everything currently
+    unblocked, the highest priority tier goes next (external_id breaks ties),
+    then the frontier is re-evaluated. nodes maps external_id -> priority
+    value; edges maps external_id -> the ids it depends on. Returns
+    (order, cycles); cycles lists the ids left unresolvable."""
+    pending = {nid: {d for d in deps if d in nodes}
+               for nid, deps in ((n, edges.get(n, set())) for n in nodes)}
+    blockers: dict[str, set[str]] = {nid: set() for nid in nodes}
+    for nid, deps in pending.items():
+        for dep in deps:
+            blockers[dep].add(nid)
+    heap = [(priority_rank(nodes[nid]), nid)
+            for nid, deps in pending.items() if not deps]
+    heapq.heapify(heap)
+    order: list[str] = []
+    while heap:
+        _, nid = heapq.heappop(heap)
+        order.append(nid)
+        del pending[nid]
+        for waiter in blockers[nid]:
+            deps = pending.get(waiter)
+            if deps is not None:
+                deps.discard(nid)
+                if not deps:
+                    heapq.heappush(heap, (priority_rank(nodes[waiter]), waiter))
+    return order, sorted(pending)
+
+
+def dep_cycle_path(con, item_id: int, depends_on_id: int):
+    """The external-id path that adding item -> depends_on would close into a
+    cycle, or None. Walks existing edges transitively from depends_on."""
+    parents = {depends_on_id: None}
+    frontier = [depends_on_id]
+    while frontier:
+        current = frontier.pop()
+        if current == item_id:
+            path = []
+            node = current
+            while node is not None:
+                path.append(node)
+                node = parents[node]
+            ids = list(reversed(path))
+            marks = ", ".join("?" for _ in ids)
+            titles = {
+                row["id"]: row["external_id"]
+                for row in con.execute(
+                    f"SELECT id, external_id FROM work_items WHERE id IN ({marks})",
+                    ids,
+                )
+            }
+            return [titles[i] for i in ids]
+        for row in con.execute(
+            "SELECT depends_on_id FROM work_item_deps WHERE item_id = ?",
+            (current,),
+        ):
+            nxt = row["depends_on_id"]
+            if nxt not in parents:
+                parents[nxt] = current
+                frontier.append(nxt)
+    return None
+
+
+def project_dep_graph(con, project_id: int, kind: str):
+    """(nodes, edges) over one kind's items for topo_order."""
+    nodes = {
+        row["external_id"]: row["priority"]
+        for row in con.execute(
+            "SELECT external_id, priority FROM work_items"
+            " WHERE project_id = ? AND kind = ?",
+            (project_id, kind),
+        )
+    }
+    edges: dict[str, set[str]] = {}
+    for row in con.execute(
+        "SELECT a.external_id AS item, b.external_id AS dep"
+        " FROM work_item_deps d"
+        " JOIN work_items a ON a.id = d.item_id"
+        " JOIN work_items b ON b.id = d.depends_on_id"
+        " WHERE d.project_id = ? AND a.kind = ? AND b.kind = ?",
+        (project_id, kind, kind),
+    ):
+        edges.setdefault(row["item"], set()).add(row["dep"])
+    return nodes, edges
+
+
+# ---------------------------------------------------------------------------
+# Attempt helpers (task dispatch history)
+# ---------------------------------------------------------------------------
+
+
+def close_running_attempts(con, task_id: int, outcome: str, stamp: str,
+                           failure_reason: str = "", cost_usd=None) -> int:
+    """Close every attempt still marked running; returns how many closed."""
+    open_rows = con.execute(
+        "SELECT id FROM task_attempts WHERE task_id = ? AND outcome = 'running'",
+        (task_id,),
+    ).fetchall()
+    for row in open_rows:
+        con.execute(
+            "UPDATE task_attempts SET outcome = ?, finished_at = ?,"
+            " failure_reason = ?, cost_usd = COALESCE(?, cost_usd) WHERE id = ?",
+            (outcome, stamp, failure_reason, cost_usd, row["id"]),
+        )
+    return len(open_rows)
+
+
+def open_attempt(con, task_id: int, role: str, agent_name: str,
+                 session_id: str, stamp: str) -> int:
+    """Insert the next attempt row for a task; returns the attempt number."""
+    highest = con.execute(
+        "SELECT COALESCE(MAX(attempt), 0) AS n FROM task_attempts WHERE task_id = ?",
+        (task_id,),
+    ).fetchone()["n"]
+    attempt = highest + 1
+    con.execute(
+        "INSERT INTO task_attempts (task_id, attempt, agent_name, role,"
+        " session_id, started_at) VALUES (?, ?, ?, ?, ?, ?)",
+        (task_id, attempt, agent_name, role, session_id, stamp),
+    )
+    return attempt
+
+
 # ---------------------------------------------------------------------------
 # Commands
 # ---------------------------------------------------------------------------
@@ -332,16 +554,32 @@ def next_finding_id(con, project_id: int) -> str:
 
 def cmd_init_db(args) -> int:
     con = connect()
+    version = con.execute("PRAGMA user_version").fetchone()[0]
+    if version > SCHEMA_VERSION:
+        con.close()
+        raise Rule(
+            f"database schema version {version} is newer than this CLI"
+            f" ({SCHEMA_VERSION}); update the pmo plugin"
+        )
+    if 0 < version < SCHEMA_VERSION:
+        # Migrate BEFORE the DDL runs: the DDL describes the final shape and
+        # would otherwise create empty renamed tables next to the old ones.
+        if sqlite3.sqlite_version_info < (3, 25, 0):
+            raise Rule(
+                f"SQLite {sqlite3.sqlite_version} cannot run the rename"
+                " migration; 3.25 or newer is required"
+            )
+        with mutate(con):
+            while version < SCHEMA_VERSION:
+                for statement in MIGRATIONS[version]:
+                    con.execute(statement)
+                version += 1
+                con.execute(f"PRAGMA user_version = {version}")
+                record(con, "schema_migrated", payload={"to_version": version})
     con.executescript(DDL)  # commits itself; keep it outside the transaction
     with mutate(con):
-        version = con.execute("PRAGMA user_version").fetchone()[0]
-        if version == 0:
+        if con.execute("PRAGMA user_version").fetchone()[0] == 0:
             con.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
-        elif version > SCHEMA_VERSION:
-            raise Rule(
-                f"database schema version {version} is newer than this CLI"
-                f" ({SCHEMA_VERSION}); update the pmo plugin"
-            )
         record(con, "init_db", payload={"schema_version": SCHEMA_VERSION})
     print(f"pmo: database ready at {db_path()} (schema {SCHEMA_VERSION})")
     return 0
@@ -399,16 +637,16 @@ def cmd_project_list(args) -> int:
     return 0
 
 
-def cmd_run_init(args) -> int:
+def cmd_wo_init(args) -> int:
     con = connect()
     worktree = norm_path(args.worktree)
     with mutate(con):
         project = get_project(con, args.project_key)
-        for run in active_runs(con, project["id"]):
-            if run["worktree_path"] == worktree:
+        for order in active_work_orders(con, project["id"]):
+            if order["worktree_path"] == worktree:
                 raise Rule(
-                    f"active run '{run['run_key']}' already holds worktree"
-                    f" {worktree}; resume it or release it first"
+                    f"active work order '{order['work_order_key']}' already holds"
+                    f" worktree {worktree}; resume it or release it first"
                 )
         story_id = None
         if args.story:
@@ -416,13 +654,14 @@ def cmd_run_init(args) -> int:
             if story is None or story["kind"] != "story":
                 raise Rule(f"story '{args.story}' is not in the backlog; import it first")
             claimed = con.execute(
-                "SELECT run_key FROM runs WHERE story_id = ? AND status IN (?, ?)",
-                (story["id"], *ACTIVE_RUN_STATUSES),
+                "SELECT work_order_key FROM work_orders WHERE story_id = ?"
+                " AND status IN (?, ?)",
+                (story["id"], *ACTIVE_WO_STATUSES),
             ).fetchone()
             if claimed:
                 raise Rule(
-                    f"story '{args.story}' is already claimed by active run"
-                    f" '{claimed['run_key']}'"
+                    f"story '{args.story}' is already claimed by active work order"
+                    f" '{claimed['work_order_key']}'"
                 )
             story_id = story["id"]
             con.execute(
@@ -431,47 +670,58 @@ def cmd_run_init(args) -> int:
                 (now(), story_id),
             )
         con.execute(
-            "INSERT INTO runs (project_id, story_id, run_key, request, status,"
-            " current_step, worktree_path, bindings_json, created_at, updated_at)"
-            " VALUES (?, ?, ?, ?, 'running', '0', ?, ?, ?, ?)",
-            (project["id"], story_id, args.run_key, args.request, worktree,
+            "INSERT INTO work_orders (project_id, story_id, work_order_key, request,"
+            " status, current_step, worktree_path, bindings_json, created_at,"
+            " updated_at) VALUES (?, ?, ?, ?, 'running', '0', ?, ?, ?, ?)",
+            (project["id"], story_id, args.work_order_key, args.request, worktree,
              args.bindings or "{}", now(), now()),
         )
-        run = get_run(con, args.run_key)
+        order = get_work_order(con, args.work_order_key)
+        if story_id is not None:
+            # The claimed story keeps a pointer to the work order delivering
+            # it (tasks already carry one); readers link the two directly.
+            con.execute(
+                "UPDATE work_items SET work_order_id = ?, updated_at = ?"
+                " WHERE id = ?",
+                (order["id"], now(), story_id),
+            )
         for step_id in STEP_IDS:
             status = "in_progress" if step_id == "0" else "pending"
             con.execute(
-                "INSERT INTO run_steps (run_id, step_id, status) VALUES (?, ?, ?)",
-                (run["id"], step_id, status),
+                "INSERT INTO work_order_steps (work_order_id, step_id, status)"
+                " VALUES (?, ?, ?)",
+                (order["id"], step_id, status),
             )
-        record(con, "run_initialized", project_id=project["id"], run_id=run["id"],
-               payload={"run_key": args.run_key, "story": args.story or "",
-                        "worktree": worktree})
-    if args.run_dir:
-        run_dir = Path(args.run_dir)
-        run_dir.mkdir(parents=True, exist_ok=True)
+        record(con, "work_order_initialized", project_id=project["id"],
+               work_order_id=order["id"],
+               payload={"work_order_key": args.work_order_key,
+                        "story": args.story or "", "worktree": worktree})
+    if args.order_dir:
+        order_dir = Path(args.order_dir)
+        order_dir.mkdir(parents=True, exist_ok=True)
         for src, dest in ((args.constitution, "constitution.md"),
                           (args.brief, "brief.snapshot.md"),
                           (args.config, "config.snapshot.json")):
             if src and Path(src).is_file():
-                shutil.copyfile(src, run_dir / dest)
-    print(f"pmo: run '{args.run_key}' initialized (step 0 in progress)")
+                shutil.copyfile(src, order_dir / dest)
+    print(f"pmo: work order '{args.work_order_key}' initialized (step 0 in progress)")
     return 0
 
 
-def cmd_run_set_step(args) -> int:
+def cmd_wo_set_step(args) -> int:
     if args.step not in STEP_IDS:
         return fail(f"unknown step: {args.step}", 2)
     if args.status not in STEP_STATUSES:
         return fail(f"step status not in enum: {args.status}", 2)
     con = connect()
     with mutate(con):
-        run = get_run(con, args.run_key)
+        order = get_work_order(con, args.work_order_key)
         if args.status == "in_progress":
             for prior in STEP_IDS[: STEP_IDS.index(args.step)]:
                 row = con.execute(
-                    "SELECT status FROM run_steps WHERE run_id = ? AND step_id = ?",
-                    (run["id"], prior),
+                    "SELECT status FROM work_order_steps WHERE work_order_id = ?"
+                    " AND step_id = ?",
+                    (order["id"], prior),
                 ).fetchone()
                 if row["status"] != "done":
                     raise Rule(
@@ -479,63 +729,70 @@ def cmd_run_set_step(args) -> int:
                         f" step {args.step} cannot start"
                     )
             con.execute(
-                "UPDATE runs SET current_step = ?, updated_at = ? WHERE id = ?",
-                (args.step, now(), run["id"]),
+                "UPDATE work_orders SET current_step = ?, updated_at = ? WHERE id = ?",
+                (args.step, now(), order["id"]),
             )
         con.execute(
-            "UPDATE run_steps SET status = ?,"
+            "UPDATE work_order_steps SET status = ?,"
             " artifact_path = CASE WHEN ? = '' THEN artifact_path ELSE ? END,"
-            " attempts = attempts + ? WHERE run_id = ? AND step_id = ?",
+            " attempts = attempts + ? WHERE work_order_id = ? AND step_id = ?",
             (args.status, args.artifact, args.artifact,
-             1 if args.bump_attempts else 0, run["id"], args.step),
+             1 if args.bump_attempts else 0, order["id"], args.step),
         )
-        con.execute("UPDATE runs SET updated_at = ? WHERE id = ?", (now(), run["id"]))
-        record(con, "step_changed", project_id=run["project_id"], run_id=run["id"],
+        con.execute("UPDATE work_orders SET updated_at = ? WHERE id = ?",
+                    (now(), order["id"]))
+        record(con, "step_changed", project_id=order["project_id"],
+               work_order_id=order["id"],
                payload={"step": args.step, "status": args.status,
                         "artifact": args.artifact})
     print(f"pmo: step {args.step} -> {args.status}")
     return 0
 
 
-def cmd_run_record_gate(args) -> int:
+def cmd_wo_record_gate(args) -> int:
     con = connect()
     with mutate(con):
-        run = get_run(con, args.run_key)
+        order = get_work_order(con, args.work_order_key)
         con.execute(
-            "INSERT INTO gates (run_id, name, decision, decided_by, decided_at)"
+            "INSERT INTO gates (work_order_id, name, decision, decided_by, decided_at)"
             " VALUES (?, ?, ?, ?, ?)"
-            " ON CONFLICT (run_id, name) DO UPDATE SET decision = excluded.decision,"
-            " decided_by = excluded.decided_by, decided_at = excluded.decided_at",
-            (run["id"], args.gate, args.decision, args.decided_by, now()),
+            " ON CONFLICT (work_order_id, name) DO UPDATE SET"
+            " decision = excluded.decision, decided_by = excluded.decided_by,"
+            " decided_at = excluded.decided_at",
+            (order["id"], args.gate, args.decision, args.decided_by, now()),
         )
-        con.execute("UPDATE runs SET updated_at = ? WHERE id = ?", (now(), run["id"]))
-        record(con, "gate_recorded", project_id=run["project_id"], run_id=run["id"],
+        con.execute("UPDATE work_orders SET updated_at = ? WHERE id = ?",
+                    (now(), order["id"]))
+        record(con, "gate_recorded", project_id=order["project_id"],
+               work_order_id=order["id"],
                payload={"gate": args.gate, "decision": args.decision})
     print(f"pmo: gate {args.gate} -> {args.decision}")
     return 0
 
 
-def cmd_run_bump(args) -> int:
+def cmd_wo_bump(args) -> int:
     if args.counter not in ("review", "qa"):
         return fail(f"unknown counter: {args.counter}", 2)
     con = connect()
     with mutate(con):
-        run = get_run(con, args.run_key)
+        order = get_work_order(con, args.work_order_key)
         column = "review_rounds" if args.counter == "review" else "qa_rounds"
         con.execute(
-            f"UPDATE runs SET {column} = {column} + 1, updated_at = ? WHERE id = ?",
-            (now(), run["id"]),
+            f"UPDATE work_orders SET {column} = {column} + 1, updated_at = ?"
+            " WHERE id = ?",
+            (now(), order["id"]),
         )
         value = con.execute(
-            f"SELECT {column} AS v FROM runs WHERE id = ?", (run["id"],)
+            f"SELECT {column} AS v FROM work_orders WHERE id = ?", (order["id"],)
         ).fetchone()["v"]
-        record(con, "round_bumped", project_id=run["project_id"], run_id=run["id"],
+        record(con, "round_bumped", project_id=order["project_id"],
+               work_order_id=order["id"],
                payload={"counter": args.counter, "value": value})
     print(f"pmo: {args.counter} rounds = {value}")
     return 0
 
 
-def cmd_run_set_ownership(args) -> int:
+def cmd_wo_set_ownership(args) -> int:
     try:
         ownership = json.loads(args.ownership)
     except json.JSONDecodeError as exc:
@@ -544,7 +801,7 @@ def cmd_run_set_ownership(args) -> int:
         return fail("ownership must be a JSON object of role -> path list", 2)
     con = connect()
     with mutate(con):
-        run = get_run(con, args.run_key)
+        order = get_work_order(con, args.work_order_key)
         flat: list[tuple[str, str]] = []
         for role, paths in ownership.items():
             if not is_snake(role):
@@ -555,122 +812,130 @@ def cmd_run_set_ownership(args) -> int:
             for role_b, path_b in flat[i + 1:]:
                 if role_a != role_b and prefixes_overlap(path_a, path_b):
                     raise Rule(
-                        f"ownership overlap inside the run: {role_a}:{path_a}"
+                        f"ownership overlap inside the work order: {role_a}:{path_a}"
                         f" overlaps {role_b}:{path_b}"
                     )
-        for other in active_runs(con, run["project_id"]):
-            if other["id"] == run["id"]:
+        for other in active_work_orders(con, order["project_id"]):
+            if other["id"] == order["id"]:
                 continue
             for row in con.execute(
-                "SELECT role, path_prefix FROM ownership WHERE run_id = ?",
+                "SELECT role, path_prefix FROM ownership WHERE work_order_id = ?",
                 (other["id"],),
             ):
                 for role, path in flat:
                     if prefixes_overlap(path, row["path_prefix"]):
                         raise Rule(
-                            f"ownership overlap across runs: {role}:{path} overlaps"
-                            f" {row['role']}:{row['path_prefix']} held by active run"
-                            f" '{other['run_key']}'"
+                            f"ownership overlap across work orders: {role}:{path}"
+                            f" overlaps {row['role']}:{row['path_prefix']} held by"
+                            f" active work order '{other['work_order_key']}'"
                         )
-        con.execute("DELETE FROM ownership WHERE run_id = ?", (run["id"],))
+        con.execute("DELETE FROM ownership WHERE work_order_id = ?", (order["id"],))
         for role, path in flat:
             con.execute(
-                "INSERT INTO ownership (run_id, role, path_prefix) VALUES (?, ?, ?)",
-                (run["id"], role, path),
+                "INSERT INTO ownership (work_order_id, role, path_prefix)"
+                " VALUES (?, ?, ?)",
+                (order["id"], role, path),
             )
-        con.execute("UPDATE runs SET updated_at = ? WHERE id = ?", (now(), run["id"]))
-        record(con, "ownership_set", project_id=run["project_id"], run_id=run["id"],
-               payload={"ownership": ownership})
+        con.execute("UPDATE work_orders SET updated_at = ? WHERE id = ?",
+                    (now(), order["id"]))
+        record(con, "ownership_set", project_id=order["project_id"],
+               work_order_id=order["id"], payload={"ownership": ownership})
     print("pmo: ownership map stored")
     return 0
 
 
-def cmd_run_set_status(args) -> int:
-    if args.status not in RUN_STATUSES:
-        return fail(f"run status not in enum: {args.status}", 2)
+def cmd_wo_set_status(args) -> int:
+    if args.status not in WO_STATUSES:
+        return fail(f"work order status not in enum: {args.status}", 2)
     con = connect()
     with mutate(con):
-        run = get_run(con, args.run_key)
+        order = get_work_order(con, args.work_order_key)
         if args.status == "complete":
             not_done = [
                 row["step_id"]
                 for row in con.execute(
-                    "SELECT step_id FROM run_steps WHERE run_id = ?"
+                    "SELECT step_id FROM work_order_steps WHERE work_order_id = ?"
                     " AND status != 'done' ORDER BY step_id",
-                    (run["id"],),
+                    (order["id"],),
                 )
             ]
             if not_done:
-                raise Rule(f"run-complete guard: steps not done: {', '.join(not_done)}")
+                raise Rule(
+                    f"complete guard: steps not done: {', '.join(not_done)}"
+                )
             open_findings = [
                 row["external_id"]
                 for row in con.execute(
-                    "SELECT external_id FROM findings WHERE run_id = ?"
+                    "SELECT external_id FROM findings WHERE work_order_id = ?"
                     " AND status = 'open' ORDER BY external_id",
-                    (run["id"],),
+                    (order["id"],),
                 )
             ]
             if open_findings:
                 raise Rule(
-                    "run-complete guard: open findings remain:"
+                    "complete guard: open findings remain:"
                     f" {', '.join(open_findings)}"
                 )
-            if run["story_id"] is not None:
+            if order["story_id"] is not None:
                 covered = con.execute(
-                    "SELECT COUNT(*) FROM coverage WHERE run_id = ?",
-                    (run["id"],),
+                    "SELECT COUNT(*) FROM coverage WHERE work_order_id = ?",
+                    (order["id"],),
                 ).fetchone()[0]
                 if covered == 0:
                     raise Rule(
-                        "run-complete guard: story run has no coverage rows;"
+                        "complete guard: story work order has no coverage rows;"
                         " import the QA coverage (coverage import) first"
                     )
                 ledgered = con.execute(
-                    "SELECT COUNT(*) FROM ledger WHERE run_id = ?",
-                    (run["id"],),
+                    "SELECT COUNT(*) FROM ledger WHERE work_order_id = ?",
+                    (order["id"],),
                 ).fetchone()[0]
                 if ledgered == 0:
                     raise Rule(
-                        "run-complete guard: story run has no ledger line;"
+                        "complete guard: story work order has no ledger line;"
                         " run the checkpoint subcommand first"
                     )
         con.execute(
-            "UPDATE runs SET status = ?, updated_at = ? WHERE id = ?",
-            (args.status, now(), run["id"]),
+            "UPDATE work_orders SET status = ?, updated_at = ? WHERE id = ?",
+            (args.status, now(), order["id"]),
         )
-        record(con, "run_status_changed", project_id=run["project_id"],
-               run_id=run["id"], payload={"status": args.status})
-    print(f"pmo: run status -> {args.status}")
+        record(con, "work_order_status_changed", project_id=order["project_id"],
+               work_order_id=order["id"], payload={"status": args.status})
+    print(f"pmo: work order status -> {args.status}")
     return 0
 
 
-def cmd_run_release(args) -> int:
+def cmd_wo_release(args) -> int:
     con = connect()
     with mutate(con):
-        run = get_run(con, args.run_key)
-        if run["status"] in ACTIVE_RUN_STATUSES:
+        order = get_work_order(con, args.work_order_key)
+        if order["status"] in ACTIVE_WO_STATUSES:
             con.execute(
-                "UPDATE runs SET status = 'blocked', updated_at = ? WHERE id = ?",
-                (now(), run["id"]),
+                "UPDATE work_orders SET status = 'blocked', updated_at = ?"
+                " WHERE id = ?",
+                (now(), order["id"]),
             )
-            record(con, "run_released", project_id=run["project_id"],
-                   run_id=run["id"], payload={"previous_status": run["status"]})
-            print(f"pmo: run '{args.run_key}' released (status blocked; claims freed)")
+            record(con, "work_order_released", project_id=order["project_id"],
+                   work_order_id=order["id"],
+                   payload={"previous_status": order["status"]})
+            print(f"pmo: work order '{args.work_order_key}' released"
+                  " (status blocked; claims freed)")
         else:
-            print(f"pmo: run '{args.run_key}' is not active; nothing to release")
+            print(f"pmo: work order '{args.work_order_key}' is not active;"
+                  " nothing to release")
     return 0
 
 
-def cmd_run_validate(args) -> int:
+def cmd_wo_validate(args) -> int:
     con = connect()
-    run = get_run(con, args.run_key)
+    order = get_work_order(con, args.work_order_key)
     problems: list[str] = []
-    if run["status"] not in RUN_STATUSES:
-        problems.append(f"run status not in enum: {run['status']}")
+    if order["status"] not in WO_STATUSES:
+        problems.append(f"work order status not in enum: {order['status']}")
     steps = {
         row["step_id"]: row
         for row in con.execute(
-            "SELECT * FROM run_steps WHERE run_id = ?", (run["id"],)
+            "SELECT * FROM work_order_steps WHERE work_order_id = ?", (order["id"],)
         )
     }
     for step_id in STEP_IDS:
@@ -678,12 +943,12 @@ def cmd_run_validate(args) -> int:
             problems.append(f"missing step row: {step_id}")
         elif steps[step_id]["status"] not in STEP_STATUSES:
             problems.append(f"step {step_id} status not in enum")
-    if run["status"] == "complete":
+    if order["status"] == "complete":
         for step_id, row in steps.items():
             if row["status"] != "done":
-                problems.append(f"run complete but step {step_id} is not done")
+                problems.append(f"work order complete but step {step_id} is not done")
     for row in con.execute(
-        "SELECT DISTINCT role FROM ownership WHERE run_id = ?", (run["id"],)
+        "SELECT DISTINCT role FROM ownership WHERE work_order_id = ?", (order["id"],)
     ):
         if not is_snake(row["role"]):
             problems.append(f"ownership role not snake_case: {row['role']}")
@@ -691,7 +956,7 @@ def cmd_run_validate(args) -> int:
         for problem in problems:
             print(f"pmo: INVALID: {problem}", file=sys.stderr)
         return 1
-    print("pmo: run state is valid")
+    print("pmo: work order state is valid")
     return 0
 
 
@@ -701,35 +966,36 @@ def cmd_resume_info(args) -> int:
         project = get_project(con, args.project_key)
     except Rule as exc:
         return fail(str(exc))
-    runs = active_runs(con, project["id"])
-    info = {"project_key": args.project_key, "active_runs": [], "recent_events": []}
-    for run in runs:
+    orders = active_work_orders(con, project["id"])
+    info = {"project_key": args.project_key, "active_work_orders": [],
+            "recent_events": []}
+    for order in orders:
         steps = con.execute(
-            "SELECT step_id, status, attempts FROM run_steps WHERE run_id = ?"
-            " ORDER BY step_id",
-            (run["id"],),
+            "SELECT step_id, status, attempts FROM work_order_steps"
+            " WHERE work_order_id = ? ORDER BY step_id",
+            (order["id"],),
         ).fetchall()
         gates = con.execute(
-            "SELECT name, decision FROM gates WHERE run_id = ? ORDER BY name",
-            (run["id"],),
+            "SELECT name, decision FROM gates WHERE work_order_id = ? ORDER BY name",
+            (order["id"],),
         ).fetchall()
         story = None
-        if run["story_id"]:
+        if order["story_id"]:
             row = con.execute(
                 "SELECT external_id, title FROM work_items WHERE id = ?",
-                (run["story_id"],),
+                (order["story_id"],),
             ).fetchone()
             story = f"{row['external_id']} {row['title']}"
-        info["active_runs"].append({
-            "run_key": run["run_key"],
-            "status": run["status"],
-            "current_step": run["current_step"],
+        info["active_work_orders"].append({
+            "work_order_key": order["work_order_key"],
+            "status": order["status"],
+            "current_step": order["current_step"],
             "story": story,
-            "worktree": run["worktree_path"],
+            "worktree": order["worktree_path"],
             "steps": {s["step_id"]: s["status"] for s in steps},
             "gates": {g["name"]: g["decision"] for g in gates},
-            "review_rounds": run["review_rounds"],
-            "qa_rounds": run["qa_rounds"],
+            "review_rounds": order["review_rounds"],
+            "qa_rounds": order["qa_rounds"],
         })
     for row in con.execute(
         "SELECT ts, actor, action, payload_json FROM events WHERE project_id = ?"
@@ -743,18 +1009,20 @@ def cmd_resume_info(args) -> int:
     if args.json:
         print(json.dumps(info, indent=2, sort_keys=True))
         return 0
-    if not runs:
-        print(f"pmo: no active run for project '{args.project_key}'")
+    if not orders:
+        print(f"pmo: no active work order for project '{args.project_key}'")
         return 0
-    for run in info["active_runs"]:
-        story = f" story {run['story']}" if run["story"] else ""
+    for order in info["active_work_orders"]:
+        story = f" story {order['story']}" if order["story"] else ""
         print(
-            f"pmo: active run '{run['run_key']}' status {run['status']}"
-            f" at step {run['current_step']}{story} (worktree {run['worktree']})"
+            f"pmo: active work order '{order['work_order_key']}' status"
+            f" {order['status']} at step {order['current_step']}{story}"
+            f" (worktree {order['worktree']})"
         )
-        done = [s for s, status in sorted(run["steps"].items()) if status == "done"]
+        done = [s for s, status in sorted(order["steps"].items()) if status == "done"]
         print(f"pmo:   steps done: {', '.join(done) or 'none'};"
-              f" review rounds {run['review_rounds']}, qa rounds {run['qa_rounds']}")
+              f" review rounds {order['review_rounds']},"
+              f" qa rounds {order['qa_rounds']}")
     return 0
 
 
@@ -766,6 +1034,65 @@ def load_import_file(path: str) -> dict:
     if not isinstance(data, dict):
         raise Rule("import file must be a JSON object")
     return data
+
+
+def normalize_deps(raw) -> list[dict]:
+    """Accept ["WP-01", ...] or [{"item": "WP-01", "reason": "..."}, ...]."""
+    deps = []
+    for entry in raw or []:
+        if isinstance(entry, str):
+            deps.append({"item": entry, "reason": ""})
+        elif isinstance(entry, dict) and entry.get("item"):
+            deps.append({"item": entry["item"], "reason": entry.get("reason", "")})
+        else:
+            raise Rule(f"malformed depends_on entry: {entry!r}")
+    return deps
+
+
+def replace_item_deps(con, project_id: int, item_row, deps: list[dict]) -> None:
+    """Replace an item's authored dependency edges with the given list."""
+    con.execute("DELETE FROM work_item_deps WHERE item_id = ?", (item_row["id"],))
+    for dep in deps:
+        target = get_item(con, project_id, dep["item"])
+        if target is None:
+            raise Rule(
+                f"{item_row['external_id']}: depends_on target"
+                f" '{dep['item']}' not found"
+            )
+        if target["kind"] != item_row["kind"]:
+            raise Rule(
+                f"{item_row['external_id']}: dependency crosses kinds"
+                f" ({item_row['kind']} -> {target['kind']}); same kind only"
+            )
+        if target["id"] == item_row["id"]:
+            raise Rule(f"{item_row['external_id']}: depends on itself")
+        con.execute(
+            "INSERT INTO work_item_deps (project_id, item_id, depends_on_id,"
+            " reason, created_at) VALUES (?, ?, ?, ?, ?)"
+            " ON CONFLICT (item_id, depends_on_id) DO UPDATE SET"
+            " reason = excluded.reason",
+            (project_id, item_row["id"], target["id"], dep["reason"], now()),
+        )
+
+
+def sync_dod_items(con, item_row, statements: list) -> None:
+    """Reconcile authored DoD statements: keep verified/failed rows (they are
+    evidence), drop pending rows no longer authored, add the new ones."""
+    incoming = [str(s).strip() for s in statements if str(s).strip()]
+    query = "DELETE FROM dod_items WHERE item_id = ? AND status = 'pending'"
+    params: list = [item_row["id"]]
+    if incoming:
+        marks = ", ".join("?" for _ in incoming)
+        query += f" AND statement NOT IN ({marks})"
+        params += incoming
+    con.execute(query, params)
+    for statement in incoming:
+        con.execute(
+            "INSERT INTO dod_items (item_id, statement, created_at, updated_at)"
+            " VALUES (?, ?, ?, ?)"
+            " ON CONFLICT (item_id, statement) DO NOTHING",
+            (item_row["id"], statement, now(), now()),
+        )
 
 
 def cmd_item_import(args) -> int:
@@ -818,6 +1145,8 @@ def cmd_item_import(args) -> int:
                 raise Rule(
                     f"story {story['external_id']}: status '{status}' not in enum"
                 )
+            check_priority(story.get("priority", ""),
+                           f"story {story['external_id']}")
             parent = get_item(con, project["id"], story["epic"])
             existing = get_item(con, project["id"], story["external_id"])
             values = (
@@ -841,6 +1170,26 @@ def cmd_item_import(args) -> int:
                     " dor = ?, dod = ?, parent_id = ?, updated_at = ? WHERE id = ?",
                     (*values, now(), existing["id"]),
                 )
+        # Structured dependencies and DoD items, after every story exists so
+        # forward references inside one import resolve.
+        for story in stories:
+            row = get_item(con, project["id"], story["external_id"])
+            deps = normalize_deps(story.get("depends_on"))
+            legacy = str(story.get("dependency", "")).strip()
+            if legacy and legacy not in [d["item"] for d in deps]:
+                if get_item(con, project["id"], legacy) is not None:
+                    deps.append({"item": legacy,
+                                 "reason": "authored dependency field"})
+            replace_item_deps(con, project["id"], row, deps)
+            if "dod_items" in story:
+                sync_dod_items(con, row, story.get("dod_items") or [])
+        nodes, edges = project_dep_graph(con, project["id"], "story")
+        _, cycles = topo_order(nodes, edges)
+        if cycles:
+            raise Rule(
+                "import rejected: dependency cycle among stories:"
+                f" {', '.join(cycles)}"
+            )
         for criterion in data.get("criteria", []):
             cid = criterion.get("criterion_id", "")
             if not cid:
@@ -905,6 +1254,8 @@ def cmd_item_update(args) -> int:
             raise Rule(
                 f"status '{updates['status']}' not in {item['kind']} enum"
             )
+        if "priority" in updates:
+            check_priority(updates["priority"], args.external_id)
         if args.deployed_verified is not None:
             updates["deployed_verified"] = 1 if args.deployed_verified == "true" else 0
         if not updates:
@@ -947,28 +1298,219 @@ def cmd_item_list(args) -> int:
     return 0
 
 
+def cmd_item_add_dep(args) -> int:
+    con = connect()
+    with mutate(con):
+        project = get_project(con, args.project_key)
+        item = get_item(con, project["id"], args.item)
+        target = get_item(con, project["id"], args.depends_on)
+        if item is None:
+            raise Rule(f"no work item '{args.item}' in project")
+        if target is None:
+            raise Rule(f"no work item '{args.depends_on}' in project")
+        if item["kind"] == "epic" or target["kind"] == "epic":
+            raise Rule("epics never carry dependency edges; they are groupings")
+        if item["kind"] != target["kind"]:
+            raise Rule(
+                f"dependency crosses kinds ({item['kind']} -> {target['kind']});"
+                " same kind only"
+            )
+        if item["id"] == target["id"]:
+            raise Rule(f"'{args.item}' cannot depend on itself")
+        cycle = dep_cycle_path(con, item["id"], target["id"])
+        if cycle:
+            raise Rule(
+                "dependency rejected: it closes a cycle"
+                f" {args.item} -> {' -> '.join(cycle)}"
+            )
+        con.execute(
+            "INSERT INTO work_item_deps (project_id, item_id, depends_on_id,"
+            " reason, created_at) VALUES (?, ?, ?, ?, ?)"
+            " ON CONFLICT (item_id, depends_on_id) DO UPDATE SET"
+            " reason = excluded.reason",
+            (project["id"], item["id"], target["id"], args.reason, now()),
+        )
+        record(con, "dep_added", project_id=project["id"],
+               payload={"item": args.item, "depends_on": args.depends_on,
+                        "reason": args.reason})
+    print(f"pmo: {args.item} depends on {args.depends_on}")
+    return 0
+
+
+def cmd_item_remove_dep(args) -> int:
+    con = connect()
+    with mutate(con):
+        project = get_project(con, args.project_key)
+        item = get_item(con, project["id"], args.item)
+        target = get_item(con, project["id"], args.depends_on)
+        if item is None or target is None:
+            raise Rule("both items must exist in the project")
+        gone = con.execute(
+            "DELETE FROM work_item_deps WHERE item_id = ? AND depends_on_id = ?",
+            (item["id"], target["id"]),
+        ).rowcount
+        if not gone:
+            raise Rule(f"no dependency {args.item} -> {args.depends_on} recorded")
+        record(con, "dep_removed", project_id=project["id"],
+               payload={"item": args.item, "depends_on": args.depends_on})
+    print(f"pmo: dependency {args.item} -> {args.depends_on} removed")
+    return 0
+
+
+def cmd_item_list_deps(args) -> int:
+    con = connect()
+    try:
+        project = get_project(con, args.project_key)
+    except Rule as exc:
+        return fail(str(exc))
+    query = (
+        "SELECT a.external_id AS item, b.external_id AS depends_on, d.reason"
+        " FROM work_item_deps d"
+        " JOIN work_items a ON a.id = d.item_id"
+        " JOIN work_items b ON b.id = d.depends_on_id"
+        " WHERE d.project_id = ?"
+    )
+    params: list = [project["id"]]
+    if args.item:
+        query += " AND (a.external_id = ? OR b.external_id = ?)"
+        params += [args.item, args.item]
+    query += " ORDER BY a.external_id, b.external_id"
+    rows = [dict(r) for r in con.execute(query, params)]
+    if args.json:
+        print(json.dumps(rows, indent=2, sort_keys=True))
+    else:
+        for row in rows:
+            reason = f" ({row['reason']})" if row["reason"] else ""
+            print(f"pmo: {row['item']} -> {row['depends_on']}{reason}")
+        if not rows:
+            print("pmo: no dependencies recorded")
+    return 0
+
+
+def cmd_item_add_dod(args) -> int:
+    statement = args.statement.strip()
+    if not statement:
+        return fail("statement must not be empty", 2)
+    con = connect()
+    with mutate(con):
+        project = get_project(con, args.project_key)
+        item = get_item(con, project["id"], args.item)
+        if item is None:
+            raise Rule(f"no work item '{args.item}' in project")
+        con.execute(
+            "INSERT INTO dod_items (item_id, statement, created_at, updated_at)"
+            " VALUES (?, ?, ?, ?)"
+            " ON CONFLICT (item_id, statement) DO NOTHING",
+            (item["id"], statement, now(), now()),
+        )
+        row = con.execute(
+            "SELECT id FROM dod_items WHERE item_id = ? AND statement = ?",
+            (item["id"], statement),
+        ).fetchone()
+        record(con, "dod_added", project_id=project["id"],
+               payload={"item": args.item, "dod_id": row["id"]})
+    print(f"pmo: dod item {row['id']} on {args.item}")
+    return 0
+
+
+def cmd_item_set_dod(args) -> int:
+    if args.status not in DOD_STATUSES:
+        return fail(f"dod status not in enum: {args.status}", 2)
+    con = connect()
+    with mutate(con):
+        project = get_project(con, args.project_key)
+        row = con.execute(
+            "SELECT d.*, w.external_id, w.project_id FROM dod_items d"
+            " JOIN work_items w ON w.id = d.item_id WHERE d.id = ?",
+            (args.dod_id,),
+        ).fetchone()
+        if row is None or row["project_id"] != project["id"]:
+            raise Rule(f"no dod item {args.dod_id} in project")
+        if args.status == "failed" and not args.failure_reason:
+            raise Rule("failed requires --failure-reason")
+        verified_at = now() if args.status == "verified" else ""
+        failure = args.failure_reason if args.status == "failed" else ""
+        con.execute(
+            "UPDATE dod_items SET status = ?, verified_at = ?, failure_reason = ?,"
+            " updated_at = ? WHERE id = ?",
+            (args.status, verified_at, failure, now(), args.dod_id),
+        )
+        record(con, "dod_updated", project_id=project["id"],
+               payload={"item": row["external_id"], "dod_id": args.dod_id,
+                        "status": args.status})
+    print(f"pmo: dod item {args.dod_id} -> {args.status}")
+    return 0
+
+
+def cmd_item_list_dod(args) -> int:
+    con = connect()
+    try:
+        project = get_project(con, args.project_key)
+    except Rule as exc:
+        return fail(str(exc))
+    item = get_item(con, project["id"], args.item)
+    if item is None:
+        return fail(f"no work item '{args.item}' in project")
+    rows = [dict(r) for r in con.execute(
+        "SELECT id, statement, status, verified_at, failure_reason"
+        " FROM dod_items WHERE item_id = ? ORDER BY id",
+        (item["id"],),
+    )]
+    if args.json:
+        print(json.dumps(rows, indent=2, sort_keys=True))
+    else:
+        for row in rows:
+            mark = {"pending": " ", "verified": "x", "failed": "!"}[row["status"]]
+            print(f"pmo: [{mark}] {row['id']:4} {row['statement']}")
+        if not rows:
+            print("pmo: no dod items recorded")
+    return 0
+
+
+def cmd_item_order(args) -> int:
+    con = connect()
+    try:
+        project = get_project(con, args.project_key)
+    except Rule as exc:
+        return fail(str(exc))
+    nodes, edges = project_dep_graph(con, project["id"], args.kind)
+    order, cycles = topo_order(nodes, edges)
+    if args.json:
+        print(json.dumps({"order": order, "cycles": cycles},
+                         indent=2, sort_keys=True))
+    else:
+        for pos, external_id in enumerate(order, 1):
+            print(f"pmo: {pos:3}. {external_id}")
+        for external_id in cycles:
+            print(f"pmo: CYCLE {external_id}", file=sys.stderr)
+        if not order and not cycles:
+            print(f"pmo: no {args.kind} items")
+    return 0
+
+
 def cmd_task_open(args) -> int:
     con = connect()
     with mutate(con):
-        run = get_run(con, args.run_key)
-        external_id = next_external_id(con, run["project_id"], "T")
+        order = get_work_order(con, args.work_order_key)
+        external_id = next_external_id(con, order["project_id"], "T")
         con.execute(
             "INSERT INTO work_items (project_id, kind, external_id, parent_id,"
-            " title, status, run_id, role, step_id, created_at, updated_at)"
+            " title, status, work_order_id, role, step_id, created_at, updated_at)"
             " VALUES (?, 'task', ?, ?, ?, 'open', ?, ?, ?, ?, ?)",
-            (run["project_id"], external_id, run["story_id"], args.title,
-             run["id"], args.role, args.step, now(), now()),
+            (order["project_id"], external_id, order["story_id"], args.title,
+             order["id"], args.role, args.step, now(), now()),
         )
-        record(con, "task_opened", project_id=run["project_id"], run_id=run["id"],
+        record(con, "task_opened", project_id=order["project_id"],
+               work_order_id=order["id"],
                payload={"task": external_id, "role": args.role, "step": args.step})
     print(f"pmo: task {external_id} opened ({args.role}, step {args.step})")
     return 0
 
 
-def find_task(con, run, role: str, step: str | None) -> sqlite3.Row | None:
-    query = ("SELECT * FROM work_items WHERE run_id = ? AND kind = 'task'"
+def find_task(con, order, role: str, step: str | None) -> sqlite3.Row | None:
+    query = ("SELECT * FROM work_items WHERE work_order_id = ? AND kind = 'task'"
              " AND role = ?")
-    params: list = [run["id"], role]
+    params: list = [order["id"], role]
     if step:
         query += " AND step_id = ?"
         params.append(step)
@@ -981,17 +1523,22 @@ def cmd_task_close(args) -> int:
         return fail(f"outcome must be done or blocked, got: {args.outcome}", 2)
     con = connect()
     with mutate(con):
-        run = get_run(con, args.run_key)
-        task = find_task(con, run, args.role, args.step)
+        order = get_work_order(con, args.work_order_key)
+        task = find_task(con, order, args.role, args.step)
         if task is None:
-            raise Rule(f"no task for role '{args.role}' in run '{args.run_key}'")
+            raise Rule(
+                f"no task for role '{args.role}' in work order"
+                f" '{args.work_order_key}'"
+            )
         finished = task["finished_at"] or now()
         con.execute(
             "UPDATE work_items SET status = ?, finished_at = ?, updated_at = ?"
             " WHERE id = ?",
             (args.outcome, finished, now(), task["id"]),
         )
-        record(con, "task_closed", project_id=run["project_id"], run_id=run["id"],
+        close_running_attempts(con, task["id"], args.outcome, now())
+        record(con, "task_closed", project_id=order["project_id"],
+               work_order_id=order["id"],
                payload={"task": task["external_id"], "outcome": args.outcome})
     print(f"pmo: task {task['external_id']} -> {args.outcome}")
     return 0
@@ -1003,38 +1550,48 @@ def cmd_task_touch(args) -> int:
     con = connect()
     with mutate(con):
         project = get_project(con, args.project_key)
-        runs = active_runs(con, project["id"])
+        orders = active_work_orders(con, project["id"])
         if args.worktree:
             wanted = norm_path(args.worktree)
-            runs = [r for r in runs if r["worktree_path"] == wanted]
-        if not runs:
+            orders = [o for o in orders if o["worktree_path"] == wanted]
+        if not orders:
             record(con, "task_touch_unmatched", project_id=project["id"],
                    actor="hook", payload={"role": args.role, "phase": args.phase})
-            print("pmo: no active run matched; touch recorded as an event only")
+            print("pmo: no active work order matched; touch recorded as an event only")
             return 0
-        run = runs[0]
-        task = find_task(con, run, args.role, None)
+        order = orders[0]
+        task = find_task(con, order, args.role, None)
         stamp = now()
         if task is None:
             if args.phase == "stop":
                 record(con, "task_touch_unmatched", project_id=project["id"],
-                       run_id=run["id"], actor="hook",
+                       work_order_id=order["id"], actor="hook",
                        payload={"role": args.role, "phase": "stop"})
                 print("pmo: no task row for role; touch recorded as an event only")
                 return 0
-            external_id = next_external_id(con, run["project_id"], "T")
+            external_id = next_external_id(con, order["project_id"], "T")
             con.execute(
                 "INSERT INTO work_items (project_id, kind, external_id, parent_id,"
-                " title, status, run_id, role, step_id, started_at, created_at,"
-                " updated_at) VALUES (?, 'task', ?, ?, ?, 'in_progress', ?, ?, ?,"
-                " ?, ?, ?)",
-                (run["project_id"], external_id, run["story_id"],
-                 f"auto-recorded {args.role} work", run["id"], args.role,
-                 run["current_step"], stamp, stamp, stamp),
+                " title, status, work_order_id, role, step_id, started_at,"
+                " created_at, updated_at) VALUES (?, 'task', ?, ?, ?,"
+                " 'in_progress', ?, ?, ?, ?, ?, ?)",
+                (order["project_id"], external_id, order["story_id"],
+                 f"auto-recorded {args.role} work", order["id"], args.role,
+                 order["current_step"], stamp, stamp, stamp),
             )
-            record(con, "task_started", project_id=run["project_id"],
-                   run_id=run["id"], actor="hook",
+            task_id = con.execute(
+                "SELECT id FROM work_items WHERE project_id = ? AND external_id = ?",
+                (order["project_id"], external_id),
+            ).fetchone()["id"]
+            attempt = open_attempt(con, task_id, args.role, args.agent,
+                                   args.session_id, stamp)
+            record(con, "task_started", project_id=order["project_id"],
+                   work_order_id=order["id"], actor="hook",
                    payload={"task": external_id, "role": args.role})
+            record(con, "attempt_started", project_id=order["project_id"],
+                   work_order_id=order["id"], actor="hook",
+                   payload={"task": external_id, "attempt": attempt,
+                            "agent": args.agent})
             print(f"pmo: task {external_id} auto-opened and started")
             return 0
         if args.phase == "start":
@@ -1045,16 +1602,36 @@ def cmd_task_touch(args) -> int:
                 " WHERE id = ?",
                 (started, status, stamp, task["id"]),
             )
-            record(con, "task_started", project_id=run["project_id"],
-                   run_id=run["id"], actor="hook",
+            superseded = close_running_attempts(
+                con, task["id"], "failed", stamp,
+                failure_reason="superseded by new dispatch",
+            )
+            attempt = open_attempt(con, task["id"], args.role, args.agent,
+                                   args.session_id, stamp)
+            record(con, "task_started", project_id=order["project_id"],
+                   work_order_id=order["id"], actor="hook",
                    payload={"task": task["external_id"], "role": args.role})
+            record(con, "attempt_started", project_id=order["project_id"],
+                   work_order_id=order["id"], actor="hook",
+                   payload={"task": task["external_id"], "attempt": attempt,
+                            "agent": args.agent, "superseded": superseded})
         else:
             con.execute(
                 "UPDATE work_items SET finished_at = ?, updated_at = ? WHERE id = ?",
                 (stamp, stamp, task["id"]),
             )
-            record(con, "task_finished", project_id=run["project_id"],
-                   run_id=run["id"], actor="hook",
+            closed = close_running_attempts(con, task["id"], "done", stamp,
+                                            cost_usd=args.cost_usd)
+            if closed:
+                record(con, "attempt_finished", project_id=order["project_id"],
+                       work_order_id=order["id"], actor="hook",
+                       payload={"task": task["external_id"]})
+            else:
+                record(con, "attempt_unmatched", project_id=order["project_id"],
+                       work_order_id=order["id"], actor="hook",
+                       payload={"task": task["external_id"], "phase": "stop"})
+            record(con, "task_finished", project_id=order["project_id"],
+                   work_order_id=order["id"], actor="hook",
                    payload={"task": task["external_id"], "role": args.role})
     print(f"pmo: task {task['external_id']} touched ({args.phase})")
     return 0
@@ -1067,19 +1644,19 @@ def cmd_finding_open(args) -> int:
         return fail(f"severity not in enum: {args.severity}", 2)
     con = connect()
     with mutate(con):
-        run = get_run(con, args.run_key)
-        external_id = next_finding_id(con, run["project_id"])
+        order = get_work_order(con, args.work_order_key)
+        external_id = next_finding_id(con, order["project_id"])
         con.execute(
-            "INSERT INTO findings (project_id, run_id, story_id, external_id,"
+            "INSERT INTO findings (project_id, work_order_id, story_id, external_id,"
             " source, severity, summary, repro, expected_actual,"
             " traced_requirement, opened_round, created_at, updated_at)"
             " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            (run["project_id"], run["id"], run["story_id"], external_id,
+            (order["project_id"], order["id"], order["story_id"], external_id,
              args.source, args.severity, args.summary, args.repro,
              args.expected_actual, args.traced, args.round, now(), now()),
         )
-        record(con, "finding_opened", project_id=run["project_id"],
-               run_id=run["id"],
+        record(con, "finding_opened", project_id=order["project_id"],
+               work_order_id=order["id"],
                payload={"finding": external_id, "source": args.source,
                         "severity": args.severity})
     print(f"pmo: finding {external_id} opened ({args.source}, {args.severity})")
@@ -1091,10 +1668,10 @@ def cmd_finding_update(args) -> int:
         return fail(f"status not in enum: {args.status}", 2)
     con = connect()
     with mutate(con):
-        run = get_run(con, args.run_key)
+        order = get_work_order(con, args.work_order_key)
         finding = con.execute(
             "SELECT * FROM findings WHERE project_id = ? AND external_id = ?",
-            (run["project_id"], args.finding),
+            (order["project_id"], args.finding),
         ).fetchone()
         if finding is None:
             raise Rule(f"no finding '{args.finding}' in this project")
@@ -1105,8 +1682,8 @@ def cmd_finding_update(args) -> int:
              args.round if args.status in ("fixed", "waived") else None,
              now(), finding["id"]),
         )
-        record(con, "finding_updated", project_id=run["project_id"],
-               run_id=run["id"],
+        record(con, "finding_updated", project_id=order["project_id"],
+               work_order_id=order["id"],
                payload={"finding": args.finding, "status": args.status})
     print(f"pmo: finding {args.finding} -> {args.status}")
     return 0
@@ -1115,11 +1692,11 @@ def cmd_finding_update(args) -> int:
 def cmd_finding_list(args) -> int:
     con = connect()
     try:
-        run = get_run(con, args.run_key)
+        order = get_work_order(con, args.work_order_key)
     except Rule as exc:
         return fail(str(exc))
-    query = "SELECT * FROM findings WHERE run_id = ?"
-    params: list = [run["id"]]
+    query = "SELECT * FROM findings WHERE work_order_id = ?"
+    params: list = [order["id"]]
     if args.status:
         query += " AND status = ?"
         params.append(args.status)
@@ -1139,24 +1716,24 @@ def cmd_finding_list(args) -> int:
 def cmd_coverage_import(args) -> int:
     con = connect()
     with mutate(con):
-        run = get_run(con, args.run_key)
+        order = get_work_order(con, args.work_order_key)
         data = load_import_file(args.json_file)
         rows = data.get("rows", [])
         if not rows:
             raise Rule("coverage file has no rows")
-        con.execute("DELETE FROM coverage WHERE run_id = ?", (run["id"],))
+        con.execute("DELETE FROM coverage WHERE work_order_id = ?", (order["id"],))
         for row in rows:
             verdict = str(row.get("result", "")).lower().replace("-", "_")
             if verdict not in COVERAGE_VERDICTS:
                 raise Rule(f"coverage row has unknown result: {row}")
             con.execute(
-                "INSERT INTO coverage (run_id, requirement_id, test_names,"
+                "INSERT INTO coverage (work_order_id, requirement_id, test_names,"
                 " verdict, recorded_at) VALUES (?, ?, ?, ?, ?)",
-                (run["id"], row.get("id", ""), "; ".join(row.get("tests", [])),
+                (order["id"], row.get("id", ""), "; ".join(row.get("tests", [])),
                  verdict, now()),
             )
-        record(con, "coverage_imported", project_id=run["project_id"],
-               run_id=run["id"], payload={"rows": len(rows)})
+        record(con, "coverage_imported", project_id=order["project_id"],
+               work_order_id=order["id"], payload={"rows": len(rows)})
     print(f"pmo: coverage imported ({len(rows)} requirement rows)")
     return 0
 
@@ -1166,18 +1743,18 @@ def cmd_budget_set(args) -> int:
         return fail(f"verdict not in enum: {args.verdict}", 2)
     con = connect()
     with mutate(con):
-        run = get_run(con, args.run_key)
+        order = get_work_order(con, args.work_order_key)
         con.execute(
-            "INSERT INTO budgets (run_id, budget_id, description, verdict, reason,"
-            " recorded_at) VALUES (?, ?, ?, ?, ?, ?)"
-            " ON CONFLICT (run_id, budget_id) DO UPDATE SET"
+            "INSERT INTO budgets (work_order_id, budget_id, description, verdict,"
+            " reason, recorded_at) VALUES (?, ?, ?, ?, ?, ?)"
+            " ON CONFLICT (work_order_id, budget_id) DO UPDATE SET"
             " description = excluded.description, verdict = excluded.verdict,"
             " reason = excluded.reason, recorded_at = excluded.recorded_at",
-            (run["id"], args.budget_id, args.description, args.verdict,
+            (order["id"], args.budget_id, args.description, args.verdict,
              args.reason, now()),
         )
-        record(con, "budget_recorded", project_id=run["project_id"],
-               run_id=run["id"],
+        record(con, "budget_recorded", project_id=order["project_id"],
+               work_order_id=order["id"],
                payload={"budget": args.budget_id, "verdict": args.verdict})
     print(f"pmo: budget {args.budget_id} -> {args.verdict}")
     return 0
@@ -1186,24 +1763,25 @@ def cmd_budget_set(args) -> int:
 def cmd_ledger_checkpoint(args) -> int:
     con = connect()
     with mutate(con):
-        run = get_run(con, args.run_key)
+        order = get_work_order(con, args.work_order_key)
         counts: dict[str, int] = {}
         for row in con.execute(
-            "SELECT source, severity, COUNT(*) AS n FROM findings WHERE run_id = ?"
+            "SELECT source, severity, COUNT(*) AS n FROM findings"
+            " WHERE work_order_id = ?"
             " GROUP BY source, severity ORDER BY source, severity",
-            (run["id"],),
+            (order["id"],),
         ):
             counts[f"{row['source']}_{row['severity']}"] = row["n"]
         con.execute(
-            "INSERT INTO ledger (project_id, story_id, run_id, checkpoint_at,"
+            "INSERT INTO ledger (project_id, story_id, work_order_id, checkpoint_at,"
             " finding_counts_json, review_rounds, qa_rounds, escaped_defect)"
             " VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-            (run["project_id"], run["story_id"], run["id"], now(),
-             json.dumps(counts, sort_keys=True), run["review_rounds"],
-             run["qa_rounds"], 1 if args.escaped_defect else 0),
+            (order["project_id"], order["story_id"], order["id"], now(),
+             json.dumps(counts, sort_keys=True), order["review_rounds"],
+             order["qa_rounds"], 1 if args.escaped_defect else 0),
         )
-        record(con, "ledger_checkpoint", project_id=run["project_id"],
-               run_id=run["id"],
+        record(con, "ledger_checkpoint", project_id=order["project_id"],
+               work_order_id=order["id"],
                payload={"escaped_defect": bool(args.escaped_defect)})
     print("pmo: ledger checkpoint appended")
     return 0
@@ -1213,9 +1791,9 @@ def cmd_checkpoint(args) -> int:
     """Bundle the merge-checkpoint bookkeeping into one deterministic call:
     ledger line + both generated views."""
     con = connect()
-    run = get_run(con, args.run_key)
+    order = get_work_order(con, args.work_order_key)
     project = con.execute(
-        "SELECT project_key FROM projects WHERE id = ?", (run["project_id"],)
+        "SELECT project_key FROM projects WHERE id = ?", (order["project_id"],)
     ).fetchone()
     code = cmd_ledger_checkpoint(args)
     if code != 0:
@@ -1240,6 +1818,14 @@ def cmd_render_backlog(args) -> int:
         project = get_project(con, args.project_key)
     except Rule as exc:
         return fail(str(exc))
+    deps_by_item: dict[int, list[str]] = {}
+    for row in con.execute(
+        "SELECT d.item_id, b.external_id AS dep FROM work_item_deps d"
+        " JOIN work_items b ON b.id = d.depends_on_id WHERE d.project_id = ?"
+        " ORDER BY b.external_id",
+        (project["id"],),
+    ):
+        deps_by_item.setdefault(row["item_id"], []).append(row["dep"])
     lines = [GENERATED_HEADER, f"# Backlog: {project['name']}", ""]
     epics = con.execute(
         "SELECT * FROM work_items WHERE project_id = ? AND kind = 'epic'"
@@ -1271,15 +1857,25 @@ def cmd_render_backlog(args) -> int:
         lines.append("")
         for story in stories:
             deployed = "yes" if story["deployed_verified"] else "no"
+            depends = ", ".join(deps_by_item.get(story["id"], [])) \
+                or story["dependency"] or "none"
             lines.append(f"### {story['external_id']} {story['title']}")
             lines.append(f"- Status: {story['status']}; type: {story['item_type']};"
                          f" priority: {story['priority']};"
-                         f" depends: {story['dependency'] or 'none'};"
+                         f" depends: {depends};"
                          f" deployed verified: {deployed}")
             lines.append(f"- Scope: {story['scope']}")
             lines.append(f"- Does not include: {story['excludes']}")
             lines.append(f"- Definition of Ready: {story['dor']}")
             lines.append(f"- Definition of Done: {story['dod']}")
+            dod_rows = con.execute(
+                "SELECT statement, status FROM dod_items WHERE item_id = ?"
+                " ORDER BY id",
+                (story["id"],),
+            ).fetchall()
+            for row in dod_rows:
+                mark = {"pending": " ", "verified": "x", "failed": "!"}[row["status"]]
+                lines.append(f"  - [{mark}] {row['statement']}")
             lines.append("")
     criteria = con.execute(
         "SELECT c.criterion_id, c.disposition, c.reason, w.external_id AS story"
@@ -1351,11 +1947,11 @@ def cmd_event_append(args) -> int:
     con = connect()
     with mutate(con):
         project = get_project(con, args.project_key)
-        run_id = None
-        if args.run_key:
-            run_id = get_run(con, args.run_key)["id"]
-        record(con, args.action, project_id=project["id"], run_id=run_id,
-               actor=args.actor, payload=payload)
+        work_order_id = None
+        if args.work_order_key:
+            work_order_id = get_work_order(con, args.work_order_key)["id"]
+        record(con, args.action, project_id=project["id"],
+               work_order_id=work_order_id, actor=args.actor, payload=payload)
     print(f"pmo: event '{args.action}' appended")
     return 0
 
@@ -1380,6 +1976,14 @@ def cmd_load(args) -> int:
     return 0
 
 
+def dashboard_assets() -> tuple[Path, Path]:
+    """(module path, index.html path) next to this script. Works from both the
+    plugin layout (scripts/ + dashboard/) and the synced layout (bin/ +
+    dashboard/), because both put index.html at ../dashboard/index.html."""
+    here = Path(__file__).resolve().parent
+    return here / "pmo_dashboard.py", here.parent / "dashboard" / "index.html"
+
+
 def cmd_sync_launcher(args) -> int:
     bin_dir = data_dir() / "bin"
     bin_dir.mkdir(parents=True, exist_ok=True)
@@ -1389,10 +1993,33 @@ def cmd_sync_launcher(args) -> int:
     if current == PMO_VERSION and target.is_file() and not args.force:
         print(f"pmo: launcher already at version {PMO_VERSION}")
         return 0
-    shutil.copyfile(Path(__file__).resolve(), target)
+    source = Path(__file__).resolve()
+    if source != target:
+        shutil.copyfile(source, target)
+    module_src, index_src = dashboard_assets()
+    if module_src.is_file() and module_src != bin_dir / "pmo_dashboard.py":
+        shutil.copyfile(module_src, bin_dir / "pmo_dashboard.py")
+    if index_src.is_file():
+        index_dst = data_dir() / "dashboard" / "index.html"
+        if index_src != index_dst:
+            index_dst.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(index_src, index_dst)
     version_file.write_text(PMO_VERSION + "\n", encoding="utf-8")
     print(f"pmo: launcher synced to {target} (version {PMO_VERSION})")
     return 0
+
+
+def cmd_dashboard(args) -> int:
+    module_path, index_path = dashboard_assets()
+    if not module_path.is_file() or not index_path.is_file():
+        return fail(
+            "dashboard files missing next to this CLI; reinstall the pmo"
+            " plugin or re-run sync-launcher from the plugin copy"
+        )
+    sys.path.insert(0, str(module_path.parent))
+    import pmo_dashboard
+    return pmo_dashboard.serve(args.host, args.port,
+                               open_browser=not args.no_browser)
 
 
 def cmd_version(args) -> int:
@@ -1419,6 +2046,12 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--force", action="store_true")
     p.set_defaults(func=cmd_sync_launcher)
 
+    p = sub.add_parser("dashboard")
+    p.add_argument("--port", type=int, default=8787)
+    p.add_argument("--host", default="127.0.0.1")
+    p.add_argument("--no-browser", action="store_true")
+    p.set_defaults(func=cmd_dashboard)
+
     project = sub.add_parser("project").add_subparsers(dest="subcommand", required=True)
     p = project.add_parser("register")
     p.add_argument("--key", required=True)
@@ -1436,51 +2069,51 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--json", action="store_true")
     p.set_defaults(func=cmd_resume_info)
 
-    run = sub.add_parser("run").add_subparsers(dest="subcommand", required=True)
-    p = run.add_parser("init")
+    wo = sub.add_parser("work-order").add_subparsers(dest="subcommand", required=True)
+    p = wo.add_parser("init")
     p.add_argument("--project-key", required=True)
-    p.add_argument("--run-key", required=True)
+    p.add_argument("--work-order-key", required=True)
     p.add_argument("--request", required=True)
     p.add_argument("--worktree", required=True)
     p.add_argument("--story", default="")
     p.add_argument("--bindings", default="")
-    p.add_argument("--run-dir", default="")
+    p.add_argument("--order-dir", default="")
     p.add_argument("--constitution", default="")
     p.add_argument("--brief", default="")
     p.add_argument("--config", default="")
-    p.set_defaults(func=cmd_run_init)
-    p = run.add_parser("set-step")
-    p.add_argument("--run-key", required=True)
+    p.set_defaults(func=cmd_wo_init)
+    p = wo.add_parser("set-step")
+    p.add_argument("--work-order-key", required=True)
     p.add_argument("--step", required=True)
     p.add_argument("--status", required=True)
     p.add_argument("--artifact", default="")
     p.add_argument("--bump-attempts", action="store_true")
-    p.set_defaults(func=cmd_run_set_step)
-    p = run.add_parser("record-gate")
-    p.add_argument("--run-key", required=True)
+    p.set_defaults(func=cmd_wo_set_step)
+    p = wo.add_parser("record-gate")
+    p.add_argument("--work-order-key", required=True)
     p.add_argument("--gate", required=True)
     p.add_argument("--decision", required=True)
     p.add_argument("--decided-by", default="owner")
-    p.set_defaults(func=cmd_run_record_gate)
-    p = run.add_parser("bump")
-    p.add_argument("--run-key", required=True)
+    p.set_defaults(func=cmd_wo_record_gate)
+    p = wo.add_parser("bump")
+    p.add_argument("--work-order-key", required=True)
     p.add_argument("--counter", required=True)
-    p.set_defaults(func=cmd_run_bump)
-    p = run.add_parser("set-ownership")
-    p.add_argument("--run-key", required=True)
+    p.set_defaults(func=cmd_wo_bump)
+    p = wo.add_parser("set-ownership")
+    p.add_argument("--work-order-key", required=True)
     p.add_argument("--ownership", required=True,
                    help="JSON object: snake_case role -> path prefix list")
-    p.set_defaults(func=cmd_run_set_ownership)
-    p = run.add_parser("set-status")
-    p.add_argument("--run-key", required=True)
+    p.set_defaults(func=cmd_wo_set_ownership)
+    p = wo.add_parser("set-status")
+    p.add_argument("--work-order-key", required=True)
     p.add_argument("--status", required=True)
-    p.set_defaults(func=cmd_run_set_status)
-    p = run.add_parser("release")
-    p.add_argument("--run-key", required=True)
-    p.set_defaults(func=cmd_run_release)
-    p = run.add_parser("validate")
-    p.add_argument("--run-key", required=True)
-    p.set_defaults(func=cmd_run_validate)
+    p.set_defaults(func=cmd_wo_set_status)
+    p = wo.add_parser("release")
+    p.add_argument("--work-order-key", required=True)
+    p.set_defaults(func=cmd_wo_release)
+    p = wo.add_parser("validate")
+    p.add_argument("--work-order-key", required=True)
+    p.set_defaults(func=cmd_wo_validate)
 
     item = sub.add_parser("item").add_subparsers(dest="subcommand", required=True)
     p = item.add_parser("import")
@@ -1500,16 +2133,53 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--status", default="")
     p.add_argument("--json", action="store_true")
     p.set_defaults(func=cmd_item_list)
+    p = item.add_parser("add-dep")
+    p.add_argument("--project-key", required=True)
+    p.add_argument("--item", required=True)
+    p.add_argument("--depends-on", required=True)
+    p.add_argument("--reason", default="")
+    p.set_defaults(func=cmd_item_add_dep)
+    p = item.add_parser("remove-dep")
+    p.add_argument("--project-key", required=True)
+    p.add_argument("--item", required=True)
+    p.add_argument("--depends-on", required=True)
+    p.set_defaults(func=cmd_item_remove_dep)
+    p = item.add_parser("list-deps")
+    p.add_argument("--project-key", required=True)
+    p.add_argument("--item", default="")
+    p.add_argument("--json", action="store_true")
+    p.set_defaults(func=cmd_item_list_deps)
+    p = item.add_parser("add-dod")
+    p.add_argument("--project-key", required=True)
+    p.add_argument("--item", required=True)
+    p.add_argument("--statement", required=True)
+    p.set_defaults(func=cmd_item_add_dod)
+    p = item.add_parser("set-dod")
+    p.add_argument("--project-key", required=True)
+    p.add_argument("--dod-id", type=int, required=True)
+    p.add_argument("--status", required=True)
+    p.add_argument("--failure-reason", default="")
+    p.set_defaults(func=cmd_item_set_dod)
+    p = item.add_parser("list-dod")
+    p.add_argument("--project-key", required=True)
+    p.add_argument("--item", required=True)
+    p.add_argument("--json", action="store_true")
+    p.set_defaults(func=cmd_item_list_dod)
+    p = item.add_parser("order")
+    p.add_argument("--project-key", required=True)
+    p.add_argument("--kind", default="story", choices=["story", "task"])
+    p.add_argument("--json", action="store_true")
+    p.set_defaults(func=cmd_item_order)
 
     task = sub.add_parser("task").add_subparsers(dest="subcommand", required=True)
     p = task.add_parser("open")
-    p.add_argument("--run-key", required=True)
+    p.add_argument("--work-order-key", required=True)
     p.add_argument("--role", required=True)
     p.add_argument("--step", required=True)
     p.add_argument("--title", required=True)
     p.set_defaults(func=cmd_task_open)
     p = task.add_parser("close")
-    p.add_argument("--run-key", required=True)
+    p.add_argument("--work-order-key", required=True)
     p.add_argument("--role", required=True)
     p.add_argument("--step", default="")
     p.add_argument("--outcome", required=True)
@@ -1519,11 +2189,14 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--role", required=True)
     p.add_argument("--phase", required=True)
     p.add_argument("--worktree", default="")
+    p.add_argument("--session-id", default="")
+    p.add_argument("--agent", default="")
+    p.add_argument("--cost-usd", type=float, default=None)
     p.set_defaults(func=cmd_task_touch)
 
     finding = sub.add_parser("finding").add_subparsers(dest="subcommand", required=True)
     p = finding.add_parser("open")
-    p.add_argument("--run-key", required=True)
+    p.add_argument("--work-order-key", required=True)
     p.add_argument("--source", required=True)
     p.add_argument("--severity", required=True)
     p.add_argument("--summary", required=True)
@@ -1533,26 +2206,26 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--round", type=int, default=0)
     p.set_defaults(func=cmd_finding_open)
     p = finding.add_parser("update")
-    p.add_argument("--run-key", required=True)
+    p.add_argument("--work-order-key", required=True)
     p.add_argument("--finding", required=True)
     p.add_argument("--status", required=True)
     p.add_argument("--round", type=int, default=None)
     p.set_defaults(func=cmd_finding_update)
     p = finding.add_parser("list")
-    p.add_argument("--run-key", required=True)
+    p.add_argument("--work-order-key", required=True)
     p.add_argument("--status", default="")
     p.add_argument("--json", action="store_true")
     p.set_defaults(func=cmd_finding_list)
 
     coverage = sub.add_parser("coverage").add_subparsers(dest="subcommand", required=True)
     p = coverage.add_parser("import")
-    p.add_argument("--run-key", required=True)
+    p.add_argument("--work-order-key", required=True)
     p.add_argument("--json-file", required=True)
     p.set_defaults(func=cmd_coverage_import)
 
     budget = sub.add_parser("budget").add_subparsers(dest="subcommand", required=True)
     p = budget.add_parser("set")
-    p.add_argument("--run-key", required=True)
+    p.add_argument("--work-order-key", required=True)
     p.add_argument("--budget-id", required=True)
     p.add_argument("--verdict", required=True)
     p.add_argument("--description", default="")
@@ -1564,18 +2237,18 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--project-key", required=True)
     p.add_argument("--action", required=True)
     p.add_argument("--actor", default="orchestrator")
-    p.add_argument("--run-key", default="")
+    p.add_argument("--work-order-key", default="")
     p.add_argument("--payload", default="")
     p.set_defaults(func=cmd_event_append)
 
     ledger = sub.add_parser("ledger").add_subparsers(dest="subcommand", required=True)
     p = ledger.add_parser("checkpoint")
-    p.add_argument("--run-key", required=True)
+    p.add_argument("--work-order-key", required=True)
     p.add_argument("--escaped-defect", action="store_true")
     p.set_defaults(func=cmd_ledger_checkpoint)
 
     p = sub.add_parser("checkpoint")
-    p.add_argument("--run-key", required=True)
+    p.add_argument("--work-order-key", required=True)
     p.add_argument("--docs-dir", default="workspace/docs")
     p.add_argument("--escaped-defect", action="store_true")
     p.set_defaults(func=cmd_checkpoint)

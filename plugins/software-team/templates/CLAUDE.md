@@ -20,9 +20,10 @@ produces lives under `workspace/`:
 - `workspace/apps/`: application code, one folder per application.
 - `workspace/demos/` and `workspace/sketches/`: outward demo packages and
   design exploration previews.
-- `workspace/runs/`: run snapshots (brief, config, constitution);
-  gitignored. Live process state (runs, stories, tasks, findings) lives
-  in the central PMO database, read through the PMO CLI.
+- `workspace/work-orders/`: work-order snapshots (brief, config,
+  constitution); gitignored. Live process state (work orders, stories,
+  tasks, findings) lives in the central PMO database, read through the
+  PMO CLI.
 
 Start work with the team's entry skills: setup, business-analysis,
 design-system, sketch, demo, request, configure.

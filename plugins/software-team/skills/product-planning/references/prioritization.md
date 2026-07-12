@@ -21,7 +21,7 @@ Order the walking skeleton first: the thinnest slice that crosses every
 layer end to end and proves the pieces connect at all. It jumps the queue
 even when a richer story carries more user value, because its failure
 teaches more, earlier, than any other story's success. Record it in the
-priority field: "P0: walking skeleton".
+priority field: "critical: walking skeleton".
 
 ## Step 3: Risk Pass
 
@@ -65,7 +65,7 @@ assumption gates the export story; if the assumption fails, WP-03's
 Definition of Done changes. WP-02 third, WP-08 fourth.
 
 Write the outcome, not the table, into the backlog: the table is thinking,
-the priority field is the record ("P1: retires the conversion assumption
+the priority field is the record ("high: retires the conversion assumption
 that gates WP-03").
 
 ## Deferral Discipline

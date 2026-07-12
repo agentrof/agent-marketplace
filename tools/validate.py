@@ -773,8 +773,8 @@ FALLBACK_STDLIB = frozenset(
     "multiprocessing operator os pathlib pickle platform pprint queue random "
     "re secrets shlex shutil signal socket sqlite3 statistics string struct "
     "subprocess sys tarfile tempfile textwrap threading time tomllib "
-    "traceback types typing unicodedata unittest urllib uuid warnings xml "
-    "zipfile zlib".split()
+    "traceback types typing unicodedata unittest urllib uuid warnings "
+    "webbrowser xml zipfile zlib".split()
 )
 
 

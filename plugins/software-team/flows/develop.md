@@ -30,37 +30,39 @@ only. Spawned agents never touch it; the pmo hooks record spawn and stop
 mechanics through the same CLI; direct file writes to the database are
 blocked by a guard hook.
 
-CLI resolution, once per run: the launcher at
+CLI resolution, once per work order: the launcher at
 "${AGENTROF_HOME:-$HOME/.agentrof}/bin/pmo_cli.py". When the launcher is
 missing, run the pmo plugin's status entry once to bootstrap it; if the
 pmo plugin itself is absent, STOP and tell the user to reinstall this
 plugin from the marketplace (the dependency brings pmo in). Run the
 idempotent init-db subcommand before first use.
 
-Run identity: project_key comes from workspace/config.json (stamped by
-setup); the run key is <yyyymmdd>-<kebab-slug> (suffix -2, -3 when a
-prior abandoned run already holds the key). Subcommands in play:
-run init / set-step / record-gate / bump / set-ownership / set-status /
-release / validate; task open / close; finding open / update / list;
-coverage import; budget set; checkpoint; item import / update / list;
-render backlog / ledger; resume-info. The CLI enforces the enums, the
-step transition guard (a step starts only when its predecessors are
-done), the run-complete guard (steps done, findings closed; a story run
+Work order identity: project_key comes from workspace/config.json
+(stamped by setup); the work order key is <yyyymmdd>-<kebab-slug>
+(suffix -2, -3 when a prior abandoned work order already holds the key).
+Subcommands in play:
+work-order init / set-step / record-gate / bump / set-ownership /
+set-status / release / validate; task open / close; finding open /
+update / list; coverage import; budget set; checkpoint; item import /
+update / list / add-dep / add-dod / set-dod / order; render backlog /
+ledger; resume-info. The CLI enforces the enums, the step transition
+guard (a step starts only when its predecessors are done), the
+complete guard (steps done, findings closed; a story work order
 additionally requires imported coverage and a ledger checkpoint),
 snake_case ownership roles, and ownership-overlap refusal across ALL
-active runs of the project. Advance step status with run set-step as
-you move.
+active work orders of the project. Advance step status with
+work-order set-step as you move.
 
-Claims, enforced atomically at run init: one active run per worktree; a
-story claimed by an active run cannot be claimed again; ownership path
-prefixes must stay disjoint across the project's active runs. A refused
-init means resume the holder (resume-info names it), never archive it
-blind.
+Claims, enforced atomically at work-order init: one active work order
+per worktree; a story claimed by an active work order cannot be claimed
+again; ownership path prefixes must stay disjoint across the project's
+active work orders. A refused init means resume the holder (resume-info
+names it), never archive it blind.
 
-The run directory workspace/runs/<run-key>/ (gitignored) holds ONLY the
-snapshots init copied there: constitution.md, brief.snapshot.md,
-config.snapshot.json. The run reads these snapshots for its whole
-duration; a brief or config edited mid-run does not change a running
+The order directory workspace/work-orders/<key>/ (gitignored) holds ONLY
+the snapshots init copied there: constitution.md, brief.snapshot.md,
+config.snapshot.json. The work order reads these snapshots for its whole
+duration; a brief or config edited mid-order does not change a running
 story. Nothing else is ever written there.
 
 Findings, coverage rows, budget verdicts, round counters and tasks are
@@ -70,36 +72,43 @@ the current set back into re-review spawns from finding list --json.
 Severity enum: critical, high, medium, low (map a reviewer's "major" to
 high and "minor" to low when recording).
 
-Task trail: before each spawned step, open its task (task open --run-key
-<key> --role <snake_case role> --step <n> --title "<step title>"); after
-the post-step check passes, close it (task close ... --outcome done).
-Role names are the FULL agent role names (software_architect,
-backend_developer, frontend_developer, code_reviewer, qa_engineer,
-ux_designer, product_owner); a shortened name breaks the hooks'
-reconciliation and forks the task trail. Hooks stamp started and
-finished times; the semantic fields are yours.
+Task trail: before each spawned step, open its task (task open
+--work-order-key <key> --role <snake_case role> --step <n> --title
+"<step title>"); after the post-step check passes, close it (task close
+... --outcome done). Role names are the FULL agent role names
+(software_architect, backend_developer, frontend_developer,
+code_reviewer, qa_engineer, ux_designer, product_owner); a shortened
+name breaks the hooks' reconciliation and forks the task trail. Hooks
+stamp started and finished times and the attempt history (every dispatch
+is one attempt row); the semantic fields are yours.
+
+DoD verification trail: when the backlog carries dod_items for the
+story, the QA step's verdicts flip them one by one (item set-dod
+--dod-id <id> --status verified, or failed with --failure-reason); a
+story presented at the delivery gate with pending dod_items names them
+as open work.
 
 Suite artifacts (junit output and the like) are written to gitignored
-workspace/ paths (workspace/junit-<suite>.xml), never into the run
+workspace/ paths (workspace/junit-<suite>.xml), never into the order
 directory.
 
 Step status: pending | in_progress | done | blocked | escalated.
-Run status: running | waiting_gate | blocked | escalated | complete.
+Work order status: running | waiting_gate | blocked | escalated | complete.
 
 ## Spawn prompt template
 
 Every agent spawn assembles, in this order:
 
-1. Identity: "You are <agent-name>, executing step <n> of run <run-key>.
-   Run directory: <path>."
+1. Identity: "You are <agent-name>, executing step <n> of work order
+   <key>. Order directory: <path>."
 2. The constitution body, pasted verbatim:
 
    {{constitution}}
 
 3. Inputs: an explicit file list, split into read-fully (this step's
    declared inputs) and summary-only (other prior artifacts).
-4. Skill binding: the knowledge skill(s) bound to this role in the run's
-   bindings, read from workspace/config.json.
+4. Skill binding: the knowledge skill(s) bound to this role in the work
+   order's bindings, read from workspace/config.json.
 5. The task, with its acceptance criteria, each carrying a verify line.
 6. Output: the exact artifact path(s), the requirement to end with
    SELF-CHECK, write nothing else, and never touch the PMO database.
@@ -131,9 +140,10 @@ presenting any gate.
   and route the user to the setup entry. Unsupported stack values:
   refuse honestly and stop.
 - Resolve the PMO CLI per the state contract and run init-db.
-- Initialize the run: run init --project-key <key> --run-key <id>
-  --request "<request>" --worktree <git root> --story <WP-##>
-  --bindings '<json>' --run-dir workspace/runs/<run-key>
+- Initialize the work order: work-order init --project-key <key>
+  --work-order-key <id> --request "<request>" --worktree <git root>
+  --story <WP-##> --bindings '<json>'
+  --order-dir workspace/work-orders/<key>
   --constitution ${CLAUDE_PLUGIN_ROOT}/constitution.md
   --brief <brief path> --config workspace/config.json. It claims the
   worktree and the story, marks the story in_development, writes the
@@ -143,7 +153,8 @@ presenting any gate.
   in the databases set, planner to the planning skill, analyst to the
   requirements-analysis skill, reviewer to the review skill, verifier to
   the verification skill.
-- Ensure workspace/runs/ is gitignored; append the rule when missing.
+- Ensure workspace/work-orders/ is gitignored; append the rule when
+  missing.
 - Create the work branch for this story from the main line, named
   wp-<nn>-<kebab-slug> (atomic route: atomic-<kebab-slug>).
 
@@ -153,12 +164,12 @@ presenting any gate.
   own and advances nothing when it passes.
 - Read this story's row (item list --kind story --json) and check every
   item of its Definition of Ready against reality (dependencies actually
-  merged, criteria unambiguous, preview present when required). Any item
-  failing: the story is NOT ready; return it to the product owner with
-  the failing items named, set the story back (item update
-  --external-id <WP-##> --status planned), set the run status blocked
-  via run set-status, and stop. Never start implementation on an unready
-  story.
+  merged per the story's recorded edges, criteria unambiguous, preview
+  present when required). Any item failing: the story is NOT ready;
+  return it to the product owner with the failing items named, set the
+  story back (item update --external-id <WP-##> --status planned), set
+  the work order blocked via work-order set-status, and stop. Never
+  start implementation on an unready story.
 
 ### Step 1: architecture delta
 
@@ -166,9 +177,10 @@ presenting any gate.
   living documents under workspace/docs/system-architecture/, and this
   story's scope from its backlog row.
 - The architect applies its delta to the living documents and returns
-  the ownership map; store it via run set-ownership. The CLI refuses
-  overlapping prefixes, inside the run and against every other active
-  run; a refusal routes back to the architect as the named violation.
+  the ownership map; store it via work-order set-ownership. The CLI
+  refuses overlapping prefixes, inside the work order and against every
+  other active work order; a refusal routes back to the architect as the
+  named violation.
 
 ### GATE: model and contract
 
@@ -178,8 +190,8 @@ presenting any gate.
 - Mechanical half, run BEFORE presenting the gate:
   ${CLAUDE_PLUGIN_ROOT}/scripts/contract_check.py --contract
   workspace/docs/system-architecture/api-contract.md (every endpoint
-  declares error cases) and run validate. Either exiting nonzero blocks
-  the gate; route the output back to the architect as the named
+  declares error cases) and work-order validate. Either exiting nonzero
+  blocks the gate; route the output back to the architect as the named
   violation.
 - Judgment half at the gate: error-case completeness in substance,
   boundary sanity, budget citations. The gate cannot pass otherwise.
@@ -197,7 +209,7 @@ presenting any gate.
   (frontend). Stories without client or server work spawn only the
   relevant developer.
 - Ownership overlap discovered mid-flight: serialize (backend first),
-  note it in the run's events (event append).
+  note it in the work order's events (event append).
 - Re-slice branch: when a developer reports the scope is larger than the
   story (new entities, endpoints or screens the backlog never sliced),
   halt the step, present the discovery, and route to the product owner
@@ -225,7 +237,8 @@ presenting any gate.
   loop): route each finding to the developer owning its file; after the
   fix, the reviewer re-checks only the fixes against the same finding
   set; flip resolved findings with finding update --status fixed
-  --round <n>. Increment the counter with run bump --counter review.
+  --round <n>. Increment the counter with work-order bump
+  --counter review.
 - Churn guard: at re-review, a NEW critical or high finding on
   untouched, already-passed lines is accepted only when the reviewer
   cites what changed to justify it; otherwise reject the finding and
@@ -255,9 +268,12 @@ presenting any gate.
   budget set (verified, or unverified with the reason; load-only
   budgets are never faked green). Routing a fix before the findings are
   recorded is a contract violation.
+- Flip the story's dod_items from the verifier's verdicts (item set-dod
+  --status verified, or failed with --failure-reason); a failed item is
+  a finding by another name and routes with them.
 - Pass: continue. Fail: route findings to the owning developer exactly
-  as in review; run bump --counter qa; re-verify only what changed and
-  flip fixed findings.
+  as in review; work-order bump --counter qa; re-verify only what
+  changed and flip fixed findings.
 - Requirement gaps escalate to the owner; they are never patched
   silently. The qa counter reaching 3 without pass: blocked, escalate,
   halt.
@@ -276,8 +292,8 @@ presenting any gate.
 ### GATE: delivery
 
 - Present the story summary: what was built, review verdict and rounds,
-  verification results (coverage, mutation, budgets from the database),
-  low-severity findings carried as notes.
+  verification results (coverage, mutation, budgets, dod_items from the
+  database), low-severity findings carried as notes.
 - Approve / Request changes / Pause. Record the outcome with
   record-gate --gate delivery.
 
@@ -292,10 +308,10 @@ presenting any gate.
 - Backlog updates NEVER ride this branch. At the checkpoint after merge,
   on the main line:
   - mark the story done (item update --external-id <WP-##> --status
-    done), then run the checkpoint subcommand (checkpoint --run-key
-    <key>, with --escaped-defect when a fix-atomic traced back to this
-    story): it appends the quality-ledger line AND regenerates both
-    committed views (workspace/docs/backlog.md and
+    done), then run the checkpoint subcommand (checkpoint
+    --work-order-key <key>, with --escaped-defect when a fix-atomic
+    traced back to this story): it appends the quality-ledger line AND
+    regenerates both committed views (workspace/docs/backlog.md and
     workspace/docs/quality-ledger.md) in one call; the views are
     generated files, hand edits are a contract violation and a guard
     hook denies them (wrong content in a view means wrong data: fix it
@@ -314,19 +330,19 @@ presenting any gate.
     master (stable overrides fold back in; contradictions become
     findings);
   then ask "continue with the next story?".
-- Set the run complete (run set-status --status complete) only when
-  every step is done, every gate is recorded, every finding is closed,
-  and the story run's coverage and ledger line are in the database; the
-  CLI's run-complete guard refuses otherwise.
+- Set the work order complete (work-order set-status --status complete)
+  only when every step is done, every gate is recorded, every finding is
+  closed, and the story work order's coverage and ledger line are in the
+  database; the CLI's complete guard refuses otherwise.
 
 ## Atomic route variant
 
 Atomic work has two tiers; the entry names the tier at classification.
 Both tiers run step 0 as written, except: pass --story only when the
 change maps to an existing backlog story; most atomic work has none.
-Steps a tier skips are marked done explicitly before finalize (run
-set-step --status done --artifact "skipped: <tier>"), so the
-run-complete guard stays honest about what actually ran.
+Steps a tier skips are marked done explicitly before finalize
+(work-order set-step --status done --artifact "skipped: <tier>"), so the
+complete guard stays honest about what actually ran.
 
 COSMETIC-ATOMIC (no behavior change: copy, a label, an existing-token
 swap): skip step 1, both gates, and the review and verification loops;
@@ -365,8 +381,8 @@ Tripwire, BEFORE finalize on both tiers: run
 ${CLAUDE_PLUGIN_ROOT}/scripts/atomic_tripwire.py --repo . --range
 main...HEAD. Exit 1 proves the work was never atomic: STOP, report "not
 atomic" with the flagged files, and hand the request to the large route
-unchanged. Disposition: set the run escalated (run set-status), delete
-the abandoned atomic branch, and let the large route start its own run.
-The judgment-level escape hatch stands independently: the moment the
-work touches the data model, the contract or the schema, stop without
-waiting for the tripwire.
+unchanged. Disposition: set the work order escalated (work-order
+set-status), delete the abandoned atomic branch, and let the large route
+start its own work order. The judgment-level escape hatch stands
+independently: the moment the work touches the data model, the contract
+or the schema, stop without waiting for the tripwire.

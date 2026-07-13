@@ -26,4 +26,4 @@ produces lives under `workspace/`:
   PMO CLI.
 
 Start work with the team's entry skills: setup, business-analysis,
-design-system, sketch, demo, request, configure.
+design-system, sketch, demo, request, program, configure.

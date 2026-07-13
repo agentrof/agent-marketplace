@@ -46,10 +46,13 @@ folder or an existing repository; it completes gaps and breaks nothing.
    inside workspace/docs/business-analysis/ are created by the
    business-analysis entry, never by setup.
 5. PMO backbone: resolve the PMO CLI (the launcher at
-   "${AGENTROF_HOME:-$HOME/.agentrof}/bin/pmo_cli.py", falling back to
-   the project-management-office plugin's own scripts copy; absent entirely means the project-management-office
-   plugin is missing: stop and tell the user to reinstall this plugin,
-   the dependency brings project-management-office in). Run init-db, then register the
+   "${AGENTROF_HOME:-$HOME/.agentrof}/bin/pmo_cli.py"; missing means
+   look up the project-management-office entry in
+   $HOME/.claude/plugins/installed_plugins.json, use its install path plus
+   scripts/pmo_cli.py, and run its sync-launcher subcommand once; no
+   entry there means the plugin is missing: stop and tell the user to
+   reinstall this plugin, the dependency brings project-management-office
+   in). Run init-db, then register the
    project: project register --key <kebab project name> --name "<name>"
    --team software-engineering-team --stamp-config workspace/config.json (stamps
    project_key into the config; idempotent). Every flow resolves the
@@ -76,10 +79,14 @@ folder or an existing repository; it completes gaps and breaks nothing.
    tested stacks only, and new stacks arrive as maintainer releases.
 7. Continuous integration: no PR-triggered test workflow in the
    repository's CI directory (for GitHub, .github/workflows/): offer to
-   add one from ${CLAUDE_PLUGIN_ROOT}/templates/ci-tests.yml with the
-   configured test command substituted for its placeholder. The template
-   also carries a dependency-audit job over the lockfiles; keep it, and
-   route any advisory it raises through the request entry as a
-   fix-atomic lockfile bump.
+   add one from ${CLAUDE_PLUGIN_ROOT}/templates/ci-tests.yml,
+   substituting both placeholders. {{test_command}} takes the configured
+   test command. {{audit_command}} takes one audit command per
+   configured stack, anchored at that stack's lockfile: python-fastapi
+   gets pip-audit against the backend's requirements or lock file,
+   react-typescript gets npm audit --audit-level=high run in the
+   frontend app directory; two stacks chain with &&. Keep the
+   dependency-audit job, and route any advisory it raises through the
+   request entry as a fix-atomic lockfile bump.
 8. Close with the summary and pointers: start with business-analysis for
    the first topic, design-system before any screen work, then request.

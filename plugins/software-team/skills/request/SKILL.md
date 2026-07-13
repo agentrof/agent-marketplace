@@ -52,19 +52,28 @@ Front door for real work: classify, confirm, deliver.
    binding: the moment the work touches model, contract or schema, stop
    and re-enter this procedure as LARGE.
 4. LARGE route:
-   a. Brief precondition: no approved brief for this topic under
-      workspace/docs/business-analysis/ means the business-analysis entry
-      flow runs first, here, in this conversation.
-   b. Spawn software-team-product-owner with the approved brief and its
-      bound planning knowledge skill to produce or extend the backlog as
-      an epics-and-stories JSON import file (the agent's output
-      contract). Use the develop flow's spawn template.
+   a. Brief precondition, mechanical: run
+      ${CLAUDE_PLUGIN_ROOT}/scripts/ba_compile.py check --space
+      workspace/docs/business-analysis/<slug> --gate approval (scoped
+      with --node for a single-domain ask). Nonzero or no space: the
+      business-analysis entry flow runs first, here, in this
+      conversation. A legacy single-file brief routes to migration
+      there.
+   b. Spawn software-team-product-owner with its bound planning
+      knowledge skill to produce or extend the backlog as an
+      epics-and-stories JSON import file (the agent's output contract).
+      Read-fully inputs: the space's _generated/registry.md (the
+      complete BR/AC inventory), the root overview, and the in-scope
+      rule and acceptance docs; the rest summary-only via
+      _generated/index.md. Use the develop flow's spawn template.
    c. BACKLOG GATE: present the epic and story summary with the coverage
-      map; Approve / Request changes / Pause. On approve, load it into
-      the PMO database (item import --project-key <key> --json-file
-      <file>; the CLI rejects stories with empty scope, exclusions, DoR
-      or DoD) and regenerate the committed view (render backlog --out
-      workspace/docs/backlog.md).
+      map; Approve / Request changes / Pause. On approve, first verify
+      the import against the space (ba_compile.py verify-import --space
+      <space> --json-file <file>; nonzero blocks the approve action with
+      the named ids), then load it into the PMO database (item import
+      --project-key <key> --json-file <file>; the CLI rejects stories
+      with empty scope, exclusions, DoR or DoD) and regenerate the
+      committed view (render backlog --out workspace/docs/backlog.md).
    d. Story loop: for each ready story in order, execute
       ${CLAUDE_PLUGIN_ROOT}/flows/develop.md end to end. After each
       story's merge checkpoint (which updates the database and re-renders

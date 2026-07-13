@@ -19,9 +19,14 @@ You MUST follow these rules exactly. Violating any of them is a failure.
 
 ## Preconditions
 
-- An approved brief for the topic exists under
-  workspace/docs/business-analysis/. Missing: stop and run the
-  business-analysis entry flow first, then resume here.
+- The topic's analysis space passes its approval gate for the touched
+  scope: run ${CLAUDE_PLUGIN_ROOT}/scripts/ba_compile.py check --space
+  workspace/docs/business-analysis/<slug> --gate approval (add --node
+  domains/<name> when the work touches one domain; a buildable domain
+  does not wait for the others). Nonzero, or no space at all: stop and
+  run the business-analysis entry flow first, then resume here. A legacy
+  single-file brief is accepted during transition with a migration
+  prompt at the next analysis touch.
 - The design master exists at workspace/docs/design-system/MASTER.md.
   Missing: STOP, tell the user "no design system yet", route them into
   the design-system entry, and resume here once MASTER exists. This flow
@@ -38,9 +43,11 @@ then pasted verbatim:
 
 {{constitution}}
 
-then inputs (the brief read fully; MASTER.md read fully; the relevant
-page override when one exists), the task with the requested direction
-count, and the exact output path. Standalone design work has no order
+then inputs (the space root overview read fully plus the touched
+domain's process and acceptance docs read fully, the generated registry
+summary-only; MASTER.md read fully; the relevant page override when one
+exists), the task with the requested direction count, and the exact
+output path. Standalone design work has no order
 directory and no PMO work-order row; the state-touching clauses of the
 develop template do not apply.
 

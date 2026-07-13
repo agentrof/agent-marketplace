@@ -212,6 +212,27 @@ def break_stdlib_only(root: Path) -> None:
     )
 
 
+def break_script_references(root: Path) -> None:
+    write(
+        root / "plugins" / PLUGIN / "flows" / "check.md",
+        VALID_FLOW + "\nRun ${CLAUDE_PLUGIN_ROOT}/scripts/missing_tool.py here.\n",
+    )
+
+
+def break_ba_schema_shape(root: Path) -> None:
+    write(
+        root / "plugins" / PLUGIN / "skills" / "notes" / "data" / "space-schema.json",
+        json.dumps({
+            "schema_version": 1,
+            "statuses": ["draft", "in_review", "approved"],
+            "id_format": "^(BR)-([A-Z]{2,4})-([0-9]{3,})$",
+            "doc_types": {"space": {"required_sections": [], "mints": ["BR"],
+                                    "gate_blocking": True}},
+            "row_schemas": {},
+        }, indent=2),
+    )
+
+
 BUILDERS = {
     "frontmatter_shape": break_frontmatter_shape,
     "agent_name": break_agent_name,
@@ -228,6 +249,8 @@ BUILDERS = {
     "json_hygiene": break_json_hygiene,
     "orchestrator_integrity": break_orchestrator_integrity,
     "stdlib_only": break_stdlib_only,
+    "script_references": break_script_references,
+    "ba_schema_shape": break_ba_schema_shape,
 }
 
 

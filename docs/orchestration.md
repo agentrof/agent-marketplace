@@ -22,8 +22,8 @@ Routes:
   change: owning dev agent, small diff, pull request on an atomic-<slug>
   branch) and fix-atomic (behavior change: failing reproduction test
   first, tagged to the violated or newly minted BR, then the fix, then
-  one reviewer pass; the BR updates in the brief on main at the
-  checkpoint). UI-touching atomic work still draws every visual value
+  one reviewer pass; the BR row updates in its owning rule_set on main
+  at the checkpoint). UI-touching atomic work still draws every visual value
   from the design master's tokens (no master: a change that would
   introduce a new visual value routes to the design-system entry). The
   escape hatch is mechanical and judgmental: the tripwire script scans
@@ -31,14 +31,17 @@ Routes:
   moment such a touch is recognized in judgment the work order stops,
   reports "not atomic", sets the work order escalated, deletes the
   atomic branch, and hands over to the large route, which starts its own
-  work order. Large: brief
-  precondition, then product-owner produces the backlog import (epics
-  and stories), the backlog gate approves it, the import loads it into
-  the PMO database, then stories run one by one through the develop flow
-  (branch wp-<nn>-<slug>) with a readiness gate before each story and
-  checkpoints between stories.
-- **sketch / demo** require a brief (business-analysis runs first when
-  missing) and a design system MASTER (the design-system entry owns its
+  work order. Large: analysis-space
+  precondition (the space's compiler gate passes for the touched scope),
+  then product-owner produces the backlog import (epics and stories)
+  from the space's generated registry, the backlog gate approves it
+  (verify-import checks every criterion id against the space first),
+  the import loads it into the PMO database, then stories run one by one
+  through the develop flow (branch wp-<nn>-<slug>) with a readiness gate
+  before each story and checkpoints between stories.
+- **sketch / demo** require the topic's analysis space to be buildable
+  for the touched scope (business-analysis runs first when it is not)
+  and a design system MASTER (the design-system entry owns its
   creation; other flows only redirect).
 - **program** is the integrator surface: one session per project, on
   the primary checkout only (a linked worktree is refused). It proposes
@@ -50,7 +53,12 @@ Routes:
   approving across sessions, and owns every merge checkpoint on the
   main line, strictly serialized with the suite run between merges.
 - **business-analysis** and **design-system** are interactive main
-  conversation flows with a closing approval gate each.
+  conversation flows. business-analysis grows one analysis space per
+  topic (typed docs, compiler-checked, generated views) with a
+  foundation gate plus one gate per domain, each preceded by the
+  adversarial challenge loop (fresh-context read-only challenger and
+  expert spawns, triaged into locked round records); design-system
+  closes with its own approval gate.
 - **setup** is idempotent bootstrap (including the PMO prerequisite
   check and project registration); **configure** is the single change
   gate for the project config file.
@@ -138,13 +146,18 @@ one active work order per story; disjoint ownership path prefixes
 across active work orders. A refused init means resume the holder
 (resume-info names it), never archive it blind. Claims free when the
 work order leaves the active statuses (running, waiting_gate). While a
-work order is active, the business-analysis and configure entries
-refuse edits that would fork the running spec.
+work order is active, the analysis docs owning its story's claimed ids
+are frozen at document granularity: the develop flow writes the freeze
+manifest (freeze.json in the order directory) at init and the pmo guard
+denies edits to those paths; the rest of the space stays open for
+parallel analysis, and the configure entry still refuses config edits
+that would fork the running spec.
 
 The order directory (workspace/work-orders/<key>/, gitignored) holds
-ONLY the snapshots init copies there: the constitution, the brief
-snapshot and the config snapshot; the work order reads the snapshots
-for its whole duration. Suite artifacts (junit output) go to gitignored
+ONLY the snapshots init copies there (the constitution, the analysis
+space as brief-snapshot/ or a legacy brief file, the config snapshot)
+plus the freeze manifest; the work order reads the snapshots for its
+whole duration. Suite artifacts (junit output) go to gitignored
 workspace paths, never into the order directory.
 
 ## Spawn prompt contract
@@ -180,8 +193,10 @@ into re-review spawns.
 
 ## Gates and loops
 
-Gate inventory scales with the route: classification confirm; brief
-approval; DS gate (the design-system candidate pick); backlog gate
+Gate inventory scales with the route: classification confirm; the
+analysis gates (foundation, one per domain, each preceded by the
+challenge loop's converged round, all mechanically checked by the
+space compiler); DS gate (the design-system candidate pick); backlog gate
 (approve, then item import loads the database and the backlog view is
 re-rendered); model and contract gate (architect delta shown in
 conversation with a breaking-change flag; the record is the git diff);
@@ -215,7 +230,9 @@ At the merge checkpoint on the main line: the story marked done and the
 ledger checkpoint appended (with the escaped-defect flag when a
 fix-atomic traced back), the backlog and ledger views re-rendered from
 the database, the changelog append from the PR quality summary, the
-published interface schema, brief BR updates from fix-atomic work, the
+published interface schema, the analysis-space BR row updates from
+fix-atomic work (owning rule_set edited, space re-rendered) with the
+spec-fork tripwire over the claimed ids' statement hashes, the
 deployed_verified field once the owner confirms the story runs in its
 target environment, and every tenth checkpoint the architecture
 reconciliation (living docs vs code; page overrides vs the design

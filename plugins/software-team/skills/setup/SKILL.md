@@ -42,7 +42,9 @@ folder or an existing repository; it completes gaps and breaks nothing.
    workspace/docs/design-system/pages/, workspace/demos/,
    workspace/sketches/, workspace/work-orders/. Git does not track empty
    directories: drop a .gitkeep in each folder created empty
-   (work-orders/ is gitignored and needs none).
+   (work-orders/ is gitignored and needs none). Topic analysis spaces
+   inside workspace/docs/business-analysis/ are created by the
+   business-analysis entry, never by setup.
 5. PMO backbone: resolve the PMO CLI (the launcher at
    "${AGENTROF_HOME:-$HOME/.agentrof}/bin/pmo_cli.py", falling back to
    the pmo plugin's own scripts copy; absent entirely means the pmo

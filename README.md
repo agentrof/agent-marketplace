@@ -20,7 +20,7 @@ hooks. Installing a team installs `pmo` automatically as a dependency;
 <!-- counts:start -->
 | Plugins | Agents | Entry skills | Knowledge skills |
 |---|---|---|---|
-| 2 | 8 | 9 | 10 |
+| 2 | 10 | 9 | 11 |
 <!-- counts:end -->
 
 Counts above are injected by `tools/counts.py`; they are never written by

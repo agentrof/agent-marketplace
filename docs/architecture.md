@@ -41,10 +41,11 @@ plugin.json dependencies, so it installs automatically).
    and absolute paths are banned output targets; plugin directories are
    read-only product content.
 7. **Files over conversation memory.** Durable knowledge exits through git
-   channels: code, pull request bodies, living architecture documents,
-   design system, demo packages, and the generated backlog and ledger
-   views. There are no memory tiers or mind maps; a missing-context
-   problem is a step-contract bug.
+   channels: code, pull request bodies, analysis spaces with their
+   compiler-generated views, living architecture documents, design
+   system, demo packages, and the generated backlog and ledger views.
+   There are no memory tiers or mind maps; a missing-context problem is
+   a step-contract bug.
 8. **One constitution.** Behavioral law lives in a single constitution file
    per plugin, pasted into every spawn prompt with an order-directory copy
    as fallback. Never per-agent copies, never an on-demand skill.

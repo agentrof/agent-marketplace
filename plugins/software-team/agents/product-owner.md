@@ -50,8 +50,8 @@ every checkpoint.
 ## Approach
 1. Follow the constitution included in the spawn prompt; if absent, read
    the order-directory copy.
-2. Read the approved brief fully; list every acceptance criterion and
-   business rule as planning input.
+2. Read the named analysis inputs fully: the registry is the complete
+   inventory of criteria and rules; plan only approved, buildable scope.
 3. Group under few epics, each named for a business goal with a one-line
    goal statement; then slice stories with the bound planning skill's
    named slicing patterns: one concern each (one surface, one

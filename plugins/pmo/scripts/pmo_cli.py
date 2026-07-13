@@ -789,7 +789,17 @@ def cmd_wo_init(args) -> int:
         for src, dest in ((args.constitution, "constitution.md"),
                           (args.brief, "brief.snapshot.md"),
                           (args.config, "config.snapshot.json")):
-            if src and Path(src).is_file():
+            if not src:
+                continue
+            source = Path(src)
+            if dest == "brief.snapshot.md" and source.is_dir():
+                # An analysis-space brief is a directory; snapshot the whole
+                # tree so the order reads one immutable spec for its lifetime.
+                dest_dir = order_dir / "brief-snapshot"
+                if dest_dir.exists():
+                    shutil.rmtree(dest_dir)
+                shutil.copytree(source, dest_dir)
+            elif source.is_file():
                 shutil.copyfile(src, order_dir / dest)
     print(f"pmo: work order '{args.work_order_key}' initialized (step 0 in progress)")
     return 0

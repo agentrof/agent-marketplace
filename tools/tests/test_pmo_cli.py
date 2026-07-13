@@ -430,6 +430,41 @@ class PmoCliTests(unittest.TestCase):
 
     # -- work-order lifecycle guards -------------------------------------------
 
+    def test_wo_init_snapshots_directory_brief(self):
+        """An analysis-space brief (a directory) snapshots as a whole tree to
+        brief-snapshot/; a single-file brief keeps the legacy filename."""
+        self.import_backlog()
+        space = Path(self.tmp.name) / "erp"
+        (space / "rules").mkdir(parents=True)
+        (space / "_generated").mkdir()
+        (space / "space.md").write_text("# ERP\n", encoding="utf-8")
+        (space / "rules" / "core.md").write_text("| BR-ERP-001 |\n", encoding="utf-8")
+        (space / "_generated" / "registry.json").write_text("{}", encoding="utf-8")
+        order_dir = Path(self.tmp.name) / "orders" / "wo1"
+        code, _, err = run(["work-order", "init", "--project-key", "shop",
+                            "--work-order-key", "wo1", "--request", "build it",
+                            "--worktree", str(self.wt_main), "--story", "WP-01",
+                            "--order-dir", str(order_dir), "--brief", str(space)])
+        self.assertEqual(code, 0, err)
+        snap = order_dir / "brief-snapshot"
+        self.assertTrue((snap / "space.md").is_file())
+        self.assertTrue((snap / "rules" / "core.md").is_file())
+        self.assertTrue((snap / "_generated" / "registry.json").is_file())
+        self.assertFalse((order_dir / "brief.snapshot.md").exists())
+
+    def test_wo_init_snapshots_file_brief(self):
+        self.import_backlog()
+        brief = Path(self.tmp.name) / "brief.md"
+        brief.write_text("# Brief\n", encoding="utf-8")
+        order_dir = Path(self.tmp.name) / "orders" / "wo-file"
+        code, _, err = run(["work-order", "init", "--project-key", "shop",
+                            "--work-order-key", "wo-file", "--request", "build it",
+                            "--worktree", str(self.wt_main), "--story", "WP-01",
+                            "--order-dir", str(order_dir), "--brief", str(brief)])
+        self.assertEqual(code, 0, err)
+        self.assertEqual((order_dir / "brief.snapshot.md").read_text(encoding="utf-8"),
+                         "# Brief\n")
+
     def test_same_worktree_refused(self):
         self.import_backlog()
         self.assertEqual(self.init_wo()[0], 0)

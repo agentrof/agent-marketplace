@@ -30,6 +30,11 @@ EM_DASH = "—"
 
 AGENT_REQUIRED_KEYS = {"name", "description", "model"}
 AGENT_MODEL_ENUM = {"opus", "sonnet", "haiku", "inherit"}
+# Optional capability restriction: an agent MAY carry tools: as a whitelist,
+# and only the read-only set is legal. Read-only roles (challengers, expert
+# panels) are denied write capability at spawn time, not by instruction.
+AGENT_OPTIONAL_KEYS = {"tools"}
+AGENT_READONLY_TOOLS = {"Read", "Grep", "Glob"}
 SKILL_REQUIRED_KEYS = {"name", "description"}
 SKILL_VISIBILITY_KEYS = {"user-invocable", "disable-model-invocation"}
 
@@ -237,7 +242,7 @@ def check_frontmatter_shape(tree: Tree, findings: list[Finding]) -> None:
             fm, _, _ = parse_frontmatter(read_text(path))
             keys = set(fm)
             missing = AGENT_REQUIRED_KEYS - keys
-            extra = keys - AGENT_REQUIRED_KEYS
+            extra = keys - AGENT_REQUIRED_KEYS - AGENT_OPTIONAL_KEYS
             if missing:
                 findings.append(Finding(
                     "error", rel(tree, path), 1, "frontmatter_shape",
@@ -248,8 +253,20 @@ def check_frontmatter_shape(tree: Tree, findings: list[Finding]) -> None:
                 findings.append(Finding(
                     "error", rel(tree, path), 1, "frontmatter_shape",
                     f"agent frontmatter has unsupported keys: {sorted(extra)}",
-                    "remove them; agents carry exactly name, description, model",
+                    "remove them; agents carry name, description, model and"
+                    " optionally a read-only tools whitelist",
                 ))
+            if "tools" in fm:
+                tools = {t.strip() for t in fm["tools"].split(",") if t.strip()}
+                illegal = tools - AGENT_READONLY_TOOLS
+                if illegal:
+                    findings.append(Finding(
+                        "error", rel(tree, path), 1, "frontmatter_shape",
+                        f"agent tools whitelist holds non-read-only tools: {sorted(illegal)}",
+                        f"tools: exists only to make a role read-only; allowed:"
+                        f" {sorted(AGENT_READONLY_TOOLS)}. Full-capability agents"
+                        " omit the key",
+                    ))
             model = fm.get("model", "")
             if model and model not in AGENT_MODEL_ENUM:
                 findings.append(Finding(
@@ -806,6 +823,83 @@ def check_stdlib_only(tree: Tree, findings: list[Finding]) -> None:
                     ))
 
 
+SCRIPT_REF_RE = re.compile(r"\$\{CLAUDE_PLUGIN_ROOT\}/([A-Za-z0-9_\-./]+\.py)\b")
+
+
+def check_script_references(tree: Tree, findings: list[Finding]) -> None:
+    """Every ${CLAUDE_PLUGIN_ROOT}/...py token in a plugin's markdown must
+    resolve to a shipped file: a flow naming a script that does not exist is
+    a broken contract, not documentation."""
+    for plugin in plugin_dirs(tree):
+        for path in sorted(plugin.rglob("*.md")):
+            for lineno, line in enumerate(read_text(path).splitlines(), start=1):
+                for match in SCRIPT_REF_RE.finditer(line):
+                    if not (plugin / match.group(1)).is_file():
+                        findings.append(Finding(
+                            "error", rel(tree, path), lineno, "script_references",
+                            f"referenced script does not exist: {match.group(1)}",
+                            "ship the script or fix the reference; flows carry"
+                            " only real mechanics",
+                        ))
+
+
+def check_ba_schema_shape(tree: Tree, findings: list[Finding]) -> None:
+    """Any shipped space-schema.json must be well-formed: the compiler is
+    parameterized by it, so a malformed schema is a broken product."""
+    for plugin in plugin_dirs(tree):
+        for path in sorted(plugin.glob("skills/*/data/space-schema.json")):
+            def err(message: str, fix: str) -> None:
+                findings.append(Finding(
+                    "error", rel(tree, path), 1, "ba_schema_shape", message, fix))
+            try:
+                schema = json.loads(read_text(path))
+            except json.JSONDecodeError as exc:
+                err(f"schema is not valid JSON: {exc}", "fix the JSON syntax")
+                continue
+            if not isinstance(schema.get("schema_version"), int):
+                err("schema_version must be an integer",
+                    "version the schema so the compiler can refuse unknowns")
+            doc_types = schema.get("doc_types")
+            if not isinstance(doc_types, dict) or not doc_types:
+                err("doc_types must be a non-empty object",
+                    "declare every document type the compiler may see")
+                continue
+            statuses = schema.get("statuses", [])
+            if "approved" not in statuses:
+                err("statuses must include 'approved'",
+                    "gates hinge on the approved status")
+            try:
+                re.compile(schema.get("id_format", ""))
+            except re.error:
+                err("id_format does not compile as a regex",
+                    "id_format is the id law; it must compile")
+            row_schemas = schema.get("row_schemas", {})
+            seen_prefixes: dict[str, str] = {}
+            for type_name, spec in sorted(doc_types.items()):
+                for key, expected in (("required_sections", list),
+                                      ("mints", list), ("gate_blocking", bool)):
+                    if not isinstance(spec.get(key), expected):
+                        err(f"doc type '{type_name}' key '{key}' must be"
+                            f" {expected.__name__}",
+                            "every doc type declares sections, mints and gating")
+                for kind in spec.get("mints", []) or []:
+                    if str(kind).lower() not in row_schemas:
+                        err(f"doc type '{type_name}' mints '{kind}' which has"
+                            " no row schema",
+                            "every minted kind carries a row schema")
+            for kind, row in sorted(row_schemas.items()):
+                columns = row.get("columns", [])
+                if not isinstance(columns, list) or "id" not in columns:
+                    err(f"row schema '{kind}' must list columns including 'id'",
+                        "rows are the only carrier of minted ids")
+                section = row.get("section", "")
+                if section in seen_prefixes:
+                    err(f"row schema '{kind}' reuses section '{section}'"
+                        f" already claimed by {seen_prefixes[section]}",
+                        "each id kind mints in its own section token")
+                seen_prefixes[section] = kind
+
+
 CHECKS = {
     "frontmatter_shape": check_frontmatter_shape,
     "agent_name": check_agent_name,
@@ -822,6 +916,8 @@ CHECKS = {
     "json_hygiene": check_json_hygiene,
     "orchestrator_integrity": check_orchestrator_integrity,
     "stdlib_only": check_stdlib_only,
+    "script_references": check_script_references,
+    "ba_schema_shape": check_ba_schema_shape,
 }
 
 

@@ -133,8 +133,7 @@ semantic sanity before presenting any gate.
   ${CLAUDE_PLUGIN_ROOT}/scripts/ba_compile.py check --space
   workspace/docs/business-analysis/<slug> --gate approval (--node
   <domain> when the story touches one domain), then render. Nonzero
-  blocks init: route to the business-analysis entry. A legacy
-  single-file brief still passes init (the CLI snapshots either shape).
+  blocks init: route to the business-analysis entry.
 - Initialize the work order: work-order init --project-key <key>
   --work-order-key <id> --request "<request>" --worktree <git root>
   --story <WP-##> --bindings '<json>'
@@ -143,8 +142,7 @@ semantic sanity before presenting any gate.
   --brief workspace/docs/business-analysis/<slug> --config
   workspace/config.json. It claims the worktree and the story, marks the
   story in_development, writes the step skeleton and copies the
-  snapshots (a space directory lands as brief-snapshot/, a legacy file
-  as brief.snapshot.md).
+  snapshots (the space directory lands as brief-snapshot/).
 - Freeze manifest: resolve the story's criterion ids (backlog row plus
   coverage map) with ba_compile.py resolve against the LIVE space and
   write the owning doc paths as freeze.json ({"frozen_paths": [...]}) in

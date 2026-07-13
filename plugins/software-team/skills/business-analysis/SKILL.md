@@ -21,10 +21,6 @@ ${CLAUDE_PLUGIN_ROOT}/scripts/ba_compile.py.
    - Read workspace/config.json when present (output_language governs
      all document prose; structure stays English per the space
      standard; default English).
-   - A legacy single-file brief workspace/docs/business-analysis/<slug>.md
-     exists: offer migration (ba_compile.py migrate --brief <file>
-     --space <folder> --code <CODE>). Migrated docs arrive in_review;
-     approval is re-earned at a normal gate, never assumed.
    - Freeze set: run the PMO CLI's resume-info --project-key <key>
      --json; for each active work order (running or waiting_gate) on
      this topic, collect its story's criterion ids from the coverage map

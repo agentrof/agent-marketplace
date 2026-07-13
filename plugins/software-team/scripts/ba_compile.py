@@ -16,7 +16,6 @@ Subcommands:
   render        (re)generate the _generated/ views deterministically
   resolve       map ids to owning docs, statuses and statement hashes
   verify-import validate a backlog import's criterion ids against the space
-  migrate       split a legacy single-file brief into a space
 
 Stdlib only. Exit 0 on success, 1 on findings/violations, 2 on usage.
 Finding format mirrors tools/validate.py: SEVERITY path:line [check]
@@ -110,7 +109,6 @@ class Space:
     docs: dict = field(default_factory=dict)     # rel -> Doc
     nodes: dict = field(default_factory=dict)    # rel -> code ("" = root)
     ids: dict = field(default_factory=dict)      # id -> {kind, doc, row, line}
-    legacy: bool = False
     broken: bool = False  # ambiguity class present; render must refuse
 
 
@@ -301,12 +299,6 @@ def scan_space(space_dir: Path, schema: dict) -> tuple[Space, list[Finding]]:
         space.broken = True
         return space, findings
 
-    legacy_sibling = space_dir.parent / f"{space_dir.name}.md"
-    if legacy_sibling.is_file():
-        err(legacy_sibling.as_posix(), 1, "space_layout",
-            "legacy single-file brief coexists with the space folder",
-            "finish the migrate subcommand; the space and the file never coexist")
-
     space.nodes[""] = ""
     for dir_path in sorted(space_dir.rglob("*")):
         if not dir_path.is_dir():
@@ -404,10 +396,6 @@ def scan_space(space_dir: Path, schema: dict) -> tuple[Space, list[Finding]]:
         parse_doc_body(doc)
         space.docs[rel] = doc
 
-    root_doc = space.docs.get("space.md")
-    if root_doc and root_doc.fm.get("legacy_ids") is True:
-        space.legacy = True
-
     code_format = re.compile(schema["code_format"])
     seen_codes: dict[str, str] = {}
     for rel in sorted(space.docs):
@@ -481,7 +469,6 @@ def collect_ids(space: Space, findings: list[Finding]) -> None:
                     row = dict(zip(table.columns, cells))
                     id_value = row["id"]
                     m = NAMESPACED_ID_RE.fullmatch(id_value)
-                    bare = BARE_ID_RE.fullmatch(id_value)
                     if m:
                         row_kind, row_code = m.group(1), m.group(2)
                         if row_kind != kind:
@@ -498,19 +485,6 @@ def collect_ids(space: Space, findings: list[Finding]) -> None:
                                 "an id is minted under its owning node's code;"
                                 " moving a doc re-mints its ids"))
                             continue
-                    elif bare and space.legacy:
-                        if bare.group(1) != kind:
-                            findings.append(Finding(
-                                "error", rel, lineno, "id_minting",
-                                f"{id_value} minted in a {kind} table",
-                                "bare legacy ids keep their own kind sections"))
-                            continue
-                        if Path(rel).stem != "legacy":
-                            findings.append(Finding(
-                                "warning", rel, lineno, "id_minting",
-                                f"bare legacy id {id_value} minted outside a"
-                                " legacy.md document",
-                                "new rows mint namespaced ids; legacy ids are frozen"))
                     else:
                         findings.append(Finding(
                             "error", rel, lineno, "id_format",
@@ -729,9 +703,8 @@ def run_checks(space: Space, base: list[Finding], gate: bool = False,
                                  "force it to an answer or defer it explicitly"
                                  " with a revisit trigger")
                 if kind == "AC":
-                    cite_ids = [t for t in
-                                re.findall(r"\b[A-Z]{2,3}-[A-Z0-9]{2,4}-\d{3,}\b|"
-                                           r"\bBR-\d{3,}\b", row.get("cites", ""))]
+                    cite_ids = re.findall(r"\b[A-Z]{2,3}-[A-Z0-9]{2,4}-\d{3,}\b",
+                                          row.get("cites", ""))
                     br_cites = [c for c in cite_ids if c.startswith("BR-")]
                     if not br_cites:
                         err(rel, info["line"], "row_schema",
@@ -999,8 +972,7 @@ def check_br_citations(space: Space, findings: list[Finding],
     for id_value, info in space.ids.items():
         if info["kind"] != "AC":
             continue
-        for m in list(NAMESPACED_ID_RE.finditer(info["row"].get("cites", ""))) + \
-                list(BARE_ID_RE.finditer(info["row"].get("cites", ""))):
+        for m in NAMESPACED_ID_RE.finditer(info["row"].get("cites", "")):
             cited.add(m.group(0))
     for id_value in sorted(space.ids):
         info = space.ids[id_value]
@@ -1148,9 +1120,6 @@ def id_sort_key(id_value: str):
     m = NAMESPACED_ID_RE.fullmatch(id_value)
     if m:
         return (m.group(1), m.group(2), int(m.group(3)))
-    b = BARE_ID_RE.fullmatch(id_value)
-    if b:
-        return (b.group(1), "LEG", int(b.group(2)))
     return ("ZZ", "ZZZZ", 0)
 
 
@@ -1193,8 +1162,7 @@ def cited_by_map(space: Space) -> dict[str, list[str]]:
     for ac_id in sorted((i for i in space.ids
                          if space.ids[i]["kind"] == "AC"), key=id_sort_key):
         cites = space.ids[ac_id]["row"].get("cites", "")
-        for m in list(NAMESPACED_ID_RE.finditer(cites)) + \
-                list(BARE_ID_RE.finditer(cites)):
+        for m in NAMESPACED_ID_RE.finditer(cites):
             cited.setdefault(m.group(0), []).append(ac_id)
     return cited
 
@@ -1491,11 +1459,6 @@ def next_ids(space: Space, code: str) -> dict[str, str]:
 
 def cmd_init(args, schema: dict) -> int:
     space_dir = Path(args.space)
-    legacy_sibling = space_dir.parent / f"{space_dir.name}.md"
-    if legacy_sibling.is_file() and not getattr(args, "from_migrate", False):
-        print(f"ba_compile: FAIL: legacy brief {legacy_sibling} exists;"
-              " run migrate instead", file=sys.stderr)
-        return 1
     if space_dir.is_dir() and any(space_dir.iterdir()):
         print(f"ba_compile: FAIL: {space_dir} already exists and is not empty",
               file=sys.stderr)
@@ -1678,107 +1641,6 @@ def cmd_verify_import(args, schema: dict) -> int:
     return 0
 
 
-def cmd_migrate(args, schema: dict) -> int:
-    brief_path = Path(args.brief)
-    space_dir = Path(args.space)
-    if not brief_path.is_file():
-        print(f"ba_compile: FAIL: no brief at {brief_path}", file=sys.stderr)
-        return 2
-    text = brief_path.read_text(encoding="utf-8", errors="replace")
-    lines = text.splitlines()
-    headings = [(i, re.sub(r"^#{1,6}\s*", "", line).strip().lower())
-                for i, line in enumerate(lines) if line.lstrip().startswith("#")]
-    mapping = schema["legacy_sections"]
-    positions: dict[str, int] = {}
-    for wanted in mapping:
-        for i, heading in headings:
-            if mapping[wanted]["heading"] in heading:
-                positions[wanted] = i
-                break
-    missing = [w for w in mapping if w not in positions]
-    if missing:
-        print("ba_compile: FAIL: brief is missing sections: "
-              + ", ".join(sorted(missing)) + "; nothing was written",
-              file=sys.stderr)
-        return 1
-    if space_dir.exists() and any(space_dir.iterdir()):
-        print(f"ba_compile: FAIL: {space_dir} already exists and is not empty",
-              file=sys.stderr)
-        return 1
-
-    class InitArgs:
-        space = str(space_dir)
-        title = args.title or brief_path.stem.replace("-", " ").title()
-        code = args.code
-        from_migrate = True
-
-    if cmd_init(InitArgs, schema) != 0:
-        return 1
-
-    space_md = space_dir / "space.md"
-    stamped = space_md.read_text(encoding="utf-8")
-    stamped = stamped.replace("owner_role: business_analyst",
-                              "owner_role: business_analyst\nlegacy_ids: true", 1)
-    stamped = stamped.replace("status: draft", "status: in_review", 1)
-    space_md.write_text(stamped, encoding="utf-8")
-
-    boundaries = sorted(positions.values()) + [len(lines)]
-
-    def section_body(start: int) -> str:
-        end = min(b for b in boundaries if b > start)
-        return "\n".join(lines[start + 1:end]).strip()
-
-    stub_specs = {
-        "processes/legacy.md": ("process", "Legacy Process Analysis", {}),
-        "entities/legacy.md": ("entity", "Legacy Data Dictionary", {}),
-        "rules/legacy.md": ("rule_set", "Legacy Business Rules",
-                            {"governs": ["../processes/legacy.md"]}),
-        "acceptance/legacy.md": ("acceptance_set", "Legacy Acceptance Criteria",
-                                 {"verifies": ["../processes/legacy.md"]}),
-    }
-    def replace_section(target: Path, token: str, body: str) -> None:
-        """Replace the content between the section's marker heading and the
-        next H2 (or EOF) with the migrated body."""
-        content_lines = target.read_text(encoding="utf-8").splitlines()
-        marker = f"<!-- sec: {token} -->"
-        start = next((i for i, l in enumerate(content_lines) if marker in l), None)
-        if start is None:
-            content_lines += ["", f"## {token.replace('_', ' ').title()} {marker}",
-                              "", body]
-        else:
-            end = next((i for i in range(start + 1, len(content_lines))
-                        if content_lines[i].startswith("## ")), len(content_lines))
-            content_lines = (content_lines[:start + 1] + ["", body, ""]
-                             + content_lines[end:])
-        target.write_text("\n".join(content_lines).rstrip("\n") + "\n",
-                          encoding="utf-8")
-
-    for wanted, spec in sorted(mapping.items()):
-        body = section_body(positions[wanted])
-        target_rel = spec["target"]
-        if target_rel == "space.md":
-            target = space_md
-        else:
-            target = space_dir / target_rel
-            if not target.exists():
-                doc_type, title, extra = stub_specs[target_rel]
-                write_stub(schema, target, doc_type, title, **extra)
-                text2 = target.read_text(encoding="utf-8")
-                target.write_text(text2.replace("status: draft", "status: in_review", 1),
-                                  encoding="utf-8")
-        replace_section(target, spec["section"], body)
-
-    nav = ["- [Legacy Process Analysis](processes/legacy.md)",
-           "- [Legacy Data Dictionary](entities/legacy.md)",
-           "- [Legacy Business Rules](rules/legacy.md)",
-           "- [Legacy Acceptance Criteria](acceptance/legacy.md)"]
-    replace_section(space_md, "domain_map", "\n".join(nav))
-    brief_path.unlink()
-    print(f"ba_compile: migrated {brief_path.name} into {space_dir}"
-          " (statuses in_review; approval is re-earned at the gate)")
-    return 0
-
-
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         description="Compile and check a business-analysis space.")
@@ -1823,17 +1685,11 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--space", required=True)
     p.add_argument("--json-file", required=True)
 
-    p = sub.add_parser("migrate")
-    p.add_argument("--brief", required=True)
-    p.add_argument("--space", required=True)
-    p.add_argument("--code", required=True)
-    p.add_argument("--title", default="")
-
     args = parser.parse_args(argv)
     schema = load_schema(args.schema)
     handlers = {"init": cmd_init, "stub": cmd_stub, "check": cmd_check,
                 "render": cmd_render, "resolve": cmd_resolve,
-                "verify-import": cmd_verify_import, "migrate": cmd_migrate}
+                "verify-import": cmd_verify_import}
     return handlers[args.command](args, schema)
 
 

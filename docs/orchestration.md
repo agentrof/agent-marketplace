@@ -155,8 +155,8 @@ that would fork the running spec.
 
 The order directory (workspace/work-orders/<key>/, gitignored) holds
 ONLY the snapshots init copies there (the constitution, the analysis
-space as brief-snapshot/ or a legacy brief file, the config snapshot)
-plus the freeze manifest; the work order reads the snapshots for its
+space as brief-snapshot/, the config snapshot) plus the freeze
+manifest; the work order reads the snapshots for its
 whole duration. Suite artifacts (junit output) go to gitignored
 workspace paths, never into the order directory.
 

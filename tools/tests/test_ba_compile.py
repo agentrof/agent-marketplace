@@ -598,13 +598,6 @@ class SubcommandTests(unittest.TestCase):
         self.assertEqual(code, 0)
         self.assertEqual(collect(space), [])
 
-    def test_init_refuses_legacy_sibling(self):
-        write(self.root / "topic.md", "# Old brief\n")
-        code, _, err = run(["init", "--space", str(self.root / "topic"),
-                            "--title", "Topic", "--code", "TOP"])
-        self.assertEqual(code, 1)
-        self.assertIn("migrate", err)
-
     def test_stub_carries_schema_shape(self):
         space = self.root / "topic"
         run(["init", "--space", str(space), "--title", "Topic", "--code", "TOP"])
@@ -665,67 +658,6 @@ class SubcommandTests(unittest.TestCase):
                             "--json-file", str(payload)])
         self.assertEqual(code, 1)
         self.assertIn("not approved", err)
-
-    def test_migrate_preserves_ids_and_passes_check(self):
-        brief = self.root / "checkout.md"
-        brief.write_text("""# Checkout
-
-Summary.
-
-## Purpose and Scope
-
-Scope text.
-
-## Process Analysis
-
-Flow text.
-
-## Conceptual Data Dictionary
-
-Dictionary text.
-
-## Business Rules
-
-| id | statement | kind | status | cites |
-|---|---|---|---|---|
-| BR-001 | An order line keeps the price at submit time. | constraint | active | |
-
-## Acceptance Criteria
-
-| id | criterion | cites | verify | status |
-|---|---|---|---|---|
-| AC-001 | Given a price change after submit, the order shows the submit-time price. | BR-001 | assert order line price equals snapshot | active |
-
-## Open Questions
-
-None outstanding.
-""", encoding="utf-8")
-        space = self.root / "checkout"
-        code, _, err = run(["migrate", "--brief", str(brief),
-                            "--space", str(space), "--code", "CHK"])
-        self.assertEqual(code, 0, err)
-        self.assertFalse(brief.exists())
-        rules = (space / "rules" / "legacy.md").read_text(encoding="utf-8")
-        self.assertIn("| BR-001 |", rules)
-        self.assertIn("legacy_ids: true",
-                      (space / "space.md").read_text(encoding="utf-8"))
-        code, _, _ = run(["render", "--space", str(space)])
-        self.assertEqual(code, 0)
-        findings = collect(space)
-        self.assertEqual([f for f in findings if f.severity == "error"], [],
-                         [f"{f.check}: {f.message}" for f in findings])
-
-    def test_migrate_is_all_or_nothing(self):
-        brief = self.root / "partial.md"
-        brief.write_text("# Partial\n\n## Purpose and Scope\n\nOnly one section.\n",
-                         encoding="utf-8")
-        space = self.root / "partial"
-        code, _, err = run(["migrate", "--brief", str(brief),
-                            "--space", str(space), "--code", "PAR"])
-        self.assertEqual(code, 1)
-        self.assertIn("missing sections", err)
-        self.assertTrue(brief.exists())
-        self.assertFalse(space.exists())
 
     def test_render_refuses_duplicate_ids(self):
         space = self.root / "erp"

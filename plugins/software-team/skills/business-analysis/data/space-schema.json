@@ -1,129 +1,435 @@
 {
   "schema_version": 1,
-  "statuses": ["draft", "in_review", "approved", "superseded"],
+  "statuses": [
+    "draft",
+    "in_review",
+    "approved",
+    "superseded"
+  ],
   "code_format": "^[A-Z]{2,4}$",
-  "reserved_codes": ["LEG"],
+  "reserved_codes": [],
   "id_format": "^(BR|AC|AS|OQ|DEC|CH)-([A-Z]{2,4})-([0-9]{3,})$",
   "frontmatter": {
-    "required": ["type", "title", "status", "owner_role"],
-    "optional": ["approved_at", "superseded_by", "code", "governs", "verifies",
-                 "system_name", "direction", "scope", "legacy_ids", "round",
-                 "review_scope", "verdict", "locked"]
+    "required": [
+      "type",
+      "title",
+      "status",
+      "owner_role"
+    ],
+    "optional": [
+      "approved_at",
+      "superseded_by",
+      "code",
+      "governs",
+      "verifies",
+      "system_name",
+      "direction",
+      "scope",
+      "round",
+      "review_scope",
+      "verdict",
+      "locked"
+    ]
   },
-  "summary_max_lines": {"space": 30, "default": 10},
-  "nfr_categories": ["performance", "volume", "availability", "security",
-                     "compliance", "operability"],
+  "summary_max_lines": {
+    "space": 30,
+    "default": 10
+  },
+  "nfr_categories": [
+    "performance",
+    "volume",
+    "availability",
+    "security",
+    "compliance",
+    "operability"
+  ],
   "doc_types": {
     "space": {
-      "location": {"kind": "named_file", "name": "space.md", "root_only": true},
-      "required_sections": ["purpose_scope", "domain_map", "out_of_scope"],
-      "mints": ["AS", "OQ"],
+      "location": {
+        "kind": "named_file",
+        "name": "space.md",
+        "root_only": true
+      },
+      "required_sections": [
+        "purpose_scope",
+        "domain_map",
+        "out_of_scope"
+      ],
+      "mints": [
+        "AS",
+        "OQ"
+      ],
       "gate_blocking": true,
-      "extra_frontmatter": {"required": ["code"], "optional": ["legacy_ids"]}
+      "extra_frontmatter": {
+        "required": [
+          "code"
+        ],
+        "optional": []
+      }
     },
     "domain": {
-      "location": {"kind": "named_file", "name": "domain.md", "domain_only": true},
-      "required_sections": ["mission", "boundaries", "process_map", "data_notes"],
-      "mints": ["AS", "OQ"],
+      "location": {
+        "kind": "named_file",
+        "name": "domain.md",
+        "domain_only": true
+      },
+      "required_sections": [
+        "mission",
+        "boundaries",
+        "process_map",
+        "data_notes"
+      ],
+      "mints": [
+        "AS",
+        "OQ"
+      ],
       "gate_blocking": true,
-      "extra_frontmatter": {"required": ["code"], "optional": []}
+      "extra_frontmatter": {
+        "required": [
+          "code"
+        ],
+        "optional": []
+      }
     },
     "process": {
-      "location": {"kind": "folder", "folder": "processes"},
-      "required_sections": ["actors", "trigger", "main_flow", "exception_flows"],
-      "mints": ["AS", "OQ"],
+      "location": {
+        "kind": "folder",
+        "folder": "processes"
+      },
+      "required_sections": [
+        "actors",
+        "trigger",
+        "main_flow",
+        "exception_flows"
+      ],
+      "mints": [
+        "AS",
+        "OQ"
+      ],
       "gate_blocking": true,
-      "extra_frontmatter": {"required": [], "optional": []}
+      "extra_frontmatter": {
+        "required": [],
+        "optional": []
+      }
     },
     "entity": {
-      "location": {"kind": "folder", "folder": "entities"},
-      "required_sections": ["fields", "lifecycle", "propagation"],
-      "mints": ["AS", "OQ"],
+      "location": {
+        "kind": "folder",
+        "folder": "entities"
+      },
+      "required_sections": [
+        "fields",
+        "lifecycle",
+        "propagation"
+      ],
+      "mints": [
+        "AS",
+        "OQ"
+      ],
       "gate_blocking": true,
-      "extra_frontmatter": {"required": [], "optional": []}
+      "extra_frontmatter": {
+        "required": [],
+        "optional": []
+      }
     },
     "rule_set": {
-      "location": {"kind": "folder", "folder": "rules"},
-      "required_sections": ["rules"],
-      "mints": ["BR", "AS", "OQ"],
+      "location": {
+        "kind": "folder",
+        "folder": "rules"
+      },
+      "required_sections": [
+        "rules"
+      ],
+      "mints": [
+        "BR",
+        "AS",
+        "OQ"
+      ],
       "gate_blocking": true,
-      "extra_frontmatter": {"required": ["governs"], "optional": []}
+      "extra_frontmatter": {
+        "required": [
+          "governs"
+        ],
+        "optional": []
+      }
     },
     "acceptance_set": {
-      "location": {"kind": "folder", "folder": "acceptance"},
-      "required_sections": ["criteria"],
-      "mints": ["AC", "AS", "OQ"],
+      "location": {
+        "kind": "folder",
+        "folder": "acceptance"
+      },
+      "required_sections": [
+        "criteria"
+      ],
+      "mints": [
+        "AC",
+        "AS",
+        "OQ"
+      ],
       "gate_blocking": true,
-      "extra_frontmatter": {"required": ["verifies"], "optional": []}
+      "extra_frontmatter": {
+        "required": [
+          "verifies"
+        ],
+        "optional": []
+      }
     },
     "decision": {
-      "location": {"kind": "folder", "folder": "decisions"},
-      "required_sections": ["context", "options", "ruling", "consequences"],
-      "mints": ["DEC", "AS", "OQ"],
+      "location": {
+        "kind": "folder",
+        "folder": "decisions"
+      },
+      "required_sections": [
+        "context",
+        "options",
+        "ruling",
+        "consequences"
+      ],
+      "mints": [
+        "DEC",
+        "AS",
+        "OQ"
+      ],
       "gate_blocking": false,
-      "extra_frontmatter": {"required": [], "optional": []}
+      "extra_frontmatter": {
+        "required": [],
+        "optional": []
+      }
     },
     "glossary": {
-      "location": {"kind": "named_file", "name": "glossary.md", "root_only": true},
-      "required_sections": ["terms"],
-      "mints": ["AS", "OQ"],
+      "location": {
+        "kind": "named_file",
+        "name": "glossary.md",
+        "root_only": true
+      },
+      "required_sections": [
+        "terms"
+      ],
+      "mints": [
+        "AS",
+        "OQ"
+      ],
       "gate_blocking": true,
-      "extra_frontmatter": {"required": [], "optional": []}
+      "extra_frontmatter": {
+        "required": [],
+        "optional": []
+      }
     },
     "actor_roster": {
-      "location": {"kind": "named_file", "name": "actors.md", "root_only": true},
-      "required_sections": ["actors"],
-      "mints": ["AS", "OQ"],
+      "location": {
+        "kind": "named_file",
+        "name": "actors.md",
+        "root_only": true
+      },
+      "required_sections": [
+        "actors"
+      ],
+      "mints": [
+        "AS",
+        "OQ"
+      ],
       "gate_blocking": true,
-      "extra_frontmatter": {"required": [], "optional": []}
+      "extra_frontmatter": {
+        "required": [],
+        "optional": []
+      }
     },
     "budget_set": {
-      "location": {"kind": "named_file", "name": "budgets.md"},
-      "required_sections": ["performance", "volume", "availability", "security",
-                            "compliance", "operability"],
-      "mints": ["AS", "OQ"],
+      "location": {
+        "kind": "named_file",
+        "name": "budgets.md"
+      },
+      "required_sections": [
+        "performance",
+        "volume",
+        "availability",
+        "security",
+        "compliance",
+        "operability"
+      ],
+      "mints": [
+        "AS",
+        "OQ"
+      ],
       "gate_blocking": true,
-      "extra_frontmatter": {"required": ["scope"], "optional": []}
+      "extra_frontmatter": {
+        "required": [
+          "scope"
+        ],
+        "optional": []
+      }
     },
     "integration": {
-      "location": {"kind": "folder", "folder": "integrations", "root_only": true},
-      "required_sections": ["exchange", "failure_semantics", "ownership"],
-      "mints": ["AS", "OQ"],
+      "location": {
+        "kind": "folder",
+        "folder": "integrations",
+        "root_only": true
+      },
+      "required_sections": [
+        "exchange",
+        "failure_semantics",
+        "ownership"
+      ],
+      "mints": [
+        "AS",
+        "OQ"
+      ],
       "gate_blocking": true,
-      "extra_frontmatter": {"required": ["system_name", "direction"], "optional": []}
+      "extra_frontmatter": {
+        "required": [
+          "system_name",
+          "direction"
+        ],
+        "optional": []
+      }
     },
     "challenge_record": {
-      "location": {"kind": "folder", "folder": "reviews"},
-      "required_sections": ["panel", "findings", "triage_audit", "verdict"],
-      "mints": ["CH"],
+      "location": {
+        "kind": "folder",
+        "folder": "reviews"
+      },
+      "required_sections": [
+        "panel",
+        "findings",
+        "triage_audit",
+        "verdict"
+      ],
+      "mints": [
+        "CH"
+      ],
       "gate_blocking": false,
-      "extra_frontmatter": {"required": ["round", "review_scope", "verdict"],
-                            "optional": ["locked"]}
+      "extra_frontmatter": {
+        "required": [
+          "round",
+          "review_scope",
+          "verdict"
+        ],
+        "optional": [
+          "locked"
+        ]
+      }
     }
   },
   "row_schemas": {
-    "br": {"section": "rules", "columns": ["id", "statement", "kind", "status", "cites"],
-           "status_enum": ["active", "retired"]},
-    "ac": {"section": "criteria", "columns": ["id", "criterion", "cites", "verify", "status"],
-           "status_enum": ["active", "retired"]},
-    "as": {"section": "assumptions", "columns": ["id", "statement", "source", "affects", "status", "opened_on"],
-           "status_enum": ["open", "confirmed", "struck"]},
-    "oq": {"section": "open_questions", "columns": ["id", "question", "blocks", "status", "opened_on", "note"],
-           "status_enum": ["open", "answered", "deferred"]},
-    "dec": {"section": "ruling", "columns": ["id", "ruling", "status", "decided_on"],
-            "status_enum": ["active", "superseded"]},
-    "ch": {"section": "findings", "columns": ["id", "lens", "severity", "finding", "disposition", "targets"],
-           "status_enum": []}
+    "br": {
+      "section": "rules",
+      "columns": [
+        "id",
+        "statement",
+        "kind",
+        "status",
+        "cites"
+      ],
+      "status_enum": [
+        "active",
+        "retired"
+      ]
+    },
+    "ac": {
+      "section": "criteria",
+      "columns": [
+        "id",
+        "criterion",
+        "cites",
+        "verify",
+        "status"
+      ],
+      "status_enum": [
+        "active",
+        "retired"
+      ]
+    },
+    "as": {
+      "section": "assumptions",
+      "columns": [
+        "id",
+        "statement",
+        "source",
+        "affects",
+        "status",
+        "opened_on"
+      ],
+      "status_enum": [
+        "open",
+        "confirmed",
+        "struck"
+      ]
+    },
+    "oq": {
+      "section": "open_questions",
+      "columns": [
+        "id",
+        "question",
+        "blocks",
+        "status",
+        "opened_on",
+        "note"
+      ],
+      "status_enum": [
+        "open",
+        "answered",
+        "deferred"
+      ]
+    },
+    "dec": {
+      "section": "ruling",
+      "columns": [
+        "id",
+        "ruling",
+        "status",
+        "decided_on"
+      ],
+      "status_enum": [
+        "active",
+        "superseded"
+      ]
+    },
+    "ch": {
+      "section": "findings",
+      "columns": [
+        "id",
+        "lens",
+        "severity",
+        "finding",
+        "disposition",
+        "targets"
+      ],
+      "status_enum": []
+    }
   },
   "row_enums": {
-    "ch_severity": ["blocking", "minor"],
-    "ch_disposition": ["covered", "fix", "assumption", "question", "rejected"],
-    "challenge_verdict": ["converged", "continue"],
-    "challenge_review_scope": ["domain", "space"],
-    "budget_scope": ["space", "domain"],
-    "integration_direction": ["inbound", "outbound", "bidirectional"]
+    "ch_severity": [
+      "blocking",
+      "minor"
+    ],
+    "ch_disposition": [
+      "covered",
+      "fix",
+      "assumption",
+      "question",
+      "rejected"
+    ],
+    "challenge_verdict": [
+      "converged",
+      "continue"
+    ],
+    "challenge_review_scope": [
+      "domain",
+      "space"
+    ],
+    "budget_scope": [
+      "space",
+      "domain"
+    ],
+    "integration_direction": [
+      "inbound",
+      "outbound",
+      "bidirectional"
+    ]
   },
-  "challenge": {"max_rounds": 3},
+  "challenge": {
+    "max_rounds": 3
+  },
   "thresholds": {
     "nesting_warn_depth": 2,
     "nesting_fail_depth": 3,
@@ -136,13 +442,5 @@
     "open_row_age_days_warn": 14,
     "space_docs_warn": 200,
     "space_bytes_warn": 1500000
-  },
-  "legacy_sections": {
-    "purpose_scope": {"heading": "purpose and scope", "target": "space.md", "section": "purpose_scope"},
-    "process_analysis": {"heading": "process analysis", "target": "processes/legacy.md", "section": "main_flow"},
-    "data_dictionary": {"heading": "conceptual data dictionary", "target": "entities/legacy.md", "section": "fields"},
-    "business_rules": {"heading": "business rules", "target": "rules/legacy.md", "section": "rules"},
-    "acceptance_criteria": {"heading": "acceptance criteria", "target": "acceptance/legacy.md", "section": "criteria"},
-    "open_questions": {"heading": "open questions", "target": "space.md", "section": "open_questions"}
   }
 }

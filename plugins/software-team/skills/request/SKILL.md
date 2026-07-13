@@ -57,8 +57,7 @@ Front door for real work: classify, confirm, deliver.
       workspace/docs/business-analysis/<slug> --gate approval (scoped
       with --node for a single-domain ask). Nonzero or no space: the
       business-analysis entry flow runs first, here, in this
-      conversation. A legacy single-file brief routes to migration
-      there.
+      conversation.
    b. Spawn software-team-product-owner with its bound planning
       knowledge skill to produce or extend the backlog as an
       epics-and-stories JSON import file (the agent's output contract).

@@ -24,9 +24,7 @@ You MUST follow these rules exactly. Violating any of them is a failure.
   workspace/docs/business-analysis/<slug> --gate approval (add --node
   domains/<name> when the work touches one domain; a buildable domain
   does not wait for the others). Nonzero, or no space at all: stop and
-  run the business-analysis entry flow first, then resume here. A legacy
-  single-file brief is accepted during transition with a migration
-  prompt at the next analysis touch.
+  run the business-analysis entry flow first, then resume here.
 - The design master exists at workspace/docs/design-system/MASTER.md.
   Missing: STOP, tell the user "no design system yet", route them into
   the design-system entry, and resume here once MASTER exists. This flow

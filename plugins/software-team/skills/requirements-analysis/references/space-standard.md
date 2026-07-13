@@ -113,9 +113,6 @@ frontmatter, unique across the whole space. LEG is reserved.
 - AS and OQ rows carry opened_on dates; the compiler flags open rows
   older than the schema threshold. The assumption-aging principle is
   machine-checked, not remembered.
-- Legacy briefs migrated into a space keep their bare BR-### / AC-###
-  ids frozen under legacy_ids: true in space.md; new work always mints
-  namespaced ids.
 
 ## Lifecycle and gates
 

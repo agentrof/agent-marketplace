@@ -16,16 +16,21 @@ def main() -> int:
     resolved = hook_common.resolve_project(payload.get("cwd", ""))
     if resolved is None:
         return 0
-    project_key, _ = resolved
+    project_key, project_root = resolved
     try:
         import contextlib
         import io
+        from pathlib import Path
         out = io.StringIO()
         with contextlib.redirect_stdout(out), contextlib.redirect_stderr(io.StringIO()):
             code = pmo_cli.main(["resume-info", "--project-key", project_key, "--json"])
         if code != 0:
             return 0
         orders = json.loads(out.getvalue()).get("active_work_orders", [])
+        # Only THIS session's worktree goes dangling; lanes in other worktrees
+        # have their own sessions and must not be flagged by this one.
+        here = str(Path(project_root).resolve())
+        orders = [o for o in orders if o.get("worktree") == here]
         for order in orders:
             hook_common.run_cli([
                 "event", "append",

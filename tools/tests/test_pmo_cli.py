@@ -149,6 +149,14 @@ class PmoCliTests(unittest.TestCase):
         self.tmp = tempfile.TemporaryDirectory()
         self._old_home = os.environ.get("AGENTROF_HOME")
         os.environ["AGENTROF_HOME"] = str(Path(self.tmp.name) / "agentrof")
+        # The worktree-binding guard compares the caller's cwd against each
+        # order's claimed worktree, so tests run from real directories.
+        self.wt_main = Path(self.tmp.name) / "wt-main"
+        self.wt_two = Path(self.tmp.name) / "wt-two"
+        self.wt_main.mkdir()
+        self.wt_two.mkdir()
+        self._old_cwd = os.getcwd()
+        os.chdir(self.wt_main)
         code, _, err = run(["init-db"])
         self.assertEqual(code, 0, err)
         code, _, err = run(["project", "register", "--key", "shop",
@@ -156,6 +164,7 @@ class PmoCliTests(unittest.TestCase):
         self.assertEqual(code, 0, err)
 
     def tearDown(self):
+        os.chdir(self._old_cwd)
         if self._old_home is None:
             os.environ.pop("AGENTROF_HOME", None)
         else:
@@ -173,7 +182,8 @@ class PmoCliTests(unittest.TestCase):
         return run(["item", "import", "--project-key", "shop",
                     "--json-file", str(path)])
 
-    def init_wo(self, wo_key="wo1", worktree="/w/main", story="WP-01"):
+    def init_wo(self, wo_key="wo1", worktree=None, story="WP-01"):
+        worktree = worktree or str(self.wt_main)
         argv = ["work-order", "init", "--project-key", "shop",
                 "--work-order-key", wo_key,
                 "--request", "build it", "--worktree", worktree]
@@ -430,10 +440,10 @@ class PmoCliTests(unittest.TestCase):
     def test_same_story_refused_disjoint_allowed(self):
         self.import_backlog()
         self.assertEqual(self.init_wo()[0], 0)
-        code, _, err = self.init_wo(wo_key="wo2", worktree="/w/two", story="WP-01")
+        code, _, err = self.init_wo(wo_key="wo2", worktree=str(self.wt_two), story="WP-01")
         self.assertEqual(code, 1)
         self.assertIn("already claimed", err)
-        code, _, err = self.init_wo(wo_key="wo3", worktree="/w/two", story="WP-02")
+        code, _, err = self.init_wo(wo_key="wo3", worktree=str(self.wt_two), story="WP-02")
         self.assertEqual(code, 0, err)
 
     def test_story_claim_marks_in_development(self):
@@ -510,7 +520,7 @@ class PmoCliTests(unittest.TestCase):
         code, _, err = run(["work-order", "init", "--project-key", "shop",
                             "--work-order-key", "atomic1",
                             "--request", "small fix",
-                            "--worktree", "/w/atomic"])
+                            "--worktree", str(self.wt_main)])
         self.assertEqual(code, 0, err)
         for step in ("0", "1", "2", "3", "4", "5"):
             run(["work-order", "set-step", "--work-order-key", "atomic1",
@@ -545,7 +555,8 @@ class PmoCliTests(unittest.TestCase):
                           "--ownership",
                           '{"backend_developer": ["apps/backend/"]}'])
         self.assertEqual(code, 0)
-        self.init_wo(wo_key="wo2", worktree="/w/two", story="WP-02")
+        self.init_wo(wo_key="wo2", worktree=str(self.wt_two), story="WP-02")
+        os.chdir(self.wt_two)  # wo2's mutations belong to its own worktree
         code, _, err = run(["work-order", "set-ownership",
                             "--work-order-key", "wo2",
                             "--ownership",
@@ -557,6 +568,142 @@ class PmoCliTests(unittest.TestCase):
                             "--ownership",
                             '{"frontend_developer": ["apps/frontend/"]}'])
         self.assertEqual(code, 0, err)
+
+    # -- worktree binding and reactivation (mechanical guards) -----------------
+
+    def test_midflight_verbs_bound_to_worktree(self):
+        """Mid-flight mutations are refused from outside the order's claimed
+        worktree, naming the owning path; the same call passes from inside."""
+        self.import_backlog()
+        self.init_wo()  # claimed by wt_main
+        os.chdir(self.wt_two)
+        for argv in (
+            ["work-order", "set-step", "--work-order-key", "wo1",
+             "--step", "0", "--status", "done"],
+            ["work-order", "record-gate", "--work-order-key", "wo1",
+             "--gate", "g", "--decision", "approve"],
+            ["finding", "open", "--work-order-key", "wo1",
+             "--source", "review", "--severity", "low", "--summary", "x"],
+            ["task", "open", "--work-order-key", "wo1",
+             "--role", "qa_engineer", "--step", "1", "--title", "t"],
+        ):
+            code, _, err = run(argv)
+            self.assertEqual(code, 1, argv)
+            self.assertIn("belongs to worktree", err)
+            self.assertIn(str(self.wt_main.name), err)
+        os.chdir(self.wt_main)
+        code, _, err = run(["work-order", "set-step", "--work-order-key", "wo1",
+                            "--step", "0", "--status", "done"])
+        self.assertEqual(code, 0, err)
+
+    def test_release_works_from_anywhere(self):
+        self.import_backlog()
+        self.init_wo()
+        os.chdir(self.wt_two)  # the recovery verb stays unrestricted
+        code, _, err = run(["work-order", "release", "--work-order-key", "wo1"])
+        self.assertEqual(code, 0, err)
+
+    def test_reactivation_revalidates_claims(self):
+        """set-status back to an active status re-runs the init claim checks:
+        a story or worktree taken meanwhile refuses by name."""
+        self.import_backlog()
+        self.init_wo()
+        run(["work-order", "release", "--work-order-key", "wo1"])
+        # another lane claims the same story while wo1 is parked
+        self.init_wo(wo_key="wo2", worktree=str(self.wt_two), story="WP-01")
+        code, _, err = run(["work-order", "set-status", "--work-order-key",
+                            "wo1", "--status", "running"])
+        self.assertEqual(code, 1)
+        self.assertIn("cannot reactivate", err)
+        self.assertIn("wo2", err)
+        # free the story again: reactivation now succeeds
+        os.chdir(self.wt_two)
+        run(["work-order", "release", "--work-order-key", "wo2"])
+        os.chdir(self.wt_main)
+        code, _, err = run(["work-order", "set-status", "--work-order-key",
+                            "wo1", "--status", "running"])
+        self.assertEqual(code, 0, err)
+
+    def test_reactivation_refuses_taken_worktree(self):
+        self.import_backlog()
+        self.init_wo()
+        run(["work-order", "release", "--work-order-key", "wo1"])
+        # a storyless order grabs the SAME worktree while wo1 is parked
+        code, _, err = run(["work-order", "init", "--project-key", "shop",
+                            "--work-order-key", "squatter",
+                            "--request", "atomic fix",
+                            "--worktree", str(self.wt_main)])
+        self.assertEqual(code, 0, err)
+        code, _, err = run(["work-order", "set-status", "--work-order-key",
+                            "wo1", "--status", "running"])
+        self.assertEqual(code, 1)
+        self.assertIn("now holds worktree", err)
+
+    # -- item ready (dispatch surface) -----------------------------------------
+
+    def ready(self):
+        code, out, err = run(["item", "ready", "--project-key", "shop",
+                              "--json"])
+        self.assertEqual(code, 0, err)
+        return json.loads(out)
+
+    def test_item_ready_dep_gating(self):
+        self.import_backlog()
+        result = self.ready()
+        self.assertEqual([r["external_id"] for r in result["ready"]], ["WP-01"])
+        self.assertEqual(result["blocked"][0]["external_id"], "WP-02")
+        blocker = result["blocked"][0]["blocked_by"][0]
+        self.assertEqual(blocker["item"], "WP-01")
+        self.assertIn("authenticated session", blocker["reason"])
+        run(["item", "update", "--project-key", "shop",
+             "--external-id", "WP-01", "--status", "done"])
+        result = self.ready()
+        self.assertEqual([r["external_id"] for r in result["ready"]], ["WP-02"])
+        self.assertEqual(result["blocked"], [])
+
+    def test_item_ready_excludes_claimed(self):
+        self.import_backlog()
+        self.init_wo()  # claims WP-01
+        result = self.ready()
+        self.assertEqual([r["external_id"] for r in result["ready"]], [])
+        claimed = result["claimed"][0]
+        self.assertEqual(claimed["external_id"], "WP-01")
+        self.assertEqual(claimed["work_order_key"], "wo1")
+        self.assertIn("wt-main", claimed["worktree"])
+
+    def test_item_ready_stale_in_development(self):
+        self.import_backlog()
+        self.init_wo()
+        run(["work-order", "release", "--work-order-key", "wo1"])
+        result = self.ready()  # story stayed in_development, claim freed
+        self.assertEqual(result["stale_in_development"], ["WP-01"])
+
+    def test_item_ready_orders_by_topo_priority(self):
+        data = json.loads(json.dumps(BACKLOG))
+        data["stories"][1]["depends_on"] = []
+        data["stories"][1]["dependency"] = ""
+        data["stories"].append({
+            "external_id": "WP-03", "epic": "EP-01", "title": "Avatar upload",
+            "type": "feature", "priority": "low: cosmetic tail",
+            "dependency": "", "scope": "s", "excludes": "x",
+            "dor": "d", "dod": "d",
+        })
+        self.import_backlog(data)
+        result = self.ready()
+        self.assertEqual([r["external_id"] for r in result["ready"]],
+                         ["WP-01", "WP-02", "WP-03"])  # critical, high, low
+        self.assertEqual([r["topo_position"] for r in result["ready"]],
+                         [1, 2, 3])
+
+    def test_resume_info_carries_ownership_map(self):
+        self.import_backlog()
+        self.init_wo()
+        run(["work-order", "set-ownership", "--work-order-key", "wo1",
+             "--ownership", '{"backend_developer": ["apps/backend/"]}'])
+        code, out, _ = run(["resume-info", "--project-key", "shop", "--json"])
+        info = json.loads(out)
+        self.assertEqual(info["active_work_orders"][0]["ownership"],
+                         {"backend_developer": ["apps/backend/"]})
 
     # -- tasks and attempts ----------------------------------------------------
 

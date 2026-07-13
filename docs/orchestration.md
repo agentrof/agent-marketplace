@@ -7,11 +7,12 @@ same pull request.
 ## Surfaces and routes
 
 Entry skills (user surface): request, sketch, demo, business-analysis,
-design-system, setup, configure. Entries stay thin: parse input, run the
-pre-flight, then either delegate to a flow file via the plugin root
-variable (request, sketch, demo) or execute their own short interactive
-procedure in the main conversation (business-analysis, design-system,
-setup, configure). Internal flows: design, develop.
+design-system, setup, configure, program. Entries stay thin: parse
+input, run the pre-flight, then either delegate to a flow file via the
+plugin root variable (request, sketch, demo, program) or execute their
+own short interactive procedure in the main conversation
+(business-analysis, design-system, setup, configure). Internal flows:
+design, develop, program.
 
 Routes:
 
@@ -39,6 +40,15 @@ Routes:
 - **sketch / demo** require a brief (business-analysis runs first when
   missing) and a design system MASTER (the design-system entry owns its
   creation; other flows only redirect).
+- **program** is the integrator surface: one session per project, on
+  the primary checkout only (a linked worktree is refused). It proposes
+  the ready set computed from dependency edges and claims (item ready;
+  advisory only, the human approves each lane, capped by the optional
+  max_parallel config), opens detached sibling worktrees and hands off
+  to per-lane sessions that run the develop flow up to the opened pull
+  request, tracks where gate approvals are pending without ever
+  approving across sessions, and owns every merge checkpoint on the
+  main line, strictly serialized with the suite run between merges.
 - **business-analysis** and **design-system** are interactive main
   conversation flows with a closing approval gate each.
 - **setup** is idempotent bootstrap (including the PMO prerequisite
@@ -108,11 +118,13 @@ step rows (status, artifact path, attempts), gate rows (decision,
 decided_by, decided_at), ownership rows, finding rows (stable F-### ids,
 source review/qa/design_qa, severity, open/fixed/waived), coverage rows,
 budget rows, ledger lines. The CLI enforces the enums, the step
-transition guard, the complete guard (steps done, gates recorded,
-findings closed; story work orders additionally require imported
-coverage and a ledger line), snake_case ownership roles and
-ownership-overlap refusal across all of the project's active work
-orders. The checkpoint
+transition guard, the complete guard (steps done, findings closed;
+story work orders additionally require imported coverage and a ledger
+line), snake_case ownership roles, ownership-overlap refusal across all
+of the project's active work orders, worktree binding (mid-order
+mutations only from inside the claimed worktree; closing writes only
+from the primary checkout) and claim re-validation on reactivating a
+parked order. The checkpoint
 subcommand bundles the merge-checkpoint bookkeeping (ledger line plus
 both regenerated views) into one call; the generated views are also
 protected by a guard hook against hand edits.
@@ -207,16 +219,28 @@ published interface schema, brief BR updates from fix-atomic work, the
 deployed_verified field once the owner confirms the story runs in its
 target environment, and every tenth checkpoint the architecture
 reconciliation (living docs vs code; page overrides vs the design
-master).
+master). In parallel operation the integrator session executes the
+checkpoint, one merged lane at a time, with the main-line suite run
+between merges; a lane whose branch does not contain the current main
+tip is refused before merge (mechanical merge-base check).
 
 ## Concurrency and git
 
 One active work order per worktree, one active work order per story,
 disjoint ownership across a project's active work orders: the claim
-system is designed for parallel worktrees, while the shipped flows
-still drive one work order at a time (a parallel-orchestration flow is
-future work and needs no schema change; the dependency edges stories
-carry are the scheduling contract it will consume). Backlog updates never ride feature branches; the database is
+system arbitrates parallel worktrees, and the program flow drives them.
+Parallel delivery is multi-session: each approved story gets a detached
+sibling worktree (../<project-dir>-wp-<nn>) and its own session running
+the develop flow up to the opened pull request; the dependency edges
+stories carry are the scheduling contract item ready consumes. Session
+scope is enforced mechanically by the CLI, not by instruction: mid-order
+mutations are accepted only from inside the order's claimed worktree,
+closing writes (checkpoint, complete) only from the primary checkout,
+and reactivating a parked order re-validates all three claims against
+the current active set. Gates are approved only in the owning lane
+session. Claims free when the order leaves the active statuses; after a
+completed merge checkpoint the integrator removes the worktree and
+deletes the lane branch. Backlog updates never ride feature branches; the database is
 updated and the views re-render on the main line at the checkpoint after
 merge. Architecture deltas deliberately ride the story branch so model
 and code merge atomically. Each story ends in its own pull request;

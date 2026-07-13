@@ -73,9 +73,11 @@ class PmoDashboardTests(unittest.TestCase):
         }), encoding="utf-8")
         cli(["item", "import", "--project-key", "shop",
              "--json-file", str(backlog)], env)
+        # the worktree-binding guard compares each caller's cwd to the claimed
+        # worktree, so the seed claims the test runner's own directory
         cli(["work-order", "init", "--project-key", "shop",
              "--work-order-key", "wo1", "--request", "build",
-             "--worktree", str(root / "wt"), "--story", "WP-01"], env)
+             "--worktree", os.getcwd(), "--story", "WP-01"], env)
         cli(["work-order", "set-step", "--work-order-key", "wo1",
              "--step", "0", "--status", "done"], env)
         cli(["task", "touch", "--project-key", "shop",

@@ -164,6 +164,60 @@ class PmoHookTests(unittest.TestCase):
         self.assertEqual(code, 0)
         self.assertIn("session_ended_with_active_work_order", self.events())
 
+    def open_second_lane(self):
+        """A second project worktree with its own active work order."""
+        lane_root = Path(self.tmp.name) / "lane-b"
+        (lane_root / "workspace").mkdir(parents=True)
+        (lane_root / "workspace" / "config.json").write_text(
+            json.dumps({"managed_by": "software-team", "project_key": "shop"}),
+            encoding="utf-8",
+        )
+        backlog = Path(self.tmp.name) / "backlog-b.json"
+        backlog.write_text(json.dumps({
+            "epics": [{"external_id": "EP-01", "title": "Core"}],
+            "stories": [{
+                "external_id": "WP-02", "epic": "EP-01", "title": "Slice two",
+                "scope": "s", "excludes": "x", "dor": "d", "dod": "d",
+            }],
+        }), encoding="utf-8")
+        run_cli(["item", "import", "--project-key", "shop",
+                 "--json-file", str(backlog)], self.env)
+        run_cli(["work-order", "init", "--project-key", "shop",
+                 "--work-order-key", "wo-lane-b",
+                 "--request", "build", "--worktree", str(lane_root),
+                 "--story", "WP-02"], self.env)
+        return lane_root
+
+    def test_session_end_ignores_other_worktrees(self):
+        """Closing one session flags only ITS worktree's order as dangling;
+        healthy parallel lanes stay unflagged."""
+        self.open_second_lane()
+        code, _, _ = run_hook("hook_session_end.py", self.payload(
+            hook_event_name="SessionEnd", reason="other",
+        ), self.env)  # cwd = project_root (lane A)
+        self.assertEqual(code, 0)
+        _, out, _ = run_cli(["resume-info", "--project-key", "shop",
+                             "--events", "50", "--json"], self.env)
+        dangling = [e for e in json.loads(out)["recent_events"]
+                    if e["action"] == "session_ended_with_active_work_order"]
+        self.assertEqual(len(dangling), 1)
+        self.assertEqual(dangling[0]["payload"].get("current_step"), "0")
+
+    def test_session_start_partitions_lanes(self):
+        """Resume context separates this worktree's order from parallel
+        lanes elsewhere."""
+        lane_root = self.open_second_lane()
+        code, out, err = run_hook("hook_session_start.py", self.payload(
+            hook_event_name="SessionStart", source="startup",
+        ), self.env)  # cwd = project_root (lane A, holds wo1)
+        self.assertEqual(code, 0, err)
+        context = json.loads(out)["hookSpecificOutput"]["additionalContext"]
+        self.assertIn("THIS worktree", context)
+        self.assertIn("wo1", context.split("OTHER worktrees")[0])
+        self.assertIn("OTHER worktrees", context)
+        self.assertIn("wo-lane-b", context.split("OTHER worktrees")[1])
+        self.assertIn("program entry", context)
+
     def attempts(self):
         import sqlite3
         con = sqlite3.connect(Path(self.env["AGENTROF_HOME"]) / "agentrof.db")

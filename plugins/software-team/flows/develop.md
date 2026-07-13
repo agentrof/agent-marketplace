@@ -305,8 +305,16 @@ presenting any gate.
   notes) and, when the story authored migrations, the migration notes:
   which migrations, their order, the safe-to-run-twice statement and the
   rollback note. The handoff is complete or the story is not done.
-- Backlog updates NEVER ride this branch. At the checkpoint after merge,
-  on the main line:
+- Merge checkpoint (main line only). Backlog updates NEVER ride this
+  branch, and the list below runs only in the session that sits on the
+  primary checkout. Solo operation: this session, after the human
+  merges. Parallel operation (this worktree was opened by the program
+  flow): step 5 ends at the opened pull request; mark step 5 done with
+  the PR URL as its artifact, set the work order waiting_gate (claims
+  stay held until merge), report the PR to the integrator session and
+  stop; the integrator executes this same list at its merge checkpoint,
+  and the CLI refuses these closing writes from inside a lane worktree
+  anyway. At the checkpoint after merge, on the main line:
   - mark the story done (item update --external-id <WP-##> --status
     done), then run the checkpoint subcommand (checkpoint
     --work-order-key <key>, with --escaped-defect when a fix-atomic
@@ -329,11 +337,13 @@ presenting any gate.
     the code as implemented, and of page overrides against the design
     master (stable overrides fold back in; contradictions become
     findings);
-  then ask "continue with the next story?".
-- Set the work order complete (work-order set-status --status complete)
-  only when every step is done, every gate is recorded, every finding is
-  closed, and the story work order's coverage and ledger line are in the
-  database; the CLI's complete guard refuses otherwise.
+  - set the work order complete (work-order set-status --status
+    complete) only when every step is done and every finding is closed;
+    on story work orders the coverage rows and the ledger line must be
+    in the database; the CLI's complete guard refuses otherwise (gates
+    are recorded as you pass them; the guard checks state, not gates);
+  then ask "continue with the next story?" (solo) or hand back to the
+  program flow's PROPOSE (parallel).
 
 ## Atomic route variant
 

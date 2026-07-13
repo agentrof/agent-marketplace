@@ -32,7 +32,9 @@ Config changes go through this gate, never through hand edits.
    as maintainer releases. Shape keys: test_command and mutation_command
    non-empty command strings; source_dirs a non-empty list of
    repo-relative paths (absolute paths refused); output_language a
-   non-empty language name.
+   non-empty language name; max_parallel an optional positive integer
+   (the program flow's lane-proposal cap; absent means 3; this gate is
+   its only writer).
 4. Present the impact analysis before writing: which roles' skill
    bindings change (the static role-to-skill map lives in
    ${CLAUDE_PLUGIN_ROOT}/flows/develop.md, step 0; method skills such as

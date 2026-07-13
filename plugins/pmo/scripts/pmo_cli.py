@@ -21,11 +21,12 @@ import json
 import os
 import shutil
 import sqlite3
+import subprocess
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
-PMO_VERSION = "0.3.0"
+PMO_VERSION = "0.4.0"
 SCHEMA_VERSION = 2
 DB_NAME = "agentrof.db"
 
@@ -420,6 +421,92 @@ def priority_rank(value: str) -> int:
 
 
 # ---------------------------------------------------------------------------
+# Worktree binding (mechanical session-scope guards)
+# ---------------------------------------------------------------------------
+
+
+def cwd_inside(worktree_path: str) -> bool:
+    cwd = norm_path(os.getcwd())
+    root = norm_path(worktree_path)
+    return cwd == root or cwd.startswith(root + os.sep)
+
+
+def require_cwd_inside(order) -> None:
+    """Mid-flight mutations belong to the session working in the order's
+    claimed worktree; any other session is refused mechanically."""
+    if not cwd_inside(order["worktree_path"]):
+        raise Rule(
+            f"work order '{order['work_order_key']}' belongs to worktree"
+            f" {order['worktree_path']}; run this from inside it"
+            " (work-order release is the recovery verb from elsewhere)"
+        )
+
+
+def in_linked_worktree() -> bool:
+    """True when the current directory sits in a linked git worktree, not the
+    primary checkout. A non-git directory binds nothing (permissive)."""
+    try:
+        probe = subprocess.run(
+            ["git", "rev-parse", "--git-dir", "--git-common-dir"],
+            capture_output=True, text=True, timeout=10,
+        )
+        if probe.returncode != 0:
+            return False
+        lines = probe.stdout.splitlines()
+        if len(lines) < 2:
+            return False
+        git_dir, common_dir = (str(Path(p).resolve()) for p in lines[:2])
+        return git_dir != common_dir
+    except Exception:
+        return False
+
+
+def require_main_line(order) -> None:
+    """Closing writes (checkpoint, complete) run on the primary checkout: the
+    solo session or the integrator, never a lane's linked worktree."""
+    if in_linked_worktree():
+        raise Rule(
+            f"closing writes for work order '{order['work_order_key']}' run"
+            " on the primary checkout (main line), not inside a lane worktree"
+        )
+
+
+def revalidate_claims(con, order) -> None:
+    """Reactivating a parked work order re-runs the init claim checks against
+    the CURRENT active set; anything taken meanwhile refuses by name."""
+    mine = con.execute(
+        "SELECT role, path_prefix FROM ownership WHERE work_order_id = ?",
+        (order["id"],),
+    ).fetchall()
+    for other in active_work_orders(con, order["project_id"]):
+        if other["id"] == order["id"]:
+            continue
+        if other["worktree_path"] == order["worktree_path"]:
+            raise Rule(
+                f"cannot reactivate: active work order"
+                f" '{other['work_order_key']}' now holds worktree"
+                f" {order['worktree_path']}"
+            )
+        if order["story_id"] is not None and other["story_id"] == order["story_id"]:
+            raise Rule(
+                "cannot reactivate: the story is now claimed by active work"
+                f" order '{other['work_order_key']}'"
+            )
+        for row in con.execute(
+            "SELECT role, path_prefix FROM ownership WHERE work_order_id = ?",
+            (other["id"],),
+        ):
+            for own in mine:
+                if prefixes_overlap(own["path_prefix"], row["path_prefix"]):
+                    raise Rule(
+                        f"cannot reactivate: ownership {own['role']}:"
+                        f"{own['path_prefix']} overlaps {row['role']}:"
+                        f"{row['path_prefix']} held by active work order"
+                        f" '{other['work_order_key']}'"
+                    )
+
+
+# ---------------------------------------------------------------------------
 # Dependency graph helpers (shared with the dashboard)
 # ---------------------------------------------------------------------------
 
@@ -716,6 +803,7 @@ def cmd_wo_set_step(args) -> int:
     con = connect()
     with mutate(con):
         order = get_work_order(con, args.work_order_key)
+        require_cwd_inside(order)
         if args.status == "in_progress":
             for prior in STEP_IDS[: STEP_IDS.index(args.step)]:
                 row = con.execute(
@@ -753,6 +841,7 @@ def cmd_wo_record_gate(args) -> int:
     con = connect()
     with mutate(con):
         order = get_work_order(con, args.work_order_key)
+        require_cwd_inside(order)
         con.execute(
             "INSERT INTO gates (work_order_id, name, decision, decided_by, decided_at)"
             " VALUES (?, ?, ?, ?, ?)"
@@ -776,6 +865,7 @@ def cmd_wo_bump(args) -> int:
     con = connect()
     with mutate(con):
         order = get_work_order(con, args.work_order_key)
+        require_cwd_inside(order)
         column = "review_rounds" if args.counter == "review" else "qa_rounds"
         con.execute(
             f"UPDATE work_orders SET {column} = {column} + 1, updated_at = ?"
@@ -802,6 +892,7 @@ def cmd_wo_set_ownership(args) -> int:
     con = connect()
     with mutate(con):
         order = get_work_order(con, args.work_order_key)
+        require_cwd_inside(order)
         flat: list[tuple[str, str]] = []
         for role, paths in ownership.items():
             if not is_snake(role):
@@ -850,6 +941,13 @@ def cmd_wo_set_status(args) -> int:
     con = connect()
     with mutate(con):
         order = get_work_order(con, args.work_order_key)
+        if args.status == "complete":
+            require_main_line(order)
+        else:
+            require_cwd_inside(order)
+        if (args.status in ACTIVE_WO_STATUSES
+                and order["status"] not in ACTIVE_WO_STATUSES):
+            revalidate_claims(con, order)
         if args.status == "complete":
             not_done = [
                 row["step_id"]
@@ -986,6 +1084,13 @@ def cmd_resume_info(args) -> int:
                 (order["story_id"],),
             ).fetchone()
             story = f"{row['external_id']} {row['title']}"
+        ownership: dict[str, list[str]] = {}
+        for row in con.execute(
+            "SELECT role, path_prefix FROM ownership WHERE work_order_id = ?"
+            " ORDER BY role, path_prefix",
+            (order["id"],),
+        ):
+            ownership.setdefault(row["role"], []).append(row["path_prefix"])
         info["active_work_orders"].append({
             "work_order_key": order["work_order_key"],
             "status": order["status"],
@@ -994,6 +1099,7 @@ def cmd_resume_info(args) -> int:
             "worktree": order["worktree_path"],
             "steps": {s["step_id"]: s["status"] for s in steps},
             "gates": {g["name"]: g["decision"] for g in gates},
+            "ownership": ownership,
             "review_rounds": order["review_rounds"],
             "qa_rounds": order["qa_rounds"],
         })
@@ -1488,10 +1594,94 @@ def cmd_item_order(args) -> int:
     return 0
 
 
+def cmd_item_ready(args) -> int:
+    """The dispatch surface: which stories may start now, and why the rest
+    cannot. Derived entirely from existing rows; never stored."""
+    con = connect()
+    try:
+        project = get_project(con, args.project_key)
+    except Rule as exc:
+        return fail(str(exc))
+    nodes, edges = project_dep_graph(con, project["id"], "story")
+    order_list, cycles = topo_order(nodes, edges)
+    topo_pos = {eid: i + 1 for i, eid in enumerate(order_list)}
+    stories = {
+        row["external_id"]: row
+        for row in con.execute(
+            "SELECT * FROM work_items WHERE project_id = ? AND kind = 'story'",
+            (project["id"],),
+        )
+    }
+    claims = {}
+    for active in active_work_orders(con, project["id"]):
+        if active["story_id"] is not None:
+            claims[active["story_id"]] = active
+    dep_rows = con.execute(
+        "SELECT a.external_id AS item, b.external_id AS dep, b.status AS dep_status,"
+        " d.reason FROM work_item_deps d"
+        " JOIN work_items a ON a.id = d.item_id"
+        " JOIN work_items b ON b.id = d.depends_on_id"
+        " WHERE d.project_id = ? AND a.kind = 'story' AND b.kind = 'story'"
+        " ORDER BY a.external_id, b.external_id",
+        (project["id"],),
+    ).fetchall()
+    unmet = {}
+    for row in dep_rows:
+        if row["dep_status"] != "done":
+            unmet.setdefault(row["item"], []).append(
+                {"item": row["dep"], "status": row["dep_status"],
+                 "reason": row["reason"]})
+    result = {"project_key": args.project_key, "ready": [], "blocked": [],
+              "claimed": [], "stale_in_development": [], "cycles": cycles}
+    for eid in sorted(stories, key=lambda e: topo_pos.get(e, 10 ** 6)):
+        story = stories[eid]
+        active = claims.get(story["id"])
+        if active is not None:
+            result["claimed"].append({
+                "external_id": eid,
+                "work_order_key": active["work_order_key"],
+                "worktree": active["worktree_path"],
+            })
+            continue
+        if story["status"] == "in_development":
+            result["stale_in_development"].append(eid)
+            continue
+        if story["status"] not in ("planned", "ready"):
+            continue
+        if eid in unmet:
+            result["blocked"].append({"external_id": eid,
+                                      "blocked_by": unmet[eid]})
+            continue
+        if eid in cycles:
+            continue
+        result["ready"].append({
+            "external_id": eid, "title": story["title"],
+            "priority": story["priority"],
+            "topo_position": topo_pos.get(eid),
+        })
+    if args.json:
+        print(json.dumps(result, indent=2, sort_keys=True))
+        return 0
+    for entry in result["ready"]:
+        print(f"pmo: READY   {entry['external_id']:8} {entry['title']}")
+    for entry in result["blocked"]:
+        holders = ", ".join(b["item"] for b in entry["blocked_by"])
+        print(f"pmo: BLOCKED {entry['external_id']:8} waits on {holders}")
+    for entry in result["claimed"]:
+        print(f"pmo: CLAIMED {entry['external_id']:8} by {entry['work_order_key']}")
+    for eid in result["stale_in_development"]:
+        print(f"pmo: STALE   {eid:8} in_development with no active work order")
+    if not any((result["ready"], result["blocked"], result["claimed"],
+                result["stale_in_development"])):
+        print("pmo: no stories in the backlog")
+    return 0
+
+
 def cmd_task_open(args) -> int:
     con = connect()
     with mutate(con):
         order = get_work_order(con, args.work_order_key)
+        require_cwd_inside(order)
         external_id = next_external_id(con, order["project_id"], "T")
         con.execute(
             "INSERT INTO work_items (project_id, kind, external_id, parent_id,"
@@ -1524,6 +1714,7 @@ def cmd_task_close(args) -> int:
     con = connect()
     with mutate(con):
         order = get_work_order(con, args.work_order_key)
+        require_cwd_inside(order)
         task = find_task(con, order, args.role, args.step)
         if task is None:
             raise Rule(
@@ -1645,6 +1836,7 @@ def cmd_finding_open(args) -> int:
     con = connect()
     with mutate(con):
         order = get_work_order(con, args.work_order_key)
+        require_cwd_inside(order)
         external_id = next_finding_id(con, order["project_id"])
         con.execute(
             "INSERT INTO findings (project_id, work_order_id, story_id, external_id,"
@@ -1669,6 +1861,7 @@ def cmd_finding_update(args) -> int:
     con = connect()
     with mutate(con):
         order = get_work_order(con, args.work_order_key)
+        require_cwd_inside(order)
         finding = con.execute(
             "SELECT * FROM findings WHERE project_id = ? AND external_id = ?",
             (order["project_id"], args.finding),
@@ -1717,6 +1910,7 @@ def cmd_coverage_import(args) -> int:
     con = connect()
     with mutate(con):
         order = get_work_order(con, args.work_order_key)
+        require_cwd_inside(order)
         data = load_import_file(args.json_file)
         rows = data.get("rows", [])
         if not rows:
@@ -1744,6 +1938,7 @@ def cmd_budget_set(args) -> int:
     con = connect()
     with mutate(con):
         order = get_work_order(con, args.work_order_key)
+        require_cwd_inside(order)
         con.execute(
             "INSERT INTO budgets (work_order_id, budget_id, description, verdict,"
             " reason, recorded_at) VALUES (?, ?, ?, ?, ?, ?)"
@@ -1764,6 +1959,7 @@ def cmd_ledger_checkpoint(args) -> int:
     con = connect()
     with mutate(con):
         order = get_work_order(con, args.work_order_key)
+        require_main_line(order)
         counts: dict[str, int] = {}
         for row in con.execute(
             "SELECT source, severity, COUNT(*) AS n FROM findings"
@@ -1792,6 +1988,7 @@ def cmd_checkpoint(args) -> int:
     ledger line + both generated views."""
     con = connect()
     order = get_work_order(con, args.work_order_key)
+    require_main_line(order)
     project = con.execute(
         "SELECT project_key FROM projects WHERE id = ?", (order["project_id"],)
     ).fetchone()
@@ -2170,6 +2367,10 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--kind", default="story", choices=["story", "task"])
     p.add_argument("--json", action="store_true")
     p.set_defaults(func=cmd_item_order)
+    p = item.add_parser("ready")
+    p.add_argument("--project-key", required=True)
+    p.add_argument("--json", action="store_true")
+    p.set_defaults(func=cmd_item_ready)
 
     task = sub.add_parser("task").add_subparsers(dest="subcommand", required=True)
     p = task.add_parser("open")

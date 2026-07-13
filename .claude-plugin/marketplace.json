@@ -6,21 +6,21 @@
   },
   "metadata": {
     "description": "A catalog of curated, end-to-end agent teams for Claude Code. Install a complete team and run at the goal.",
-    "version": "1.4.0"
+    "version": "1.5.0"
   },
   "plugins": [
     {
       "name": "pmo",
       "source": "./plugins/pmo",
       "description": "Project Management Office: the shared operations backbone for every team plugin. One central database for projects, epics, stories, tasks with attempt history, dependencies, DoD records, work orders, findings and audit events, written only through its CLI, recorded deterministically via hooks, and viewed through a read-only web dashboard.",
-      "version": "0.3.0",
+      "version": "0.4.0",
       "license": "MIT"
     },
     {
       "name": "software-team",
       "source": "./plugins/software-team",
       "description": "A complete, orchestrated software and product development team: analysis, planning, architecture, design system, implementation, review and verification.",
-      "version": "1.4.0",
+      "version": "1.5.0",
       "license": "MIT"
     }
   ]

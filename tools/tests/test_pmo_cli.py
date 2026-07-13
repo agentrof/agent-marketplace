@@ -11,7 +11,7 @@ from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[2]
-CLI_PATH = REPO / "plugins" / "pmo" / "scripts" / "pmo_cli.py"
+CLI_PATH = REPO / "plugins" / "project-management-office" / "scripts" / "pmo_cli.py"
 
 spec = importlib.util.spec_from_file_location("pmo_cli", CLI_PATH)
 pmo_cli = importlib.util.module_from_spec(spec)
@@ -36,7 +36,6 @@ BACKLOG = {
         {
             "external_id": "WP-01", "epic": "EP-01", "title": "Password reset flow",
             "type": "feature", "priority": "critical: walking skeleton",
-            "dependency": "",
             "scope": "Request, email token, set new password.",
             "excludes": "Two-factor reset.",
             "dor": "Brief BR-001..BR-004 accepted.",
@@ -49,7 +48,6 @@ BACKLOG = {
         {
             "external_id": "WP-02", "epic": "EP-01", "title": "Profile editing",
             "type": "feature", "priority": "high: closes the account loop",
-            "dependency": "WP-01",
             "depends_on": [{"item": "WP-01",
                             "reason": "editing needs the authenticated session WP-01 ships"}],
             "scope": "Edit display name and avatar.",
@@ -64,85 +62,6 @@ BACKLOG = {
     ],
     "open_questions": ["Which mail provider?"],
 }
-
-# The v1 schema shape, for migration tests: enough tables and rows to prove
-# the rename keeps data and foreign keys intact.
-V1_FIXTURE = """
-CREATE TABLE projects (id INTEGER PRIMARY KEY, project_key TEXT NOT NULL UNIQUE,
-  name TEXT NOT NULL, created_at TEXT NOT NULL);
-CREATE TABLE work_items (id INTEGER PRIMARY KEY,
-  project_id INTEGER NOT NULL REFERENCES projects(id), kind TEXT NOT NULL,
-  external_id TEXT NOT NULL, parent_id INTEGER, title TEXT NOT NULL,
-  status TEXT NOT NULL, item_type TEXT NOT NULL DEFAULT '',
-  priority TEXT NOT NULL DEFAULT '', dependency TEXT NOT NULL DEFAULT '',
-  scope TEXT NOT NULL DEFAULT '', excludes TEXT NOT NULL DEFAULT '',
-  dor TEXT NOT NULL DEFAULT '', dod TEXT NOT NULL DEFAULT '',
-  deployed_verified INTEGER NOT NULL DEFAULT 0,
-  run_id INTEGER REFERENCES runs(id), role TEXT NOT NULL DEFAULT '',
-  step_id TEXT NOT NULL DEFAULT '', started_at TEXT NOT NULL DEFAULT '',
-  finished_at TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL,
-  updated_at TEXT NOT NULL, UNIQUE (project_id, external_id));
-CREATE TABLE runs (id INTEGER PRIMARY KEY,
-  project_id INTEGER NOT NULL REFERENCES projects(id), story_id INTEGER,
-  run_key TEXT NOT NULL UNIQUE, request TEXT NOT NULL, status TEXT NOT NULL,
-  current_step TEXT NOT NULL DEFAULT '0', review_rounds INTEGER NOT NULL DEFAULT 0,
-  qa_rounds INTEGER NOT NULL DEFAULT 0, worktree_path TEXT NOT NULL,
-  bindings_json TEXT NOT NULL DEFAULT '{}', created_at TEXT NOT NULL,
-  updated_at TEXT NOT NULL);
-CREATE TABLE run_steps (run_id INTEGER NOT NULL REFERENCES runs(id),
-  step_id TEXT NOT NULL, status TEXT NOT NULL,
-  artifact_path TEXT NOT NULL DEFAULT '', attempts INTEGER NOT NULL DEFAULT 0,
-  UNIQUE (run_id, step_id));
-CREATE TABLE gates (id INTEGER PRIMARY KEY,
-  run_id INTEGER NOT NULL REFERENCES runs(id), name TEXT NOT NULL,
-  decision TEXT NOT NULL, decided_by TEXT NOT NULL DEFAULT 'owner',
-  decided_at TEXT NOT NULL, UNIQUE (run_id, name));
-CREATE TABLE ownership (run_id INTEGER NOT NULL REFERENCES runs(id),
-  role TEXT NOT NULL, path_prefix TEXT NOT NULL,
-  UNIQUE (run_id, role, path_prefix));
-CREATE TABLE findings (id INTEGER PRIMARY KEY, project_id INTEGER NOT NULL,
-  run_id INTEGER NOT NULL REFERENCES runs(id), story_id INTEGER,
-  external_id TEXT NOT NULL, source TEXT NOT NULL, severity TEXT NOT NULL,
-  summary TEXT NOT NULL, repro TEXT NOT NULL DEFAULT '',
-  expected_actual TEXT NOT NULL DEFAULT '',
-  traced_requirement TEXT NOT NULL DEFAULT '',
-  status TEXT NOT NULL DEFAULT 'open', opened_round INTEGER NOT NULL DEFAULT 0,
-  closed_round INTEGER, created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
-  UNIQUE (project_id, external_id));
-CREATE TABLE coverage (run_id INTEGER NOT NULL REFERENCES runs(id),
-  requirement_id TEXT NOT NULL, test_names TEXT NOT NULL DEFAULT '',
-  verdict TEXT NOT NULL, recorded_at TEXT NOT NULL,
-  UNIQUE (run_id, requirement_id));
-CREATE TABLE budgets (run_id INTEGER NOT NULL REFERENCES runs(id),
-  budget_id TEXT NOT NULL, description TEXT NOT NULL DEFAULT '',
-  verdict TEXT NOT NULL, reason TEXT NOT NULL DEFAULT '',
-  recorded_at TEXT NOT NULL, UNIQUE (run_id, budget_id));
-CREATE TABLE ledger (id INTEGER PRIMARY KEY, project_id INTEGER NOT NULL,
-  story_id INTEGER, run_id INTEGER REFERENCES runs(id),
-  checkpoint_at TEXT NOT NULL, finding_counts_json TEXT NOT NULL,
-  review_rounds INTEGER NOT NULL, qa_rounds INTEGER NOT NULL,
-  escaped_defect INTEGER NOT NULL DEFAULT 0);
-CREATE TABLE events (id INTEGER PRIMARY KEY, ts TEXT NOT NULL,
-  project_id INTEGER, run_id INTEGER, actor TEXT NOT NULL, action TEXT NOT NULL,
-  payload_json TEXT NOT NULL DEFAULT '{}');
-CREATE TABLE story_criteria (id INTEGER PRIMARY KEY, project_id INTEGER NOT NULL,
-  criterion_id TEXT NOT NULL, story_id INTEGER, disposition TEXT NOT NULL,
-  reason TEXT NOT NULL DEFAULT '', UNIQUE (project_id, criterion_id));
-CREATE TABLE open_questions (id INTEGER PRIMARY KEY, project_id INTEGER NOT NULL,
-  question TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'open',
-  created_at TEXT NOT NULL);
-INSERT INTO projects VALUES (1, 'shop', 'Shop', '2026-01-01T00:00:00+00:00');
-INSERT INTO runs VALUES (1, 1, NULL, 'r1', 'build', 'running', '0', 1, 2, '/w',
-  '{}', '2026-01-01T00:00:00+00:00', '2026-01-01T00:00:00+00:00');
-INSERT INTO run_steps VALUES (1, '0', 'in_progress', '', 0);
-INSERT INTO findings VALUES (1, 1, 1, NULL, 'F-001', 'review', 'high', 'bug',
-  '', '', '', 'open', 1, NULL, '2026-01-01T00:00:00+00:00',
-  '2026-01-01T00:00:00+00:00');
-INSERT INTO events (ts, project_id, run_id, actor, action) VALUES
-  ('2026-01-01T00:00:00+00:00', 1, 1, 'hook', 'session_ended_with_active_run');
-PRAGMA user_version = 1;
-"""
-
 
 class PmoCliTests(unittest.TestCase):
     def setUp(self):
@@ -160,7 +79,7 @@ class PmoCliTests(unittest.TestCase):
         code, _, err = run(["init-db"])
         self.assertEqual(code, 0, err)
         code, _, err = run(["project", "register", "--key", "shop",
-                            "--name", "Shop", "--team", "software-team"])
+                            "--name", "Shop", "--team", "software-engineering-team"])
         self.assertEqual(code, 0, err)
 
     def tearDown(self):
@@ -191,7 +110,7 @@ class PmoCliTests(unittest.TestCase):
             argv += ["--story", story]
         return run(argv)
 
-    # -- database, project, migration ----------------------------------------
+    # -- database and project --------------------------------------------------
 
     def test_init_db_idempotent(self):
         code1, _, _ = run(["init-db"])
@@ -204,7 +123,7 @@ class PmoCliTests(unittest.TestCase):
         self.assertEqual(code, 1)
         self.assertIn("init-db", err)
 
-    def test_fresh_db_is_schema_v2(self):
+    def test_fresh_db_schema(self):
         con = self.db()
         self.assertEqual(con.execute("PRAGMA user_version").fetchone()[0],
                          pmo_cli.SCHEMA_VERSION)
@@ -215,39 +134,7 @@ class PmoCliTests(unittest.TestCase):
             self.assertIn(table, tables)
         self.assertNotIn("runs", tables)
 
-    def test_migration_v1_to_v2_preserves_data(self):
-        home = Path(self.tmp.name) / "legacy"
-        home.mkdir()
-        con = sqlite3.connect(home / "agentrof.db")
-        con.executescript(V1_FIXTURE)
-        con.commit()
-        con.close()
-        os.environ["AGENTROF_HOME"] = str(home)
-        code, _, err = run(["init-db"])
-        self.assertEqual(code, 0, err)
-        con = self.db()
-        tables = {r["name"] for r in con.execute(
-            "SELECT name FROM sqlite_master WHERE type = 'table'")}
-        self.assertIn("work_orders", tables)
-        self.assertNotIn("runs", tables)
-        self.assertEqual(con.execute("PRAGMA user_version").fetchone()[0], 2)
-        row = con.execute("SELECT * FROM work_orders").fetchone()
-        self.assertEqual(row["work_order_key"], "r1")
-        self.assertEqual(row["review_rounds"], 1)
-        finding = con.execute("SELECT work_order_id FROM findings").fetchone()
-        self.assertEqual(finding["work_order_id"], 1)
-        self.assertEqual(con.execute("PRAGMA foreign_key_check").fetchall(), [])
-        actions = [r["action"] for r in con.execute(
-            "SELECT action FROM events ORDER BY id")]
-        self.assertIn("schema_migrated", actions)
-        self.assertIn("session_ended_with_active_run", actions)  # history kept
-        # the migrated database serves the renamed read surface
-        code, out, _ = run(["resume-info", "--project-key", "shop", "--json"])
-        self.assertEqual(code, 0)
-        info = json.loads(out)
-        self.assertEqual(info["active_work_orders"][0]["work_order_key"], "r1")
-
-    def test_migration_refuses_newer_schema(self):
+    def test_refuses_newer_schema(self):
         con = self.db()
         con.execute("PRAGMA user_version = 99")
         con.commit()
@@ -300,15 +187,6 @@ class PmoCliTests(unittest.TestCase):
             "item": "WP-02", "depends_on": "WP-01",
             "reason": "editing needs the authenticated session WP-01 ships",
         }])
-
-    def test_import_materializes_legacy_dependency_text(self):
-        data = json.loads(json.dumps(BACKLOG))
-        del data["stories"][1]["depends_on"]  # only the legacy text field left
-        self.import_backlog(data)
-        code, out, _ = run(["item", "list-deps", "--project-key", "shop", "--json"])
-        deps = json.loads(out)
-        self.assertEqual(deps[0]["depends_on"], "WP-01")
-        self.assertEqual(deps[0]["reason"], "authored dependency field")
 
     def test_import_rejects_dependency_cycle(self):
         data = json.loads(json.dumps(BACKLOG))
@@ -376,7 +254,7 @@ class PmoCliTests(unittest.TestCase):
         data["stories"].append({
             "external_id": "WP-03", "epic": "EP-01", "title": "Avatar upload",
             "type": "feature", "priority": "low: cosmetic tail",
-            "dependency": "", "scope": "s", "excludes": "x",
+            "scope": "s", "excludes": "x",
             "dor": "d", "dod": "d",
         })
         self.import_backlog(data)
@@ -716,11 +594,10 @@ class PmoCliTests(unittest.TestCase):
     def test_item_ready_orders_by_topo_priority(self):
         data = json.loads(json.dumps(BACKLOG))
         data["stories"][1]["depends_on"] = []
-        data["stories"][1]["dependency"] = ""
         data["stories"].append({
             "external_id": "WP-03", "epic": "EP-01", "title": "Avatar upload",
             "type": "feature", "priority": "low: cosmetic tail",
-            "dependency": "", "scope": "s", "excludes": "x",
+            "scope": "s", "excludes": "x",
             "dor": "d", "dod": "d",
         })
         self.import_backlog(data)
@@ -783,10 +660,10 @@ class PmoCliTests(unittest.TestCase):
         self.init_wo()
         run(["task", "touch", "--project-key", "shop",
              "--role", "backend_developer", "--phase", "start",
-             "--session-id", "s1", "--agent", "software-team-backend-developer"])
+             "--session-id", "s1", "--agent", "software-engineering-team-backend-developer"])
         run(["task", "touch", "--project-key", "shop",
              "--role", "backend_developer", "--phase", "start",
-             "--session-id", "s2", "--agent", "software-team-backend-developer"])
+             "--session-id", "s2", "--agent", "software-engineering-team-backend-developer"])
         run(["task", "touch", "--project-key", "shop",
              "--role", "backend_developer", "--phase", "stop",
              "--session-id", "s2", "--cost-usd", "1.25"])
@@ -800,7 +677,7 @@ class PmoCliTests(unittest.TestCase):
         self.assertEqual(attempts[1]["outcome"], "done")
         self.assertEqual(attempts[1]["cost_usd"], 1.25)
         self.assertEqual(attempts[1]["agent_name"],
-                         "software-team-backend-developer")
+                         "software-engineering-team-backend-developer")
         actions = []
         for row in con.execute("SELECT action FROM events ORDER BY id"):
             actions.append(row["action"])

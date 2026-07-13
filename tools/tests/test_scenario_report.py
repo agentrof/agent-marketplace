@@ -9,7 +9,7 @@ from contextlib import redirect_stdout
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[2]
-SCRIPT = REPO / "plugins" / "software-team" / "skills" / "qa-verification" / "scripts" / "scenario_report.py"
+SCRIPT = REPO / "plugins" / "software-engineering-team" / "skills" / "qa-verification" / "scripts" / "scenario_report.py"
 
 spec = importlib.util.spec_from_file_location("scenario_report", SCRIPT)
 scenario_report = importlib.util.module_from_spec(spec)

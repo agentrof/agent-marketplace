@@ -1,4 +1,4 @@
-"""Tests for the analysis-space compiler (plugins/software-team/scripts/
+"""Tests for the analysis-space compiler (plugins/software-engineering-team/scripts/
 ba_compile.py), run against the SHIPPED schema so the taxonomy and the
 machinery are welded together.
 
@@ -20,7 +20,7 @@ from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[2]
-COMPILER = REPO / "plugins" / "software-team" / "scripts" / "ba_compile.py"
+COMPILER = REPO / "plugins" / "software-engineering-team" / "scripts" / "ba_compile.py"
 
 spec = importlib.util.spec_from_file_location("ba_compile", COMPILER)
 ba = importlib.util.module_from_spec(spec)

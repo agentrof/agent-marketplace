@@ -1,4 +1,4 @@
-"""Unit tests for the software-team plugin's file-facing enforcement scripts
+"""Unit tests for the software-engineering-team plugin's file-facing enforcement scripts
 (run state and ownership moved to the PMO plugin's CLI; see test_pmo_cli)."""
 
 import importlib.util
@@ -9,7 +9,7 @@ from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[2]
-SCRIPTS = REPO / "plugins" / "software-team" / "scripts"
+SCRIPTS = REPO / "plugins" / "software-engineering-team" / "scripts"
 
 
 def load(name: str):

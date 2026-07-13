@@ -385,7 +385,7 @@ def check_trigger_policy(tree: Tree, findings: list[Finding]) -> None:
                 findings.append(Finding(
                     "error", rel(tree, path), 1, "trigger_policy",
                     "agent description contains an auto-trigger phrase",
-                    "agents are passive; describe the role and say it is invoked by software-team flows",
+                    "agents are passive; describe the role and say it is invoked by the plugin's flows",
                 ))
             if not desc:
                 findings.append(Finding(

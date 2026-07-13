@@ -13,7 +13,7 @@ import unittest
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[2]
-SCRIPTS = REPO / "plugins" / "pmo" / "scripts"
+SCRIPTS = REPO / "plugins" / "project-management-office" / "scripts"
 
 
 def run_hook(script: str, payload: dict, env: dict, args: list[str] | None = None):
@@ -45,11 +45,11 @@ class PmoHookTests(unittest.TestCase):
         self.project_root = root / "proj"
         (self.project_root / "workspace").mkdir(parents=True)
         (self.project_root / "workspace" / "config.json").write_text(
-            json.dumps({"managed_by": "software-team", "project_key": "shop"}),
+            json.dumps({"managed_by": "software-engineering-team", "project_key": "shop"}),
             encoding="utf-8",
         )
         run_cli(["init-db"], self.env)
-        run_cli(["project", "register", "--key", "shop", "--team", "software-team"],
+        run_cli(["project", "register", "--key", "shop", "--team", "software-engineering-team"],
                 self.env)
         backlog = root / "backlog.json"
         backlog.write_text(json.dumps({
@@ -94,7 +94,7 @@ class PmoHookTests(unittest.TestCase):
         code, _, err = run_hook("hook_subagent.py", self.payload(
             hook_event_name="SubagentStart",
             agent_id="a1",
-            agent_type="software-team:software-team-backend-developer",
+            agent_type="software-engineering-team:software-engineering-team-backend-developer",
         ), self.env, ["start"])
         self.assertEqual(code, 0, err)
         tasks = self.tasks()
@@ -106,11 +106,11 @@ class PmoHookTests(unittest.TestCase):
     def test_subagent_stop_stamps_finish(self):
         run_hook("hook_subagent.py", self.payload(
             hook_event_name="SubagentStart",
-            agent_id="a1", agent_type="software-team-qa-engineer",
+            agent_id="a1", agent_type="software-engineering-team-qa-engineer",
         ), self.env, ["start"])
         code, _, _ = run_hook("hook_subagent.py", self.payload(
             hook_event_name="SubagentStop",
-            agent_id="a1", agent_type="software-team-qa-engineer",
+            agent_id="a1", agent_type="software-engineering-team-qa-engineer",
             last_assistant_message="done",
         ), self.env, ["stop"])
         self.assertEqual(code, 0)
@@ -128,7 +128,7 @@ class PmoHookTests(unittest.TestCase):
         code, _, _ = run_hook("hook_subagent.py", self.payload(
             hook_event_name="SubagentStart",
             cwd=self.tmp.name,
-            agent_id="a3", agent_type="software-team-backend-developer",
+            agent_id="a3", agent_type="software-engineering-team-backend-developer",
         ), self.env, ["start"])
         self.assertEqual(code, 0)
         self.assertEqual(self.tasks(), [])
@@ -169,7 +169,7 @@ class PmoHookTests(unittest.TestCase):
         lane_root = Path(self.tmp.name) / "lane-b"
         (lane_root / "workspace").mkdir(parents=True)
         (lane_root / "workspace" / "config.json").write_text(
-            json.dumps({"managed_by": "software-team", "project_key": "shop"}),
+            json.dumps({"managed_by": "software-engineering-team", "project_key": "shop"}),
             encoding="utf-8",
         )
         backlog = Path(self.tmp.name) / "backlog-b.json"
@@ -230,21 +230,21 @@ class PmoHookTests(unittest.TestCase):
     def test_subagent_lifecycle_records_attempts(self):
         run_hook("hook_subagent.py", self.payload(
             hook_event_name="SubagentStart",
-            agent_id="a1", agent_type="software-team:software-team-backend-developer",
+            agent_id="a1", agent_type="software-engineering-team:software-engineering-team-backend-developer",
         ), self.env, ["start"])
         first = self.attempts()
         self.assertEqual(len(first), 1)
         self.assertEqual(first[0]["outcome"], "running")
         self.assertEqual(first[0]["session_id"], "s1")
-        self.assertEqual(first[0]["agent_name"], "software-team-backend-developer")
+        self.assertEqual(first[0]["agent_name"], "software-engineering-team-backend-developer")
         # a second dispatch before the first stop supersedes the dangling one
         run_hook("hook_subagent.py", self.payload(
             hook_event_name="SubagentStart", session_id="s2",
-            agent_id="a2", agent_type="software-team:software-team-backend-developer",
+            agent_id="a2", agent_type="software-engineering-team:software-engineering-team-backend-developer",
         ), self.env, ["start"])
         run_hook("hook_subagent.py", self.payload(
             hook_event_name="SubagentStop", session_id="s2",
-            agent_id="a2", agent_type="software-team:software-team-backend-developer",
+            agent_id="a2", agent_type="software-engineering-team:software-engineering-team-backend-developer",
         ), self.env, ["stop"])
         attempts = self.attempts()
         self.assertEqual(len(attempts), 2)

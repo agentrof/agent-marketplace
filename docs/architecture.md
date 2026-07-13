@@ -11,7 +11,7 @@ tested, end-to-end team; users install a team and run at the goal. Parts
 are not sold separately: agents and knowledge skills are encapsulated
 behind a small user surface of entry skills. Supported stacks are fixed
 and tested; new stacks are added by the maintainer as a skills folder plus
-a config enum value plus tests. One plugin is not a team: pmo is the
+a config enum value plus tests. One plugin is not a team: project-management-office is the
 shared operations backbone every team plugin depends on (declared in
 plugin.json dependencies, so it installs automatically).
 
@@ -51,9 +51,9 @@ plugin.json dependencies, so it installs automatically).
    as fallback. Never per-agent copies, never an on-demand skill.
 9. **Single-writer operations backbone.** Process state (projects, epics,
    stories, tasks with attempt history, dependency edges, DoD records,
-   work orders, findings, audit events) lives in the pmo plugin's central
+   work orders, findings, audit events) lives in the project-management-office plugin's central
    database in the user-level data directory, written ONLY through the
-   pmo CLI. Spawned agents never touch it; pmo's hooks record spawn/stop
+   project-management-office CLI. Spawned agents never touch it; project-management-office's hooks record spawn/stop
    mechanics through the same CLI and a guard hook denies direct file
    writes. What must be reviewable in git is rendered from the database
    as generated views, never hand-written. The web dashboard is a READER:
@@ -65,9 +65,9 @@ plugin.json dependencies, so it installs automatically).
 - `.claude-plugin/marketplace.json`: the catalog registry.
 - `plugins/<team>/`: one complete team per plugin (agents, skills, flows,
   templates, constitution).
-- `plugins/pmo/`: the operations backbone (central database CLI, hooks,
-  status entry, read-only web dashboard); a dependency of every team
-  plugin, never a team itself.
+- `plugins/project-management-office/`: the operations backbone (central
+  database CLI, hooks, the Control Tower launcher entry and its read-only
+  web dashboard); a dependency of every team plugin, never a team itself.
 - `docs/`: this map, the authoring guide, the orchestration spec.
 - `tools/`: validator, counts injector, scaffolder and their tests.
 - `memory/`: maintainer rules; excluded from all tooling.

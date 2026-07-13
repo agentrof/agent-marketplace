@@ -22,9 +22,9 @@ A plugin ships four component kinds:
 
 | thing | rule | example |
 |---|---|---|
-| plugin directory / name | kebab-case noun | software-team |
+| plugin directory / name | kebab-case noun | software-engineering-team |
 | agent file | agents/<role>.md, bare kebab | agents/code-reviewer.md |
-| agent frontmatter name | `<plugin>-<file-stem>`, globally unique | software-team-code-reviewer |
+| agent frontmatter name | `<plugin>-<file-stem>`, globally unique | software-engineering-team-code-reviewer |
 | skill directory + frontmatter name | identical bare kebab | skills/python-fastapi/ |
 | skill entry file | SKILL.md (uppercase) | skills/request/SKILL.md |
 | skill subfolders | references/, scripts/, data/ | references/patterns.md |
@@ -59,8 +59,8 @@ Copy this shape exactly; only the content of the sections varies by role.
 
 ```markdown
 ---
-name: software-team-backend-developer
-description: Backend developer role for orchestrated team runs. Invoked by software-team flows with explicit inputs; not auto-triggered.
+name: software-engineering-team-backend-developer
+description: Backend developer role for orchestrated team runs. Invoked by software-engineering-team flows with explicit inputs; not auto-triggered.
 model: sonnet
 ---
 
@@ -100,7 +100,7 @@ nouns, version pins, model names or counts in the body.
 ```markdown
 ---
 name: python-fastapi
-description: Backend stack knowledge for the team's server-side work. Loaded by software-team agents during runs; not user-facing.
+description: Backend stack knowledge for the team's server-side work. Loaded by software-engineering-team agents during runs; not user-facing.
 user-invocable: false
 ---
 
@@ -176,15 +176,15 @@ way.
 ## Depending on the operations backbone
 
 Every team plugin records its process state (runs, stories, tasks,
-findings) through the pmo plugin, never in its own files:
+findings) through the project-management-office plugin, never in its own files:
 
-- Declare the dependency in plugin.json: `"dependencies": ["pmo"]`;
-  installing the team then installs pmo automatically.
+- Declare the dependency in plugin.json: `"dependencies": ["project-management-office"]`;
+  installing the team then installs project-management-office automatically.
 - Invoke the CLI through the synced launcher in the user-level data
   directory (see the develop flow's state contract for the resolution
   line); never reference another plugin's install path, it is not a
   stable location.
-- Register the team's agent-name prefix in pmo's hook registry
+- Register the team's agent-name prefix in project-management-office's hook registry
   (TEAM_AGENT_PREFIXES in the hook common module) so subagent spawns are
   recorded as task activity.
 - The single-writer rule is absolute: flows call the CLI; spawned agents

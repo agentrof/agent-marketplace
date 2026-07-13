@@ -1,6 +1,6 @@
 # Orchestration spec
 
-The contract the software-team flows implement. Flow files are reviewed
+The contract the software-engineering-team flows implement. Flow files are reviewed
 against this document; when they disagree, one of the two changes in the
 same pull request.
 
@@ -78,9 +78,9 @@ Routes:
 5. Spawn only this plugin's agents.
 6. Never enter plan mode; the flow is the plan.
 
-## Operations backbone (the pmo plugin)
+## Operations backbone (the project-management-office plugin)
 
-The software-team plugin declares the pmo plugin as a dependency;
+The software-engineering-team plugin declares the project-management-office plugin as a dependency;
 installing the team installs the backbone. Pmo owns the user-level data
 directory (default: .agentrof under the user's home; AGENTROF_HOME
 overrides) holding one central SQLite database for every project and
@@ -90,11 +90,11 @@ step state and gates, findings, coverage rows, budget verdicts, the
 quality ledger and an append-only audit event per mutation.
 
 The database has exactly ONE writer: the PMO CLI. Flows call the synced
-launcher (bin/pmo_cli.py under the data directory; pmo's SessionStart
+launcher (bin/pmo_cli.py under the data directory; project-management-office's SessionStart
 hook keeps it current). Spawned agents never touch the database; a
 PreToolUse guard hook denies direct file writes to it.
 
-Hooks carry the mechanics, flows carry the semantics: pmo's
+Hooks carry the mechanics, flows carry the semantics: project-management-office's
 SubagentStart/SubagentStop hooks stamp task start and finish times for
 team agents automatically; the orchestrator's CLI calls carry which
 step, which round and which outcome. SessionStart injects resume context
@@ -148,7 +148,7 @@ across active work orders. A refused init means resume the holder
 work order leaves the active statuses (running, waiting_gate). While a
 work order is active, the analysis docs owning its story's claimed ids
 are frozen at document granularity: the develop flow writes the freeze
-manifest (freeze.json in the order directory) at init and the pmo guard
+manifest (freeze.json in the order directory) at init and the project-management-office guard
 denies edits to those paths; the rest of the space stays open for
 parallel analysis, and the configure entry still refuses config edits
 that would fork the running spec.

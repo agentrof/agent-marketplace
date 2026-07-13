@@ -17,7 +17,7 @@ import urllib.request
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[2]
-SCRIPTS = REPO / "plugins" / "pmo" / "scripts"
+SCRIPTS = REPO / "plugins" / "project-management-office" / "scripts"
 
 
 def load(name: str):
@@ -53,7 +53,7 @@ class PmoDashboardTests(unittest.TestCase):
         code, _, err = cli(["init-db"], env)
         assert code == 0, err
         cli(["project", "register", "--key", "shop", "--name", "Shop",
-             "--team", "software-team"], env)
+             "--team", "software-engineering-team"], env)
         backlog = root / "backlog.json"
         backlog.write_text(json.dumps({
             "epics": [{"external_id": "EP-01", "title": "Core", "goal": "g"}],
@@ -83,7 +83,7 @@ class PmoDashboardTests(unittest.TestCase):
         cli(["task", "touch", "--project-key", "shop",
              "--role", "backend_developer", "--phase", "start",
              "--session-id", "s1",
-             "--agent", "software-team-backend-developer"], env)
+             "--agent", "software-engineering-team-backend-developer"], env)
         cli(["task", "touch", "--project-key", "shop",
              "--role", "backend_developer", "--phase", "stop",
              "--cost-usd", "0.42"], env)
@@ -93,14 +93,14 @@ class PmoDashboardTests(unittest.TestCase):
 
         # a fake Claude plugin registry for the catalog scan
         plugins = root / "plugins"
-        install = plugins / "cache" / "agent-marketplace" / "software-team" / "9.9.9"
+        install = plugins / "cache" / "agent-marketplace" / "software-engineering-team" / "9.9.9"
         (install / ".claude-plugin").mkdir(parents=True)
         (install / ".claude-plugin" / "plugin.json").write_text(json.dumps(
-            {"name": "software-team", "version": "9.9.9",
-             "description": "The software team.", "dependencies": ["pmo"]}))
+            {"name": "software-engineering-team", "version": "9.9.9",
+             "description": "The software team.", "dependencies": ["project-management-office"]}))
         (install / "agents").mkdir()
-        (install / "agents" / "software-team-backend-developer.md").write_text(
-            "---\nname: software-team-backend-developer\n"
+        (install / "agents" / "software-engineering-team-backend-developer.md").write_text(
+            "---\nname: software-engineering-team-backend-developer\n"
             "description: Builds backends.\nmodel: sonnet\n---\n# X\n")
         (install / "skills" / "product-planning").mkdir(parents=True)
         (install / "skills" / "product-planning" / "SKILL.md").write_text(
@@ -109,7 +109,7 @@ class PmoDashboardTests(unittest.TestCase):
         (plugins / "installed_plugins.json").write_text(json.dumps({
             "version": 2,
             "plugins": {
-                "software-team@agent-marketplace": [
+                "software-engineering-team@agent-marketplace": [
                     {"scope": "project", "installPath": str(install),
                      "version": "9.9.9",
                      "lastUpdated": "2026-07-12T00:00:00Z"}],
@@ -160,27 +160,47 @@ class PmoDashboardTests(unittest.TestCase):
         self.assertEqual(status, 200)
         self.assertTrue(head["db_present"])
         self.assertGreater(head["head_id"], 0)
-        self.assertEqual(head["schema_version"], 2)
+        self.assertEqual(head["schema_version"],
+                         self.dashboard.pmo_cli.SCHEMA_VERSION)
+        # status-skill parity: the head carries the system facts
+        self.assertEqual(head["db_path"], str(Path(self.home) / "agentrof.db"))
+        self.assertTrue(head["cli_version"])
 
     def test_overview(self):
         status, overview = self.get("/api/overview")
         self.assertEqual(status, 200)
         project = overview["projects"][0]
         self.assertEqual(project["project_key"], "shop")
-        self.assertEqual(project["teams"], ["software-team"])
+        self.assertEqual(project["teams"], ["software-engineering-team"])
         self.assertEqual(project["open_findings"], 1)
         self.assertEqual(project["item_counts"]["story"]["in_development"], 1)
         active = project["active_work_orders"][0]
         self.assertEqual(active["work_order_key"], "wo1")
         self.assertFalse(active["dangling"])
 
+    def test_dangling_flag_follows_last_event(self):
+        """A session-ended event as the order's LAST event flips dangling on;
+        any later activity flips it back off."""
+        env = {"AGENTROF_HOME": self.home}
+        cli(["event", "append", "--project-key", "shop",
+             "--action", "session_ended_with_active_work_order",
+             "--actor", "hook", "--work-order-key", "wo1"], env)
+        status, overview = self.get("/api/overview")
+        self.assertEqual(status, 200)
+        self.assertTrue(overview["projects"][0]["active_work_orders"][0]["dangling"])
+        cli(["event", "append", "--project-key", "shop",
+             "--action", "lane_resumed", "--actor", "hook",
+             "--work-order-key", "wo1"], env)
+        status, overview = self.get("/api/overview")
+        self.assertFalse(overview["projects"][0]["active_work_orders"][0]["dangling"])
+
     def test_catalog_scans_team_plugins_only(self):
         status, catalog = self.get("/api/catalog")
         self.assertEqual(status, 200)
         teams = {team["plugin_name"]: team for team in catalog["teams"]}
-        self.assertIn("software-team", teams)
+        self.assertIn("software-engineering-team", teams)
         self.assertNotIn("unrelated", teams)
-        team = teams["software-team"]
+        team = teams["software-engineering-team"]
         self.assertTrue(team["in_use"])
         self.assertTrue(team["installed"])
         self.assertEqual(team["agents"][0]["model"], "sonnet")
@@ -241,7 +261,7 @@ class PmoDashboardTests(unittest.TestCase):
             self.assertEqual(response.status, 200)
             self.assertEqual(response.headers.get("Cache-Control"), "no-store")
             body = response.read().decode("utf-8", errors="replace")
-        self.assertIn("<title>Agentrof PMO</title>", body)
+        self.assertIn("<title>Control Tower</title>", body)
         # served self-contained: no external runtime URLs in src/href
         import re
         external = re.findall(r'(?:src|href)="(https?://[^"]+)"', body)
@@ -278,8 +298,10 @@ class PmoDashboardTests(unittest.TestCase):
             os.environ["AGENTROF_HOME"] = self.tmp.name + "/nowhere"
             status, head = self.get("/api/head")
             self.assertEqual(status, 200)
-            self.assertEqual(head, {"db_present": False, "head_id": 0,
-                                    "schema_version": None})
+            self.assertFalse(head["db_present"])
+            self.assertEqual(head["head_id"], 0)
+            self.assertIsNone(head["schema_version"])
+            self.assertIn("nowhere", head["db_path"])
             status, body = self.get("/api/overview")
             self.assertEqual(status, 503)
             self.assertEqual(body["error"], "db_missing")
@@ -300,7 +322,7 @@ class PmoDashboardTests(unittest.TestCase):
             self.assertEqual(head["schema_version"], 99)
         finally:
             connection = sqlite3.connect(Path(self.home) / "agentrof.db")
-            connection.execute("PRAGMA user_version = 2")
+            connection.execute(f"PRAGMA user_version = {self.dashboard.pmo_cli.SCHEMA_VERSION}")
             connection.commit()
             connection.close()
 

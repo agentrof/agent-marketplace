@@ -1,8 +1,7 @@
 # Develop Flow
 
-State-machine procedure for delivering ONE story (or one atomic change)
-end to end. Loaded and executed by entry skills; its spec lives in the
-repository's orchestration document.
+State-machine procedure delivering ONE story (or one atomic change) end
+to end. Loaded by entry skills; its spec lives in the orchestration document.
 
 ## Critical behavioral rules
 
@@ -12,19 +11,17 @@ You MUST follow these rules exactly. Violating any of them is a failure.
 2. State and artifacts are the source of truth. Read prior steps from
    the PMO database and from FILES, never from conversation memory;
    after any compaction, run resume-info and re-read before acting.
-3. Stop at every GATE and CHECKPOINT and wait for explicit user approval.
-   Offer exactly: Approve / Request changes (revise, then re-gate) /
-   Pause (save state and stop).
+3. Stop at every GATE and CHECKPOINT for explicit user approval. Offer
+   exactly: Approve / Request changes (revise, re-gate) / Pause (save, stop).
 4. Halt on failure: present the error and ask. Never continue silently.
 5. Spawn only this plugin's agents.
 6. Never enter plan mode. This flow IS the plan.
 
 ## State contract
 
-All process state lives in the central PMO database (the project-management-office plugin
-installs as a dependency). ONE writer: you, the main conversation,
-through the PMO CLI only. Spawned agents never touch it; project-management-office hooks
-record spawn/stop mechanics; a guard hook blocks direct file writes.
+All process state lives in the central PMO database. ONE writer: you,
+the main conversation, through the PMO CLI only. Agents never touch it;
+hooks record spawn/stop mechanics; a guard blocks direct file writes.
 
 CLI resolution, once per work order: the launcher at
 "${AGENTROF_HOME:-$HOME/.agentrof}/bin/pmo_cli.py"; missing means run
@@ -38,13 +35,11 @@ work-order init / set-step / record-gate / bump / set-ownership /
 set-status / release / validate; task open / close; finding open /
 update / list; coverage import; budget set; checkpoint; item import /
 update / list / add-dep / add-dod / set-dod / order; render backlog /
-ledger; resume-info. The CLI enforces the enums, the step transition
-guard (a step starts only when its predecessors are done), the
-complete guard (steps done, findings closed; a story work order
-additionally requires imported coverage and a ledger checkpoint),
-snake_case ownership roles, and ownership-overlap refusal across ALL
-active work orders of the project; advance step status with set-step
-as you move.
+ledger; resume-info. The CLI enforces the enums, the step-transition
+guard, the complete guard (steps done, findings closed; story work
+orders also need imported coverage and a ledger checkpoint), snake_case
+ownership roles, and ownership-overlap refusal across ALL active work
+orders of the project; advance step status with set-step as you move.
 
 Claims, enforced atomically at work-order init: one active work order
 per worktree; one per story; ownership path prefixes disjoint across the
@@ -54,10 +49,10 @@ project's active work orders. A refused init means resume the holder
 The order directory workspace/work-orders/<key>/ (gitignored) holds ONLY
 the snapshots init copied there (constitution.md, brief-snapshot/ with
 the whole analysis space, config.snapshot.json) plus the freeze manifest
-step 0 writes (freeze.json; the project-management-office guard denies edits to its paths
-while the order is active). The work order reads its snapshots for its
-whole duration; a space or config edited mid-order does not change a
-running story. Nothing else is ever written there.
+step 0 writes (freeze.json; a guard denies edits to its listed paths
+while the order is active). Snapshots are read for the whole order; a
+mid-order space or config edit never changes a running story; nothing
+else is written there.
 
 Findings, coverage rows, budget verdicts, round counters and tasks are
 DATABASE rows, not files. Reviewer and verifier spawns RETURN findings
@@ -70,9 +65,9 @@ Task trail: before each spawned step, open its task (task open
 "<title>"); after the post-step check passes, close it (task close ...
 --outcome done). Role names are the FULL agent role names
 (software_architect, backend_developer, frontend_developer,
-code_reviewer, qa_engineer, ux_designer, product_owner); a shortened
-name forks the hooks' task trail. Hooks stamp timing and the attempt
-history; the semantic fields are yours.
+devops_engineer, code_reviewer, qa_engineer, ux_designer,
+product_owner); a shortened name forks the hooks' task trail. Hooks
+stamp timing and the attempt history; the semantic fields are yours.
 
 DoD verification trail: the QA step's verdicts flip the story's
 dod_items one by one (item set-dod --dod-id <id> --status verified, or
@@ -111,14 +106,13 @@ single message; consume their artifacts from disk afterwards.
 After every spawned step, BEFORE advancing state, run
 ${CLAUDE_PLUGIN_ROOT}/scripts/artifact_check.py --path <artifact>
 --require-sections "<the artifact's mandated sections>" (data model:
-"Summary, Entities"; contract: "Summary, Error cases"). Analysis-space
+"Summary, Entities"; contract: "Summary, Error cases"; environment
+contract: "Commands, Scenarios, Tolerated Warnings"). Analysis-space
 checking has a single home: ${CLAUDE_PLUGIN_ROOT}/scripts/ba_compile.py
-check, never artifact_check. Exit 1 is the violation: re-spawn the SAME
-step exactly once with the violation named ("your prior attempt produced
-no artifact at PATH / is missing SECTIONS; write it now"); a second
-failure sets the step blocked via set-step and halts with resume
-instructions. The script proves structure; still read the artifact for
-semantic sanity before presenting any gate.
+check, never artifact_check. Exit 1: re-spawn the SAME step exactly once
+with the violation named; a second failure sets the step blocked via
+set-step and halts with resume instructions. The script proves structure;
+still read the artifact for semantic sanity before presenting any gate.
 
 ## Steps
 
@@ -147,14 +141,13 @@ semantic sanity before presenting any gate.
   coverage map) with ba_compile.py resolve against the LIVE space and
   write the owning doc paths as freeze.json ({"frozen_paths": [...]}) in
   the order directory; the guard freezes exactly those docs while the
-  order is active. Bindings from config: backend
-  role to the backend stack skill, frontend role to the frontend stack
-  skill, architect to the architecture skill plus every database skill
-  in the databases set, planner to the planning skill, analyst to the
-  requirements-analysis skill, reviewer to the review skill, verifier to
-  the verification skill.
-- Ensure workspace/work-orders/ is gitignored; append the rule when
-  missing.
+  order is active. Bindings from config: backend role to the backend
+  stack skill, frontend role to the frontend stack skill, devops role to
+  the environment stack skill, architect to the architecture skill plus
+  every database skill in the databases set, planner to the planning
+  skill, analyst to the requirements-analysis skill, reviewer to the
+  review skill, verifier to the verification skill.
+- Ensure workspace/work-orders/ is gitignored; append the rule if absent.
 - Create the work branch for this story from the main line, named
   wp-<nn>-<kebab-slug> (atomic route: atomic-<kebab-slug>).
 
@@ -180,10 +173,13 @@ semantic sanity before presenting any gate.
   living documents under workspace/docs/system-architecture/ and this
   story's scope from its backlog row.
 - The architect applies its delta to the living documents and returns
-  the ownership map; store it via work-order set-ownership. The CLI
-  refuses overlapping prefixes, inside the work order and against every
-  other active work order; a refusal routes back to the architect as the
-  named violation.
+  the ownership map; the delta declares its environment impact (services,
+  stores, runtime variables, seed needs, or an explicit none) and the map
+  grants workspace/environment/ to the devops engineer when impact exists
+  or no environment definition exists yet. Store the map via work-order
+  set-ownership. The CLI refuses overlapping prefixes, inside the work
+  order and against every other active work order; a refusal routes back
+  to the architect as the named violation.
 
 ### GATE: model and contract
 
@@ -204,13 +200,19 @@ semantic sanity before presenting any gate.
 
 - A screen-requiring Definition of Ready without an approved preview:
   run the design flow now (flows/design.md) and return.
+- Environment first: on a delta declaring environment impact (or a
+  project with no environment definition yet), spawn
+  software-engineering-team-devops-engineer serially before the developers, bounded
+  to the environment prefix (workspace/environment/); its SELF-CHECK is
+  the from-scratch cycle its bound skill defines.
 - Spawn software-engineering-team-backend-developer and
   software-engineering-team-frontend-developer in one message, each bounded to its
   ownership paths, read-fully inputs: the architecture delta, the
-  contract, the approved preview and design master (frontend). Stories
-  without client or server work spawn only the relevant developer.
+  contract, the approved preview and design master (frontend); include
+  the configured environment command in the prompt. Stories without
+  client or server work spawn only the relevant developer.
 - Ownership overlap discovered mid-flight: serialize (backend first)
-  and note it in the work order's events (event append).
+  and note it via event append.
 - Re-slice branch: a developer reporting scope larger than the story
   (new entities, endpoints or screens the backlog never sliced) halts
   the step; present the discovery, route to the product owner for a
@@ -229,8 +231,7 @@ semantic sanity before presenting any gate.
   list --json (empty on round one).
 - The reviewer RETURNS its verdict and findings; the FIRST action on
   that reply is recording every new finding with finding open --source
-  review. A fix applied to an unrecorded finding is a contract
-  violation.
+  review. Fixing an unrecorded finding is a contract violation.
 - Verdict approve: continue. Verdict fix_required (issued only when a
   critical or high finding is open; lower severities never spin the
   loop): route each finding to the developer owning its file; the
@@ -238,9 +239,8 @@ semantic sanity before presenting any gate.
   findings with finding update --status fixed --round <n>; increment
   with work-order bump --counter review.
 - Churn guard: at re-review, a NEW critical or high finding on
-  untouched, already-passed lines is accepted only when the reviewer
-  cites what changed to justify it; otherwise reject the finding and
-  keep the round scoped to the fixes.
+  untouched, already-passed lines needs the reviewer to cite what
+  changed; otherwise reject it and keep the round scoped to the fixes.
 - A finding implicating the approved architecture does NOT enter the
   fix loop: set the step escalated, present it, stop for the owner.
   Exits: the owner records the decision retroactively (owner-decision
@@ -253,10 +253,11 @@ semantic sanity before presenting any gate.
 - Spawn software-engineering-team-qa-engineer with the story's criteria read from
   the snapshot (the acceptance docs named by ba_compile.py resolve over
   the claimed ids), the currently open findings from finding list
-  --json, and the configured commands (test_command and
-  mutation_command).
+  --json, and the configured commands (test_command, mutation_command
+  and env_command).
 - The mutation gate is mandatory on code stories: QA runs the configured
-  mutation command scoped to this story's changed files; every surviving
+  mutation command scoped to this story's changed code-owned files;
+  every surviving
   mutant in changed lines is a finding (high on a BR/AC-tagged path, low
   otherwise); a missing mutation_command on a code story is itself a
   blocking finding.
@@ -278,13 +279,14 @@ semantic sanity before presenting any gate.
 ### Step 4.5: design verification (screenful stories only)
 
 - After QA passes, spawn software-engineering-team-ux-designer READ-ONLY with the
-  approved preview, the design master and the built screens (run the app
-  via the configured command): it re-judges the realization with its
-  pre-delivery checklist (contrast, spacing rhythm, motion character,
-  hierarchy, token fidelity) against the spec it authored. Findings are
-  recorded with finding open --source design_qa and route like review
-  findings (token drift to the frontend developer; spec ambiguity
-  escalates); one fix round, then re-judge once.
+  approved preview, the design master and the built screens (reuse the
+  environment the QA live protocol stood up): it re-judges the
+  realization with its pre-delivery checklist (contrast, spacing rhythm,
+  motion character, hierarchy, token fidelity) against the spec it
+  authored. Findings are recorded with finding open --source design_qa
+  and route like review findings (token drift to the frontend developer;
+  spec ambiguity escalates); one fix round, then re-judge once; then
+  tear the environment down.
 
 ### GATE: delivery
 
@@ -308,16 +310,14 @@ semantic sanity before presenting any gate.
   program flow): step 5 ends at the opened pull request; mark it done
   with the PR URL as artifact, set the work order waiting_gate (claims
   stay held), report the PR to the integrator and stop; the integrator
-  executes this list at its merge checkpoint (the CLI refuses closing
-  writes from a lane worktree anyway). After merge, on the main line:
+  executes this list at its merge checkpoint. After merge, on the main line:
   - mark the story done (item update --external-id <WP-##> --status
     done), then run the checkpoint subcommand (checkpoint
     --work-order-key <key>, --escaped-defect when a fix-atomic traced
     back): it appends the quality-ledger line and regenerates both
     committed views (workspace/docs/backlog.md,
     workspace/docs/quality-ledger.md); the views are generated files, a
-    guard hook denies hand edits (wrong view content means wrong data:
-    fix via the CLI, the checkpoint re-renders);
+    guard hook denies hand edits;
   - append the story's line to workspace/CHANGELOG.md from the PR
     quality summary (append-only);
   - publish the exported interface schema under workspace/docs/api/;
@@ -330,8 +330,7 @@ semantic sanity before presenting any gate.
     the live space; a mismatch no recorded fix-atomic update explains is
     an escaped spec fork: halt and present it before completing;
   - record deployed_verified (item update --deployed-verified true) when
-    the owner confirms the merged story runs in its target environment
-    (merged is not working-in-the-world);
+    the owner confirms the merged story runs in its target environment;
   - every tenth checkpoint, or on demand, run the architecture
     reconciliation: an architect audit of living documents against the
     code and of page overrides against the design master (stable
@@ -339,8 +338,7 @@ semantic sanity before presenting any gate.
   - set the work order complete (work-order set-status --status
     complete) only when every step is done and every finding is closed;
     on story work orders the coverage rows and the ledger line must be
-    in the database; the CLI's complete guard refuses otherwise (gates
-    are recorded as you pass them; the guard checks state, not gates);
+    in the database; the CLI's complete guard refuses otherwise;
   then ask "continue with the next story?" (solo) or hand back to the
   program flow's PROPOSE (parallel).
 
@@ -385,7 +383,10 @@ is a contract violation):
 Both tiers: UI-touching atomic work still draws every visual value from
 the design master's tokens. No master in the project: a change that
 would introduce a new visual value stops and routes to the design-system
-entry; changes introducing no visual value proceed.
+entry; changes introducing no visual value proceed. Environment paths:
+the devops engineer is the owning developer; changing the service or
+store set is never atomic; fix-atomic work substitutes the skill-defined
+from-scratch reproduction for the failing test.
 
 Tripwire, BEFORE finalize on both tiers: run
 ${CLAUDE_PLUGIN_ROOT}/scripts/atomic_tripwire.py --repo . --range
@@ -394,5 +395,6 @@ atomic" with the flagged files, and hand the request to the large route
 unchanged. Disposition: set the work order escalated (work-order
 set-status), delete the abandoned atomic branch, and let the large route
 start its own work order. The judgment-level escape hatch stands
-independently: the moment the work touches the data model, the contract
-or the schema, stop without waiting for the tripwire.
+independently: the moment the work touches the data model, the contract,
+the schema or the environment's service or store set, stop without
+waiting for the tripwire.

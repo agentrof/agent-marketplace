@@ -76,7 +76,9 @@ PROPOSE before ending the cycle.
 - Per candidate, sanity-read the story row (DoR text, dep reasons) and
   give the SHARES advisory: compare the candidate's scope and dep-edge
   reasons against in-flight orders' ownership prefixes (resume-info
-  ownership maps) and their stories' scopes. Verdict per candidate:
+  ownership maps) and their stories' scopes. The environment prefix
+  (workspace/environment/) is a shared resource: two candidates with
+  environment impact never run together. Verdict per candidate:
   "ownership expected disjoint" or "waits: SHARES <contract> with
   WP-## in flight".
 - Present exactly in this shape: "WP-03 and WP-05 can start; ownership
@@ -115,6 +117,9 @@ PROPOSE before ending the cycle.
   the platform). Then, on the primary checkout: pull main; run the
   configured test_command. Red suite: STOP all further merges, route a
   fix-atomic through the request entry, resume merging only on green.
+- Environment smoke, when env_command is configured: from-scratch
+  bring-up on the merged main (env_command up, then down). A failed
+  bring-up stops further merges exactly like a red suite.
 - Execute the develop flow's "Merge checkpoint (main line only)" list
   verbatim, including setting the work order complete.
 - Cleanup: git worktree remove ../<project-dir>-wp-<nn>; git branch -d

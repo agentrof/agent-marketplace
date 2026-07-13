@@ -12,10 +12,13 @@ asserts nothing about that behavior.
 - The command comes from `workspace/config.json` `mutation_command`; the
   project's setup configured a runner per stack and verified it runs.
   Never hardcode a tool.
-- Scope: the files this story changed, never the whole tree. The
-  command carries a `{{changed_files}}` placeholder QA substitutes with
-  the space-joined list (git diff --name-only against the main line);
-  a runner that scopes only through its config file gets the scope
+- Scope: the code-owned files this story changed, never the whole tree.
+  Environment-owned paths (the workspace/environment/ prefix) are
+  excluded; the live protocol verifies them, not mutants. The command
+  carries a `{{changed_files}}` placeholder QA substitutes with the
+  space-joined list (git diff --name-only against the main line, the
+  environment prefix filtered out); a runner that scopes only through
+  its config file gets the scope
   written there for the run, and the record states the effective scope
   either way. A whole-tree run on a mature project is a budget
   violation, not extra rigor.
@@ -50,8 +53,8 @@ scope for judgment, whether or not its exact line changed.
 - Pass: zero unaccepted survivors in the changed files.
 - A missing `mutation_command` on a story that changed code is a
   blocking finding routed to the owner: configure the runner via the
-  configure entry. Documentation-only or asset-only stories are exempt;
-  say so in the record.
+  configure entry. Documentation-only, asset-only or environment-only
+  stories are exempt; say so in the record.
 - The gate reads the runner's exit code and report; QA never overrides a
   survivor by judgment alone.
 

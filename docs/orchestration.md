@@ -51,7 +51,9 @@ Routes:
   to per-lane sessions that run the develop flow up to the opened pull
   request, tracks where gate approvals are pending without ever
   approving across sessions, and owns every merge checkpoint on the
-  main line, strictly serialized with the suite run between merges.
+  main line, strictly serialized with the suite run and, when the
+  environment command is configured, a from-scratch environment smoke
+  between merges.
 - **business-analysis** and **design-system** are interactive main
   conversation flows. business-analysis grows one analysis space per
   topic (typed docs, compiler-checked, generated views) with a
@@ -221,10 +223,24 @@ decision log. Severity policy: fix_required only for critical and high
 findings; lower severities become pull request notes. QA's gates include
 the coverage matrix (scenario_report, imported into the database with
 its --json-out file), the mandatory mutation gate scoped to the story's
-changed files, the budget-verification verdicts (verified or honestly
-unverified per quantified budget, recorded with budget set) and the live
-protocol; screenful stories add a read-only design verification by the
-designer against the approved preview (findings recorded as design_qa).
+changed code-owned files, the budget-verification verdicts (verified or
+honestly unverified per quantified budget, recorded with budget set) and
+the live protocol, which stands a fresh environment up through the
+configured environment command, seeds a named scenario, audits the
+service logs and tears the environment down; screenful stories add a
+read-only design verification by the designer against the approved
+preview, reusing that environment (findings recorded as design_qa).
+
+Environment discipline: the architecture delta declares its environment
+impact; when it does (or no environment definition exists yet) the
+develop flow spawns the devops engineer serially before the developers,
+bounded to the environment prefix (workspace/environment/). The
+environment is consumed only through the configured environment
+command's verbs (up, down, seed, logs, url); the suite stays hermetic
+(the test and mutation commands never depend on a standing
+environment); parallel lanes are isolated by the entry point's
+worktree-derived project naming, and the program flow's SHARES advisory
+treats the environment prefix as a shared resource.
 
 At the merge checkpoint on the main line: the story marked done and the
 ledger checkpoint appended (with the escaped-defect flag when a

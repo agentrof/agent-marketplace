@@ -10,7 +10,7 @@ Verification, not authorship. The QA role never writes or modifies product code 
 
 ## When to Use
 
-Load when verifying a delivered increment against its brief: acceptance criteria (AC-###), business rules (BR-###), and edge cases. This skill defines HOW to verify. WHAT the stack-specific checks look like comes from the bound stack skill: also load that skill's references/qa-checklist.md before planning. Not for authoring tests, fixing bugs, or reviewing code style (the review role owns style).
+Load when verifying a delivered increment against its brief: acceptance criteria (AC-###), business rules (BR-###), and edge cases. This skill defines HOW to verify. WHAT the stack-specific checks look like comes from each stack skill bound to the change: also load their references/qa-checklist.md files before planning. Not for authoring tests, fixing bugs, or reviewing code style (the review role owns style).
 
 ## Test Plan Categories
 
@@ -30,10 +30,11 @@ Classify every planned check into exactly one category. A plan missing any categ
 
 ## Command Indirection
 
-- DO read the test-suite command, the application run command and the mutation command from `workspace/config.json`.
+- DO read the test-suite command, the environment command (env_command: verbs `up`, `down`, `seed <scenario>`, `logs`, `url <service>`) and the mutation command from `workspace/config.json`.
 - DON'T hardcode tool invocations or ports. This skill is stack-agnostic; the configured commands are the only entry points.
 - DO record the exact commands executed in the report, so the run is reproducible.
-- The mutation gate is mandatory on code stories: run the mutation command scoped to the story's changed files; a surviving mutant in changed lines is a finding, a missing mutation_command on a code story is a blocking finding. Method: [mutation](references/mutation.md). Read when running the mutation gate or judging a survivor.
+- The suite is hermetic: the test and mutation commands never depend on a standing environment; a suite found depending on one is a blocking finding (waiver semantics in the environment stack skill's Hermetic Suite Rule).
+- The mutation gate is mandatory on code stories: run the mutation command scoped to the story's changed code-owned files (environment-owned paths are verified by the live protocol, not by mutants); a surviving mutant in changed lines is a finding, a missing mutation_command on a code story is a blocking finding. Method: [mutation](references/mutation.md). Read when running the mutation gate or judging a survivor.
 
 ## Severity Classification
 
@@ -58,7 +59,7 @@ A check is green only when it would fail for the right reason. Before trusting a
 
 ## Live Runtime Verification
 
-Automated green is necessary, not sufficient. After the suite passes, start the application with the configured run command and walk every navigable surface: console audit, network audit, render audit, interaction audit, each with explicit FAIL conditions and per-surface PASS/FAIL records.
+Automated green is necessary, not sufficient. After the suite passes, stand the environment up fresh with the configured environment command, seeded with a named scenario, and walk every navigable surface: console audit, network audit, render audit, interaction audit, service-log audit, each with explicit FAIL conditions and per-surface PASS/FAIL records. Tear the environment down when the protocol (and the design verification that reuses it) is done.
 
 - [runtime-protocol](references/runtime-protocol.md): the step-by-step live protocol with FAIL conditions per audit. Read when starting the live runtime pass.
 
@@ -86,7 +87,7 @@ FAIL if ANY of:
 - Any AC or BR id lacks a mapped test.
 - Any test fails, errors, or passes for the wrong reason.
 - Any runtime CRITICAL or FAIL condition observed.
-- Suite or run command missing from `workspace/config.json` (escalate; do not improvise commands).
+- Suite command missing, or env_command missing when the live protocol must run (escalate; do not improvise commands).
 
 Rules:
 

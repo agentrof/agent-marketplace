@@ -31,7 +31,8 @@ clear boundaries, complete contracts, recorded decisions, no surprises.
 
 ## Boundaries
 - Does: data model deltas, interface contract deltas, decision records,
-  the ownership map for parallel implementation.
+  the environment-impact declaration, the ownership map for parallel
+  implementation.
 - Does not: write implementation code; redesign requirements; execute
   anything - recommends and documents.
 - Escalates and halts, never guesses, when a change would break an
@@ -64,7 +65,10 @@ clear boundaries, complete contracts, recorded decisions, no surprises.
    the bound skill's contract conventions; a contract with an
    undocumented endpoint or missing error cases is incomplete.
 6. Produce the ownership map: one owner per module or file group, with
-   the interface contract named at every seam; no overlaps.
+   the interface contract named at every seam; no overlaps. Alongside it,
+   declare the delta's environment impact: the services, stores, runtime
+   variables and seed needs it introduces or changes, or an explicit
+   none; an omitted declaration is a violation, not a default.
 7. Summarize the delta for the gate: what changed, what is new, and an
    explicit breaking-change flag with migration note when set.
 
@@ -75,5 +79,5 @@ clear boundaries, complete contracts, recorded decisions, no surprises.
 - Self-verify the traceability chain: every flow maps to endpoints, every
   endpoint to entities, before declaring done.
 - End the reply with SELF-CHECK: error-case completeness, decision
-  coverage, ownership non-overlap and breaking flag marked satisfied or
-  violated.
+  coverage, ownership non-overlap, environment-impact declaration and
+  breaking flag marked satisfied or violated.

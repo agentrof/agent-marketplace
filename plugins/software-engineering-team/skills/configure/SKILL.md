@@ -9,9 +9,9 @@ disable-model-invocation: true
 Config changes go through this gate, never through hand edits.
 
 ## When to Use
-- The project's stack set, test command, source directories or output
-  language must change (for example: "add a document store to the
-  databases set").
+- The project's stack set, test, mutation or environment command, source
+  directories or output language must change (for example: "add a
+  document store to the databases set").
 
 ## Procedure
 
@@ -26,15 +26,18 @@ Config changes go through this gate, never through hand edits.
    gate writes.
 2. Interpret the requested change into concrete key changes.
 3. Validate. Enum keys: backend_stack python-fastapi; frontend_stack
-   react-typescript; databases a set drawn from sql and nosql, one or
-   both, never empty. A value outside the enums is refused honestly with
-   the reason: this team ships tested stacks only, and new stacks arrive
-   as maintainer releases. Shape keys: test_command and mutation_command
-   non-empty command strings; source_dirs a non-empty list of
-   repo-relative paths (absolute paths refused); output_language a
-   non-empty language name; max_parallel an optional positive integer
-   (the program flow's lane-proposal cap; absent means 3; this gate is
-   its only writer).
+   react-typescript; environment_stack docker-compose; databases a set
+   drawn from sql and nosql, one or both, never empty. A value outside
+   the enums is refused honestly with the reason: this team ships tested
+   stacks only, and new stacks arrive as maintainer releases. Shape
+   keys: test_command and mutation_command non-empty command strings;
+   env_command a non-empty command string naming one entry point that
+   implements the verbs up, down, seed <scenario>, logs and
+   url <service> (contract in the environment stack skill); source_dirs
+   a non-empty list of repo-relative paths (absolute paths refused);
+   output_language a non-empty language name; max_parallel an optional
+   positive integer (the program flow's lane-proposal cap; absent means
+   3; this gate is its only writer).
 4. Present the impact analysis before writing: which roles' skill
    bindings change (the static role-to-skill map lives in
    ${CLAUDE_PLUGIN_ROOT}/flows/develop.md, step 0; method skills such as

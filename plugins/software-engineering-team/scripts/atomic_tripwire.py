@@ -25,6 +25,23 @@ TRIPWIRES = [
     (re.compile(r"openapi|api-contract", re.IGNORECASE), "interface contract"),
 ]
 
+# Environment definition files get a CONTENT check, not a path ban: a
+# healthcheck or timeout fix is legitimately atomic, but an added or
+# removed service (its image:/build: key) never is. Needs --range;
+# with --files only, there is no diff content to inspect.
+ENV_DEFINITION_RE = re.compile(r"(^|/)workspace/environment/.*\.ya?ml$", re.IGNORECASE)
+SERVICE_SET_RE = re.compile(r"^[+-]\s+(image|build):", re.MULTILINE)
+
+
+def service_set_changed(repo: str, diff_range: str, path: str) -> bool:
+    proc = subprocess.run(
+        ["git", "-C", repo, "diff", "--unified=0", diff_range, "--", path],
+        capture_output=True, text=True,
+    )
+    if proc.returncode != 0:
+        return False
+    return bool(SERVICE_SET_RE.search(proc.stdout))
+
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Detect model/contract/schema touches on an atomic branch.")
@@ -53,6 +70,10 @@ def main(argv: list[str] | None = None) -> int:
             if pattern.search(path):
                 hits.append(f"{path} ({label})")
                 break
+        else:
+            if (ENV_DEFINITION_RE.search(path) and args.range
+                    and service_set_changed(args.repo, args.range, path)):
+                hits.append(f"{path} (environment service or store set)")
     if hits:
         print("atomic_tripwire: NOT ATOMIC. The change touches:", file=sys.stderr)
         for hit in hits:

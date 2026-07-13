@@ -46,12 +46,12 @@ obvious one-liner) use judgment; rigor prevents costly mistakes.
 
 ## House style
 
-- All produced content in the project's configured output language;
-  default English.
+- All output in the project's configured output language; default English.
 - Never use the em dash character; use a hyphen, comma, or rewrite.
 - JSON keys are snake_case. No emoji in headings.
 - Placeholder people and companies only: Jane Doe, John Doe, Acme Corp.
-- No version pins, vendor bias or concrete model names in outputs.
+- No version pins, vendor bias or concrete model names in outputs; the
+  one exception: environment definitions pin exact image tags.
 - One evolving record per report; never versioned copies of the same file.
 - Files over conversation memory: re-read state and artifacts before
   acting; if a rule matters, it lives in a file.

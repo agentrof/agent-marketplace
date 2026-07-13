@@ -47,6 +47,7 @@ TECH_SKILLS = {
     "react-typescript",
     "sql-database-design",
     "nosql-database-design",
+    "docker-compose",
 }
 RESERVED_CHECKLISTS = ["review-checklist.md", "qa-checklist.md"]
 
@@ -843,6 +844,35 @@ def check_script_references(tree: Tree, findings: list[Finding]) -> None:
                         ))
 
 
+PLACEHOLDER_RE = re.compile(r"\{\{([a-z0-9_]+)\}\}")
+
+
+def check_template_placeholders(tree: Tree, findings: list[Finding]) -> None:
+    """Every {{placeholder}} a template ships must be named by one of the
+    plugin's skills (the skill that substitutes it); an unmentioned token
+    ships literally into consumer repositories."""
+    for plugin in plugin_dirs(tree):
+        templates = plugin / "templates"
+        if not templates.is_dir():
+            continue
+        skills_dir = plugin / "skills"
+        skill_text = "".join(
+            read_text(p) for p in sorted(skills_dir.glob("*/SKILL.md"))
+        ) if skills_dir.is_dir() else ""
+        for tpl in sorted(p for p in templates.rglob("*") if p.is_file()):
+            for lineno, line in enumerate(read_text(tpl).splitlines(), start=1):
+                for token in PLACEHOLDER_RE.findall(line):
+                    if f"{{{{{token}}}}}" not in skill_text:
+                        findings.append(Finding(
+                            "error", rel(tree, tpl), lineno,
+                            "template_placeholders",
+                            f"template placeholder {{{{{token}}}}} is not"
+                            " named by any skill",
+                            "name the substitution in the materializing"
+                            " skill or drop the placeholder",
+                        ))
+
+
 def check_ba_schema_shape(tree: Tree, findings: list[Finding]) -> None:
     """Any shipped space-schema.json must be well-formed: the compiler is
     parameterized by it, so a malformed schema is a broken product."""
@@ -917,6 +947,7 @@ CHECKS = {
     "orchestrator_integrity": check_orchestrator_integrity,
     "stdlib_only": check_stdlib_only,
     "script_references": check_script_references,
+    "template_placeholders": check_template_placeholders,
     "ba_schema_shape": check_ba_schema_shape,
 }
 

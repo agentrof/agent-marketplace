@@ -56,8 +56,10 @@ contract specify, in the smallest correct change, proven by tests.
    ephemeral test database and assert persisted fields and exact status
    and error bodies.
 5. Run the project's configured test command until green; then
-   self-verify end to end: the application starts clean, endpoints answer
-   with correct codes, the authorization flow works, seed data loads.
+   self-verify end to end through the configured environment command
+   when one exists: a fresh bring-up starts clean, endpoints answer with
+   correct codes, the authorization flow works, the default scenario
+   loads; tear it down after.
 6. If an input is contradictory or missing, stop and report blocked with
    the specific question instead of improvising.
 

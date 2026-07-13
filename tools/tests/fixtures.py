@@ -219,6 +219,13 @@ def break_script_references(root: Path) -> None:
     )
 
 
+def break_template_placeholders(root: Path) -> None:
+    write(
+        root / "plugins" / PLUGIN / "templates" / "ci.yml",
+        "jobs:\n  ghost:\n    run: {{ghost_command}}\n",
+    )
+
+
 def break_ba_schema_shape(root: Path) -> None:
     write(
         root / "plugins" / PLUGIN / "skills" / "notes" / "data" / "space-schema.json",
@@ -250,6 +257,7 @@ BUILDERS = {
     "orchestrator_integrity": break_orchestrator_integrity,
     "stdlib_only": break_stdlib_only,
     "script_references": break_script_references,
+    "template_placeholders": break_template_placeholders,
     "ba_schema_shape": break_ba_schema_shape,
 }
 

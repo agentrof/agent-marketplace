@@ -5,12 +5,12 @@ complete team and run at the goal; this is not a parts store.
 
 The first team, `software-engineering-team`, is an orchestrated software and product
 development team: business analysis, planning, architecture, design
-system, implementation, review and verification, driven through a small
-set of user-invocable entry skills.
+system, implementation, review, verification and a containerized
+environment, driven through a small set of user-invocable entry skills.
 
 Every team runs on the `project-management-office` plugin: a
 shared operations backbone holding one central database for projects,
-epics, stories, machine-generated tasks, run state, findings and audit
+epics, stories, machine-generated tasks, work-order state, findings and audit
 events, written only through its CLI and recorded deterministically via
 hooks. Installing a team installs `project-management-office`
 automatically as a dependency;
@@ -21,7 +21,7 @@ automatically as a dependency;
 <!-- counts:start -->
 | Plugins | Agents | Entry skills | Knowledge skills |
 |---|---|---|---|
-| 2 | 10 | 9 | 11 |
+| 2 | 11 | 9 | 12 |
 <!-- counts:end -->
 
 Counts above are injected by `tools/counts.py`; they are never written by
@@ -59,6 +59,7 @@ skills stay behind them.
 | `/software-engineering-team:sketch` | Design exploration: divergent single-file previews, no code. |
 | `/software-engineering-team:demo` | Pre-sales package: a navigable single-file demo, no code. |
 | `/software-engineering-team:request` | Real work. Atomic asks ship as a small PR; everything else runs the backlog path with gates. |
+| `/software-engineering-team:program` | The integrator surface for parallel delivery: proposes lanes, opens worktrees, owns every merge checkpoint. |
 | `/software-engineering-team:configure` | The single change gate for the project config. |
 | `/project-management-office:control-tower` | Starts Control Tower, the read-only web dashboard over the central database, and replies with the clickable URL. |
 

@@ -1,5 +1,5 @@
-# Materialized by the software-engineering-team setup entry; {{test_command}} is
-# replaced with the project's configured test command.
+# Materialized by the software-engineering-team setup entry; every
+# double-braced token is substituted from the project's configuration.
 name: tests
 
 on:
@@ -22,3 +22,20 @@ jobs:
         # (server and client). An advisory routes through the request entry
         # as a fix-atomic lockfile bump.
         run: {{audit_command}}
+
+  environment_smoke:
+    # Setup includes this job once the environment command's up-then-down
+    # probe passes; re-run setup after the first environment story to
+    # append it.
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Stand the environment up from scratch
+        run: {{env_command}} up
+      - name: Dump service logs for diagnosis
+        if: failure()
+        run: {{env_command}} logs
+      - name: Tear the environment down
+        if: always()
+        run: {{env_command}} down

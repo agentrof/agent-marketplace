@@ -4,13 +4,13 @@ Execute after the automated suite is green. The application must be observed run
 
 Severity vocabulary: CRITICAL (maps to Critical), FAIL (maps to High), MINOR (maps to Low). See the severity table in SKILL.md.
 
-## Step 1: Start the Application
+## Step 1: Stand the Environment Up From Scratch
 
-- Start with the run command from `workspace/config.json`. Never invent a start command.
-- Verify the process starts without compilation or startup errors in terminal output.
-- Verify no build warnings in terminal output.
-- Record the local URL or entry point the application serves.
-- Application fails to start: CRITICAL, stop the protocol, report.
+- Use the environment command (env_command) from `workspace/config.json`. Never invent commands.
+- Full teardown first (`down`), then one-command bring-up (`up`): every service healthy, the default scenario seeded. Seed the scenario the test plan names (`seed baseline` unless the plan says otherwise).
+- Verify bring-up output is clean: no errors, no unexplained warnings.
+- Resolve and record the base URL per published service (`url <service>`).
+- Bring-up fails or any service stays unhealthy: CRITICAL, stop the protocol, report.
 
 ## Step 2: Enumerate and Visit Every Navigable Surface
 
@@ -83,10 +83,24 @@ FAIL conditions:
 
 Any interaction that crashes, silently does nothing, or produces the wrong outcome: FAIL. Focus-management defects: FAIL.
 
-## Step 7: Record Results
+## Step 7: Service-Log Audit (after the surface walk)
+
+Pull the aggregated service logs with the `logs` verb and audit the whole window, bring-up through last interaction.
+
+FAIL conditions:
+
+- Any error-level line or stack trace from any service.
+- Any credential, token or secret appearing in log output (this one is CRITICAL).
+
+MINOR/KNOWN exception: a warning recorded in the environment contract document's tolerated-warning record (library name and reason). An unrecorded warning is FAIL, including "harmless" ones.
+
+## Step 8: Record Results and Tear Down
 
 In the verification record (see report-format.md):
 
 - Per surface: identifier, console PASS/FAIL with details, network PASS/FAIL with details, render PASS/FAIL with details.
 - Per interaction: action performed, expected result, actual result, PASS/FAIL.
+- Service-log audit: window covered, PASS/FAIL with the offending lines.
 - Overall runtime verdict: PASS only with zero CRITICAL and zero FAIL findings; otherwise FAIL with the finding list mapped into the severity table.
+
+Tear the environment down (`down`) when the story needs no design verification; otherwise leave it standing for that step and tear down after.

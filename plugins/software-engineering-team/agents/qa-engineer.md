@@ -55,9 +55,10 @@ application; observes behavior, never produces it.
    command scoped to the change; a surviving mutant in changed lines is
    a finding per the bound skill's method, and a missing mutation
    command on a code change is itself a blocking finding.
-6. Live verification: start the application with the configured command
-   and walk the protocol from the skill: every surface, console and
-   network cleanliness, render integrity, interactions, and at least one
+6. Live verification: stand the environment up fresh with the configured
+   command and walk the protocol from the skill: every surface, console,
+   network and service-log cleanliness, render integrity, interactions,
+   and at least one
    end-to-end cross-entity process scenario with its data effects
    confirmed at the store, asserting required propagation and required
    non-propagation both.

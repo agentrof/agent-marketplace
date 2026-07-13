@@ -1,7 +1,7 @@
 {
   "name": "software-engineering-team",
-  "version": "3.0.1",
-  "description": "A complete, orchestrated software and product development team: analysis, planning, architecture, design system, implementation, review and verification.",
+  "version": "3.1.0",
+  "description": "A complete, orchestrated software and product development team: analysis, planning, architecture, design system, implementation, review, verification and a containerized environment.",
   "author": {
     "name": "Agentrof",
     "url": "https://github.com/agentrof"

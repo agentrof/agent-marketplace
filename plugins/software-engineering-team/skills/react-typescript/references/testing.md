@@ -73,7 +73,7 @@ Prefer testing hooks through a component that uses them. When a hook is a public
 
 - Component tests run in a DOM environment with a shared setup file (jest-dom matchers, request-mock server lifecycle, cleanup between tests).
 - Global test state resets in `beforeEach`: stores to initial state, request mocks to defaults, storage cleared. Test pollution is a bug.
-- Keep unit/component tests fast and isolated; reserve a thin end-to-end layer for critical user journeys via the project's configured e2e command.
+- Keep unit/component tests fast and isolated; reserve a thin end-to-end layer for critical user journeys, run against an environment stood up through the configured environment command. The e2e layer stays outside the hermetic suite and outside mutation scope.
 
 ## Behavioral Coverage Contract
 

@@ -96,5 +96,59 @@ class TripwireTests(unittest.TestCase):
         self.assertEqual(code, 0)
 
 
+class TripwireEnvironmentTests(unittest.TestCase):
+    """Content-level check on the compose definition: a healthcheck fix is
+    atomic, a service-set change is not."""
+
+    COMPOSE_V1 = (
+        "services:\n"
+        "  api:\n"
+        "    build: .\n"
+        "    healthcheck:\n"
+        "      test: [\"CMD\", \"app-health\"]\n"
+        "      retries: 5\n"
+    )
+
+    def _repo_with_change(self, tmp, new_compose):
+        import subprocess
+        repo = Path(tmp)
+        compose = repo / "workspace" / "environment" / "docker-compose.yml"
+        compose.parent.mkdir(parents=True)
+
+        def git(*argv):
+            subprocess.run(["git", "-C", str(repo), *argv],
+                           check=True, capture_output=True)
+
+        git("init", "-q", "-b", "main")
+        git("config", "user.email", "t@example.com")
+        git("config", "user.name", "t")
+        compose.write_text(self.COMPOSE_V1, encoding="utf-8")
+        git("add", "-A")
+        git("commit", "-q", "-m", "base")
+        git("checkout", "-q", "-b", "atomic-change")
+        compose.write_text(new_compose, encoding="utf-8")
+        git("commit", "-q", "-am", "change")
+        return str(repo)
+
+    def test_healthcheck_fix_stays_atomic(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = self._repo_with_change(
+                tmp, self.COMPOSE_V1.replace("retries: 5", "retries: 10"))
+            code, _, _ = run(atomic_tripwire, [
+                "--repo", repo, "--range", "main...atomic-change",
+            ])
+            self.assertEqual(code, 0)
+
+    def test_added_service_trips(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = self._repo_with_change(
+                tmp, self.COMPOSE_V1 + "  cache:\n    image: redis:<tag>\n")
+            code, _, err = run(atomic_tripwire, [
+                "--repo", repo, "--range", "main...atomic-change",
+            ])
+            self.assertEqual(code, 1)
+            self.assertIn("environment service or store set", err)
+
+
 if __name__ == "__main__":
     unittest.main()

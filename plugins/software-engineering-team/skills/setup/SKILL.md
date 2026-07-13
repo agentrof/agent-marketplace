@@ -40,8 +40,9 @@ folder or an existing repository; it completes gaps and breaks nothing.
 4. Create the skeleton, only missing parts: workspace/apps/,
    workspace/docs/business-analysis/, workspace/docs/system-architecture/,
    workspace/docs/design-system/pages/, workspace/demos/,
-   workspace/sketches/, workspace/work-orders/. Git does not track empty
-   directories: drop a .gitkeep in each folder created empty
+   workspace/sketches/, workspace/environment/, workspace/work-orders/.
+   Git does not track empty directories: drop a .gitkeep in each folder
+   created empty
    (work-orders/ is gitignored and needs none). Topic analysis spaces
    inside workspace/docs/business-analysis/ are created by the
    business-analysis entry, never by setup.
@@ -74,19 +75,31 @@ folder or an existing repository; it completes gaps and breaks nothing.
    finding; verify it by running it once on one file before writing the
    config, and in a project with no code yet record it as unverified so
    the first code story's QA gate performs the verification),
-   source_dirs, output_language (default English). A
-   stack outside the supported set is refused honestly: this team ships
-   tested stacks only, and new stacks arrive as maintainer releases.
+   environment_stack (supported: docker-compose; detect from an existing
+   compose file under workspace/environment/), env_command (one entry
+   point implementing the verbs up, down, seed <scenario>, logs and
+   url <service>; contract in the environment stack skill; verify by
+   running up then down once, and in a project with no environment yet
+   record it as unverified so the first environment-impacting story's QA
+   gate performs the verification), source_dirs, output_language
+   (default English). A stack outside the supported set is refused
+   honestly: this team ships tested stacks only, and new stacks arrive
+   as maintainer releases.
 7. Continuous integration: no PR-triggered test workflow in the
    repository's CI directory (for GitHub, .github/workflows/): offer to
    add one from ${CLAUDE_PLUGIN_ROOT}/templates/ci-tests.yml,
-   substituting both placeholders. {{test_command}} takes the configured
+   substituting every placeholder. {{test_command}} takes the configured
    test command. {{audit_command}} takes one audit command per
    configured stack, anchored at that stack's lockfile: python-fastapi
    gets pip-audit against the backend's requirements or lock file,
    react-typescript gets npm audit --audit-level=high run in the
-   frontend app directory; two stacks chain with &&. Keep the
-   dependency-audit job, and route any advisory it raises through the
-   request entry as a fix-atomic lockfile bump.
+   frontend app directory; two stacks chain with &&. {{env_command}}
+   takes the configured environment command; include the
+   environment_smoke job only when an up-then-down probe passes right
+   now, otherwise omit it (never ship a dead placeholder) and note that
+   re-running setup after the first environment story appends it: a
+   workflow missing the smoke job counts as a gap once the probe passes.
+   Keep the dependency-audit job, and route any advisory it raises
+   through the request entry as a fix-atomic lockfile bump.
 8. Close with the summary and pointers: start with business-analysis for
    the first topic, design-system before any screen work, then request.

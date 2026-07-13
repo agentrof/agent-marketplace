@@ -18,6 +18,9 @@ produces lives under `workspace/`:
   `quality-ledger.md` here are GENERATED views of the central PMO
   database; never hand-edit them.
 - `workspace/apps/`: application code, one folder per application.
+- `workspace/environment/`: the containerized environment (definition,
+  build recipes, seed scenarios, contract document); devops-owned, one
+  command brings the whole system up.
 - `workspace/demos/` and `workspace/sketches/`: outward demo packages and
   design exploration previews.
 - `workspace/work-orders/`: work-order snapshots (brief, config,

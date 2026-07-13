@@ -57,8 +57,9 @@ design master's tokens.
 4. Write tagged tests as you go: component render and interaction, state
    coverage, accessibility checks; one tagged test per acceptance
    criterion and business rule this package owns.
-5. Self-verify end to end: the application starts clean, every approved
-   screen renders, no console errors, all states reachable.
+5. Self-verify end to end, through the configured environment command
+   when one exists: the application starts clean, every approved screen
+   renders, no console errors, all states reachable; tear it down after.
 6. If an input is contradictory or missing, stop and report blocked with
    the specific question instead of improvising.
 

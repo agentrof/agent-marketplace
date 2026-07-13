@@ -91,4 +91,4 @@ Auth was checked only at login or router include, not per endpoint. Enforce the 
 
 ## Related Skills
 
-Pairs with the sql-database-design and nosql-database-design skills for schema decisions, and with react-typescript on the consuming frontend.
+Pairs with the sql-database-design and nosql-database-design skills for schema decisions, with react-typescript on the consuming frontend, and with the docker-compose skill whose environment packages the service. Seed scenario loaders are this stack's code: one callable receiving the scenario name, deterministic and referentially intact per the docker-compose skill's seed-scenarios contract.

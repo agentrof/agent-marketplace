@@ -40,17 +40,18 @@ Front door for real work: classify, confirm, deliver.
      existing-token swap); FIX-ATOMIC changes behavior (a bug fix, a
      rule correction) and runs the develop flow's fix-atomic discipline
      (failing reproduction test first, one reviewer pass). Anything
-     touching the data model, the interface contract or the schema is
-     NOT atomic; an ask that implies persisted data or a contract change
-     (a new form field that must be saved) classifies LARGE up front,
-     not at the escape hatch.
+     touching the data model, the interface contract, the schema or the
+     environment's service or store set is NOT atomic; an ask that
+     implies persisted data or a contract change (a new form field that
+     must be saved) classifies LARGE up front, not at the escape hatch.
    - LARGE: everything else.
    Confirm the route in one line ("Reading this as: <atomic|large>,
    because <reason>. Proceed?") and wait.
 3. ATOMIC route: execute the atomic variant in
    ${CLAUDE_PLUGIN_ROOT}/flows/develop.md exactly. Its escape hatch is
-   binding: the moment the work touches model, contract or schema, stop
-   and re-enter this procedure as LARGE.
+   binding: the moment the work touches model, contract, schema or the
+   environment's service or store set, stop and re-enter this procedure
+   as LARGE.
 4. LARGE route:
    a. Brief precondition, mechanical: run
       ${CLAUDE_PLUGIN_ROOT}/scripts/ba_compile.py check --space

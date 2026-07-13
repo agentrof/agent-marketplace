@@ -21,7 +21,7 @@ automatically as a dependency;
 <!-- counts:start -->
 | Plugins | Agents | Entry skills | Knowledge skills |
 |---|---|---|---|
-| 2 | 11 | 9 | 12 |
+| 2 | 12 | 10 | 13 |
 <!-- counts:end -->
 
 Counts above are injected by `tools/counts.py`; they are never written by
@@ -55,6 +55,7 @@ skills stay behind them.
 |---|---|
 | `/software-engineering-team:setup` | Bootstraps the workspace and the project config. Idempotent. |
 | `/software-engineering-team:business-analysis` | Interactive analysis; produces the approved brief every flow stands on. |
+| `/software-engineering-team:solution-design` | Interactive solution architecture: landscape, technology and topology decisions as living documents the team plans and designs against. |
 | `/software-engineering-team:design-system` | Creates or updates the design master from picked candidates. |
 | `/software-engineering-team:sketch` | Design exploration: divergent single-file previews, no code. |
 | `/software-engineering-team:demo` | Pre-sales package: a navigable single-file demo, no code. |
@@ -64,8 +65,8 @@ skills stay behind them.
 | `/project-management-office:control-tower` | Starts Control Tower, the read-only web dashboard over the central database, and replies with the clickable URL. |
 
 A first session usually looks like: `setup`, then `business-analysis`
-for the first topic, `design-system` before any screen work, then
-`request`.
+for the first topic, `solution-design` for the system foundations,
+`design-system` before any screen work, then `request`.
 
 ## Repository map
 

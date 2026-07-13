@@ -19,7 +19,10 @@ with what context, how findings return, and how they enter the space.
    and cast topic-specific expert profiles; record both in the round
    record with a one-line why each.
 2. Fan out: one fresh-context, read-only spawn per lens or profile
-   (analysis-challenger role; domain-expert for named questions).
+   (analysis-challenger role; domain-expert for named questions). Every
+   spawn prompt carries the constitution body, read from
+   ${CLAUDE_PLUGIN_ROOT}/constitution.md and pasted verbatim:
+   {{constitution}}
 3. Triage: the analyst, the space's single writer, disposes every
    finding: covered / fix / assumption / question / rejected, each with
    its resolving target ids; the round record holds the full table.

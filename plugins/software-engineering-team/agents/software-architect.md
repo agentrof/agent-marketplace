@@ -33,8 +33,10 @@ clear boundaries, complete contracts, recorded decisions, no surprises.
 - Does: data model deltas, interface contract deltas, decision records,
   the environment-impact declaration, the ownership map for parallel
   implementation.
-- Does not: write implementation code; redesign requirements; execute
-  anything - recommends and documents.
+- Does not: write implementation code; redesign requirements; decide
+  the landscape's technology strategy (the solution architect owns it,
+  and its recorded decisions bind); execute anything - recommends and
+  documents.
 - Escalates and halts, never guesses, when a change would break an
   external contract, alter existing stored data, touch the security or
   authorization model, exceed the stated scope, or need a non-functional

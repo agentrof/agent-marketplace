@@ -846,6 +846,24 @@ def check_script_references(tree: Tree, findings: list[Finding]) -> None:
 
 PLACEHOLDER_RE = re.compile(r"\{\{([a-z0-9_]+)\}\}")
 
+SPAWN_SHAPE_HEADING_RE = re.compile(r"^#{2,3}\s+Spawn Shape\s*$", re.MULTILINE)
+
+
+def check_spawn_shape_constitution(tree: Tree, findings: list[Finding]) -> None:
+    """A spawn-prompt template outside a flow (a 'Spawn Shape' section in any
+    plugin markdown) must paste the constitution, exactly as flows must."""
+    for path in iter_scope_files(tree, ".md"):
+        if tree.plugins_dir not in path.parents:
+            continue
+        text = read_text(path)
+        if (SPAWN_SHAPE_HEADING_RE.search(text)
+                and CONSTITUTION_PLACEHOLDER not in text):
+            findings.append(Finding(
+                "error", rel(tree, path), 1, "spawn_shape_constitution",
+                "spawn shape lacks the {{constitution}} placeholder",
+                "every spawn prompt template pastes the constitution verbatim",
+            ))
+
 
 def check_template_placeholders(tree: Tree, findings: list[Finding]) -> None:
     """Every {{placeholder}} a template ships must be named by one of the
@@ -948,6 +966,7 @@ CHECKS = {
     "stdlib_only": check_stdlib_only,
     "script_references": check_script_references,
     "template_placeholders": check_template_placeholders,
+    "spawn_shape_constitution": check_spawn_shape_constitution,
     "ba_schema_shape": check_ba_schema_shape,
 }
 

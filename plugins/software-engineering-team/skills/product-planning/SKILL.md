@@ -14,9 +14,12 @@ this skill says how to cut one and where it goes in the queue.
 
 Loaded when producing the backlog import (epics and stories in the PMO
 database; workspace/docs/backlog.md is its generated view) from an
-approved analysis space (its generated registry is the criteria source),
-or reconciling at a merge checkpoint. Not for the analysis (analyst
-work), not for technical choices (architect work).
+approved analysis space (its registry is the criteria source), or
+reconciling at a merge checkpoint. An existing solution-design tree
+(workspace/docs/solution-design/) is read first: build-buy-integrate
+verdicts shape what is sliced versus bought; Transition ordering
+constrains story order. Not for analysis (analyst work), not for
+technical choices (architect work).
 
 ## Hierarchy and Sizing
 
@@ -91,11 +94,10 @@ Two passes; the second never overrides the first.
      assumptions gate other stories.
    - Then highest user-visible value per review unit.
    - Cosmetic tail (polish, copy, layout refinement) last, as named
-     stories, never as padding inside earlier ones.
+     stories, never padding inside earlier ones.
 
-- The priority field carries the reason ("high: unblocks WP-04 and
-  WP-05"), never a bare rank; tiers are critical/high/medium/low,
-  import-enforced.
+- The priority field carries the reason ("high: unblocks WP-04"), never
+  a bare rank; tiers are critical/high/medium/low, import-enforced.
 - The quality ledger (workspace/docs/quality-ledger.md, a generated
   view) is an ordering input: read its tail before planning; a recurring
   finding category is risk evidence (sequence the next story touching
@@ -103,13 +105,11 @@ Two passes; the second never overrides the first.
   rounds-to-green on a module argues for smaller slices there.
 - At the backlog gate, negotiate scope in plain must/should/deferred
   language; every "deferred" lands on the deferred list with a written
-  reason, never as a silent drop.
-
-## Method Transparency
-
-- The backlog summary names the ordering method applied (dependency
-  order, then risk-adjusted value) and the top three ordering decisions,
-  one-line rationale each: the gate reviews reasoning, not a bare list.
+  reason, never a silent drop.
+- Method transparency: the backlog summary names the ordering method
+  applied (dependency order, then risk-adjusted value) and the top three
+  ordering decisions with one-line rationale each: the gate reviews
+  reasoning, not a bare list.
 
 ## References
 

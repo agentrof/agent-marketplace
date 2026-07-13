@@ -22,6 +22,7 @@ def load(name: str):
 artifact_check = load("artifact_check")
 contract_check = load("contract_check")
 atomic_tripwire = load("atomic_tripwire")
+landscape_check = load("landscape_check")
 
 
 def run(module, argv):
@@ -94,6 +95,59 @@ class TripwireTests(unittest.TestCase):
             "--files", "workspace/apps/frontend/src/SaveButton.tsx",
         ])
         self.assertEqual(code, 0)
+
+
+class LandscapeCheckTests(unittest.TestCase):
+    LOG = (
+        "# Decision Log\n\n## Summary\n| id | status |\n|---|---|\n\n"
+        "## Decisions\n\n## SD-001\n**Title:** Baseline\n**Status:** accepted\n\n"
+        "## SD-002\n**Title:** Old queue\n**Status:** superseded\n"
+    )
+    LAND_OK = (
+        "# Landscape\n\n## Summary\nok\n\n## Current\nx\n\n## Target\n"
+        "Adopt queue (SD-001)\n\n## Transition\n\n## Components\n"
+        "| component | verdict | decision | engagement | status |\n|---|---|---|---|---|\n"
+        "| queue | buy | [SD-001](decision-log.md#sd-001) | [q](engagements/q.md) | decided |\n"
+    )
+
+    def _tree(self, tmp, log, land, engagement=None):
+        tree = Path(tmp) / "solution-design"
+        (tree / "engagements").mkdir(parents=True)
+        (tree / "decision-log.md").write_text(log, encoding="utf-8")
+        (tree / "landscape.md").write_text(land, encoding="utf-8")
+        if engagement is not None:
+            (tree / "engagements" / "q.md").write_text(engagement, encoding="utf-8")
+        return str(tree)
+
+    def test_consistent_tree_passes(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tree = self._tree(
+                tmp, self.LOG, self.LAND_OK,
+                "# Q\n\n## Summary\nStatus: approved 2026-07-13\n\n"
+                "## Framing\nf\n\n## Options\no\n\n## Verdict\nv\n")
+            code, _, _ = run(landscape_check, ["--tree", tree])
+            self.assertEqual(code, 0)
+
+    def test_superseded_citation_fails(self):
+        land = self.LAND_OK.replace("sd-001)", "sd-002)").replace("[SD-001]", "[SD-002]")
+        land = land.replace("(SD-001)", "(SD-002)")
+        with tempfile.TemporaryDirectory() as tmp:
+            tree = self._tree(tmp, self.LOG, land)
+            code, _, err = run(landscape_check, ["--tree", tree])
+            self.assertEqual(code, 1)
+            self.assertIn("superseded", err)
+
+    def test_titled_heading_and_bad_status_fail(self):
+        log = self.LOG.replace("## SD-001", "## SD-001: Baseline")
+        with tempfile.TemporaryDirectory() as tmp:
+            tree = self._tree(
+                tmp, log, self.LAND_OK,
+                "# Q\n\n## Summary\napproved someday\n\n"
+                "## Framing\nf\n\n## Options\no\n\n## Verdict\nv\n")
+            code, _, err = run(landscape_check, ["--tree", tree])
+            self.assertEqual(code, 1)
+            self.assertIn("bare ids", err)
+            self.assertIn("Status line", err)
 
 
 class TripwireEnvironmentTests(unittest.TestCase):

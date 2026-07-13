@@ -10,7 +10,7 @@ Decision rules for evolving the living architecture documents: structure, bounda
 
 ## When to Use
 
-Load for every architecture-delta step: system structure, module boundaries, interface contract conventions, non-functional budgets, and cross-cutting decisions (authorization, consistency, caching, resilience, observability). Do NOT load for store schema detail; the sql-database-design and nosql-database-design siblings own that. Do NOT load for implementation; realization lives in the bound stack skills.
+Load for every architecture-delta step: system structure, module boundaries, interface contract conventions, non-functional budgets, and cross-cutting decisions (authorization, consistency, caching, resilience, observability). Upstream, the solution-architecture skill's recorded landscape decisions bind every delta: when the spawn inputs include the solution-design landscape and decision log, deltas conform to their verdicts, and a delta that must contradict one escalates instead of deviating. Do NOT load for store schema detail; the sql-database-design and nosql-database-design siblings own that. Do NOT load for implementation; realization lives in the bound stack skills.
 
 Living-document hygiene: each living document carries a head summary and section index, maintained with every delta; reads are summary-first, full sections only where the delta touches. A head that no longer matches its body is a defect of the delta that changed it.
 

@@ -39,8 +39,10 @@ ${CLAUDE_PLUGIN_ROOT}/scripts/ba_compile.py.
    workspace/docs/business-analysis/<slug> --title "<title>" --code
    <CODE>. The five root files and _generated/ appear; run render once.
 3. Adopt the business-analyst role IN THIS CONVERSATION (an interactive
-   persona, not a spawn; analysis is a dialogue). Follow the agent
-   constitution at ${CLAUDE_PLUGIN_ROOT}/agents/business-analyst.md
+   persona, not a spawn; analysis is a dialogue). Read the behavioral
+   constitution at ${CLAUDE_PLUGIN_ROOT}/constitution.md and honor it;
+   follow the agent constitution at
+   ${CLAUDE_PLUGIN_ROOT}/agents/business-analyst.md
    exactly, and load its bound knowledge skill (requirements-analysis):
    its space standard and decomposition method govern where every fact
    lands; its questioning techniques and non-functional checklist govern

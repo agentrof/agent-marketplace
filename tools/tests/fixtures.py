@@ -226,6 +226,13 @@ def break_template_placeholders(root: Path) -> None:
     )
 
 
+def break_spawn_shape_constitution(root: Path) -> None:
+    write(
+        root / "plugins" / PLUGIN / "skills" / "notes" / "spawning.md",
+        "# Spawning\n\n## Spawn Shape\n\n1. Identity line.\n2. Inputs.\n",
+    )
+
+
 def break_ba_schema_shape(root: Path) -> None:
     write(
         root / "plugins" / PLUGIN / "skills" / "notes" / "data" / "space-schema.json",
@@ -258,6 +265,7 @@ BUILDERS = {
     "stdlib_only": break_stdlib_only,
     "script_references": break_script_references,
     "template_placeholders": break_template_placeholders,
+    "spawn_shape_constitution": break_spawn_shape_constitution,
     "ba_schema_shape": break_ba_schema_shape,
 }
 

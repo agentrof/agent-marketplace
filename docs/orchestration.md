@@ -7,12 +7,12 @@ same pull request.
 ## Surfaces and routes
 
 Entry skills (user surface): request, sketch, demo, business-analysis,
-design-system, setup, configure, program. Entries stay thin: parse
-input, run the pre-flight, then either delegate to a flow file via the
-plugin root variable (request, sketch, demo, program) or execute their
-own short interactive procedure in the main conversation
-(business-analysis, design-system, setup, configure). Internal flows:
-design, develop, program.
+solution-design, design-system, setup, configure, program. Entries stay
+thin: parse input, run the pre-flight, then either delegate to a flow
+file via the plugin root variable (request, sketch, demo, program) or
+execute their own short interactive procedure in the main conversation
+(business-analysis, solution-design, design-system, setup, configure).
+Internal flows: design, develop, program.
 
 Routes:
 
@@ -61,6 +61,16 @@ Routes:
   adversarial challenge loop (fresh-context read-only challenger and
   expert spawns, triaged into locked round records); design-system
   closes with its own approval gate.
+- **solution-design** is an interactive main-conversation flow: the
+  solution-architect persona evaluates the end-to-end landscape and
+  records technology, topology and method decisions in one living tree
+  (workspace/docs/solution-design/: landscape, append-only decision
+  log, engagement studies, challenge-round records). Each engagement is
+  challenged by fresh-context read-only lens spawns and closes at the
+  SOLUTION gate; approved outcomes fold into the landscape. Downstream,
+  the product owner's planning and the develop flow's step-1 architect
+  read the landscape and decision log as inputs; built components stay
+  within the configured stacks and stack changes route to configure.
 - **setup** is idempotent bootstrap (including the PMO prerequisite
   check and project registration); **configure** is the single change
   gate for the project config file.

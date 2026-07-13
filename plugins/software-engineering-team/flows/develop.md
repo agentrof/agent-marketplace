@@ -153,8 +153,7 @@ still read the artifact for semantic sanity before presenting any gate.
 
 ### Step 0.5: readiness gate
 
-- This gate lives inside step 0's state row; it has no step id of its
-  own and advances nothing when it passes.
+- Lives in step 0's state row: no own step id; passing advances nothing.
 - Read this story's row (item list --kind story --json) and check every
   item of its Definition of Ready against reality (dependencies actually
   merged per the story's recorded edges, criteria unambiguous, preview
@@ -169,7 +168,8 @@ still read the artifact for semantic sanity before presenting any gate.
 - Spawn software-engineering-team-software-architect with the snapshotted analysis
   space: read-fully the snapshot's root overview, budgets and the docs
   owning this story's claimed ids (ba_compile.py resolve against the
-  snapshot); its generated registry and index summary-only. Add the
+  snapshot); summary-only its generated registry and index, plus the
+  solution-design landscape and decision log when present. Add the
   living documents under workspace/docs/system-architecture/ and this
   story's scope from its backlog row.
 - The architect applies its delta to the living documents and returns

@@ -38,7 +38,8 @@ folder or an existing repository; it completes gaps and breaks nothing.
      are copied verbatim per file, otherwise me.md and profile.md come
      from the templates.
 4. Create the skeleton, only missing parts: workspace/apps/,
-   workspace/docs/business-analysis/, workspace/docs/system-architecture/,
+   workspace/docs/business-analysis/, workspace/docs/solution-design/,
+   workspace/docs/system-architecture/,
    workspace/docs/design-system/pages/, workspace/demos/,
    workspace/sketches/, workspace/environment/, workspace/work-orders/.
    Git does not track empty directories: drop a .gitkeep in each folder
@@ -102,4 +103,5 @@ folder or an existing repository; it completes gaps and breaks nothing.
    Keep the dependency-audit job, and route any advisory it raises
    through the request entry as a fix-atomic lockfile bump.
 8. Close with the summary and pointers: start with business-analysis for
-   the first topic, design-system before any screen work, then request.
+   the first topic, solution-design for the system foundations,
+   design-system before any screen work, then request.

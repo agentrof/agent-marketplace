@@ -307,7 +307,7 @@ still read the artifact for semantic sanity before presenting any gate.
 - Merge checkpoint (main line only). Backlog updates NEVER ride this
   branch; the list below runs only on the primary checkout. Solo: this
   session, after the human merges. Parallel (worktree opened by the
-  program flow): step 5 ends at the opened pull request; mark it done
+  delivery-lanes flow): step 5 ends at the opened pull request; mark it done
   with the PR URL as artifact, set the work order waiting_gate (claims
   stay held), report the PR to the integrator and stop; the integrator
   executes this list at its merge checkpoint. After merge, on the main line:
@@ -340,7 +340,7 @@ still read the artifact for semantic sanity before presenting any gate.
     on story work orders the coverage rows and the ledger line must be
     in the database; the CLI's complete guard refuses otherwise;
   then ask "continue with the next story?" (solo) or hand back to the
-  program flow's PROPOSE (parallel).
+  delivery-lanes flow's PROPOSE (parallel).
 
 ## Atomic route variant
 

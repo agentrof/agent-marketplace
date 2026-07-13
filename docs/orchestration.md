@@ -7,12 +7,13 @@ same pull request.
 ## Surfaces and routes
 
 Entry skills (user surface): request, sketch, demo, business-analysis,
-solution-design, design-system, setup, configure, program. Entries stay
-thin: parse input, run the pre-flight, then either delegate to a flow
-file via the plugin root variable (request, sketch, demo, program) or
-execute their own short interactive procedure in the main conversation
-(business-analysis, solution-design, design-system, setup, configure).
-Internal flows: design, develop, program.
+solution-design, design-system, setup, configure, delivery-lanes.
+Entries stay thin: parse input, run the pre-flight, then either
+delegate to a flow file via the plugin root variable (request, sketch,
+demo, delivery-lanes) or execute their own short interactive procedure
+in the main conversation (business-analysis, solution-design,
+design-system, setup, configure).
+Internal flows: design, develop, delivery-lanes.
 
 Routes:
 
@@ -43,7 +44,7 @@ Routes:
   for the touched scope (business-analysis runs first when it is not)
   and a design system MASTER (the design-system entry owns its
   creation; other flows only redirect).
-- **program** is the integrator surface: one session per project, on
+- **delivery-lanes** is the integrator surface: one session per project, on
   the primary checkout only (a linked worktree is refused). It proposes
   the ready set computed from dependency edges and claims (item ready;
   advisory only, the human approves each lane, capped by the optional
@@ -249,7 +250,7 @@ environment is consumed only through the configured environment
 command's verbs (up, down, seed, logs, url); the suite stays hermetic
 (the test and mutation commands never depend on a standing
 environment); parallel lanes are isolated by the entry point's
-worktree-derived project naming, and the program flow's SHARES advisory
+worktree-derived project naming, and the delivery-lanes flow's SHARES advisory
 treats the environment prefix as a shared resource.
 
 At the merge checkpoint on the main line: the story marked done and the
@@ -271,7 +272,7 @@ tip is refused before merge (mechanical merge-base check).
 
 One active work order per worktree, one active work order per story,
 disjoint ownership across a project's active work orders: the claim
-system arbitrates parallel worktrees, and the program flow drives them.
+system arbitrates parallel worktrees, and the delivery-lanes flow drives them.
 Parallel delivery is multi-session: each approved story gets a detached
 sibling worktree (../<project-dir>-wp-<nn>) and its own session running
 the develop flow up to the opened pull request; the dependency edges

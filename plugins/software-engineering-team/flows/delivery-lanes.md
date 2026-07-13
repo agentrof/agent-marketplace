@@ -1,4 +1,4 @@
-# Program Flow
+# Delivery Lanes Flow
 
 State-machine procedure for the INTEGRATOR session: one session per
 project, on the primary checkout, coordinating parallel work orders
@@ -50,7 +50,7 @@ created by develop step 0 inside the lane, never here.
 
 ## Cycle
 
-Each program invocation runs one cycle: LANES, then whichever of the
+Each delivery-lanes invocation runs one cycle: LANES, then whichever of the
 other states the situation calls for. After a merge checkpoint, re-run
 PROPOSE before ending the cycle.
 

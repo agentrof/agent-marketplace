@@ -66,7 +66,7 @@ def main() -> int:
         if elsewhere:
             lines.append(
                 "Active in OTHER worktrees (parallel lanes); do not resume or"
-                " modify them from this session, the program entry on the"
+                " modify them from this session, the delivery-lanes entry on the"
                 " primary checkout coordinates them:"
             )
             lines.extend(describe(o) + f" (worktree {o.get('worktree')})"

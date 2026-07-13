@@ -216,7 +216,7 @@ class PmoHookTests(unittest.TestCase):
         self.assertIn("wo1", context.split("OTHER worktrees")[0])
         self.assertIn("OTHER worktrees", context)
         self.assertIn("wo-lane-b", context.split("OTHER worktrees")[1])
-        self.assertIn("program entry", context)
+        self.assertIn("delivery-lanes entry", context)
 
     def attempts(self):
         import sqlite3

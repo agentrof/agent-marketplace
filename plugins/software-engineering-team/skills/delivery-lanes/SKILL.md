@@ -1,10 +1,10 @@
 ---
-name: program
-description: The integrator surface for parallel delivery. Proposes which ready stories can start together from dependencies and claims, opens git worktree lanes on approval, tracks where gate approvals are pending, and owns every merge checkpoint on the main line.
+name: delivery-lanes
+description: The integrator surface for parallel delivery; it never delivers a story itself. Proposes which ready stories can start together from dependencies and claims, opens git worktree lanes the user drives through their own request sessions, tracks where gate approvals are pending, and owns every merge checkpoint on the main line.
 disable-model-invocation: true
 ---
 
-# Program
+# Delivery Lanes
 
 One session per project coordinates many work orders; this is that
 session's entry.
@@ -28,7 +28,7 @@ session's entry.
    `git rev-parse --git-common-dir`. A linked worktree fails that test:
    refuse, name the primary checkout path, and route lane work to the
    request entry.
-2. Load ${CLAUDE_PLUGIN_ROOT}/flows/program.md and execute it under its
+2. Load ${CLAUDE_PLUGIN_ROOT}/flows/delivery-lanes.md and execute it under its
    full state contract.
 3. Gate approvals belong to the owning lane session, never to this one;
    the CLI's worktree binding enforces it, and every approval request is

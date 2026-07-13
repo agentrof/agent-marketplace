@@ -72,9 +72,9 @@ one at a time (the QA step does this through the CLI).
   cites nothing is invented scope (raise it in open questions) or too
   small to stand alone (fold it into a sibling item).
 - The story's scope names its expected environment impact (a new
-  service, store or exposed surface, or explicitly none): the program
-  flow's SHARES advisory reads it to keep two environment-impacting
-  stories out of the same parallel wave.
+  service, store or exposed surface, or explicitly none): the
+  delivery-lanes flow's SHARES advisory reads it to keep two
+  environment-impacting stories out of the same parallel wave.
 
 ## Anti-pattern gallery
 

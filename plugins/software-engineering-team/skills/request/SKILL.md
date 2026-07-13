@@ -20,7 +20,7 @@ Front door for real work: classify, confirm, deliver.
    state contract): an active work order whose worktree field matches
    THIS resolved git root means offer Resume or Release; never start a
    second work order here. Active orders in OTHER worktrees are parallel
-   lanes coordinated by the program entry: name them and continue.
+   lanes coordinated by the delivery-lanes entry: name them and continue.
    Resume means: load ${CLAUDE_PLUGIN_ROOT}/flows/develop.md, read the
    work order's state (resume-info), and continue from the first step
    that is not done, under the full state contract; never redo done

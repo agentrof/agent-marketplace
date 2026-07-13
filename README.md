@@ -60,7 +60,7 @@ skills stay behind them.
 | `/software-engineering-team:sketch` | Design exploration: divergent single-file previews, no code. |
 | `/software-engineering-team:demo` | Pre-sales package: a navigable single-file demo, no code. |
 | `/software-engineering-team:request` | Real work. Atomic asks ship as a small PR; everything else runs the backlog path with gates. |
-| `/software-engineering-team:program` | The integrator surface for parallel delivery: proposes lanes, opens worktrees, owns every merge checkpoint. |
+| `/software-engineering-team:delivery-lanes` | The integrator surface for parallel delivery: proposes lanes, opens worktrees the user drives in their own sessions, owns every merge checkpoint. |
 | `/software-engineering-team:configure` | The single change gate for the project config. |
 | `/project-management-office:control-tower` | Starts Control Tower, the read-only web dashboard over the central database, and replies with the clickable URL. |
 

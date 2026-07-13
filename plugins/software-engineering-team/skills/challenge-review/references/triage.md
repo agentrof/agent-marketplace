@@ -45,5 +45,8 @@ Created via the compiler's stub (type challenge_record), one file per
 round under the node's reviews/ folder (space rounds at the root). It
 holds: the panel roster with the one-line why per member, the findings
 table (CH rows), the triage audit outcome, and the verdict. Closing a
-round sets verdict, flips status to approved with the date, and sets
-locked true in the same write; the guard hook denies any later edit.
+round is a status flip plus one script call, never a hand edit: flip the
+round to in_review, then ba_compile.py approve --space <space> --doc
+<round file> --verdict <converged|continue> sets verdict, status
+approved with the UTC date, and locked true in the same write; the
+guard hook denies any later edit (and any hand-written stamp date).

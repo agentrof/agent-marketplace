@@ -35,9 +35,11 @@ Config changes go through this gate, never through hand edits.
    implements the verbs up, down, seed <scenario>, logs and
    url <service> (contract in the environment stack skill); source_dirs
    a non-empty list of repo-relative paths (absolute paths refused);
-   output_language a non-empty language name; max_parallel an optional
-   positive integer (the delivery-lanes flow's lane-proposal cap; absent means
-   3; this gate is its only writer).
+   output_language a non-empty language name (scope: ONLY the body
+   content of authored .md documents; file names, commits, code, keys
+   and every other process artifact stay English); max_parallel an
+   optional positive integer (the delivery-lanes flow's lane-proposal
+   cap; absent means 3; this gate is its only writer).
 4. Present the impact analysis before writing: which roles' skill
    bindings change (the static role-to-skill map lives in
    ${CLAUDE_PLUGIN_ROOT}/flows/develop.md, step 0; method skills such as

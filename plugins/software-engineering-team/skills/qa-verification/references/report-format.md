@@ -62,6 +62,9 @@ Grouped by severity (Critical, High, Medium, Low). Each finding:
 | 1 | <date> | FAIL: <blocking findings> | implement |
 | 2 | <date> | PASS | sign-off |
 
+Each Date cell is the pasted output of the PMO CLI's `now --date`
+(system clock, UTC), never a remembered date.
+
 ## Verdict
 - PASS or FAIL, with the gate-by-gate breakdown:
   coverage matrix clean / suite green / runtime clean / no unresolved blocking findings.

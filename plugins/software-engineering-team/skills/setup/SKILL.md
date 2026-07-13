@@ -83,7 +83,10 @@ folder or an existing repository; it completes gaps and breaks nothing.
    running up then down once, and in a project with no environment yet
    record it as unverified so the first environment-impacting story's QA
    gate performs the verification), source_dirs, output_language
-   (default English). A stack outside the supported set is refused
+   (default English; state its scope when asking: it governs ONLY the
+   body content of authored .md documents, everything else, file names,
+   commits, code, keys, stays English). A stack outside the supported
+   set is refused
    honestly: this team ships tested stacks only, and new stacks arrive
    as maintainer releases.
 7. Continuous integration: no PR-triggered test workflow in the

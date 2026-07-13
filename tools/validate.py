@@ -824,6 +824,32 @@ def check_stdlib_only(tree: Tree, findings: list[Finding]) -> None:
                     ))
 
 
+NAIVE_CLOCK_RE = re.compile(r"\bdate\.today\(\)|\bdatetime\.now\(\s*\)|\butcnow\(")
+
+
+def check_naive_clock(tree: Tree, findings: list[Finding]) -> None:
+    """One clock: plugin scripts read time as datetime.now(timezone.utc).
+    A naive or local clock call (date.today(), no-arg datetime.now(),
+    utcnow()) puts local or deprecated time into artifacts and diverges
+    from the UTC values every other writer records."""
+    for plugin in plugin_dirs(tree):
+        script_dirs = [sdir / "scripts" for sdir in skill_dirs(plugin)]
+        script_dirs.append(plugin / "scripts")
+        for scripts in script_dirs:
+            if not scripts.is_dir():
+                continue
+            for script in sorted(scripts.glob("*.py")):
+                for lineno, line in enumerate(read_text(script).splitlines(), start=1):
+                    if NAIVE_CLOCK_RE.search(line):
+                        findings.append(Finding(
+                            "error", rel(tree, script), lineno, "naive_clock",
+                            "local or naive clock call",
+                            "plugin scripts read the clock as"
+                            " datetime.now(timezone.utc); local time never"
+                            " enters artifacts",
+                        ))
+
+
 SCRIPT_REF_RE = re.compile(r"\$\{CLAUDE_PLUGIN_ROOT\}/([A-Za-z0-9_\-./]+\.py)\b")
 
 
@@ -964,6 +990,7 @@ CHECKS = {
     "json_hygiene": check_json_hygiene,
     "orchestrator_integrity": check_orchestrator_integrity,
     "stdlib_only": check_stdlib_only,
+    "naive_clock": check_naive_clock,
     "script_references": check_script_references,
     "template_placeholders": check_template_placeholders,
     "spawn_shape_constitution": check_spawn_shape_constitution,

@@ -485,6 +485,11 @@ def break_generated_freshness(space: Path) -> None:
          "never edited directly", "never edited directly by hand")
 
 
+def break_future_dates(space: Path) -> None:
+    edit(space / "space.md", "approved_at: 2026-07-12",
+         "approved_at: 9999-01-01")
+
+
 BA_BUILDERS = {
     "space_layout": break_space_layout,
     "frontmatter_schema": break_frontmatter_schema,
@@ -506,6 +511,7 @@ BA_BUILDERS = {
     "aging": break_aging,
     "gate_approval": break_gate_approval,
     "generated_freshness": break_generated_freshness,
+    "future_dates": break_future_dates,
 }
 
 # Builders that mutate authored docs make the pre-built generated views
@@ -579,6 +585,98 @@ class BuilderFixtureTests(unittest.TestCase):
                         matching,
                         f"{check}: no finding fired; got "
                         f"{[(f.check, f.message) for f in findings]}")
+
+
+class ApproveTests(unittest.TestCase):
+    """The approve verb stamps status, the UTC date and (for challenge
+    records) verdict + locked in one script-owned write; a doc the checks
+    reject is restored byte-identical."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.space = Path(self.tmp.name) / "erp"
+        make_valid_space(self.space)
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    @staticmethod
+    def utc_today() -> str:
+        from datetime import datetime, timezone
+        return datetime.now(timezone.utc).date().isoformat()
+
+    def test_approve_stamps_status_and_utc_date(self):
+        target = self.space / INV / "entities" / "stock-item.md"
+        edit(target, "status: approved\napproved_at: 2026-07-12",
+             "status: in_review")
+        code, out, err = run(["approve", "--space", str(self.space),
+                              "--doc", "domains/inventory/entities/stock-item.md"])
+        self.assertEqual(code, 0, out + err)
+        text = target.read_text(encoding="utf-8")
+        self.assertIn("status: approved", text)
+        self.assertIn(f"approved_at: {self.utc_today()}", text)
+
+    def test_approve_rejected_doc_restores_bytes(self):
+        target = self.space / INV / "rules" / "stock-item-lifecycle.md"
+        edit(target, "status: approved\napproved_at: 2026-07-12",
+             "status: in_review")
+        edit(target, "| confirmed | 2026-07-09 |",
+             f"| open | {self.utc_today()} |")
+        before = target.read_bytes()
+        code, out, err = run(["approve", "--space", str(self.space),
+                              "--doc",
+                              "domains/inventory/rules/stock-item-lifecycle.md"])
+        self.assertEqual(code, 1, out + err)
+        self.assertEqual(target.read_bytes(), before)
+
+    def test_approve_already_approved_fails(self):
+        code, _, err = run(["approve", "--space", str(self.space),
+                            "--doc", "space.md"])
+        self.assertEqual(code, 1)
+        self.assertIn("already approved", err)
+
+    def test_approve_refuses_draft(self):
+        """Approval follows review: a draft doc must pass through
+        in_review before the verb accepts it."""
+        target = self.space / INV / "entities" / "stock-item.md"
+        edit(target, "status: approved\napproved_at: 2026-07-12",
+             "status: draft")
+        code, _, err = run(["approve", "--space", str(self.space),
+                            "--doc", "domains/inventory/entities/stock-item.md"])
+        self.assertEqual(code, 1)
+        self.assertIn("in_review", err)
+
+    def test_approve_rejects_verdict_on_non_challenge_docs(self):
+        target = self.space / INV / "entities" / "stock-item.md"
+        edit(target, "status: approved\napproved_at: 2026-07-12",
+             "status: in_review")
+        code, _, err = run(["approve", "--space", str(self.space),
+                            "--doc", "domains/inventory/entities/stock-item.md",
+                            "--verdict", "converged"])
+        self.assertEqual(code, 2)
+        self.assertIn("challenge", err)
+
+    def test_approve_unknown_doc_is_usage_error(self):
+        code, _, err = run(["approve", "--space", str(self.space),
+                            "--doc", "nope.md"])
+        self.assertEqual(code, 2, err)
+
+    def test_challenge_record_requires_verdict_and_locks(self):
+        target = self.space / INV / "reviews" / "round-1.md"
+        edit(target, "status: approved\napproved_at: 2026-07-12",
+             "status: in_review")
+        edit(target, "verdict: converged\nlocked: true", "verdict: continue")
+        rel = "domains/inventory/reviews/round-1.md"
+        code, _, err = run(["approve", "--space", str(self.space),
+                            "--doc", rel])
+        self.assertEqual(code, 2, err)
+        code, out, err = run(["approve", "--space", str(self.space),
+                              "--doc", rel, "--verdict", "converged"])
+        self.assertEqual(code, 0, out + err)
+        text = target.read_text(encoding="utf-8")
+        self.assertIn("verdict: converged", text)
+        self.assertIn("locked: true", text)
+        self.assertIn(f"approved_at: {self.utc_today()}", text)
 
 
 class SubcommandTests(unittest.TestCase):

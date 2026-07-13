@@ -16,6 +16,11 @@ REPO = Path(__file__).resolve().parents[2]
 SCRIPTS = REPO / "plugins" / "project-management-office" / "scripts"
 
 
+def utc_today() -> str:
+    from datetime import datetime, timezone
+    return datetime.now(timezone.utc).date().isoformat()
+
+
 def run_hook(script: str, payload: dict, env: dict, args: list[str] | None = None):
     proc = subprocess.run(
         [sys.executable, str(SCRIPTS / script), *(args or [])],
@@ -140,6 +145,8 @@ class PmoHookTests(unittest.TestCase):
         self.assertEqual(code, 0, err)
         data = json.loads(out)
         context = data["hookSpecificOutput"]["additionalContext"]
+        self.assertIn(f"Current UTC time at session start: {utc_today()}",
+                      context)
         self.assertIn("wo1", context)
         self.assertIn("WP-01", context)
         self.assertIn("work order", context)
@@ -150,12 +157,16 @@ class PmoHookTests(unittest.TestCase):
         dashboard_index = Path(self.env["AGENTROF_HOME"]) / "dashboard" / "index.html"
         self.assertTrue(dashboard_index.is_file())
 
-    def test_session_start_quiet_outside_projects(self):
+    def test_session_start_clock_only_outside_projects(self):
         code, out, _ = run_hook("hook_session_start.py", self.payload(
             hook_event_name="SessionStart", source="startup", cwd=self.tmp.name,
         ), self.env)
         self.assertEqual(code, 0)
-        self.assertEqual(out.strip(), "")
+        context = json.loads(out)["hookSpecificOutput"]["additionalContext"]
+        self.assertIn(f"Current UTC time at session start: {utc_today()}",
+                      context)
+        self.assertIn("never from memory", context)
+        self.assertNotIn("work order", context)
 
     def test_session_end_flags_dangling_work_order(self):
         code, _, _ = run_hook("hook_session_end.py", self.payload(
@@ -338,6 +349,124 @@ class PmoHookTests(unittest.TestCase):
         )
         code, _, _ = self.guard(record, tool="Edit")
         self.assertEqual(code, 0)
+
+    def test_guard_denies_hand_stamped_dates(self):
+        """Stamp fields are script-owned: any stamp date the model
+        introduces by hand is denied, today's included; stamps already in
+        the on-disk file pass (rewrites, restructures)."""
+        doc = self.project_root / "workspace" / "docs" / "rules.md"
+        doc.parent.mkdir(parents=True, exist_ok=True)
+        stale = "---\nstatus: approved\napproved_at: 2025-01-01\n---\n# R\n"
+        code, _, err = run_hook("hook_guard_db.py", self.payload(
+            hook_event_name="PreToolUse", tool_name="Write", tool_use_id="d1",
+            tool_input={"file_path": str(doc), "content": stale},
+        ), self.env)
+        self.assertEqual(code, 2)
+        self.assertIn("owning verb", err)
+        # Today's date typed by hand is denied too: the value is not the
+        # point, the writer is.
+        fresh = stale.replace("2025-01-01", utc_today())
+        code, _, err = run_hook("hook_guard_db.py", self.payload(
+            hook_event_name="PreToolUse", tool_name="Write", tool_use_id="d2",
+            tool_input={"file_path": str(doc), "content": fresh},
+        ), self.env)
+        self.assertEqual(code, 2)
+        # A stamp already in the on-disk file is not "introduced": full
+        # rewrites and Edits that relocate it pass.
+        doc.write_text(stale, encoding="utf-8")
+        code, _, err = run_hook("hook_guard_db.py", self.payload(
+            hook_event_name="PreToolUse", tool_name="Write", tool_use_id="d3",
+            tool_input={"file_path": str(doc), "content": stale + "\nMore.\n"},
+        ), self.env)
+        self.assertEqual(code, 0, err)
+        code, _, err = run_hook("hook_guard_db.py", self.payload(
+            hook_event_name="PreToolUse", tool_name="Edit", tool_use_id="d4",
+            tool_input={"file_path": str(doc), "old_string": "# R",
+                        "new_string": "# R\napproved_at: 2025-01-01"},
+        ), self.env)
+        self.assertEqual(code, 0, err)
+        # An Edit introducing a stamp the file does not hold is denied.
+        code, _, err = run_hook("hook_guard_db.py", self.payload(
+            hook_event_name="PreToolUse", tool_name="Edit", tool_use_id="d5",
+            tool_input={"file_path": str(doc), "old_string": "# R",
+                        "new_string": "Status: approved 2024-12-31"},
+        ), self.env)
+        self.assertEqual(code, 2)
+        self.assertIn("owning verb", err)
+        # Outside a managed project the stamp family does not apply.
+        outside = Path(self.tmp.name) / "elsewhere" / "workspace" / "n.md"
+        outside.parent.mkdir(parents=True)
+        code, _, err = run_hook("hook_guard_db.py", self.payload(
+            hook_event_name="PreToolUse", tool_name="Write", tool_use_id="d6",
+            cwd=str(outside.parent.parent),
+            tool_input={"file_path": str(outside), "content": stale},
+        ), self.env)
+        self.assertEqual(code, 0, err)
+
+    def test_guard_denies_non_ascii_workspace_paths(self):
+        target = self.project_root / "workspace" / "docs" / "müşteri.md"
+        code, _, err = run_hook("hook_guard_db.py", self.payload(
+            hook_event_name="PreToolUse", tool_name="Write", tool_use_id="l1",
+            tool_input={"file_path": str(target), "content": "x"},
+        ), self.env)
+        self.assertEqual(code, 2)
+        self.assertIn("English", err)
+        ascii_target = self.project_root / "workspace" / "docs" / "customer.md"
+        code, _, err = run_hook("hook_guard_db.py", self.payload(
+            hook_event_name="PreToolUse", tool_name="Write", tool_use_id="l2",
+            tool_input={"file_path": str(ascii_target), "content": "x"},
+        ), self.env)
+        self.assertEqual(code, 0, err)
+
+    def test_guard_allows_configured_language_in_md_bodies(self):
+        doc = self.project_root / "workspace" / "docs" / "analysis.md"
+        code, _, err = run_hook("hook_guard_db.py", self.payload(
+            hook_event_name="PreToolUse", tool_name="Write", tool_use_id="l3",
+            tool_input={"file_path": str(doc),
+                        "content": "# Analiz\n\nMüşteri kuralı."},
+        ), self.env)
+        self.assertEqual(code, 0, err)
+
+    def test_guard_denies_non_ascii_commit_messages(self):
+        code, _, err = run_hook("hook_guard_db.py", self.payload(
+            hook_event_name="PreToolUse", tool_name="Bash", tool_use_id="b1",
+            tool_input={"command":
+                        'git commit -m "müşteri modülü"'},
+        ), self.env)
+        self.assertEqual(code, 2)
+        self.assertIn("English", err)
+        code, _, err = run_hook("hook_guard_db.py", self.payload(
+            hook_event_name="PreToolUse", tool_name="Bash", tool_use_id="b2",
+            tool_input={"command": 'git commit -m "add customer module"'},
+        ), self.env)
+        self.assertEqual(code, 0, err)
+        # Non-ASCII in a non-commit command is not this guard's business.
+        code, _, err = run_hook("hook_guard_db.py", self.payload(
+            hook_event_name="PreToolUse", tool_name="Bash", tool_use_id="b3",
+            tool_input={"command": 'echo "müşteri"'},
+        ), self.env)
+        self.assertEqual(code, 0, err)
+        # A compound command writing configured-language .md content with
+        # an English message passes: only the -m payload is judged.
+        code, _, err = run_hook("hook_guard_db.py", self.payload(
+            hook_event_name="PreToolUse", tool_name="Bash", tool_use_id="b4",
+            tool_input={"command":
+                        'printf "Müşteri kuralı\\n" >> workspace/docs/a.md'
+                        ' && git commit -am "extend analysis"'},
+        ), self.env)
+        self.assertEqual(code, 0, err)
+        # Global git options and combined short flags do not hide the
+        # commit message from the guard.
+        code, _, err = run_hook("hook_guard_db.py", self.payload(
+            hook_event_name="PreToolUse", tool_name="Bash", tool_use_id="b5",
+            tool_input={"command": 'git -C . commit -m "müşteri modülü"'},
+        ), self.env)
+        self.assertEqual(code, 2)
+        code, _, err = run_hook("hook_guard_db.py", self.payload(
+            hook_event_name="PreToolUse", tool_name="Bash", tool_use_id="b6",
+            tool_input={"command": 'git commit -am "müşteri modülü"'},
+        ), self.env)
+        self.assertEqual(code, 2)
 
     def test_guard_denies_generated_view_edits(self):
         docs = self.project_root / "workspace" / "docs"

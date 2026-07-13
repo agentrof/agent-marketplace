@@ -43,6 +43,17 @@ Skills carry `name`, `description` and exactly one visibility flag:
 - Entry skill (user surface): `disable-model-invocation: true`
 - Knowledge skill (agent-loaded): `user-invocable: false`
 
+## Time
+
+Scripts read the clock timezone-aware in UTC only:
+`datetime.now(timezone.utc)`. The validator's `naive_clock` rule fails
+`date.today()`, no-arg `datetime.now()` and `utcnow()` in any plugin
+script. A new stamp-like field (a date the process writes into an
+artifact) ships with two things: an owning stamp verb that writes the
+date itself, and its pattern registered in the guard hook's
+STAMP_FIELD_PATTERNS table (project-management-office's hook_guard_db.py)
+so a hand-typed date is denied at write time.
+
 ## Size caps
 
 | file | cap |

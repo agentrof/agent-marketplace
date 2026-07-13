@@ -30,12 +30,13 @@ reinstall this plugin). Run the idempotent init-db before first use.
 
 Work order identity: project_key comes from workspace/config.json
 (stamped by setup); the key is <yyyymmdd>-<kebab-slug> (suffix -2, -3
-when an abandoned order already holds it). Subcommands in play:
-work-order init / set-step / record-gate / bump / set-ownership /
-set-status / release / validate; task open / close; finding open /
-update / list; coverage import; budget set; checkpoint; item import /
-update / list / add-dep / add-dod / set-dod / order; render backlog /
-ledger; resume-info. The CLI enforces the enums, the step-transition
+when an abandoned order already holds it), its date prefix pasted from
+`"$PMO" now --compact` (init refuses a stale prefix). Subcommands in
+play: now; work-order init / set-step / record-gate / bump /
+set-ownership / set-status / release / validate; task open / close;
+finding open / update / list; coverage import; budget set; checkpoint;
+item import / update / list / add-dep / add-dod / set-dod / order;
+render backlog / ledger; resume-info. The CLI enforces the enums, the step-transition
 guard, the complete guard (steps done, findings closed; story work
 orders also need imported coverage and a ledger checkpoint), snake_case
 ownership roles, and ownership-overlap refusal across ALL active work
@@ -252,15 +253,14 @@ still read the artifact for semantic sanity before presenting any gate.
 
 - Spawn software-engineering-team-qa-engineer with the story's criteria read from
   the snapshot (the acceptance docs named by ba_compile.py resolve over
-  the claimed ids), the currently open findings from finding list
-  --json, and the configured commands (test_command, mutation_command
-  and env_command).
+  the claimed ids), the currently open findings from finding list --json,
+  and the configured commands (test_command, mutation_command,
+  env_command).
 - The mutation gate is mandatory on code stories: QA runs the configured
-  mutation command scoped to this story's changed code-owned files;
-  every surviving
-  mutant in changed lines is a finding (high on a BR/AC-tagged path, low
-  otherwise); a missing mutation_command on a code story is itself a
-  blocking finding.
+  mutation command scoped to this story's changed code-owned files; every
+  surviving mutant in changed lines is a finding (high on a BR/AC-tagged
+  path, low otherwise); a missing mutation_command on a code story is
+  itself a blocking finding.
 - The verifier RETURNS findings, the coverage matrix and the budget
   table. The FIRST action on that reply is recording them: finding open
   --source qa per finding; the coverage script with --json-out, imported
@@ -319,7 +319,7 @@ still read the artifact for semantic sanity before presenting any gate.
     workspace/docs/quality-ledger.md); the views are generated files, a
     guard hook denies hand edits;
   - append the story's line to workspace/CHANGELOG.md from the PR
-    quality summary (append-only);
+    quality summary (append-only; any date pasted from "$PMO" now --date);
   - publish the exported interface schema under workspace/docs/api/;
   - update the analysis-space BR rows changed by fix-atomic work since
     the last checkpoint (edit the owning rule_set row in place: same id,

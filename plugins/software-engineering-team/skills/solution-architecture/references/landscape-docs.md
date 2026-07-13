@@ -41,7 +41,7 @@ Greenfield first run: Current states "Nothing built yet" plus any inherited cons
 ## engagements/
 
 - The slug names the topic, kebab-case, minted at the entry's pre-flight; a reopened topic appends -2, -3, never reuses a closed slug.
-- The Summary's first body line is exactly `Status: open`, `Status: approved YYYY-MM-DD`, `Status: parked YYYY-MM-DD: <reason>`, or `Status: superseded by <slug>`. Session resume greps it, reads open engagements fully and skips parked ones. Parked covers an owner pause, a spike in flight and topics ruled not-now; a parked engagement reopens by flipping to open with a dated note.
+- The Summary's first body line is exactly `Status: open`, `Status: approved YYYY-MM-DD`, `Status: parked YYYY-MM-DD: <reason>`, or `Status: superseded by <slug>`. Dated Status lines are written only by the stamp mode (`landscape_check.py --tree <tree> --stamp-engagement <slug> --status approved|parked|open [--reason ...]`): the script stamps the UTC date and re-checks the tree; a hand-typed date is denied by the guard hook and a future date fails the check. Session resume greps the line, reads open engagements fully and skips parked ones. Parked covers an owner pause, a spike in flight and topics ruled not-now; a parked engagement reopens through the stamp mode's `--status open`, with the note dated from `now --date`.
 - Deferred questions and named risks live under Verdict, each with a revisit note; silence is never a deferral.
 - An engagement is append-only once its gate closes; a reopened topic gets a new engagement citing the old one.
 - The `ungrounded-by-analysis` flag, when present, sits in the Summary and is removed only by re-verification against an approved analysis domain.

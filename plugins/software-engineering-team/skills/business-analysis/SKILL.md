@@ -19,8 +19,9 @@ ${CLAUDE_PLUGIN_ROOT}/scripts/ba_compile.py.
 
 1. Pre-flight.
    - Read workspace/config.json when present (output_language governs
-     all document prose; structure stays English per the space
-     standard; default English).
+     ONLY the body content of authored .md docs; file names, ids,
+     frontmatter values, structure and every other process artifact
+     stay English; default English).
    - Freeze set: run the PMO CLI's resume-info --project-key <key>
      --json; for each active work order (running or waiting_gate) on
      this topic, collect its story's criterion ids from the coverage map
@@ -55,9 +56,12 @@ ${CLAUDE_PLUGIN_ROOT}/scripts/ba_compile.py.
      fact-routing test. Ids are table rows; citations are links.
    - After every authoring milestone: check + render. Fix findings
      immediately; a red compile never accumulates.
-   - Flip a doc draft -> in_review -> approved only when check reports
-     zero errors naming it; stamp approved_at. approved -> draft reopens
-     rework outside the frozen set.
+   - Flip a doc draft -> in_review in the frontmatter; approve only via
+     ${CLAUDE_PLUGIN_ROOT}/scripts/ba_compile.py approve --space <space>
+     --doc <rel-path>: the script stamps status and the UTC approved_at
+     itself and refuses a doc the checks reject (never hand-write the
+     date; the guard hook denies it). approved -> draft reopens rework
+     outside the frozen set.
 5. CHALLENGE LOOP, per domain, before its gate (and once at space level
    before the space closes when domains exist). Load the challenge-review
    knowledge skill and run its loop: cast lenses and topic experts, spawn

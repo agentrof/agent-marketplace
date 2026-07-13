@@ -107,6 +107,27 @@ launcher (bin/pmo_cli.py under the data directory; project-management-office's S
 hook keeps it current). Spawned agents never touch the database; a
 PreToolUse guard hook denies direct file writes to it.
 
+Time discipline: one clock. Every timestamp the system records comes
+off the system clock in UTC through a script, never out of the model's
+memory. The CLI's internal now() fills every database column; its `now`
+verb (bare ISO output; --date for YYYY-MM-DD, --compact for work-order
+key prefixes) is the paste source for every date a flow writes into an
+artifact; the analysis compiler's approve verb and the landscape
+checker's stamp mode author their documents' dates themselves; work-order
+init refuses a key whose date prefix is not the current UTC date;
+future-dated stamps fail the compilers; the guard hook denies hand-typed
+stamp dates at write time; and SessionStart injects the current UTC time
+into every session as calibration.
+
+Language discipline: everything the team produces runs in English: file
+and directory names, git branches and commit messages, code and
+comments, database values (story titles, scopes, keys), frontmatter keys
+and machine-parsed values, CLI output, PR bodies. The configured
+output_language applies exclusively to the body content of authored .md
+artifacts under workspace/. The guard hook enforces the mechanical
+slice: non-ASCII file paths under workspace/ and non-ASCII git commit
+messages are denied.
+
 Hooks carry the mechanics, flows carry the semantics: project-management-office's
 SubagentStart/SubagentStop hooks stamp task start and finish times for
 team agents automatically; the orchestrator's CLI calls carry which

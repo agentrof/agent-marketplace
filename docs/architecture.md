@@ -59,6 +59,14 @@ plugin.json dependencies, so it installs automatically).
    as generated views, never hand-written. The web dashboard is a READER:
    it opens the database read-only (mode=ro), exposes GET routes only,
    and scans the plugin catalog from the filesystem; it never writes.
+10. **One clock.** Every timestamp in a durable artifact comes off the
+   system clock in UTC through a script (the project-management-office
+   CLI's `now` verb or the owning stamp verb), never out of the model's
+   memory. Mechanical layers, not instructions, carry the rule: the CLI
+   fills every database column itself, work-order init rejects stale key
+   prefixes, the compilers reject future dates, a validator rule bans
+   naive clock calls in plugin scripts, and the guard hook denies
+   hand-typed stamp dates at write time.
 
 ## Repository layout
 

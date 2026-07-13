@@ -31,7 +31,7 @@ import re
 import sys
 import unicodedata
 from dataclasses import dataclass, field
-from datetime import date
+from datetime import date, datetime, timezone
 from pathlib import Path
 
 DEFAULT_SCHEMA = (Path(__file__).resolve().parent.parent
@@ -61,7 +61,7 @@ CHECK_IDS = (
     "id_format", "id_unique", "id_minting", "id_links", "row_schema",
     "semantic_links", "approval_preconditions", "challenge_record",
     "br_uncited", "thresholds", "aging", "gate_approval",
-    "generated_freshness",
+    "generated_freshness", "future_dates",
 )
 
 STATUS_RANK = {"draft": 0, "in_review": 1, "approved": 2}
@@ -511,6 +511,19 @@ def doc_status(doc: Doc) -> str:
     return str(doc.fm.get("status", ""))
 
 
+def parse_iso_date(value: str) -> date | None:
+    try:
+        return date.fromisoformat(value)
+    except ValueError:
+        return None
+
+
+def utc_today() -> date:
+    """This module's single clock read; every date this compiler writes
+    or judges derives from it."""
+    return datetime.now(timezone.utc).date()
+
+
 def id_references(doc: Doc) -> list[tuple[int, str, str | None]]:
     """All id references in a doc: (line, id, link_target or None).
     Table id-column declarations are excluded (they are mints)."""
@@ -544,7 +557,7 @@ def run_checks(space: Space, base: list[Finding], gate: bool = False,
                gate_node: str = "", today: date | None = None) -> list[Finding]:
     schema = space.schema
     findings = list(base)
-    today = today or date.today()
+    today = today or utc_today()
 
     def err(path, line, check, message, fix):
         findings.append(Finding("error", path, line, check, message, fix))
@@ -589,10 +602,19 @@ def run_checks(space: Space, base: list[Finding], gate: bool = False,
             err(rel, 1, "status_legality",
                 "superseded doc is missing superseded_by",
                 "name the successor documents")
-        if "approved_at" in doc.fm and not DATE_RE.match(str(doc.fm["approved_at"])):
-            err(rel, 1, "status_legality",
-                "approved_at is not a YYYY-MM-DD date",
-                "dates are ISO calendar dates")
+        if "approved_at" in doc.fm:
+            stamp = parse_iso_date(str(doc.fm["approved_at"])) \
+                if DATE_RE.match(str(doc.fm["approved_at"])) else None
+            if stamp is None:
+                err(rel, 1, "status_legality",
+                    "approved_at is not a YYYY-MM-DD calendar date",
+                    "dates are ISO calendar dates; the approve verb stamps"
+                    " them")
+            elif stamp > today:
+                err(rel, 1, "future_dates",
+                    f"approved_at {doc.fm['approved_at']} is in the future",
+                    "stamps come from the clock: ba_compile.py approve, or"
+                    " paste pmo_cli.py now --date output")
 
         h1s = [h for h in doc.headings if h[1] == 1]
         if len(h1s) != 1:
@@ -689,12 +711,21 @@ def run_checks(space: Space, base: list[Finding], gate: bool = False,
                         f"{id_value} status '{row.get('status', '')}' not in {enum}",
                         "row statuses use the schema enum")
                 if "opened_on" in row:
-                    if not DATE_RE.match(row["opened_on"]):
+                    stamp = parse_iso_date(row["opened_on"]) \
+                        if DATE_RE.match(row["opened_on"]) else None
+                    if stamp is None:
                         err(rel, info["line"], "row_schema",
                             f"{id_value} opened_on is not a YYYY-MM-DD date",
-                            "stamp the date the row was opened")
+                            "stamp the date the row was opened from the"
+                            " clock: paste pmo_cli.py now --date output")
+                    elif stamp > today:
+                        err(rel, info["line"], "future_dates",
+                            f"{id_value} opened_on {row['opened_on']} is in"
+                            " the future",
+                            "stamps come from the clock: paste pmo_cli.py"
+                            " now --date output")
                     elif row.get("status") == "open":
-                        age = (today - date.fromisoformat(row["opened_on"])).days
+                        age = (today - stamp).days
                         limit = schema["thresholds"]["open_row_age_days_warn"]
                         if age > limit:
                             warn(rel, info["line"], "aging",
@@ -1553,6 +1584,86 @@ def cmd_check(args, schema: dict) -> int:
     return emit(findings, args.json)
 
 
+def restamp_frontmatter(text: str, stamps: dict) -> str | None:
+    """Set the given frontmatter keys in place (replace or insert before the
+    closing delimiter), preserving everything else byte for byte."""
+    lines = text.splitlines(keepends=True)
+    if not lines or lines[0].strip() != "---":
+        return None
+    close = None
+    for i in range(1, len(lines)):
+        if lines[i].strip() == "---":
+            close = i
+            break
+    if close is None:
+        return None
+    remaining = dict(stamps)
+    for i in range(1, close):
+        key = lines[i].strip().partition(":")[0].strip()
+        if key in remaining:
+            lines[i] = f"{key}: {remaining.pop(key)}\n"
+    lines[close:close] = [f"{k}: {v}\n" for k, v in remaining.items()]
+    return "".join(lines)
+
+
+def cmd_approve(args, schema: dict) -> int:
+    """Approve a doc: the script stamps status, the UTC date and (for
+    challenge records) verdict + locked in one write, then re-runs the
+    checks; a doc the compiler rejects is restored untouched. The model
+    never types the date."""
+    space_dir = Path(args.space)
+    space, base = scan_space(space_dir, schema)
+    rel = args.doc
+    doc = space.docs.get(rel)
+    if doc is None:
+        print(f"ba_compile: FAIL: unknown doc '{rel}' in space {space_dir}",
+              file=sys.stderr)
+        return 2
+    status = doc_status(doc)
+    if status in ("approved", "superseded"):
+        print(f"ba_compile: FAIL: {rel} is already {status}", file=sys.stderr)
+        return 1
+    if status != "in_review":
+        print(f"ba_compile: FAIL: {rel} is '{status}', not in_review;"
+              " approval follows review, flip the doc to in_review first",
+              file=sys.stderr)
+        return 1
+    if doc.doc_type == "challenge_record" and not args.verdict:
+        print("ba_compile: FAIL: a challenge record closes with --verdict",
+              file=sys.stderr)
+        return 2
+    if args.verdict and doc.doc_type != "challenge_record":
+        print("ba_compile: FAIL: --verdict applies only to challenge"
+              " records", file=sys.stderr)
+        return 2
+    target = doc.abs_path
+    original = target.read_text(encoding="utf-8")
+    today = utc_today().isoformat()
+    stamps: dict = {"status": "approved", "approved_at": today}
+    if doc.doc_type == "challenge_record":
+        stamps["verdict"] = args.verdict
+        stamps["locked"] = "true"
+    updated = restamp_frontmatter(original, stamps)
+    if updated is None:
+        print(f"ba_compile: FAIL: {rel} has no parseable frontmatter block",
+              file=sys.stderr)
+        return 1
+    target.write_text(updated, encoding="utf-8")
+    space, base = scan_space(space_dir, schema)
+    findings = run_checks(space, base)
+    blocking = [f for f in findings
+                if f.severity == "error" and f.path == rel]
+    if blocking:
+        target.write_text(original, encoding="utf-8")
+        emit(blocking, args.json)
+        print(f"ba_compile: FAIL: {rel} does not pass the checks as"
+              " approved; original restored", file=sys.stderr)
+        return 1
+    closed = f", verdict {args.verdict}, locked" if args.verdict else ""
+    print(f"ba_compile: approved {rel} (approved_at {today}{closed})")
+    return 0
+
+
 def cmd_render(args, schema: dict) -> int:
     space, base = scan_space(Path(args.space), schema)
     if space.broken:
@@ -1671,6 +1782,12 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--node", default="")
     p.add_argument("--json", action="store_true")
 
+    p = sub.add_parser("approve")
+    p.add_argument("--space", required=True)
+    p.add_argument("--doc", required=True)
+    p.add_argument("--verdict", default="")
+    p.add_argument("--json", action="store_true")
+
     p = sub.add_parser("render")
     p.add_argument("--space", required=True)
     p.add_argument("--check-only", action="store_true")
@@ -1688,8 +1805,8 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     schema = load_schema(args.schema)
     handlers = {"init": cmd_init, "stub": cmd_stub, "check": cmd_check,
-                "render": cmd_render, "resolve": cmd_resolve,
-                "verify-import": cmd_verify_import}
+                "approve": cmd_approve, "render": cmd_render,
+                "resolve": cmd_resolve, "verify-import": cmd_verify_import}
     return handlers[args.command](args, schema)
 
 

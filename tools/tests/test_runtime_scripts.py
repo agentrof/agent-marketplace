@@ -149,6 +149,101 @@ class LandscapeCheckTests(unittest.TestCase):
             self.assertIn("bare ids", err)
             self.assertIn("Status line", err)
 
+    def test_stamp_engagement_writes_utc_today_and_checks(self):
+        from datetime import datetime, timezone
+        today = datetime.now(timezone.utc).date().isoformat()
+        with tempfile.TemporaryDirectory() as tmp:
+            tree = self._tree(
+                tmp, self.LOG, self.LAND_OK,
+                "# Q\n\n## Summary\nStatus: open\n\n"
+                "## Framing\nf\n\n## Options\no\n\n## Verdict\nv\n")
+            code, _, err = run(landscape_check, [
+                "--tree", tree, "--stamp-engagement", "q",
+                "--status", "approved"])
+            self.assertEqual(code, 0, err)
+            text = (Path(tree) / "engagements" / "q.md").read_text(
+                encoding="utf-8")
+            self.assertIn(f"Status: approved {today}", text)
+
+    def test_future_status_date_fails(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tree = self._tree(
+                tmp, self.LOG, self.LAND_OK,
+                "# Q\n\n## Summary\nStatus: approved 9999-01-01\n\n"
+                "## Framing\nf\n\n## Options\no\n\n## Verdict\nv\n")
+            code, _, err = run(landscape_check, ["--tree", tree])
+            self.assertEqual(code, 1)
+            self.assertIn("clock", err)
+
+    def test_stamp_missing_engagement_is_usage_error(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tree = self._tree(tmp, self.LOG, self.LAND_OK)
+            code, _, err = run(landscape_check, [
+                "--tree", tree, "--stamp-engagement", "nope",
+                "--status", "approved"])
+            self.assertEqual(code, 2, err)
+
+    def test_stamp_parked_requires_reason(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tree = self._tree(tmp, self.LOG, self.LAND_OK)
+            code, _, err = run(landscape_check, [
+                "--tree", tree, "--stamp-engagement", "q",
+                "--status", "parked"])
+            self.assertEqual(code, 2, err)
+
+    def test_stamp_refuses_closed_engagement(self):
+        """Closed engagements are append-only: approved or superseded
+        Status lines are never restamped."""
+        with tempfile.TemporaryDirectory() as tmp:
+            tree = self._tree(
+                tmp, self.LOG, self.LAND_OK,
+                "# Q\n\n## Summary\nStatus: approved 2026-07-01\n\n"
+                "## Framing\nf\n\n## Options\no\n\n## Verdict\nv\n")
+            code, _, err = run(landscape_check, [
+                "--tree", tree, "--stamp-engagement", "q",
+                "--status", "open"])
+            self.assertEqual(code, 1, err)
+            self.assertIn("append-only", err)
+            text = (Path(tree) / "engagements" / "q.md").read_text(
+                encoding="utf-8")
+            self.assertIn("Status: approved 2026-07-01", text)
+
+    def test_stamp_refuses_non_status_first_line(self):
+        """The stamp replaces a Status line only; prose is never
+        clobbered."""
+        with tempfile.TemporaryDirectory() as tmp:
+            tree = self._tree(
+                tmp, self.LOG, self.LAND_OK,
+                "# Q\n\n## Summary\nThe caching question, still framed.\n\n"
+                "## Framing\nf\n\n## Options\no\n\n## Verdict\nv\n")
+            code, _, err = run(landscape_check, [
+                "--tree", tree, "--stamp-engagement", "q",
+                "--status", "approved"])
+            self.assertEqual(code, 2, err)
+            text = (Path(tree) / "engagements" / "q.md").read_text(
+                encoding="utf-8")
+            self.assertIn("The caching question, still framed.", text)
+
+    def test_stamp_rolls_back_when_tree_check_fails(self):
+        """A stamp never survives a failing tree: the original Status
+        line is restored before the FAIL exit."""
+        land_bad = self.LAND_OK.replace("Adopt queue (SD-001)",
+                                        "Adopt queue with no citation")
+        with tempfile.TemporaryDirectory() as tmp:
+            tree = self._tree(
+                tmp, self.LOG, land_bad,
+                "# Q\n\n## Summary\nStatus: open\n\n"
+                "## Framing\nf\n\n## Options\no\n\n## Verdict\nv\n")
+            code, _, err = run(landscape_check, [
+                "--tree", tree, "--stamp-engagement", "q",
+                "--status", "approved"])
+            self.assertEqual(code, 1, err)
+            self.assertIn("rolled back", err)
+            text = (Path(tree) / "engagements" / "q.md").read_text(
+                encoding="utf-8")
+            self.assertIn("Status: open", text)
+            self.assertNotIn("Status: approved", text)
+
 
 class TripwireEnvironmentTests(unittest.TestCase):
     """Content-level check on the compose definition: a healthcheck fix is

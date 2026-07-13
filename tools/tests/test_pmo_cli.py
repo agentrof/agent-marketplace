@@ -110,6 +110,51 @@ class PmoCliTests(unittest.TestCase):
             argv += ["--story", story]
         return run(argv)
 
+    # -- clock ------------------------------------------------------------------
+
+    def test_now_prints_iso_utc(self):
+        from datetime import datetime
+        code, out, err = run(["now"])
+        self.assertEqual(code, 0, err)
+        value = out.strip()
+        self.assertTrue(value.endswith("+00:00"), value)
+        datetime.fromisoformat(value)  # parseable or it raises
+
+    def test_now_date_and_compact_shapes(self):
+        from datetime import datetime, timezone
+        today = datetime.now(timezone.utc).date()
+        code, out, _ = run(["now", "--date"])
+        self.assertEqual((code, out.strip()), (0, today.isoformat()))
+        code, out, _ = run(["now", "--compact"])
+        self.assertEqual((code, out.strip()), (0, today.strftime("%Y%m%d")))
+
+    def test_now_flags_are_exclusive(self):
+        code, _, _ = run(["now", "--date", "--compact"])
+        self.assertEqual(code, 2)
+
+    def test_wo_init_rejects_wrong_date_prefix(self):
+        from datetime import datetime, timedelta, timezone
+        self.import_backlog()
+        today = datetime.now(timezone.utc).date()
+        for prefix in ((today - timedelta(days=2)).strftime("%Y%m%d"),
+                       (today + timedelta(days=1)).strftime("%Y%m%d"),
+                       "99999999"):
+            code, _, err = self.init_wo(wo_key=f"{prefix}-password-reset")
+            self.assertEqual(code, 1, err)
+            self.assertIn("now --compact", err)
+
+    def test_wo_init_accepts_current_dated_and_undated_keys(self):
+        from datetime import datetime, timedelta, timezone
+        self.import_backlog()
+        today = datetime.now(timezone.utc).date()
+        code, _, err = self.init_wo(
+            wo_key=f"{today.strftime('%Y%m%d')}-password-reset")
+        self.assertEqual(code, 0, err)
+        yesterday = (today - timedelta(days=1)).strftime("%Y%m%d")
+        code, _, err = self.init_wo(wo_key=f"{yesterday}-midnight-lane",
+                                    worktree=str(self.wt_two), story="")
+        self.assertEqual(code, 0, err)
+
     # -- database and project --------------------------------------------------
 
     def test_init_db_idempotent(self):

@@ -212,6 +212,13 @@ def break_stdlib_only(root: Path) -> None:
     )
 
 
+def break_naive_clock(root: Path) -> None:
+    write(
+        root / "plugins" / PLUGIN / "skills" / "notes" / "scripts" / "clock.py",
+        "from datetime import date\n\nprint(date.today())\n",
+    )
+
+
 def break_script_references(root: Path) -> None:
     write(
         root / "plugins" / PLUGIN / "flows" / "check.md",
@@ -263,6 +270,7 @@ BUILDERS = {
     "json_hygiene": break_json_hygiene,
     "orchestrator_integrity": break_orchestrator_integrity,
     "stdlib_only": break_stdlib_only,
+    "naive_clock": break_naive_clock,
     "script_references": break_script_references,
     "template_placeholders": break_template_placeholders,
     "spawn_shape_constitution": break_spawn_shape_constitution,

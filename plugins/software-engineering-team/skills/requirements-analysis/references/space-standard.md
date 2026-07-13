@@ -41,7 +41,9 @@ chart (see the decomposition reference).
 
 Common frontmatter on every authored doc (keys snake_case): type, title,
 status (draft | in_review | approved | superseded), owner_role. Exactly
-when approved: approved_at (a calendar date). Exactly when superseded:
+when approved: approved_at, stamped by the ba_compile approve verb with
+the UTC calendar date (never hand-written; the guard hook denies a typed
+date and the compiler rejects a future one). Exactly when superseded:
 superseded_by. Doc identity is its path; there is no separate id key.
 
 | type | lives at | mints | notes |
@@ -110,9 +112,11 @@ frontmatter, unique across the whole space. LEG is reserved.
   checked claim. In table cells (cites, affects, blocks, targets), a
   bare id is legal and checked for existence. A bare id in prose is
   legal only inside its owning doc.
-- AS and OQ rows carry opened_on dates; the compiler flags open rows
-  older than the schema threshold. The assumption-aging principle is
-  machine-checked, not remembered.
+- AS and OQ rows carry opened_on dates, pasted from the PMO CLI's
+  `now --date` output (never typed from memory; the compiler rejects a
+  future date); the compiler flags open rows older than the schema
+  threshold. The assumption-aging principle is machine-checked, not
+  remembered.
 
 ## Lifecycle and gates
 
@@ -137,9 +141,12 @@ space-level challenge round when child domains exist.
 - One H1 per doc, matching the title. No emoji in headings, no em dash
   anywhere, relative paths only: the compiler enforces the same bans the
   marketplace validator enforces on shipped content.
-- Structure is language-neutral: frontmatter keys, sec anchors and table
-  headers are fixed English; titles, prose and cell contents follow
-  workspace/config.json output_language.
+- Structure is language-neutral: frontmatter keys and machine-parsed
+  values (type, status, dates, roles), sec anchors, table headers, ids,
+  file and directory names are fixed English; the title value, body
+  prose and free-text cell contents follow workspace/config.json
+  output_language (its sole scope: .md content; every other process
+  artifact is English).
 - Diagrams (fenced mermaid blocks) render on the hosting platforms the
   team already uses: flowchart TD for process flows, stateDiagram-v2 for
   entity lifecycles, erDiagram for a domain's conceptual entities (business

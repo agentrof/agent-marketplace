@@ -23,10 +23,10 @@ import shutil
 import sqlite3
 import subprocess
 import sys
-from datetime import datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
-PMO_VERSION = "1.0.0"
+PMO_VERSION = "1.1.0"
 SCHEMA_VERSION = 1
 DB_NAME = "agentrof.db"
 
@@ -690,7 +690,31 @@ def cmd_project_list(args) -> int:
     return 0
 
 
+def check_key_date_prefix(work_order_key: str) -> None:
+    """Reject a date-shaped key prefix that is not the current UTC date.
+
+    Keys shaped <yyyymmdd>-... carry the mint date; the value must
+    come off the clock (now --compact), never out of the model's
+    memory. Yesterday is accepted so a key minted just before UTC
+    midnight still initializes. Keys without a date-shaped prefix pass:
+    the convention belongs to the team plugins, not to this backbone."""
+    key = work_order_key
+    if len(key) < 9 or not key[:8].isdigit() or key[8] != "-":
+        return
+    today = date.fromisoformat(now()[:10])
+    allowed = {today.strftime("%Y%m%d"),
+               (today - timedelta(days=1)).strftime("%Y%m%d")}
+    if key[:8] not in allowed:
+        raise Rule(
+            f"work-order key date prefix '{key[:8]}' is not the current"
+            f" UTC date ({today.strftime('%Y%m%d')}); timestamps come off"
+            " the clock, never out of memory; mint the prefix with:"
+            " pmo_cli.py now --compact"
+        )
+
+
 def cmd_wo_init(args) -> int:
+    check_key_date_prefix(args.work_order_key)
     con = connect()
     worktree = norm_path(args.worktree)
     with mutate(con):
@@ -2194,6 +2218,21 @@ def cmd_version(args) -> int:
     return 0
 
 
+def cmd_now(args) -> int:
+    """The one exposed clock: every timestamp in a durable artifact is
+    pasted from this output, never typed from memory. Bare stdout so the
+    value can be used verbatim; no database access so it works before
+    init-db."""
+    full = now()
+    if args.date:
+        print(full[:10])
+    elif args.compact:
+        print(full[:10].replace("-", ""))
+    else:
+        print(full)
+    return 0
+
+
 # ---------------------------------------------------------------------------
 # Argument parsing
 # ---------------------------------------------------------------------------
@@ -2208,6 +2247,12 @@ def build_parser() -> argparse.ArgumentParser:
 
     p = sub.add_parser("version")
     p.set_defaults(func=cmd_version)
+
+    p = sub.add_parser("now")
+    group = p.add_mutually_exclusive_group()
+    group.add_argument("--date", action="store_true")
+    group.add_argument("--compact", action="store_true")
+    p.set_defaults(func=cmd_now)
 
     p = sub.add_parser("sync-launcher")
     p.add_argument("--force", action="store_true")

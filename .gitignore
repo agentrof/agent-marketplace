@@ -12,6 +12,9 @@
 # Claude Code: ignore personal/local settings (shared settings.json stays tracked)
 .claude/settings.local.json
 
+# Research and source material: local only, never in git (architecture invariant)
+assets/
+
 # Obsidian local UI state (machine-specific, noisy diffs)
 **/.obsidian/workspace.json
 **/.obsidian/workspace-mobile.json

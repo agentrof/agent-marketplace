@@ -45,6 +45,21 @@ GENERATED_VIEWS = ("index.md", "registry.md", "registry.json", "backlinks.md",
 EM_DASH = "—"
 ABSOLUTE_PATH_RE = re.compile(r"(?:^|[\s\"'`(=])(?:/Users/|/home/|[A-Za-z]:\\\\|~/)")
 LINK_RE = re.compile(r"\[([^\]]+)\]\(([^)\s]+)(?:\s+\"[^\"]*\")?\)")
+# Vault wikilink grammar, shared with vault_check (single parsing home).
+WIKILINK_RE = re.compile(r"(?P<embed>!?)\[\[(?P<inner>[^\[\]\n]+?)\]\]")
+INLINE_CODE_RE = re.compile(r"`[^`]*`")
+
+
+def split_wikilink(inner: str) -> tuple[str, str, str]:
+    """Split a wikilink body into (target, anchor, alias). The alias
+    separator is '|' or its table-escaped form '\\|'."""
+    alias = ""
+    for sep in ("\\|", "|"):
+        if sep in inner:
+            inner, alias = inner.split(sep, 1)
+            break
+    target, _, anchor = inner.partition("#")
+    return target.strip(), anchor.strip(), alias.strip()
 SEC_RE = re.compile(r"<!--\s*sec:\s*([a-z_]+)\s*-->")
 DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 NAMESPACED_ID_RE = re.compile(r"\b(BR|AC|AS|OQ|DEC|CH)-([A-Z]{2,4})-(\d{3,})\b")
@@ -102,6 +117,7 @@ class Doc:
     tables: list = field(default_factory=list)
     summary_lines: int = 0
     links: list = field(default_factory=list)  # (lineno, text, target)
+    wikilinks: list = field(default_factory=list)  # (lineno, embed, target, anchor, alias)
 
 
 @dataclass
@@ -112,6 +128,7 @@ class Space:
     nodes: dict = field(default_factory=dict)    # rel -> code ("" = root)
     ids: dict = field(default_factory=dict)      # id -> {kind, doc, row, line}
     broken: bool = False  # ambiguity class present; render must refuse
+    vault_root: Path | None = None  # the docs tree root; wikilinks resolve here
 
 
 # ---------------------------------------------------------------------------
@@ -246,8 +263,13 @@ def parse_doc_body(doc: Doc) -> None:
     for idx, line in enumerate(doc.lines, start=1):
         if idx < doc.fm_end or idx in doc.fenced:
             continue
-        for m in LINK_RE.finditer(line):
+        scrubbed = INLINE_CODE_RE.sub(" ", line)
+        for m in LINK_RE.finditer(scrubbed):
             doc.links.append((idx, m.group(1), m.group(2)))
+        for m in WIKILINK_RE.finditer(scrubbed):
+            target, anchor, alias = split_wikilink(m.group("inner"))
+            doc.wikilinks.append(
+                (idx, m.group("embed") == "!", target, anchor, alias))
 
 
 # ---------------------------------------------------------------------------
@@ -533,10 +555,11 @@ def utc_today() -> date:
     return datetime.now(timezone.utc).date()
 
 
-def id_references(doc: Doc) -> list[tuple[int, str, str | None]]:
-    """All id references in a doc: (line, id, link_target or None).
-    Table id-column declarations are excluded (they are mints)."""
-    refs: list[tuple[int, str, str | None]] = []
+def id_references(doc: Doc) -> list[tuple[int, str, str | None, bool]]:
+    """All id references in a doc: (line, id, link_target or None, is_wiki).
+    A wikilink whose alias is a bare id is an id citation; table id-column
+    declarations are excluded (they are mints)."""
+    refs: list[tuple[int, str, str | None, bool]] = []
     mint_lines = {}
     for table in doc.tables:
         for lineno, cells in table.rows:
@@ -547,18 +570,22 @@ def id_references(doc: Doc) -> list[tuple[int, str, str | None]]:
     for idx, line in enumerate(doc.lines, start=1):
         if idx < doc.fm_end or idx in doc.fenced:
             continue
-        remaining = line
-        for m in LINK_RE.finditer(line):
+        scrubbed = INLINE_CODE_RE.sub(" ", line)
+        for m in LINK_RE.finditer(scrubbed):
             text, target = m.group(1), m.group(2)
             if NAMESPACED_ID_RE.fullmatch(text) or BARE_ID_RE.fullmatch(text):
-                refs.append((idx, text, target))
-        remaining = LINK_RE.sub(" ", line)
+                refs.append((idx, text, target, False))
+        for m in WIKILINK_RE.finditer(scrubbed):
+            target, _anchor, alias = split_wikilink(m.group("inner"))
+            if NAMESPACED_ID_RE.fullmatch(alias) or BARE_ID_RE.fullmatch(alias):
+                refs.append((idx, alias, target, True))
+        remaining = WIKILINK_RE.sub(" ", LINK_RE.sub(" ", scrubbed))
         for m in list(NAMESPACED_ID_RE.finditer(remaining)) + \
                 list(BARE_ID_RE.finditer(remaining)):
             token = m.group(0)
             if token in mint_lines.get(idx, set()):
                 continue
-            refs.append((idx, token, None))
+            refs.append((idx, token, None, False))
     return refs
 
 
@@ -662,23 +689,38 @@ def run_checks(space: Space, base: list[Finding], gate: bool = False,
             if not clean:
                 continue
             resolved = (doc.abs_path.parent / clean).resolve()
-            try:
-                inside = resolved.relative_to(space.root.resolve())
-                if str(inside).split("/")[0] == GENERATED_DIR:
+            if space.vault_root is not None:
+                try:
+                    resolved.relative_to(space.vault_root.resolve())
+                except ValueError:
+                    pass
+                else:
                     err(rel, lineno, "dead_links",
-                        f"authored doc links into {GENERATED_DIR}/",
-                        "authored docs never depend on generated views")
+                        f"vault-internal citation uses a markdown link: {target}",
+                        "cite vault content as a vault-absolute wikilink"
+                        " (vault_check.py migrate rewrites this class)")
                     continue
-            except ValueError:
-                warn(rel, lineno, "dead_links",
-                     f"link leaves the space: {target}",
-                     "cross-space links are not checked; prefer in-space links")
             if not resolved.exists():
                 err(rel, lineno, "dead_links",
                     f"link target does not resolve: {target}",
                     "fix the path or restore the target")
+        for lineno, embed, target, _anchor, _alias in doc.wikilinks:
+            if not target or space.vault_root is None:
+                continue
+            if target.split("/")[0] == GENERATED_DIR \
+                    or f"/{GENERATED_DIR}/" in target:
+                err(rel, lineno, "dead_links",
+                    f"authored doc links into {GENERATED_DIR}/",
+                    "authored docs never depend on generated views")
+                continue
+            candidate = (space.vault_root
+                         / (target if embed else target + ".md"))
+            if not candidate.exists():
+                err(rel, lineno, "dead_links",
+                    f"unresolved wikilink target: {target}",
+                    "targets are vault-absolute paths from the vault root")
 
-        for lineno, id_value, target in id_references(doc):
+        for lineno, id_value, target, is_wiki in id_references(doc):
             info = space.ids.get(id_value)
             if target is not None:
                 if info is None:
@@ -686,9 +728,14 @@ def run_checks(space: Space, base: list[Finding], gate: bool = False,
                         f"link cites unknown id {id_value}",
                         "cite only declared ids")
                 else:
-                    clean = target.split("#", 1)[0]
-                    resolved = (doc.abs_path.parent / clean).resolve()
                     owner = (space.root / info["doc"]).resolve()
+                    if is_wiki:
+                        resolved = ((space.vault_root / (target + ".md"))
+                                    .resolve()
+                                    if space.vault_root is not None else None)
+                    else:
+                        clean = target.split("#", 1)[0]
+                        resolved = (doc.abs_path.parent / clean).resolve()
                     if resolved != owner:
                         err(rel, lineno, "id_links",
                             f"{id_value} link targets {target}, but the id is"
@@ -939,9 +986,22 @@ def check_semantic_links(space: Space, findings: list[Finding]) -> None:
                                         f"{key} list is empty",
                                         f"name at least one target document"))
             for target in targets:
-                resolved = (doc.abs_path.parent / str(target)).resolve()
+                value = str(target)
+                if not (value.startswith("[[") and value.endswith("]]")):
+                    findings.append(Finding(
+                        "error", rel, 1, "semantic_links",
+                        f"{key} value is not a quoted vault-absolute"
+                        f" wikilink: {value}",
+                        "relation values are quoted wikilinks; they draw the"
+                        " graph edges the vault exists to show"))
+                    continue
+                inner, _, _ = split_wikilink(value[2:-2])
+                resolved = ((space.vault_root / (inner + ".md")).resolve()
+                            if space.vault_root is not None else None)
                 try:
-                    target_rel = resolved.relative_to(space.root.resolve()).as_posix()
+                    target_rel = (resolved.relative_to(
+                        space.root.resolve()).as_posix()
+                        if resolved is not None else None)
                 except ValueError:
                     target_rel = None
                 target_doc = space.docs.get(target_rel) if target_rel else None
@@ -964,6 +1024,14 @@ def check_semantic_links(space: Space, findings: list[Finding]) -> None:
         for _lineno, _text, target in overview.links:
             clean = target.split("#", 1)[0]
             resolved = (overview.abs_path.parent / clean).resolve()
+            try:
+                linked.add(resolved.relative_to(space.root.resolve()).as_posix())
+            except ValueError:
+                pass
+        for _lineno, _embed, target, _anchor, _alias in overview.wikilinks:
+            if not target or space.vault_root is None:
+                continue
+            resolved = (space.vault_root / (target + ".md")).resolve()
             try:
                 linked.add(resolved.relative_to(space.root.resolve()).as_posix())
             except ValueError:
@@ -1215,7 +1283,7 @@ def run_gate_checks(space: Space, findings: list[Finding], gate_node: str) -> No
             doc = space.docs[rel]
             if not doc_in_node(space, rel, gate_node):
                 continue
-            for _lineno, id_value, _target in id_references(doc):
+            for _lineno, id_value, _target, _is_wiki in id_references(doc):
                 info = space.ids.get(id_value)
                 if info is None or doc_in_node(space, info["doc"], gate_node):
                     continue
@@ -1297,6 +1365,13 @@ def render_views(space: Space, warnings: list[Finding]) -> dict[str, str]:
     {relpath under _generated: content}."""
     docs_sorted = sorted(space.docs)
     cited = cited_by_map(space)
+    vault_prefix = ""
+    if space.vault_root is not None:
+        try:
+            vault_prefix = space.root.resolve().relative_to(
+                space.vault_root.resolve()).as_posix() + "/"
+        except ValueError:
+            vault_prefix = ""
     title = str(space.docs.get("space.md").fm.get("title", "")) \
         if "space.md" in space.docs else ""
     stable_warnings = [w for w in warnings
@@ -1330,7 +1405,9 @@ def render_views(space: Space, warnings: list[Finding]) -> dict[str, str]:
                         summary = candidate.replace("|", "\\|")
                         break
                 break
-        lines.append(f"| [{rel}]({'../' + rel}) | {doc.doc_type} |"
+        cell = (f"[[{vault_prefix}{rel[:-3]}\\|{rel}]]" if vault_prefix
+                else f"[{rel}]({'../' + rel})")
+        lines.append(f"| {cell} | {doc.doc_type} |"
                      f" {doc_status(doc)} | {summary} |")
     if stable_warnings:
         lines += ["", "## Warnings", ""]
@@ -1389,11 +1466,16 @@ def render_views(space: Space, warnings: list[Finding]) -> dict[str, str]:
     inbound: dict[str, list[str]] = {}
     for rel in docs_sorted:
         doc = space.docs[rel]
+        edges = []
         for _lineno, _text, target in doc.links:
             clean = target.split("#", 1)[0]
             if not clean or target.startswith(("http://", "https://", "mailto:", "#")):
                 continue
-            resolved = (doc.abs_path.parent / clean).resolve()
+            edges.append((doc.abs_path.parent / clean).resolve())
+        for _lineno, _embed, target, _anchor, _alias in doc.wikilinks:
+            if target and space.vault_root is not None:
+                edges.append((space.vault_root / (target + ".md")).resolve())
+        for resolved in edges:
             try:
                 target_rel = resolved.relative_to(space.root.resolve()).as_posix()
             except ValueError:
@@ -1529,7 +1611,8 @@ def table_skeleton(columns: list[str]) -> list[str]:
             "|" + "---|" * len(columns)]
 
 
-def stub_lines(schema: dict, doc_type: str, title: str, **extra) -> list[str]:
+def stub_lines(schema: dict, doc_type: str, title: str,
+               vault_prefix: str = "", **extra) -> list[str]:
     spec = schema["doc_types"][doc_type]
     fm = ["---", f"type: {doc_type}", f"title: {title}", "status: draft",
           "owner_role: business_analyst"]
@@ -1537,9 +1620,17 @@ def stub_lines(schema: dict, doc_type: str, title: str, **extra) -> list[str]:
         value = extra.get(key)
         if isinstance(value, list):
             fm.append(f"{key}:")
-            fm += [f"  - {v}" for v in value]
+            for v in value:
+                if key in ("governs", "verifies"):
+                    target = str(v).strip()
+                    if target.endswith(".md"):
+                        target = target[:-3]
+                    fm.append(f'  - "[[{vault_prefix}{target}]]"')
+                else:
+                    fm.append(f"  - {v}")
         else:
             fm.append(f"{key}: {value}")
+    fm += ["tags:", f"  - doc/{doc_type.replace('_', '-')}", "  - status/draft"]
     fm.append("---")
     body = ["", f"# {title}", "", f"One-line summary of {title}.", ""]
     section_titles = {token: token.replace("_", " ").title()
@@ -1556,13 +1647,17 @@ def stub_lines(schema: dict, doc_type: str, title: str, **extra) -> list[str]:
         else:
             body.append("To be analyzed.")
         body.append("")
+    body += ["## Navigation <!-- sec: nav -->", "",
+             "[[maps/business-analysis|Business Analysis]]", ""]
     return fm + body
 
 
-def write_stub(schema: dict, path: Path, doc_type: str, title: str, **extra) -> None:
+def write_stub(schema: dict, path: Path, doc_type: str, title: str,
+               vault_prefix: str = "", **extra) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text("\n".join(stub_lines(schema, doc_type, title, **extra)).rstrip("\n")
-                    + "\n", encoding="utf-8")
+    path.write_text("\n".join(
+        stub_lines(schema, doc_type, title, vault_prefix, **extra)
+    ).rstrip("\n") + "\n", encoding="utf-8")
 
 
 def next_ids(space: Space, code: str) -> dict[str, str]:
@@ -1580,6 +1675,35 @@ def next_ids(space: Space, code: str) -> dict[str, str]:
 # ---------------------------------------------------------------------------
 # Subcommands
 # ---------------------------------------------------------------------------
+
+
+def resolve_vault_root(space_dir: Path, override: str) -> Path | None:
+    """The vault root: --vault-root, else the nearest ancestor named
+    docs. No silent fallback: a wikilink-resolving run without a vault
+    root is a usage error, not a guess."""
+    if override:
+        return Path(override).resolve()
+    for ancestor in space_dir.resolve().parents:
+        if ancestor.name == "docs":
+            return ancestor
+    return None
+
+
+def require_vault_root(args) -> Path | None:
+    root = resolve_vault_root(Path(args.space), getattr(args, "vault_root", ""))
+    if root is None:
+        print("ba_compile: FAIL: no ancestor named docs and no --vault-root;"
+              " wikilink resolution needs the vault root named explicitly",
+              file=sys.stderr)
+    return root
+
+
+def vault_prefix_for(space_dir: Path, vault_root: Path) -> str:
+    try:
+        return space_dir.resolve().relative_to(
+            vault_root.resolve()).as_posix() + "/"
+    except ValueError:
+        return ""
 
 
 def cmd_init(args, schema: dict) -> int:
@@ -1607,7 +1731,11 @@ def cmd_stub(args, schema: dict) -> int:
     if args.type not in schema["doc_types"]:
         print(f"ba_compile: FAIL: unknown type '{args.type}'", file=sys.stderr)
         return 2
+    vault_root = require_vault_root(args)
+    if vault_root is None:
+        return 2
     space_dir = Path(args.space)
+    prefix = vault_prefix_for(space_dir, vault_root)
     spec = schema["doc_types"][args.type]
     loc = spec["location"]
     node = args.node.strip("/")
@@ -1657,7 +1785,8 @@ def cmd_stub(args, schema: dict) -> int:
     if target.exists():
         print(f"ba_compile: FAIL: {target} already exists", file=sys.stderr)
         return 1
-    write_stub(schema, target, args.type, args.title, **extra)
+    write_stub(schema, target, args.type, args.title,
+               vault_prefix=prefix, **extra)
     space, _ = scan_space(space_dir, schema)
     code = nearest_code(space, node)
     print(f"ba_compile: created {target}")
@@ -1669,7 +1798,11 @@ def cmd_stub(args, schema: dict) -> int:
 
 
 def cmd_check(args, schema: dict) -> int:
+    vault_root = require_vault_root(args)
+    if vault_root is None:
+        return 2
     space, base = scan_space(Path(args.space), schema)
+    space.vault_root = vault_root
     findings = run_checks(space, base, gate=args.gate == "approval",
                           gate_node=args.node)
     if not space.broken:
@@ -1706,7 +1839,11 @@ def cmd_approve(args, schema: dict) -> int:
     checks; a doc the compiler rejects is restored untouched. The model
     never types the date."""
     space_dir = Path(args.space)
+    vault_root = require_vault_root(args)
+    if vault_root is None:
+        return 2
     space, base = scan_space(space_dir, schema)
+    space.vault_root = vault_root
     rel = args.doc
     doc = space.docs.get(rel)
     if doc is None:
@@ -1742,8 +1879,12 @@ def cmd_approve(args, schema: dict) -> int:
         print(f"ba_compile: FAIL: {rel} has no parseable frontmatter block",
               file=sys.stderr)
         return 1
+    # The tag mirror rides the same write (one-clock, one operation).
+    updated = re.sub(r"(?m)^(\s*- status/)[a-z0-9-]+\s*$",
+                     r"\g<1>approved", updated, count=1)
     target.write_text(updated, encoding="utf-8")
     space, base = scan_space(space_dir, schema)
+    space.vault_root = vault_root
     findings = run_checks(space, base)
     blocking = [f for f in findings
                 if f.severity == "error" and f.path == rel]
@@ -1759,7 +1900,11 @@ def cmd_approve(args, schema: dict) -> int:
 
 
 def cmd_render(args, schema: dict) -> int:
+    vault_root = require_vault_root(args)
+    if vault_root is None:
+        return 2
     space, base = scan_space(Path(args.space), schema)
+    space.vault_root = vault_root
     if space.broken:
         emit([f for f in base if f.severity == "error"], args.json)
         print("ba_compile: FAIL: ambiguity findings block render", file=sys.stderr)
@@ -1859,6 +2004,7 @@ def main(argv: list[str] | None = None) -> int:
 
     p = sub.add_parser("stub")
     p.add_argument("--space", required=True)
+    p.add_argument("--vault-root", default="", dest="vault_root")
     p.add_argument("--type", required=True)
     p.add_argument("--title", required=True)
     p.add_argument("--node", default="")
@@ -1872,18 +2018,21 @@ def main(argv: list[str] | None = None) -> int:
 
     p = sub.add_parser("check")
     p.add_argument("--space", required=True)
+    p.add_argument("--vault-root", default="", dest="vault_root")
     p.add_argument("--gate", choices=["approval"], default="")
     p.add_argument("--node", default="")
     p.add_argument("--json", action="store_true")
 
     p = sub.add_parser("approve")
     p.add_argument("--space", required=True)
+    p.add_argument("--vault-root", default="", dest="vault_root")
     p.add_argument("--doc", required=True)
     p.add_argument("--verdict", default="")
     p.add_argument("--json", action="store_true")
 
     p = sub.add_parser("render")
     p.add_argument("--space", required=True)
+    p.add_argument("--vault-root", default="", dest="vault_root")
     p.add_argument("--check-only", action="store_true")
     p.add_argument("--json", action="store_true")
 

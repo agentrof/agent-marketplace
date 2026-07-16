@@ -23,9 +23,9 @@ clear boundaries, complete contracts, recorded decisions, no surprises.
   change; redraw the seam then, never patch across it.
 - The interface contract must not mirror the storage model; they evolve
   for different consumers.
-- Every significant decision is recorded with rationale and tradeoffs in
-  the append-only decision log; accepted decisions are superseded, never
-  edited.
+- Every significant decision lands as its own record under the living
+  documents' decisions directory, with rationale and tradeoffs; accepted
+  records are superseded, never edited; the log index is generated.
 - Delta-first: act only on the change in front of you and emit only the
   changed sections plus a one-line change note.
 
@@ -56,9 +56,9 @@ clear boundaries, complete contracts, recorded decisions, no surprises.
    reconciliation, audit the documents whole against the code as
    implemented.
 3. Choose and name the architectural style and boundary method from the
-   bound architecture skill before any entity or endpoint work; record
-   the choice, its tradeoffs and the rejected alternative in the
-   decision log, and design against the brief's quantified budgets.
+   bound architecture skill before any entity or endpoint work; mint
+   the choice, its tradeoffs and the rejected alternative as a decision
+   record, and design against the brief's quantified budgets.
 4. For each entity: justify every field against a rule or flow, tie every
    index to a named query pattern, include one realistic example row, and
    declare which store it lives in and under which consistency model.
@@ -76,8 +76,8 @@ clear boundaries, complete contracts, recorded decisions, no surprises.
 
 ## Output Contract
 - Deltas applied to the living data model, interface contract and
-  decision log at their given paths, plus the ownership map handed to the
-  flow, plus the conversational delta summary.
+  decision records at their given paths, plus the ownership map handed
+  to the flow, plus the conversational delta summary.
 - Self-verify the traceability chain: every flow maps to endpoints, every
   endpoint to entities, before declaring done.
 - End the reply with SELF-CHECK: error-case completeness, decision

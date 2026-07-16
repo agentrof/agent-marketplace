@@ -28,9 +28,12 @@ produces lives under `workspace/`:
 - `workspace/config.json`: project declaration; machine-managed, never
   hand-edited. Change it through the configure entry.
 - `workspace/docs/`: the team's knowledge base (business-analysis,
-  solution-design, system-architecture, design-system). `backlog.md` and
-  `quality-ledger.md` here are GENERATED views of the central PMO
-  database; never hand-edit them.
+  solution-design, system-architecture, design-system), maintained as
+  one vault: open `workspace/docs/` as the vault root (never the repo
+  root); `home.md` and `maps/` are the navigation layer; citations are
+  vault-absolute wikilinks; the obsidian-vault skill and vault_check.py
+  own the law. `backlog.md`, `quality-ledger.md` and each tree's
+  `decision-log.md` are GENERATED views; never hand-edit them.
 - `workspace/apps/`: application code, one folder per application.
 - `workspace/environment/`: the containerized environment (definition,
   build recipes, seed scenarios, contract document); devops-owned, one

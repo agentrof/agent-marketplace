@@ -1,0 +1,18 @@
+{
+  "types": {
+    "type": "text",
+    "title": "text",
+    "status": "text",
+    "owner_role": "text",
+    "approved_at": "date",
+    "decided_at": "date",
+    "superseded_by": "text",
+    "supersedes": "text",
+    "engagement": "text",
+    "territory": "text",
+    "revisit_trigger": "text",
+    "story": "text",
+    "tags": "list",
+    "aliases": "list"
+  }
+}

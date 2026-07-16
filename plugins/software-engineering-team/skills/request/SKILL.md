@@ -77,7 +77,8 @@ Front door for real work: classify, confirm, deliver.
       the named ids), then load it into the PMO database (item import
       --project-key <key> --json-file <file>; the CLI rejects stories
       with empty scope, exclusions, DoR or DoD) and regenerate the
-      committed view (render backlog --out workspace/docs/backlog.md).
+      committed view (render backlog --out workspace/docs/backlog.md, a
+      generated vault view per the obsidian-vault skill).
    d. Story loop: for each ready story in order, execute
       ${CLAUDE_PLUGIN_ROOT}/flows/develop.md end to end. After each
       story's merge checkpoint (which updates the database and re-renders

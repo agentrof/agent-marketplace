@@ -56,7 +56,9 @@ SKILL_MAX_LINES = 150
 SKILL_WARN_LINES = 120
 SKILL_MAX_BYTES = 8192
 CONSTITUTION_MAX_LINES = 60
-FLOW_MAX_LINES = 400
+# Raised from 400 with the vault-law wiring (develop.md carries the
+# decision-note and stewardship mechanics); applies to every flow.
+FLOW_MAX_LINES = 416
 REFERENCE_WARN_LINES = 500
 
 AUTO_TRIGGER_RE = re.compile(
@@ -86,7 +88,8 @@ HANDWRITTEN_COUNT_RE = re.compile(
 TECH_NOUN_RE = re.compile(
     r"\b(python|fastapi|django|flask|react|typescript|javascript|node|nextjs|"
     r"vue|svelte|angular|tailwind|postgres(?:ql)?|mysql|mongodb|redis|sql|"
-    r"nosql|docker|kubernetes|aws|azure|gcp|pytest|vitest|playwright|npm|pip)\b",
+    r"nosql|docker|kubernetes|aws|azure|gcp|pytest|vitest|playwright|npm|pip|"
+    r"obsidian)\b",
     re.IGNORECASE,
 )
 
@@ -99,6 +102,14 @@ SNAKE_KEY_RE = re.compile(r"^[a-z0-9_]+$")
 # Hook event names inside a plugin's hooks/hooks.json follow the host
 # platform's PascalCase schema (SessionStart, PreToolUse, ...).
 HOOK_EVENT_KEY_RE = re.compile(r"^[A-Z][A-Za-z]+$")
+
+# Inline code spans render as code, not links; wikilink_ban strips them
+# before scanning, the same way fenced blocks are skipped.
+INLINE_CODE_RE = re.compile(r"`[^`]*`")
+
+# The vault app's property types; vault-policy.json property_types values
+# must come from this enum.
+OBSIDIAN_PROPERTY_TYPES = {"text", "list", "number", "checkbox", "date", "datetime"}
 
 COUNTS_START = "<!-- counts:start -->"
 COUNTS_END = "<!-- counts:end -->"
@@ -741,9 +752,15 @@ def check_json_hygiene(tree: Tree, findings: list[Finding]) -> None:
             ))
             continue
         is_hooks_manifest = path.name == "hooks.json" and path.parent.name == "hooks"
+        # Vault payload files under a plugin's templates/ carry the vault
+        # app's own key schema (camelCase settings, kebab plugin ids); only
+        # the parse requirement applies there.
+        is_vault_payload = "templates" in path.parts and ".obsidian" in path.parts
         keys: list[tuple[str, str]] = []
         _walk_keys(data, "$", keys)
         for where, key in keys:
+            if is_vault_payload:
+                continue
             if (is_hooks_manifest and where == "$.hooks"
                     and HOOK_EVENT_KEY_RE.match(key)):
                 continue  # hook event names are the host platform's schema
@@ -997,6 +1014,231 @@ def check_ba_schema_shape(tree: Tree, findings: list[Finding]) -> None:
                 seen_prefixes[section] = kind
 
 
+def _under_plugin_templates(tree: Tree, path: Path) -> bool:
+    try:
+        parts = path.relative_to(tree.plugins_dir).parts
+    except ValueError:
+        return False
+    return len(parts) > 1 and parts[1] == "templates"
+
+
+def check_wikilink_ban(tree: Tree, findings: list[Finding]) -> None:
+    """Marketplace content links with standard relative markdown links; the
+    wikilink grammar belongs to the product vault and ships only under a
+    plugin's templates/ (consumer-bound seeds). Illustrations live in fenced
+    blocks or inline code spans, which render as code, not links."""
+    for path in iter_scope_files(tree, ".md"):
+        if _under_plugin_templates(tree, path):
+            continue  # consumer-bound vault seeds carry real wikilinks
+        text = read_text(path)
+        in_fence = False
+        for lineno, line in enumerate(text.splitlines(), start=1):
+            if line.lstrip().startswith("```"):
+                in_fence = not in_fence
+                continue
+            if in_fence:
+                continue
+            if "[[" in INLINE_CODE_RE.sub("", line):
+                findings.append(Finding(
+                    "error", rel(tree, path), lineno, "wikilink_ban",
+                    "wikilink syntax outside a code example",
+                    "marketplace content uses standard relative links; show"
+                    " wikilink grammar only in fenced blocks or inline code",
+                ))
+
+
+def check_version_sync(tree: Tree, findings: list[Finding]) -> None:
+    """A registered plugin's marketplace entry and its plugin.json declare
+    the same version: a release bumps both in one commit, and drift ships a
+    catalog that lies about what installs."""
+    if not tree.marketplace.is_file():
+        return
+    try:
+        data = json.loads(read_text(tree.marketplace))
+    except json.JSONDecodeError:
+        return  # json_hygiene reports the parse failure
+    for entry in data.get("plugins", []):
+        source = entry.get("source", "")
+        entry_version = entry.get("version", "")
+        plugin_json = (tree.marketplace.parent.parent / source).resolve() \
+            / ".claude-plugin" / "plugin.json"
+        if not plugin_json.is_file():
+            continue  # registration reports the missing manifest
+        try:
+            pj = json.loads(read_text(plugin_json))
+        except json.JSONDecodeError:
+            continue
+        plugin_version = pj.get("version", "")
+        if entry_version and plugin_version and entry_version != plugin_version:
+            findings.append(Finding(
+                "error", rel(tree, plugin_json), 1, "version_sync",
+                f"plugin version '{plugin_version}' does not match marketplace"
+                f" entry '{entry_version}'",
+                "bump plugin.json and its marketplace.json entry together",
+            ))
+
+
+def check_vault_wiring(tree: Tree, findings: list[Finding]) -> None:
+    """A plugin that ships the vault-law skill wires every docs-facing
+    surface to it: an entry or flow that names the docs tree must also
+    name the obsidian-vault skill, so the law cannot be skipped by
+    omission. Deliberately broad: readers pay one pointer sentence."""
+    for plugin in plugin_dirs(tree):
+        if not (plugin / "skills" / "obsidian-vault").is_dir():
+            continue
+        surfaces = sorted(plugin.glob("skills/*/SKILL.md"))
+        flows = plugin / "flows"
+        if flows.is_dir():
+            surfaces.extend(sorted(flows.glob("*.md")))
+        for path in surfaces:
+            text = read_text(path)
+            if "workspace/docs" in text and "obsidian-vault" not in text:
+                findings.append(Finding(
+                    "error", rel(tree, path), 1, "vault_wiring",
+                    "surface names the docs tree without the vault-law skill",
+                    "add the obsidian-vault load or pointer sentence; every"
+                    " docs-facing surface names the law"))
+
+
+def check_vault_policy_shape(tree: Tree, findings: list[Finding]) -> None:
+    """Any shipped vault-policy.json must be well-formed and in parity with
+    the plugin's templates/vault seeds: the vault checker, the seeds and the
+    graph config are all parameterized by it, so drift is a broken product."""
+    for plugin in plugin_dirs(tree):
+        for path in sorted(plugin.glob("skills/*/data/vault-policy.json")):
+            def err(message: str, fix: str) -> None:
+                findings.append(Finding(
+                    "error", rel(tree, path), 1, "vault_policy_shape",
+                    message, fix))
+            try:
+                policy = json.loads(read_text(path))
+            except json.JSONDecodeError as exc:
+                err(f"policy is not valid JSON: {exc}", "fix the JSON syntax")
+                continue
+            if not isinstance(policy.get("schema_version"), int):
+                err("schema_version must be an integer",
+                    "version the policy so the checker can refuse unknowns")
+            for key in ("vault_root_dirname", "home_file", "start_here_file",
+                        "maps_dir", "generated_marker_prefix", "attachments_dir"):
+                value = policy.get(key)
+                if not (isinstance(value, str) and value):
+                    err(f"'{key}' must be a non-empty string",
+                        "every structural name is policy-driven, never implied")
+            subtrees = policy.get("subtrees")
+            if (not isinstance(subtrees, list) or not subtrees
+                    or not all(isinstance(s, str) and KEBAB_RE.match(s)
+                               for s in subtrees)):
+                err("subtrees must be a non-empty list of kebab-case names",
+                    "list every note-bearing top-level directory of the vault")
+                subtrees = []
+            extra_maps = policy.get("extra_maps", [])
+            if (not isinstance(extra_maps, list)
+                    or not all(isinstance(s, str) and KEBAB_RE.match(s)
+                               for s in extra_maps)):
+                err("extra_maps must be a list of kebab-case names",
+                    "name the non-subtree map notes (or ship an empty list)")
+                extra_maps = []
+            namespaces = policy.get("tag_namespaces")
+            if (not isinstance(namespaces, list) or not namespaces
+                    or not all(isinstance(s, str) and KEBAB_RE.match(s)
+                               for s in namespaces)):
+                err("tag_namespaces must be a non-empty list of kebab-case names",
+                    "the tag vocabulary is closed; declare its namespaces")
+            peer_min = policy.get("nav_peer_min")
+            peer_max = policy.get("nav_peer_max")
+            if (not isinstance(peer_min, int) or not isinstance(peer_max, int)
+                    or isinstance(peer_min, bool) or isinstance(peer_max, bool)
+                    or not 1 <= peer_min <= peer_max):
+                err("nav_peer_min/nav_peer_max must be integers with"
+                    " 1 <= min <= max",
+                    "the nav footer peer range is policy, not prose")
+            trees = policy.get("decision_trees")
+            if not isinstance(trees, dict):
+                err("decision_trees must be an object",
+                    "declare each decision tree's path and id grammar")
+                trees = {}
+            for tree_name, spec in sorted(trees.items()):
+                if not isinstance(spec, dict):
+                    err(f"decision tree '{tree_name}' must be an object",
+                        "give it path, id_prefix and id_min_width")
+                    continue
+                if not (isinstance(spec.get("path"), str) and spec.get("path")):
+                    err(f"decision tree '{tree_name}' needs a non-empty path",
+                        "point at the decisions directory inside the vault")
+                if not re.fullmatch(r"[A-Z][A-Z0-9]*", str(spec.get("id_prefix", ""))):
+                    err(f"decision tree '{tree_name}' id_prefix must be"
+                        " uppercase letters/digits",
+                        "ids read as PREFIX-number; the prefix is the law")
+                width = spec.get("id_min_width")
+                if not isinstance(width, int) or isinstance(width, bool) or width < 1:
+                    err(f"decision tree '{tree_name}' id_min_width must be a"
+                        " positive integer",
+                        "ids are zero-padded to the minimum width; more digits"
+                        " stay legal")
+            for key in ("generated_views", "generated_subtrees"):
+                value = policy.get(key)
+                if (not isinstance(value, list)
+                        or not all(isinstance(s, str) and s for s in value)):
+                    err(f"'{key}' must be a list of non-empty strings",
+                        "generated surfaces are policy-listed, never inferred")
+            prop_types = policy.get("property_types")
+            if not isinstance(prop_types, dict) or not prop_types:
+                err("property_types must be a non-empty object",
+                    "one value type per frontmatter key, vault-wide")
+            else:
+                for key, value in sorted(prop_types.items()):
+                    if value not in OBSIDIAN_PROPERTY_TYPES:
+                        err(f"property_types['{key}'] value '{value}' is not"
+                            f" one of {sorted(OBSIDIAN_PROPERTY_TYPES)}",
+                            "use the vault app's property type enum")
+            # Parity with the shipped seeds: the policy and templates/vault
+            # describe one product; they may not drift.
+            vault_tpl = plugin / "templates" / "vault"
+            if not vault_tpl.is_dir():
+                continue
+            maps_dir = policy.get("maps_dir") or "maps"
+            home_file = policy.get("home_file") or "home.md"
+            expected_maps = set(subtrees) | set(extra_maps)
+            seeds_dir = vault_tpl / maps_dir
+            seeds = ({p.stem for p in seeds_dir.glob("*.md")}
+                     if seeds_dir.is_dir() else set())
+            for name in sorted(expected_maps - seeds):
+                err(f"policy names '{name}' but templates/vault/{maps_dir}/"
+                    f"{name}.md is missing",
+                    "ship one map seed per policy subtree and extra map")
+            for name in sorted(seeds - expected_maps):
+                err(f"templates/vault/{maps_dir}/{name}.md is not named by"
+                    " the policy",
+                    "add it to subtrees or extra_maps, or drop the seed")
+            home = vault_tpl / home_file
+            if not home.is_file():
+                err(f"templates/vault/{home_file} is missing",
+                    "the home seed is the vault's navigation root")
+            else:
+                home_text = read_text(home)
+                for name in sorted(expected_maps):
+                    if f"[[{maps_dir}/{name}" not in home_text:
+                        err(f"home seed does not link [[{maps_dir}/{name}]]",
+                            "home links every map note; the graph star"
+                            " topology depends on it")
+            graph = vault_tpl / ".obsidian" / "graph.json"
+            if graph.is_file():
+                try:
+                    graph_data = json.loads(read_text(graph))
+                except json.JSONDecodeError:
+                    graph_data = {}  # json_hygiene reports the parse failure
+                queries = " ".join(
+                    str(group.get("query", ""))
+                    for group in graph_data.get("colorGroups", [])
+                    if isinstance(group, dict))
+                for name in sorted(subtrees):
+                    if f'path:"{name}/' not in queries:
+                        err(f"graph.json has no color group for subtree"
+                            f" '{name}'",
+                            "one slash-anchored path query per subtree keeps"
+                            " the graph clusters readable")
+
+
 CHECKS = {
     "frontmatter_shape": check_frontmatter_shape,
     "agent_name": check_agent_name,
@@ -1019,6 +1261,10 @@ CHECKS = {
     "template_placeholders": check_template_placeholders,
     "spawn_shape_constitution": check_spawn_shape_constitution,
     "ba_schema_shape": check_ba_schema_shape,
+    "wikilink_ban": check_wikilink_ban,
+    "version_sync": check_version_sync,
+    "vault_policy_shape": check_vault_policy_shape,
+    "vault_wiring": check_vault_wiring,
 }
 
 

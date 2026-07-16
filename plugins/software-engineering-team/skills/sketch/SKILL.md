@@ -19,7 +19,8 @@ Pure design exploration: no code, no sales package, just directions.
 2. Preconditions, in order:
    a. Approved brief for the topic; missing: run the business-analysis
       entry flow first, then continue.
-   b. Design master at workspace/docs/design-system/MASTER.md; missing:
+   b. Design master at workspace/docs/design-system/MASTER.md (a vault
+      note; the obsidian-vault skill owns its docs-tree law); missing:
       stop, say "no design system yet", route the user into the
       design-system entry, and continue here once it exists.
 3. Execute ${CLAUDE_PLUGIN_ROOT}/flows/design.md in sketch mode:

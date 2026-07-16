@@ -393,6 +393,14 @@ class PmoHookTests(unittest.TestCase):
         ), self.env)
         self.assertEqual(code, 2)
         self.assertIn("owning verb", err)
+        # decided_at is a clock-owned field too (vault_check stamp-decision).
+        code, _, err = run_hook("hook_guard_db.py", self.payload(
+            hook_event_name="PreToolUse", tool_name="Edit", tool_use_id="d6",
+            tool_input={"file_path": str(doc), "old_string": "# R",
+                        "new_string": "decided_at: 2026-01-05"},
+        ), self.env)
+        self.assertEqual(code, 2)
+        self.assertIn("stamp-decision", err)
         # Outside a managed project the stamp family does not apply.
         outside = Path(self.tmp.name) / "elsewhere" / "workspace" / "n.md"
         outside.parent.mkdir(parents=True)

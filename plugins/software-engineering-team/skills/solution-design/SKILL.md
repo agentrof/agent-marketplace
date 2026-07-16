@@ -30,41 +30,41 @@ gate, and a decision log the planner and the software architect read.
      workspace/docs/business-analysis/<slug> --gate approval --node
      <domain> per cited domain; nonzero routes to business-analysis. No
      space at all is allowed ONLY for pre-analysis groundwork: the
-     engagement doc is then flagged ungrounded-by-analysis and its
-     decisions cite requirements as assumptions to re-verify.
+     engagement is flagged ungrounded, decisions cite assumptions.
    - Mint the engagement slug here: kebab-case topic name; a reopened
      topic appends -2, -3, never reuses a closed slug.
-   - An existing tree means UPDATE mode: same living tree, never a
-     parallel version. First run births it from the landscape-docs
-     reference's birth skeletons, verbatim. On a project with
+   - An existing tree means UPDATE mode, never a parallel version; the
+     first run births it from the landscape-docs birth skeletons. With
      pre-existing systems, baselining precedes engagement one: write
-     Current from the repository and the user's account, minted as one
-     dated baseline decision record the Components rows cite.
+     Current from the repository, minted as one dated baseline decision
+     note the Components rows cite.
    - Session resume (the tree outlives conversations): orient from the
-     landscape and decision-log summaries and the engagements whose
-     status is open, then read only the active engagement's docs fully.
-     The tree is the working memory; conversation is not.
+     landscape and the generated decision index plus open engagements;
+     read only the active engagement's docs fully.
    - Staleness sweep, every session: compare each live record's revisit
-     trigger and cited budget values (decision-log Summary index)
-     against the current analysis space; a breached trigger or changed
-     budget opens a re-evaluation engagement citing the record before
-     any new topic proceeds.
+     trigger and cited budgets (the generated decision index) against
+     the analysis space; a breach opens a re-evaluation engagement
+     citing the record before any new topic.
+   - Vault stewardship (obsidian-vault skill): run
+     ${CLAUDE_PLUGIN_ROOT}/scripts/vault_check.py check --vault
+     workspace/docs --scope solution-design; its findings are this
+     session's repair work (migrate covers the deterministic classes).
 2. Adopt the solution-architect role IN THIS CONVERSATION (an
    interactive persona, not a spawn; solution design is a debate). Read
    the behavioral constitution at ${CLAUDE_PLUGIN_ROOT}/constitution.md
    and honor it; follow the agent constitution at
    ${CLAUDE_PLUGIN_ROOT}/agents/solution-architect.md exactly, and load
-   its bound knowledge skill (solution-architecture): its dimension set
-   governs every evaluation, its doc contract governs where every
-   verdict lands.
+   its bound knowledge skills (solution-architecture and obsidian-vault):
+   the dimension set governs every evaluation, the doc contract governs
+   where every verdict lands, the vault law governs every docs write.
 3. Work per engagement.
    - One engagement doc per topic: engagements/<slug>.md framing the
      question, the touched components, the cited requirements and
      constraints, then the options matrix and the verdict.
-   - Debate in rounds with the user; every accepted verdict lands as a
-     decision record (alternatives, tradeoffs, exit path,
-     sustainability judgment; supersede, never edit) and the landscape
-     updates to match. Nothing decided lives only in conversation.
+   - Debate in rounds; every accepted verdict lands as its own decision
+     note under decisions/ (landscape-docs contract; supersede via the
+     stamp-decision verb, never edit) and the landscape updates to
+     match. Nothing decided lives only in conversation.
    - Build, buy or integrate per component; a verdict that would change
      the configured stack enums routes to the configure entry and the
      maintainer path, never around them.
@@ -80,18 +80,18 @@ gate, and a decision log the planner and the software architect read.
    every finding in conversation: fix (doc or record updated), reject
    (one-line reason), defer (named at the gate). Record the round as
    reviews/<slug>-round-<n>.md (findings table plus dispositions).
-   Round 1 is mandatory; further rounds run only while blocking
-   findings appear, cap 3. A landscape-scoped round (the lenses over
-   landscape.md and the live decisions, not one engagement) runs on
-   user demand or when fold-in reveals a contradiction.
+   Round 1 is mandatory; further rounds only while blocking findings
+   appear, cap 3. A landscape-scoped round runs on user demand or when
+   fold-in reveals a contradiction.
 5. SOLUTION gate, per engagement.
-   - Mechanical half first: artifact_check on every touched doc per the
-     doc contract;
+   - Mechanical half first: artifact_check on every touched doc;
      ${CLAUDE_PLUGIN_ROOT}/scripts/landscape_check.py --tree
-     workspace/docs/solution-design exit 0 (link, status and id
-     integrity); ${CLAUDE_PLUGIN_ROOT}/scripts/ba_compile.py resolve
-     --space <space> --ids <every id the engagement cites>, nonzero
-     blocks the gate; all rounds recorded.
+     workspace/docs/solution-design exit 0;
+     ${CLAUDE_PLUGIN_ROOT}/scripts/vault_check.py check --vault
+     workspace/docs --scope solution-design exit 0 (freeze set passed
+     as --exclude); ${CLAUDE_PLUGIN_ROOT}/scripts/ba_compile.py resolve
+     --space <space> --ids <every cited id>, nonzero blocks the gate;
+     all rounds recorded.
    - Present: each verdict with its strongest rejected alternative,
      sustainability judgments, cited constraints, impacts on in-flight
      or planned work (read resume-info --project-key <key> --json and
@@ -100,21 +100,21 @@ gate, and a decision log the planner and the software architect read.
      owner's ruling.
    - Approve / Request changes / Pause, asked through the
      AskUserQuestion popup (tradeoffs in the option descriptions). On
-     approve: stamp the
-     engagement via ${CLAUDE_PLUGIN_ROOT}/scripts/landscape_check.py
-     --tree <tree> --stamp-engagement <slug> --status approved (the
-     script writes the UTC date and re-checks the tree; never type the
-     date), land deferred questions in its Verdict with a revisit note
-     (deferral is a recorded row, never silence), fold the outcome into
-     landscape.md and decision-log.md (the engagement is the study; the
-     landscape is the living truth) and commit the tree.
-6. Process pulses: at each round close and gate close, append an event
-   via the PMO CLI (event append) naming the engagement, round and
-   finding counts; the CLI is the launcher at
+     approve: stamp the engagement via
+     ${CLAUDE_PLUGIN_ROOT}/scripts/landscape_check.py --tree <tree>
+     --stamp-engagement <slug> --status approved (the script writes the
+     UTC date; never type it), land deferred questions in the Verdict
+     with a revisit note (a recorded row, never silence), fold the
+     outcome into landscape.md, re-render the generated index via the
+     render-decisions verb, update the map note and commit the tree.
+6. Process pulses: at each round and gate close, append an event via
+   the PMO CLI (event append) naming the engagement, round and finding
+   counts; the CLI is the launcher at
    "${AGENTROF_HOME:-$HOME/.agentrof}/bin/pmo_cli.py", per the develop
-   flow's state contract. Content stays in files; the database gets
-   pulses.
-7. HARD SCOPE LIMIT: this entry writes ONLY under
-   workspace/docs/solution-design/. Requirements gaps route to
-   business-analysis, implementation to request, stack changes to
-   configure, per-story design to the develop flow.
+   flow's state contract. Content stays in files; the database pulses.
+7. HARD SCOPE LIMIT: this entry writes only under
+   workspace/docs/solution-design/, plus its own map note, home and
+   start-here repair, and vault payload materialization (per-file,
+   only where missing). Requirements gaps route to business-analysis,
+   implementation to request, stack changes to configure, per-story
+   design to the develop flow.

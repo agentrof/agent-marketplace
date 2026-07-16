@@ -56,6 +56,7 @@ STAMP_FIELD_PATTERNS = (
     re.compile(r"^approved_at:\s*(\d{4}-\d{2}-\d{2})", re.MULTILINE),
     re.compile(r"^Status:\s+(?:approved|parked)\s+(\d{4}-\d{2}-\d{2})",
                re.MULTILINE),
+    re.compile(r"^decided_at:\s*(\d{4}-\d{2}-\d{2})", re.MULTILINE),
 )
 
 GIT_COMMIT_RE = re.compile(r"\bgit\b[^|&;]*\bcommit\b")
@@ -326,10 +327,11 @@ def main() -> int:
     if stamp:
         return deny(
             f"hand-written stamp date '{stamp}' in a clock-owned field"
-            " (approved_at / Status approved|parked): these fields are"
-            " written only by their owning verb, never by hand, today's"
-            " date included. Use ba_compile.py approve or landscape_check.py"
-            " --stamp-engagement; free dates elsewhere paste pmo_cli.py now"
+            " (approved_at / Status approved|parked / decided_at): these"
+            " fields are written only by their owning verb, never by hand,"
+            " today's date included. Use ba_compile.py approve,"
+            " landscape_check.py --stamp-engagement or vault_check.py"
+            " stamp-decision; free dates elsewhere paste pmo_cli.py now"
             " --date output."
         )
     return 0

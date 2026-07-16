@@ -19,6 +19,8 @@ The only place the design master is born or changed.
    - Read workspace/config.json when present: MASTER body prose follows
      output_language; token, component and spec names follow
      terminology_language (default English).
+   - Load the obsidian-vault knowledge skill: MASTER and every page
+     override are vault notes (frontmatter, tags mirror, nav section).
    - MASTER exists at workspace/docs/design-system/MASTER.md: UPDATE mode.
    - No MASTER but the codebase carries themes or tokens: EXTRACTION mode;
      derive MASTER from what the code already declares, never invent over
@@ -41,7 +43,8 @@ The only place the design master is born or changed.
 4. DS GATE: the user picks a candidate through the AskUserQuestion
    popup, one option per candidate with its emphasis in the description
    (or requests different emphases; one re-run). The pick is written as
-   workspace/docs/design-system/MASTER.md: logic header, global rules
+   workspace/docs/design-system/MASTER.md: vault frontmatter and nav
+   section (the persist script emits them), logic header, global rules
    (semantic palette with light and dark pairs, typography, spacing,
    radius derived from style, shadows, motion tokens, breakpoints, one
    declared icon set), component specs, style guidelines, plain-text
@@ -55,6 +58,15 @@ The only place the design master is born or changed.
    absorbs; an override that contradicts MASTER is a finding, not a
    preference. Run the consolidation sweep when asked (the develop
    flow's periodic reconciliation requests it).
-6. HARD SCOPE LIMIT: this flow writes ONLY under
-   workspace/docs/design-system/. Requests to design product pages or
-   write code are refused and routed to sketch or request.
+6. Close: update maps/design-system.md to match (one wikilink per
+   override with its deviation summary), then run
+   ${CLAUDE_PLUGIN_ROOT}/scripts/vault_check.py check --vault
+   workspace/docs --scope design-system; repair every finding before
+   closing (obsidian-vault skill; migrate covers the deterministic
+   classes). A leftover candidates.html is a finding, never an
+   exemption.
+7. HARD SCOPE LIMIT: this flow writes only under
+   workspace/docs/design-system/, plus its own map note, home and
+   start-here repair, and vault payload materialization (per-file, only
+   where missing). Requests to design product pages or write code are
+   refused and routed to sketch or request.

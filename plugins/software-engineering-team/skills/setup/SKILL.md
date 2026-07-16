@@ -27,11 +27,10 @@ detected candidates plus free-form input.
 2. Workspace collision: a foreign workspace/ directory at the root: ask
    for an alternative name and use it consistently, substituting it for
    workspace/ in every materialized template content and skeleton path
-   (the .gitignore work-orders rule, the CLAUDE.md import, source_dirs). The
-   team's own layout is recognized by a config.json carrying the
-   managed_by note, or by the docs/ plus memory/ pair; a directory
-   matching neither is foreign. Record the chosen name as a one-line
-   note in the project CLAUDE.md once step 3 has materialized it.
+   (the .gitignore work-orders rule, the CLAUDE.md import, source_dirs).
+   The team's layout is recognized by config.json's managed_by note or
+   the docs/ plus memory/ pair; anything else is foreign. Record the
+   chosen name in the project CLAUDE.md once step 3 materializes it.
 3. Materialize templates from ${CLAUDE_PLUGIN_ROOT}/templates/, only
    where missing (idempotency: never overwrite an existing file, only
    add):
@@ -42,28 +41,30 @@ detected candidates plus free-form input.
      and a profile.md, or a directory containing them)?"; given paths
      are copied verbatim per file, otherwise me.md and profile.md come
      from the templates.
+   - workspace/docs/ vault payload: copy ${CLAUDE_PLUGIN_ROOT}/templates/vault/
+     per file, only where missing (.obsidian payload, home, start-here,
+     maps/ seeds; the obsidian-vault skill owns their law).
 4. Create the skeleton, only missing parts: workspace/apps/,
    workspace/docs/business-analysis/, workspace/docs/solution-design/,
-   workspace/docs/system-architecture/,
+   workspace/docs/system-architecture/, workspace/docs/maps/,
    workspace/docs/design-system/pages/, workspace/demos/,
    workspace/sketches/, workspace/environment/, workspace/work-orders/.
-   Git does not track empty directories: drop a .gitkeep in each folder
-   created empty
-   (work-orders/ is gitignored and needs none). Topic analysis spaces
-   inside workspace/docs/business-analysis/ are created by the
-   business-analysis entry, never by setup.
+   Git does not track empty directories: drop a .gitkeep in each empty
+   folder created (work-orders/ is gitignored and needs none). Topic
+   analysis spaces inside workspace/docs/business-analysis/ are created
+   by the business-analysis entry, never by setup.
 5. PMO backbone: resolve the PMO CLI (the launcher at
-   "${AGENTROF_HOME:-$HOME/.agentrof}/bin/pmo_cli.py"; missing means
-   look up the project-management-office entry in
-   $HOME/.claude/plugins/installed_plugins.json, use its install path plus
-   scripts/pmo_cli.py, and run its sync-launcher subcommand once; no
-   entry there means the plugin is missing: stop and tell the user to
-   reinstall this plugin, the dependency brings project-management-office
-   in). Run init-db, then register the
+   "${AGENTROF_HOME:-$HOME/.agentrof}/bin/pmo_cli.py"; missing: look up
+   the project-management-office entry in
+   $HOME/.claude/plugins/installed_plugins.json, use its install path
+   plus scripts/pmo_cli.py, run its sync-launcher once; no entry means
+   the plugin is missing: stop, tell the user to reinstall, the
+   dependency brings it in). Run init-db, then register the
    project: project register --key <kebab project name> --name "<name>"
    --team software-engineering-team --stamp-config workspace/config.json (stamps
    project_key into the config; idempotent). Every flow resolves the
-   project by that key.
+   project by that key. Render the delivery views once (render backlog
+   and render ledger) so the delivery map resolves from day zero.
 6. Build workspace/config.json interactively. Its first key is always
    "managed_by": "software-engineering-team plugin; change only through the
    configure entry". An existing config.json is never re-interviewed:
@@ -76,18 +77,15 @@ detected candidates plus free-form input.
    test_command (the one command that runs the whole suite; point it at
    a script or make target when several stacks must run),
    mutation_command (the mutation-testing runner for the stacks, with a
-   {{changed_files}} placeholder for per-story scope; the QA gate
-   requires it on code stories and treats its absence as a blocking
-   finding; verify it by running it once on one file before writing the
-   config, and in a project with no code yet record it as unverified so
-   the first code story's QA gate performs the verification),
+   {{changed_files}} placeholder; required on code stories, absence is
+   a blocking finding; verify by one one-file run, or record unverified
+   in a no-code project for the first code story's QA gate to verify),
    environment_stack (supported: docker-compose; detect from an existing
    compose file under workspace/environment/), env_command (one entry
-   point implementing the verbs up, down, seed <scenario>, logs and
-   url <service>; contract in the environment stack skill; verify by
-   running up then down once, and in a project with no environment yet
-   record it as unverified so the first environment-impacting story's QA
-   gate performs the verification), source_dirs, output_language
+   point for the verbs up, down, seed <scenario>, logs, url <service>;
+   contract in the environment stack skill; verify by one up-then-down,
+   or record unverified for the first environment story's QA gate to
+   verify), source_dirs, output_language
    (default English; its scope: the body prose of authored .md
    documents), terminology_language (default English; its scope: names,
    technical terms, code and comments, commit messages and PR bodies;
@@ -113,6 +111,10 @@ detected candidates plus free-form input.
    workflow missing the smoke job counts as a gap once the probe passes.
    Keep the dependency-audit job, and route any advisory it raises
    through the request entry as a fix-atomic lockfile bump.
-8. Close with the summary and pointers: start with business-analysis for
-   the first topic, solution-design for the system foundations,
-   design-system before any screen work, then request.
+8. Close: run ${CLAUDE_PLUGIN_ROOT}/scripts/vault_check.py check
+   --vault workspace/docs. Fresh tree: any finding is a setup bug.
+   Existing tree: findings in setup-authored files are setup bugs;
+   pre-existing content findings are named as vault degradation for the
+   next docs gate's stewardship (offer the migrate verb now). Then the
+   pointers: business-analysis first, solution-design for foundations,
+   design-system before screen work, then request.

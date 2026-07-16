@@ -8,7 +8,7 @@ An engagement doc opens by pinning, before any option is named:
 
 - The question, in one sentence, and what is explicitly out of scope.
 - The components of the landscape it touches.
-- The cited requirements and quantified constraints; what the decision must satisfy is fixed before candidates enter. Requirement ids follow the space's namespaced grammar (`BR-<CODE>-###` and kin) and are read from the space's `_generated/registry.json`, never from memory; budgets are cited as relative links to the budgets.md section, since budget rows carry no ids.
+- The cited requirements and quantified constraints; what the decision must satisfy is fixed before candidates enter. Requirement ids follow the space's namespaced grammar (`BR-<CODE>-###` and kin) and are read from the space's `_generated/registry.json`, never from memory; budgets are cited as block-id wikilinks (`[[business-analysis/shop/budgets#^event-volume|volume budget]]`), since budget rows carry no ids.
 - The dimension priority for this question: which dimensions dominate when they conflict, fixed before any candidate is named. A verdict that flips the stated priority to fit its winner is post-hoc reasoning; the tie rule reads the framing's priority first, and only a genuine residual tie escalates to the owner.
 - The decision horizon: is this reversible next quarter or structural for years? Reversible decisions get lighter treatment; structural ones get the full matrix.
 
@@ -42,4 +42,4 @@ When no analysis space exists yet (pre-analysis groundwork), the engagement proc
 
 ## From Verdict to Record
 
-An accepted verdict produces, in the same session: the decision record in decision-log.md (alternatives, tradeoffs, exit path, sustainability judgment), the landscape.md update (component list, build-buy-integrate verdicts, topology), and any handed-down questions for the software architect named at the gate. The engagement doc itself is the study and stays as written; corrections happen by appending, never rewriting history.
+An accepted verdict produces, in the same session: the decision note under decisions/ (alternatives, tradeoffs, exit path, sustainability judgment) and the index re-render, the landscape.md update (component list, build-buy-integrate verdicts, topology), and any handed-down questions for the software architect named at the gate. The engagement doc itself is the study and stays as written; corrections happen by appending, never rewriting history.

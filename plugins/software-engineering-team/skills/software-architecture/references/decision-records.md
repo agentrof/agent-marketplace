@@ -56,3 +56,28 @@ Keep a record under a page. A record nobody reads protects nobody.
 | Edited history | An accepted record's text changed after acceptance | The review baseline moved silently; conformance becomes unverifiable |
 | Vague decision | Cannot be caught violated at review | Not falsifiable, so not enforceable; rewrite as a checkable choice |
 | Orphan record | Cited by no delta, citing no symptom or budget | Decoration; wire it into the traceability chain or reject it |
+
+## Record Files and the Generated Index
+
+- One note per record at system-architecture/decisions/adr-###-<kebab-slug>.md
+  (3+ digits, zero-padded to 3, more digits legal), H1 `ADR-042: <title>`.
+  Identity is the file path plus the alias; there is no bare-id heading.
+- Frontmatter contract: `type: decision`, `title`, `status`,
+  `owner_role`, `decided_at` (stamped only by the vault checker's
+  stamp-decision verb, never hand-typed), `story` (the delta or story
+  that forced the record), `revisit_trigger`, `tags` as the stamped
+  mirror (`doc/decision` plus `status/<status>`), and `aliases` holding
+  the bare id (`- ADR-042`).
+- The supersede chain lives in quoted vault-absolute wikilink keys
+  (`supersedes: "[[system-architecture/decisions/adr-031-offset-pagination]]"`,
+  `superseded_by` on the older note); stamp-decision writes both ends in
+  one operation, and an empty relation is an absent key, never an empty
+  string.
+- The links field's values are wikilinks: cited budgets as block ids,
+  briefs, affected ownership rows.
+- Id allocation: scan the decisions/ filenames and take the highest
+  number plus one. Duplicate id numbers are caught at every gate, and
+  render-decisions refuses to render an index over them.
+- decision-log.md beside decisions/ is the GENERATED index (first-line
+  marker), rendered by the vault checker's render-decisions verb;
+  re-render it after any record write, never author or hand-edit it.

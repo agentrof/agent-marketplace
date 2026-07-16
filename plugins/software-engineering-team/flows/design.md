@@ -30,7 +30,8 @@ You MUST follow these rules exactly. Violating any of them is a failure.
 - The design master exists at workspace/docs/design-system/MASTER.md.
   Missing: STOP, tell the user "no design system yet", route them into
   the design-system entry, and resume here once MASTER exists. This flow
-  never creates or edits the master.
+  never creates or edits the master. Any docs-tree write follows the
+  obsidian-vault skill's vault law.
 
 ## Spawn prompt template
 

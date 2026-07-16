@@ -74,8 +74,7 @@ DoD verification trail: the QA step's verdicts flip the story's
 dod_items one by one (item set-dod --dod-id <id> --status verified, or
 failed with --failure-reason); pending dod_items at the delivery gate are named as open work.
 
-Suite artifacts (junit output and the like) go to gitignored
-workspace/ paths (workspace/junit-<suite>.xml), never the order dir.
+Suite artifacts (junit output) go to gitignored workspace/junit-<suite>.xml, never the order dir.
 
 Step status: pending | in_progress | done | blocked | escalated.
 Work order status: running | waiting_gate | blocked | escalated | complete.
@@ -143,8 +142,9 @@ still read the artifact for semantic sanity before presenting any gate.
   the order directory; the guard freezes exactly those docs while the
   order is active. Bindings from config: backend role to the backend
   stack skill, frontend role to the frontend stack skill, devops role to
-  the environment stack skill, architect to the architecture skill plus
-  every database skill in the databases set, planner to the planning
+  the environment stack skill, architect to the architecture skill, the
+  obsidian-vault skill (vault law for the living documents) and every
+  database skill in the databases set, planner to the planning
   skill, analyst to the requirements-analysis skill, reviewer to the
   review skill, verifier to the verification skill.
 - Ensure workspace/work-orders/ is gitignored; append the rule if absent.
@@ -169,10 +169,17 @@ still read the artifact for semantic sanity before presenting any gate.
   space: read-fully the snapshot's root overview, budgets and the docs
   owning this story's claimed ids (ba_compile.py resolve against the
   snapshot); summary-only its generated registry and index, plus the
-  solution-design landscape and decision log when present. Add the
-  living documents under workspace/docs/system-architecture/ and this
-  story's scope from its backlog row.
-- The architect applies its delta to the living documents and returns
+  solution-design landscape and its generated decision index when
+  present (read fully only the decision notes the delta must conform
+  to). Add the living documents under
+  workspace/docs/system-architecture/ and this story's scope from its
+  backlog row.
+- The architect applies its delta to the living documents (new or
+  changed decisions land as their own notes under
+  workspace/docs/system-architecture/decisions/ per the decision-records
+  contract; afterwards the flow re-renders the generated index via
+  ${CLAUDE_PLUGIN_ROOT}/scripts/vault_check.py render-decisions --vault
+  workspace/docs) and returns
   the ownership map; the delta declares its environment impact (services,
   stores, runtime variables, seed needs, or an explicit none) and the map
   grants workspace/environment/ to the devops engineer when impact exists
@@ -189,8 +196,10 @@ still read the artifact for semantic sanity before presenting any gate.
 - Mechanical half, BEFORE presenting the gate:
   ${CLAUDE_PLUGIN_ROOT}/scripts/contract_check.py --contract
   workspace/docs/system-architecture/api-contract.md (every endpoint
-  declares error cases) and work-order validate; either nonzero blocks
-  the gate and routes back to the architect as the named violation.
+  declares error cases); ${CLAUDE_PLUGIN_ROOT}/scripts/vault_check.py
+  check --vault workspace/docs --scope system-architecture (freeze.json
+  paths passed as --exclude); and work-order validate; any nonzero
+  blocks the gate, routed back to the architect as the named violation.
 - Judgment half at the gate: error-case completeness in substance,
   boundary sanity, budget citations. The gate cannot pass otherwise.
 - Approve / Request changes / Pause. Record the outcome with
@@ -243,9 +252,11 @@ still read the artifact for semantic sanity before presenting any gate.
   changed; otherwise reject it and keep the round scoped to the fixes.
 - A finding implicating the approved architecture does NOT enter the
   fix loop: set the step escalated, present it, stop for the owner.
-  Exits: the owner records the decision retroactively (owner-decision
-  entry, supersede mechanics) and the loop resumes; or the architect
-  revises the delta through a mini model gate, then resume here.
+  Exits: the owner's ruling lands retroactively as its own decision
+  note under workspace/docs/system-architecture/decisions/ (the
+  stamp-decision verb owns status and supersede mechanics; the flow
+  re-renders the index) and the loop resumes; or the architect revises
+  the delta through a mini model gate, then resume here.
 - The review counter reaching 3 without approve: blocked, escalate, halt.
 
 ### Step 4: verification loop (max 3 rounds)
@@ -321,6 +332,11 @@ still read the artifact for semantic sanity before presenting any gate.
   - append the story's line to workspace/CHANGELOG.md from the PR
     quality summary (append-only; any date pasted from "$PMO" now --date);
   - publish the exported interface schema under workspace/docs/api/;
+  - vault stewardship: clear this order's freeze.json (the flow authors
+    the manifest), re-render the decision indexes (vault_check.py
+    render-decisions), then run ${CLAUDE_PLUGIN_ROOT}/scripts/vault_check.py
+    check --vault workspace/docs and repair every finding now, map notes
+    included (index conflicts heal by re-render, never hand-merge);
   - update the analysis-space BR rows changed by fix-atomic work since
     the last checkpoint (edit the owning rule_set row in place: same id,
     new statement, or retire plus mint), then ba_compile.py check plus

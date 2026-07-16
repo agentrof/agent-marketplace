@@ -26,6 +26,8 @@ assumption ledger, the non-functional budgets, and the tree they live in.
   to the registry and to QA.
 - Cite ids as links to their owning doc; the compiler proves the target
   mints them. Numbers are permanent: retire, never renumber or reuse.
+  Citations are wikilinks per the vault contract (the obsidian-vault
+  skill owns the grammar).
 - Run the compiler's check and render after every authoring milestone;
   a gate is never presented on a red compile.
 

@@ -51,9 +51,19 @@ def edit(path: Path, old: str, new: str) -> None:
     path.write_text(text.replace(old, new), encoding="utf-8")
 
 
+def seed_vault_scaffolding(space: Path) -> None:
+    """The map seed setup materializes in a real project; the stubs' nav
+    links resolve against it."""
+    docs_root = space.parent.parent
+    write(docs_root / "maps" / "business-analysis.md",
+          "---\ntype: moc\ntitle: Business Analysis\ntags:\n"
+          "  - doc/moc\n---\n\n# Business Analysis\n")
+
+
 def make_valid_space(space: Path) -> None:
     """A gate-passing ERP space with one inventory domain: approved docs,
     cited rules, a converged locked challenge round."""
+    seed_vault_scaffolding(space)
     write(space / "space.md", """---
 type: space
 title: ERP Analysis
@@ -73,7 +83,7 @@ Track sellable stock per warehouse with auditable movements.
 
 ## Domain Map <!-- sec: domain_map -->
 
-- [Inventory](domains/inventory/domain.md)
+- [[business-analysis/erp/domains/inventory/domain|Inventory]]
 
 ## Out Of Scope <!-- sec: out_of_scope -->
 
@@ -176,13 +186,13 @@ Owns stock levels; pricing belongs to sales.
 
 ## Process Map <!-- sec: process_map -->
 
-- [Goods Receipt](processes/goods-receipt.md)
+- [[business-analysis/erp/domains/inventory/processes/goods-receipt|Goods Receipt]]
 
 ## Data Notes <!-- sec: data_notes -->
 
 | entity | note |
 |---|---|
-| [Stock Item](entities/stock-item.md) | promoted: has lifecycle |
+| [[business-analysis/erp/domains/inventory/entities/stock-item\\|Stock Item]] | promoted: has lifecycle |
 """)
     write(space / "domains" / "inventory" / "processes" / "goods-receipt.md", """---
 type: process
@@ -207,8 +217,8 @@ A delivery arrives against a purchase order.
 ## Main Flow <!-- sec: main_flow -->
 
 Operator scans items; each accepted line creates a movement for
-[Stock Item](../entities/stock-item.md) per
-[BR-INV-001](../rules/stock-item-lifecycle.md).
+[[business-analysis/erp/domains/inventory/entities/stock-item|Stock Item]] per
+[[business-analysis/erp/domains/inventory/rules/stock-item-lifecycle|BR-INV-001]].
 
 ## Exception Flows <!-- sec: exception_flows -->
 
@@ -230,8 +240,8 @@ One sellable, storable product variant tracked per warehouse.
 
 | field | meaning | source | frozen_when | rules |
 |---|---|---|---|---|
-| sku | unique identifier | product manager | after first movement | [BR-INV-001](../rules/stock-item-lifecycle.md) |
-| on_hand_quantity | derived sum of movements | system | always | [BR-INV-002](../rules/stock-item-lifecycle.md) |
+| sku | unique identifier | product manager | after first movement | BR-INV-001 |
+| on_hand_quantity | derived sum of movements | system | always | BR-INV-002 |
 
 ## Lifecycle <!-- sec: lifecycle -->
 
@@ -260,12 +270,12 @@ status: approved
 approved_at: 2026-07-12
 owner_role: business_analyst
 governs:
-  - ../entities/stock-item.md
+  - "[[business-analysis/erp/domains/inventory/entities/stock-item]]"
 ---
 
 # Stock Item Lifecycle Rules
 
-Lifecycle constraints for [Stock Item](../entities/stock-item.md).
+Lifecycle constraints for [[business-analysis/erp/domains/inventory/entities/stock-item|Stock Item]].
 
 ## Rules <!-- sec: rules -->
 
@@ -287,12 +297,12 @@ status: approved
 approved_at: 2026-07-12
 owner_role: business_analyst
 verifies:
-  - ../processes/goods-receipt.md
+  - "[[business-analysis/erp/domains/inventory/processes/goods-receipt]]"
 ---
 
 # Goods Receipt Criteria
 
-Criteria for [Goods Receipt](../processes/goods-receipt.md).
+Criteria for [[business-analysis/erp/domains/inventory/processes/goods-receipt|Goods Receipt]].
 
 ## Criteria <!-- sec: criteria -->
 
@@ -416,7 +426,8 @@ def break_content_bans(space: Path) -> None:
 
 def break_dead_links(space: Path) -> None:
     edit(space / INV / "processes" / "goods-receipt.md",
-         "(../entities/stock-item.md)", "(../entities/missing.md)")
+         "[[business-analysis/erp/domains/inventory/entities/stock-item|Stock Item]]",
+         "[[business-analysis/erp/domains/inventory/entities/missing|Stock Item]]")
 
 
 def break_id_format(space: Path) -> None:
@@ -449,7 +460,7 @@ def break_row_schema(space: Path) -> None:
 
 
 def break_semantic_links(space: Path) -> None:
-    edit(space / "space.md", "- [Inventory](domains/inventory/domain.md)",
+    edit(space / "space.md", "- [[business-analysis/erp/domains/inventory/domain|Inventory]]",
          "The domain list is maintained elsewhere.")
 
 
@@ -543,6 +554,7 @@ GATE_CHECKS = {"gate_approval"}
 def collect(space: Path, gate: bool = False) -> list:
     schema = SCHEMA
     scanned, base = ba.scan_space(space, schema)
+    scanned.vault_root = ba.resolve_vault_root(space, "")
     findings = ba.run_checks(scanned, base, gate=gate, gate_node="")
     if not scanned.broken:
         warnings = [f for f in findings if f.severity == "warning"]
@@ -553,7 +565,7 @@ def collect(space: Path, gate: bool = False) -> list:
 class ValidSpaceTests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
-        self.space = Path(self.tmp.name) / "erp"
+        self.space = Path(self.tmp.name) / "docs" / "business-analysis" / "erp"
         make_valid_space(self.space)
 
     def tearDown(self):
@@ -596,7 +608,7 @@ class BuilderFixtureTests(unittest.TestCase):
         for check, builder in sorted(BA_BUILDERS.items()):
             with self.subTest(check=check):
                 with tempfile.TemporaryDirectory() as tmp:
-                    space = Path(tmp) / "erp"
+                    space = Path(tmp) / "docs" / "business-analysis" / "erp"
                     make_valid_space(space)
                     builder(space)
                     findings = collect(space, gate=check in GATE_CHECKS)
@@ -610,7 +622,7 @@ class BuilderFixtureTests(unittest.TestCase):
         """The glossary mapping column is identifier-shaped when filled;
         the valid space's empty cell proves allow_empty stays silent."""
         with tempfile.TemporaryDirectory() as tmp:
-            space = Path(tmp) / "erp"
+            space = Path(tmp) / "docs" / "business-analysis" / "erp"
             make_valid_space(space)
             edit(space / "glossary.md", "| stock_movement |",
                  "| stokHareketi |")
@@ -626,7 +638,7 @@ class ApproveTests(unittest.TestCase):
 
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
-        self.space = Path(self.tmp.name) / "erp"
+        self.space = Path(self.tmp.name) / "docs" / "business-analysis" / "erp"
         make_valid_space(self.space)
 
     def tearDown(self):
@@ -714,13 +726,14 @@ class ApproveTests(unittest.TestCase):
 class SubcommandTests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
-        self.root = Path(self.tmp.name)
+        self.root = Path(self.tmp.name) / "docs" / "business-analysis"
 
     def tearDown(self):
         self.tmp.cleanup()
 
     def test_init_is_born_compliant(self):
         space = self.root / "topic"
+        seed_vault_scaffolding(space)
         code, _, err = run(["init", "--space", str(space),
                             "--title", "Topic", "--code", "TOP"])
         self.assertEqual(code, 0, err)

@@ -12,8 +12,17 @@
   "naming": {
     "identifier_format": "^[a-z][a-z0-9_]*$",
     "identifier_columns": [
-      {"doc_type": "entity", "section": "fields", "column": "field"},
-      {"doc_type": "glossary", "section": "terms", "column": "technical_name", "allow_empty": true}
+      {
+        "doc_type": "entity",
+        "section": "fields",
+        "column": "field"
+      },
+      {
+        "doc_type": "glossary",
+        "section": "terms",
+        "column": "technical_name",
+        "allow_empty": true
+      }
     ]
   },
   "frontmatter": {
@@ -35,7 +44,9 @@
       "round",
       "review_scope",
       "verdict",
-      "locked"
+      "locked",
+      "tags",
+      "aliases"
     ]
   },
   "summary_max_lines": {

@@ -40,11 +40,24 @@ chart (see the decomposition reference).
 ## Document types
 
 Common frontmatter on every authored doc (keys snake_case): type, title,
-status (draft | in_review | approved | superseded), owner_role. Exactly
-when approved: approved_at, stamped by the ba_compile approve verb with
-the UTC calendar date (never hand-written; the guard hook denies a typed
-date and the compiler rejects a future one). Exactly when superseded:
-superseded_by. Doc identity is its path; there is no separate id key.
+status (draft | in_review | approved | superseded), owner_role, tags.
+Exactly when approved: approved_at, stamped by the ba_compile approve
+verb with the UTC calendar date (never hand-written; the guard hook
+denies a typed date and the compiler rejects a future one). Exactly when
+superseded: superseded_by. Doc identity is its path; there is no
+separate id key.
+
+- tags is a BLOCK list (one `- item` line each) holding exactly the
+  stamped mirror: `doc/<type-kebab>` plus `status/<status-kebab>`
+  (rule_set becomes `doc/rule-set`, in_review becomes
+  `status/in-review`). The mirror is written by the owning verbs, never
+  hand-picked. aliases (block list) appears wherever a doc owns a bare
+  name worth finding. Inline flow lists (`tags: [a, b]`) are hook-denied.
+- Doc-referencing keys (governs, verifies, superseded_by) hold QUOTED
+  vault-absolute wikilinks, e.g.
+  `governs: "[[business-analysis/shop/domains/inventory/entities/stock-item]]"`,
+  a block list of them when a doc governs several targets. An empty
+  relation is an ABSENT key, never an empty string.
 
 | type | lives at | mints | notes |
 |---|---|---|---|
@@ -106,12 +119,19 @@ frontmatter, unique across the whole space. LEG is reserved.
   retirement is a row status. Moving a doc between domains re-mints its
   ids (the compiler fails a code mismatch), which is intended: ids never
   silently change owners.
-- Citing an id: in prose, the id is a link whose text is the bare id and
-  whose target is the OWNING doc (see the worked example below). The
-  compiler verifies the target really mints it, so every citation is a
-  checked claim. In table cells (cites, affects, blocks, targets), a
-  bare id is legal and checked for existence. A bare id in prose is
-  legal only inside its owning doc.
+- Citing an id: in prose, a bare id is the ALIAS of a vault-absolute
+  wikilink to the OWNING doc; the compiler still verifies the target
+  really mints it, so every citation is a checked claim:
+
+  ```markdown
+  [[business-analysis/<slug>/domains/inventory/rules/stock-item-lifecycle|BR-INV-001]]
+  ```
+
+  TABLE CELLS in schema-declared id columns (cites, affects, blocks,
+  targets, verify) KEEP bare ids: they are machine-parsed registry data,
+  and the prose citation carries the edge. Any other cell link uses the
+  escaped-pipe wikilink form (`[[path\|BR-INV-001]]`). A bare id in
+  prose is legal only inside its owning doc.
 - AS and OQ rows carry opened_on dates, pasted from the PMO CLI's
   `now --date` output (never typed from memory; the compiler rejects a
   future date); the compiler flags open rows older than the schema
@@ -139,8 +159,8 @@ space-level challenge round when child domains exist.
 ## Formatting
 
 - One H1 per doc, matching the title. No emoji in headings, no em dash
-  anywhere, relative paths only: the compiler enforces the same bans the
-  marketplace validator enforces on shipped content.
+  anywhere: the compiler enforces the same bans the marketplace
+  validator enforces on shipped content.
 - Structure is language-neutral: frontmatter keys and machine-parsed
   values (type, status, dates, roles), sec anchors, table headers, ids,
   file and directory names are fixed English; the title value, body
@@ -161,19 +181,50 @@ space-level challenge round when child domains exist.
   also a BR row.
 - Callouts use the blockquote alert syntax ([!NOTE], [!IMPORTANT],
   [!WARNING]); they carry context, never BR or AC content.
-- Link text is a noun phrase or a bare id, never "here". Obsidian opens
-  the space fine; keep wikilink generation off, standard links only.
+- Vault-internal citations are vault-absolute wikilinks with an alias;
+  the ba_compile check and the per-write hook both enforce it:
+
+  ```markdown
+  [[business-analysis/shop/domains/inventory/entities/stock-item|Stock Item]]
+  ```
+
+  Standard relative markdown links remain only for targets OUTSIDE
+  workspace/docs/ (sketches, demos, environment files); external URLs
+  stay `[text](https://...)`. Link text (the alias) is a noun phrase or
+  a bare id, never "here".
+- Budgets and other row-level anchors are block ids: mint ` ^kebab-id`
+  at the end of the row once, never rename it, and cite
+  `[[business-analysis/shop/budgets#^event-volume|volume budget]]`.
+  Heading anchors are banned vault-wide: heading text is output-language
+  prose and cannot hold an anchor stable.
+
+## Navigation and stewardship
+
+- Every authored doc ends with the nav section, marked
+  `<!-- sec: nav -->` (the heading text above the marker is
+  output-language prose): the FIRST wikilink is `[[maps/business-analysis]]`,
+  then 2-5 peers a reader would jump to next.
+- A new space or domain joins maps/business-analysis.md in the same
+  session that births it; a retired doc leaves the map the same way.
+- The vault checker runs at every gate alongside the compiler; frozen
+  docs are passed as repeated --exclude flags and surface as named
+  warnings, never silently skipped.
+- Deterministic legacy rewrites go through the vault checker's migrate
+  verb. Migrate is format-only and sanctioned on approved docs: it never
+  touches status and never stamps.
 
 ## Rename and restructure runbook
 
 1. Run the compiler's render, then read _generated/backlinks.md for the
    doc's inbound links.
-2. Move or rename the file; update every inbound link in the same
-   change.
+2. Move or rename the file; grep the old path across the whole vault and
+   rewrite every wikilink referrer (body links, frontmatter values, map
+   rows) in the same change.
 3. If the doc changed nodes, re-mint its ids under the new code
    (retire the old rows in place with a superseded_by note; numbers are
    never reused) and update citations.
-4. Run check + render; a dead link or code mismatch fails loudly.
+4. Run check + render plus the vault check; a dead wikilink or code
+   mismatch fails loudly.
 
 ## Worked example: one rule_set
 
@@ -184,20 +235,25 @@ title: Stock item lifecycle rules
 status: approved
 approved_at: 2026-07-10
 owner_role: business_analyst
-governs:
-  - ../entities/stock-item.md
+tags:
+  - doc/rule-set
+  - status/approved
+governs: "[[business-analysis/shop/domains/inventory/entities/stock-item]]"
 ---
 
 # Stock Item Lifecycle Rules
 
-Lifecycle constraints for [Stock Item](../entities/stock-item.md).
+Lifecycle constraints for
+[[business-analysis/shop/domains/inventory/entities/stock-item|Stock Item]],
+bounded by
+[[business-analysis/shop/decisions/single-warehouse-first|DEC-ERP-001]].
 
 ## Rules <!-- sec: rules -->
 
 | id | statement | kind | status | cites |
 |---|---|---|---|---|
 | BR-INV-001 | The sku cannot change after the item's first stock movement; a change attempt is refused with the movement date named. | constraint | active | |
-| BR-INV-005 | A blocked or discontinued item accepts no stock movements; any attempt is refused and the state is unchanged. | lifecycle | active | [DEC-ERP-001](../../../decisions/single-warehouse-first.md) |
+| BR-INV-005 | A blocked or discontinued item accepts no stock movements; any attempt is refused and the state is unchanged. | lifecycle | active | DEC-ERP-001 |
 
 ## Assumptions <!-- sec: assumptions -->
 

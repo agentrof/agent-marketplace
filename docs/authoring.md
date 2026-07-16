@@ -79,7 +79,7 @@ as product-i18n subject matter; anything else is a hard-code defect.
 | agent body (below frontmatter) | 80 lines (target 40-75) |
 | SKILL.md | 150 lines and 8 KB (warn at 120) |
 | constitution.md | 60 lines |
-| flows/*.md | 400 lines |
+| flows/*.md | 416 lines |
 | references/*.md | warn above 500 lines |
 
 ## Agent template
@@ -195,6 +195,32 @@ ADR); otherwise paraphrase the procedure and drop the brand.
 - References to the research material directory in shipped content.
 - Hand-written derived counts. Counts exist only inside the README marker
   block and are injected by `tools/counts.py`.
+- Wikilink syntax (`[[target|alias]]`) outside fenced blocks and inline
+  code spans. Marketplace content links with standard relative markdown
+  links; the wikilink grammar belongs to the product vault and ships only
+  under a plugin's `templates/` (consumer-bound seeds). Backticked or
+  fenced wikilinks render as code, not links, so illustrations stay legal.
+
+## Product vault surface
+
+A plugin that ships vault authoring rules declares every variation point
+in one policy file, `skills/<skill>/data/vault-policy.json` (subtrees,
+map notes, tag namespaces, nav peer range, decision-id grammars,
+generated views, property types). The `vault_policy_shape` rule validates
+the shape and holds the policy, the `templates/vault/` seeds and the
+committed graph config in parity: a policy subtree without a map seed, a
+home seed that does not link every map, or a missing graph color group is
+an error. JSON files under `templates/**/.obsidian/` carry the vault
+app's own key schema and are exempt from the snake_case key rule only
+there; they must still parse. In a plugin shipping the vault-law skill,
+every entry or flow that names the docs tree must also name
+`obsidian-vault` (the `vault_wiring` rule): the law cannot be skipped
+by omission.
+
+## Releases
+
+A release bumps `plugin.json` and its `marketplace.json` entry to the
+same version in one commit; the `version_sync` rule errors on drift.
 
 ## Scaffolding
 

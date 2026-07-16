@@ -11,7 +11,8 @@ A complete miniature engagement, framing through fold-in: the calibration bar fo
 Status: approved 2025-11-04
 How order events reach the fulfillment and notification components
 without coupling them to the order service. Decided: managed streaming
-service, integrate verdict; minted [SD-007](../decision-log.md#sd-007).
+service, integrate verdict; minted
+[[solution-design/decisions/sd-007-order-events|SD-007]].
 
 ## Framing
 - Question: one distribution mechanism for order events, consumed by
@@ -20,9 +21,9 @@ service, integrate verdict; minted [SD-007](../decision-log.md#sd-007).
   policy for analytics (no cited requirement yet).
 - Components touched: order service (build), fulfillment worker (build),
   notification sender (build), the distribution mechanism (this verdict).
-- Citations: [BR-ORD-014](../../business-analysis/shop/domains/orders/rules.md)
+- Citations: [[business-analysis/shop/domains/orders/rules/order-events|BR-ORD-014]]
   ordering guarantee per customer;
-  [throughput budget](../../business-analysis/shop/budgets.md#event-volume)
+  [[business-analysis/shop/budgets#^event-volume|throughput budget]]
   peak event volume.
 - Dimension priority: requirement fit, then sustainability and
   operability, then cost and lock-in; the rest tie-break.
@@ -42,32 +43,59 @@ not serve at the cited volume; this is not a solved territory.
 Managed streaming service, integrate. Strongest rejected alternative:
 self-hosted broker; deciding dimension: sustainability and operability
 (no operator on the team). Egress cost stays a named risk on
-[SD-007](../decision-log.md#sd-007). Deferred: analytics retention,
-revisit when a requirement cites it. UNDECIDABLE benchmark dropped:
+[[solution-design/decisions/sd-007-order-events|SD-007]]. Deferred:
+analytics retention, revisit when a requirement cites it.
+UNDECIDABLE benchmark dropped:
 the spike became unnecessary once the lead option's vendor ordering
 semantics verified against BR-ORD-014.
 ```
 
-## decision-log.md excerpt
+## decisions/sd-007-order-events.md
 
 ```markdown
-## SD-007
-**Title:** Order event distribution via managed streaming service
-**Status:** accepted
-**Engagement:** [order-event-distribution](engagements/order-event-distribution.md)
+---
+type: decision
+title: Order event distribution via managed streaming service
+status: accepted
+owner_role: solution_architect
+decided_at: 2025-11-04
+territory: asynchronous work and queueing
+revisit_trigger: event volume crossing 5x the cited budget, or the vendor's pricing model changing
+engagement: "[[solution-design/engagements/order-event-distribution]]"
+tags:
+  - doc/decision
+  - status/accepted
+aliases:
+  - SD-007
+---
+
+# SD-007: Order event distribution via managed streaming service
+
 **Decision:** In the context of distributing order events to multiple
 consumers, facing BR-ORD-014's per-customer ordering guarantee and the
 event-volume budget, we chose a managed streaming service (integrate)
 and neglected a self-hosted broker, to achieve ordering and throughput
 without an operations burden the team cannot staff, accepting
 usage-based pricing and an ASSUMED egress cost carried as a risk.
-**Rests on:** BR-ORD-014, [event-volume budget](../business-analysis/shop/budgets.md#event-volume)
+**Rests on:** [[business-analysis/shop/domains/orders/rules/order-events|BR-ORD-014]],
+[[business-analysis/shop/budgets#^event-volume|event-volume budget]]
 **Exit path:** standard protocol; consumers re-point to any compatible
 broker; data replay from the order store.
 **Sustainability:** vendor-operated; team touches client config only.
-**Revisit trigger:** event volume crossing 5x the cited budget, or the
-vendor's pricing model changing.
 **Risks:** egress cost ASSUMED, verify on first invoice.
+
+## Baglantilar <!-- sec: nav -->
+[[maps/solution-design|Solution Design]] -
+[[solution-design/engagements/order-event-distribution|engagement]] -
+[[solution-design/landscape|Landscape]]
+```
+
+Status, decided_at, the tag mirror and any supersede chain are written
+by stamp-decision, never typed. The generated decision-log.md gains its
+row at the next render-decisions run:
+
+```markdown
+| [[solution-design/decisions/sd-007-order-events\|SD-007]] | Order event distribution via managed streaming service | accepted | asynchronous work and queueing | 2025-11-04 | event volume crossing 5x the cited budget, or the vendor's pricing model changing | |
 ```
 
 ## landscape.md fold-in excerpt
@@ -75,10 +103,10 @@ vendor's pricing model changing.
 ```markdown
 | component | verdict | decision | engagement | status |
 |---|---|---|---|---|
-| event distribution | integrate | [SD-007](decision-log.md#sd-007) | [order-event-distribution](engagements/order-event-distribution.md) | decided |
+| event distribution | integrate | [[solution-design/decisions/sd-007-order-events\|SD-007]] | [[solution-design/engagements/order-event-distribution\|order-event-distribution]] | decided |
 ```
 
-Transition gains a step citing SD-007 (linked): adopt event distribution before the fulfillment story lands; precondition: none.
+Transition gains a step citing SD-007 (an aliased wikilink, escaped-pipe in table cells): adopt event distribution before the fulfillment story lands; precondition: none.
 
 ## One challenge finding and its disposition
 
@@ -86,4 +114,4 @@ Round 1, cost-and-lock-in lens: "Egress cost is ASSUMED and the verdict's 3-year
 
 ## Why this is the bar
 
-Framing pinned scope, citations, priority and horizon before candidates; three options including the incumbent; every cell carries a source, a measurement or a marked assumption; the UNDECIDABLE outcome appeared and was resolved honestly; the record carries exit, sustainability, revisit trigger and risks as fields; every citation is a link; the landscape shows outcomes only. An engagement thinner than this on a structural question is below the bar.
+Framing pinned scope, citations, priority and horizon before candidates; three options including the incumbent; every cell carries a source, a measurement or a marked assumption; the UNDECIDABLE outcome appeared and was resolved honestly; the record carries exit, sustainability, revisit trigger and risks as fields; every citation is an aliased wikilink edge; the landscape shows outcomes only. An engagement thinner than this on a structural question is below the bar.

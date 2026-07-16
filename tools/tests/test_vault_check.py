@@ -1,0 +1,686 @@
+"""Tests for the vault checker and the per-write vault hook
+(plugins/software-engineering-team/scripts/vault_check.py, vault_hook.py),
+run against the SHIPPED vault policy so the law and the machinery are
+welded together.
+
+Doctrine mirror of test_ba_compile.py: a VAULT_BUILDERS registry holds one
+builder per checker check id; each builder mutates a valid, gate-passing
+vault to make exactly that check fire; a meta-test keeps the registry in
+lockstep with CHECK_IDS; and the untouched valid vault stays silent."""
+
+from __future__ import annotations
+
+import importlib.util
+import io
+import json
+import sys
+import tempfile
+import unittest
+from contextlib import redirect_stderr, redirect_stdout
+from datetime import datetime, timezone
+from pathlib import Path
+
+REPO = Path(__file__).resolve().parents[2]
+SCRIPTS = REPO / "plugins" / "software-engineering-team" / "scripts"
+POLICY_PATH = (REPO / "plugins" / "software-engineering-team" / "skills"
+               / "obsidian-vault" / "data" / "vault-policy.json")
+
+
+def load(name: str):
+    spec = importlib.util.spec_from_file_location(name, SCRIPTS / f"{name}.py")
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+ba = load("ba_compile")
+vc = load("vault_check")
+vh = load("vault_hook")
+
+POLICY = json.loads(POLICY_PATH.read_text(encoding="utf-8"))
+
+
+def run(argv):
+    out, err = io.StringIO(), io.StringIO()
+    with redirect_stdout(out), redirect_stderr(err):
+        try:
+            code = vc.main(["--policy", str(POLICY_PATH)] + argv)
+        except SystemExit as exc:
+            code = exc.code if isinstance(exc.code, int) else 1
+    return code, out.getvalue(), err.getvalue()
+
+
+def write(path: Path, text: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text, encoding="utf-8")
+
+
+def edit(path: Path, old: str, new: str) -> None:
+    text = path.read_text(encoding="utf-8")
+    assert old in text, f"fixture edit target not found in {path}: {old[:60]}"
+    path.write_text(text.replace(old, new), encoding="utf-8")
+
+
+SD = "solution-design"
+DEC = f"{SD}/decisions"
+
+NAV = """## Navigation <!-- sec: nav -->
+[[maps/solution-design|Solution Design]] -
+{peers}
+"""
+
+
+def make_valid_vault(root: Path) -> None:
+    write(root / "home.md", """---
+type: home
+title: Shop Knowledge Base
+tags:
+  - doc/home
+---
+
+# Shop Knowledge Base
+
+- [[maps/solution-design|Solution Design]]
+- [[maps/delivery|Delivery]]
+- [[start-here|Start Here]]
+""")
+    write(root / "start-here.md", """---
+type: guide
+title: Start Here
+tags:
+  - doc/guide
+---
+
+# Start Here
+
+Open the docs directory as the vault root, never the repository root.
+""")
+    write(root / "maps" / "solution-design.md", """---
+type: moc
+title: Solution Design
+tags:
+  - doc/moc
+---
+
+# Solution Design
+
+- [[solution-design/landscape|Landscape]]
+- [[solution-design/decision-log|Decision Index]]
+""")
+    write(root / "maps" / "delivery.md", """---
+type: moc
+title: Delivery
+tags:
+  - doc/moc
+---
+
+# Delivery
+
+- [[backlog|Backlog]]
+- [[quality-ledger|Quality Ledger]]
+""")
+    write(root / SD / "landscape.md", """---
+type: landscape
+title: Landscape
+status: approved
+tags:
+  - doc/landscape
+  - status/approved
+---
+
+# Landscape
+
+The components and their owning decisions.
+
+| component | decision |
+|---|---|
+| order-events | [[solution-design/decisions/sd-002-order-events-v2\\|SD-002]] |
+
+""" + NAV.format(peers=(
+        "[[solution-design/decisions/sd-001-order-events|SD-001]] -\n"
+        "[[solution-design/decisions/sd-002-order-events-v2|SD-002]]")))
+    write(root / DEC / "sd-001-order-events.md", """---
+type: decision
+title: Order events v1
+status: superseded
+owner_role: solution_architect
+decided_at: 2026-01-10
+territory: asynchronous work
+revisit_trigger: volume beyond budget
+superseded_by: "[[solution-design/decisions/sd-002-order-events-v2]]"
+tags:
+  - doc/decision
+  - status/superseded
+aliases:
+  - SD-001
+---
+
+# SD-001: Order events v1
+
+**Decision:** direct queue fan-out.
+
+""" + NAV.format(peers=(
+        "[[solution-design/landscape|Landscape]] -\n"
+        "[[solution-design/decisions/sd-002-order-events-v2|SD-002]]")))
+    write(root / DEC / "sd-002-order-events-v2.md", """---
+type: decision
+title: Order events v2
+status: accepted
+owner_role: solution_architect
+decided_at: 2026-02-01
+territory: asynchronous work
+revisit_trigger: volume beyond budget
+supersedes: "[[solution-design/decisions/sd-001-order-events]]"
+tags:
+  - doc/decision
+  - status/accepted
+aliases:
+  - SD-002
+---
+
+# SD-002: Order events v2
+
+**Decision:** managed streaming service.
+
+""" + NAV.format(peers=(
+        "[[solution-design/landscape|Landscape]] -\n"
+        "[[solution-design/decisions/sd-001-order-events|SD-001]]")))
+    write(root / "backlog.md",
+          "<!-- generated by pmo_cli render; do not edit by hand -->\n\n"
+          "# Backlog\n")
+    write(root / "quality-ledger.md",
+          "<!-- generated by pmo_cli render; do not edit by hand -->\n\n"
+          "# Quality Ledger\n")
+    obsidian = root / ".obsidian"
+    write(obsidian / "app.json", json.dumps({
+        "useMarkdownLinks": False,
+        "newLinkFormat": "absolute",
+        "alwaysUpdateLinks": True,
+        "attachmentFolderPath": "_attachments",
+    }))
+    write(obsidian / "appearance.json",
+          json.dumps({"enabledCssSnippets": ["brand"]}))
+    write(obsidian / "core-plugins.json",
+          json.dumps(["graph", "backlinks", "page-preview", "properties"]))
+    write(obsidian / "graph.json", json.dumps({
+        "colorGroups": [
+            {"query": 'path:"solution-design/"', "color": {"a": 1, "rgb": 1}},
+        ],
+        "showOrphans": True, "hideUnresolved": False, "showTags": False,
+    }))
+    write(obsidian / "types.json",
+          json.dumps({"types": POLICY["property_types"]}))
+    write(obsidian / "snippets" / "brand.css", ".theme-dark {}\n")
+    code, out, err = run(["render-decisions", "--vault", str(root)])
+    assert code == 0, f"fixture render failed: {out} {err}"
+
+
+def check_findings(root: Path):
+    code, out, _ = run(["check", "--vault", str(root), "--json"])
+    findings = [json.loads(line) for line in out.splitlines()
+                if line.startswith("{")]
+    return code, findings
+
+
+# --- one builder per checker check id ------------------------------------
+
+
+def break_vault_layout(root: Path) -> None:
+    write(root / SD / "sketch.base", "views: []\n")
+
+
+def break_wikilink_resolution(root: Path) -> None:
+    edit(root / SD / "landscape.md",
+         "The components and their owning decisions.",
+         "The components and their owning decisions.\n\n"
+         "See [[solution-design/missing-note|the missing note]].")
+
+
+def break_anchor_resolution(root: Path) -> None:
+    edit(root / DEC / "sd-002-order-events-v2.md",
+         "**Decision:** managed streaming service.",
+         "**Decision:** managed streaming service, per"
+         " [[solution-design/landscape#Landscape|the landscape heading]].")
+
+
+def break_link_policy(root: Path) -> None:
+    edit(root / DEC / "sd-002-order-events-v2.md",
+         "**Decision:** managed streaming service.",
+         "**Decision:** managed streaming service, see"
+         " [the landscape](../landscape.md).")
+
+
+def break_table_pipe(root: Path) -> None:
+    edit(root / SD / "landscape.md",
+         "[[solution-design/decisions/sd-002-order-events-v2\\|SD-002]]",
+         "[[solution-design/decisions/sd-002-order-events-v2|SD-002]]")
+
+
+def break_orphans(root: Path) -> None:
+    write(root / SD / "floating.md", """---
+type: note
+title: Floating
+tags:
+  - doc/note
+---
+
+# Floating
+
+Nothing links here.
+
+""" + NAV.format(peers=(
+        "[[solution-design/landscape|Landscape]] -\n"
+        "[[solution-design/decisions/sd-001-order-events|SD-001]]")))
+
+
+def break_moc_coverage(root: Path) -> None:
+    for name, other in (("loop-a", "loop-b"), ("loop-b", "loop-a")):
+        write(root / SD / f"{name}.md", f"""---
+type: note
+title: {name}
+tags:
+  - doc/note
+---
+
+# {name}
+
+Mutual: [[solution-design/{other}|{other}]].
+
+""" + NAV.format(peers=(
+            "[[solution-design/landscape|Landscape]] -\n"
+            "[[solution-design/decisions/sd-001-order-events|SD-001]]")))
+
+
+def break_nav_footer(root: Path) -> None:
+    edit(root / SD / "landscape.md",
+         "## Navigation <!-- sec: nav -->", "## Navigation")
+
+
+def break_frontmatter_props(root: Path) -> None:
+    edit(root / SD / "landscape.md", "type: landscape\n", "")
+
+
+def break_tags_mirror(root: Path) -> None:
+    edit(root / SD / "landscape.md",
+         "  - status/approved", "  - status/approved\n  - doc/extra")
+
+
+def break_decision_records(root: Path) -> None:
+    edit(root / DEC / "sd-002-order-events-v2.md",
+         "# SD-002: Order events v2", "# Order events v2")
+
+
+def break_generated_views(root: Path) -> None:
+    (root / "quality-ledger.md").unlink()
+
+
+def break_home_shape(root: Path) -> None:
+    edit(root / "home.md", "- [[start-here|Start Here]]",
+         "- [[start-here|Start Here]]\n"
+         "- [[solution-design/landscape|Landscape]]")
+
+
+def break_obsidian_payload(root: Path) -> None:
+    edit(root / ".obsidian" / "app.json", "\"absolute\"", "\"shortest\"")
+
+
+VAULT_BUILDERS = {
+    "vault_layout": break_vault_layout,
+    "wikilink_resolution": break_wikilink_resolution,
+    "anchor_resolution": break_anchor_resolution,
+    "link_policy": break_link_policy,
+    "table_pipe": break_table_pipe,
+    "orphans": break_orphans,
+    "moc_coverage": break_moc_coverage,
+    "nav_footer": break_nav_footer,
+    "frontmatter_props": break_frontmatter_props,
+    "tags_mirror": break_tags_mirror,
+    "decision_records": break_decision_records,
+    "generated_views": break_generated_views,
+    "home_shape": break_home_shape,
+    "obsidian_payload": break_obsidian_payload,
+}
+
+# A builder whose defect necessarily trips a second check tolerates
+# exactly that side effect and nothing else.
+TOLERATED = {
+    "orphans": {"moc_coverage"},        # zero inbound implies unreachable
+    "generated_views": {"wikilink_resolution"},  # delivery map cites the view
+}
+
+
+class ValidVaultTests(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self.tmp.name) / "docs"
+        make_valid_vault(self.root)
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def test_valid_vault_is_silent(self):
+        code, findings = check_findings(self.root)
+        self.assertEqual(code, 0)
+        self.assertEqual(findings, [],
+                         [f"{f['check']}: {f['path']}: {f['message']}"
+                          for f in findings])
+
+    def test_render_is_deterministic(self):
+        index = self.root / SD / "decision-log.md"
+        first = index.read_bytes()
+        code, _, _ = run(["render-decisions", "--vault", str(self.root)])
+        self.assertEqual(code, 0)
+        self.assertEqual(first, index.read_bytes())
+
+    def test_index_carries_marker_and_rows(self):
+        text = (self.root / SD / "decision-log.md").read_text(encoding="utf-8")
+        self.assertTrue(text.startswith("<!-- generated by vault_check"))
+        self.assertIn("\\|SD-001]]", text)
+        self.assertIn("superseded", text)
+
+    def test_scope_confines_but_keeps_global_checks(self):
+        break_obsidian_payload(self.root)
+        write(self.root / "business-analysis" / "stray.md", "no frontmatter\n")
+        code, findings = check_findings_scoped(self.root, SD)
+        self.assertEqual(code, 1)
+        checks = {f["check"] for f in findings}
+        self.assertIn("obsidian_payload", checks)
+        self.assertNotIn("frontmatter_props", checks)
+
+    def test_exclude_downgrades_to_warning(self):
+        break_wikilink_resolution(self.root)
+        code, out, _ = run(["check", "--vault", str(self.root),
+                            "--exclude", f"{SD}/landscape.md"])
+        self.assertEqual(code, 0)
+        self.assertIn("excluded path", out)
+
+
+def check_findings_scoped(root: Path, scope: str):
+    code, out, _ = run(["check", "--vault", str(root), "--scope", scope,
+                        "--json"])
+    findings = [json.loads(line) for line in out.splitlines()
+                if line.startswith("{")]
+    return code, findings
+
+
+class BuilderFixtureTests(unittest.TestCase):
+    def test_registry_lockstep_with_check_ids(self):
+        self.assertEqual(sorted(VAULT_BUILDERS), sorted(vc.CHECK_IDS))
+
+    def test_each_builder_fires_its_check(self):
+        for check, builder in sorted(VAULT_BUILDERS.items()):
+            with self.subTest(check=check):
+                with tempfile.TemporaryDirectory() as tmp:
+                    root = Path(tmp) / "docs"
+                    make_valid_vault(root)
+                    builder(root)
+                    code, findings = check_findings(root)
+                    self.assertEqual(code, 1, f"{check}: expected errors")
+                    fired = {f["check"] for f in findings}
+                    self.assertIn(check, fired)
+                    allowed = {check} | TOLERATED.get(check, set())
+                    self.assertLessEqual(
+                        fired, allowed,
+                        f"{check}: unexpected side findings {fired - allowed}")
+
+
+class VerbTests(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self.tmp.name) / "docs"
+        make_valid_vault(self.root)
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def test_stamp_decision_one_write(self):
+        note = self.root / DEC / "sd-003-order-retries.md"
+        write(note, """---
+type: decision
+title: Order retries
+status: proposed
+owner_role: solution_architect
+territory: asynchronous work
+revisit_trigger: retry storm observed
+tags:
+  - doc/decision
+  - status/proposed
+aliases:
+  - SD-003
+---
+
+# SD-003: Order retries
+
+**Decision:** bounded retries with dead-lettering.
+
+""" + NAV.format(peers=(
+            "[[solution-design/landscape|Landscape]] -\n"
+            "[[solution-design/decisions/sd-002-order-events-v2|SD-002]]")))
+        edit(self.root / SD / "landscape.md",
+             "[[solution-design/decisions/sd-002-order-events-v2|SD-002]]",
+             "[[solution-design/decisions/sd-002-order-events-v2|SD-002]] -\n"
+             "[[solution-design/decisions/sd-003-order-retries|SD-003]]")
+        code, out, err = run([
+            "stamp-decision", "--vault", str(self.root),
+            "--note", f"{DEC}/sd-003-order-retries.md",
+            "--status", "accepted"])
+        self.assertEqual(code, 0, out + err)
+        text = note.read_text(encoding="utf-8")
+        today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        self.assertIn("status: accepted", text)
+        self.assertIn(f"decided_at: {today}", text)
+        self.assertIn("- status/accepted", text)
+        index = (self.root / SD / "decision-log.md").read_text(encoding="utf-8")
+        self.assertIn("SD-003", index)
+        code, findings = check_findings(self.root)
+        self.assertEqual(code, 0,
+                         [f"{f['check']}: {f['message']}" for f in findings])
+
+    def test_stamp_supersede_writes_both_ends(self):
+        note = self.root / DEC / "sd-003-order-events-v3.md"
+        write(note, """---
+type: decision
+title: Order events v3
+status: proposed
+owner_role: solution_architect
+territory: asynchronous work
+revisit_trigger: volume beyond budget
+tags:
+  - doc/decision
+  - status/proposed
+aliases:
+  - SD-003
+---
+
+# SD-003: Order events v3
+
+**Decision:** broker-managed fan-out.
+
+""" + NAV.format(peers=(
+            "[[solution-design/landscape|Landscape]] -\n"
+            "[[solution-design/decisions/sd-002-order-events-v2|SD-002]]")))
+        edit(self.root / SD / "landscape.md",
+             "| order-events | [[solution-design/decisions/sd-002-order-events-v2\\|SD-002]] |",
+             "| order-events | [[solution-design/decisions/sd-003-order-events-v3\\|SD-003]] |")
+        edit(self.root / SD / "landscape.md",
+             "[[solution-design/decisions/sd-002-order-events-v2|SD-002]]",
+             "[[solution-design/decisions/sd-002-order-events-v2|SD-002]] -\n"
+             "[[solution-design/decisions/sd-003-order-events-v3|SD-003]]")
+        code, out, err = run([
+            "stamp-decision", "--vault", str(self.root),
+            "--note", f"{DEC}/sd-003-order-events-v3.md",
+            "--status", "accepted",
+            "--supersedes", f"{DEC}/sd-002-order-events-v2.md"])
+        self.assertEqual(code, 0, out + err)
+        new_text = note.read_text(encoding="utf-8")
+        old_text = (self.root / DEC / "sd-002-order-events-v2.md").read_text(
+            encoding="utf-8")
+        self.assertIn('supersedes: "[[solution-design/decisions/'
+                      'sd-002-order-events-v2]]"', new_text)
+        self.assertIn('superseded_by: "[[solution-design/decisions/'
+                      'sd-003-order-events-v3]]"', old_text)
+        self.assertIn("status: superseded", old_text)
+        self.assertIn("- status/superseded", old_text)
+        code, findings = check_findings(self.root)
+        self.assertEqual(code, 0,
+                         [f"{f['check']}: {f['message']}" for f in findings])
+
+    def test_render_refuses_duplicate_ids(self):
+        write(self.root / DEC / "sd-002-duplicate.md",
+              (self.root / DEC / "sd-002-order-events-v2.md")
+              .read_text(encoding="utf-8"))
+        code, _, err = run(["render-decisions", "--vault", str(self.root)])
+        self.assertEqual(code, 1)
+        self.assertIn("duplicate id number 002", err)
+
+    def test_migrate_rewrites_deterministic_classes(self):
+        legacy = self.root / SD / "legacy.md"
+        write(legacy, """---
+type: note
+title: Legacy
+tags:
+  - doc/wrong
+---
+
+# Legacy
+
+See [the landscape](landscape.md) and
+[SD-001](decisions/sd-001-order-events.md).
+
+""" + NAV.format(peers=(
+            "[[solution-design/landscape|Landscape]] -\n"
+            "[[solution-design/decisions/sd-001-order-events|SD-001]]")))
+        edit(self.root / "maps" / "solution-design.md",
+             "- [[solution-design/landscape|Landscape]]",
+             "- [[solution-design/landscape|Landscape]]\n"
+             "- [[solution-design/legacy|Legacy]]")
+        code, out, _ = run(["migrate", "--vault", str(self.root)])
+        self.assertEqual(code, 0)
+        text = legacy.read_text(encoding="utf-8")
+        self.assertIn("[[solution-design/landscape|the landscape]]", text)
+        self.assertIn(
+            "[[solution-design/decisions/sd-001-order-events|SD-001]]", text)
+        self.assertIn("- doc/note", text)
+        self.assertNotIn("doc/wrong", text)
+        code, findings = check_findings(self.root)
+        self.assertEqual(code, 0,
+                         [f"{f['check']}: {f['message']}" for f in findings])
+
+
+class DesignSystemWriterTests(unittest.TestCase):
+    """The design-system persist script is a vault writer: its outputs are
+    born compliant (frontmatter floor, tag mirror, nav section)."""
+
+    @classmethod
+    def setUpClass(cls):
+        scripts = (REPO / "plugins" / "software-engineering-team" / "skills"
+                   / "ui-ux-design" / "scripts")
+        sys.path.insert(0, str(scripts))
+        try:
+            spec = importlib.util.spec_from_file_location(
+                "design_system", scripts / "design_system.py")
+            cls.ds = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(cls.ds)
+        finally:
+            sys.path.remove(str(scripts))
+
+    def assert_born_compliant(self, text: str, doc_type: str):
+        fm, _, fm_error = ba.parse_frontmatter(text)
+        self.assertIsNone(fm_error, text[:120])
+        self.assertEqual(fm.get("type"), doc_type)
+        self.assertEqual(fm.get("tags"), [f"doc/{doc_type.replace('_', '-')}"])
+        self.assertIn("<!-- sec: nav -->", text)
+        self.assertIn("[[maps/design-system|Design System]]", text)
+
+    def test_master_is_born_compliant(self):
+        text = self.ds.format_master_md({"project_name": "Shop"})
+        self.assert_born_compliant(text, "design_master")
+
+    def test_page_override_is_born_compliant(self):
+        text = self.ds.format_page_override_md(
+            {"project_name": "Shop"}, "dashboard")
+        self.assert_born_compliant(text, "page_override")
+        self.assertIn("[[design-system/MASTER|Design Master]]", text)
+
+
+class TemplateParityTests(unittest.TestCase):
+    def test_template_types_json_derives_from_policy(self):
+        template = json.loads(
+            (REPO / "plugins" / "software-engineering-team" / "templates"
+             / "vault" / ".obsidian" / "types.json")
+            .read_text(encoding="utf-8"))
+        self.assertEqual(template.get("types"), POLICY["property_types"])
+
+
+class HookTests(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.project = Path(self.tmp.name) / "proj"
+        self.vault = self.project / "workspace" / "docs"
+        make_valid_vault(self.vault)
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def hook(self, fn, payload):
+        err = io.StringIO()
+        with redirect_stderr(err), redirect_stdout(io.StringIO()):
+            code = fn(payload)
+        return code, err.getvalue()
+
+    def payload(self, rel: str, content: str, tool="Write") -> dict:
+        return {"tool_name": tool,
+                "tool_input": {"file_path": str(self.vault / rel),
+                               "content": content}}
+
+    def test_pre_denies_vault_internal_markdown_link(self):
+        code, err = self.hook(vh.pre, self.payload(
+            "solution-design/new.md", "See [the landscape](../landscape.md)."))
+        self.assertEqual(code, 2)
+        self.assertIn("wikilink", err)
+
+    def test_pre_denies_inline_flow_list(self):
+        code, err = self.hook(vh.pre, self.payload(
+            "solution-design/new.md", "---\ntags: [doc/note]\n---\n"))
+        self.assertEqual(code, 2)
+        self.assertIn("block list", err)
+
+    def test_pre_denies_unescaped_table_pipe(self):
+        code, err = self.hook(vh.pre, self.payload(
+            "solution-design/new.md",
+            "| x | [[solution-design/landscape|Landscape]] |"))
+        self.assertEqual(code, 2)
+        self.assertIn("pipe", err)
+
+    def test_pre_passes_compliant_content_and_foreign_paths(self):
+        code, _ = self.hook(vh.pre, self.payload(
+            "solution-design/new.md",
+            "See [[solution-design/landscape|the landscape]] and"
+            " [docs](https://example.com) and"
+            " [the sketch](../../sketches/a/preview.html)."))
+        self.assertEqual(code, 0)
+        code, _ = self.hook(vh.pre, {
+            "tool_name": "Write",
+            "tool_input": {"file_path": str(self.project / "src" / "x.md"),
+                           "content": "[a](b.md)"}})
+        self.assertEqual(code, 0)
+
+    def test_post_surfaces_findings_for_the_changed_file(self):
+        target = self.vault / SD / "landscape.md"
+        edit(target, "The components and their owning decisions.",
+             "See [[solution-design/missing-note|missing]].")
+        code, err = self.hook(vh.post, self.payload(
+            f"{SD}/landscape.md", "ignored"))
+        self.assertEqual(code, 2)
+        self.assertIn("wikilink_resolution", err)
+        self.assertIn("repair them in this session", err)
+
+    def test_post_is_silent_on_a_green_write(self):
+        code, err = self.hook(vh.post, self.payload(
+            f"{SD}/landscape.md", "ignored"))
+        self.assertEqual(code, 0, err)
+
+
+if __name__ == "__main__":
+    unittest.main()

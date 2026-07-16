@@ -50,7 +50,7 @@ Every evaluation scores its options against all six dimensions; a skipped dimens
 - Build, buy or integrate is explicit per component. Built components stay within the configured stacks; a verdict needing a new stack routes to the configure entry and arrives as a maintainer release, never as a silent exception.
 - Prefer boring proven pieces; novelty buys its place with a named, measured advantage.
 - Unquantified constraints escalate to the owner; an assumed number is a defect in the record.
-- Decision records follow the software-architecture skill's decision-records mechanics (Y-statement or full record; supersede, never edit); solution decisions live in the solution tree's own decision-log.md.
+- Decision records follow the software-architecture skill's decision-records mechanics (Y-statement or full record; supersede, never edit); solution decisions live as individual notes under the tree's decisions/ directory, and decision-log.md is the generated index.
 
 ## References
 

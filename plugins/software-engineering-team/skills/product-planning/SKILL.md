@@ -13,7 +13,8 @@ this skill says how to cut one and where it goes in the queue.
 ## When to Use
 
 Loaded when producing the backlog import (epics and stories in the PMO
-database; workspace/docs/backlog.md is its generated view) from an
+database; workspace/docs/backlog.md is its generated view, a vault
+surface per the obsidian-vault skill) from an
 approved analysis space (its registry is the criteria source), or
 reconciling at a merge checkpoint. An existing solution-design tree
 (workspace/docs/solution-design/) is read first: build-buy-integrate

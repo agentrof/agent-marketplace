@@ -10,14 +10,14 @@ Decision rules for evolving the living architecture documents: structure, bounda
 
 ## When to Use
 
-Load for every architecture-delta step: system structure, module boundaries, interface contract conventions, non-functional budgets, and cross-cutting decisions (authorization, consistency, caching, resilience, observability). Upstream, the solution-architecture skill's recorded landscape decisions bind every delta: when the spawn inputs include the solution-design landscape and decision log, deltas conform to their verdicts, and a delta that must contradict one escalates instead of deviating. Do NOT load for store schema detail; the sql-database-design and nosql-database-design siblings own that. Do NOT load for implementation; realization lives in the bound stack skills.
+Load for every architecture-delta step: system structure, module boundaries, interface contract conventions, non-functional budgets, and cross-cutting decisions (authorization, consistency, caching, resilience, observability). Upstream, the solution-architecture skill's recorded landscape decisions bind every delta: when the spawn inputs include the solution-design landscape and decision index, deltas conform to their verdicts, and a delta that must contradict one escalates instead of deviating. Do NOT load for store schema detail; the sql-database-design and nosql-database-design siblings own that. Do NOT load for implementation; realization lives in the bound stack skills.
 
 Living-document hygiene: each living document carries a head summary and section index, maintained with every delta; reads are summary-first, full sections only where the delta touches. A head that no longer matches its body is a defect of the delta that changed it.
 
 ## Style Selection
 
-- The default verdict is a modular monolith: one repo, one backend app, one frontend app, module boundaries enforced inside the codebase. Any departure is a recorded decision in the decision log, never a preference.
-- Styles are guard rails, never menus. DON'T choose service decomposition or command-query separation without a named forcing symptom recorded in the decision log. "We might need to scale later" is a prediction, not a symptom.
+- The default verdict is a modular monolith: one repo, one backend app, one frontend app, module boundaries enforced inside the codebase. Any departure is a minted decision note, never a preference.
+- Styles are guard rails, never menus. DON'T choose service decomposition or command-query separation without a named forcing symptom recorded in a decision note. "We might need to scale later" is a prediction, not a symptom.
 
 | Observed forcing symptom | Style to consider |
 |---|---|
@@ -77,4 +77,4 @@ Altitude boundary: a sentence belongs in this section only if it stays true when
 - [nfr-budgets](references/nfr-budgets.md): budget categories, budget-to-decision map, escalation script, traceability. Read when a structural decision depends on load, volume, availability, or security numbers.
 - [cross-cutting](references/cross-cutting.md): authorization placement, outbox and saga, caching, resilience and observability obligations. Read when a delta spans modules or touches any cross-cutting default.
 - [design-qualities](references/design-qualities.md): coupling vocabulary and structural decision tests shared with the review role. Read when judging a proposed structure or writing a structural finding.
-- [decision-records](references/decision-records.md): write-or-skip detail, record formats, supersede mechanics, anti-patterns. Read when writing, superseding, or auditing a decision log entry.
+- [decision-records](references/decision-records.md): write-or-skip detail, record formats, supersede mechanics, anti-patterns. Read when writing, superseding, or auditing a decision note.

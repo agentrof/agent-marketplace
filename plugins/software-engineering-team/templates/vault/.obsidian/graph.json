@@ -1,0 +1,64 @@
+{
+  "collapse-filter": false,
+  "search": "",
+  "showTags": false,
+  "showAttachments": false,
+  "hideUnresolved": false,
+  "showOrphans": true,
+  "collapse-color-groups": false,
+  "colorGroups": [
+    {
+      "query": "path:\"business-analysis/\"",
+      "color": {
+        "a": 1,
+        "rgb": 1193960
+      }
+    },
+    {
+      "query": "path:\"solution-design/\"",
+      "color": {
+        "a": 1,
+        "rgb": 4056063
+      }
+    },
+    {
+      "query": "path:\"system-architecture/\"",
+      "color": {
+        "a": 1,
+        "rgb": 8152319
+      }
+    },
+    {
+      "query": "path:\"design-system/\"",
+      "color": {
+        "a": 1,
+        "rgb": 16742953
+      }
+    },
+    {
+      "query": "path:\"maps/delivery\" OR path:\"backlog\" OR path:\"quality-ledger\"",
+      "color": {
+        "a": 1,
+        "rgb": 2278750
+      }
+    },
+    {
+      "query": "path:\"maps/\" OR file:\"home\" OR file:\"start-here\"",
+      "color": {
+        "a": 1,
+        "rgb": 9741240
+      }
+    }
+  ],
+  "collapse-display": false,
+  "showArrow": true,
+  "textFadeMultiplier": 0,
+  "nodeSizeMultiplier": 1.1,
+  "lineSizeMultiplier": 1,
+  "collapse-forces": false,
+  "centerStrength": 0.45,
+  "repelStrength": 12,
+  "linkStrength": 1,
+  "linkDistance": 220,
+  "scale": 1
+}

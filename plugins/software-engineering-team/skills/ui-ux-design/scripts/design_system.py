@@ -656,6 +656,28 @@ def format_markdown(design_system: dict) -> str:
     return "\n".join(lines)
 
 
+def vault_frontmatter(doc_type: str, title: str) -> list[str]:
+    """Vault-law frontmatter (obsidian-vault skill): typed note, block-list
+    tag mirror. The writer emits compliance; personas never patch it in."""
+    return [
+        "---",
+        f"type: {doc_type}",
+        f"title: {title}",
+        "tags:",
+        f"  - doc/{doc_type.replace('_', '-')}",
+        "---",
+        "",
+    ]
+
+
+def vault_nav_section(peers: list[tuple[str, str]]) -> list[str]:
+    """The nav section every authored vault note ends with: owning map
+    first, then the contextual peers."""
+    links = ["[[maps/design-system|Design System]]"]
+    links += [f"[[{target}|{label}]]" for target, label in peers]
+    return ["", "## Navigation <!-- sec: nav -->", "", " -\n".join(links), ""]
+
+
 def format_master_md(design_system: dict) -> str:
     """Format design system as MASTER.md with hierarchical override logic."""
     pattern = design_system.get("pattern", {})
@@ -665,6 +687,7 @@ def format_master_md(design_system: dict) -> str:
     motion = design_system.get("motion", {})
 
     lines = []
+    lines += vault_frontmatter("design_master", "Design System Master File")
     lines.append("# Design System Master File")
     lines.append("")
     lines.append("> **LOGIC:** When building a specific page, first check `pages/[page-name].md`")
@@ -929,6 +952,7 @@ def format_master_md(design_system: dict) -> str:
     for item in CHECKLIST_ITEMS:
         lines.append(f"- [ ] {item}")
     lines.append("")
+    lines += vault_nav_section([])
     return "\n".join(lines)
 
 
@@ -938,6 +962,7 @@ def format_page_override_md(design_system: dict, page_name: str, page_query: str
     page_overrides = _generate_intelligent_overrides(page_name, page_query, design_system)
 
     lines = []
+    lines += vault_frontmatter("page_override", f"{page_title} Page Overrides")
     lines.append(f"# {page_title} Page Overrides")
     lines.append("")
     lines.append(f"> **PROJECT:** {design_system.get('project_name', 'PROJECT')}")
@@ -980,6 +1005,7 @@ def format_page_override_md(design_system: dict, page_name: str, page_query: str
     for rec in page_overrides.get("recommendations", []):
         lines.append(f"- {rec}")
     lines.append("")
+    lines += vault_nav_section([("design-system/MASTER", "Design Master")])
     return "\n".join(lines)
 
 

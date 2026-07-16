@@ -31,6 +31,12 @@ ${CLAUDE_PLUGIN_ROOT}/scripts/ba_compile.py.
      in the space stays editable but must pass check before commit.
    - An existing space for this topic means UPDATE mode: same living
      tree, never a parallel version.
+   - Vault stewardship (obsidian-vault skill): run
+     ${CLAUDE_PLUGIN_ROOT}/scripts/vault_check.py check --vault
+     workspace/docs --scope business-analysis, passing the freeze set as
+     repeated --exclude flags; every finding is this session's repair
+     work before the gate (migrate covers the deterministic classes;
+     frozen docs surface as named warnings, repaired after release).
    - Session resume (spaces outlive conversations): orient from
      _generated/status.md and _generated/open-questions.md first, then
      read only the target domain's subtree fully, the rest summary-only
@@ -44,14 +50,17 @@ ${CLAUDE_PLUGIN_ROOT}/scripts/ba_compile.py.
    constitution at ${CLAUDE_PLUGIN_ROOT}/constitution.md and honor it;
    follow the agent constitution at
    ${CLAUDE_PLUGIN_ROOT}/agents/business-analyst.md
-   exactly, and load its bound knowledge skill (requirements-analysis):
-   its space standard and decomposition method govern where every fact
-   lands; its questioning techniques and non-functional checklist govern
-   the rounds.
+   exactly, and load its bound knowledge skills (requirements-analysis
+   and obsidian-vault): the space standard and decomposition method
+   govern where every fact lands, the questioning techniques and
+   non-functional checklist govern the rounds, and the vault law
+   governs every file written under the docs tree.
 4. Author incrementally, per domain.
-   - New docs come from ba_compile.py stub (born compliant; it prints
-     the node's next free ids). Grow domains only on the decomposition
-     reference's split signals; a small topic stays one node.
+   - New docs come from ba_compile.py stub (born compliant with the
+     vault frontmatter and nav section; it prints the node's next free
+     ids). Grow domains only on the decomposition reference's split
+     signals; a small topic stays one node. A new space or domain joins
+     maps/business-analysis.md in the same milestone.
    - Question in rounds through the AskUserQuestion popup (at most four
      questions per round, options with tradeoffs, recommended first);
      flush every answer into its owning doc per the fact-routing test.
@@ -73,8 +82,9 @@ ${CLAUDE_PLUGIN_ROOT}/scripts/ba_compile.py.
    locked. Round 1 is mandatory; rounds 2-3 run only while blocking
    findings appear; the record is part of the gate.
 6. Gates, in order; before presenting any gate run check --gate approval
-   (scoped with --node for a domain) and render; a red compile blocks
-   the gate.
+   (scoped with --node for a domain), render, and the vault stewardship
+   check from step 1; a red compile or a red vault check blocks the
+   gate.
    - FOUNDATION gate, once: space.md, glossary.md, actors.md,
      budgets.md approved together; the approval is asked through the
      AskUserQuestion popup.

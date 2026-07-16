@@ -61,7 +61,8 @@ CHECK_IDS = (
     "id_format", "id_unique", "id_minting", "id_links", "row_schema",
     "semantic_links", "approval_preconditions", "challenge_record",
     "br_uncited", "thresholds", "aging", "gate_approval",
-    "generated_freshness", "future_dates",
+    "generated_freshness", "future_dates", "identifier_shape",
+    "diagram_identifiers",
 )
 
 STATUS_RANK = {"draft": 0, "in_review": 1, "approved": 2}
@@ -95,6 +96,7 @@ class Doc:
     node: str
     lines: list[str] = field(default_factory=list)
     fenced: set = field(default_factory=set)
+    fences: list = field(default_factory=list)  # (start, end, info)
     headings: list = field(default_factory=list)  # (lineno, level, text)
     sections: dict = field(default_factory=dict)  # token -> (h_line, start, end)
     tables: list = field(default_factory=list)
@@ -170,8 +172,15 @@ def heading_has_emoji(line: str) -> bool:
 def parse_doc_body(doc: Doc) -> None:
     """Fill headings, sections, summary, tables and links from doc.lines."""
     in_fence = False
+    fence_start = 0
+    fence_info = ""
     for idx, line in enumerate(doc.lines, start=1):
         if line.lstrip().startswith("```"):
+            if not in_fence:
+                fence_start = idx
+                fence_info = line.lstrip()[3:].strip().lower()
+            else:
+                doc.fences.append((fence_start, idx, fence_info))
             in_fence = not in_fence
             doc.fenced.add(idx)
             continue
@@ -760,6 +769,7 @@ def run_checks(space: Space, base: list[Finding], gate: bool = False,
             check_challenge_record(space, doc, findings)
 
     check_semantic_links(space, findings)
+    check_identifier_language(space, findings)
     check_thresholds(space, findings, warn)
     check_br_citations(space, findings, gate=gate, gate_node=gate_node)
 
@@ -830,6 +840,90 @@ def check_challenge_record(space: Space, doc: Doc, findings: list[Finding]) -> N
     if doc_status(doc) == "approved" and doc.fm.get("locked") is not True:
         err(1, "closed (approved) record is not locked",
             "set locked: true in the closing write; audit history is immutable")
+
+
+def check_identifier_language(space: Space, findings: list[Finding]) -> None:
+    """Identifier positions carry ASCII machine-safe names regardless of
+    the configured language axes: schema-registered table columns must
+    match the naming block's identifier format, and erDiagram or
+    stateDiagram identifier lines must be ASCII (text after ':' labels
+    and inside double quotes is free output_language content)."""
+    naming = space.schema.get("naming")
+    if not naming:
+        return
+    id_re = re.compile(naming["identifier_format"])
+    for entry in naming.get("identifier_columns", []):
+        for rel in sorted(space.docs):
+            doc = space.docs[rel]
+            if doc.doc_type != entry["doc_type"]:
+                continue
+            for table in doc.tables:
+                if table.section != entry["section"]:
+                    continue
+                column = entry["column"]
+                if column not in table.columns:
+                    findings.append(Finding(
+                        "error", rel, table.header_line, "identifier_shape",
+                        f"table in section '{entry['section']}' carries no"
+                        f" '{column}' column",
+                        "the identifier column is fixed; see the space"
+                        " standard"))
+                    continue
+                col_idx = table.columns.index(column)
+                for lineno, cells in table.rows:
+                    value = cells[col_idx].strip("`") if col_idx < len(cells) else ""
+                    if not value and entry.get("allow_empty"):
+                        continue
+                    if not id_re.fullmatch(value):
+                        findings.append(Finding(
+                            "error", rel, lineno, "identifier_shape",
+                            f"field name '{value}' is not an ASCII snake_case"
+                            f" identifier ({naming['identifier_format']})",
+                            "technical names are written in the"
+                            " terminology_language (default English) as ASCII"
+                            " snake_case; glossary.md carries the"
+                            " business-term to technical-name mapping"))
+
+    for rel in sorted(space.docs):
+        doc = space.docs[rel]
+        for start, end, info in doc.fences:
+            if not info.startswith("mermaid"):
+                continue
+            kind = ""
+            in_note = False
+            for idx in range(start + 1, end):
+                line = doc.lines[idx - 1].strip()
+                if not line:
+                    continue
+                if not kind:
+                    if line.startswith("erDiagram"):
+                        kind = "erDiagram"
+                    elif line.startswith("stateDiagram"):
+                        kind = "stateDiagram"
+                    else:
+                        break
+                    continue
+                if line.startswith("%%"):
+                    continue
+                if in_note:
+                    if line.startswith("end note"):
+                        in_note = False
+                    continue
+                if line.startswith("note") and ":" not in line:
+                    in_note = True
+                    continue
+                residue = re.sub(r'"[^"]*"', "", line).split(":", 1)[0]
+                if not residue.isascii():
+                    token = next(
+                        (w for w in residue.split() if not w.isascii()),
+                        residue.strip())
+                    findings.append(Finding(
+                        "error", rel, idx, "diagram_identifiers",
+                        f"non-ASCII identifier '{token}' in a {kind} diagram",
+                        "erDiagram entities/attributes and stateDiagram"
+                        " states are terminology_language names in ASCII;"
+                        " localized wording belongs after ':' labels or in"
+                        " prose, with the mapping in glossary.md"))
 
 
 def check_semantic_links(space: Space, findings: list[Finding]) -> None:

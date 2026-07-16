@@ -14,7 +14,9 @@ Gate validation of the database design deliverable against upstream requirements
 
 ## Upstream Consistency
 
-- [ ] Entity names match the terminology of the product brief.
+- [ ] Entity names match the brief's business concepts through
+      glossary.md's business-term to technical-name mapping, rendered in
+      the terminology_language.
 - [ ] Non-functional requirements (audit, retention, multi-tenancy) are reflected in the schema.
 - [ ] Every acceptance criterion that implies data is served by the schema; fields cover all data points in story scenarios.
 - [ ] Access patterns from user stories have supporting indexes.
@@ -66,4 +68,4 @@ FAIL on any of:
 - NEVER approve with undocumented indexes.
 - NEVER approve with relationships lacking integrity rules.
 - NEVER approve with an unreviewed cascade chain.
-- Report in English, in the step's output directory, with status, findings by severity, and coverage tables.
+- Report prose in the configured output_language, names and technical terms in the terminology_language (both default English), in the step's output directory, with status, findings by severity, and coverage tables.

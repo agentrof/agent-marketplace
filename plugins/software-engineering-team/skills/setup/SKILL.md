@@ -15,6 +15,11 @@ folder or an existing repository; it completes gaps and breaks nothing.
 
 ## Procedure
 
+Every decision here is asked through the AskUserQuestion popup
+(recommended option first, tradeoffs in descriptions); enum keys offer
+supported values as options, free-text values (commands, paths) offer
+detected candidates plus free-form input.
+
 1. Git check: resolve the project git root and anchor everything there.
    No repository: offer to initialize one; the team cannot work without
    git (every story ends in a pull request). Sub-directory invocation
@@ -83,10 +88,13 @@ folder or an existing repository; it completes gaps and breaks nothing.
    running up then down once, and in a project with no environment yet
    record it as unverified so the first environment-impacting story's QA
    gate performs the verification), source_dirs, output_language
-   (default English; state its scope when asking: it governs ONLY the
-   body content of authored .md documents, everything else, file names,
-   commits, code, keys, stays English). A stack outside the supported
-   set is refused
+   (default English; its scope: the body prose of authored .md
+   documents), terminology_language (default English; its scope: names,
+   technical terms, code and comments, commit messages and PR bodies;
+   the machine layer, file names, keys, ids, CLI output, always stays
+   English). Both language keys are always written into config.json,
+   "English" spelled out when the default is accepted; absence never
+   encodes a default. A stack outside the supported set is refused
    honestly: this team ships tested stacks only, and new stacks arrive
    as maintainer releases.
 7. Continuous integration: no PR-triggered test workflow in the

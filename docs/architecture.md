@@ -67,6 +67,15 @@ plugin.json dependencies, so it installs automatically).
    prefixes, the compilers reject future dates, a validator rule bans
    naive clock calls in plugin scripts, and the guard hook denies
    hand-typed stamp dates at write time.
+11. **One lexicon, two axes.** output_language localizes only .md body
+   prose under workspace/; terminology_language (default English)
+   carries names, technical terms, code and comments, commits and PR
+   bodies; the machine layer is fixed English. Mechanical layers, not
+   instructions, carry the rule: the guard hook denies non-ASCII paths
+   and branch names always, and non-ASCII commit and PR payloads
+   unless terminology_language is configured non-English; the analysis
+   compiler, landscape checker and contract checker enforce identifier
+   positions as ASCII shapes.
 
 ## Repository layout
 

@@ -1,6 +1,6 @@
 # Rules
 
-- Language: all output English, always. Chat in user's language is fine; artifacts stay English.
+- Language: English by default; output_language localizes .md body prose, terminology_language (default English) governs names, technical terms, code and comments, commits and PR bodies; the machine layer stays English. Chat in user's language is fine.
 - Style: no filler, no intro/outro. Answer the core ask only.
 - No AI tells: must not read as AI-generated. No em dash (use hyphen, comma, or rewrite). Avoid over-hedging, "It's worth noting", "In conclusion", "not X but Y", needless bold, emoji. Exception: advisor confidence tags ([Certain]/[Likely]/[Guessing]) are intended, not an AI tell.
 

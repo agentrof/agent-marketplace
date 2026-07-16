@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """PreToolUse guard: deny direct Write/Edit access to machine-owned files,
-hand-written stamp dates, and non-English process artifacts.
+hand-written stamp dates, machine-layer language violations and
+unconfigured non-English payloads.
 
 Six families of protected targets, each with its own remediation:
   1. The PMO database files: written only through the PMO CLI.
@@ -18,9 +19,13 @@ Six families of protected targets, each with its own remediation:
      date newly introduced by the model is denied outright, today's date
      included. Scripts write via subprocess and bypass this hook, so the
      owning verb is the sanctioned path.
-  6. Non-English process artifacts: file paths under workspace/ and git
-     commit messages (Bash matcher) must be English ASCII; the
-     configured output_language applies only to .md body content.
+  6. Language slices (Bash matcher plus paths): file paths under
+     workspace/ and branch names are machine-layer English ASCII,
+     always; git commit messages and gh pr title/body payloads must be
+     ASCII unless the resolved project's terminology_language is
+     configured non-English (the one config-aware slice; unreadable
+     config fail-closes to English). output_language covers only .md
+     body prose.
 
 Families 5 and 6a apply only inside a resolved managed project's
 workspace/ tree (paths judged relative to the project root, so a
@@ -57,6 +62,20 @@ GIT_COMMIT_RE = re.compile(r"\bgit\b[^|&;]*\bcommit\b")
 # -m, combined short flags ending in m (-am), and --message[=] payloads.
 COMMIT_MSG_RE = re.compile(
     r"(?:-[a-zA-Z]*m|--message=?)\s*(\"[^\"]*\"|'[^']*'|\S+)")
+GH_PR_RE = re.compile(r"\bgh\b[^|&;]*\bpr\b[^|&;]*\b(?:create|edit)\b")
+# --title/-t and --body/-b inline payloads; --body-file is a named
+# residual exactly like commit's -F.
+PR_PAYLOAD_RE = re.compile(
+    r"(?:--title=?|--body=?|-t|-b)\s*(\"[^\"]*\"|'[^']*'|\S+)")
+# Branch-creating commands; the name argument is machine layer, always
+# ASCII. Deletion/list flags captured instead of a name are ASCII and
+# pass harmlessly.
+BRANCH_NAME_RES = (
+    re.compile(r"\bgit\b[^|&;]*\bcheckout\s+-[bB]\s+([^\s|&;]+)"),
+    re.compile(r"\bgit\b[^|&;]*\bswitch\s+-[cC]\s+([^\s|&;]+)"),
+    re.compile(r"\bgit\b[^|&;]*\bbranch\s+([^\s|&;]+)"),
+    re.compile(r"\bgit\b[^|&;]*\bworktree\s+add\b[^|&;]*\s-b\s+([^\s|&;]+)"),
+)
 
 
 def deny(message: str) -> int:
@@ -168,22 +187,60 @@ def hand_stamped_date(target: Path, tool_input: dict) -> str | None:
     return sorted(introduced)[0] if introduced else None
 
 
-def guard_bash(tool_input: dict) -> int:
-    """Deny git commits whose message payload carries non-ASCII text.
-    Only the -m/--message payloads are judged, so a compound command that
-    also writes configured-language .md content passes; a message fed in
-    via a file (-F) is a named residual."""
+def terminology_language(cwd: str) -> str:
+    """The resolved project's configured terminology_language,
+    lowercased; 'english' when unset or unreadable. Fail-closed: the
+    default enforces the ASCII check, so a transient config error never
+    admits non-ASCII text into immutable history."""
+    try:
+        resolved = hook_common.resolve_project(cwd)
+        if resolved is None:
+            return "english"
+        _, project_root = resolved
+        config = json.loads(
+            (Path(project_root) / "workspace" / "config.json")
+            .read_text(encoding="utf-8"))
+        value = config.get("terminology_language")
+        if isinstance(value, str) and value.strip():
+            return value.strip().lower()
+        return "english"
+    except Exception:
+        return "english"
+
+
+def guard_bash(tool_input: dict, cwd: str) -> int:
+    """Deny branch names carrying non-ASCII text always (machine layer),
+    and git commit / gh pr payloads carrying non-ASCII text unless the
+    project's terminology_language is configured non-English. Only
+    inline payloads are judged (-m/--message, --title/--body), so a
+    compound command that also writes configured-language .md content
+    passes; file-fed payloads (-F, --body-file) are named residuals."""
     command = str(tool_input.get("command", ""))
-    if not GIT_COMMIT_RE.search(command):
-        return 0
-    payloads = COMMIT_MSG_RE.findall(command)
+    for pattern in BRANCH_NAME_RES:
+        for name in pattern.findall(command):
+            if not name.isascii():
+                return deny(
+                    f"branch name '{name}' carries non-ASCII characters;"
+                    " branch names are machine-layer English, never"
+                    " configurable. Rename in English ASCII."
+                )
+    payloads = []
+    if GIT_COMMIT_RE.search(command):
+        payloads += COMMIT_MSG_RE.findall(command)
+    if GH_PR_RE.search(command):
+        payloads += PR_PAYLOAD_RE.findall(command)
     if all(p.isascii() for p in payloads):
         return 0
+    if terminology_language(cwd) != "english":
+        return 0
     return deny(
-        "this git commit message carries non-ASCII text; commit messages"
-        " (and every process artifact: file names, branches, keys) are"
-        " English only. The configured output_language applies exclusively"
-        " to .md body content. Rewrite the message in English."
+        "this git commit or gh pr payload carries non-ASCII text; commit"
+        " messages and PR titles and bodies follow terminology_language,"
+        " which resolves to English for this project (the default; also"
+        " used when workspace/config.json cannot be read). Set"
+        " terminology_language through the configure entry or rewrite the"
+        " text in English. File names, branches and keys are always"
+        " English."
     )
 
 
@@ -193,7 +250,7 @@ def main() -> int:
     if not isinstance(tool_input, dict):
         return 0
     if payload.get("tool_name") == "Bash":
-        return guard_bash(tool_input)
+        return guard_bash(tool_input, str(payload.get("cwd", "")))
     # The file families need the CLI module (db path, active-order lookup);
     # imported here so the Bash fast path never pays for it.
     global pmo_cli
@@ -258,9 +315,9 @@ def main() -> int:
     if not str(rel).isascii():
         return deny(
             "this path carries non-ASCII characters; file and directory"
-            " names are English only. The configured output_language"
-            " applies exclusively to .md body content. Rename in English"
-            " ASCII."
+            " names are machine-layer English, never configurable. The"
+            " language axes cover only .md bodies, names/terms, commits"
+            " and PR bodies. Rename in English ASCII."
         )
     try:
         stamp = hand_stamped_date(target, tool_input)

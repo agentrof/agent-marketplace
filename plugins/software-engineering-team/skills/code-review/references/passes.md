@@ -75,8 +75,10 @@ ad hoc structural terms cannot.
       relationships; no field invented in code that the schema does not
       declare
 - [ ] Configuration read in code matches the declared environment
-      specification; no undeclared variable, no hardcoded value that the
-      spec says is configurable
+      specification; no undeclared variable; no hard-coded variation
+      point: enums, thresholds, formats, taxonomies and policy values
+      are declared data (config or schema) even when the spec does not
+      name them configurable
 - [ ] File placement follows the declared structure; layer separation
       respected (no interface layer reaching past the service layer into
       storage)

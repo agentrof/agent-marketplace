@@ -42,6 +42,11 @@ def main(argv: list[str] | None = None) -> int:
         return 2
 
     violations = []
+    for label, _start, _level in endpoints:
+        if not label.isascii():
+            violations.append(
+                f"{label} carries a non-ASCII path; endpoint paths are"
+                " ASCII terminology_language names")
     for idx, (label, start, level) in enumerate(endpoints):
         end = len(lines)
         for j in range(start + 1, len(lines)):

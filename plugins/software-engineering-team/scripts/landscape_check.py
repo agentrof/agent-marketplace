@@ -165,6 +165,14 @@ def main(argv: list[str] | None = None) -> int:
                 continue
             if "component" in line.lower() and "verdict" in line.lower():
                 continue
+            component = line.strip().strip("|").split("|")[0].strip()
+            component = re.sub(r"\[([^\]]*)\]\([^)]*\)", r"\1", component)
+            if not component.isascii():
+                findings.append(
+                    "landscape.md Components component name carries"
+                    f" non-ASCII text: '{component}'; component names are"
+                    " ASCII terminology_language names, the glossary"
+                    " carries the mapping")
             links = SD_LINK_RE.findall(line)
             if not links:
                 findings.append(f"landscape.md Components row without a decision link: {line.strip()[:60]}")

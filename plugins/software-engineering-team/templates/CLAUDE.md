@@ -6,6 +6,20 @@
 
 workspace/memory/me.md. Read and follow.
 
+## House rules
+
+- Two language axes live in workspace/config.json, both defaulting to
+  English: output_language governs .md body prose; terminology_language
+  governs names, technical terms, code and comments, commit messages
+  and PR bodies. The machine layer (file names, branches, keys, ids,
+  CLI output) is always English.
+- Decision and preference questions go through the AskUserQuestion
+  popup: recommended option first with a "(Recommended)"-style suffix
+  in the conversation's language, tradeoffs in descriptions, at most
+  four options and four questions per batch.
+- Variation points (enums, thresholds, formats, taxonomies, policy
+  values) are declared config or schema, never hard-coded.
+
 ## Team workspace
 
 This project is driven by the software-engineering-team plugin. Everything the team

@@ -45,3 +45,9 @@ the owner, never task technique.
 - Low value is never a reason to pause or to ask permission to skip. Once
   scope is agreed, finish every part end to end, the tedious tail
   included, then move to the next agreed step.
+- Hard-coded structure is a defect: variation the ask contains is
+  declared as config or schema; extensibility is the default quality
+  bar.
+- Decision and preference questions are asked through the
+  AskUserQuestion popup, recommended option first, tradeoffs in
+  descriptions; plain-text question lists go unanswered.

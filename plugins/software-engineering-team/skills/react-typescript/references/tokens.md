@@ -45,7 +45,7 @@ Components then style against `var(--text-primary)` (or the utility class genera
 
 ## Color-Scheme Handling
 
-- Default to the system preference via `prefers-color-scheme`; let an explicit user choice override it by stamping `data-theme` on the root element.
+- Default to the system preference via `prefers-color-scheme`; let the user's explicit theme override win by stamping `data-theme` on the root element.
 - Persist the explicit choice, and apply it with a synchronous inline script before first paint so the page never flashes the wrong theme (an effect runs too late).
 - Set the `color-scheme` property so native controls, scrollbars, and form elements match the active theme.
 - Verify contrast in both themes; a token pair that passes in light mode can fail in dark mode.

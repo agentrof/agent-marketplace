@@ -18,14 +18,15 @@ Minimum work that solves the problem. Nothing speculative.
 
 - No features, abstractions, flexibility or error handling beyond the ask.
 - If two hundred lines could be fifty, rewrite before delivering.
+- Variation the ask contains (enums, thresholds, formats, taxonomies,
+  policy values) is declared as config or schema, never inline code.
 - Self-check: would a senior engineer call this overcomplicated?
 
 ## 3. Surgical changes
 
 Touch only what you must. Clean up only your own mess.
 
-- Never improve adjacent code, comments or formatting; match existing
-  style even when you would do it differently.
+- Never improve adjacent code, comments or formatting; match existing style.
 - Remove only orphans your own change created; mention pre-existing dead
   code, never delete it unasked.
 - Self-check: does every changed line trace directly to the task?
@@ -34,20 +35,19 @@ Touch only what you must. Clean up only your own mess.
 
 Define success criteria. Loop until verified.
 
-- Turn every task into verifiable goals before starting; plan as numbered
-  steps, each with a verify line.
+- Turn tasks into verifiable goals; plan numbered steps with verify lines.
 - A check is green only when it passes for the right reason.
 - Self-check: what exact command or observation proves this step done?
 
 ## Escape hatch
 
-These rules bias caution over speed. For trivial work (a typo, an
-obvious one-liner) use judgment; rigor prevents costly mistakes.
+These rules bias caution over speed; for trivial work use judgment.
 
 ## House style
 
-- English everywhere (file names, commits, code, keys, CLI output);
-  output_language covers only .md body content under workspace/.
+- output_language covers only .md body prose under workspace/;
+  terminology_language (default English) covers names, technical terms,
+  code and comments, commit messages and PR bodies; all else stays English.
 - Timestamps come off the system clock in UTC: paste the PMO CLI now
   verb's output or use the owning stamp verb; never type a date.
 - No em dash; no emoji in headings; JSON keys are snake_case.

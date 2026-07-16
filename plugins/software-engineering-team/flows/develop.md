@@ -11,8 +11,9 @@ You MUST follow these rules exactly. Violating any of them is a failure.
 2. State and artifacts are the source of truth. Read prior steps from
    the PMO database and from FILES, never from conversation memory;
    after any compaction, run resume-info and re-read before acting.
-3. Stop at every GATE and CHECKPOINT for explicit user approval. Offer
-   exactly: Approve / Request changes (revise, re-gate) / Pause (save, stop).
+3. Stop at every GATE and CHECKPOINT for explicit user choice via the
+   AskUserQuestion popup (tradeoffs in descriptions). Offer exactly:
+   Approve / Request changes (revise, re-gate) / Pause (save, stop).
 4. Halt on failure: present the error and ask. Never continue silently.
 5. Spawn only this plugin's agents.
 6. Never enter plan mode. This flow IS the plan.
@@ -52,8 +53,7 @@ the snapshots init copied there (constitution.md, brief-snapshot/ with
 the whole analysis space, config.snapshot.json) plus the freeze manifest
 step 0 writes (freeze.json; a guard denies edits to its listed paths
 while the order is active). Snapshots are read for the whole order; a
-mid-order space or config edit never changes a running story; nothing
-else is written there.
+mid-order space or config edit never changes a running story; nothing else is written there.
 
 Findings, coverage rows, budget verdicts, round counters and tasks are
 DATABASE rows, not files. Reviewer and verifier spawns RETURN findings
@@ -72,8 +72,7 @@ stamp timing and the attempt history; the semantic fields are yours.
 
 DoD verification trail: the QA step's verdicts flip the story's
 dod_items one by one (item set-dod --dod-id <id> --status verified, or
-failed with --failure-reason); pending dod_items at the delivery gate
-are named as open work.
+failed with --failure-reason); pending dod_items at the delivery gate are named as open work.
 
 Suite artifacts (junit output and the like) go to gitignored
 workspace/ paths (workspace/junit-<suite>.xml), never the order dir.
@@ -120,7 +119,7 @@ still read the artifact for semantic sanity before presenting any gate.
 ### Step 0: init
 
 - Resolve the project git root; anchor everything there. No git
-  repository: stop and offer to initialize one.
+  repository: stop and offer (AskUserQuestion popup) to initialize one.
 - Read workspace/config.json. Missing or without a project_key: stop and
   route to the setup entry. Unsupported stack values: refuse and stop.
 - Resolve the PMO CLI per the state contract and run init-db.
@@ -298,7 +297,8 @@ still read the artifact for semantic sanity before presenting any gate.
 
 ### Step 5: finalize
 
-- Commit on the work branch and open the pull request; its body carries
+- Commit on the work branch and open the pull request (message and PR
+  body in the terminology_language, default English); the body carries
   the compact quality summary (review verdict and rounds, coverage
   matrix result, mutation result, live verification result, low-severity
   notes) and, when the story authored migrations, the migration notes:
@@ -339,8 +339,8 @@ still read the artifact for semantic sanity before presenting any gate.
     complete) only when every step is done and every finding is closed;
     on story work orders the coverage rows and the ledger line must be
     in the database; the CLI's complete guard refuses otherwise;
-  then ask "continue with the next story?" (solo) or hand back to the
-  delivery-lanes flow's PROPOSE (parallel).
+  then ask "continue with the next story?" via the AskUserQuestion popup
+  (solo) or hand back to the delivery-lanes flow's PROPOSE (parallel).
 
 ## Atomic route variant
 
@@ -354,9 +354,9 @@ complete guard honest about what ran.
 COSMETIC-ATOMIC (no behavior change: copy, a label, an existing-token
 swap): skip step 1, both gates, and the review and verification loops;
 spawn only the owning developer with the task and ownership bounded to
-the touched files; finalize with a small pull request whose body states
-the route (cosmetic-atomic), the diff summary and the test command
-result.
+the touched files; finalize with a small pull request (message and body
+in the terminology_language) whose body states the route
+(cosmetic-atomic), the diff summary and the test command result.
 
 FIX-ATOMIC (any behavior change: a bug fix, a rule correction): after
 step 0, in order (every item below is SPAWNED agent work with its task
@@ -371,9 +371,9 @@ is a contract violation):
 3. ONE reviewer pass (single round): findings recorded and routed once
    to the developer, re-checked once; an architecture-implicating
    finding escalates as in the large route.
-4. Finalize with a small pull request whose body states the route
-   (fix-atomic), the reproduction test name, the diff summary and the
-   test command result.
+4. Finalize with a small pull request (message and body in the
+   terminology_language) whose body states the route (fix-atomic), the
+   reproduction test name, the diff summary and the test command result.
 5. At the merge checkpoint ON MAIN, update or add the BR row in the
    owning rule_set when the fix changed or defined specified behavior
    (the backlog-main rule extended to the analysis space), re-run

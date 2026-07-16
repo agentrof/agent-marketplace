@@ -51,11 +51,11 @@ superseded_by. Doc identity is its path; there is no separate id key.
 | space | space.md | AS, OQ | carries code:, the space head summary (30 lines max), purpose, domain map, out of scope |
 | domain | domains/<slug>/domain.md | AS, OQ | carries code:; mission, boundaries, process map, data notes |
 | process | processes/*.md | AS, OQ | actors, trigger, main flow, exception flows |
-| entity | entities/*.md | AS, OQ | fields, lifecycle, propagation semantics |
+| entity | entities/*.md | AS, OQ | fields (a table whose first column is the fixed `field` identifier column), lifecycle, propagation semantics |
 | rule_set | rules/*.md | BR, AS, OQ | carries governs: (entity or process targets) |
 | acceptance_set | acceptance/*.md | AC, AS, OQ | carries verifies:; every AC cites BR ids and a verify cell |
 | decision | decisions/*.md | DEC, AS, OQ | context, options, ruling, consequences |
-| glossary | glossary.md (root) | AS, OQ | one vocabulary per space |
+| glossary | glossary.md (root) | AS, OQ | one vocabulary per space; terms table columns: term, technical_name, definition (technical_name empty when the term names no technical artifact) |
 | actor_roster | actors.md (root) | AS, OQ | actors, roles, permission vocabulary |
 | budget_set | budgets.md | AS, OQ | all six non-functional categories, empty ones written as "none stated, confirmed" |
 | integration | integrations/*.md (root) | AS, OQ | carries system_name and direction; exchange, failure semantics, ownership |
@@ -145,8 +145,14 @@ space-level challenge round when child domains exist.
   values (type, status, dates, roles), sec anchors, table headers, ids,
   file and directory names are fixed English; the title value, body
   prose and free-text cell contents follow workspace/config.json
-  output_language (its sole scope: .md content; every other process
-  artifact is English).
+  output_language.
+- Names and technical terms follow terminology_language (default
+  English), never output_language: entity, field and lifecycle-state
+  names in table cells, mermaid identifiers (erDiagram entities and
+  attributes, stateDiagram states) and established technical terms in
+  prose. A name derived from a business concept is rendered in the
+  terminology_language (Fatura becomes the Invoice entity, fatura_no
+  the invoice_number field); record the pair in glossary.md.
 - Diagrams (fenced mermaid blocks) render on the hosting platforms the
   team already uses: flowchart TD for process flows, stateDiagram-v2 for
   entity lifecycles, erDiagram for a domain's conceptual entities (business

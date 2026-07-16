@@ -23,7 +23,8 @@ gate, and a decision log the planner and the software architect read.
 1. Pre-flight.
    - Read workspace/config.json. Missing or without a project_key: stop
      and route to the setup entry. output_language governs ONLY .md body
-     prose; file names, ids, Status lines and commits stay English.
+     prose; names and technical terms follow terminology_language
+     (default English); file names, ids and Status lines stay English.
    - Grounding, mechanical: when the engagement cites analysis content,
      run ${CLAUDE_PLUGIN_ROOT}/scripts/ba_compile.py check --space
      workspace/docs/business-analysis/<slug> --gate approval --node
@@ -97,7 +98,9 @@ gate, and a decision log the planner and the software architect read.
      name affected stories; invalidated scope routes to the product
      owner for re-slicing, never silently), deferred findings for the
      owner's ruling.
-   - Approve / Request changes / Pause. On approve: stamp the
+   - Approve / Request changes / Pause, asked through the
+     AskUserQuestion popup (tradeoffs in the option descriptions). On
+     approve: stamp the
      engagement via ${CLAUDE_PLUGIN_ROOT}/scripts/landscape_check.py
      --tree <tree> --stamp-engagement <slug> --status approved (the
      script writes the UTC date and re-checks the tree; never type the

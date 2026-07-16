@@ -16,6 +16,9 @@ The only place the design master is born or changed.
 ## Procedure
 
 1. Pre-flight and state detection:
+   - Read workspace/config.json when present: MASTER body prose follows
+     output_language; token, component and spec names follow
+     terminology_language (default English).
    - MASTER exists at workspace/docs/design-system/MASTER.md: UPDATE mode.
    - No MASTER but the codebase carries themes or tokens: EXTRACTION mode;
      derive MASTER from what the code already declares, never invent over
@@ -23,7 +26,9 @@ The only place the design master is born or changed.
    - Neither: CREATION mode.
 2. Gather inputs interactively: industry and product type, brand
    material the user owns, taste preferences and reference likes, target
-   audience. The user's own files win over generated suggestions.
+   audience; preference questions go through the AskUserQuestion popup,
+   open taste input stays free-form. The user's own files win over
+   generated suggestions.
 3. CREATION mode: spawn software-engineering-team-ux-designer (spawn template from
    ${CLAUDE_PLUGIN_ROOT}/flows/design.md) to generate the requested
    number of CANDIDATE systems (default three) using the bound design
@@ -33,8 +38,9 @@ The only place the design master is born or changed.
    workspace/docs/design-system/candidates.html with the axis of
    difference stated per candidate. The preview is a working artifact:
    delete it after MASTER is written.
-4. DS GATE: the user picks a candidate (or requests different emphases;
-   one re-run). The pick is written as
+4. DS GATE: the user picks a candidate through the AskUserQuestion
+   popup, one option per candidate with its emphasis in the description
+   (or requests different emphases; one re-run). The pick is written as
    workspace/docs/design-system/MASTER.md: logic header, global rules
    (semantic palette with light and dark pairs, typography, spacing,
    radius derived from style, shadows, motion tokens, breakpoints, one

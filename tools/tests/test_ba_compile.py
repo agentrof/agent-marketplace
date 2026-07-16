@@ -93,9 +93,10 @@ One vocabulary for the whole space.
 
 ## Terms <!-- sec: terms -->
 
-| term | definition |
-|---|---|
-| movement | one typed quantity change against a stock item |
+| term | technical_name | definition |
+|---|---|---|
+| movement | stock_movement | one typed quantity change against a stock item |
+| warehouse zone | | a named storage area inside a warehouse |
 """)
     write(space / "actors.md", """---
 type: actor_roster
@@ -238,6 +239,12 @@ One sellable, storable product variant tracked per warehouse.
 stateDiagram-v2
     [*] --> draft
     draft --> active: activate
+    active --> retired: kullanım dışı bırak
+```
+
+```mermaid
+flowchart TD
+    A[Müşteri fatura oluşturur] --> B[Onaya gönderilir]
 ```
 
 ## Propagation <!-- sec: propagation -->
@@ -490,6 +497,17 @@ def break_future_dates(space: Path) -> None:
          "approved_at: 9999-01-01")
 
 
+def break_identifier_shape(space: Path) -> None:
+    edit(space / "domains" / "inventory" / "entities" / "stock-item.md",
+         "| sku |", "| ürünNo |")
+
+
+def break_diagram_identifiers(space: Path) -> None:
+    edit(space / "domains" / "inventory" / "entities" / "stock-item.md",
+         "draft --> active: activate",
+         "draft --> onaylandı: onayla")
+
+
 BA_BUILDERS = {
     "space_layout": break_space_layout,
     "frontmatter_schema": break_frontmatter_schema,
@@ -512,6 +530,8 @@ BA_BUILDERS = {
     "gate_approval": break_gate_approval,
     "generated_freshness": break_generated_freshness,
     "future_dates": break_future_dates,
+    "identifier_shape": break_identifier_shape,
+    "diagram_identifiers": break_diagram_identifiers,
 }
 
 # Builders that mutate authored docs make the pre-built generated views
@@ -585,6 +605,18 @@ class BuilderFixtureTests(unittest.TestCase):
                         matching,
                         f"{check}: no finding fired; got "
                         f"{[(f.check, f.message) for f in findings]}")
+
+    def test_glossary_technical_name_shape_fires(self):
+        """The glossary mapping column is identifier-shaped when filled;
+        the valid space's empty cell proves allow_empty stays silent."""
+        with tempfile.TemporaryDirectory() as tmp:
+            space = Path(tmp) / "erp"
+            make_valid_space(space)
+            edit(space / "glossary.md", "| stock_movement |",
+                 "| stokHareketi |")
+            findings = collect(space)
+            self.assertTrue(
+                [f for f in findings if f.check == "identifier_shape"])
 
 
 class ApproveTests(unittest.TestCase):

@@ -54,6 +54,24 @@ date itself, and its pattern registered in the guard hook's
 STAMP_FIELD_PATTERNS table (project-management-office's hook_guard_db.py)
 so a hand-typed date is denied at write time.
 
+## Language
+
+Shipped content is English everywhere; the content bans below enforce
+the mechanical slice. The managed-project contract (two axes:
+output_language for .md body prose, terminology_language for names,
+technical terms, code and comments, commits and PR bodies, machine
+layer fixed English) lives in docs/orchestration.md. In-body
+identifier positions are enforced as ASCII machine-safe shapes by the
+analysis compiler, the landscape checker and the contract checker; a
+new identifier position (a table column or diagram kind that carries
+technical names) registers itself in space-schema.json's naming block
+or its owning checker, and ships with a firing fixture in the matching
+test registry. The guard hook's commit and PR payload checks are the
+config-aware points: they read the resolved project's
+terminology_language. A language name appears in shipped content only
+as the spelled-out default of an axis, as the fixed machine layer, or
+as product-i18n subject matter; anything else is a hard-code defect.
+
 ## Size caps
 
 | file | cap |

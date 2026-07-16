@@ -81,6 +81,13 @@ class ContractCheckTests(unittest.TestCase):
         code, _, _ = self.check("# Contract\nNothing here.\n")
         self.assertEqual(code, 2)
 
+    def test_non_ascii_endpoint_path_fails(self):
+        code, _, err = self.check(
+            "## GET /faturalar/ödemeler\nError cases: 401.\n"
+        )
+        self.assertEqual(code, 1)
+        self.assertIn("ASCII", err)
+
 
 class TripwireTests(unittest.TestCase):
     def test_schema_touch_trips(self):
@@ -127,6 +134,14 @@ class LandscapeCheckTests(unittest.TestCase):
                 "## Framing\nf\n\n## Options\no\n\n## Verdict\nv\n")
             code, _, _ = run(landscape_check, ["--tree", tree])
             self.assertEqual(code, 0)
+
+    def test_non_ascii_component_fails(self):
+        land = self.LAND_OK.replace("| queue |", "| mesaj kuyruğu |")
+        with tempfile.TemporaryDirectory() as tmp:
+            tree = self._tree(tmp, self.LOG, land)
+            code, _, err = run(landscape_check, ["--tree", tree])
+            self.assertEqual(code, 1)
+            self.assertIn("non-ASCII", err)
 
     def test_superseded_citation_fails(self):
         land = self.LAND_OK.replace("sd-001)", "sd-002)").replace("[SD-001]", "[SD-002]")

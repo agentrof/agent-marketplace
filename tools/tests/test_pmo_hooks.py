@@ -423,7 +423,10 @@ class PmoHookTests(unittest.TestCase):
         code, _, err = run_hook("hook_guard_db.py", self.payload(
             hook_event_name="PreToolUse", tool_name="Write", tool_use_id="l3",
             tool_input={"file_path": str(doc),
-                        "content": "# Analiz\n\nMüşteri kuralı."},
+                        "content": "# Analiz\n\nMüşteri kuralı.\n\n"
+                                   "```mermaid\nflowchart TD\n"
+                                   "    A[Müşteri fatura oluşturur] --> B[Onay]\n"
+                                   "```\n"},
         ), self.env)
         self.assertEqual(code, 0, err)
 
@@ -467,6 +470,79 @@ class PmoHookTests(unittest.TestCase):
             tool_input={"command": 'git commit -am "müşteri modülü"'},
         ), self.env)
         self.assertEqual(code, 2)
+
+    def write_config(self, **extra):
+        (self.project_root / "workspace" / "config.json").write_text(
+            json.dumps({"managed_by": "software-engineering-team",
+                        "project_key": "shop", **extra}),
+            encoding="utf-8",
+        )
+
+    def test_guard_commit_language_follows_terminology_config(self):
+        self.write_config(terminology_language="Turkish")
+        code, _, err = run_hook("hook_guard_db.py", self.payload(
+            hook_event_name="PreToolUse", tool_name="Bash", tool_use_id="b7",
+            tool_input={"command": 'git commit -m "müşteri modülü"'},
+        ), self.env)
+        self.assertEqual(code, 0, err)
+
+    def test_guard_commit_fail_closes_on_malformed_config(self):
+        (self.project_root / "workspace" / "config.json").write_text(
+            "{not json", encoding="utf-8")
+        code, _, err = run_hook("hook_guard_db.py", self.payload(
+            hook_event_name="PreToolUse", tool_name="Bash", tool_use_id="b8",
+            tool_input={"command": 'git commit -m "müşteri modülü"'},
+        ), self.env)
+        self.assertEqual(code, 2)
+        self.assertIn("English", err)
+
+    def test_guard_gh_pr_payloads_follow_terminology_config(self):
+        code, _, err = run_hook("hook_guard_db.py", self.payload(
+            hook_event_name="PreToolUse", tool_name="Bash", tool_use_id="p1",
+            tool_input={"command":
+                        'gh pr create --title "müşteri modülü" --body "ok"'},
+        ), self.env)
+        self.assertEqual(code, 2)
+        self.assertIn("terminology_language", err)
+        code, _, err = run_hook("hook_guard_db.py", self.payload(
+            hook_event_name="PreToolUse", tool_name="Bash", tool_use_id="p2",
+            tool_input={"command":
+                        'gh pr create --title "customer module" --body "adds it"'},
+        ), self.env)
+        self.assertEqual(code, 0, err)
+        # A non-pr gh command is not judged.
+        code, _, err = run_hook("hook_guard_db.py", self.payload(
+            hook_event_name="PreToolUse", tool_name="Bash", tool_use_id="p3",
+            tool_input={"command": 'gh issue create --title "müşteri"'},
+        ), self.env)
+        self.assertEqual(code, 0, err)
+        self.write_config(terminology_language="Turkish")
+        code, _, err = run_hook("hook_guard_db.py", self.payload(
+            hook_event_name="PreToolUse", tool_name="Bash", tool_use_id="p4",
+            tool_input={"command": 'gh pr create --body "müşteri akışı"'},
+        ), self.env)
+        self.assertEqual(code, 0, err)
+
+    def test_guard_denies_non_ascii_branch_names_always(self):
+        # Branches are machine layer: a configured non-English
+        # terminology_language never admits a non-ASCII branch name.
+        self.write_config(terminology_language="Turkish")
+        for i, command in enumerate((
+                'git checkout -b wp-03-fatura-düzeltme',
+                'git switch -c düzeltme',
+                'git branch özellik',
+                'git worktree add ../lane -b düzeltme-2')):
+            code, _, err = run_hook("hook_guard_db.py", self.payload(
+                hook_event_name="PreToolUse", tool_name="Bash",
+                tool_use_id=f"br{i}", tool_input={"command": command},
+            ), self.env)
+            self.assertEqual(code, 2, command)
+            self.assertIn("machine-layer", err)
+        code, _, err = run_hook("hook_guard_db.py", self.payload(
+            hook_event_name="PreToolUse", tool_name="Bash", tool_use_id="br9",
+            tool_input={"command": 'git checkout -b wp-03-invoice-fix'},
+        ), self.env)
+        self.assertEqual(code, 0, err)
 
     def test_guard_denies_generated_view_edits(self):
         docs = self.project_root / "workspace" / "docs"

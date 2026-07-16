@@ -18,7 +18,8 @@ Front door for real work: classify, confirm, deliver.
    project_key: route to the setup entry and stop). Run the PMO CLI's
    resume-info --project-key <key> (launcher per the develop flow's
    state contract): an active work order whose worktree field matches
-   THIS resolved git root means offer Resume or Release; never start a
+   THIS resolved git root means offer Resume or Release through the
+   AskUserQuestion popup; never start a
    second work order here. Active orders in OTHER worktrees are parallel
    lanes coordinated by the delivery-lanes entry: name them and continue.
    Resume means: load ${CLAUDE_PLUGIN_ROOT}/flows/develop.md, read the
@@ -28,8 +29,9 @@ Front door for real work: classify, confirm, deliver.
    Story fast path: an ask naming an existing backlog story ("request:
    deliver WP-03"; verify the row with item list) is LARGE by
    construction and was already sliced and approved at the backlog gate:
-   skip classification and the brief precondition, confirm in one line
-   ("Delivering WP-03 <title>. Proceed?"), and execute
+   skip classification and the brief precondition, confirm through the
+   AskUserQuestion popup ("Delivering WP-03 <title>." with proceed /
+   adjust options), and execute
    ${CLAUDE_PLUGIN_ROOT}/flows/develop.md for that story (its step 0.5
    readiness gate still guards).
 2. Classify BINARY, in this conversation (this is the product-owner hat
@@ -45,8 +47,9 @@ Front door for real work: classify, confirm, deliver.
      implies persisted data or a contract change (a new form field that
      must be saved) classifies LARGE up front, not at the escape hatch.
    - LARGE: everything else.
-   Confirm the route in one line ("Reading this as: <atomic|large>,
-   because <reason>. Proceed?") and wait.
+   Confirm the route through the AskUserQuestion popup ("Reading this
+   as: <atomic|large>, because <reason>." with proceed / reclassify
+   options) and wait.
 3. ATOMIC route: execute the atomic variant in
    ${CLAUDE_PLUGIN_ROOT}/flows/develop.md exactly. Its escape hatch is
    binding: the moment the work touches model, contract, schema or the
@@ -67,7 +70,8 @@ Front door for real work: classify, confirm, deliver.
       rule and acceptance docs; the rest summary-only via
       _generated/index.md. Use the develop flow's spawn template.
    c. BACKLOG GATE: present the epic and story summary with the coverage
-      map; Approve / Request changes / Pause. On approve, first verify
+      map; Approve / Request changes / Pause, asked through the
+      AskUserQuestion popup. On approve, first verify
       the import against the space (ba_compile.py verify-import --space
       <space> --json-file <file>; nonzero blocks the approve action with
       the named ids), then load it into the PMO database (item import
@@ -77,6 +81,6 @@ Front door for real work: classify, confirm, deliver.
    d. Story loop: for each ready story in order, execute
       ${CLAUDE_PLUGIN_ROOT}/flows/develop.md end to end. After each
       story's merge checkpoint (which updates the database and re-renders
-      the backlog view on the main line), ask whether to continue with
-      the next story.
+      the backlog view on the main line), ask through the
+      AskUserQuestion popup whether to continue with the next story.
 5. All gates are manual; there is no autonomous mode.

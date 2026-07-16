@@ -86,7 +86,13 @@ Routes:
    gates offer Approve, Request changes (revise and re-gate), Pause
    (save and stop); design-flow gates offer their own choices (pick a
    direction or re-run with different emphases; approve the refined
-   preview).
+   preview). Decision and preference questions go through the
+   AskUserQuestion popup: options carry tradeoffs in their
+   descriptions, the recommended option is first with a
+   "(Recommended)"-style suffix in the conversation's language, at most
+   four options per question and four questions per batch; free-text
+   data capture offers detected candidates as options plus free-form
+   input; a plain-text question list is never the ask.
 4. Halt on failure: present the error and ask; never continue silently.
 5. Spawn only this plugin's agents.
 6. Never enter plan mode; the flow is the plan.
@@ -119,14 +125,39 @@ future-dated stamps fail the compilers; the guard hook denies hand-typed
 stamp dates at write time; and SessionStart injects the current UTC time
 into every session as calibration.
 
-Language discipline: everything the team produces runs in English: file
-and directory names, git branches and commit messages, code and
-comments, database values (story titles, scopes, keys), frontmatter keys
-and machine-parsed values, CLI output, PR bodies. The configured
-output_language applies exclusively to the body content of authored .md
-artifacts under workspace/. The guard hook enforces the mechanical
-slice: non-ASCII file paths under workspace/ and non-ASCII git commit
-messages are denied.
+Language discipline: two configured axes, both defaulting to English,
+both living in workspace/config.json and changed only through the
+configure entry. output_language governs the body prose of authored
+.md artifacts under workspace/: titles, explanation prose and
+free-text cells (workspace/CHANGELOG.md story lines included).
+terminology_language governs the technical lexicon: entity, table,
+column and lifecycle-state names, API endpoint and architecture
+component names, code symbols and comments, mermaid identifiers
+(erDiagram entities and attributes, stateDiagram states), established
+technical terms wherever they appear (migration, endpoint, cache,
+rollback), git commit messages and PR titles and bodies. A name
+derived from an output_language business concept is rendered in the
+terminology_language (with the default: Fatura becomes the Invoice
+entity, fatura_no the invoice_number field); the analysis space's
+glossary.md carries the business-term to technical-name mapping. A
+terminology_language change governs newly authored names only:
+existing names, glossary rows and merged code are never renamed
+retroactively, and the configure entry states this lexicon fork in its
+impact analysis. The machine layer is fixed English and never
+configurable: file and directory names, git branches, frontmatter keys
+and machine-parsed values, sec anchors, ids, table headers, JSON keys,
+database keys and values (story titles, scopes), CLI output. The
+product's own user-facing language (its message catalogs and locales)
+is a product requirement stated in the analysis space, outside both
+axes. Reader-facing placeholder copy in previews and demo packages
+follows output_language; identifiers in it follow terminology_language.
+The guard hook enforces the mechanical slice: non-ASCII file paths
+under workspace/ and non-ASCII branch names are always denied;
+non-ASCII git commit messages and gh pr title/body payloads are denied
+unless the resolved project's terminology_language is configured
+non-English. The analysis compiler, the landscape checker and the
+contract checker enforce identifier positions as ASCII machine-safe
+shapes regardless of the configured axes.
 
 Hooks carry the mechanics, flows carry the semantics: project-management-office's
 SubagentStart/SubagentStop hooks stamp task start and finish times for

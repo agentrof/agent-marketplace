@@ -14,7 +14,9 @@ Gate-stage validation of a document-store design deliverable against upstream re
 
 ## Upstream Consistency
 
-- [ ] Entity names match the terminology of the product brief
+- [ ] Entity names match the brief's business concepts through
+      glossary.md's business-term to technical-name mapping, rendered in
+      the terminology_language
 - [ ] Non-functional requirements (audit, retention, multi-tenancy) are reflected in the schema
 - [ ] Every acceptance criterion that implies data is served by the schema
 - [ ] Fields cover all data points mentioned in user story scenarios

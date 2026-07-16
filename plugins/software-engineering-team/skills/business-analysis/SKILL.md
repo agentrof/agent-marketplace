@@ -19,9 +19,9 @@ ${CLAUDE_PLUGIN_ROOT}/scripts/ba_compile.py.
 
 1. Pre-flight.
    - Read workspace/config.json when present (output_language governs
-     ONLY the body content of authored .md docs; file names, ids,
-     frontmatter values, structure and every other process artifact
-     stay English; default English).
+     ONLY the body prose of authored .md docs; names and technical
+     terms follow terminology_language, default English; ids, structure
+     and every other machine artifact stay English).
    - Freeze set: run the PMO CLI's resume-info --project-key <key>
      --json; for each active work order (running or waiting_gate) on
      this topic, collect its story's criterion ids from the coverage map
@@ -52,8 +52,10 @@ ${CLAUDE_PLUGIN_ROOT}/scripts/ba_compile.py.
    - New docs come from ba_compile.py stub (born compliant; it prints
      the node's next free ids). Grow domains only on the decomposition
      reference's split signals; a small topic stays one node.
-   - Question in rounds; flush every answer into its owning doc per the
-     fact-routing test. Ids are table rows; citations are links.
+   - Question in rounds through the AskUserQuestion popup (at most four
+     questions per round, options with tradeoffs, recommended first);
+     flush every answer into its owning doc per the fact-routing test.
+     Ids are table rows; citations are links.
    - After every authoring milestone: check + render. Fix findings
      immediately; a red compile never accumulates.
    - Flip a doc draft -> in_review in the frontmatter; approve only via
@@ -74,11 +76,13 @@ ${CLAUDE_PLUGIN_ROOT}/scripts/ba_compile.py.
    (scoped with --node for a domain) and render; a red compile blocks
    the gate.
    - FOUNDATION gate, once: space.md, glossary.md, actors.md,
-     budgets.md approved together.
+     budgets.md approved together; the approval is asked through the
+     AskUserQuestion popup.
    - DOMAIN gate, per domain as its analysis closes: present
      _generated/status.md and the open-questions board; the user
-     approves or defers named questions explicitly (deferral is a row
-     status with a revisit note, never silence). Approve flips the
+     approves or defers named questions explicitly through the
+     AskUserQuestion popup (deferral is a row status with a revisit
+     note, never silence). Approve flips the
      subtree statuses; commit authored plus generated files together.
    - A buildable domain unblocks request, sketch and demo for its scope;
      other domains keep analyzing in parallel.

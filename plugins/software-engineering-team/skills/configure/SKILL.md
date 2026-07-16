@@ -10,8 +10,8 @@ Config changes go through this gate, never through hand edits.
 
 ## When to Use
 - The project's stack set, test, mutation or environment command, source
-  directories or output language must change (for example: "add a
-  document store to the databases set").
+  directories, output language or terminology language must change (for
+  example: "add a document store to the databases set").
 
 ## Procedure
 
@@ -36,8 +36,10 @@ Config changes go through this gate, never through hand edits.
    url <service> (contract in the environment stack skill); source_dirs
    a non-empty list of repo-relative paths (absolute paths refused);
    output_language a non-empty language name (scope: ONLY the body
-   content of authored .md documents; file names, commits, code, keys
-   and every other process artifact stay English); max_parallel an
+   prose of authored .md documents); terminology_language a non-empty
+   language name, default English (scope: names, technical terms, code
+   and comments, commit messages and PR bodies; the machine layer, file
+   names, keys, ids, CLI output, always stays English); max_parallel an
    optional positive integer (the delivery-lanes flow's lane-proposal
    cap; absent means 3; this gate is its only writer).
 4. Present the impact analysis before writing: which roles' skill
@@ -47,7 +49,11 @@ Config changes go through this gate, never through hand edits.
    what future packages will do differently (for example: adding a
    document store means the architect loads both database skills and
    declares a store per entity), and any migration consequences for
-   existing work.
+   existing work. A terminology_language change governs newly authored
+   names only; existing names, glossary rows and merged code are never
+   renamed, state this fork whenever the key changes on a project with
+   authored content. The apply / reject decision is asked through the
+   AskUserQuestion popup (impact summary in the option descriptions).
 5. On approval, write workspace/config.json and nothing else: this gate
    touches exactly one file. Confirm the diff to the user. On rejection,
    stop; nothing is written.

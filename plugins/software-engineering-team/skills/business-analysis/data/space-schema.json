@@ -9,6 +9,13 @@
   "code_format": "^[A-Z]{2,4}$",
   "reserved_codes": [],
   "id_format": "^(BR|AC|AS|OQ|DEC|CH)-([A-Z]{2,4})-([0-9]{3,})$",
+  "naming": {
+    "identifier_format": "^[a-z][a-z0-9_]*$",
+    "identifier_columns": [
+      {"doc_type": "entity", "section": "fields", "column": "field"},
+      {"doc_type": "glossary", "section": "terms", "column": "technical_name", "allow_empty": true}
+    ]
+  },
   "frontmatter": {
     "required": [
       "type",

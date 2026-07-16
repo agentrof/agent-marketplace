@@ -53,6 +53,7 @@ Planning notes knowledge.
 
 ## Core Rules
 - Keep notes terse and decision-oriented.
+- Respect the user's explicit theme override.
 """
 
 VALID_FLOW = """# Develop Flow
@@ -205,6 +206,14 @@ def break_orchestrator_integrity(root: Path) -> None:
     write(root / "plugins" / PLUGIN / "flows" / "develop.md", text)
 
 
+def break_question_popup(root: Path) -> None:
+    write(
+        root / "plugins" / PLUGIN / "flows" / "gates.md",
+        VALID_FLOW
+        + "\n3. Stop at every gate and wait for explicit user choice.\n",
+    )
+
+
 def break_stdlib_only(root: Path) -> None:
     write(
         root / "plugins" / PLUGIN / "skills" / "notes" / "scripts" / "tool.py",
@@ -269,6 +278,7 @@ BUILDERS = {
     "registration": break_registration,
     "json_hygiene": break_json_hygiene,
     "orchestrator_integrity": break_orchestrator_integrity,
+    "question_popup": break_question_popup,
     "stdlib_only": break_stdlib_only,
     "naive_clock": break_naive_clock,
     "script_references": break_script_references,

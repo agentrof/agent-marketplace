@@ -782,6 +782,29 @@ def check_orchestrator_integrity(tree: Tree, findings: list[Finding]) -> None:
                         ))
 
 
+QUESTION_POPUP_MARKER = "explicit user choice"
+QUESTION_POPUP_TOKEN = "AskUserQuestion"
+
+
+def check_question_popup(tree: Tree, findings: list[Finding]) -> None:
+    """A gate declared with the standard marker phrase must name the
+    AskUserQuestion popup, so the popup discipline cannot be silently
+    stripped from a gate-declaring file."""
+    for path in iter_scope_files(tree, ".md"):
+        text = read_text(path)
+        if QUESTION_POPUP_MARKER in text and QUESTION_POPUP_TOKEN not in text:
+            lineno = next(
+                (i for i, line in enumerate(text.splitlines(), start=1)
+                 if QUESTION_POPUP_MARKER in line), 1)
+            findings.append(Finding(
+                "error", rel(tree, path), lineno, "question_popup",
+                f"file declares a gate ('{QUESTION_POPUP_MARKER}') without"
+                f" naming the {QUESTION_POPUP_TOKEN} popup",
+                "decision gates ask through the AskUserQuestion popup;"
+                " state it where the gate is declared",
+            ))
+
+
 # Fallback for runtimes that predate sys.stdlib_module_names.
 FALLBACK_STDLIB = frozenset(
     "__future__ abc argparse ast asyncio base64 bisect calendar collections "
@@ -989,6 +1012,7 @@ CHECKS = {
     "registration": check_registration,
     "json_hygiene": check_json_hygiene,
     "orchestrator_integrity": check_orchestrator_integrity,
+    "question_popup": check_question_popup,
     "stdlib_only": check_stdlib_only,
     "naive_clock": check_naive_clock,
     "script_references": check_script_references,

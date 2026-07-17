@@ -105,12 +105,19 @@ DESIGNATIONS = {
 }
 
 
-def write_config(root: Path, designations=DESIGNATIONS) -> None:
+def write_config(root: Path, designations=DESIGNATIONS, history=None,
+                 project_key=None) -> None:
     """Mint the consumer designation map at <workspace>/config.json (the
-    workspace is the vault's parent, mirroring the runtime derivation)."""
+    workspace is the vault's parent, mirroring the runtime derivation).
+    `history` writes the retired-designation ledger; `project_key` the
+    PMO project binding."""
     payload = {"terminology_language": "English"}
+    if project_key is not None:
+        payload["project_key"] = project_key
     if designations is not None:
         payload["doc_type_designations"] = designations
+    if history is not None:
+        payload["doc_type_designation_history"] = history
     write(root.parent / "config.json", json.dumps(payload, indent=2))
 
 
@@ -485,6 +492,24 @@ def break_obsidian_payload(root: Path) -> None:
     edit(root / ".obsidian" / "app.json", "\"absolute\"", "\"shortest\"")
 
 
+def break_designation_drift(root: Path) -> None:
+    # The double-suffix shape: a retired ledger value survives UNDER the
+    # current designation, so the containment check stays green and only
+    # the ledger-backed drift check can see it.
+    config_path = root.parent / "config.json"
+    payload = json.loads(config_path.read_text(encoding="utf-8"))
+    payload["doc_type_designation_history"] = {
+        "space": [{"value": "blueprint", "replaced": "2026-01-01",
+                   "superseded_by": "space overview"}]}
+    config_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+    edit(root / BA_SPACE / "space.md",
+         "title: ERP analysis space overview",
+         "title: ERP analysis blueprint space overview")
+    edit(root / BA_SPACE / "space.md",
+         "# ERP analysis space overview",
+         "# ERP analysis blueprint space overview")
+
+
 VAULT_BUILDERS = {
     "vault_layout": break_vault_layout,
     "wikilink_resolution": break_wikilink_resolution,
@@ -494,6 +519,7 @@ VAULT_BUILDERS = {
     "table_shape": break_table_shape,
     "banned_basename": break_banned_basename,
     "title_shape": break_title_shape,
+    "designation_drift": break_designation_drift,
     "orphans": break_orphans,
     "moc_coverage": break_moc_coverage,
     "map_coverage": break_map_coverage,
@@ -1366,6 +1392,515 @@ class DesignationCheckTests(unittest.TestCase):
             findings, "error",
             "designation map key 'ghost' names no known doc type"),
             findings)
+
+
+class DesignationTransformTests(unittest.TestCase):
+    """The raw-offset tail transform: fold() is the equality oracle only,
+    never an index space (it changes string length on the Turkish dotted
+    I), and stripping is tail-only, longest-first, never emptying."""
+
+    def test_fold_changes_length_and_strip_survives_it(self):
+        self.assertNotEqual(len(vc.fold("İ")), len("İ"))
+        self.assertEqual(
+            vc.strip_designation_tails("İlk sürümde tam paket kararı",
+                                       ["kararı"]),
+            "İlk sürümde tam paket")
+
+    def test_double_suffix_and_duplicate_strip(self):
+        self.assertEqual(
+            vc.strip_designation_tails("İlk sürüm kararı hüküm",
+                                       ["hüküm", "kararı"]),
+            "İlk sürüm")
+        self.assertEqual(
+            vc.strip_designation_tails("Foo kararı kararı", ["kararı"]),
+            "Foo")
+
+    def test_longest_fold_first_beats_substring_sibling(self):
+        self.assertEqual(
+            vc.strip_designation_tails("X inceleme turu",
+                                       ["turu", "inceleme turu"]),
+            "X")
+
+    def test_whole_title_designation_never_stripped(self):
+        self.assertEqual(
+            vc.strip_designation_tails("Aktörler", ["Aktörler"]),
+            "Aktörler")
+
+    def test_tail_only_never_mid_title(self):
+        # another type's designation mid-title is legitimate vocabulary
+        self.assertEqual(
+            vc.strip_designation_tails("Tenant hiyerarşi kuralları kararı",
+                                       ["hüküm", "kararı"]),
+            "Tenant hiyerarşi kuralları")
+
+    def test_agglutinated_tail_matches_punctuation_does_not(self):
+        self.assertEqual(vc.designation_tail_span("Tenant kararına",
+                                                  "kararı"), 7)
+        self.assertIsNone(vc.designation_tail_span("X kararı (taslak)",
+                                                   "kararı"))
+
+    def test_round_token_peeling(self):
+        self.assertEqual(
+            vc.designation_tail_span("Foundation inceleme turu 3",
+                                     "inceleme turu", 3), 11)
+        self.assertIsNone(
+            vc.designation_tail_span("Foundation inceleme turu 3",
+                                     "inceleme turu", 2))
+        self.assertEqual(
+            vc.peel_trailing_token("Foundation inceleme turu 3", "3"),
+            "Foundation inceleme turu")
+        self.assertIsNone(vc.peel_trailing_token("Tur 3 incelemesi", "3"))
+
+    def test_apply_retitle_requotes_and_syncs_h1(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            note = Path(tmp) / "n.md"
+            write(note, "---\ntype: decision\ntitle: Esnek model kararı\n"
+                        "---\n\n# Esnek model kararı\n\nBody.\n")
+            self.assertTrue(vc.apply_retitle(
+                Path(tmp), "n.md", "Esnek model kararı",
+                "Esnek model: hüküm"))
+            text = note.read_text(encoding="utf-8")
+            self.assertIn('title: "Esnek model: hüküm"', text)
+            self.assertIn("# Esnek model: hüküm", text)
+            self.assertIn("Body.", text)
+
+
+class DesignationDriftTests(unittest.TestCase):
+    """The ledger-backed drift check: stale tails are errors (locked:
+    warnings), mid-title strandings and non-closing designations warn,
+    ledger hygiene lands on config.json, and a vault with no ledger is
+    silent (green stays green by construction)."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self.tmp.name) / "docs"
+        make_valid_vault(self.root)
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def drift(self, findings, severity, needle):
+        return any(f["check"] == "designation_drift"
+                   and f["severity"] == severity
+                   and needle in f["message"] for f in findings)
+
+    def test_stale_tail_under_current_designation_errors(self):
+        # the exact silent-green repro, inverted: double suffix now RED
+        ruling = dict(DESIGNATIONS, decision="ruling")
+        write_config(self.root, ruling,
+                     history={"decision": [{"value": "decision"}]})
+        edit(self.root / BA_SPACE / "decisions" / "pilot-scope-decision.md",
+             "title: Pilot scope decision", "title: Pilot scope decision ruling")
+        edit(self.root / BA_SPACE / "decisions" / "pilot-scope-decision.md",
+             "# Pilot scope decision", "# Pilot scope decision ruling")
+        code, findings = check_findings(self.root)
+        self.assertEqual(code, 1)
+        self.assertTrue(self.drift(
+            findings, "error", "retired 'decision' designation 'decision'"),
+            findings)
+
+    def test_no_ledger_double_suffix_stays_green_stated_limit(self):
+        # without the ledger the drift check has no memory: the shape
+        # verifies green, the documented limit --from exists for
+        ruling = dict(DESIGNATIONS, decision="ruling")
+        write_config(self.root, ruling)
+        for old, new in (("title: Pilot scope decision",
+                          "title: Pilot scope decision ruling"),
+                         ("# Pilot scope decision",
+                          "# Pilot scope decision ruling"),
+                         ("title: Order events v1 decision",
+                          "title: Order events v1 ruling"),
+                         ("# Order events v1 decision",
+                          "# Order events v1 ruling"),
+                         ("title: Order events v2 decision",
+                          "title: Order events v2 ruling"),
+                         ("# Order events v2 decision",
+                          "# Order events v2 ruling")):
+            for name in ("business-analysis/erp/decisions/"
+                         "pilot-scope-decision.md",
+                         "solution-design/decisions/"
+                         "order-events-decision.md",
+                         "solution-design/decisions/"
+                         "order-events-v2-decision.md"):
+                path = self.root / name
+                text = path.read_text(encoding="utf-8")
+                if old in text:
+                    path.write_text(text.replace(old, new),
+                                    encoding="utf-8")
+        run(["render-decisions", "--vault", str(self.root)])
+        code, findings = check_findings(self.root)
+        self.assertEqual(code, 0, findings)
+
+    def test_mid_title_stranding_warns(self):
+        write_config(self.root, DESIGNATIONS,
+                     history={"decision": [{"value": "scope"}]})
+        edit(self.root / BA_SPACE / "decisions" / "pilot-scope-decision.md",
+             "title: Pilot scope decision",
+             "title: Pilot scope refinement decision")
+        edit(self.root / BA_SPACE / "decisions" / "pilot-scope-decision.md",
+             "# Pilot scope decision", "# Pilot scope refinement decision")
+        code, findings = check_findings(self.root)
+        self.assertEqual(code, 0)
+        self.assertTrue(self.drift(findings, "warning", "appears mid-title"),
+                        findings)
+
+    def test_locked_stale_warns_never_errors(self):
+        write_config(self.root, DESIGNATIONS,
+                     history={"challenge-record": [{"value": "audit round"}]})
+        write(self.root / BA_SPACE / "reviews" / "space-round-2-review.md",
+              typed_note("challenge_record", "Payments audit round 2",
+                         "status: approved\nowner_role: business_analyst\n"
+                         "round: 2\nreview_scope: space\n"
+                         "verdict: continue\nlocked: true\n"
+                         "approved_at: 2026-07-01\n"))
+        _code, findings = check_findings(self.root)
+        # the locked record's designation findings are warnings, never
+        # errors (the unwired fixture note's graph findings are not the
+        # subject here)
+        rel = f"{BA_SPACE}/reviews/space-round-2-review.md"
+        designation = [f for f in findings if f["path"] == rel
+                       and f["check"] in ("designation_drift",
+                                          "title_shape")]
+        self.assertTrue(designation, findings)
+        self.assertTrue(all(f["severity"] == "warning"
+                            for f in designation), designation)
+        self.assertTrue(self.drift(
+            findings, "warning", "retired 'challenge-record'"), findings)
+        self.assertTrue(any(
+            f["check"] == "title_shape" and f["severity"] == "warning"
+            and "locked record" in f["message"]
+            and "--include-locked" in f["remediation"]
+            for f in designation), designation)
+
+    def test_whole_title_retired_designation_warns_not_errors(self):
+        # 'Landscape' whose designation moves on: the drift finding is
+        # a judgment warning (mechanical transition would empty the
+        # base); the missing-designation error stays title_shape's
+        write_config(self.root, dict(DESIGNATIONS, landscape="peyzaj"),
+                     history={"landscape": [{"value": "landscape"}]})
+        code, findings = check_findings(self.root)
+        self.assertEqual(code, 1)
+        drift = [f for f in findings if f["check"] == "designation_drift"
+                 and f["path"] == f"{SD}/landscape.md"]
+        self.assertTrue(drift, findings)
+        self.assertTrue(all(f["severity"] == "warning" for f in drift),
+                        drift)
+        self.assertTrue(any("IS the retired" in f["message"]
+                            for f in drift), drift)
+
+    def test_current_designation_not_closing_warns(self):
+        write_config(self.root, dict(DESIGNATIONS, decision="ruling"),
+                     history={"decision": [{"value": "decision"}]})
+        edit(self.root / BA_SPACE / "decisions" / "pilot-scope-decision.md",
+             "title: Pilot scope decision", "title: Ruling on pilot scope")
+        edit(self.root / BA_SPACE / "decisions" / "pilot-scope-decision.md",
+             "# Pilot scope decision", "# Ruling on pilot scope")
+        code, findings = check_findings(self.root)
+        self.assertTrue(self.drift(findings, "warning",
+                                   "not the closing phrase"), findings)
+
+    def test_ledger_hygiene_errors_on_config(self):
+        write_config(self.root, DESIGNATIONS,
+                     history={"ghost": [{"value": "specter"}],
+                              "decision": [{"value": "decision"}]})
+        code, findings = check_findings(self.root)
+        self.assertEqual(code, 1)
+        config_findings = [f for f in findings
+                           if f["check"] == "designation_drift"
+                           and f["path"] == "config.json"]
+        messages = " | ".join(f["message"] for f in config_findings)
+        self.assertIn("history key 'ghost'", messages)
+        self.assertIn("repeats the current designation", messages)
+
+    def test_changed_fast_path_emits_drift(self):
+        write_config(self.root, dict(DESIGNATIONS, decision="ruling"),
+                     history={"decision": [{"value": "decision"}]})
+        rel = f"{BA_SPACE}/decisions/pilot-scope-decision.md"
+        edit(self.root / rel, "title: Pilot scope decision",
+             "title: Pilot scope decision ruling")
+        edit(self.root / rel, "# Pilot scope decision",
+             "# Pilot scope decision ruling")
+        code, out, _ = run(["check", "--vault", str(self.root),
+                            "--changed", rel, "--json"])
+        findings = [json.loads(line) for line in out.splitlines()
+                    if line.startswith("{")]
+        self.assertEqual(code, 1)
+        self.assertTrue(any(f["check"] == "designation_drift"
+                            for f in findings), findings)
+
+
+def tree_snapshot(base: Path) -> dict:
+    return {p.relative_to(base).as_posix(): p.read_bytes()
+            for p in sorted(base.rglob("*")) if p.is_file()}
+
+
+class ReconcileVerbTests(unittest.TestCase):
+    """The reconcile-designations verb: plan/apply split with a real
+    dry-run, old -> new transitions with no double suffix, idempotent
+    re-runs, locked-record consent and audit, and the migrate second
+    door held shut."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.project = Path(self.tmp.name) / "proj" / "workspace"
+        self.root = self.project / "docs"
+        make_valid_vault(self.root)
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def reconcile(self, *argv):
+        return run(["reconcile-designations", "--vault", str(self.root)]
+                   + list(argv))
+
+    def read(self, rel: str) -> str:
+        return (self.root / rel).read_text(encoding="utf-8")
+
+    def test_dry_run_plans_and_writes_nothing(self):
+        before = tree_snapshot(self.project)
+        code, out, err = self.reconcile("--set", "decision=ruling",
+                                        "--dry-run", "--json")
+        self.assertEqual(code, 0, err)
+        self.assertEqual(tree_snapshot(self.project), before)
+        plan = json.loads(out)
+        self.assertTrue(plan["dry_run"])
+        news = {r["path"]: r["new_title"] for r in plan["retitles"]}
+        self.assertEqual(
+            news[f"{BA_SPACE}/decisions/pilot-scope-decision.md"],
+            "Pilot scope ruling")
+        self.assertEqual(
+            news[f"{DEC}/order-events-v2-decision.md"],
+            "Order events v2 ruling")
+        self.assertEqual(plan["config"]["history_appends"],
+                         [{"type": "decision", "value": "decision"}])
+
+    def test_execute_transitions_titles_h1_config_and_index(self):
+        # a curated alias byte-equal to the old title is swept too
+        edit(self.root / "maps" / "solution-design.md",
+             "- [[solution-design/decision-log|Decision Index]]",
+             "- [[solution-design/decision-log|Decision Index]]\n"
+             "- [[solution-design/decisions/order-events-v2-decision"
+             "|Order events v2 decision]]")
+        code, out, err = self.reconcile("--set", "decision=ruling")
+        self.assertEqual(code, 0, err)
+        pilot = self.read(f"{BA_SPACE}/decisions/pilot-scope-decision.md")
+        self.assertIn("title: Pilot scope ruling", pilot)
+        self.assertIn("# Pilot scope ruling", pilot)
+        self.assertNotIn("decision ruling", pilot)
+        self.assertIn("|Order events v2 ruling]]",
+                      self.read("maps/solution-design.md"))
+        index = self.read(f"{SD}/decision-log.md")
+        self.assertIn("Order events v2 ruling", index)
+        config = json.loads((self.project / "config.json")
+                            .read_text(encoding="utf-8"))
+        self.assertEqual(config["doc_type_designations"]["decision"],
+                         "ruling")
+        entry = config["doc_type_designation_history"]["decision"][0]
+        self.assertEqual(entry["value"], "decision")
+        self.assertEqual(entry["superseded_by"], "ruling")
+        code, findings = check_findings(self.root)
+        self.assertEqual(code, 0, findings)
+
+    def test_second_run_is_byte_identical(self):
+        code, _, err = self.reconcile("--set", "decision=ruling")
+        self.assertEqual(code, 0, err)
+        before = tree_snapshot(self.project)
+        code, _, err = self.reconcile("--set", "decision=ruling")
+        self.assertEqual(code, 0, err)
+        self.assertEqual(tree_snapshot(self.project), before)
+
+    def test_locked_skipped_by_default_included_with_audit(self):
+        write_config(self.root, DESIGNATIONS, project_key="erp")
+        rel = f"{BA_SPACE}/reviews/space-round-2-review.md"
+        write(self.root / rel,
+              typed_note("challenge_record", "ERP review round 2",
+                         "status: approved\nowner_role: business_analyst\n"
+                         "round: 2\nreview_scope: space\n"
+                         "verdict: continue\nlocked: true\n"
+                         "approved_at: 2026-07-01\n"))
+        stub = self.project.parent / "pmo_stub.py"
+        log = self.project.parent / "events.jsonl"
+        stub.write_text(
+            "import json, sys, pathlib\n"
+            f"path = pathlib.Path({str(log)!r})\n"
+            "path.open('a').write(json.dumps(sys.argv[1:]) + '\\n')\n",
+            encoding="utf-8")
+        before = (self.root / rel).read_bytes()
+        code, out, err = self.reconcile(
+            "--set", "challenge-record=assessment round")
+        self.assertEqual(code, 0, err)
+        self.assertEqual((self.root / rel).read_bytes(), before)
+        self.assertIn("LOCKED skipped", out)
+        code, out, err = self.reconcile(
+            "--set", "challenge-record=assessment round",
+            "--include-locked", "--pmo-launcher", str(stub))
+        self.assertEqual(code, 0, err)
+        text = self.read(rel)
+        self.assertIn("title: ERP assessment round 2", text)
+        self.assertIn("# ERP assessment round 2", text)
+        self.assertIn("verdict: continue", text)
+        self.assertIn("locked: true", text)
+        events = [json.loads(line)
+                  for line in log.read_text(encoding="utf-8").splitlines()]
+        self.assertEqual(len(events), 1)
+        self.assertIn("designation_relabel", events[0])
+        self.assertIn("erp", events[0])
+
+    def test_from_override_heals_a_ledgerless_swap(self):
+        write_config(self.root, dict(DESIGNATIONS, decision="ruling"))
+        code, _, err = self.reconcile("--set", "decision=ruling",
+                                      "--from", "decision=decision")
+        self.assertEqual(code, 0, err)
+        self.assertIn("title: Pilot scope ruling",
+                      self.read(f"{BA_SPACE}/decisions/"
+                                "pilot-scope-decision.md"))
+        config = json.loads((self.project / "config.json")
+                            .read_text(encoding="utf-8"))
+        # --from is never recorded: it was not a configured value
+        self.assertNotIn("doc_type_designation_history", config)
+
+    def test_manual_cases_named_not_touched(self):
+        write(self.root / BA_SPACE / "actors.md",
+              typed_note("actor_roster", "Actors"))
+        write(self.root / BA_SPACE / "reviews" / "round-1-review.md",
+              typed_note("challenge_record", "Tur 1 incelemesi",
+                         "status: draft\nowner_role: business_analyst\n"
+                         "round: 1\nreview_scope: space\n"))
+        code, out, _ = self.reconcile(
+            "--set", "actor-roster=cast",
+            "--set", "challenge-record=assessment round",
+            "--dry-run", "--json")
+        self.assertEqual(code, 0)
+        plan = json.loads(out)
+        reasons = {m["path"]: m["reason"] for m in plan["manual"]}
+        self.assertIn("only its designation",
+                      reasons[f"{BA_SPACE}/actors.md"])
+        self.assertIn("round number",
+                      reasons[f"{BA_SPACE}/reviews/round-1-review.md"])
+
+    def test_migrate_second_door_stays_shut(self):
+        # config already changed with the ledger recorded, titles stale:
+        # migrate must NOT append the new value over the retired tail
+        write_config(self.root, dict(DESIGNATIONS, decision="ruling"),
+                     history={"decision": [{"value": "decision"}]})
+        code, _, err = run(["migrate", "--vault", str(self.root)])
+        self.assertEqual(code, 0, err)
+        pilot = self.read(f"{BA_SPACE}/decisions/pilot-scope-decision.md")
+        self.assertIn("title: Pilot scope decision", pilot)
+        self.assertNotIn("decision ruling", pilot)
+
+    def test_migrate_content_dry_run_writes_nothing(self):
+        edit(self.root / SD / "landscape.md",
+             "The components and their owning decisions.",
+             "See [the decision](decisions/order-events-decision.md).")
+        before = tree_snapshot(self.project)
+        code, out, err = run(["migrate", "--vault", str(self.root),
+                              "--dry-run"])
+        self.assertEqual(code, 0, err)
+        self.assertEqual(tree_snapshot(self.project), before)
+        self.assertIn("dry run", out)
+
+    def test_unknown_type_and_missing_config_refused(self):
+        code, _, err = self.reconcile("--set", "ghost=x")
+        self.assertEqual(code, 2)
+        self.assertIn("no known doc type", err)
+        (self.project / "config.json").unlink()
+        code, _, err = self.reconcile("--set", "decision=ruling")
+        self.assertEqual(code, 2)
+        self.assertIn("setup entry", err)
+
+
+class ConfigGuardHookTests(unittest.TestCase):
+    """The write-time single-writer guard on workspace/config.json: no
+    Write/Edit ever changes the designation keys (mint included); the
+    sanctioned verb writes via subprocess and never meets this hook."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.project = Path(self.tmp.name) / "proj"
+        self.vault = self.project / "workspace" / "docs"
+        make_valid_vault(self.vault)
+        self.config = self.project / "workspace" / "config.json"
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def hook(self, tool_input: dict, tool="Write"):
+        err = io.StringIO()
+        payload = {"tool_name": tool, "tool_input": tool_input}
+        with redirect_stderr(err), redirect_stdout(io.StringIO()):
+            code = vh.pre(payload)
+        return code, err.getvalue()
+
+    def config_payload(self, mutate=None) -> str:
+        data = json.loads(self.config.read_text(encoding="utf-8"))
+        if mutate:
+            mutate(data)
+        return json.dumps(data, indent=2)
+
+    def test_edit_naming_the_key_denied(self):
+        code, err = self.hook(
+            {"file_path": str(self.config),
+             "old_string": '"doc_type_designations"', "new_string": "x"},
+            tool="Edit")
+        self.assertEqual(code, 2)
+        self.assertIn("reconcile-designations", err)
+
+    def test_edit_fragment_inside_guarded_block_denied(self):
+        code, err = self.hook(
+            {"file_path": str(self.config),
+             "old_string": '"decision": "decision"',
+             "new_string": '"decision": "ruling"'},
+            tool="Edit")
+        self.assertEqual(code, 2)
+        self.assertIn("machine-managed", err)
+
+    def test_edit_of_unrelated_key_passes(self):
+        code, err = self.hook(
+            {"file_path": str(self.config),
+             "old_string": '"terminology_language": "English"',
+             "new_string": '"terminology_language": "German"'},
+            tool="Edit")
+        self.assertEqual(code, 0, err)
+
+    def test_write_changing_the_subtree_denied(self):
+        content = self.config_payload(
+            lambda d: d["doc_type_designations"].update(decision="ruling"))
+        code, err = self.hook({"file_path": str(self.config),
+                               "content": content})
+        self.assertEqual(code, 2)
+        self.assertIn("single writer", err)
+
+    def test_write_preserving_the_subtree_passes(self):
+        content = self.config_payload(
+            lambda d: d.update(terminology_language="German"))
+        code, err = self.hook({"file_path": str(self.config),
+                               "content": content})
+        self.assertEqual(code, 0, err)
+
+    def test_write_introducing_over_absent_denied_mint_is_the_verbs(self):
+        fresh = self.project / "other" / "workspace" / "config.json"
+        code, err = self.hook({
+            "file_path": str(fresh),
+            "content": json.dumps({"doc_type_designations": {}})})
+        self.assertEqual(code, 2)
+        self.assertIn("mint through the same verb", err)
+        code, err = self.hook({
+            "file_path": str(fresh),
+            "content": json.dumps({"project_key": "erp"})})
+        self.assertEqual(code, 0, err)
+
+    def test_unparseable_write_denied(self):
+        code, err = self.hook({"file_path": str(self.config),
+                               "content": "{ broken"})
+        self.assertEqual(code, 2)
+        self.assertIn("unparseable", err)
+
+    def test_foreign_config_json_untouched(self):
+        code, err = self.hook({"file_path": str(self.project / "frontend"
+                                                / "config.json"),
+                               "content": "{ broken"})
+        self.assertEqual(code, 0, err)
 
 
 class FoldUnitTests(unittest.TestCase):

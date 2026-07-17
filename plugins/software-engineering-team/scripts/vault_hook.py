@@ -7,7 +7,10 @@ Two moments, one law (the obsidian-vault skill):
   lands. A vault-internal relative markdown link, an unescaped alias pipe
   in a table-row wikilink, or an inline flow-list tags:/aliases: value
   never reaches disk, regardless of which agent writes. Content-only
-  regexes, zero vault I/O.
+  regexes, zero vault I/O. The one exception is workspace/config.json:
+  its designation keys are machine-managed with a single writer (the
+  reconcile-designations verb, a subprocess this hook never sees), so
+  ANY tool-level change to them is denied, which needs one disk read.
 - post (PostToolUse, Write|Edit): after a write lands under the vault,
   run vault_check's --changed fast path and surface its findings to the
   writing session immediately, so link and metadata duties are repaired
@@ -30,6 +33,18 @@ from pathlib import Path
 import vault_check
 
 VAULT_SEGMENTS = ("workspace", "docs")
+
+# Machine-managed config keys with a single sanctioned writer (the
+# vault_check.py reconcile-designations verb). The verb writes via
+# subprocess and never traverses PreToolUse, so the deny below needs no
+# handshake: no Write/Edit call ever changes these keys legitimately.
+CONFIG_GUARD_KEYS = ("doc_type_designations", "doc_type_designation_history")
+
+CONFIG_GUARD_MESSAGE = (
+    "doc_type_designations and its history ledger are machine-managed;"
+    " their single writer is vault_check.py reconcile-designations, driven"
+    " by the configure entry (build-docs-vault and setup mint through the"
+    " same verb). Hand edits desynchronize every vault title.")
 
 # A relative markdown link that is not http(s)/mailto/anchor/root form.
 MD_LINK_RE = re.compile(
@@ -92,11 +107,113 @@ def outside_fences(text: str) -> list[tuple[int, str]]:
     return lines
 
 
+def is_workspace_config(file_path: str) -> bool:
+    parts = Path(file_path).as_posix().split("/")
+    return parts[-2:] == ["workspace", "config.json"]
+
+
+def guarded_spans(text: str) -> list[tuple[int, int]]:
+    """Char spans of the guarded keys' JSON blocks (key name through the
+    matching close), string-aware, so an Edit fragment that lands inside
+    a guarded block is recognized even when it never names the key."""
+    spans: list[tuple[int, int]] = []
+    for key in CONFIG_GUARD_KEYS:
+        start = text.find(f'"{key}"')
+        if start == -1:
+            continue
+        i = text.find(":", start)
+        if i == -1:
+            continue
+        i += 1
+        while i < len(text) and text[i] in " \t\r\n":
+            i += 1
+        if i >= len(text) or text[i] not in "{[":
+            spans.append((start, min(len(text), i + 1)))
+            continue
+        opener, closer = text[i], {"{": "}", "[": "]"}[text[i]]
+        depth = 0
+        j = i
+        in_str = False
+        while j < len(text):
+            ch = text[j]
+            if in_str:
+                if ch == "\\":
+                    j += 2
+                    continue
+                if ch == '"':
+                    in_str = False
+            elif ch == '"':
+                in_str = True
+            elif ch == opener:
+                depth += 1
+            elif ch == closer:
+                depth -= 1
+                if depth == 0:
+                    break
+            j += 1
+        spans.append((start, min(len(text), j + 1)))
+    return spans
+
+
+def config_guard(tool_input: dict, file_path: str) -> int:
+    """Deny any tool-level change to the guarded designation keys, mint
+    included: introduction over an absent key is a change. Writes are
+    diffed subtree-against-disk (a Write changing only other config keys
+    passes); Edits are fragments the final JSON cannot be rebuilt from,
+    so any fragment naming a guarded key or landing inside its on-disk
+    block is denied conservatively."""
+    try:
+        disk_text = Path(file_path).read_text(encoding="utf-8")
+    except OSError:
+        disk_text = None
+    if "content" in tool_input:
+        try:
+            proposed = json.loads(str(tool_input.get("content") or ""))
+        except json.JSONDecodeError:
+            return deny(
+                "workspace/config.json is machine-managed JSON; an"
+                " unparseable write would blind every designation check. "
+                + CONFIG_GUARD_MESSAGE)
+        if not isinstance(proposed, dict):
+            return deny("workspace/config.json holds a JSON object. "
+                        + CONFIG_GUARD_MESSAGE)
+        disk = None
+        if disk_text is not None:
+            try:
+                disk = json.loads(disk_text)
+            except json.JSONDecodeError:
+                disk = None
+        for key in CONFIG_GUARD_KEYS:
+            disk_value = disk.get(key) if isinstance(disk, dict) else None
+            if proposed.get(key) != disk_value:
+                return deny(CONFIG_GUARD_MESSAGE)
+        return 0
+    old = str(tool_input.get("old_string") or "")
+    new = str(tool_input.get("new_string") or "")
+    if any(key in old or key in new for key in CONFIG_GUARD_KEYS):
+        return deny(CONFIG_GUARD_MESSAGE)
+    if disk_text and old:
+        spans = guarded_spans(disk_text)
+        pos = disk_text.find(old)
+        while pos != -1:
+            end = pos + len(old)
+            if any(pos < s_end and end > s_start
+                   for (s_start, s_end) in spans):
+                return deny(CONFIG_GUARD_MESSAGE)
+            pos = disk_text.find(old, pos + 1)
+    return 0
+
+
 def pre(payload: dict) -> int:
     tool_input = payload.get("tool_input", {})
     if not isinstance(tool_input, dict):
         return 0
     file_path = str(tool_input.get("file_path", ""))
+    if is_workspace_config(file_path):
+        try:
+            return config_guard(tool_input, file_path)
+        except Exception:
+            return 0  # a guard never takes the session down
     rel = vault_relative(file_path)
     if rel is None or not rel.endswith(".md"):
         return 0

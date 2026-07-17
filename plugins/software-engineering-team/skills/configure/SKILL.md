@@ -44,8 +44,12 @@ Config changes go through this gate, never through hand edits.
    cap; absent means 3; this gate is its only writer);
    doc_type_designations a map of each taxonomy type-kebab to its
    rendered designation string, minted from the canonical English table
-   into output_language, machine-managed and, like the language axes,
-   changed only through this gate, a change re-checking every vault title.
+   into output_language. It and its doc_type_designation_history ledger
+   are machine-managed with ONE writer, the checker's
+   reconcile-designations verb (the write-time hook denies every other
+   Write/Edit of these keys). Validate a requested value: key a known
+   taxonomy type, value a non-empty output_language phrase, refused
+   when fold-equal to another type's current designation.
 4. Present the impact analysis before writing: which roles' skill
    bindings change (the static role-to-skill map lives in
    ${CLAUDE_PLUGIN_ROOT}/flows/develop.md, step 0; method skills such as
@@ -58,6 +62,27 @@ Config changes go through this gate, never through hand edits.
    renamed, state this fork whenever the key changes on a project with
    authored content. The apply / reject decision is asked through the
    AskUserQuestion popup (impact summary in the option descriptions).
-5. On approval, write workspace/config.json and nothing else: this gate
-   touches exactly one file. Confirm the diff to the user. On rejection,
-   stop; nothing is written.
+   For a designation change (or an output_language change, which
+   re-renders the canonical table from the obsidian-vault skill's
+   metadata into the new language and passes every pair), the impact
+   analysis IS the verb's plan (the title law it transitions is that
+   skill's):
+   ${CLAUDE_PLUGIN_ROOT}/scripts/vault_check.py reconcile-designations
+   --vault workspace/docs --set <type>=<value> ... --dry-run --json.
+   Render the popup from that plan: apply / reject / adjust wording,
+   with the before -> after retitles and alias sweeps in the
+   descriptions; when locked_skipped is non-empty, a SECOND question:
+   relabel the locked records (PMO-audited, title and H1 only,
+   recommended) or leave them as named check warnings. manual and
+   blocked entries are presented as named residuals, never as
+   approvable options.
+5. On approval: designation keys execute through the verb, never a
+   Write (run it without --dry-run, adding --include-locked per the
+   locked answer and --actor configure); it writes config.json (map
+   plus ledger in one write), transitions every affected title and H1,
+   sweeps byte-equal link aliases, re-renders the generated views and
+   appends one PMO audit event per relabeled locked record. Close with
+   a full check: green, or every residual named. Every OTHER key:
+   write workspace/config.json and nothing else, this gate touches
+   exactly one file. Confirm the diff to the user. On rejection, stop;
+   nothing is written.

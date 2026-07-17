@@ -13,6 +13,10 @@ Verbs:
   render-decisions render each decision tree's generated index
   stamp-decision   stamp a decision note's status (one clock, one write)
   migrate          apply the deterministic legacy-to-vault rewrites
+  reconcile-designations
+                   the single writer of the designation map and its
+                   ledger: change (or mint) values and transition every
+                   affected title old -> new in one sanctioned operation
 
 Stdlib only. Findings sorted by (path, line, check). Wikilink resolution
 runs against one posix-keyed file index, never the filesystem, so wrong
@@ -24,8 +28,10 @@ from __future__ import annotations
 import argparse
 import fnmatch
 import json
+import os
 import re
 import shutil
+import subprocess
 import sys
 import unicodedata
 from dataclasses import dataclass, field
@@ -58,8 +64,9 @@ CHECK_IDS = (
     "vault_layout", "wikilink_resolution", "anchor_resolution",
     "link_policy", "table_pipe", "table_shape", "banned_basename",
     "title_shape", "orphans", "moc_coverage", "map_coverage", "nav_footer",
-    "frontmatter_props", "tags_mirror", "alias_ownership",
-    "decision_records", "generated_views", "home_shape", "obsidian_payload",
+    "designation_drift", "frontmatter_props", "tags_mirror",
+    "alias_ownership", "decision_records", "generated_views", "home_shape",
+    "obsidian_payload",
 )
 
 # Checks that judge the vault as a whole; --scope never silences them,
@@ -110,6 +117,12 @@ NAV_DOC_TYPES = ("home", "moc")
 # map itself rather than any single note.
 DESIGNATION_CONFIG_REL = "config.json"
 
+# The retired-designation ledger, a machine-managed SIBLING of the map
+# (never nested inside it: older checkers drop non-string map values
+# silently, so nesting would blank the whole map for them). The
+# reconcile-designations verb is the single writer of both keys.
+DESIGNATION_HISTORY_KEY = "doc_type_designation_history"
+
 
 @dataclass(frozen=True)
 class Finding:
@@ -148,6 +161,10 @@ class Vault:
     # The consumer's rendered {kebab type -> designation} map, or None when
     # config.json is missing, unreadable, or omits the key (fail-closed).
     designations: dict | None = None
+    # The retired-designation ledger, {kebab type -> [prior values]};
+    # empty when config carries none (fail-soft: the ledger is memory
+    # for the drift check and the reconcile strip, never a gate itself).
+    designation_history: dict = field(default_factory=dict)
     # The kebab taxonomy types that must carry a designation (same source
     # as the graph color-completeness guard, minus the nav types).
     taxonomy_types: set = field(default_factory=set)
@@ -303,6 +320,7 @@ def build_vault(root: Path, policy: dict) -> Vault:
         for target in targets:
             vault.inbound.setdefault(f"{target}.md", set()).add(note.rel)
     vault.designations = load_designations(root)
+    vault.designation_history = load_designation_history(root)
     vault.taxonomy_types = designation_type_universe(policy)
     return vault
 
@@ -335,6 +353,72 @@ def designation_present(title: str, designation: str) -> bool:
         return False
     pattern = r"(?<![^\W\d_])" + re.escape(fold(designation))
     return re.search(pattern, fold(title)) is not None
+
+
+def peel_trailing_token(title: str, token: str) -> str | None:
+    """The title without its trailing whitespace-delimited token when
+    that token byte-equals `token`, else None. Raw-offset slicing."""
+    matches = list(re.finditer(r"\S+", title))
+    if not matches or matches[-1].group(0) != token:
+        return None
+    return title[:matches[-1].start()].rstrip()
+
+
+def designation_tail_span(title: str, designation: str,
+                          round_no: int | None = None) -> int | None:
+    """Raw char index where the title's designation tail begins, or
+    None. The tail is the designation's tokens CLOSING the title (before
+    the trailing round-number token when round_no is given), every token
+    fold-equal and the last granted the same right-open agglutinative
+    tolerance designation_present grants: the title token fold-starts
+    with the designation token, letters only beyond it. fold() changes
+    string length (NFKC on a dotted I), so it serves only as the
+    equality oracle; every slice happens on raw offsets."""
+    if not designation:
+        return None
+    tokens = [(m.start(), m.group(0)) for m in re.finditer(r"\S+", title)]
+    if round_no is not None:
+        if not tokens or tokens[-1][1] != str(round_no):
+            return None
+        tokens = tokens[:-1]
+    desig_tokens = designation.split()
+    if not desig_tokens or len(tokens) < len(desig_tokens):
+        return None
+    tail = tokens[-len(desig_tokens):]
+    for (_, have), want in zip(tail[:-1], desig_tokens[:-1]):
+        if fold(have) != fold(want):
+            return None
+    last_have = fold(tail[-1][1])
+    last_want = fold(desig_tokens[-1])
+    if last_have != last_want:
+        if not last_have.startswith(last_want):
+            return None
+        if not last_have[len(last_want):].isalpha():
+            return None
+    return tail[0][0]
+
+
+def strip_designation_tails(title: str, candidates: list[str]) -> str:
+    """Fixpoint-strip candidate designation tails from the raw title,
+    longest-folded-first so a candidate extending another ('inceleme
+    turu' over 'turu') always wins. A tail spanning the WHOLE title is
+    never stripped: a title that IS its designation stays whole, a
+    judgment case, never a mechanical empty."""
+    ordered = sorted({c for c in candidates if c},
+                     key=lambda c: -len(fold(c)))
+    current = title
+    for _ in range(len(title.split()) + 1):
+        stripped = False
+        for candidate in ordered:
+            span = designation_tail_span(current, candidate)
+            if span is None or span == 0:
+                continue
+            current = current[:span].rstrip()
+            stripped = True
+            break
+        if not stripped:
+            break
+    return current
 
 
 def schema_doc_types() -> set:
@@ -376,6 +460,37 @@ def load_designations(vault_root: Path) -> dict | None:
         return None
     return {str(k): str(v).strip() for k, v in raw.items()
             if isinstance(v, str) and str(v).strip()}
+
+
+def load_designation_history(vault_root: Path) -> dict:
+    """The consumer's retired-designation ledger from the same config
+    file, {kebab type -> [prior values, oldest first]}. Fail-soft: a
+    missing, unreadable, or malformed ledger is an empty one. Entries
+    may be the written {value, replaced, superseded_by} objects or bare
+    strings; only the values are the checker's business. Hygiene (dead
+    keys, entries duplicating the current value) is the drift check's,
+    so nothing is silently dropped here."""
+    config_path = vault_root.parent / "config.json"
+    try:
+        data = json.loads(config_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+    raw = data.get(DESIGNATION_HISTORY_KEY) if isinstance(data, dict) else None
+    if not isinstance(raw, dict):
+        return {}
+    history: dict[str, list[str]] = {}
+    for key, entries in raw.items():
+        if not isinstance(entries, list):
+            continue
+        values: list[str] = []
+        for entry in entries:
+            value = entry.get("value") if isinstance(entry, dict) else entry
+            if isinstance(value, str) and value.strip() \
+                    and value.strip() not in values:
+                values.append(value.strip())
+        if values:
+            history[str(key)] = values
+    return history
 
 
 # ---------------------------------------------------------------------------
@@ -705,7 +820,10 @@ def check_title_designation(vault: Vault, note: Note, title: str,
     folded), and a challenge-record title also carries its round number as a
     standalone token. The map is config data: absent, or missing this type,
     is the mint-duty WARNING (never a silent pass); present binds the
-    containment ERROR."""
+    containment ERROR. Locked records downgrade to warnings: an error no
+    Write/Edit can ever repair (the PMO lock guard denies them) would
+    deadlock every gate, so the finding names the audited relabel path
+    instead."""
     designations = vault.designations
     if designations is None:
         findings.append(Finding(
@@ -724,24 +842,40 @@ def check_title_designation(vault: Vault, note: Note, title: str,
             "run setup/configure or build-docs-vault to mint this type's"
             " designation in workspace/config.json"))
         return
+    locked = note.fm.get("locked") is True
     if not designation_present(title, designation):
-        findings.append(Finding(
-            "error", note.rel, 1, "title_shape",
-            f"title '{title}' does not carry the '{kebab_type}'"
-            f" designation '{designation}'",
-            "the title is a natural output_language phrase carrying its"
-            " type's designation; the migrate verb appends it"))
+        if locked:
+            findings.append(Finding(
+                "warning", note.rel, 1, "title_shape",
+                f"locked record title '{title}' does not carry the"
+                f" '{kebab_type}' designation '{designation}'",
+                "locked records are closed audit history; relabel the"
+                " title through reconcile-designations --include-locked"
+                " (PMO-audited, title and H1 only) or accept this named"
+                " residual"))
+        else:
+            findings.append(Finding(
+                "error", note.rel, 1, "title_shape",
+                f"title '{title}' does not carry the '{kebab_type}'"
+                f" designation '{designation}'",
+                "the title is a natural output_language phrase carrying its"
+                " type's designation; the migrate verb appends it (titles"
+                " holding a retired value reconcile through"
+                " reconcile-designations)"))
     if kebab_type == "challenge-record":
         round_no = note.fm.get("round")
         if isinstance(round_no, int) and not re.search(
                 r"(?<!\d)" + re.escape(str(round_no)) + r"(?!\d)", title):
             findings.append(Finding(
-                "error", note.rel, 1, "title_shape",
+                "warning" if locked else "error", note.rel, 1, "title_shape",
                 f"review-round title '{title}' does not carry its round"
                 f" number {round_no} as a standalone token",
-                "review-round titles read '<scope> <review-round"
-                " designation> <n>'; retitle it (auto-append leaves"
-                " round-number placement to judgment)"))
+                ("locked records are closed audit history; relabel through"
+                 " reconcile-designations --include-locked or accept this"
+                 " named residual") if locked else
+                ("review-round titles read '<scope> <review-round"
+                 " designation> <n>'; retitle it (auto-append leaves"
+                 " round-number placement to judgment)")))
 
 
 def check_designation_coverage(vault: Vault, findings: list[Finding]) -> None:
@@ -764,6 +898,109 @@ def check_designation_coverage(vault: Vault, findings: list[Finding]) -> None:
             f"designation map key '{unknown}' names no known doc type",
             "map keys are kebab taxonomy types; drop the stale key or"
             " declare the type"))
+
+
+def stale_designation_values(vault: Vault, kebab_type: str) -> list[str]:
+    """The type's retired candidate values: its ledger entries that are
+    not fold-equal to its current designation."""
+    current = (vault.designations or {}).get(kebab_type, "")
+    return [h for h in vault.designation_history.get(kebab_type, [])
+            if not current or fold(h) != fold(current)]
+
+
+def check_designation_drift(vault: Vault, findings: list[Finding]) -> None:
+    """Titles hold against the retired-designation ledger. A retired
+    value closing a typed title (bare, or buried under the current
+    designation: the double-suffix shape) is the mechanically fixable
+    ERROR; a retired value stranded mid-title, and a current designation
+    that is not the title's closing phrase, are judgment WARNINGS.
+    Locked records always warn (the audited relabel or the named
+    residual, never a red no tool-level write can repair). Ledger
+    hygiene findings land on config.json. A vault with no ledger emits
+    nothing per note: green vaults stay green by construction."""
+    designations = vault.designations
+    policy = vault.policy
+    if designations is not None:
+        for note in authored(vault):
+            if in_machine_dir(policy, note.rel):
+                continue
+            title = note.fm.get("title")
+            note_type = note.fm.get("type")
+            kebab_type = kebab(note_type) if note_type else ""
+            if not isinstance(title, str) or not title.strip() \
+                    or kebab_type not in vault.taxonomy_types:
+                continue
+            designation = designations.get(kebab_type)
+            if not designation:
+                continue
+            locked = note.fm.get("locked") is True
+            work = title
+            if kebab_type == "challenge-record":
+                round_no = note.fm.get("round")
+                if isinstance(round_no, int):
+                    peeled = peel_trailing_token(work, str(round_no))
+                    if peeled is not None:
+                        work = peeled
+            span = designation_tail_span(work, designation)
+            base = work[:span].rstrip() if span not in (None, 0) else work
+            stale = stale_designation_values(vault, kebab_type)
+            tail_hit = next(
+                (h for h in sorted(stale, key=lambda h: -len(fold(h)))
+                 if (designation_tail_span(base, h) or 0) > 0), None)
+            if tail_hit is not None:
+                findings.append(Finding(
+                    "warning" if locked else "error", note.rel, 1,
+                    "designation_drift",
+                    f"{'locked record ' if locked else ''}title '{title}'"
+                    f" still carries the retired '{kebab_type}'"
+                    f" designation '{tail_hit}'",
+                    "reconcile-designations strips the retired tail and"
+                    " appends the current designation"
+                    + (" (--include-locked, PMO-audited, for locked"
+                       " records)" if locked else "")))
+            else:
+                judgment_hit = next((h for h in stale
+                                     if designation_present(base, h)), None)
+                if judgment_hit is not None:
+                    whole = designation_tail_span(base, judgment_hit) == 0
+                    findings.append(Finding(
+                        "warning", note.rel, 1, "designation_drift",
+                        (f"title '{title}' IS the retired '{kebab_type}'"
+                         f" designation '{judgment_hit}'" if whole else
+                         f"retired '{kebab_type}' designation"
+                         f" '{judgment_hit}' appears mid-title in"
+                         f" '{title}'"),
+                        ("a mechanical transition would empty the base;"
+                         " retitle by judgment" if whole else
+                         "a mid-title occurrence is meaning, not"
+                         " mechanics; retitle by judgment if it is stale"
+                         " wording")))
+            if designation_present(title, designation) and span is None:
+                findings.append(Finding(
+                    "warning", note.rel, 1, "designation_drift",
+                    f"'{kebab_type}' designation '{designation}' is not"
+                    f" the closing phrase of title '{title}'",
+                    "titles close with their designation (review rounds:"
+                    " designation then round number); retitle, or"
+                    " reconcile-designations --from names an unrecorded"
+                    " prior value"))
+    for unknown in sorted(set(vault.designation_history)
+                          - vault.taxonomy_types):
+        findings.append(Finding(
+            "error", DESIGNATION_CONFIG_REL, 1, "designation_drift",
+            f"designation history key '{unknown}' names no known doc type",
+            "ledger keys are kebab taxonomy types; drop the stale key or"
+            " declare the type"))
+    for kebab_type in sorted(vault.designation_history):
+        current = (designations or {}).get(kebab_type, "")
+        if current and any(fold(v) == fold(current)
+                           for v in vault.designation_history[kebab_type]):
+            findings.append(Finding(
+                "error", DESIGNATION_CONFIG_REL, 1, "designation_drift",
+                f"designation history for '{kebab_type}' repeats the"
+                f" current designation '{current}'",
+                "the ledger holds RETIRED values only; the"
+                " reconcile-designations verb maintains it"))
 
 
 def check_map_coverage(vault: Vault, findings: list[Finding]) -> None:
@@ -1458,6 +1695,7 @@ CHECKS = {
     "table_shape": check_table_shape,
     "banned_basename": check_banned_basename,
     "title_shape": check_title_shape,
+    "designation_drift": check_designation_drift,
     "orphans": check_orphans,
     "moc_coverage": check_moc_coverage,
     "map_coverage": check_map_coverage,
@@ -1473,8 +1711,8 @@ CHECKS = {
 # Per-file checks the --changed fast path (the per-write hook) runs.
 CHANGED_CHECKS = ("wikilink_resolution", "anchor_resolution", "link_policy",
                   "table_pipe", "table_shape", "title_shape",
-                  "alias_ownership", "nav_footer", "frontmatter_props",
-                  "tags_mirror", "decision_records")
+                  "designation_drift", "alias_ownership", "nav_footer",
+                  "frontmatter_props", "tags_mirror", "decision_records")
 
 
 # ---------------------------------------------------------------------------
@@ -1816,7 +2054,10 @@ def append_designation(vault: Vault, note: Note, lines: list[str]) -> int:
     when the map is absent, the type is nav or unmapped, or the designation
     is already present (idempotent through the SAME test the check uses).
     Challenge records are excluded: round-number placement is judgment, so
-    they stay a check finding for build-docs-vault to retitle."""
+    they stay a check finding for build-docs-vault to retitle. A title
+    whose tail holds a RETIRED value is reconcile-designations' class:
+    appending over it would mint the double suffix, so it is skipped and
+    stays a designation_drift finding."""
     designations = vault.designations
     if designations is None:
         return 0
@@ -1836,6 +2077,9 @@ def append_designation(vault: Vault, note: Note, lines: list[str]) -> int:
             title_idx = i
             break
     if title_idx is None or not current or designation_present(current, designation):
+        return 0
+    if any(designation_tail_span(current, h) is not None
+           for h in stale_designation_values(vault, kebab_type)):
         return 0
     new_title = f"{current} {designation}"
     indent = lines[title_idx][:len(lines[title_idx])
@@ -2193,17 +2437,22 @@ def cmd_migrate(args, policy: dict) -> int:
             rewrites += 1
         total_manual += manual
         if rewrites:
-            note.path.write_text(text, encoding="utf-8")
+            # --dry-run gates EVERY content write, not only --rename.
+            if not args.dry_run:
+                note.path.write_text(text, encoding="utf-8")
             touched += 1
             total_rewrites += rewrites
-            print(f"vault_check: migrated {note.rel} ({rewrites} rewrites)")
-    retired = retired_reconcile(root, policy, skip)
-    reconciled = payload_reconcile(root, policy, args.payload)
+            print(f"vault_check: migrated {note.rel} ({rewrites} rewrites)"
+                  + (" (dry run)" if args.dry_run else ""))
+    retired = 0 if args.dry_run else retired_reconcile(root, policy, skip)
+    reconciled = (0 if args.dry_run
+                  else payload_reconcile(root, policy, args.payload))
     print(f"vault_check: migrate touched {touched} notes,"
           f" {total_rewrites} rewrites;"
           f" {retired} retired surface(s) cleared;"
           f" {reconciled} payload file(s) reconciled;"
-          f" {total_manual} link(s) left for stewardship")
+          f" {total_manual} link(s) left for stewardship"
+          + (" (dry run: nothing written)" if args.dry_run else ""))
     return 0
 
 
@@ -2426,6 +2675,417 @@ def migrate_rename(args, policy: dict, vault: Vault, skip: set) -> int:
 
 
 # ---------------------------------------------------------------------------
+# Reconcile designations: the map's single writer and title transitioner
+# ---------------------------------------------------------------------------
+
+
+def parse_type_values(pairs: list[str], universe: set,
+                      label: str) -> dict[str, list[str]] | None:
+    """--set/--from '<type>=<value>' pairs -> {kebab type: [values]};
+    None (reported) on a malformed pair or an unknown type."""
+    out: dict[str, list[str]] = {}
+    for raw in pairs or []:
+        key, sep, value = raw.partition("=")
+        key = kebab(key.strip())
+        value = value.strip()
+        if not sep or not key or not value:
+            print(f"vault_check: {label} takes <type>=<value>, got '{raw}'",
+                  file=sys.stderr)
+            return None
+        if key not in universe:
+            print(f"vault_check: {label} type '{key}' names no known doc"
+                  " type", file=sys.stderr)
+            return None
+        out.setdefault(key, []).append(value)
+    return out
+
+
+def build_designation_plan(vault: Vault, changes: list[dict],
+                           extra_old: dict, frozen: set,
+                           include_locked: bool) -> dict:
+    """The retitle and alias plan for the requested designation changes.
+    Pure planning, no writes. A title transitions to base + current
+    designation (+ round for review rounds), the base found by stripping
+    every known prior value of the note's OWN type from the tail only
+    (type-scoped: another type's designation is legitimate title
+    vocabulary, never a strip candidate)."""
+    plan: dict = {"changes": changes, "retitles": [], "locked_skipped": [],
+                  "alias_rewrites": [], "manual": [], "blocked": []}
+    by_type = {c["type"]: c for c in changes}
+    retitled: dict[str, tuple[str, str]] = {}
+    for note in authored(vault):
+        if in_machine_dir(vault.policy, note.rel):
+            continue
+        note_type = note.fm.get("type")
+        kebab_type = kebab(note_type) if note_type else ""
+        change = by_type.get(kebab_type)
+        if change is None:
+            continue
+        title = note.fm.get("title")
+        if not isinstance(title, str) or not title.strip():
+            continue  # the missing-title error is title_shape's subject
+        new = change["new"]
+        candidates = [new] + ([change["old"]] if change["old"] else []) \
+            + vault.designation_history.get(kebab_type, []) \
+            + extra_old.get(kebab_type, [])
+        round_no = note.fm.get("round") \
+            if kebab_type == "challenge-record" else None
+        work = title
+        round_suffix = ""
+        if isinstance(round_no, int):
+            peeled = peel_trailing_token(title, str(round_no))
+            if peeled is None:
+                plan["manual"].append({
+                    "path": note.rel,
+                    "reason": "review-round title does not close with its"
+                              " round number; round placement is judgment,"
+                              " retitle in-session"})
+                continue
+            work = peeled
+            round_suffix = f" {round_no}"
+        base = strip_designation_tails(work, candidates)
+        if any(designation_tail_span(base, c) == 0 for c in candidates):
+            plan["manual"].append({
+                "path": note.rel,
+                "reason": "title is only its designation; a mechanical"
+                          " transition would empty it, retitle by"
+                          " judgment"})
+            continue
+        new_title = f"{base} {new}{round_suffix}"
+        if new_title == title:
+            continue
+        locked = note.fm.get("locked") is True
+        entry = {"path": note.rel, "type": kebab_type, "old_title": title,
+                 "new_title": new_title, "locked": locked,
+                 "round": round_no if isinstance(round_no, int) else None}
+        if note.rel in frozen:
+            plan["blocked"].append({"path": note.rel,
+                                    "reason": "frozen by work order"})
+            continue
+        if locked and not include_locked:
+            plan["locked_skipped"].append(entry)
+            continue
+        if locked:
+            first_h1 = next((text for (_l, text, level) in note.headings
+                             if level == 1), None)
+            if first_h1 is not None and first_h1 != title:
+                plan["manual"].append({
+                    "path": note.rel,
+                    "reason": "locked record H1 differs from its title;"
+                              " excluded from relabel (a half-write would"
+                              " strand an unrepairable H1 mismatch)"})
+                continue
+        plan["retitles"].append(entry)
+        retitled[note.rel] = (title, new_title)
+    for rel, (old_title, new_title) in sorted(retitled.items()):
+        stem = rel[:-3]
+        for ref_rel in rename_referrers(vault, rel):
+            ref = vault.notes[ref_rel]
+            for (lineno, _e, target, _a, alias, _i) in ref.wikilinks:
+                if target != stem or alias != old_title:
+                    continue
+                if ref_rel in frozen:
+                    plan["blocked"].append({
+                        "path": ref_rel,
+                        "reason": f"frozen referrer of {rel}"})
+                    continue
+                ref_locked = ref.fm.get("locked") is True
+                if ref_locked and not include_locked:
+                    plan["blocked"].append({
+                        "path": ref_rel,
+                        "reason": f"locked referrer of {rel}; sweep with"
+                                  " --include-locked"})
+                    continue
+                plan["alias_rewrites"].append({
+                    "path": ref_rel, "line": lineno, "target": stem,
+                    "old_alias": old_title, "new_alias": new_title,
+                    "locked": ref_locked})
+    return plan
+
+
+def write_designation_config(config_path: Path, config: dict,
+                             changes: list[dict]) -> dict:
+    """Apply the new values and append each replaced value to the ledger
+    in ONE write: config truth lands before any title does, so a crash
+    mid-run leaves detectable drift, never silent staleness."""
+    dmap = config.get("doc_type_designations")
+    if not isinstance(dmap, dict):
+        dmap = {}
+    config["doc_type_designations"] = dmap
+    history = config.get(DESIGNATION_HISTORY_KEY)
+    if not isinstance(history, dict):
+        history = {}
+    appended = []
+    for change in changes:
+        old, new = change["old"], change["new"]
+        if old and fold(old) != fold(new):
+            entries = history.setdefault(change["type"], [])
+            recorded = {e.get("value") if isinstance(e, dict) else e
+                        for e in entries}
+            if old not in recorded:
+                entries.append({"value": old, "replaced": utc_today(),
+                                "superseded_by": new})
+                appended.append({"type": change["type"], "value": old})
+        dmap[change["type"]] = new
+    if history:
+        config[DESIGNATION_HISTORY_KEY] = history
+    config_path.write_text(
+        json.dumps(config, ensure_ascii=False, indent=2) + "\n",
+        encoding="utf-8")
+    return {"map_writes": {c["type"]: c["new"] for c in changes},
+            "history_appends": appended}
+
+
+def apply_retitle(vault_root: Path, rel: str, old_title: str,
+                  new_title: str) -> bool:
+    """Rewrite the frontmatter title and the byte-matching first H1 in
+    one write; nothing else in the file is touched (what makes the
+    locked relabel 'title and H1 only' true by construction)."""
+    path = vault_root / rel
+    try:
+        text = path.read_text(encoding="utf-8")
+    except OSError:
+        return False
+    trailing = text.endswith("\n")
+    lines = text.splitlines()
+    _fm, fm_end, _err = parse_frontmatter(text)
+    changed = False
+    for i in range(min(fm_end - 1, len(lines))):
+        stripped = lines[i].strip()
+        if stripped.startswith("title:"):
+            value = stripped[len("title:"):].strip().strip("\"'")
+            if value == old_title:
+                indent = lines[i][:len(lines[i]) - len(lines[i].lstrip())]
+                quoted = f'"{new_title}"' if ":" in new_title else new_title
+                lines[i] = f"{indent}title: {quoted}"
+                changed = True
+            break
+    if changed:
+        for i in range(fm_end - 1, len(lines)):
+            if lines[i].startswith("# "):
+                if lines[i][2:].strip() == old_title:
+                    lines[i] = f"# {new_title}"
+                break
+        path.write_text("\n".join(lines) + ("\n" if trailing else ""),
+                        encoding="utf-8")
+    return changed
+
+
+def apply_alias_rewrites(vault_root: Path, entries: list[dict]) -> int:
+    """Rewrite planned wikilink aliases in place, line-targeted (the
+    plan's line numbers come from the fence-aware scan, so fenced
+    examples are never touched)."""
+    rewritten = 0
+    by_file: dict[str, list[dict]] = {}
+    for entry in entries:
+        by_file.setdefault(entry["path"], []).append(entry)
+    for rel, file_entries in sorted(by_file.items()):
+        path = vault_root / rel
+        try:
+            text = path.read_text(encoding="utf-8")
+        except OSError:
+            continue
+        trailing = text.endswith("\n")
+        lines = text.splitlines()
+        dirty = False
+        for entry in file_entries:
+            idx = entry["line"] - 1
+            if not 0 <= idx < len(lines):
+                continue
+            pattern = re.compile(
+                re.escape(f"[[{entry['target']}")
+                + r"(#[^\]|]*)?(\\?\|)"
+                + re.escape(entry["old_alias"]) + r"\]\]")
+            new_line = pattern.sub(
+                lambda m, e=entry: f"[[{e['target']}{m.group(1) or ''}"
+                                   f"{m.group(2)}{e['new_alias']}]]",
+                lines[idx])
+            if new_line != lines[idx]:
+                lines[idx] = new_line
+                dirty = True
+                rewritten += 1
+        if dirty:
+            path.write_text("\n".join(lines) + ("\n" if trailing else ""),
+                            encoding="utf-8")
+    return rewritten
+
+
+def rerender_spaces(root: Path, vault: Vault) -> list[str]:
+    """Re-render every analysis space's generated views (titles are
+    embedded there). Schema absence or a failing render is a NAMED
+    residual, never a crash and never a silent skip."""
+    residuals: list[str] = []
+    try:
+        schema = ba_compile.load_schema(ba_compile.DEFAULT_SCHEMA)
+    except (OSError, json.JSONDecodeError, SystemExit):
+        return ["analysis schema unavailable; space views were not"
+                " re-rendered"]
+    roots = set()
+    for rel in vault.index:
+        parts = rel.split("/")
+        if len(parts) >= 2 \
+                and parts[-1] == ba_compile.space_overview_rel(schema):
+            roots.add("/".join(parts[:-1]))
+    for root_rel in sorted(roots):
+        code = ba_compile.main([
+            "render", "--space", str(root / root_rel),
+            "--vault-root", str(root)])
+        if code != 0:
+            residuals.append(f"ba_compile render failed for {root_rel}"
+                             f" (exit {code}); re-render after repair")
+    return residuals
+
+
+def pmo_launcher_path(override: str | None) -> Path:
+    home = Path(os.environ.get("AGENTROF_HOME",
+                               str(Path.home() / ".agentrof")))
+    return Path(override) if override else home / "bin" / "pmo_cli.py"
+
+
+def append_relabel_events(launcher: Path, project_key: str, actor: str,
+                          entries: list[dict]) -> list[str]:
+    """One PMO audit event per relabeled locked record. PMO absence
+    downgrades to a named residual: audit availability must never
+    become a write lock (the freeze doctrine)."""
+    if not entries:
+        return []
+    if not project_key:
+        return [f"config has no project_key; {len(entries)} relabel audit"
+                " event(s) not appended"]
+    if not launcher.is_file():
+        return [f"PMO CLI not found at {launcher}; {len(entries)} relabel"
+                " audit event(s) not appended"]
+    residuals = []
+    for entry in entries:
+        payload = {"note": entry["path"], "doc_type": entry["type"],
+                   "old_title": entry["old_title"],
+                   "new_title": entry["new_title"]}
+        result = subprocess.run(
+            [sys.executable, str(launcher), "event", "append",
+             "--project-key", project_key,
+             "--action", "designation_relabel", "--actor", actor,
+             "--payload", json.dumps(payload, ensure_ascii=False)],
+            capture_output=True, text=True)
+        if result.returncode != 0:
+            residuals.append(
+                f"PMO event append failed for {entry['path']}:"
+                f" {(result.stderr or result.stdout).strip()}")
+    return residuals
+
+
+def cmd_reconcile_designations(args, policy: dict) -> int:
+    root = args.vault.resolve()
+    if not root.is_dir():
+        print(f"vault_check: vault directory not found: {args.vault}",
+              file=sys.stderr)
+        return 2
+    config_path = root.parent / "config.json"
+    try:
+        config = json.loads(config_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        print(f"vault_check: cannot read {config_path}: {exc}; the setup"
+              " entry mints the workspace config first", file=sys.stderr)
+        return 2
+    if not isinstance(config, dict):
+        print(f"vault_check: {config_path} is not a JSON object",
+              file=sys.stderr)
+        return 2
+    universe = designation_type_universe(policy)
+    sets = parse_type_values(args.set, universe, "--set")
+    if not sets:
+        return 2
+    for kebab_type, values in sets.items():
+        if len(values) > 1:
+            print(f"vault_check: --set names '{kebab_type}' twice; one new"
+                  " value per type", file=sys.stderr)
+            return 2
+    extra_old = parse_type_values(args.from_values, universe, "--from")
+    if extra_old is None:
+        return 2
+    vault = build_vault(root, policy)
+    current_map = config.get("doc_type_designations")
+    current_map = dict(current_map) if isinstance(current_map, dict) else {}
+    changes = []
+    for kebab_type in sorted(sets):
+        new = sets[kebab_type][0]
+        raw_old = current_map.get(kebab_type)
+        old = str(raw_old).strip() if isinstance(raw_old, str) \
+            and str(raw_old).strip() else None
+        changes.append({
+            "type": kebab_type, "old": old, "new": new,
+            "old_source": ("config" if old
+                           else "from" if extra_old.get(kebab_type)
+                           else None)})
+    frozen = set() if args.override_freeze else freeze_skip_set(args.vault)
+    plan = build_designation_plan(vault, changes, extra_old, frozen,
+                                  args.include_locked)
+    plan["mint"] = not current_map
+    plan["dry_run"] = bool(args.dry_run)
+    residuals: list[str] = []
+    if args.dry_run:
+        plan["config"] = {
+            "map_writes": {c["type"]: c["new"] for c in changes},
+            "history_appends": [{"type": c["type"], "value": c["old"]}
+                                for c in changes
+                                if c["old"]
+                                and fold(c["old"]) != fold(c["new"])]}
+        plan["executed"] = None
+    else:
+        plan["config"] = write_designation_config(config_path, config,
+                                                  changes)
+        retitled = sum(
+            apply_retitle(root, e["path"], e["old_title"], e["new_title"])
+            for e in plan["retitles"])
+        aliases = apply_alias_rewrites(root, plan["alias_rewrites"])
+        render_code = cmd_render_decisions(args, policy)
+        if render_code != 0:
+            residuals.append("render-decisions failed; re-render after"
+                             " repair")
+        residuals += rerender_spaces(root, vault)
+        residuals += append_relabel_events(
+            pmo_launcher_path(args.pmo_launcher),
+            str(config.get("project_key") or ""), args.actor,
+            [e for e in plan["retitles"] if e["locked"]])
+        plan["executed"] = {"retitles": retitled, "aliases": aliases}
+    plan["pmo_events"] = [
+        {"note": e["path"], "old_title": e["old_title"],
+         "new_title": e["new_title"]}
+        for e in plan["retitles"] if e["locked"]]
+    plan["residuals"] = residuals
+    if args.json:
+        print(json.dumps(plan, ensure_ascii=False, indent=2,
+                         sort_keys=True))
+        return 0
+    for change in plan["changes"]:
+        print(f"vault_check: designation {change['type']}:"
+              f" '{change['old'] or '(unset)'}' -> '{change['new']}'")
+    for entry in plan["retitles"]:
+        print(f"vault_check: retitle {entry['path']}:"
+              f" '{entry['old_title']}' -> '{entry['new_title']}'"
+              + (" [locked, audited]" if entry["locked"] else ""))
+    for entry in plan["locked_skipped"]:
+        print(f"vault_check: LOCKED skipped {entry['path']}:"
+              f" '{entry['old_title']}' -> '{entry['new_title']}'"
+              " (relabel with --include-locked, owner-approved)")
+    for entry in plan["alias_rewrites"]:
+        print(f"vault_check: alias {entry['path']}:{entry['line']}:"
+              f" '{entry['old_alias']}' -> '{entry['new_alias']}'")
+    for entry in plan["manual"]:
+        print(f"vault_check: manual {entry['path']}: {entry['reason']}")
+    for entry in plan["blocked"]:
+        print(f"vault_check: BLOCKED {entry['path']}: {entry['reason']}")
+    for residual in residuals:
+        print(f"vault_check: RESIDUAL {residual}")
+    print(f"vault_check: reconcile plan: {len(plan['retitles'])}"
+          f" retitle(s), {len(plan['alias_rewrites'])} alias(es),"
+          f" {len(plan['locked_skipped'])} locked skipped,"
+          f" {len(plan['manual'])} manual, {len(plan['blocked'])} blocked"
+          + (" (dry run: nothing written)" if args.dry_run else
+             "; run check to confirm green"))
+    return 0
+
+
+# ---------------------------------------------------------------------------
 # Runner
 # ---------------------------------------------------------------------------
 
@@ -2535,6 +3195,30 @@ def main(argv: list[str] | None = None) -> int:
                    help="sanctioned override: skip the work-order freeze"
                         " veto for this run")
     p.set_defaults(func=cmd_migrate)
+
+    p = sub.add_parser("reconcile-designations")
+    p.add_argument("--vault", type=Path, required=True)
+    p.add_argument("--set", action="append", required=True, dest="set",
+                   metavar="TYPE=VALUE",
+                   help="the type's new designation (repeatable; the"
+                        " full-map swap passes every pair)")
+    p.add_argument("--from", action="append", default=[],
+                   dest="from_values", metavar="TYPE=VALUE",
+                   help="an unrecorded prior value to strip (repeatable;"
+                        " never written to the ledger)")
+    p.add_argument("--include-locked", action="store_true",
+                   dest="include_locked",
+                   help="owner-approved: relabel locked records' title"
+                        " and H1 only, one PMO audit event each")
+    p.add_argument("--dry-run", action="store_true", dest="dry_run")
+    p.add_argument("--json", action="store_true")
+    p.add_argument("--override-freeze", action="store_true",
+                   dest="override_freeze",
+                   help="sanctioned override: skip the work-order freeze"
+                        " veto for this run")
+    p.add_argument("--actor", default="configure")
+    p.add_argument("--pmo-launcher", default=None, dest="pmo_launcher")
+    p.set_defaults(func=cmd_reconcile_designations)
 
     args = parser.parse_args(argv)
     try:

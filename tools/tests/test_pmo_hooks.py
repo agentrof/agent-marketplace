@@ -343,6 +343,9 @@ class PmoHookTests(unittest.TestCase):
         code, _, err = self.guard(record, tool="Edit")
         self.assertEqual(code, 2)
         self.assertIn("locked", err)
+        # the deny names the ONE sanctioned exception: the audited
+        # designation relabel through the reconcile verb
+        self.assertIn("reconcile-designations --include-locked", err)
         record.write_text(
             "---\ntype: challenge_record\nlocked: false\n---\n# Round 1\n",
             encoding="utf-8",

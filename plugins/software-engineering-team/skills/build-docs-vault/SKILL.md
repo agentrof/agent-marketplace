@@ -41,12 +41,17 @@ hook; nothing here ever changes what a document claims.
      rename when the gate is presented.
 2. AUDIT, always full width, never --scope.
    - ${CLAUDE_PLUGIN_ROOT}/scripts/vault_check.py check --vault
-     workspace/docs --json for the finding inventory.
+     workspace/docs --json for the finding inventory (designation_drift
+     findings inventory stale or double-suffixed titles).
    - ${CLAUDE_PLUGIN_ROOT}/scripts/vault_check.py migrate --vault
      workspace/docs --rename --dry-run --json for the rename plan: old
      and new names, per-rename referrer counts, the manual list and the
      blocked entries (blocked_by_frozen_referrer) with their blocking
      paths.
+   - When the config map exists, a no-op-change designation dry run
+     (reconcile-designations --set <type>=<current value> per type,
+     --dry-run --json) surfaces the retitle, manual and locked lists
+     mechanically.
 3. PLAN and GATE, asked through the AskUserQuestion popup (recommended
    option first, tradeoffs in every description).
    - The rename batch is an explicit user choice: present every planned
@@ -54,14 +59,20 @@ hook; nothing here ever changes what a document claims.
      batch / Skip renames / Adjust list.
    - Blocked-by-frozen renames are shown as deferred, never as
      approvable options: they wait for their work orders to close.
+   - When the designation dry run lists locked records, the relabel
+     batch is its own question: relabel (PMO-audited, title and H1
+     only, recommended) or leave them as named warnings.
    - The curation program is summarized per area (maps, nav peers,
      titles and aliases, home localization, empty maps)
      and asked as Approve / Adjust / Pause.
 4. EXECUTE. Mint the designation map first WHEN ABSENT: render the
-   canonical table (obsidian-vault metadata) into output_language and
-   write doc_type_designations to workspace/config.json, owner-approved,
-   so migrate's title repair and the checker read real strings (present,
-   leave it). Then deterministic first.
+   canonical table (obsidian-vault metadata) into output_language,
+   owner-approved, and write it through reconcile-designations (one
+   --set per type, --actor build-docs-vault): the designation keys are
+   hook-guarded with the verb as sole writer (present, leave it; stale
+   titles heal through the same verb, approved above, BEFORE migrate so
+   the append step never meets a retired tail). Then deterministic
+   first.
    a. ${CLAUDE_PLUGIN_ROOT}/scripts/vault_check.py migrate --vault
       workspace/docs, freeze-safe by construction: citation cells,
       scalar doc-ref keys, nav hub retargeting, de-id-leading of
@@ -84,10 +95,11 @@ hook; nothing here ever changes what a document claims.
    c. Judgment in-session, every write under the per-write hook: curate
       map notes (grouped, annotated, output_language), fix contextual
       nav peers, stamp titles and aliases per the law, retitle the
-      challenge records (round-number placement is judgment) and anything
-      auto-append could not shape, sync home to vault reality and localize
-      its prose, and settle each empty map (fill or retire) with owner
-      approval.
+      challenge records the reconcile verb listed as manual (a round
+      number not closing the title is judgment; canonical tails
+      transition mechanically) and anything auto-append could not
+      shape, sync home to vault reality and localize its prose, and
+      settle each empty map (fill or retire) with owner approval.
 5. CLOSE.
    - Re-run the full check: green, or every residual named with its
      reason (frozen docs, unresolved PMO, deferred judgment).
@@ -102,8 +114,8 @@ hook; nothing here ever changes what a document claims.
 
 - The ONE entry allowed to write vault-wide: the whole docs tree plus
   its committed payload, never a byte outside workspace/docs/ save the
-  one owner-approved config write minting the absent
-  doc_type_designations map (the title repair reads it).
+  owner-approved reconcile-designations invocations (mint and heal),
+  the designation map's single writer.
 - The PMO database is touched only through event append; no other
   state writes.
 - Prose meaning stays untouched: reorganization is names, links,

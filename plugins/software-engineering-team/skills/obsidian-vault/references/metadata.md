@@ -46,13 +46,32 @@ aliases:
 ## Type designations
 
 The title's closing designation is now MECHANICAL. The canonical
-ENGLISH table below is rendered ONCE per project into config.json's
+ENGLISH table below is minted per project into config.json's
 `doc_type_designations` map (type-kebab -> designation) in the
 output_language, owner-approved. The checker holds each typed note's
 title against that DATA: the designation at a word boundary under an
 NFKC+casefold fold, and a challenge-record title also its round number
 as a standalone token. Map absent or config unreadable warns per note
 naming the mint duty, never a silent pass; only the English table ships.
+
+The map is mutable with memory, never hand-edited. Its single writer,
+for mint and change alike, is `vault_check.py reconcile-designations`
+(the write-time hook denies any other Write/Edit of the map or the
+ledger). A change records the outgoing value in the machine-managed
+`doc_type_designation_history` ledger sibling in the SAME config write,
+then transitions every affected title and byte-matching H1 old -> new
+(tail-stripping every known prior value of the note's own type, so no
+double suffix survives), sweeps wikilink aliases byte-equal to the old
+title, and re-renders the generated views. The `designation_drift`
+check holds titles against the ledger: a retired value closing a title
+is an error (mechanically fixable), a mid-title stranding or a
+non-closing designation warns. Locked records are skipped by default
+and always report warnings, never errors: the owner-approved relabel
+(`--include-locked`, title and H1 only, one PMO audit event per record)
+is the sanctioned path, and a declined relabel stays a named residual.
+An adopted vault with stale titles and no ledger states its prior value
+explicitly via `--from` (never recorded: it was not a configured
+value).
 
 | doc type | designation |
 |---|---|

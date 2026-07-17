@@ -304,7 +304,11 @@ def main() -> int:
                 return deny(
                     "this record is locked (frontmatter 'locked: true'):"
                     " it is closed audit history and is never edited or"
-                    " reopened. Continue in a new record instead."
+                    " reopened. Continue in a new record instead. The one"
+                    " sanctioned exception is a designation relabel of the"
+                    " title and H1: vault_check.py reconcile-designations"
+                    " --include-locked, owner-approved, one PMO audit"
+                    " event per record."
                 )
     except Exception:
         return 0

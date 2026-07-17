@@ -92,7 +92,11 @@ detected candidates plus free-form input.
    written, "English" spelled out on the accepted default. Then mint
    doc_type_designations: render the canonical table (obsidian-vault
    metadata) into output_language, one per taxonomy type, for owner
-   review. An unsupported stack is refused honestly: tested stacks only.
+   review, and write it through the checker's reconcile-designations
+   verb (one --set per type): the designation keys and their history
+   ledger are hook-guarded with the verb as sole writer, so the
+   interactive config write itself never carries them. An unsupported
+   stack is refused honestly: tested stacks only.
 7. Continuous integration: no PR-triggered test workflow in the
    repository's CI directory (for GitHub, .github/workflows/): offer to
    add one from ${CLAUDE_PLUGIN_ROOT}/templates/ci-tests.yml,

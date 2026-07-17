@@ -49,7 +49,12 @@ variation points live in `data/vault-policy.json`, never in prose.
   `doc_type_designations` config string (word boundary, NFKC+casefold;
   challenge records also the round number) alongside presence, H1 match,
   id-lead ban and uniqueness; the map renders per project from the
-  canonical English table in references/metadata.md.
+  canonical English table in references/metadata.md. The map and its
+  retired-value ledger have ONE writer, the reconcile-designations
+  verb (hook-denied otherwise); a changed designation transitions every
+  title through it, and the designation_drift check holds titles
+  against the ledger (locked records warn, routing to the audited
+  relabel).
 - Alias Law: ids live in frontmatter, never in filenames or titles: a
   note owning an id or node code carries it in `aliases`; an id-shaped
   link alias must decorate a link to the id's owning note, nothing else.

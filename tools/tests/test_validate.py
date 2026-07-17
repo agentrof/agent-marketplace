@@ -58,6 +58,42 @@ class ValidatorFixtureTests(unittest.TestCase):
                     f"{check_id}: remediation must be non-empty",
                 )
 
+    def test_color_completeness_uncolored_type_fires(self):
+        """A doc type without a tag:#doc/<type> color group is an error;
+        adding a type forces its color in the same commit."""
+        import json
+        from fixtures import PLUGIN, VALID_VAULT_POLICY, write
+
+        def uncolored(root: Path) -> None:
+            policy = json.loads(json.dumps(VALID_VAULT_POLICY))
+            policy["extra_doc_types"].append("sketch")
+            write(root / "plugins" / PLUGIN / "skills" / "notes" / "data"
+                  / "vault-policy.json", json.dumps(policy, indent=2))
+
+        findings = self.run_on(uncolored)
+        self.assertEqual(len(findings), 1, findings)
+        self.assertEqual(findings[0].check, "vault_policy_shape")
+        self.assertIn("no graph color group", findings[0].message)
+
+    def test_color_completeness_dead_legend_fires(self):
+        """A color group whose tag names no known type is a dead legend
+        entry; graph.json parity noise is tolerated (the seed derives
+        from the valid policy)."""
+        import json
+        from fixtures import PLUGIN, VALID_VAULT_POLICY, write
+
+        def dead_legend(root: Path) -> None:
+            policy = json.loads(json.dumps(VALID_VAULT_POLICY))
+            policy["graph_color_groups"].append("tag:#doc/ghost")
+            write(root / "plugins" / PLUGIN / "skills" / "notes" / "data"
+                  / "vault-policy.json", json.dumps(policy, indent=2))
+
+        findings = self.run_on(dead_legend)
+        messages = [f.message for f in findings
+                    if f.check == "vault_policy_shape"]
+        self.assertTrue(any("names no known doc type" in m
+                            for m in messages), findings)
+
     def test_out_of_scope_violations_are_not_caught(self):
         findings = self.run_on(extra=fixtures.plant_out_of_scope_violations)
         self.assertEqual(

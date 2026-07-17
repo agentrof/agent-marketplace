@@ -63,9 +63,9 @@ def seed_vault_scaffolding(space: Path) -> None:
 def make_valid_space(space: Path) -> None:
     """A gate-passing ERP space with one inventory domain: approved docs,
     wikilink-cited rules, a converged locked challenge round. Named files
-    carry their chain-qualified slug prefixes."""
+    carry their plain contract names; typed content is type-suffixed."""
     seed_vault_scaffolding(space)
-    write(space / "erp-space.md", """---
+    write(space / "space.md", """---
 type: space
 title: ERP Analysis
 status: approved
@@ -86,13 +86,13 @@ Track sellable stock per warehouse with auditable movements.
 
 ## Domain Map <!-- sec: domain_map -->
 
-- [[business-analysis/erp/domains/inventory/erp-inventory-domain|Inventory]]
+- [[business-analysis/erp/domains/inventory/domain|Inventory]]
 
 ## Out Of Scope <!-- sec: out_of_scope -->
 
 Payroll and manufacturing.
 """)
-    write(space / "erp-glossary.md", """---
+    write(space / "glossary.md", """---
 type: glossary
 title: ERP Glossary
 status: approved
@@ -111,7 +111,7 @@ One vocabulary for the whole space.
 | movement | stock_movement | one typed quantity change against a stock item |
 | warehouse zone | | a named storage area inside a warehouse |
 """)
-    write(space / "erp-actors.md", """---
+    write(space / "actors.md", """---
 type: actor_roster
 title: ERP Actors
 status: approved
@@ -129,7 +129,7 @@ Roles that appear across the space.
 |---|---|---|
 | warehouse operator | records receipts | create movements |
 """)
-    write(space / "erp-budgets.md", """---
+    write(space / "budgets.md", """---
 type: budget_set
 title: ERP Non-Functional Budgets
 status: approved
@@ -166,7 +166,7 @@ None stated, confirmed.
 
 None stated, confirmed.
 """)
-    write(space / "domains" / "inventory" / "erp-inventory-domain.md", """---
+    write(space / "domains" / "inventory" / "domain.md", """---
 type: domain
 title: Inventory
 status: approved
@@ -191,15 +191,15 @@ Owns stock levels; pricing belongs to sales.
 
 ## Process Map <!-- sec: process_map -->
 
-- [[business-analysis/erp/domains/inventory/processes/goods-receipt|Goods Receipt]]
+- [[business-analysis/erp/domains/inventory/processes/goods-receipt-process|Goods Receipt]]
 
 ## Data Notes <!-- sec: data_notes -->
 
 | entity | note |
 |---|---|
-| [[business-analysis/erp/domains/inventory/entities/stock-item\\|Stock Item]] | promoted: has lifecycle |
+| [[business-analysis/erp/domains/inventory/entities/stock-item-entity\\|Stock Item]] | promoted: has lifecycle |
 """)
-    write(space / "domains" / "inventory" / "processes" / "goods-receipt.md", """---
+    write(space / "domains" / "inventory" / "processes" / "goods-receipt-process.md", """---
 type: process
 title: Goods Receipt
 status: approved
@@ -222,14 +222,14 @@ A delivery arrives against a purchase order.
 ## Main Flow <!-- sec: main_flow -->
 
 Operator scans items; each accepted line creates a movement for
-[[business-analysis/erp/domains/inventory/entities/stock-item|Stock Item]] per
-[[business-analysis/erp/domains/inventory/rules/stock-item-lifecycle|BR-INV-001]].
+[[business-analysis/erp/domains/inventory/entities/stock-item-entity|Stock Item]] per
+[[business-analysis/erp/domains/inventory/rules/stock-item-lifecycle-rules|BR-INV-001]].
 
 ## Exception Flows <!-- sec: exception_flows -->
 
 Damaged goods are refused at the line level.
 """)
-    write(space / "domains" / "inventory" / "entities" / "stock-item.md", """---
+    write(space / "domains" / "inventory" / "entities" / "stock-item-entity.md", """---
 type: entity
 title: Stock Item
 status: approved
@@ -268,19 +268,19 @@ flowchart TD
 |---|---|---|---|
 | name edit | future documents | issued receipts | line keeps issue-time name |
 """)
-    write(space / "domains" / "inventory" / "rules" / "stock-item-lifecycle.md", """---
+    write(space / "domains" / "inventory" / "rules" / "stock-item-lifecycle-rules.md", """---
 type: rule_set
 title: Stock Item Lifecycle Rules
 status: approved
 approved_at: 2026-07-12
 owner_role: business_analyst
 governs:
-  - "[[business-analysis/erp/domains/inventory/entities/stock-item]]"
+  - "[[business-analysis/erp/domains/inventory/entities/stock-item-entity]]"
 ---
 
 # Stock Item Lifecycle Rules
 
-Lifecycle constraints for [[business-analysis/erp/domains/inventory/entities/stock-item|Stock Item]].
+Lifecycle constraints for [[business-analysis/erp/domains/inventory/entities/stock-item-entity|Stock Item]].
 
 ## Rules <!-- sec: rules -->
 
@@ -293,31 +293,31 @@ Lifecycle constraints for [[business-analysis/erp/domains/inventory/entities/sto
 
 | id | statement | source | affects | status | opened_on |
 |---|---|---|---|---|---|
-| AS-INV-001 | Negative on-hand is never permitted. | owner confirmed in round two | [[business-analysis/erp/domains/inventory/rules/stock-item-lifecycle\\|BR-INV-002]] | confirmed | 2026-07-09 |
+| AS-INV-001 | Negative on-hand is never permitted. | owner confirmed in round two | [[business-analysis/erp/domains/inventory/rules/stock-item-lifecycle-rules\\|BR-INV-002]] | confirmed | 2026-07-09 |
 """)
-    write(space / "domains" / "inventory" / "acceptance" / "goods-receipt.md", """---
+    write(space / "domains" / "inventory" / "acceptance" / "goods-receipt-acceptance.md", """---
 type: acceptance_set
 title: Goods Receipt Criteria
 status: approved
 approved_at: 2026-07-12
 owner_role: business_analyst
 verifies:
-  - "[[business-analysis/erp/domains/inventory/processes/goods-receipt]]"
+  - "[[business-analysis/erp/domains/inventory/processes/goods-receipt-process]]"
 ---
 
 # Goods Receipt Criteria
 
-Criteria for [[business-analysis/erp/domains/inventory/processes/goods-receipt|Goods Receipt]].
+Criteria for [[business-analysis/erp/domains/inventory/processes/goods-receipt-process|Goods Receipt]].
 
 ## Criteria <!-- sec: criteria -->
 
 | id | criterion | cites | verify | status |
 |---|---|---|---|---|
-| AC-INV-001 | Given an accepted line, when the receipt posts, then a movement row exists and on-hand rises by the line quantity. | [[business-analysis/erp/domains/inventory/rules/stock-item-lifecycle\\|BR-INV-002]] | assert movement row and quantity delta via the stock query | active |
-| AC-INV-002 | Given an item with a movement, when its sku is edited, then the edit is refused naming the movement date. | [[business-analysis/erp/domains/inventory/rules/stock-item-lifecycle\\|BR-INV-001]] | attempt the edit; assert refusal message content | active |
+| AC-INV-001 | Given an accepted line, when the receipt posts, then a movement row exists and on-hand rises by the line quantity. | [[business-analysis/erp/domains/inventory/rules/stock-item-lifecycle-rules\\|BR-INV-002]] | assert movement row and quantity delta via the stock query | active |
+| AC-INV-002 | Given an item with a movement, when its sku is edited, then the edit is refused naming the movement date. | [[business-analysis/erp/domains/inventory/rules/stock-item-lifecycle-rules\\|BR-INV-001]] | attempt the edit; assert refusal message content | active |
 """)
     write(space / "domains" / "inventory" / "reviews"
-          / "erp-inventory-round-1.md", """---
+          / "round-1.md", """---
 type: challenge_record
 title: Inventory Challenge Round 1
 status: approved
@@ -344,7 +344,7 @@ Round 1 panel found no blocking gaps; one minor finding triaged.
 
 | id | lens | severity | finding | disposition | targets |
 |---|---|---|---|---|---|
-| CH-INV-001 | warehouse operations expert | minor | Damaged-goods refusal already covered. | covered | [[business-analysis/erp/domains/inventory/rules/stock-item-lifecycle\\|BR-INV-002]] |
+| CH-INV-001 | warehouse operations expert | minor | Damaged-goods refusal already covered. | covered | [[business-analysis/erp/domains/inventory/rules/stock-item-lifecycle-rules\\|BR-INV-002]] |
 
 ## Triage Audit <!-- sec: triage_audit -->
 
@@ -354,7 +354,7 @@ Independent audit reviewed the covered disposition; no disagreement.
 
 Converged: zero blocking findings this round.
 """)
-    write(space / "reviews" / "erp-space-round-1.md", """---
+    write(space / "reviews" / "space-round-1.md", """---
 type: challenge_record
 title: Space Challenge Round 1
 status: approved
@@ -380,7 +380,7 @@ Cross-domain round over the registry and the inventory overview.
 
 | id | lens | severity | finding | disposition | targets |
 |---|---|---|---|---|---|
-| CH-ERP-001 | cross-domain consistency | minor | Movement wording consistent with glossary. | covered | [[business-analysis/erp/domains/inventory/rules/stock-item-lifecycle\\|BR-INV-002]] |
+| CH-ERP-001 | cross-domain consistency | minor | Movement wording consistent with glossary. | covered | [[business-analysis/erp/domains/inventory/rules/stock-item-lifecycle-rules\\|BR-INV-002]] |
 
 ## Triage Audit <!-- sec: triage_audit -->
 
@@ -404,45 +404,45 @@ def break_space_layout(space: Path) -> None:
 
 
 def break_frontmatter_schema(space: Path) -> None:
-    edit(space / INV / "processes" / "goods-receipt.md",
+    edit(space / INV / "processes" / "goods-receipt-process.md",
          "owner_role: business_analyst\n", "")
 
 
 def break_status_legality(space: Path) -> None:
-    edit(space / INV / "entities" / "stock-item.md",
+    edit(space / INV / "entities" / "stock-item-entity.md",
          "status: approved", "status: shipped")
 
 
 def break_required_sections(space: Path) -> None:
-    edit(space / INV / "processes" / "goods-receipt.md",
+    edit(space / INV / "processes" / "goods-receipt-process.md",
          "## Trigger <!-- sec: trigger -->", "## Trigger")
 
 
 def break_summary_caps(space: Path) -> None:
     filler = "\n".join(f"Summary filler line {i}." for i in range(12))
-    edit(space / INV / "entities" / "stock-item.md",
+    edit(space / INV / "entities" / "stock-item-entity.md",
          "One sellable, storable product variant tracked per warehouse.",
          filler)
 
 
 def break_content_bans(space: Path) -> None:
-    edit(space / INV / "processes" / "goods-receipt.md",
+    edit(space / INV / "processes" / "goods-receipt-process.md",
          "Damaged goods are refused", "Damaged goods — refused")
 
 
 def break_dead_links(space: Path) -> None:
-    edit(space / INV / "processes" / "goods-receipt.md",
-         "[[business-analysis/erp/domains/inventory/entities/stock-item|Stock Item]]",
+    edit(space / INV / "processes" / "goods-receipt-process.md",
+         "[[business-analysis/erp/domains/inventory/entities/stock-item-entity|Stock Item]]",
          "[[business-analysis/erp/domains/inventory/entities/missing|Stock Item]]")
 
 
 def break_id_format(space: Path) -> None:
-    edit(space / INV / "rules" / "stock-item-lifecycle.md",
+    edit(space / INV / "rules" / "stock-item-lifecycle-rules.md",
          "| BR-INV-002 |", "| BR-2 |")
 
 
 def break_id_unique(space: Path) -> None:
-    edit(space / INV / "rules" / "stock-item-lifecycle.md",
+    edit(space / INV / "rules" / "stock-item-lifecycle-rules.md",
          "| BR-INV-002 | On-hand quantity",
          "| BR-INV-001 | Duplicate. | constraint | active | |\n"
          "| BR-INV-002 | On-hand quantity")
@@ -450,44 +450,44 @@ def break_id_unique(space: Path) -> None:
 
 def break_id_minting(space: Path) -> None:
     # A mint cell written as a wikilink: the mint declares the bare id.
-    edit(space / INV / "rules" / "stock-item-lifecycle.md",
+    edit(space / INV / "rules" / "stock-item-lifecycle-rules.md",
          "| BR-INV-002 | On-hand quantity",
          "| [[business-analysis/erp/domains/inventory/rules/"
-         "stock-item-lifecycle\\|BR-INV-002]] | On-hand quantity")
+         "stock-item-lifecycle-rules\\|BR-INV-002]] | On-hand quantity")
 
 
 def break_id_links(space: Path) -> None:
     # A bare id in an id-citation column: cells cite ids as wikilinks.
-    edit(space / INV / "acceptance" / "goods-receipt.md",
+    edit(space / INV / "acceptance" / "goods-receipt-acceptance.md",
          "| [[business-analysis/erp/domains/inventory/rules/"
-         "stock-item-lifecycle\\|BR-INV-002]] | assert movement row",
+         "stock-item-lifecycle-rules\\|BR-INV-002]] | assert movement row",
          "| BR-INV-002 | assert movement row")
 
 
 def break_row_schema(space: Path) -> None:
-    edit(space / INV / "acceptance" / "goods-receipt.md",
+    edit(space / INV / "acceptance" / "goods-receipt-acceptance.md",
          "| attempt the edit; assert refusal message content |", "| |")
 
 
 def break_semantic_links(space: Path) -> None:
-    edit(space / "erp-space.md",
-         "- [[business-analysis/erp/domains/inventory/erp-inventory-domain|Inventory]]",
+    edit(space / "space.md",
+         "- [[business-analysis/erp/domains/inventory/domain|Inventory]]",
          "The domain list is maintained elsewhere.")
 
 
 def break_approval_preconditions(space: Path) -> None:
-    edit(space / INV / "rules" / "stock-item-lifecycle.md",
+    edit(space / INV / "rules" / "stock-item-lifecycle-rules.md",
          "| confirmed | 2026-07-09 |", "| open | 2026-07-09 |")
 
 
 def break_challenge_record(space: Path) -> None:
-    edit(space / INV / "reviews" / "erp-inventory-round-1.md",
+    edit(space / INV / "reviews" / "round-1.md",
          "| minor | Damaged-goods refusal already covered. |",
          "| blocking | Damaged-goods refusal already covered. |")
 
 
 def break_br_uncited(space: Path) -> None:
-    edit(space / INV / "rules" / "stock-item-lifecycle.md",
+    edit(space / INV / "rules" / "stock-item-lifecycle-rules.md",
          "| BR-INV-002 | On-hand quantity",
          "| BR-INV-003 | An uncited rule. | constraint | active | |\n"
          "| BR-INV-002 | On-hand quantity")
@@ -495,37 +495,37 @@ def break_br_uncited(space: Path) -> None:
 
 def break_thresholds(space: Path) -> None:
     filler = "\n".join(f"Exception narration line {i}." for i in range(160))
-    edit(space / INV / "processes" / "goods-receipt.md",
+    edit(space / INV / "processes" / "goods-receipt-process.md",
          "Damaged goods are refused at the line level.", filler)
 
 
 def break_aging(space: Path) -> None:
-    edit(space / INV / "rules" / "stock-item-lifecycle.md",
+    edit(space / INV / "rules" / "stock-item-lifecycle-rules.md",
          "| confirmed | 2026-07-09 |", "| open | 2020-01-01 |")
 
 
 def break_gate_approval(space: Path) -> None:
-    edit(space / INV / "entities" / "stock-item.md",
+    edit(space / INV / "entities" / "stock-item-entity.md",
          "status: approved\napproved_at: 2026-07-12", "status: draft")
 
 
 def break_generated_freshness(space: Path) -> None:
-    edit(space / INV / "rules" / "stock-item-lifecycle.md",
+    edit(space / INV / "rules" / "stock-item-lifecycle-rules.md",
          "never edited directly", "never edited directly by hand")
 
 
 def break_future_dates(space: Path) -> None:
-    edit(space / "erp-space.md", "approved_at: 2026-07-12",
+    edit(space / "space.md", "approved_at: 2026-07-12",
          "approved_at: 9999-01-01")
 
 
 def break_identifier_shape(space: Path) -> None:
-    edit(space / "domains" / "inventory" / "entities" / "stock-item.md",
+    edit(space / "domains" / "inventory" / "entities" / "stock-item-entity.md",
          "| sku |", "| ürünNo |")
 
 
 def break_diagram_identifiers(space: Path) -> None:
-    edit(space / "domains" / "inventory" / "entities" / "stock-item.md",
+    edit(space / "domains" / "inventory" / "entities" / "stock-item-entity.md",
          "draft --> active: activate",
          "draft --> onaylandı: onayla")
 
@@ -601,7 +601,7 @@ class ValidSpaceTests(unittest.TestCase):
 
     def test_staleness_round_trip(self):
         edit(self.space / "domains" / "inventory" / "rules"
-             / "stock-item-lifecycle.md",
+             / "stock-item-lifecycle-rules.md",
              "every change is a typed movement",
              "every change is a typed, audited movement")
         stale = [f for f in collect(self.space) if f.check == "generated_freshness"]
@@ -635,7 +635,7 @@ class BuilderFixtureTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             space = Path(tmp) / "docs" / "business-analysis" / "erp"
             make_valid_space(space)
-            edit(space / "erp-glossary.md", "| stock_movement |",
+            edit(space / "glossary.md", "| stock_movement |",
                  "| stokHareketi |")
             findings = collect(space)
             self.assertTrue(
@@ -661,18 +661,18 @@ class ApproveTests(unittest.TestCase):
         return datetime.now(timezone.utc).date().isoformat()
 
     def test_approve_stamps_status_and_utc_date(self):
-        target = self.space / INV / "entities" / "stock-item.md"
+        target = self.space / INV / "entities" / "stock-item-entity.md"
         edit(target, "status: approved\napproved_at: 2026-07-12",
              "status: in_review")
         code, out, err = run(["approve", "--space", str(self.space),
-                              "--doc", "domains/inventory/entities/stock-item.md"])
+                              "--doc", "domains/inventory/entities/stock-item-entity.md"])
         self.assertEqual(code, 0, out + err)
         text = target.read_text(encoding="utf-8")
         self.assertIn("status: approved", text)
         self.assertIn(f"approved_at: {self.utc_today()}", text)
 
     def test_approve_rejected_doc_restores_bytes(self):
-        target = self.space / INV / "rules" / "stock-item-lifecycle.md"
+        target = self.space / INV / "rules" / "stock-item-lifecycle-rules.md"
         edit(target, "status: approved\napproved_at: 2026-07-12",
              "status: in_review")
         edit(target, "| confirmed | 2026-07-09 |",
@@ -680,33 +680,33 @@ class ApproveTests(unittest.TestCase):
         before = target.read_bytes()
         code, out, err = run(["approve", "--space", str(self.space),
                               "--doc",
-                              "domains/inventory/rules/stock-item-lifecycle.md"])
+                              "domains/inventory/rules/stock-item-lifecycle-rules.md"])
         self.assertEqual(code, 1, out + err)
         self.assertEqual(target.read_bytes(), before)
 
     def test_approve_already_approved_fails(self):
         code, _, err = run(["approve", "--space", str(self.space),
-                            "--doc", "erp-space.md"])
+                            "--doc", "space.md"])
         self.assertEqual(code, 1)
         self.assertIn("already approved", err)
 
     def test_approve_refuses_draft(self):
         """Approval follows review: a draft doc must pass through
         in_review before the verb accepts it."""
-        target = self.space / INV / "entities" / "stock-item.md"
+        target = self.space / INV / "entities" / "stock-item-entity.md"
         edit(target, "status: approved\napproved_at: 2026-07-12",
              "status: draft")
         code, _, err = run(["approve", "--space", str(self.space),
-                            "--doc", "domains/inventory/entities/stock-item.md"])
+                            "--doc", "domains/inventory/entities/stock-item-entity.md"])
         self.assertEqual(code, 1)
         self.assertIn("in_review", err)
 
     def test_approve_rejects_verdict_on_non_challenge_docs(self):
-        target = self.space / INV / "entities" / "stock-item.md"
+        target = self.space / INV / "entities" / "stock-item-entity.md"
         edit(target, "status: approved\napproved_at: 2026-07-12",
              "status: in_review")
         code, _, err = run(["approve", "--space", str(self.space),
-                            "--doc", "domains/inventory/entities/stock-item.md",
+                            "--doc", "domains/inventory/entities/stock-item-entity.md",
                             "--verdict", "converged"])
         self.assertEqual(code, 2)
         self.assertIn("challenge", err)
@@ -717,11 +717,11 @@ class ApproveTests(unittest.TestCase):
         self.assertEqual(code, 2, err)
 
     def test_challenge_record_requires_verdict_and_locks(self):
-        target = self.space / INV / "reviews" / "erp-inventory-round-1.md"
+        target = self.space / INV / "reviews" / "round-1.md"
         edit(target, "status: approved\napproved_at: 2026-07-12",
              "status: in_review")
         edit(target, "verdict: converged\nlocked: true", "verdict: continue")
-        rel = "domains/inventory/reviews/erp-inventory-round-1.md"
+        rel = "domains/inventory/reviews/round-1.md"
         code, _, err = run(["approve", "--space", str(self.space),
                             "--doc", rel])
         self.assertEqual(code, 2, err)
@@ -771,14 +771,15 @@ class SubcommandTests(unittest.TestCase):
         run(["init", "--space", str(space), "--title", "Topic", "--code", "TOP"])
         run(["stub", "--space", str(space), "--type", "process",
              "--slug", "intake", "--title", "Intake"])
-        text = (space / "processes" / "intake.md").read_text(encoding="utf-8")
-        self.assertIn("[[business-analysis/topic/topic-space|", text)
-        overview = (space / "topic-space.md").read_text(encoding="utf-8")
+        text = (space / "processes" / "intake-process.md").read_text(encoding="utf-8")
+        self.assertIn("[[business-analysis/topic/space|", text)
+        overview = (space / "space.md").read_text(encoding="utf-8")
         self.assertIn("[[maps/business-analysis|Business Analysis]]", overview)
 
-    def test_decision_stub_mints_id_prefixed_note(self):
-        """Decision stubs mint dec-<code>-<nnn>-<slug>.md with an id-led H1
-        and title, the id alias, a seeded ruling row and a hub-first nav."""
+    def test_decision_stub_mints_alias_id_note(self):
+        """Decision stubs mint <slug>-decision.md with a natural (never
+        id-led) title and H1, the record id in the frontmatter alias and
+        the seeded ruling row, and a hub-first nav."""
         space = self.root / "erp"
         make_valid_space(space)
         code, _, err = run(["stub", "--space", str(space), "--type", "decision",
@@ -786,15 +787,16 @@ class SubcommandTests(unittest.TestCase):
                             "--slug", "batch-sizing", "--title", "Batch sizing"])
         self.assertEqual(code, 0, err)
         target = (space / "domains" / "inventory" / "decisions"
-                  / "dec-inv-001-batch-sizing.md")
+                  / "batch-sizing-decision.md")
         self.assertTrue(target.is_file())
         text = target.read_text(encoding="utf-8")
-        self.assertIn("title: DEC-INV-001: Batch sizing", text)
-        self.assertIn("# DEC-INV-001: Batch sizing", text)
+        self.assertIn("title: Batch sizing\n", text)
+        self.assertIn("# Batch sizing\n", text)
+        self.assertNotIn("DEC-INV-001:", text)
         self.assertIn("aliases:\n  - DEC-INV-001", text)
         self.assertIn("| DEC-INV-001 | To be decided. | active |", text)
         self.assertIn(
-            "[[business-analysis/erp/domains/inventory/erp-inventory-domain|",
+            "[[business-analysis/erp/domains/inventory/domain|",
             text)
         code, _, _ = run(["render", "--space", str(space)])
         self.assertEqual(code, 0)
@@ -811,7 +813,7 @@ class SubcommandTests(unittest.TestCase):
         self.assertEqual(code, 0)
         payload = json.loads(out)
         self.assertEqual(payload["BR-INV-001"]["doc"],
-                         "domains/inventory/rules/stock-item-lifecycle.md")
+                         "domains/inventory/rules/stock-item-lifecycle-rules.md")
         self.assertEqual(payload["BR-INV-001"]["doc_status"], "approved")
         self.assertEqual(len(payload["BR-INV-001"]["statement_sha256"]), 64)
         code, _, err = run(["resolve", "--space", str(space),
@@ -841,7 +843,7 @@ class SubcommandTests(unittest.TestCase):
     def test_verify_import_rejects_unapproved_owner(self):
         space = self.root / "erp"
         make_valid_space(space)
-        edit(space / "domains" / "inventory" / "acceptance" / "goods-receipt.md",
+        edit(space / "domains" / "inventory" / "acceptance" / "goods-receipt-acceptance.md",
              "status: approved\napproved_at: 2026-07-12", "status: draft")
         payload = self.root / "import.json"
         payload.write_text(json.dumps({"criteria": [

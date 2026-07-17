@@ -1,6 +1,7 @@
 # Risk-Adjusted Sequencing
 
-Step-by-step ordering for workspace/docs/backlog.md. Two passes: the
+Step-by-step ordering for the backlog in the PMO database (item order
+records the sequence; item list --json reads it back). Two passes: the
 dependency pass decides first, the value-and-risk weighing orders whatever
 the dependency pass leaves free. No estimate field exists in any artifact,
 so all weighing happens in coarse words, never in numbers pretending

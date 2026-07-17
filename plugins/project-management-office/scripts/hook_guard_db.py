@@ -6,7 +6,8 @@ unconfigured non-English payloads.
 Six families of protected targets, each with its own remediation:
   1. The PMO database files: written only through the PMO CLI.
   2. Generated views: any file whose first line carries a generated-by
-     marker (pmo render, ba_compile render, future generators), and any
+     marker (ba_compile render, vault_check render-decisions, future
+     generators), and any
      path inside a _generated directory. Regenerate with the owning
      render command instead.
   3. Frozen analysis docs: paths listed in the freeze manifest

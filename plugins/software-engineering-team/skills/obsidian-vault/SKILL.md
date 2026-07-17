@@ -21,13 +21,13 @@ variation points live in `data/vault-policy.json`, never in prose.
 ## Linking Law
 
 - DO cite vault content as a vault-absolute wikilink with an alias:
-  `[[solution-design/decisions/sd-007-order-events|SD-007]]`. Paths run
-  from the vault root, forward slashes, exact case, no leading slash.
+  `[[solution-design/decisions/order-events-decision|SD-007]]`. Paths
+  run from the vault root, forward slashes, exact case, no leading slash.
 - DON'T write relative markdown links between vault files (hook-denied);
   external URLs stay `[text](https://...)`; targets outside the docs
   tree stay standard relative links.
 - Heading anchors are banned; the stable in-note anchor is a block id:
-  `[[business-analysis/shop/shop-budgets#^event-volume|volume budget]]`.
+  `[[business-analysis/shop/budgets#^event-volume|volume budget]]`.
 - In table cells escape the alias pipe: `[[path\|SD-007]]`. Schema
   id-citation columns carry these wikilinks too; a bare id is legal
   only where it is minted.
@@ -35,20 +35,23 @@ variation points live in `data/vault-policy.json`, never in prose.
 
 ## Naming and Title Law
 
-- Naming Law: authored basenames are vault-unique AND meaningful; a
-  duplicate or policy-banned generic basename (space.md, index.md, ...)
-  is an error. Named-file contracts carry the chain-qualified slug
-  (`shop-space.md`, `shop-inventory-domain.md`); when the chain itself
-  collides, rename the domain folder.
+- Naming Law: named files are plain per-folder contracts (`space.md`,
+  `domain.md`, `glossary.md`, `actors.md`, `budgets.md`, `round-<n>.md`);
+  typed content is `<slug>-<type>.md` with the schema's English suffix
+  (`checkout-rules.md`, `order-events-decision.md`). No chain or id
+  prefixes; duplicates across folders are legal, and only a
+  policy-banned generic basename where a slug is due is an error.
 - Title Law: `title` is the user-facing graph label, shown instead of
-  the filename by the vetted display plugin: human output_language
-  prose, never the raw stem. A note that owns an id leads with it,
-  quoted: `title: "DEC-SHP-004: Single warehouse first"`. The checker
-  holds presence, the id lead and uniqueness; readability itself is
-  this instruction.
-- Alias Law: a note that owns an id or node code carries it in
-  `aliases`; an id-shaped link alias must decorate a link to the id's
-  owning note, nothing else.
+  the filename by the vetted display plugin: a natural output_language
+  phrase naming the content and ENDING with its type designation,
+  rendered in the output_language (canonical English table in
+  references/metadata.md). Never id-led, never the raw stem; the H1
+  equals the title byte-for-byte. The checker holds presence, the H1
+  match, the id-lead ban and uniqueness.
+- Alias Law: ids live in frontmatter, never in filenames or titles: a
+  note that owns an id or node code carries it in `aliases`; an
+  id-shaped link alias must decorate a link to the id's owning note,
+  nothing else.
 - The policy lists the vetted community-plugin set (the front-matter
   title display plugin, bare `title` template) in the committed
   payload; without it, labels fall back to the meaningful slug names.
@@ -70,21 +73,21 @@ variation points live in `data/vault-policy.json`, never in prose.
 
 ## Structure Law
 
-- Star topology: home is DYNAMIC: it links start-here, the extra maps
-  and every content-bearing subtree's map; the entry that births a tree
-  materializes its map seed and adds the home line. Each map links its
-  subtree's hubs, curated by the producing persona in the same session
-  that creates or retires docs.
+- Star topology: home is the single knowledge-base root and DYNAMIC:
+  it links ONLY the content-bearing subtrees' maps (nothing at seed);
+  the entry that births a tree materializes its map seed and adds the
+  home line. Each map links its subtree's hubs, curated by the
+  producing persona in the same session that creates or retires docs.
 - Nav section: the line `<!-- sec: nav -->` opens it in every tree (the
   heading text above it is free output-language prose); the FIRST
   wikilink is the owning hub per the policy hubs ladder (the deepest
   existing hub covering the note; hubs and uncovered notes point at the
   subtree map), then 2-5 contextual peers.
 - Decision records are atomic notes under their tree's decisions/
-  directory (`sd-007-<slug>.md`; code-bearing trees
-  `dec-shp-004-<slug>.md`; title and H1 `SD-007: <title>`, alias
-  `SD-007`); where policy renders an index it is GENERATED. Generated
-  files (first-line marker) are re-rendered, never edited.
+  directory (`<slug>-decision.md`; the id lives in the frontmatter
+  alias, never the filename, title or H1); where policy renders an
+  index it is GENERATED. Generated files (first-line marker) are
+  re-rendered, never edited.
 
 ## Stewardship
 

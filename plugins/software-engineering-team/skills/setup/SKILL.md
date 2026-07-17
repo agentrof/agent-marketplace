@@ -42,11 +42,11 @@ detected candidates plus free-form input.
      are copied verbatim per file, otherwise me.md and profile.md come
      from the templates.
    - workspace/docs/ vault payload from ${CLAUDE_PLUGIN_ROOT}/templates/vault/,
-     per file, only where missing: home, start-here, the extra_maps
-     seeds and the .obsidian payload with plugins/ copied recursively
-     (the vault app asks a one-time trust prompt to enable them). Each
-     subtree map seed is materialized by its tree-birthing entry, born
-     with its tree, never by setup; the obsidian-vault skill owns their law.
+     per file, only where missing: home and the .obsidian payload with
+     plugins/ copied recursively (the vault app asks a one-time trust
+     prompt to enable them). Each subtree map seed is materialized by
+     its tree-birthing entry, born with its tree, never by setup; the
+     obsidian-vault skill owns their law.
 4. Create the skeleton, only missing parts: workspace/apps/,
    workspace/docs/business-analysis/, workspace/docs/solution-design/,
    workspace/docs/system-architecture/, workspace/docs/maps/,
@@ -66,8 +66,8 @@ detected candidates plus free-form input.
    project: project register --key <kebab project name> --name "<name>"
    --team software-engineering-team --stamp-config workspace/config.json (stamps
    project_key into the config; idempotent). Every flow resolves the
-   project by that key. Render the delivery views once (render backlog
-   and render ledger) so the delivery map resolves from day zero.
+   project by that key; delivery state lives in the database, read
+   through the CLI.
 6. Build workspace/config.json interactively; first key always
    "managed_by": "software-engineering-team plugin; change only through
    the configure entry". An existing config.json is never re-interviewed:

@@ -7,9 +7,5 @@ tags:
 
 # Knowledge Base
 
-The project's knowledge graph. Each map curates one tree; a tree's map
-line joins this list the moment the tree gains content. Delivery state
-(backlog, quality ledger) is one hop away through the delivery map.
-
-- [[maps/delivery|Delivery]] - generated backlog and quality views
-- [[start-here|Start Here]] - how to read this vault
+The project's knowledge graph root. Subtree maps join this list as
+their trees gain content.

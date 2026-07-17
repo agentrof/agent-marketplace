@@ -6,10 +6,10 @@ invisible; every edge follows one grammar or the graph lies.
 ## Wikilink grammar
 
 ```markdown
-[[solution-design/decisions/sd-007-order-events|SD-007]]     link, aliased
-[[business-analysis/shop/shop-space|analysis space]]         link, aliased
-![[_attachments/checkout-flow.png]]                          embed
-[[business-analysis/shop/shop-budgets#^event-volume|budget]] block anchor
+[[solution-design/decisions/order-events-decision|SD-007]] link, aliased
+[[business-analysis/shop/space|analysis space]]            link, aliased
+![[_attachments/checkout-flow.png]]                        embed
+[[business-analysis/shop/budgets#^event-volume|budget]]    block anchor
 ```
 
 - Targets are vault-absolute: the path from the vault root, forward
@@ -39,12 +39,12 @@ invisible; every edge follows one grammar or the graph lies.
 Inside a table row the alias pipe must be escaped or it splits the cell:
 
 ```markdown
-| decision | [[solution-design/decisions/sd-007-order-events\|SD-007]] |
+| decision | [[solution-design/decisions/order-events-decision\|SD-007]] |
 ```
 
 Schema-declared id-citation columns (cites, affects, blocks, targets,
 verify) carry the SAME escaped-pipe wikilink form, targeting the doc
-that mints the id: `[[business-analysis/shop/domains/inventory/rules/stock-item-lifecycle\|BR-INV-001]]`.
+that mints the id: `[[business-analysis/shop/domains/inventory/rules/stock-item-lifecycle-rules\|BR-INV-001]]`.
 The old bare-cell law is dead: the compiler normalizes citation cells
 back to bare ids for the registry, so the machine layer lost nothing,
 and a bare id left in a citation cell is an error the `migrate` verb
@@ -63,8 +63,8 @@ column of the owning row, where a wikilink is the error instead.
 The vault app's rename refactoring never runs headlessly, and a manual
 grep is no longer the runbook. A rename is a migration owned by the
 checker: `vault_check.py migrate --rename [--dry-run] [--json]` builds
-the grammar-driven rename map (chain-qualified named files, id-prefixed
-decision notes; already-compliant files are skipped), then renames and
+the grammar-driven rename map (plain named files, type-suffixed content
+notes; already-compliant files are skipped), then renames and
 rewrites every referrer across the WHOLE vault (body links, frontmatter
 values, map rows) in one operation, even when `--scope` narrows the
 map; generated views are re-rendered by their owning verbs afterwards.

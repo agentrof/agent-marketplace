@@ -114,7 +114,7 @@ gate, and a decision log the planner and the software architect read.
    "${AGENTROF_HOME:-$HOME/.agentrof}/bin/pmo_cli.py" (develop flow's
    state contract). Content stays in files; the database pulses.
 7. HARD SCOPE LIMIT: writes only under workspace/docs/solution-design/,
-   plus its own map note, home and start-here repair, and vault payload
+   plus home and its own map note repair, and vault payload
    materialization (per-file, only where missing). Requirements gaps
    route to business-analysis, implementation to request, stack changes
    to configure, per-story design to the develop flow.

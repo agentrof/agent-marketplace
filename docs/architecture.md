@@ -43,8 +43,9 @@ plugin.json dependencies, so it installs automatically).
 7. **Files over conversation memory.** Durable knowledge exits through git
    channels: code, pull request bodies, analysis spaces with their
    compiler-generated views, living architecture documents, design
-   system, demo packages, and the generated backlog and ledger views.
-   There are no memory tiers or mind maps; a missing-context problem is
+   system, demo packages, and the generated decision logs; delivery
+   state lives in the PMO database, read through its CLI. There are no
+   memory tiers or mind maps; a missing-context problem is
    a step-contract bug.
 8. **One constitution.** Behavioral law lives in a single constitution file
    per plugin, pasted into every spawn prompt with an order-directory copy

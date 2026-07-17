@@ -28,11 +28,11 @@ hook; nothing here ever changes what a document claims.
      hub law this entry restores, and every write below follows it.
    - Read workspace/config.json for project_key and output_language;
      missing or without a project_key: stop and route to the setup
-     entry. output_language governs curated map, nav, home and
-     start-here prose; the machine layer stays English.
+     entry. output_language governs curated map, nav and home
+     prose; the machine layer stays English.
    - Resolve the PMO CLI: the launcher at
      "${AGENTROF_HOME:-$HOME/.agentrof}/bin/pmo_cli.py". An
-     unresolvable PMO only skips the render and event verbs below and
+     unresolvable PMO only skips the event pulses below and
      is named honestly as a residual at close. Freeze truth never
      depends on it: the migrate verb globs
      workspace/work-orders/*/freeze.json mechanically before any write.
@@ -55,13 +55,16 @@ hook; nothing here ever changes what a document claims.
    - Blocked-by-frozen renames are shown as deferred, never as
      approvable options: they wait for their work orders to close.
    - The curation program is summarized per area (maps, nav peers,
-     titles and aliases, home and start-here localization, empty maps)
+     titles and aliases, home localization, empty maps)
      and asked as Approve / Adjust / Pause.
 4. EXECUTE, deterministic first.
    a. ${CLAUDE_PLUGIN_ROOT}/scripts/vault_check.py migrate --vault
       workspace/docs, freeze-safe by construction: citation cells,
-      scalar doc-ref keys, nav hub retargeting, decision-title
-      prefixing and payload reconciliation. Then the approved batch via
+      scalar doc-ref keys, nav hub retargeting, de-id-leading of
+      decision titles and H1s, deletion of notes the law has retired
+      (legacy scaffold and delivery-view files, with home's links to
+      them stripped; runs unconditionally, even under --scope) and
+      payload reconciliation. Then the approved batch via
       migrate --vault workspace/docs --rename: every referrer is
       rewritten vault-wide in the same operation.
    b. Re-render every generated surface:
@@ -70,13 +73,12 @@ hook; nothing here ever changes what a document claims.
       ${CLAUDE_PLUGIN_ROOT}/scripts/ba_compile.py render --space
       workspace/docs/business-analysis/<slug> for EVERY analysis space,
       because a post-rename registry must match the new filenames or
-      alias ownership checks poison; PMO render backlog and render
-      ledger when the CLI resolved. Materialize a subtree's map seed
+      alias ownership checks poison. Materialize a subtree's map seed
       only when its tree bears content: maps are born with their tree.
    c. Judgment in-session, every write under the per-write hook: curate
       map notes (grouped, annotated, output_language), fix contextual
-      nav peers, stamp titles and aliases per the law, sync home and
-      start-here to vault reality and localize their prose, and settle
+      nav peers, stamp titles and aliases per the law, sync home
+      to vault reality and localize its prose, and settle
       each empty map (fill or retire) with owner approval.
 5. CLOSE.
    - Re-run the full check: green, or every residual named with its
@@ -92,8 +94,8 @@ hook; nothing here ever changes what a document claims.
 
 - The ONE entry allowed to write vault-wide: the whole docs tree plus
   its committed payload, and never a byte outside workspace/docs/.
-- The PMO database is touched only through event append and the render
-  verbs; no other state writes.
+- The PMO database is touched only through event append; no other
+  state writes.
 - Prose meaning stays untouched: reorganization is names, links,
   metadata, maps and payload, never content claims.
 - Renames go only through migrate --rename, the rename-as-migration

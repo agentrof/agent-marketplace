@@ -30,10 +30,14 @@ produces lives under `workspace/`:
 - `workspace/docs/`: the team's knowledge base (business-analysis,
   solution-design, system-architecture, design-system), maintained as
   one vault: open `workspace/docs/` as the vault root (never the repo
-  root); `home.md` and `maps/` are the navigation layer; citations are
-  vault-absolute wikilinks; the obsidian-vault skill and vault_check.py
-  own the law. `backlog.md`, `quality-ledger.md` and each tree's
-  `decision-log.md` are GENERATED views; never hand-edit them.
+  root); on first open the vault app asks ONCE to trust the vendored
+  community plugins (that click enables the title-based labels);
+  `home.md` is the knowledge-base root and `maps/` the navigation
+  layer; the global graph colors notes by document type, one color per
+  type; citations are vault-absolute wikilinks; the obsidian-vault
+  skill and vault_check.py own the law. Files opening with a
+  generated-by marker (each tree's `decision-log.md`) are GENERATED
+  views: re-rendered by their owning verbs, never hand-edited.
 - `workspace/apps/`: application code, one folder per application.
 - `workspace/environment/`: the containerized environment (definition,
   build recipes, seed scenarios, contract document); devops-owned, one
@@ -41,9 +45,9 @@ produces lives under `workspace/`:
 - `workspace/demos/` and `workspace/sketches/`: outward demo packages and
   design exploration previews.
 - `workspace/work-orders/`: work-order snapshots (brief, config,
-  constitution); gitignored. Live process state (work orders, stories,
-  tasks, findings) lives in the central PMO database, read through the
-  PMO CLI.
+  constitution); gitignored. Delivery state (work orders, the backlog
+  of stories and its ordering, tasks, findings, the quality ledger)
+  lives in the central PMO database, read through the PMO CLI.
 
 Start work with the team's entry skills: setup, business-analysis,
 solution-design, design-system, sketch, demo, request, delivery-lanes,

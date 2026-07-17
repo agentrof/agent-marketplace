@@ -15,25 +15,22 @@ machine-checked is not a rule.
 ## The node model
 
 - A NODE is a folder with one overview document plus content folders.
-  Every named file carries the CHAIN-QUALIFIED slug: the space
-  directory's name, extended with every domain folder on the path,
-  joined by the schema's slug_join character. The space root's overview
-  is <slug>-space.md; a child node is a domain: domains/<d>/ with
-  <space>-<d>-domain.md. Domains nest by the same rule
-  (domains/finance/domains/accounts-payable/ holds
-  <space>-finance-accounts-payable-domain.md); the compiler warns at
-  depth 2 and fails at depth 3.
-- The chain exists because basenames are VAULT-UNIQUE (they are the
-  graph's fallback labels and link targets); a duplicate or bare
-  contract name (space.md, domain.md) is an error. When two folder
-  paths spell the same chain, rename a domain folder so the chain stays
-  unique, then let the vault checker's migrate --rename regenerate
-  filenames and rewrite referrers.
+  Named files are plain per-folder contracts. The space root's overview
+  is space.md; a child node is a domain: domains/<d>/ with its own
+  domain.md. Domains nest by the same rule
+  (domains/finance/domains/accounts-payable/ holds its own domain.md);
+  the compiler warns at depth 2 and fails at depth 3.
+- Display identity lives in TITLES, not filenames: basenames repeat
+  freely across folders (every domain holds a domain.md) and the title
+  layer labels the graph. Typed content carries its type as the
+  schema's English filename suffix (filename_suffix per doc type); the
+  compiler refuses a typed file without its suffix, and the vault
+  checker's migrate --rename heals legacy names and rewrites referrers.
 - Content folders inside any node, created only when non-empty:
   processes/, entities/, rules/, acceptance/, decisions/, reviews/.
 - Cross-domain concerns live ONLY at the root, one home each:
-  <slug>-glossary.md, <slug>-actors.md, <slug>-budgets.md,
-  integrations/. A domain may carry its own <chain>-budgets.md for
+  glossary.md, actors.md, budgets.md,
+  integrations/. A domain may carry its own budgets.md for
   domain-specific deltas. The root may also own processes/, rules/ and
   acceptance/ for genuinely cross-domain flows (order-to-cash spanning
   finance and inventory lives at the root and mints ids in the space's
@@ -60,9 +57,12 @@ denies a typed date and the compiler rejects a future one). Exactly when
 superseded: superseded_by. Doc identity is its path; there is no
 separate id key.
 
-- title is the user-facing graph label: human output_language prose,
-  never the filename stem. A decision doc's title is id-led and quoted
-  (`title: "DEC-ERP-001: Single warehouse first"`); its H1 matches.
+- title is the user-facing graph label: a natural output_language
+  phrase naming the content and ENDING with the doc type's designation,
+  rendered in the output_language (canonical English designations: the
+  obsidian-vault skill's metadata reference). Never id-led, never the
+  filename stem; the H1 is byte-identical to the title. A decision
+  doc's DEC id lives in its alias and minted row, not its title.
 - tags is a BLOCK list (one `- item` line each) holding exactly the
   stamped mirror: `doc/<type-kebab>` plus `status/<status-kebab>`
   (rule_set becomes `doc/rule-set`, in_review becomes
@@ -79,24 +79,24 @@ separate id key.
 
 | type | lives at | mints | notes |
 |---|---|---|---|
-| space | <slug>-space.md | AS, OQ | carries code:, the space head summary (30 lines max), purpose, domain map, out of scope |
-| domain | domains/<d>/<space>-<d>-domain.md | AS, OQ | carries code:; mission, boundaries, process map, data notes; the chain extends per nesting level |
-| process | processes/*.md | AS, OQ | actors, trigger, main flow, exception flows |
-| entity | entities/*.md | AS, OQ | fields (a table whose first column is the fixed `field` identifier column), lifecycle, propagation semantics |
-| rule_set | rules/*.md | BR, AS, OQ | carries governs: (entity or process targets) |
-| acceptance_set | acceptance/*.md | AC, AS, OQ | carries verifies:; every AC cites BR ids and a verify cell |
-| decision | decisions/dec-<code>-<nnn>-<slug>.md | DEC, AS, OQ | id-prefixed filename (code lowercase, number zero-padded); context, options, ruling, consequences |
-| glossary | <slug>-glossary.md (root) | AS, OQ | one vocabulary per space; terms table columns: term, technical_name, definition (technical_name empty when the term names no technical artifact) |
-| actor_roster | <slug>-actors.md (root) | AS, OQ | actors, roles, permission vocabulary |
-| budget_set | <chain>-budgets.md | AS, OQ | all six non-functional categories, empty ones written as "none stated, confirmed" |
-| integration | integrations/*.md (root) | AS, OQ | carries system_name and direction; exchange, failure semantics, ownership |
-| challenge_record | reviews/<chain>-round-N.md | CH | chain-slugged round files (space rounds: <slug>-space-round-N.md); the challenge loop's audit record; see the challenge-review skill |
+| space | space.md | AS, OQ | carries code:, the space head summary (30 lines max), purpose, domain map, out of scope |
+| domain | domains/<d>/domain.md | AS, OQ | carries code:; mission, boundaries, process map, data notes; nesting repeats the same plain name |
+| process | processes/<slug>-process.md | AS, OQ | actors, trigger, main flow, exception flows |
+| entity | entities/<slug>-entity.md | AS, OQ | fields (a table whose first column is the fixed `field` identifier column), lifecycle, propagation semantics |
+| rule_set | rules/<slug>-rules.md | BR, AS, OQ | carries governs: (entity or process targets) |
+| acceptance_set | acceptance/<slug>-acceptance.md | AC, AS, OQ | carries verifies:; every AC cites BR ids and a verify cell |
+| decision | decisions/<slug>-decision.md | DEC, AS, OQ | the DEC id lives in the frontmatter alias and the minted row, never the filename; context, options, ruling, consequences |
+| glossary | glossary.md (root) | AS, OQ | one vocabulary per space; terms table columns: term, technical_name, definition (technical_name empty when the term names no technical artifact) |
+| actor_roster | actors.md (root) | AS, OQ | actors, roles, permission vocabulary |
+| budget_set | budgets.md (root or domain) | AS, OQ | all six non-functional categories, empty ones written as "none stated, confirmed" |
+| integration | integrations/<slug>-integration.md (root) | AS, OQ | carries system_name and direction; exchange, failure semantics, ownership |
+| challenge_record | reviews/round-<n>.md | CH | plain round files (space rounds: space-round-<n>.md); the challenge loop's audit record; see the challenge-review skill |
 
 Required sections carry language-neutral anchors so the checker never
 parses translated heading text: the H2 text is free (it follows the
 project's output language), the marker is fixed English:
 
-    ## Is Kurallari <!-- sec: rules -->
+    ## <free heading in the output language> <!-- sec: rules -->
 
 Head summary: the lines between the H1 and the first H2. Cap: 30 lines
 for the space overview (the brief contract's summary survives here), 10
@@ -108,9 +108,9 @@ The old six-section brief did not disappear; it distributed:
 
 | brief section | new home |
 |---|---|
-| head summary | <slug>-space.md, between H1 and first H2 |
-| purpose and scope | <slug>-space.md purpose_scope and out_of_scope |
-| non-functional budgets | <slug>-budgets.md, all six categories |
+| head summary | space.md, between H1 and first H2 |
+| purpose and scope | space.md purpose_scope and out_of_scope |
+| non-functional budgets | budgets.md, all six categories |
 | process analysis | process docs, mapped from each overview |
 | conceptual data dictionary | entity docs; trivial entities stay rows in the domain overview's data notes until promoted |
 | business rules | rule_set docs |
@@ -144,7 +144,7 @@ frontmatter, unique across the whole space. LEG is reserved.
   citation is a checked claim. In prose the id is the alias:
 
   ```markdown
-  [[business-analysis/<slug>/domains/inventory/rules/stock-item-lifecycle|BR-INV-001]]
+  [[business-analysis/<slug>/domains/inventory/rules/stock-item-lifecycle-rules|BR-INV-001]]
   ```
 
   TABLE CELLS in schema-declared id-citation columns (cites, affects,
@@ -167,8 +167,8 @@ A doc cannot approve while it holds an open assumption or open question
 row, a dead link, or a missing section.
 
 Computed roll-ups (never authored): node status is the minimum over its
-subtree; FOUNDATION APPROVED means <slug>-space.md, <slug>-glossary.md,
-<slug>-actors.md and <slug>-budgets.md are approved; a domain is
+subtree; FOUNDATION APPROVED means space.md, glossary.md,
+actors.md and budgets.md are approved; a domain is
 BUILDABLE when the foundation is approved, its subtree is approved, its
 challenge gate is satisfied and every id it cites across domain lines
 has an approved owner.
@@ -180,10 +180,10 @@ space-level challenge round when child domains exist.
 
 ## Formatting
 
-- One H1 per doc, matching the title (a decision doc's H1 is the id-led
-  form: `DEC-ERP-001: <title>`). No emoji in headings, no em dash
-  anywhere: the compiler enforces the same bans the marketplace
-  validator enforces on shipped content.
+- One H1 per doc, byte-identical to the title (decision docs included:
+  the id lives in the alias and the minted row, never the H1). No emoji
+  in headings, no em dash anywhere: the compiler enforces the same bans
+  the marketplace validator enforces on shipped content.
 - Structure is language-neutral: frontmatter keys and machine-parsed
   values (type, status, dates, roles), sec anchors, table headers, ids,
   file and directory names are fixed English; the title value, body
@@ -208,7 +208,7 @@ space-level challenge round when child domains exist.
   the ba_compile check and the per-write hook both enforce it:
 
   ```markdown
-  [[business-analysis/shop/domains/inventory/entities/stock-item|Stock Item]]
+  [[business-analysis/shop/domains/inventory/entities/stock-item-entity|Stock Item]]
   ```
 
   Standard relative markdown links remain only for targets OUTSIDE
@@ -217,7 +217,7 @@ space-level challenge round when child domains exist.
   a bare id, never "here".
 - Budgets and other row-level anchors are block ids: mint ` ^kebab-id`
   at the end of the row once, never rename it, and cite
-  `[[business-analysis/shop/shop-budgets#^event-volume|volume budget]]`.
+  `[[business-analysis/shop/budgets#^event-volume|volume budget]]`.
   Heading anchors are banned vault-wide: heading text is output-language
   prose and cannot hold an anchor stable.
 
@@ -254,7 +254,7 @@ space-level challenge round when child domains exist.
    across the whole vault (body links, frontmatter values, map rows)
    in one operation; already-compliant files are skipped.
 3. Moving a doc between nodes is still a manual move first: relocate
-   the file, then run --rename so the filename follows its new chain
+   the file, then run --rename so the filename follows the grammar
    and the referrers follow the file. Re-mint its ids under the new
    code (retire the old rows in place with a superseded_by note;
    numbers are never reused) and update citations.
@@ -278,37 +278,37 @@ governs:
   - "[[business-analysis/shop/domains/inventory/entities/stock-item]]"
 ---
 
-# Stock Item Lifecycle Rules
+# Stock item lifecycle rules
 
 Lifecycle constraints for
-[[business-analysis/shop/domains/inventory/entities/stock-item|Stock Item]],
+[[business-analysis/shop/domains/inventory/entities/stock-item-entity|Stock Item]],
 bounded by
-[[business-analysis/shop/decisions/dec-erp-001-single-warehouse-first|DEC-ERP-001]].
+[[business-analysis/shop/decisions/single-warehouse-first-decision|DEC-ERP-001]].
 
 ## Rules <!-- sec: rules -->
 
 | id | statement | kind | status | cites |
 |---|---|---|---|---|
 | BR-INV-001 | The sku cannot change after the item's first stock movement; a change attempt is refused with the movement date named. | constraint | active | |
-| BR-INV-005 | A blocked or discontinued item accepts no stock movements; any attempt is refused and the state is unchanged. | lifecycle | active | [[business-analysis/shop/decisions/dec-erp-001-single-warehouse-first\|DEC-ERP-001]] |
+| BR-INV-005 | A blocked or discontinued item accepts no stock movements; any attempt is refused and the state is unchanged. | lifecycle | active | [[business-analysis/shop/decisions/single-warehouse-first-decision\|DEC-ERP-001]] |
 
 ## Assumptions <!-- sec: assumptions -->
 
 | id | statement | source | affects | status | opened_on |
 |---|---|---|---|---|---|
-| AS-INV-003 | Negative on-hand quantity is never permitted. | inferred from the goods-receipt walkthrough; owner confirmed | [[business-analysis/shop/domains/inventory/rules/stock-item-lifecycle\|BR-INV-001]] | confirmed | 2026-07-08 |
+| AS-INV-003 | Negative on-hand quantity is never permitted. | inferred from the goods-receipt walkthrough; owner confirmed | [[business-analysis/shop/domains/inventory/rules/stock-item-lifecycle-rules\|BR-INV-001]] | confirmed | 2026-07-08 |
 ```
 
 The mint cells stay bare (BR-INV-001 mints here); the cites and affects
 cells are escaped-pipe wikilinks to the owning docs, collapsed back to
 bare ids in the registry. The owning domain overview at
-domains/inventory/shop-inventory-domain.md carries `code: INV` and the
+domains/inventory/domain.md carries `code: INV` and the
 matching alias:
 
 ```markdown
 ---
 type: domain
-title: Inventory
+title: Inventory domain overview
 code: INV
 status: approved
 approved_at: 2026-07-09

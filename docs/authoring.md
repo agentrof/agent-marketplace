@@ -214,8 +214,8 @@ tag wildcards) and holds the policy, the `templates/vault/` seeds and
 the committed graph config in parity: a policy subtree or extra map
 without a map seed, a stray seed the policy does not name, or a
 `graph.json` whose colorGroups or search drift from the policy is an
-error. The home seed is minimal and DYNAMIC: it must link the extra
-maps and the start-here note and must NOT link any subtree map; subtree
+error. The home seed is minimal and DYNAMIC: it links
+nothing at seed and must NOT link any subtree map; subtree
 map lines are added in the consuming project by the entry that births
 each tree. The enable list `community-plugins.json` must equal the
 policy's plugin set, and a vendored plugin directory under

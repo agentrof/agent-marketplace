@@ -22,7 +22,7 @@ You MUST follow these rules exactly. Violating any of them is a failure.
 6. Never enter plan mode. This flow IS the plan.
 7. Single writer per work order. This session's database writes are
    ONLY: backlog mutations on main (item import / update / add-dep /
-   add-dod, render backlog) and closing writes for MERGED lanes
+   add-dod) and closing writes for MERGED lanes
    (checkpoint, item update --status done / --deployed-verified,
    work-order set-status --status complete), plus work-order release as
    the recovery verb. Lane-scoped verbs (set-step, record-gate, bump,
@@ -139,8 +139,8 @@ PROPOSE before ending the cycle.
 
   {{constitution}}
 
-- The re-slice passes a mini backlog gate, loads via item import, and
-  the backlog view re-renders. The affected lane then resumes with its
+- The re-slice passes a mini backlog gate and loads via item import.
+  The affected lane then resumes with its
   corrected scope or aborts in favor of the new slices (its call, per
   the develop flow's re-slice rule).
 

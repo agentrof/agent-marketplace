@@ -76,12 +76,13 @@ Front door for real work: classify, confirm, deliver.
       <space> --json-file <file>; nonzero blocks the approve action with
       the named ids), then load it into the PMO database (item import
       --project-key <key> --json-file <file>; the CLI rejects stories
-      with empty scope, exclusions, DoR or DoD) and regenerate the
-      committed view (render backlog --out workspace/docs/backlog.md, a
-      generated vault view per the obsidian-vault skill).
+      with empty scope, exclusions, DoR or DoD). The database is the
+      single source of delivery state, read back through the CLI; no
+      backlog view is rendered into the docs vault (its law is the
+      obsidian-vault skill's).
    d. Story loop: for each ready story in order, execute
       ${CLAUDE_PLUGIN_ROOT}/flows/develop.md end to end. After each
-      story's merge checkpoint (which updates the database and re-renders
-      the backlog view on the main line), ask through the
+      story's merge checkpoint (which updates the database on the main
+      line), ask through the
       AskUserQuestion popup whether to continue with the next story.
 5. All gates are manual; there is no autonomous mode.

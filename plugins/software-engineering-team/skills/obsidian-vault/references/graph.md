@@ -58,8 +58,8 @@ its copyleft binds the vendored bundle only.
   (1.12.0) is the consumer's minimum vault-app version.
 - Fallback truth: with the plugin absent, declined or broken (an app
   update can break a pinned build), nothing corrupts; labels fall back
-  to the filenames, which the naming law keeps meaningful chain-slugged
-  names.
+  to the filenames, which the naming law keeps meaningful plain
+  type-suffixed names.
 - Update procedure: re-vendor a newer TAGGED release's `manifest.json`
   and `main.js`, keep our committed `data.json`, and review the new
   bundle at vendor time. Honest risk: `main.js` is third-party
@@ -69,15 +69,22 @@ its copyleft binds the vendored bundle only.
 ## Type-based color groups
 
 The global graph is colored by document TYPE, not by folder; the
-policy's `graph_color_groups` orders the queries and first match wins:
+policy's `graph_color_groups` orders the queries, first match wins,
+and EVERY type in the taxonomy owns a color:
 
-- `tag:#doc/rule-set`, `tag:#doc/decision`, `tag:#doc/acceptance-set`,
-  `tag:#doc/process`, `tag:#doc/entity`: one color per content kind,
-  readable across every subtree.
-- `tag:#doc/moc OR tag:#doc/home OR tag:#doc/guide`: the navigation
-  layer as one group.
-- `path:"maps/delivery" OR path:"backlog" OR path:"quality-ledger"`:
-  the delivery views.
+- One `tag:#doc/<type-kebab>` group per doc type, across all trees:
+  space, domain, glossary, actor-roster, budget-set, entity, process,
+  rule-set, acceptance-set, decision, challenge-record, integration,
+  landscape, engagement, design-master, page-override.
+- `tag:#doc/moc OR tag:#doc/home`: the navigation layer as one group.
+- Completeness is machine-guarded: the marketplace validator errors on
+  a taxonomy type without a color group AND on a group whose tag names
+  no known type (a dead legend). Adding a type forces its color in the
+  same commit.
+- The palette is authored once in the policy, distinct in light AND
+  dark themes: hub and overview types warm, content kinds cool, audit
+  records muted, nav neutral; the committed `graph.json` mirrors it
+  byte-level.
 
 Graph queries support no pipe-OR and no tag wildcards; the policy
 writes OR-joined full tags in the legal grammar, validated before the

@@ -86,71 +86,49 @@ BARE_ID_RE = re.compile(r"\b(BR|AC|AS|OQ|DEC)-(\d{3,})\b")
 
 
 # ---------------------------------------------------------------------------
-# Naming: chain-qualified slugs (the schema's slug_join rule)
+# Naming: plain per-folder names; typed content is <slug>-<suffix>.md.
+# Display identity lives in titles (the vault's title layer), never in
+# filenames, so basenames may repeat across folders.
 # ---------------------------------------------------------------------------
 
 
-def slug_join(schema: dict) -> str:
-    return schema.get("slug_join", "-")
+def named_file_name(schema: dict, doc_type: str) -> str:
+    return schema["doc_types"][doc_type]["location"]["name"]
 
 
-def chain_slug(schema: dict, space_slug: str, node_rel: str) -> str:
-    """The chain-qualified slug of a node: the space directory slug at the
-    root, extended with every domain folder name on the way down. A single
-    folder-name slug would re-create collisions across spaces and domains;
-    the chain keeps basenames unique vault-wide."""
-    parts = [space_slug]
-    segments = node_rel.split("/") if node_rel else []
-    parts.extend(segments[i] for i in range(1, len(segments), 2))
-    return slug_join(schema).join(parts)
+def space_overview_rel(schema: dict) -> str:
+    return named_file_name(schema, "space")
 
 
-def named_file_name(schema: dict, doc_type: str, chain: str) -> str:
-    loc = schema["doc_types"][doc_type]["location"]
-    if loc.get("slug_prefixed"):
-        return f"{chain}{slug_join(schema)}{loc['name']}"
-    return loc["name"]
-
-
-def space_overview_rel(schema: dict, space_slug: str) -> str:
-    return named_file_name(schema, "space", space_slug)
-
-
-def node_overview_rel(schema: dict, space_slug: str, node_rel: str) -> str:
+def node_overview_rel(schema: dict, node_rel: str) -> str:
     if node_rel == "":
-        return space_overview_rel(schema, space_slug)
-    name = named_file_name(schema, "domain",
-                           chain_slug(schema, space_slug, node_rel))
-    return f"{node_rel}/{name}"
+        return space_overview_rel(schema)
+    return f"{node_rel}/{named_file_name(schema, 'domain')}"
 
 
-def root_file_rels(schema: dict, space_slug: str) -> list[str]:
-    """The required root skeleton files, chain-slugged."""
-    return [named_file_name(schema, t, space_slug)
+def root_file_rels(schema: dict) -> list[str]:
+    """The required root skeleton files, plain contract names."""
+    return [named_file_name(schema, t)
             for t in ("space", "glossary", "actor_roster", "budget_set")]
 
 
-def _format_re(fmt: str, chain: str) -> re.Pattern:
-    pattern = re.escape(fmt)
-    pattern = pattern.replace(re.escape("{slug}"), re.escape(chain))
-    pattern = pattern.replace(re.escape("{n}"), r"(\d+)")
+def _format_re(fmt: str) -> re.Pattern:
+    pattern = re.escape(fmt).replace(re.escape("{n}"), r"(\d+)")
     return re.compile(f"^{pattern}$")
 
 
-def round_file_re(schema: dict, chain: str) -> re.Pattern:
-    return _format_re(schema["challenge"]["round_file_format"], chain)
+def round_file_re(schema: dict) -> re.Pattern:
+    return _format_re(schema["challenge"]["round_file_format"])
 
 
-def space_round_file_re(schema: dict, space_slug: str) -> re.Pattern:
-    return _format_re(schema["challenge"]["space_round_file_format"],
-                      space_slug)
+def space_round_file_re(schema: dict) -> re.Pattern:
+    return _format_re(schema["challenge"]["space_round_file_format"])
 
 
-def round_file_name(schema: dict, chain: str, scope: str,
-                    n: int | str) -> str:
+def round_file_name(schema: dict, scope: str, n: int | str) -> str:
     key = ("space_round_file_format" if scope == "space"
            else "round_file_format")
-    return schema["challenge"][key].format(slug=chain, n=n)
+    return schema["challenge"][key].format(n=n)
 
 # Every check id this compiler can emit. The test suite's builder registry
 # stays in lockstep with this tuple: a check without a firing fixture
@@ -374,8 +352,8 @@ def parse_doc_body(doc: Doc) -> None:
 def classify_location(schema: dict, space_slug: str,
                       rel_parts: tuple[str, ...]) -> tuple[str, str] | None:
     """Return (node_rel, expected_type) for a markdown file path, or None
-    when the location is illegal. Named files carry their chain-qualified
-    slug prefix; the bare contract names are dead grammar."""
+    when the location is illegal. Named files carry their plain contract
+    names; typed folder content is <slug>-<filename_suffix>.md."""
     parts = list(rel_parts)
     node: list[str] = []
     while len(parts) > 2 and parts[0] == "domains":
@@ -385,12 +363,11 @@ def classify_location(schema: dict, space_slug: str,
     is_root = node_rel == ""
     if len(parts) == 1:
         name = parts[0]
-        chain = chain_slug(schema, space_slug, node_rel)
         for type_name, spec in schema["doc_types"].items():
             loc = spec["location"]
             if loc["kind"] != "named_file":
                 continue
-            if name != named_file_name(schema, type_name, chain):
+            if name != named_file_name(schema, type_name):
                 continue
             if loc.get("root_only") and not is_root:
                 return None
@@ -399,13 +376,19 @@ def classify_location(schema: dict, space_slug: str,
             return node_rel, type_name
         return None
     if len(parts) == 2:
-        folder, _name = parts
+        folder, name = parts
         for type_name, spec in schema["doc_types"].items():
             loc = spec["location"]
             if loc["kind"] != "folder" or loc["folder"] != folder:
                 continue
             if loc.get("root_only") and not is_root:
                 return None
+            suffix = loc.get("filename_suffix")
+            if suffix:
+                stem = name[:-3] if name.endswith(".md") else name
+                if not (stem.endswith(f"-{suffix}")
+                        and len(stem) > len(suffix) + 1):
+                    return None
             return node_rel, type_name
         return None
     return None
@@ -452,15 +435,15 @@ def scan_space(space_dir: Path, schema: dict) -> tuple[Space, list[Finding]]:
                      "deep trees hide content; prefer wider domain maps")
 
     for node_rel in sorted(space.nodes):
-        overview_rel = node_overview_rel(schema, space.slug, node_rel)
+        overview_rel = node_overview_rel(schema, node_rel)
         if not (space_dir / overview_rel).is_file():
             overview = overview_rel.rsplit("/", 1)[-1]
             err(overview_rel, 1, "space_layout",
                 f"node is missing its overview file {overview}",
-                "every node carries exactly one chain-slugged overview"
-                " document")
+                "every node carries exactly one overview document under"
+                " its plain contract name")
 
-    for name in root_file_rels(schema, space.slug):
+    for name in root_file_rels(schema):
         if not (space_dir / name).is_file():
             err(name, 1, "space_layout",
                 f"space root is missing required file {name}",
@@ -498,8 +481,9 @@ def scan_space(space_dir: Path, schema: dict) -> tuple[Space, list[Finding]]:
         if location is None:
             err(rel, 1, "space_layout",
                 "file location matches no document type",
-                "place docs in their type folder and give named files their"
-                " chain-qualified slug prefix; see the space standard")
+                "typed content is <slug>-<filename_suffix>.md in its type"
+                " folder; named files keep their plain contract names; see"
+                " the space standard")
             continue
         node_rel, expected_type = location
         fm, fm_end, fm_error = parse_frontmatter(text)
@@ -976,16 +960,12 @@ def check_challenge_record(space: Space, doc: Doc, findings: list[Finding]) -> N
             "the loop is capped; residue goes to the gate as open questions")
         round_no = None
     name = Path(rel).name
-    chain = chain_slug(schema, space.slug, doc.node)
-    m = (space_round_file_re(schema, space.slug).match(name)
-         if scope == "space"
-         else round_file_re(schema, chain).match(name))
+    m = (space_round_file_re(schema).match(name) if scope == "space"
+         else round_file_re(schema).match(name))
     if not m:
-        expected = round_file_name(schema, space.slug if scope == "space"
-                                   else chain, scope, "N")
+        expected = round_file_name(schema, scope, "N")
         err(1, f"filename '{name}' does not match its review_scope '{scope}'",
-            f"round records here are named {expected} (chain-slugged,"
-            " schema-driven)")
+            f"round records here are named {expected} (schema-driven)")
     elif round_no is not None and int(m.group(1)) != round_no:
         err(1, f"filename round {m.group(1)} disagrees with frontmatter round"
             f" {round_no}", "the filename carries the round number")
@@ -1153,7 +1133,7 @@ def check_semantic_links(space: Space, findings: list[Finding]) -> None:
                                             f"{key} points at {' or '.join(wanted)} docs"))
 
     for node_rel in sorted(space.nodes):
-        overview_rel = node_overview_rel(space.schema, space.slug, node_rel)
+        overview_rel = node_overview_rel(space.schema, node_rel)
         overview = space.docs.get(overview_rel)
         if overview is None:
             continue
@@ -1178,7 +1158,7 @@ def check_semantic_links(space: Space, findings: list[Finding]) -> None:
                     if r.startswith(f"{prefix}domains/") and
                     r.count("/") == (node_rel.count("/") + 2 if node_rel else 1)]
         for child in sorted(children):
-            child_overview = node_overview_rel(space.schema, space.slug, child)
+            child_overview = node_overview_rel(space.schema, child)
             if child_overview in space.docs and child_overview not in linked:
                 findings.append(Finding(
                     "error", overview_rel, 1, "semantic_links",
@@ -1197,7 +1177,7 @@ def check_semantic_links(space: Space, findings: list[Finding]) -> None:
 
 def check_thresholds(space: Space, findings: list[Finding], warn) -> None:
     th = space.schema["thresholds"]
-    space_rel = space_overview_rel(space.schema, space.slug)
+    space_rel = space_overview_rel(space.schema)
     total_docs = len(space.docs)
     total_bytes = sum(len("\n".join(d.lines).encode("utf-8"))
                       for d in space.docs.values())
@@ -1214,7 +1194,7 @@ def check_thresholds(space: Space, findings: list[Finding], warn) -> None:
         own = [d for d in space.docs.values() if d.node == node_rel]
         direct = [d for d in own if d.doc_type not in
                   ("space", "domain", "challenge_record")]
-        overview_rel = node_overview_rel(space.schema, space.slug, node_rel)
+        overview_rel = node_overview_rel(space.schema, node_rel)
         if len(direct) > th["node_direct_docs_warn"]:
             warn(overview_rel, 1, "thresholds",
                  f"node owns {len(direct)} content docs"
@@ -1371,7 +1351,7 @@ def run_gate_checks(space: Space, findings: list[Finding], gate_node: str) -> No
     def err(path, line, message, fix):
         findings.append(Finding("error", path, line, "gate_approval", message, fix))
 
-    for name in root_file_rels(space.schema, space.slug):
+    for name in root_file_rels(space.schema):
         doc = space.docs.get(name)
         if doc is None:
             continue
@@ -1392,7 +1372,7 @@ def run_gate_checks(space: Space, findings: list[Finding], gate_node: str) -> No
                      if gate_node == "" or n == gate_node
                      or n.startswith(gate_node + "/")]
     for node_rel in subtree_nodes:
-        overview = node_overview_rel(space.schema, space.slug, node_rel)
+        overview = node_overview_rel(space.schema, node_rel)
         reason = record_satisfies_gate(space, latest_record(space, node_rel, "domain"))
         if reason:
             err(overview, 1, f"challenge gate unsatisfied: {reason}",
@@ -1402,7 +1382,7 @@ def run_gate_checks(space: Space, findings: list[Finding], gate_node: str) -> No
     if gate_node == "" and has_domains:
         reason = record_satisfies_gate(space, latest_record(space, "", "space"))
         if reason:
-            err(space_overview_rel(space.schema, space.slug), 1,
+            err(space_overview_rel(space.schema), 1,
                 f"space-level challenge gate unsatisfied: {reason}",
                 "run the cross-domain round before closing the space")
 
@@ -1412,7 +1392,7 @@ def run_gate_checks(space: Space, findings: list[Finding], gate_node: str) -> No
                      and space.docs[rel].doc_type == type_name
                      for rel in space.docs)
         if not exists:
-            anchor = node_overview_rel(space.schema, space.slug, gate_node)
+            anchor = node_overview_rel(space.schema, gate_node)
             err(anchor, 1, f"subtree holds no {type_name} document",
                 "the distributed brief contract requires processes, rules"
                 " and acceptance criteria")
@@ -1474,7 +1454,7 @@ def node_rollup(space: Space, node_rel: str) -> str:
 
 def foundation_approved(space: Space) -> bool:
     return all(doc_status(space.docs[n]) == "approved"
-               for n in root_file_rels(space.schema, space.slug)
+               for n in root_file_rels(space.schema)
                if n in space.docs)
 
 
@@ -1511,7 +1491,7 @@ def render_views(space: Space, warnings: list[Finding]) -> dict[str, str]:
                 space.vault_root.resolve()).as_posix() + "/"
         except ValueError:
             vault_prefix = ""
-    space_rel = space_overview_rel(space.schema, space.slug)
+    space_rel = space_overview_rel(space.schema)
     title = str(space.docs.get(space_rel).fm.get("title", "")) \
         if space_rel in space.docs else ""
     stable_warnings = [w for w in warnings
@@ -1874,17 +1854,16 @@ def cmd_init(args, schema: dict) -> int:
     vault_root = require_vault_root(args)
     if vault_root is None:
         return 2
-    slug = space_dir.name
     prefix = vault_prefix_for(space_dir, vault_root)
-    hub = f"{prefix}{space_overview_rel(schema, slug)[:-3]}"
+    hub = f"{prefix}{space_overview_rel(schema)[:-3]}"
     (space_dir / GENERATED_DIR).mkdir(parents=True, exist_ok=True)
-    write_stub(schema, space_dir / space_overview_rel(schema, slug), "space",
+    write_stub(schema, space_dir / space_overview_rel(schema), "space",
                args.title, code=args.code, aliases=[args.code])
-    write_stub(schema, space_dir / named_file_name(schema, "glossary", slug),
+    write_stub(schema, space_dir / named_file_name(schema, "glossary"),
                "glossary", f"{args.title} Glossary", nav_hub=hub)
-    write_stub(schema, space_dir / named_file_name(schema, "actor_roster", slug),
+    write_stub(schema, space_dir / named_file_name(schema, "actor_roster"),
                "actor_roster", f"{args.title} Actors", nav_hub=hub)
-    budgets_name = named_file_name(schema, "budget_set", slug)
+    budgets_name = named_file_name(schema, "budget_set")
     write_stub(schema, space_dir / budgets_name, "budget_set",
                f"{args.title} Non-Functional Budgets", nav_hub=hub,
                scope="space")
@@ -1905,12 +1884,10 @@ def cmd_stub(args, schema: dict) -> int:
     if vault_root is None:
         return 2
     space_dir = Path(args.space)
-    space_slug = space_dir.name
     prefix = vault_prefix_for(space_dir, vault_root)
     spec = schema["doc_types"][args.type]
     loc = spec["location"]
     node = args.node.strip("/")
-    chain = chain_slug(schema, space_slug, node)
     title = args.title
     extra: dict = {}
     aliases: list[str] | None = None
@@ -1918,17 +1895,17 @@ def cmd_stub(args, schema: dict) -> int:
     # Overview docs are hubs and nav to the subtree map (the default);
     # everything else navs to its owning node's overview hub.
     nav_hub = ("" if args.type in ("space", "domain")
-               else f"{prefix}{node_overview_rel(schema, space_slug, node)[:-3]}")
+               else f"{prefix}{node_overview_rel(schema, node)[:-3]}")
     if args.type == "domain":
         if not node:
             print("ba_compile: FAIL: domain stubs need --node domains/<slug>",
                   file=sys.stderr)
             return 2
-        target = space_dir / node / named_file_name(schema, "domain", chain)
+        target = space_dir / node / named_file_name(schema, "domain")
         extra["code"] = args.code or ""
         aliases = [args.code] if args.code else None
     elif loc["kind"] == "named_file":
-        name = named_file_name(schema, args.type, chain)
+        name = named_file_name(schema, args.type)
         target = space_dir / node / name if node else space_dir / name
         if args.type == "budget_set":
             extra["scope"] = "domain" if node else "space"
@@ -1936,9 +1913,7 @@ def cmd_stub(args, schema: dict) -> int:
             extra["code"] = args.code or ""
             aliases = [args.code] if args.code else None
     elif args.type == "challenge_record":
-        name = round_file_name(
-            schema, space_slug if args.review_scope == "space" else chain,
-            args.review_scope, args.round)
+        name = round_file_name(schema, args.review_scope, args.round)
         base = space_dir / node if node else space_dir
         target = base / loc["folder"] / name
     elif args.type == "decision":
@@ -1951,12 +1926,12 @@ def cmd_stub(args, schema: dict) -> int:
             print("ba_compile: FAIL: decision stubs need an owning node"
                   " code; declare the node overview first", file=sys.stderr)
             return 2
+        # The id is minted in the ruling row and the alias; the filename
+        # and the title stay natural (display-native naming).
         dec_id = next_ids(pre_space, code)["DEC"]
-        number = dec_id.rsplit("-", 1)[-1]
         base = space_dir / node if node else space_dir
         target = (base / loc["folder"]
-                  / f"dec-{code.lower()}-{number}-{args.slug}.md")
-        title = f"{dec_id}: {args.title}"
+                  / f"{args.slug}-{loc['filename_suffix']}.md")
         aliases = [dec_id]
         seed_rows = {"ruling": [dec_id, "To be decided.", "active",
                                 utc_today().isoformat()]}
@@ -1965,7 +1940,9 @@ def cmd_stub(args, schema: dict) -> int:
             print("ba_compile: FAIL: folder docs need --slug", file=sys.stderr)
             return 2
         base = space_dir / node if node else space_dir
-        target = base / loc["folder"] / f"{args.slug}.md"
+        suffix = loc.get("filename_suffix")
+        name = f"{args.slug}-{suffix}.md" if suffix else f"{args.slug}.md"
+        target = base / loc["folder"] / name
     if args.type == "rule_set":
         if not args.governs:
             print("ba_compile: FAIL: rule_set stubs need --governs", file=sys.stderr)

@@ -8,18 +8,16 @@ leaves linking back up and sideways.
 
 ```text
 workspace/docs/            the vault root (open THIS in the vault app)
-  home.md                  navigation root; dynamic, links maps + start-here
-  start-here.md            human onboarding note
-  maps/                    one map note per subtree + delivery
+  home.md                  the knowledge-base root; dynamic, links the
+                           content-bearing subtrees' maps
+  maps/                    one map note per content-bearing subtree
   business-analysis/       analysis spaces (space standard governs)
-    shop/                  a space: shop-space.md, shop-glossary.md,
-                           shop-actors.md, shop-budgets.md, domains/,
-                           decisions/, reviews/, _generated/
+    shop/                  a space: space.md, glossary.md, actors.md,
+                           budgets.md, domains/, decisions/, reviews/,
+                           _generated/
   solution-design/         landscape, engagements, decisions/, index
   system-architecture/     living documents, decisions/, index
   design-system/           MASTER and page overrides
-  backlog.md               generated delivery view
-  quality-ledger.md        generated delivery view
   api/                     generated schema exports (non-note subtree)
   _attachments/            embedded binaries only
   .obsidian/               committed payload + local UI state
@@ -32,30 +30,33 @@ policy, never ad hoc.
 
 ## Naming
 
-- Authored basenames are vault-unique and the policy's
-  `banned_basenames` list kills the generic set; both violations are
-  per-file `basename_collision` errors, so a scoped gate repairs its
-  own subtree.
-- Named-file contracts carry the chain-qualified slug: the space
-  directory's slug leads and every domain folder on the path extends
-  it. Root files are `shop-space.md`, `shop-glossary.md`,
-  `shop-actors.md`, `shop-budgets.md`; a domain overview is
-  `domains/inventory/shop-inventory-domain.md`; a nested one is
-  `domains/finance/domains/accounts-payable/shop-finance-accounts-payable-domain.md`.
-- When the chain itself collides (two folder paths spelling one
-  chain), the remediation is to RENAME THE DOMAIN FOLDER so the chain
-  stays unique, then let `migrate --rename` regenerate the filenames
-  and rewrite every referrer.
+- Named files are plain per-folder contracts: a space root holds
+  `space.md`, `glossary.md`, `actors.md`, `budgets.md`; every domain
+  folder holds its own `domain.md`
+  (`domains/inventory/domain.md`, nested
+  `domains/finance/domains/accounts-payable/domain.md`); review
+  records are `round-<n>.md` (space-level rounds `space-round-<n>.md`).
+- Typed content carries its type as the schema's English filename
+  suffix: `<slug>-rules.md`, `<slug>-acceptance.md`,
+  `<slug>-process.md`, `<slug>-entity.md`, `<slug>-decision.md`,
+  `<slug>-integration.md` (`checkout-rules.md`,
+  `order-events-decision.md`). No chain prefixes, no id prefixes: ids
+  live in frontmatter aliases, display identity lives in titles.
+- Basenames repeat freely across folders (every domain holds a
+  `domain.md`); only a policy-banned generic basename where a
+  meaningful slug is due is a per-file error, so a scoped gate repairs
+  its own subtree. Renames go through `migrate --rename`, which renames
+  per the grammar and rewrites every referrer in one operation.
 
 ## Home and maps
 
-- `home.md` is DYNAMIC: it links the start-here note, the policy's
-  extra maps (delivery) and the map of every subtree that BEARS notes;
-  linking an empty tree's map is an error, exactly like omitting a
-  content-bearing one. The entry that births a tree materializes its
-  map seed from the templates and adds the home line in the same
-  session; template seeds ship for every map, copy time is the tree's
-  birth.
+- `home.md` is the single knowledge-base root and DYNAMIC: it links
+  the map of every subtree that BEARS notes and nothing else; linking
+  an empty tree's map is an error, exactly like omitting a
+  content-bearing one. The seed links nothing. The entry that births a
+  tree materializes its map seed from the templates and adds the home
+  line in the same session; template seeds ship for every map, copy
+  time is the tree's birth.
 - Maps link HUBS, hubs link leaves, leaves are NOT required on maps.
   Each map note (`type: moc`, no status) curates its subtree: it links
   the policy-ladder hubs (a space's overview, each domain's overview)
@@ -64,18 +65,19 @@ policy, never ad hoc.
   rows. Every policy hub MUST have an inbound link from its subtree
   map (`map_coverage`); the producing persona updates the map in the
   same session that creates, renames or retires docs.
-- `maps/delivery.md` links the generated backlog and quality-ledger
-  views so delivery state is one hop from home.
+- Delivery state (the backlog, the quality ledger) lives in the PMO
+  database and is read through the PMO CLI; the vault holds knowledge,
+  never delivery views, and the graph carries no delivery nodes.
 
 ## Nav sections
 
 Every authored leaf ends with the nav section:
 
 ```markdown
-## Baglantilar <!-- sec: nav -->
-[[business-analysis/shop/domains/inventory/shop-inventory-domain|Inventory]] -
-[[business-analysis/shop/domains/inventory/entities/stock-item|Stock Item]] -
-[[business-analysis/shop/shop-glossary|Glossary]]
+## Links <!-- sec: nav -->
+[[business-analysis/shop/domains/inventory/domain|Inventory]] -
+[[business-analysis/shop/domains/inventory/entities/stock-item-entity|Stock Item]] -
+[[business-analysis/shop/glossary|Glossary]]
 ```
 
 The marker line is the fixed machine layer; the heading text above it
@@ -85,15 +87,15 @@ this file (above, the domain overview). Hubs themselves and notes no
 ladder entry covers keep the subtree map first:
 
 ```markdown
-## Baglantilar <!-- sec: nav -->
+## Links <!-- sec: nav -->
 [[maps/solution-design|Solution Design]] -
 [[solution-design/landscape|Landscape]] -
-[[solution-design/decisions/sd-007-order-events|SD-007]]
+[[solution-design/decisions/order-events-decision|SD-007]]
 ```
 
 After the first link come 2-5 peers a reader would jump to next (policy
 range; the floor relaxes while a subtree holds fewer than three notes).
-Home, start-here and map notes carry no nav section.
+Home and map notes carry no nav section.
 
 ## Generated surfaces
 

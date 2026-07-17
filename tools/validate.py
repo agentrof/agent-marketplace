@@ -993,21 +993,16 @@ def check_ba_schema_shape(tree: Tree, findings: list[Finding]) -> None:
             except re.error:
                 err("id_format does not compile as a regex",
                     "id_format is the id law; it must compile")
-            slug_join = schema.get("slug_join")
-            if not (isinstance(slug_join, str) and slug_join):
-                err("slug_join must be a non-empty string",
-                    "named files carry chain-qualified slug prefixes; the"
-                    " join character is schema data, never implied")
             challenge = schema.get("challenge")
             for key in ("round_file_format", "space_round_file_format"):
                 value = (challenge.get(key)
                          if isinstance(challenge, dict) else None)
-                if not (isinstance(value, str) and "{slug}" in value
-                        and "{n}" in value and value.endswith(".md")):
+                if not (isinstance(value, str) and "{n}" in value
+                        and value.endswith(".md")):
                     err(f"challenge.{key} must be a .md format string"
-                        " carrying {slug} and {n}",
-                        "round filenames are schema-driven and chain-slug"
-                        " qualified; the format is data, not code")
+                        " carrying {n}",
+                        "round filenames are schema-driven; the format is"
+                        " data, not code")
             row_schemas = schema.get("row_schemas", {})
             all_columns = {c for row in row_schemas.values()
                            if isinstance(row, dict)
@@ -1037,12 +1032,16 @@ def check_ba_schema_shape(tree: Tree, findings: list[Finding]) -> None:
                             "every doc type declares sections, mints and gating")
                 location = spec.get("location")
                 if isinstance(location, dict) \
-                        and location.get("kind") == "named_file" \
-                        and not isinstance(location.get("slug_prefixed"), bool):
-                    err(f"doc type '{type_name}' named_file location must"
-                        " carry a boolean slug_prefixed",
-                        "unique chain-slugged basenames are the naming law;"
-                        " every named file declares its stance")
+                        and location.get("kind") == "folder" \
+                        and type_name != "challenge_record":
+                    suffix = location.get("filename_suffix")
+                    if not (isinstance(suffix, str) and suffix):
+                        err(f"doc type '{type_name}' folder location must"
+                            " carry a non-empty filename_suffix",
+                            "typed content files are <slug>-<suffix>.md;"
+                            " the suffix is schema data, never implied"
+                            " (challenge records alone follow the round"
+                            " file format)")
                 for kind in spec.get("mints", []) or []:
                     if str(kind).lower() not in row_schemas:
                         err(f"doc type '{type_name}' mints '{kind}' which has"
@@ -1165,7 +1164,7 @@ def check_vault_policy_shape(tree: Tree, findings: list[Finding]) -> None:
             if not isinstance(policy.get("schema_version"), int):
                 err("schema_version must be an integer",
                     "version the policy so the checker can refuse unknowns")
-            for key in ("vault_root_dirname", "home_file", "start_here_file",
+            for key in ("vault_root_dirname", "home_file",
                         "maps_dir", "generated_marker_prefix", "attachments_dir"):
                 value = policy.get(key)
                 if not (isinstance(value, str) and value):
@@ -1291,12 +1290,16 @@ def check_vault_policy_shape(tree: Tree, findings: list[Finding]) -> None:
                         " positive integer",
                         "ids are zero-padded to the minimum width; more digits"
                         " stay legal")
-                for flag in ("code_in_filename", "render_index"):
-                    if not isinstance(spec.get(flag), bool):
-                        err(f"decision tree '{tree_name}' must carry a"
-                            f" boolean {flag}",
-                            "glob trees declare their filename grammar and"
-                            " index stance explicitly; no default")
+                if spec.get("id_source") not in ("alias", "filename"):
+                    err(f"decision tree '{tree_name}' id_source must be"
+                        " 'alias' or 'filename'",
+                        "the record id's home is declared per tree: alias"
+                        " is the law, filename the legacy escape hatch")
+                if not isinstance(spec.get("render_index"), bool):
+                    err(f"decision tree '{tree_name}' must carry a boolean"
+                        " render_index",
+                        "each tree declares its index stance explicitly;"
+                        " no default")
             for key in ("generated_views", "generated_subtrees"):
                 value = policy.get(key)
                 if (not isinstance(value, list)
@@ -1313,6 +1316,57 @@ def check_vault_policy_shape(tree: Tree, findings: list[Finding]) -> None:
                         err(f"property_types['{key}'] value '{value}' is not"
                             f" one of {sorted(OBSIDIAN_PROPERTY_TYPES)}",
                             "use the vault app's property type enum")
+            extra_types = policy.get("extra_doc_types")
+            if (not isinstance(extra_types, list)
+                    or not all(isinstance(s, str) and KEBAB_RE.match(s)
+                               for s in extra_types)):
+                err("extra_doc_types must be a list of kebab-case type"
+                    " names",
+                    "non-schema doc types (navigation, architecture and"
+                    " design layers) are policy-listed so the graph legend"
+                    " can be judged complete")
+                extra_types = []
+            # Graph color completeness: every doc type known to the
+            # taxonomy (sibling space-schema doc_types, kebab-ized, UNION
+            # extra_doc_types) owns a tag:#doc/<type> color group, and
+            # every group tag names a known type. An uncolored type or a
+            # dead legend entry is a mechanical error, never an oversight.
+            schema_types: set[str] = set()
+            for spath in sorted(plugin.glob("skills/*/data/space-schema.json")):
+                try:
+                    sdata = json.loads(read_text(spath))
+                except json.JSONDecodeError:
+                    continue  # ba_schema_shape reports the parse failure
+                if isinstance(sdata.get("doc_types"), dict):
+                    schema_types.update(k.replace("_", "-")
+                                        for k in sdata["doc_types"])
+            universe = schema_types | set(extra_types)
+            if color_groups is not None:
+                tagged = {m for query in color_groups
+                          for m in re.findall(r"tag:#doc/([a-z0-9-]+)",
+                                              query)}
+                for name in sorted(universe - tagged):
+                    err(f"doc type '{name}' has no graph color group",
+                        "every known doc type carries a tag:#doc/<type>"
+                        " entry in graph_color_groups; add the group (and"
+                        " its color) in the same commit as the type")
+                for name in sorted(tagged - universe):
+                    err(f"graph color group tag '#doc/{name}' names no"
+                        " known doc type",
+                        "a legend entry without a type is dead; drop the"
+                        " group or declare the type in extra_doc_types")
+            colors = policy.get("graph_group_colors")
+            if colors is not None and (
+                    not isinstance(colors, list)
+                    or not all(isinstance(c, int)
+                               and not isinstance(c, bool)
+                               and 0 <= c <= 0xFFFFFF for c in colors)
+                    or (color_groups is not None
+                        and len(colors) != len(color_groups))):
+                err("graph_group_colors must list one 0..16777215 rgb int"
+                    " per graph_color_groups entry, same order",
+                    "the palette is policy data: one authored color per"
+                    " group; the committed graph config derives from it")
             # Parity with the shipped seeds: the policy and templates/vault
             # describe one product; they may not drift.
             vault_tpl = plugin / "templates" / "vault"
@@ -1333,8 +1387,6 @@ def check_vault_policy_shape(tree: Tree, findings: list[Finding]) -> None:
                     " the policy",
                     "add it to subtrees or extra_maps, or drop the seed")
             home = vault_tpl / home_file
-            start_stem = (policy.get("start_here_file")
-                          or "start-here.md").rsplit(".", 1)[0]
             if not home.is_file():
                 err(f"templates/vault/{home_file} is missing",
                     "the home seed is the vault's navigation root")
@@ -1343,10 +1395,7 @@ def check_vault_policy_shape(tree: Tree, findings: list[Finding]) -> None:
                 for name in sorted(extra_maps):
                     if f"[[{maps_dir}/{name}" not in home_text:
                         err(f"home seed does not link [[{maps_dir}/{name}]]",
-                            "home always links the extra maps and start-here")
-                if f"[[{start_stem}" not in home_text:
-                    err(f"home seed does not link [[{start_stem}]]",
-                        "home always links the extra maps and start-here")
+                            "home always links the extra maps")
                 for name in sorted(subtrees):
                     if f"[[{maps_dir}/{name}" in home_text:
                         err(f"home seed links [[{maps_dir}/{name}]]",
@@ -1367,6 +1416,16 @@ def check_vault_policy_shape(tree: Tree, findings: list[Finding]) -> None:
                         " graph_color_groups (same queries, same order)",
                         "the committed graph legend derives from the policy;"
                         " regenerate graph.json from graph_color_groups")
+                if (isinstance(colors, list) and color_groups is not None
+                        and len(colors) == len(color_groups)):
+                    rgbs = [(group.get("color") or {}).get("rgb")
+                            for group in graph_data.get("colorGroups", [])
+                            if isinstance(group, dict)]
+                    if rgbs != colors:
+                        err("graph.json group colors do not match policy"
+                            " graph_group_colors (same ints, same order)",
+                            "the palette is authored once in the policy;"
+                            " regenerate graph.json from it")
                 if graph_search is not None \
                         and graph_data.get("search", "") != graph_search:
                     err("graph.json search does not match policy"

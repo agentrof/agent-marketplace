@@ -68,7 +68,7 @@ The only place the design master is born or changed.
    classes). A leftover candidates.html is a finding, never an
    exemption.
 7. HARD SCOPE LIMIT: this flow writes only under
-   workspace/docs/design-system/, plus its own map note, home and
-   start-here repair, and vault payload materialization (per-file, only
-   where missing). Requests to design product pages or write code are
+   workspace/docs/design-system/, plus home and its own map note
+   repair, and vault payload materialization (per-file, only where
+   missing). Requests to design product pages or write code are
    refused and routed to sketch or request.

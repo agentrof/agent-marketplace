@@ -87,19 +87,6 @@ tags:
 
 - [[maps/business-analysis|Business Analysis]]
 - [[maps/solution-design|Solution Design]]
-- [[maps/delivery|Delivery]]
-- [[start-here|Start Here]]
-""")
-    write(root / "start-here.md", """---
-type: guide
-title: Start Here
-tags:
-  - doc/guide
----
-
-# Start Here
-
-Open the docs directory as the vault root, never the repository root.
 """)
     write(root / "maps" / "solution-design.md", """---
 type: moc
@@ -113,18 +100,6 @@ tags:
 - [[solution-design/landscape|Landscape]]
 - [[solution-design/decision-log|Decision Index]]
 """)
-    write(root / "maps" / "delivery.md", """---
-type: moc
-title: Delivery
-tags:
-  - doc/moc
----
-
-# Delivery
-
-- [[backlog|Backlog]]
-- [[quality-ledger|Quality Ledger]]
-""")
     write(root / "maps" / "business-analysis.md", """---
 type: moc
 title: Business Analysis
@@ -134,10 +109,10 @@ tags:
 
 # Business Analysis
 
-- [[business-analysis/erp/erp-space|ERP Analysis]]
-- [[business-analysis/erp/decisions/dec-erp-001-pilot-scope|DEC-ERP-001]]
+- [[business-analysis/erp/space|ERP Analysis]]
+- [[business-analysis/erp/decisions/pilot-scope-decision|DEC-ERP-001]]
 """)
-    write(root / BA_SPACE / "erp-space.md", """---
+    write(root / BA_SPACE / "space.md", """---
 type: space
 title: ERP Analysis
 status: approved
@@ -152,15 +127,15 @@ aliases:
 # ERP Analysis
 
 The pilot analysis space. Its rules registry backs
-[[business-analysis/erp/erp-space|BR-ERP-001]] style citations.
+[[business-analysis/erp/space|BR-ERP-001]] style citations.
 
 ## Navigation <!-- sec: nav -->
 [[maps/business-analysis|Business Analysis]] -
-[[business-analysis/erp/decisions/dec-erp-001-pilot-scope|DEC-ERP-001]]
+[[business-analysis/erp/decisions/pilot-scope-decision|DEC-ERP-001]]
 """)
-    write(root / BA_SPACE / "decisions" / "dec-erp-001-pilot-scope.md", """---
+    write(root / BA_SPACE / "decisions" / "pilot-scope-decision.md", """---
 type: decision
-title: "DEC-ERP-001: Pilot scope"
+title: Pilot scope decision
 status: approved
 tags:
   - doc/decision
@@ -169,10 +144,10 @@ aliases:
   - DEC-ERP-001
 ---
 
-# DEC-ERP-001: Pilot scope
+# Pilot scope decision
 
 The pilot covers inventory only, per
-[[business-analysis/erp/erp-space|ERP Analysis]].
+[[business-analysis/erp/space|ERP Analysis]].
 
 ## Ruling <!-- sec: ruling -->
 
@@ -181,17 +156,17 @@ The pilot covers inventory only, per
 | DEC-ERP-001 | The pilot covers inventory only. | active | 2026-07-10 |
 
 ## Navigation <!-- sec: nav -->
-[[business-analysis/erp/erp-space|ERP Analysis]] -
+[[business-analysis/erp/space|ERP Analysis]] -
 [[maps/business-analysis|Business Analysis]]
 """)
     write(root / BA_SPACE / "_generated" / "registry.json", json.dumps({
         "schema_version": 2,
         "codes": {"ERP": "(root)"},
         "ids": {
-            "BR-ERP-001": {"kind": "BR", "doc": "erp-space.md",
+            "BR-ERP-001": {"kind": "BR", "doc": "space.md",
                            "row_status": "active"},
             "DEC-ERP-001": {"kind": "DEC",
-                            "doc": "decisions/dec-erp-001-pilot-scope.md",
+                            "doc": "decisions/pilot-scope-decision.md",
                             "row_status": "active"},
         },
     }, indent=2))
@@ -210,20 +185,20 @@ The components and their owning decisions.
 
 | component | decision |
 |---|---|
-| order-events | [[solution-design/decisions/sd-002-order-events-v2\\|SD-002]] |
+| order-events | [[solution-design/decisions/order-events-v2-decision\\|SD-002]] |
 
 """ + NAV.format(peers=(
-        "[[solution-design/decisions/sd-001-order-events|SD-001]] -\n"
-        "[[solution-design/decisions/sd-002-order-events-v2|SD-002]]")))
-    write(root / DEC / "sd-001-order-events.md", """---
+        "[[solution-design/decisions/order-events-decision|SD-001]] -\n"
+        "[[solution-design/decisions/order-events-v2-decision|SD-002]]")))
+    write(root / DEC / "order-events-decision.md", """---
 type: decision
-title: "SD-001: Order events v1"
+title: Order events v1 decision
 status: superseded
 owner_role: solution_architect
 decided_at: 2026-01-10
 territory: asynchronous work
 revisit_trigger: volume beyond budget
-superseded_by: "[[solution-design/decisions/sd-002-order-events-v2]]"
+superseded_by: "[[solution-design/decisions/order-events-v2-decision]]"
 tags:
   - doc/decision
   - status/superseded
@@ -231,22 +206,22 @@ aliases:
   - SD-001
 ---
 
-# SD-001: Order events v1
+# Order events v1 decision
 
 **Decision:** direct queue fan-out.
 
 """ + NAV.format(peers=(
         "[[solution-design/landscape|Landscape]] -\n"
-        "[[solution-design/decisions/sd-002-order-events-v2|SD-002]]")))
-    write(root / DEC / "sd-002-order-events-v2.md", """---
+        "[[solution-design/decisions/order-events-v2-decision|SD-002]]")))
+    write(root / DEC / "order-events-v2-decision.md", """---
 type: decision
-title: "SD-002: Order events v2"
+title: Order events v2 decision
 status: accepted
 owner_role: solution_architect
 decided_at: 2026-02-01
 territory: asynchronous work
 revisit_trigger: volume beyond budget
-supersedes: "[[solution-design/decisions/sd-001-order-events]]"
+supersedes: "[[solution-design/decisions/order-events-decision]]"
 tags:
   - doc/decision
   - status/accepted
@@ -254,19 +229,13 @@ aliases:
   - SD-002
 ---
 
-# SD-002: Order events v2
+# Order events v2 decision
 
 **Decision:** managed streaming service.
 
 """ + NAV.format(peers=(
         "[[solution-design/landscape|Landscape]] -\n"
-        "[[solution-design/decisions/sd-001-order-events|SD-001]]")))
-    write(root / "backlog.md",
-          "<!-- generated by pmo_cli render; do not edit by hand -->\n\n"
-          "# Backlog\n")
-    write(root / "quality-ledger.md",
-          "<!-- generated by pmo_cli render; do not edit by hand -->\n\n"
-          "# Quality Ledger\n")
+        "[[solution-design/decisions/order-events-decision|SD-001]]")))
     obsidian = root / ".obsidian"
     write(obsidian / "app.json", json.dumps({
         "useMarkdownLinks": False,
@@ -342,14 +311,14 @@ def break_wikilink_resolution(root: Path) -> None:
 
 
 def break_anchor_resolution(root: Path) -> None:
-    edit(root / DEC / "sd-002-order-events-v2.md",
+    edit(root / DEC / "order-events-v2-decision.md",
          "**Decision:** managed streaming service.",
          "**Decision:** managed streaming service, per"
          " [[solution-design/landscape#Landscape|the landscape heading]].")
 
 
 def break_link_policy(root: Path) -> None:
-    edit(root / DEC / "sd-002-order-events-v2.md",
+    edit(root / DEC / "order-events-v2-decision.md",
          "**Decision:** managed streaming service.",
          "**Decision:** managed streaming service, see"
          " [the landscape](../landscape.md).")
@@ -357,8 +326,8 @@ def break_link_policy(root: Path) -> None:
 
 def break_table_pipe(root: Path) -> None:
     edit(root / SD / "landscape.md",
-         "[[solution-design/decisions/sd-002-order-events-v2\\|SD-002]]",
-         "[[solution-design/decisions/sd-002-order-events-v2|SD-002]]")
+         "[[solution-design/decisions/order-events-v2-decision\\|SD-002]]",
+         "[[solution-design/decisions/order-events-v2-decision|SD-002]]")
 
 
 def break_table_shape(root: Path) -> None:
@@ -369,7 +338,7 @@ def break_table_shape(root: Path) -> None:
          "```\nfenced text right after the header\n```")
 
 
-def break_basename_collision(root: Path) -> None:
+def break_banned_basename(root: Path) -> None:
     write(root / SD / "notes.md", """---
 type: note
 title: Working Notes
@@ -383,7 +352,7 @@ Scratch notes under a policy-banned basename.
 
 """ + NAV.format(peers=(
         "[[solution-design/landscape|Landscape]] -\n"
-        "[[solution-design/decisions/sd-001-order-events|SD-001]]")))
+        "[[solution-design/decisions/order-events-decision|SD-001]]")))
     edit(root / "maps" / "solution-design.md",
          "- [[solution-design/landscape|Landscape]]",
          "- [[solution-design/landscape|Landscape]]\n"
@@ -396,7 +365,7 @@ def break_title_shape(root: Path) -> None:
 
 def break_map_coverage(root: Path) -> None:
     edit(root / "maps" / "business-analysis.md",
-         "- [[business-analysis/erp/erp-space|ERP Analysis]]\n", "")
+         "- [[business-analysis/erp/space|ERP Analysis]]\n", "")
 
 
 def break_alias_ownership(root: Path) -> None:
@@ -420,7 +389,7 @@ Nothing links here.
 
 """ + NAV.format(peers=(
         "[[solution-design/landscape|Landscape]] -\n"
-        "[[solution-design/decisions/sd-001-order-events|SD-001]]")))
+        "[[solution-design/decisions/order-events-decision|SD-001]]")))
 
 
 def break_moc_coverage(root: Path) -> None:
@@ -438,7 +407,7 @@ Mutual: [[solution-design/{other}|{other}]].
 
 """ + NAV.format(peers=(
             "[[solution-design/landscape|Landscape]] -\n"
-            "[[solution-design/decisions/sd-001-order-events|SD-001]]")))
+            "[[solution-design/decisions/order-events-decision|SD-001]]")))
 
 
 def break_nav_footer(root: Path) -> None:
@@ -456,17 +425,19 @@ def break_tags_mirror(root: Path) -> None:
 
 
 def break_decision_records(root: Path) -> None:
-    edit(root / DEC / "sd-002-order-events-v2.md",
-         "# SD-002: Order events v2", "# Order events v2")
+    # The record id's single home is the id-shaped alias; dropping it
+    # leaves the note without exactly one SD-shaped alias.
+    edit(root / DEC / "order-events-v2-decision.md",
+         "aliases:\n  - SD-002\n", "aliases:\n")
 
 
 def break_generated_views(root: Path) -> None:
-    (root / "quality-ledger.md").unlink()
+    (root / SD / "decision-log.md").unlink()
 
 
 def break_home_shape(root: Path) -> None:
-    edit(root / "home.md", "- [[start-here|Start Here]]",
-         "- [[start-here|Start Here]]\n"
+    edit(root / "home.md", "- [[maps/solution-design|Solution Design]]",
+         "- [[maps/solution-design|Solution Design]]\n"
          "- [[solution-design/landscape|Landscape]]")
 
 
@@ -481,7 +452,7 @@ VAULT_BUILDERS = {
     "link_policy": break_link_policy,
     "table_pipe": break_table_pipe,
     "table_shape": break_table_shape,
-    "basename_collision": break_basename_collision,
+    "banned_basename": break_banned_basename,
     "title_shape": break_title_shape,
     "orphans": break_orphans,
     "moc_coverage": break_moc_coverage,
@@ -500,7 +471,8 @@ VAULT_BUILDERS = {
 # exactly that side effect and nothing else.
 TOLERATED = {
     "orphans": {"moc_coverage"},        # zero inbound implies unreachable
-    "generated_views": {"wikilink_resolution"},  # delivery map cites the view
+    # a deleted index is also a stale index and a dead map link
+    "generated_views": {"decision_records", "wikilink_resolution"},
 }
 
 
@@ -578,6 +550,34 @@ class BuilderFixtureTests(unittest.TestCase):
                         fired, allowed,
                         f"{check}: unexpected side findings {fired - allowed}")
 
+    def test_title_h1_divergence_fires(self):
+        """Title law v2: the first H1 is byte-identical to the title."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "docs"
+            make_valid_vault(root)
+            edit(root / SD / "landscape.md", "# Landscape",
+                 "# The Landscape")
+            code, findings = check_findings(root)
+            self.assertEqual(code, 1)
+            matching = [f for f in findings if f["check"] == "title_shape"
+                        and "byte-identical to the title" in f["message"]]
+            self.assertTrue(matching, findings)
+
+    def test_id_led_title_fires(self):
+        """Title law v2 flip: a title led by the note's own id alias is
+        an error (ids live in the alias, never in the label)."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "docs"
+            make_valid_vault(root)
+            edit(root / DEC / "order-events-v2-decision.md",
+                 "title: Order events v2 decision",
+                 'title: "SD-002: Order events v2 decision"')
+            code, findings = check_findings(root)
+            self.assertEqual(code, 1)
+            matching = [f for f in findings if f["check"] == "title_shape"
+                        and "id-led" in f["message"]]
+            self.assertTrue(matching, findings)
+
 
 class VerbTests(unittest.TestCase):
     def setUp(self):
@@ -589,10 +589,10 @@ class VerbTests(unittest.TestCase):
         self.tmp.cleanup()
 
     def test_stamp_decision_one_write(self):
-        note = self.root / DEC / "sd-003-order-retries.md"
+        note = self.root / DEC / "order-retries-decision.md"
         write(note, """---
 type: decision
-title: "SD-003: Order retries"
+title: Order retries decision
 status: proposed
 owner_role: solution_architect
 territory: asynchronous work
@@ -604,20 +604,20 @@ aliases:
   - SD-003
 ---
 
-# SD-003: Order retries
+# Order retries decision
 
 **Decision:** bounded retries with dead-lettering.
 
 """ + NAV.format(peers=(
             "[[solution-design/landscape|Landscape]] -\n"
-            "[[solution-design/decisions/sd-002-order-events-v2|SD-002]]")))
+            "[[solution-design/decisions/order-events-v2-decision|SD-002]]")))
         edit(self.root / SD / "landscape.md",
-             "[[solution-design/decisions/sd-002-order-events-v2|SD-002]]",
-             "[[solution-design/decisions/sd-002-order-events-v2|SD-002]] -\n"
-             "[[solution-design/decisions/sd-003-order-retries|SD-003]]")
+             "[[solution-design/decisions/order-events-v2-decision|SD-002]]",
+             "[[solution-design/decisions/order-events-v2-decision|SD-002]] -\n"
+             "[[solution-design/decisions/order-retries-decision|SD-003]]")
         code, out, err = run([
             "stamp-decision", "--vault", str(self.root),
-            "--note", f"{DEC}/sd-003-order-retries.md",
+            "--note", f"{DEC}/order-retries-decision.md",
             "--status", "accepted"])
         self.assertEqual(code, 0, out + err)
         text = note.read_text(encoding="utf-8")
@@ -632,10 +632,10 @@ aliases:
                          [f"{f['check']}: {f['message']}" for f in findings])
 
     def test_stamp_supersede_writes_both_ends(self):
-        note = self.root / DEC / "sd-003-order-events-v3.md"
+        note = self.root / DEC / "order-events-v3-decision.md"
         write(note, """---
 type: decision
-title: "SD-003: Order events v3"
+title: Order events v3 decision
 status: proposed
 owner_role: solution_architect
 territory: asynchronous work
@@ -647,33 +647,33 @@ aliases:
   - SD-003
 ---
 
-# SD-003: Order events v3
+# Order events v3 decision
 
 **Decision:** broker-managed fan-out.
 
 """ + NAV.format(peers=(
             "[[solution-design/landscape|Landscape]] -\n"
-            "[[solution-design/decisions/sd-002-order-events-v2|SD-002]]")))
+            "[[solution-design/decisions/order-events-v2-decision|SD-002]]")))
         edit(self.root / SD / "landscape.md",
-             "| order-events | [[solution-design/decisions/sd-002-order-events-v2\\|SD-002]] |",
-             "| order-events | [[solution-design/decisions/sd-003-order-events-v3\\|SD-003]] |")
+             "| order-events | [[solution-design/decisions/order-events-v2-decision\\|SD-002]] |",
+             "| order-events | [[solution-design/decisions/order-events-v3-decision\\|SD-003]] |")
         edit(self.root / SD / "landscape.md",
-             "[[solution-design/decisions/sd-002-order-events-v2|SD-002]]",
-             "[[solution-design/decisions/sd-002-order-events-v2|SD-002]] -\n"
-             "[[solution-design/decisions/sd-003-order-events-v3|SD-003]]")
+             "[[solution-design/decisions/order-events-v2-decision|SD-002]]",
+             "[[solution-design/decisions/order-events-v2-decision|SD-002]] -\n"
+             "[[solution-design/decisions/order-events-v3-decision|SD-003]]")
         code, out, err = run([
             "stamp-decision", "--vault", str(self.root),
-            "--note", f"{DEC}/sd-003-order-events-v3.md",
+            "--note", f"{DEC}/order-events-v3-decision.md",
             "--status", "accepted",
-            "--supersedes", f"{DEC}/sd-002-order-events-v2.md"])
+            "--supersedes", f"{DEC}/order-events-v2-decision.md"])
         self.assertEqual(code, 0, out + err)
         new_text = note.read_text(encoding="utf-8")
-        old_text = (self.root / DEC / "sd-002-order-events-v2.md").read_text(
+        old_text = (self.root / DEC / "order-events-v2-decision.md").read_text(
             encoding="utf-8")
         self.assertIn('supersedes: "[[solution-design/decisions/'
-                      'sd-002-order-events-v2]]"', new_text)
+                      'order-events-v2-decision]]"', new_text)
         self.assertIn('superseded_by: "[[solution-design/decisions/'
-                      'sd-003-order-events-v3]]"', old_text)
+                      'order-events-v3-decision]]"', old_text)
         self.assertIn("status: superseded", old_text)
         self.assertIn("- status/superseded", old_text)
         code, findings = check_findings(self.root)
@@ -681,8 +681,8 @@ aliases:
                          [f"{f['check']}: {f['message']}" for f in findings])
 
     def test_render_refuses_duplicate_ids(self):
-        write(self.root / DEC / "sd-002-duplicate.md",
-              (self.root / DEC / "sd-002-order-events-v2.md")
+        write(self.root / DEC / "order-events-copy-decision.md",
+              (self.root / DEC / "order-events-v2-decision.md")
               .read_text(encoding="utf-8"))
         code, _, err = run(["render-decisions", "--vault", str(self.root)])
         self.assertEqual(code, 1)
@@ -700,11 +700,11 @@ tags:
 # Legacy
 
 See [the landscape](landscape.md) and
-[SD-001](decisions/sd-001-order-events.md).
+[SD-001](decisions/order-events-decision.md).
 
 """ + NAV.format(peers=(
             "[[solution-design/landscape|Landscape]] -\n"
-            "[[solution-design/decisions/sd-001-order-events|SD-001]]")))
+            "[[solution-design/decisions/order-events-decision|SD-001]]")))
         edit(self.root / "maps" / "solution-design.md",
              "- [[solution-design/landscape|Landscape]]",
              "- [[solution-design/landscape|Landscape]]\n"
@@ -714,7 +714,7 @@ See [the landscape](landscape.md) and
         text = legacy.read_text(encoding="utf-8")
         self.assertIn("[[solution-design/landscape|the landscape]]", text)
         self.assertIn(
-            "[[solution-design/decisions/sd-001-order-events|SD-001]]", text)
+            "[[solution-design/decisions/order-events-decision|SD-001]]", text)
         self.assertIn("- doc/note", text)
         self.assertNotIn("doc/wrong", text)
         code, findings = check_findings(self.root)
@@ -722,21 +722,21 @@ See [the landscape](landscape.md) and
                          [f"{f['check']}: {f['message']}" for f in findings])
 
 
-def legacy_ba_names(root: Path) -> None:
-    """Rewind the mini analysis space to its pre-reform names: bare
-    space.md, un-prefixed decision file, referrers pointing at both."""
-    (root / BA_SPACE / "erp-space.md").rename(root / BA_SPACE / "space.md")
-    (root / BA_SPACE / "decisions" / "dec-erp-001-pilot-scope.md").rename(
-        root / BA_SPACE / "decisions" / "pilot-scope.md")
-    for rel in ("maps/business-analysis.md", f"{BA_SPACE}/space.md",
-                f"{BA_SPACE}/decisions/pilot-scope.md"):
+def v5_shaped_names(root: Path) -> None:
+    """Rewind the mini analysis space to its v5 names: chain-prefixed
+    space file, id-prefixed decision file, referrers pointing at both."""
+    (root / BA_SPACE / "space.md").rename(root / BA_SPACE / "erp-space.md")
+    (root / BA_SPACE / "decisions" / "pilot-scope-decision.md").rename(
+        root / BA_SPACE / "decisions" / "dec-erp-001-pilot-scope.md")
+    for rel in ("maps/business-analysis.md", f"{BA_SPACE}/erp-space.md",
+                f"{BA_SPACE}/decisions/dec-erp-001-pilot-scope.md"):
         path = root / rel
         text = path.read_text(encoding="utf-8")
-        text = text.replace("business-analysis/erp/erp-space",
-                            "business-analysis/erp/space")
         text = text.replace(
-            "business-analysis/erp/decisions/dec-erp-001-pilot-scope",
-            "business-analysis/erp/decisions/pilot-scope")
+            "business-analysis/erp/decisions/pilot-scope-decision",
+            "business-analysis/erp/decisions/dec-erp-001-pilot-scope")
+        text = text.replace("business-analysis/erp/space",
+                            "business-analysis/erp/erp-space")
         path.write_text(text, encoding="utf-8")
 
 
@@ -750,37 +750,111 @@ class RenameVerbTests(unittest.TestCase):
         self.tmp.cleanup()
 
     def test_rename_round_trip_restores_green(self):
-        legacy_ba_names(self.root)
+        v5_shaped_names(self.root)
         code, out, err = run(["migrate", "--vault", str(self.root),
                               "--rename"])
         self.assertEqual(code, 0, out + err)
-        self.assertTrue((self.root / BA_SPACE / "erp-space.md").is_file())
+        self.assertTrue((self.root / BA_SPACE / "space.md").is_file())
         self.assertTrue((self.root / BA_SPACE / "decisions"
-                         / "dec-erp-001-pilot-scope.md").is_file())
-        self.assertFalse((self.root / BA_SPACE / "space.md").exists())
+                         / "pilot-scope-decision.md").is_file())
+        self.assertFalse((self.root / BA_SPACE / "erp-space.md").exists())
+        self.assertFalse((self.root / BA_SPACE / "decisions"
+                          / "dec-erp-001-pilot-scope.md").exists())
         map_text = (self.root / "maps" / "business-analysis.md").read_text(
             encoding="utf-8")
-        self.assertIn("business-analysis/erp/erp-space", map_text)
-        self.assertIn("dec-erp-001-pilot-scope", map_text)
+        self.assertIn("business-analysis/erp/space", map_text)
+        self.assertIn("pilot-scope-decision", map_text)
+        self.assertNotIn("erp-space", map_text)
         code, findings = check_findings(self.root)
         self.assertEqual(code, 0,
                          [f"{f['check']}: {f['message']}" for f in findings])
 
+    def test_rename_double_run_is_idempotent(self):
+        """Red-team 2: the decision skip gate is the filename-suffix
+        test, never the record id (both generations carry the alias), so
+        a second --rename run plans nothing."""
+        v5_shaped_names(self.root)
+        code, _, err = run(["migrate", "--vault", str(self.root),
+                            "--rename"])
+        self.assertEqual(code, 0, err)
+        code, out, err = run(["migrate", "--vault", str(self.root),
+                              "--rename", "--json"])
+        self.assertEqual(code, 0, err)
+        payload = json.loads(out)
+        self.assertEqual(payload["renames"], [])
+        self.assertEqual(payload["manual"], [])
+
+    def test_rename_same_slug_collision_routes_manual(self):
+        """Red-team 6: two v5 decisions minting one plain target route to
+        the manual list and the run proceeds; never an abort, never an
+        id appended to disambiguate."""
+        v5_shaped_names(self.root)
+        source = (self.root / BA_SPACE / "decisions"
+                  / "dec-erp-001-pilot-scope.md")
+        twin = (self.root / BA_SPACE / "decisions"
+                / "dec-erp-002-pilot-scope.md")
+        write(twin, source.read_text(encoding="utf-8")
+              .replace("DEC-ERP-001", "DEC-ERP-002"))
+        code, out, err = run(["migrate", "--vault", str(self.root),
+                              "--rename", "--dry-run", "--json"])
+        self.assertEqual(code, 0, err)
+        payload = json.loads(out)
+        manual = set(payload["manual"])
+        self.assertIn(f"{BA_SPACE}/decisions/dec-erp-001-pilot-scope.md",
+                      manual)
+        self.assertIn(f"{BA_SPACE}/decisions/dec-erp-002-pilot-scope.md",
+                      manual)
+        self.assertTrue(payload["collisions"])
+        # the real run proceeds (no abort) and executes the unambiguous
+        # renames
+        code, _, err = run(["migrate", "--vault", str(self.root),
+                            "--rename"])
+        self.assertEqual(code, 0, err)
+        self.assertTrue((self.root / BA_SPACE / "space.md").is_file())
+
+    def test_rename_round_inverses_are_node_scoped(self):
+        """Red-team 3: the root applies only the space-round inverse and
+        a domain only the round inverse, both anchored on a REQUIRED
+        chain prefix, so plain v6 names never re-match."""
+        reviews = self.root / BA_SPACE / "reviews"
+        write(reviews / "erp-space-round-1.md", "# r\n")
+        write(reviews / "space-round-2.md", "# r\n")
+        dom = self.root / BA_SPACE / "domains" / "inventory" / "reviews"
+        write(dom / "erp-inventory-round-1.md", "# r\n")
+        write(dom / "round-2.md", "# r\n")
+        code, out, err = run(["migrate", "--vault", str(self.root),
+                              "--rename", "--dry-run", "--json"])
+        self.assertEqual(code, 0, out + err)
+        payload = json.loads(out)
+        plan = {e["old"]: e["new"] for e in payload["renames"]}
+        self.assertEqual(plan.get(f"{BA_SPACE}/reviews/erp-space-round-1.md"),
+                         f"{BA_SPACE}/reviews/space-round-1.md")
+        self.assertEqual(
+            plan.get(f"{BA_SPACE}/domains/inventory/reviews/"
+                     "erp-inventory-round-1.md"),
+            f"{BA_SPACE}/domains/inventory/reviews/round-1.md")
+        self.assertNotIn(f"{BA_SPACE}/reviews/space-round-2.md", plan)
+        self.assertNotIn(
+            f"{BA_SPACE}/domains/inventory/reviews/round-2.md", plan)
+
     def test_rename_dry_run_counts_and_writes_nothing(self):
-        legacy_ba_names(self.root)
+        v5_shaped_names(self.root)
         code, out, err = run(["migrate", "--vault", str(self.root),
                               "--rename", "--dry-run", "--json"])
         self.assertEqual(code, 0, out + err)
         payload = json.loads(out)
         self.assertTrue(payload["dry_run"])
         by_old = {entry["old"]: entry for entry in payload["renames"]}
-        space_entry = by_old[f"{BA_SPACE}/space.md"]
-        self.assertEqual(space_entry["new"], f"{BA_SPACE}/erp-space.md")
+        space_entry = by_old[f"{BA_SPACE}/erp-space.md"]
+        self.assertEqual(space_entry["new"], f"{BA_SPACE}/space.md")
         self.assertGreaterEqual(space_entry["referrers"], 2)
-        self.assertTrue((self.root / BA_SPACE / "space.md").is_file())
+        dec_entry = by_old[f"{BA_SPACE}/decisions/dec-erp-001-pilot-scope.md"]
+        self.assertEqual(dec_entry["new"],
+                         f"{BA_SPACE}/decisions/pilot-scope-decision.md")
+        self.assertTrue((self.root / BA_SPACE / "erp-space.md").is_file())
 
     def test_rename_vetoes_frozen_referrer(self):
-        legacy_ba_names(self.root)
+        v5_shaped_names(self.root)
         write(self.root.parent / "work-orders" / "wo-7" / "freeze.json",
               json.dumps({"frozen_paths":
                           ["workspace/docs/maps/business-analysis.md"]}))
@@ -789,9 +863,9 @@ class RenameVerbTests(unittest.TestCase):
         self.assertEqual(code, 0, out + err)
         payload = json.loads(out)
         blocked = {entry["old"]: entry for entry in payload["blocked"]}
-        self.assertIn(f"{BA_SPACE}/space.md", blocked)
+        self.assertIn(f"{BA_SPACE}/erp-space.md", blocked)
         self.assertIn("maps/business-analysis.md",
-                      blocked[f"{BA_SPACE}/space.md"]["blocked_by"])
+                      blocked[f"{BA_SPACE}/erp-space.md"]["blocked_by"])
         self.assertEqual(sorted(payload["blocked_paths"]),
                          sorted(blocked))
 
@@ -810,7 +884,7 @@ See [the landscape](landscape.md).
 
 """ + NAV.format(peers=(
             "[[solution-design/landscape|Landscape]] -\n"
-            "[[solution-design/decisions/sd-001-order-events|SD-001]]")))
+            "[[solution-design/decisions/order-events-decision|SD-001]]")))
         write(self.root.parent / "work-orders" / "wo-9" / "freeze.json",
               json.dumps({"frozen_paths":
                           ["workspace/docs/solution-design/legacy.md"]}))
@@ -834,7 +908,7 @@ See [the landscape](landscape.md).
 
 """ + NAV.format(peers=(
             "[[solution-design/landscape|Landscape]] -\n"
-            "[[solution-design/decisions/sd-001-order-events|SD-001]]")))
+            "[[solution-design/decisions/order-events-decision|SD-001]]")))
         before = legacy.read_bytes()
         code, _, _ = run(["migrate", "--vault", str(self.root),
                           "--exclude", f"{SD}/legacy.md"])
@@ -848,25 +922,25 @@ See [the landscape](landscape.md).
         self.assertEqual(code, 0)
         text = scratch.read_text(encoding="utf-8")
         self.assertIn(
-            "[[business-analysis/erp/decisions/dec-erp-001-pilot-scope"
+            "[[business-analysis/erp/decisions/pilot-scope-decision"
             "\\|DEC-ERP-001]]", text)
 
     def test_migrate_retargets_nav_first_link_to_hub(self):
-        dec = self.root / BA_SPACE / "decisions" / "dec-erp-001-pilot-scope.md"
+        dec = self.root / BA_SPACE / "decisions" / "pilot-scope-decision.md"
         edit(dec,
-             "[[business-analysis/erp/erp-space|ERP Analysis]] -\n"
+             "[[business-analysis/erp/space|ERP Analysis]] -\n"
              "[[maps/business-analysis|Business Analysis]]",
              "[[maps/business-analysis|Business Analysis]] -\n"
-             "[[business-analysis/erp/erp-space|ERP Analysis]]")
+             "[[business-analysis/erp/space|ERP Analysis]]")
         code, _, _ = run(["migrate", "--vault", str(self.root)])
         self.assertEqual(code, 0)
         text = dec.read_text(encoding="utf-8")
         nav = text.split("<!-- sec: nav -->", 1)[1]
         links = vc.WIKILINK_RE.findall(nav)
         # promoted to first; the map link dropped instead of duplicated
-        self.assertIn("business-analysis/erp/erp-space", links[0][1])
+        self.assertIn("business-analysis/erp/space", links[0][1])
         self.assertEqual(
-            sum("erp-space" in inner for _e, inner in links), 1)
+            sum("erp/space" in inner for _e, inner in links), 1)
 
     def test_migrate_converts_scalar_governs_to_block_list(self):
         target = self.root / SD / "landscape.md"
@@ -881,14 +955,82 @@ See [the landscape](landscape.md).
         self.assertEqual(code, 0,
                          [f"{f['check']}: {f['message']}" for f in findings])
 
-    def test_migrate_prefixes_decision_title(self):
-        target = self.root / DEC / "sd-001-order-events.md"
-        edit(target, 'title: "SD-001: Order events v1"',
-             "title: Order events v1")
+    def test_migrate_deid_leads_decision_title_and_h1(self):
+        """The v5 '<ID>: ' lead leaves the title AND the first H1 in one
+        write; the alias keeps the id."""
+        target = self.root / DEC / "order-events-decision.md"
+        edit(target, "title: Order events v1 decision",
+             'title: "SD-001: Order events v1 decision"')
+        edit(target, "# Order events v1 decision",
+             "# SD-001: Order events v1 decision")
         code, _, _ = run(["migrate", "--vault", str(self.root)])
         self.assertEqual(code, 0)
-        self.assertIn('title: "SD-001: Order events v1"',
-                      target.read_text(encoding="utf-8"))
+        text = target.read_text(encoding="utf-8")
+        self.assertIn("title: Order events v1 decision", text)
+        self.assertIn("# Order events v1 decision", text)
+        self.assertNotIn("SD-001: Order events", text)
+        code, findings = check_findings(self.root)
+        self.assertEqual(code, 0,
+                         [f"{f['check']}: {f['message']}" for f in findings])
+
+    def test_migrate_deletes_retired_scaffold_unscoped(self):
+        """Red-team 4: the retired scaffold files leave the vault inside
+        ANY migrate run (scope or not), and a scoped gate on a v5-shaped
+        root passes right after (the deadlock regression); the class is
+        idempotent."""
+        write(self.root / "backlog.md",
+              "<!-- generated by pmo render; do not edit by hand -->\n\n"
+              "# Backlog\n")
+        write(self.root / "quality-ledger.md",
+              "<!-- generated by pmo render; do not edit by hand -->\n\n"
+              "# Quality Ledger\n")
+        write(self.root / "start-here.md", """---
+type: guide
+title: Start Here
+tags:
+  - doc/guide
+---
+
+# Start Here
+
+How to read this vault.
+""")
+        write(self.root / "maps" / "delivery.md", """---
+type: moc
+title: Delivery
+tags:
+  - doc/moc
+---
+
+# Delivery
+
+- [[backlog|Backlog]]
+- [[quality-ledger|Quality Ledger]]
+""")
+        edit(self.root / "home.md",
+             "- [[maps/solution-design|Solution Design]]",
+             "- [[maps/solution-design|Solution Design]]\n"
+             "- [[maps/delivery|Delivery]]\n"
+             "- [[start-here|Start Here]]")
+        code, findings = check_findings_scoped(self.root, SD)
+        self.assertEqual(code, 1)  # the v5 scaffold trips the global layout
+        code, out, err = run(["migrate", "--vault", str(self.root),
+                              "--scope", SD])
+        self.assertEqual(code, 0, out + err)
+        for rel in ("backlog.md", "quality-ledger.md", "start-here.md",
+                    "maps/delivery.md"):
+            self.assertFalse((self.root / rel).exists(), rel)
+        home_text = (self.root / "home.md").read_text(encoding="utf-8")
+        self.assertNotIn("start-here", home_text)
+        self.assertNotIn("maps/delivery", home_text)
+        code, findings = check_findings_scoped(self.root, SD)
+        self.assertEqual(code, 0,
+                         [f"{f['check']}: {f['message']}" for f in findings])
+        # idempotent: a second plain run changes nothing and stays green
+        before = (self.root / "home.md").read_bytes()
+        code, _, _ = run(["migrate", "--vault", str(self.root)])
+        self.assertEqual(code, 0)
+        self.assertEqual((self.root / "home.md").read_bytes(), before)
         code, findings = check_findings(self.root)
         self.assertEqual(code, 0,
                          [f"{f['check']}: {f['message']}" for f in findings])

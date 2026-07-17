@@ -13,7 +13,7 @@ Every authored note opens with frontmatter carrying at least:
 ```markdown
 ---
 type: decision
-title: "SD-007: Order event distribution"
+title: Order event distribution decision
 status: accepted
 tags:
   - doc/decision
@@ -24,22 +24,67 @@ aliases:
 ```
 
 - `type` names the note's kind (decision, rule-set, landscape, moc,
-  home, guide, page-override, ...). The kind drives the tag mirror.
+  home, page-override, ...). The kind drives the tag mirror.
 - `title` is the user-facing graph label (see the Title Law in
-  SKILL.md): human output_language prose, never the filename stem. A
-  note that owns an id leads with it and the colon forces quoting, as
-  above; the checker enforces presence, the id lead on decision notes,
-  and warns on stem-identical, generic or duplicate labels.
+  SKILL.md): a natural output_language phrase that names the content
+  and ENDS with the type's designation (table below), never the
+  filename stem, never id-led. The first H1 is byte-identical to the
+  title; the checker enforces presence, the H1 match and the id-lead
+  ban, and warns on stem-identical, generic or duplicate labels.
 - `tags` is ALWAYS a block list and always exactly the mirror:
   `doc/<type>` plus `status/<status>` when the note has a status,
   underscores kebab-ized (`in_review` becomes `status/in-review`).
   Nothing else: tags are stamped state, not folksonomy.
-- `aliases` (block list) is mandatory wherever the note owns a bare id
-  OR a node code: a decision note carries its id (`- SD-007`), an
-  analysis space or domain overview carries its code (`- SHP`), so
-  search, the quick switcher and unlinked mentions find them. An
-  id-shaped LINK alias must target the id's owning note
-  (`alias_ownership`).
+- `aliases` (block list) is the id's ONLY home besides its minted row:
+  mandatory wherever the note owns a bare id OR a node code. A decision
+  note carries exactly one id-shaped alias (`- SD-007`), an analysis
+  space or domain overview carries its code (`- SHP`), so search, the
+  quick switcher and unlinked mentions find them; ids never appear in
+  filenames, titles or H1s. An id-shaped LINK alias must target the
+  id's owning note (`alias_ownership`).
+
+## Type designations
+
+The title's closing designation is canonical in ENGLISH, one per doc
+type; the authoring persona RENDERS it into the project's
+output_language at authoring time. A translated word cannot be
+regexed, so the mechanical slice stays presence, H1 match, id-lead ban
+and uniqueness; the designation itself is this table plus
+build-docs-vault curation.
+
+| doc type | designation |
+|---|---|
+| space | space overview |
+| domain | domain overview |
+| glossary | glossary |
+| actor-roster | actors |
+| budget-set | budgets |
+| process | process |
+| entity | entity |
+| rule-set | rules |
+| acceptance-set | acceptance criteria |
+| decision | decision |
+| challenge-record | review round |
+| integration | integration |
+| landscape | landscape |
+| engagement | engagement |
+| design-master | design master |
+| page-override | page override |
+
+Nav-layer notes (home, the maps) are curated per the structure law and
+carry no designation. Worked shapes, generic English (render the
+designation in the project's output_language):
+
+- `rules/checkout-rules.md` holds `title: Checkout rules`.
+- `processes/order-fulfillment-process.md` holds
+  `title: Order fulfillment process`.
+- `entities/customer-entity.md` holds `title: Customer entity`.
+- `decisions/order-events-decision.md` holds
+  `title: Order event distribution decision`, alias `SD-007`.
+- Review rounds follow `<scope name> <review-round designation> <n>`:
+  `reviews/round-2.md` holds `title: Payments review round 2`.
+
+In every case the H1 repeats the title byte-for-byte.
 
 ## Shapes
 
@@ -63,9 +108,9 @@ Doc-referencing keys hold QUOTED vault-absolute wikilinks and draw
 edges in the graph and backlinks panel:
 
 ```markdown
-supersedes: "[[solution-design/decisions/sd-003-order-events-v1]]"
+supersedes: "[[solution-design/decisions/order-events-v1-decision]]"
 governs:
-  - "[[business-analysis/shop/domains/orders/entities/order]]"
+  - "[[business-analysis/shop/domains/orders/entities/order-entity]]"
 ```
 
 - `governs` and `verifies` are ALWAYS block lists, one quoted wikilink

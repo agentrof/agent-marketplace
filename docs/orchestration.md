@@ -184,10 +184,10 @@ dependency edges ({item, reason}; the import rejects cycles), dod_items
 (one verifiable statement each, flipped verified or failed at QA) and a
 priority whose tier is critical, high, medium or low with the reason
 after a colon. The CLI's import rejects stories with empty scope,
-exclusions, DoR or DoD. workspace/docs/backlog.md and
-workspace/docs/quality-ledger.md are GENERATED views rendered from the
-database at checkpoints; they are committed for review and durability
-and never hand-edited.
+exclusions, DoR or DoD. The backlog and the quality ledger live ONLY
+in the database and are read back through the CLI's read verbs (item
+list / order, coverage list, ledger list); no delivery view is
+rendered into the docs tree.
 
 ## State contract
 
@@ -205,9 +205,8 @@ of the project's active work orders, worktree binding (mid-order
 mutations only from inside the claimed worktree; closing writes only
 from the primary checkout) and claim re-validation on reactivating a
 parked order. The checkpoint
-subcommand bundles the merge-checkpoint bookkeeping (ledger line plus
-both regenerated views) into one call; the generated views are also
-protected by a guard hook against hand edits.
+subcommand bundles the merge-checkpoint bookkeeping (the ledger line)
+into one call.
 
 Step status enum: pending, in_progress, done, blocked, escalated.
 Work order status enum: running, waiting_gate, blocked, escalated,
@@ -269,8 +268,8 @@ Gate inventory scales with the route: classification confirm; the
 analysis gates (foundation, one per domain, each preceded by the
 challenge loop's converged round, all mechanically checked by the
 space compiler); DS gate (the design-system candidate pick); backlog gate
-(approve, then item import loads the database and the backlog view is
-re-rendered); model and contract gate (architect delta shown in
+(approve, then item import loads the database, the single source of
+delivery state); model and contract gate (architect delta shown in
 conversation with a breaking-change flag; the record is the git diff);
 direction pick and handshake (two distinct design-flow gates); delivery
 gate; inter-story checkpoints; the pull request itself. Every gate is a
@@ -314,8 +313,8 @@ treats the environment prefix as a shared resource.
 
 At the merge checkpoint on the main line: the story marked done and the
 ledger checkpoint appended (with the escaped-defect flag when a
-fix-atomic traced back), the backlog and ledger views re-rendered from
-the database, the changelog append from the PR quality summary, the
+fix-atomic traced back), the changelog append from the PR quality
+summary, the
 published interface schema, the analysis-space BR row updates from
 fix-atomic work (owning rule_set edited, space re-rendered) with the
 spec-fork tripwire over the claimed ids' statement hashes, the
@@ -344,7 +343,7 @@ the current active set. Gates are approved only in the owning lane
 session. Claims free when the order leaves the active statuses; after a
 completed merge checkpoint the integrator removes the worktree and
 deletes the lane branch. Backlog updates never ride feature branches; the database is
-updated and the views re-render on the main line at the checkpoint after
+updated on the main line at the checkpoint after
 merge. Architecture deltas deliberately ride the story branch so model
 and code merge atomically. Each story ends in its own pull request;
 merging is a human act.

@@ -35,9 +35,9 @@ when an abandoned order already holds it), its date prefix pasted from
 `"$PMO" now --compact` (init refuses a stale prefix). Subcommands in
 play: now; work-order init / set-step / record-gate / bump /
 set-ownership / set-status / release / validate; task open / close;
-finding open / update / list; coverage import; budget set; checkpoint;
+finding open / update / list; coverage import / list; budget set; checkpoint;
 item import / update / list / add-dep / add-dod / set-dod / order;
-render backlog / ledger; resume-info. The CLI enforces the enums, the step-transition
+resume-info. The CLI enforces the enums, the step-transition
 guard, the complete guard (steps done, findings closed; story work
 orders also need imported coverage and a ledger checkpoint), snake_case
 ownership roles, and ownership-overlap refusal across ALL active work
@@ -136,8 +136,9 @@ still read the artifact for semantic sanity before presenting any gate.
   workspace/config.json. It claims the worktree and the story, marks the
   story in_development, writes the step skeleton and copies the
   snapshots (the space directory lands as brief-snapshot/).
-- Freeze manifest: resolve the story's criterion ids (backlog row plus
-  coverage map) with ba_compile.py resolve against the LIVE space and
+- Freeze manifest: read the story's criterion ids from the database
+  (coverage list --project-key <key> --story <WP-##> --json), resolve
+  them with ba_compile.py resolve against the LIVE space and
   write the owning doc paths as freeze.json ({"frozen_paths": [...]}) in
   the order directory; the guard freezes exactly those docs while the
   order is active. Bindings from config: backend role to the backend
@@ -325,10 +326,8 @@ still read the artifact for semantic sanity before presenting any gate.
   - mark the story done (item update --external-id <WP-##> --status
     done), then run the checkpoint subcommand (checkpoint
     --work-order-key <key>, --escaped-defect when a fix-atomic traced
-    back): it appends the quality-ledger line and regenerates both
-    committed views (workspace/docs/backlog.md,
-    workspace/docs/quality-ledger.md); the views are generated files, a
-    guard hook denies hand edits;
+    back): it appends the story's quality-ledger row in the database
+    (read back with ledger list --project-key <key> --tail <N> --json);
   - append the story's line to workspace/CHANGELOG.md from the PR
     quality summary (append-only; any date pasted from "$PMO" now --date);
   - publish the exported interface schema under workspace/docs/api/;

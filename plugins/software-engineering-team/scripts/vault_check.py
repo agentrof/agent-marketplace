@@ -55,7 +55,7 @@ GENERATED_INDEX_MARKER = (
 # stays in lockstep with this tuple (same doctrine as ba_compile).
 CHECK_IDS = (
     "vault_layout", "wikilink_resolution", "anchor_resolution",
-    "link_policy", "table_pipe", "table_shape", "basename_collision",
+    "link_policy", "table_pipe", "table_shape", "banned_basename",
     "title_shape", "orphans", "moc_coverage", "map_coverage", "nav_footer",
     "frontmatter_props", "tags_mirror", "alias_ownership",
     "decision_records", "generated_views", "home_shape", "obsidian_payload",
@@ -63,7 +63,7 @@ CHECK_IDS = (
 
 # Checks that judge the vault as a whole; --scope never silences them,
 # because any session may repair their subjects (payload, layout).
-# basename_collision stays OUT of this set deliberately: its findings are
+# banned_basename stays OUT of this set deliberately: its findings are
 # per file, so a scoped gate repairs only its own subtree instead of
 # deadlocking on renames it cannot perform.
 GLOBAL_CHECKS = {"vault_layout", "obsidian_payload"}
@@ -122,7 +122,7 @@ class Note:
     wikilinks: list = field(default_factory=list)  # (line, embed, target, anchor, alias, raw_inner)
     mdlinks: list = field(default_factory=list)    # (line, text, target)
     fm_targets: list = field(default_factory=list)  # (key, target) wikilink values
-    headings: list = field(default_factory=list)   # (line, text)
+    headings: list = field(default_factory=list)   # (line, text, level)
     block_ids: set = field(default_factory=set)
 
 
@@ -245,7 +245,8 @@ def scan_note(root: Path, path: Path, marker_prefix: str) -> Note:
             continue
         heading = re.match(r"^(#{1,6})\s+(.*)$", line)
         if heading:
-            note.headings.append((lineno, heading.group(2).strip()))
+            note.headings.append((lineno, heading.group(2).strip(),
+                                  len(heading.group(1))))
         block = BLOCK_ID_RE.search(line)
         if block:
             note.block_ids.add(block.group(1))
@@ -330,7 +331,11 @@ def check_vault_layout(vault: Vault, findings: list[Finding]) -> None:
     }
     known_roots.update(p.rstrip("/").split("/")[0]
                        for p in policy.get("generated_subtrees", []))
-    known_files = {home, policy["start_here_file"]}
+    # The vault root holds exactly the home note (plus any root-level
+    # policy-listed generated view); a retired scaffold file left behind
+    # by an older generation fires "outside layout" here, which is the
+    # enforced-deletion mechanism (migrate deletes the class).
+    known_files = {home}
     known_files.update(v for v in policy.get("generated_views", [])
                        if "/" not in v)
     attachments = policy.get("attachments_dir", "_attachments")
@@ -504,36 +509,23 @@ def check_table_shape(vault: Vault, findings: list[Finding]) -> None:
             prev_is_row = row_here
 
 
-def check_basename_collision(vault: Vault, findings: list[Finding]) -> None:
-    """Duplicate or policy-banned authored basenames. Findings are per
-    FILE (never vault-global) so scoped gates compose: each gate repairs
-    only its own subtree."""
+def check_banned_basename(vault: Vault, findings: list[Finding]) -> None:
+    """Policy-banned generic basenames only. Duplicate basenames across
+    folders are legal: the title layer owns display identity (title
+    uniqueness is title_shape's warning). Findings are per FILE (never
+    vault-global) so scoped gates compose."""
     policy = vault.policy
     banned = set(policy.get("banned_basenames", []))
-    by_name: dict[str, list[str]] = {}
     for note in authored(vault):
         if in_machine_dir(policy, note.rel):
             continue
-        by_name.setdefault(note.rel.rsplit("/", 1)[-1], []).append(note.rel)
-    for name, rels in sorted(by_name.items()):
+        name = note.rel.rsplit("/", 1)[-1]
         if name in banned:
-            for rel in rels:
-                findings.append(Finding(
-                    "error", rel, 1, "basename_collision",
-                    f"basename '{name}' is policy-banned",
-                    "give the file its chain-qualified slug name (for a"
-                    " nested domain, rename the domain folder so the chain"
-                    " stays unique); migrate --rename heals this class"))
-        elif len(rels) > 1:
-            for rel in rels:
-                other = next(r for r in rels if r != rel)
-                findings.append(Finding(
-                    "error", rel, 1, "basename_collision",
-                    f"basename '{name}' is also used by {other}",
-                    "authored basenames are vault-unique (graph labels and"
-                    " links depend on it); rename with the chain-qualified"
-                    " slug, renaming the domain folder when the chain"
-                    " itself collides"))
+            findings.append(Finding(
+                "error", note.rel, 1, "banned_basename",
+                f"basename '{name}' is policy-banned",
+                "generic filenames say nothing; give the file a meaningful"
+                " slug name (typed content: <slug>-<type suffix>.md)"))
 
 
 def note_decision_tree(policy: dict, rel: str) -> dict | None:
@@ -545,6 +537,19 @@ def note_decision_tree(policy: dict, rel: str) -> dict | None:
         elif rel.startswith(path + "/"):
             return tree
     return None
+
+
+# The shape of a record id a note may own through its aliases: PREFIX-,
+# an optional node code, then digits (SD-001, ADR-012, DEC-INV-001).
+ID_ALIAS_RE = re.compile(r"^[A-Z][A-Z0-9]*(?:-[A-Z0-9]{2,4})?-\d{3,}$")
+
+
+def id_shaped_aliases(note: Note) -> list[str]:
+    aliases = note.fm.get("aliases")
+    if not isinstance(aliases, list):
+        return []
+    return [str(a).strip() for a in aliases
+            if isinstance(a, str) and ID_ALIAS_RE.fullmatch(str(a).strip())]
 
 
 def check_title_shape(vault: Vault, findings: list[Finding]) -> None:
@@ -559,18 +564,26 @@ def check_title_shape(vault: Vault, findings: list[Finding]) -> None:
             findings.append(Finding(
                 "error", note.rel, 1, "title_shape",
                 "authored note has no title",
-                "the title is the user-facing graph label: human-readable,"
-                " output_language, id-led when the note owns an id"))
+                "the title is the user-facing graph label: a natural"
+                " output_language phrase ending in the type's designation,"
+                " never id-led"))
             continue
-        tree = note_decision_tree(policy, note.rel)
-        if tree is not None:
-            rec_id = decision_id(tree, note.rel)
-            if rec_id and not title.startswith(f"{rec_id}: "):
+        for alias in id_shaped_aliases(note):
+            if title.startswith(alias):
                 findings.append(Finding(
                     "error", note.rel, 1, "title_shape",
-                    f"decision title must start '{rec_id}: '",
-                    "the id leads the label so the graph and search show"
-                    " it; the migrate verb prefixes this class"))
+                    f"title is id-led ('{alias}')",
+                    "ids live in the frontmatter alias, never in the"
+                    " label; the migrate verb strips this class"))
+                break
+        first_h1 = next((text for (_l, text, level) in note.headings
+                         if level == 1), None)
+        if first_h1 is not None and first_h1 != title:
+            findings.append(Finding(
+                "error", note.rel, 1, "title_shape",
+                f"first H1 '{first_h1}' is not byte-identical to the title",
+                "the H1 and the title are one label; edit them in the"
+                " same write"))
         stem = note.rel.rsplit("/", 1)[-1][:-3]
         if title == stem:
             findings.append(Finding(
@@ -625,7 +638,7 @@ def check_alias_ownership(vault: Vault, findings: list[Finding]) -> None:
     owners: dict[str, str] = {}
     for tree in policy.get("decision_trees", {}).values():
         for note in decision_notes(vault, tree):
-            rec_id = decision_id(tree, note.rel)
+            rec_id = decision_id(tree, note)
             if rec_id is not None:
                 owners.setdefault(rec_id, note.rel)
     registries: dict[str, dict | None] = {}
@@ -726,7 +739,7 @@ def check_moc_coverage(vault: Vault, findings: list[Finding]) -> None:
 def check_nav_footer(vault: Vault, findings: list[Finding]) -> None:
     policy = vault.policy
     maps_dir = policy["maps_dir"]
-    exempt = {policy["home_file"], policy["start_here_file"]}
+    exempt = {policy["home_file"]}
     peer_min = policy["nav_peer_min"]
     peer_max = policy["nav_peer_max"]
     subtree_counts: dict[str, int] = {}
@@ -888,71 +901,81 @@ def decision_notes(vault: Vault, tree: dict) -> list[Note]:
             if n.rel.startswith(prefix) and not n.generated]
 
 
-def decision_filename_re(tree: dict) -> re.Pattern:
-    if tree.get("code_in_filename"):
-        return re.compile(
-            rf"^{tree['id_prefix'].lower()}-([a-z][a-z0-9]{{1,3}})"
-            rf"-(\d{{{tree['id_min_width']},}})"
-            rf"-[a-z0-9]+(?:-[a-z0-9]+)*\.md$")
-    return re.compile(
-        rf"^{tree['id_prefix'].lower()}-(\d{{{tree['id_min_width']},}})"
-        rf"-[a-z0-9]+(?:-[a-z0-9]+)*\.md$")
+def tree_id_re(tree: dict) -> re.Pattern:
+    """The id grammar a tree's records own: glob (per-space) trees carry
+    a node code between prefix and number; flat trees do not."""
+    width = tree.get("id_min_width", 3)
+    if tree_is_glob(tree):
+        return re.compile(rf"^{tree['id_prefix']}-[A-Z]{{2,4}}-\d{{{width},}}$")
+    return re.compile(rf"^{tree['id_prefix']}-\d{{{width},}}$")
 
 
-def decision_id(tree: dict, note_rel: str) -> str | None:
-    match = decision_filename_re(tree).match(note_rel.rsplit("/", 1)[-1])
-    if not match:
-        return None
-    if tree.get("code_in_filename"):
-        return (f"{tree['id_prefix']}-{match.group(1).upper()}"
-                f"-{match.group(2)}")
-    return f"{tree['id_prefix']}-{match.group(1)}"
+def tree_id_aliases(tree: dict, note: Note) -> list[str]:
+    """Frontmatter aliases matching the tree's id grammar. Non-id
+    aliases in the list are tolerated (they are search sugar)."""
+    aliases = note.fm.get("aliases")
+    if not isinstance(aliases, list):
+        return []
+    pattern = tree_id_re(tree)
+    return [str(a).strip() for a in aliases
+            if isinstance(a, str) and pattern.fullmatch(str(a).strip())]
+
+
+def decision_id(tree: dict, note: Note) -> str | None:
+    """The record id of a decision note. id_source 'alias' (the law)
+    reads the single id-shaped frontmatter alias; 'filename' is the
+    per-tree legacy escape hatch (prefix-number-slug.md names)."""
+    if tree.get("id_source", "alias") == "filename":
+        match = re.match(
+            rf"^{tree['id_prefix'].lower()}-(\d{{{tree['id_min_width']},}})"
+            rf"-[a-z0-9]+(?:-[a-z0-9]+)*\.md$",
+            note.rel.rsplit("/", 1)[-1])
+        return f"{tree['id_prefix']}-{match.group(1)}" if match else None
+    ids = tree_id_aliases(tree, note)
+    return ids[0] if len(ids) == 1 else None
 
 
 def check_decision_records(vault: Vault, findings: list[Finding]) -> None:
     for tree_name, tree in sorted(vault.policy.get("decision_trees", {}).items()):
-        code_tree = bool(tree.get("code_in_filename"))
+        alias_tree = tree.get("id_source", "alias") == "alias"
         seen: dict[str, str] = {}
         notes = decision_notes(vault, tree)
         for note in notes:
-            rec_id = decision_id(tree, note.rel)
+            stem = note.rel.rsplit("/", 1)[-1][:-3]
+            if alias_tree and not (stem.endswith("-decision")
+                                   and len(stem) > len("-decision")):
+                findings.append(Finding(
+                    "error", note.rel, 1, "decision_records",
+                    "filename does not match the decision note grammar",
+                    "decision notes are <slug>-decision.md; the id lives"
+                    " in the frontmatter alias, never in the filename"))
+            if alias_tree:
+                ids = tree_id_aliases(tree, note)
+                if len(ids) != 1:
+                    findings.append(Finding(
+                        "error", note.rel, 1, "decision_records",
+                        f"note carries {len(ids)} {tree['id_prefix']}-shaped"
+                        " aliases, expected exactly one",
+                        "the frontmatter alias is the id's single home;"
+                        " mint exactly one id alias per record"))
+                    continue
+            rec_id = decision_id(tree, note)
             if rec_id is None:
-                grammar = (f"{tree['id_prefix'].lower()}-<code>-"
-                           f"<{tree['id_min_width']}+ digits>-<kebab-slug>.md"
-                           if code_tree else
-                           f"{tree['id_prefix'].lower()}-"
-                           f"<{tree['id_min_width']}+ digits>-<kebab-slug>.md")
                 findings.append(Finding(
                     "error", note.rel, 1, "decision_records",
-                    f"filename does not match the {tree['id_prefix']} note"
-                    " grammar",
-                    f"decision notes are {grammar}"))
+                    f"note owns no {tree['id_prefix']} record id",
+                    "legacy filename-id trees name records"
+                    f" {tree['id_prefix'].lower()}-<number>-<slug>.md"))
                 continue
-            key = tuple(rec_id.split("-")[1:])  # (code, number) or (number,)
-            if key in seen:
+            if rec_id in seen:
                 findings.append(Finding(
                     "error", note.rel, 1, "decision_records",
-                    f"decision id {rec_id} already minted by {seen[key]}",
+                    f"decision id {rec_id} already minted by {seen[rec_id]}",
                     "ids are unique per tree; renumber the younger note and"
                     " rewrite its referrers in the same commit"))
             else:
-                seen[key] = note.rel
-            first_heading = note.headings[0][1] if note.headings else ""
-            if not first_heading.startswith(f"{rec_id}: "):
-                findings.append(Finding(
-                    "error", note.rel,
-                    note.headings[0][0] if note.headings else 1,
-                    "decision_records",
-                    f"first heading must read '{rec_id}: <title>'",
-                    "the id leads the heading so previews and the graph"
-                    " show it"))
-            aliases = note.fm.get("aliases")
-            if not (isinstance(aliases, list) and rec_id in aliases):
-                findings.append(Finding(
-                    "error", note.rel, 1, "decision_records",
-                    f"aliases must contain the bare id '{rec_id}'",
-                    "the alias makes the bare id searchable and linkable"))
-            if code_tree:
+                seen[rec_id] = note.rel
+            if tree_is_glob(tree):
                 # The BA supersede lifecycle belongs to ba_compile (the
                 # schema has superseded_by and no supersedes), so the
                 # supersede shape and symmetry sub-rules stay scoped to
@@ -1011,8 +1034,7 @@ def check_generated_views(vault: Vault, findings: list[Finding]) -> None:
             findings.append(Finding(
                 "error", view, 1, "generated_views",
                 "policy-listed generated view is missing",
-                "render it with its owning verb (render backlog/ledger,"
-                " render-decisions)"))
+                "render it with its owning verb (render-decisions)"))
             continue
         first = path.read_text(encoding="utf-8",
                                errors="replace").splitlines()
@@ -1027,11 +1049,10 @@ def check_home_shape(vault: Vault, findings: list[Finding]) -> None:
     policy = vault.policy
     maps_dir = policy["maps_dir"]
     home = vault.notes.get(policy["home_file"])
-    start_stem = policy["start_here_file"].rsplit(".", 1)[0]
     if home is not None:
         targets = {t for (_l, _e, t, _a, _al, _inner) in home.wikilinks}
         for (lineno, _e, target, _a, _al, _inner) in home.wikilinks:
-            if not (target.startswith(f"{maps_dir}/") or target == start_stem):
+            if not target.startswith(f"{maps_dir}/"):
                 findings.append(Finding(
                     "error", home.rel, lineno, "home_shape",
                     f"home links '{target}'; home links only map notes",
@@ -1042,11 +1063,10 @@ def check_home_shape(vault: Vault, findings: list[Finding]) -> None:
                 "error", home.rel, 1, "home_shape",
                 "home note must carry type: home",
                 "home and maps are navigation, typed as such"))
-        # Dynamic home: every content-bearing subtree's map, the extra
-        # maps and start-here are linked; empty-tree maps are not.
+        # Dynamic home: every content-bearing subtree's map and the
+        # extra maps are linked; empty-tree maps are not.
         required = [f"{maps_dir}/{name}"
                     for name in policy.get("extra_maps", [])]
-        required.append(start_stem)
         for subtree in policy["subtrees"]:
             if subtree_has_notes(vault, subtree):
                 required.append(f"{maps_dir}/{subtree}")
@@ -1062,9 +1082,8 @@ def check_home_shape(vault: Vault, findings: list[Finding]) -> None:
                 findings.append(Finding(
                     "error", home.rel, 1, "home_shape",
                     f"home does not link '{target}'",
-                    "home links start-here, the extra maps and every"
-                    " content-bearing subtree map; the birthing entry adds"
-                    " the line"))
+                    "home links every content-bearing subtree map; the"
+                    " birthing entry adds the line"))
     for rel, note in sorted(vault.notes.items()):
         if not rel.startswith(f"{maps_dir}/") or note.generated:
             continue
@@ -1279,7 +1298,7 @@ CHECKS = {
     "link_policy": check_link_policy,
     "table_pipe": check_table_pipe,
     "table_shape": check_table_shape,
-    "basename_collision": check_basename_collision,
+    "banned_basename": check_banned_basename,
     "title_shape": check_title_shape,
     "orphans": check_orphans,
     "moc_coverage": check_moc_coverage,
@@ -1320,9 +1339,9 @@ def render_decision_index(vault: Vault, tree: dict) -> str:
     extra = tree.get("extra_column", "territory")
     for note in sorted(
             notes,
-            key=lambda n: int((decision_id(tree, n.rel) or "X-0").split("-")[1])
-            if decision_id(tree, n.rel) else 0):
-        rec_id = decision_id(tree, note.rel) or note.rel
+            key=lambda n: int((decision_id(tree, n) or "X-0").split("-")[-1])
+            if decision_id(tree, n) else 0):
+        rec_id = decision_id(tree, note) or note.rel
         target = note.rel[:-3]
         superseded = dict(note.fm_targets).get("superseded_by", "")
         superseded_cell = (
@@ -1351,10 +1370,10 @@ def cmd_render_decisions(args, policy: dict) -> int:
         notes = decision_notes(vault, tree)
         numbers: dict[str, str] = {}
         for note in notes:
-            rec_id = decision_id(tree, note.rel)
+            rec_id = decision_id(tree, note)
             if rec_id is None:
                 continue
-            number = rec_id.split("-")[1]
+            number = rec_id.split("-")[-1]
             if number in numbers:
                 print(f"vault_check: refuse to render '{tree_name}':"
                       f" duplicate id number {number}"
@@ -1495,7 +1514,7 @@ def ba_id_lookup(vault: Vault) -> dict[str, str]:
     for rel in vault.index:
         parts = rel.split("/")
         if len(parts) >= 2 and parts[-1] == ba_compile.space_overview_rel(
-                schema, parts[-2]):
+                schema):
             roots.add("/".join(parts[:-1]))
     for root_rel in sorted(roots):
         space, _ = ba_compile.scan_space(vault.root / root_rel, schema)
@@ -1598,27 +1617,38 @@ def migrate_note(vault: Vault, note: Note, citation_columns: list[str],
     return text, rewrites, manual
 
 
-def prefix_decision_title(policy: dict, note: Note,
-                          lines: list[str]) -> int:
-    """Give a decision-tree note's title its '<ID>: ' prefix when the
-    prefix is missing (the title itself stays untouched otherwise)."""
+def deid_lead_decision(policy: dict, note: Note,
+                       lines: list[str]) -> int:
+    """Strip a decision-tree note's legacy '<ID>: ' lead from the title
+    AND the first H1 in the same write (title law v2: labels are never
+    id-led; the id's single home is the frontmatter alias)."""
     tree = note_decision_tree(policy, note.rel)
     if tree is None:
         return 0
-    rec_id = decision_id(tree, note.rel)
+    rec_id = decision_id(tree, note)
     if rec_id is None:
         return 0
+    prefix = f"{rec_id}: "
+    changed = 0
     for i in range(min(note.fm_end - 1, len(lines))):
         stripped = lines[i].strip()
         if not stripped.startswith("title:"):
             continue
         value = stripped[len("title:"):].strip().strip("\"'")
-        if not value or value.startswith(f"{rec_id}: "):
-            return 0
-        indent = lines[i][:len(lines[i]) - len(lines[i].lstrip())]
-        lines[i] = f'{indent}title: "{rec_id}: {value}"'
-        return 1
-    return 0
+        if value.startswith(prefix):
+            indent = lines[i][:len(lines[i]) - len(lines[i].lstrip())]
+            new_value = value[len(prefix):]
+            quoted = f'"{new_value}"' if ":" in new_value else new_value
+            lines[i] = f"{indent}title: {quoted}"
+            changed += 1
+        break
+    for i in range(note.fm_end - 1, len(lines)):
+        if lines[i].startswith("# "):
+            if lines[i][2:].startswith(prefix):
+                lines[i] = "# " + lines[i][2 + len(prefix):]
+                changed += 1
+            break
+    return changed
 
 
 def retarget_nav(vault: Vault, note: Note, lines: list[str]) -> int:
@@ -1784,8 +1814,15 @@ def freeze_skip_set(vault_path: Path) -> set:
     return frozen
 
 
-GRAPH_PALETTE = (16007990, 5431378, 2201331, 16750592, 10233776, 38536,
-                 9741240)
+# Fallback node color when the policy palette does not cover a group
+# (the shipped policy always does): the neutral nav slate.
+DEFAULT_GROUP_RGB = 9741240
+
+
+def group_color(policy: dict, index: int) -> dict:
+    colors = policy.get("graph_group_colors") or []
+    rgb = colors[index] if index < len(colors) else DEFAULT_GROUP_RGB
+    return {"a": 1, "rgb": rgb}
 
 
 def payload_reconcile(root: Path, policy: dict,
@@ -1824,8 +1861,7 @@ def payload_reconcile(root: Path, policy: dict,
                               if isinstance(g, dict)}
                 new["colorGroups"] = [
                     {"query": q,
-                     "color": old_colors.get(q)
-                     or {"a": 1, "rgb": GRAPH_PALETTE[i % len(GRAPH_PALETTE)]}}
+                     "color": old_colors.get(q) or group_color(policy, i)}
                     for i, q in enumerate(groups)]
                 dirty = True
             if new.get("search", "") != policy.get("graph_search", ""):
@@ -1881,6 +1917,46 @@ def payload_reconcile(root: Path, policy: dict,
     return changed
 
 
+def retired_reconcile(root: Path, policy: dict, skip: set) -> int:
+    """Delete the retired scaffold notes and strip home's links to them.
+    Deterministic and IDEMPOTENT, and (payload_reconcile pattern) runs
+    regardless of --scope inside cmd_migrate: a scoped gate on an older
+    tree must never deadlock on root files it cannot repair."""
+    maps_dir = policy["maps_dir"]
+    retired = ["backlog.md", "quality-ledger.md", "start-here.md",
+               f"{maps_dir}/delivery.md"]
+    removed = 0
+    for rel in retired:
+        if rel in skip:
+            continue
+        path = root / rel
+        if path.is_file():
+            path.unlink()
+            removed += 1
+            print(f"vault_check: deleted retired file {rel}")
+    home_rel = policy["home_file"]
+    home = root / home_rel
+    if home.is_file() and home_rel not in skip:
+        stems = {r[:-3] for r in retired}
+        text = home.read_text(encoding="utf-8")
+        out = []
+        dirty = False
+        for line in text.splitlines():
+            targets = [split_wikilink(m.group("inner"))[0]
+                       for m in WIKILINK_RE.finditer(line)]
+            if targets and all(t in stems for t in targets):
+                dirty = True
+                continue
+            out.append(line)
+        if dirty:
+            home.write_text("\n".join(out)
+                            + ("\n" if text.endswith("\n") else ""),
+                            encoding="utf-8")
+            removed += 1
+            print(f"vault_check: stripped retired links from {home_rel}")
+    return removed
+
+
 def cmd_migrate(args, policy: dict) -> int:
     root = args.vault.resolve()
     vault = build_vault(root, policy)
@@ -1908,7 +1984,7 @@ def cmd_migrate(args, policy: dict) -> int:
                                               id_lookup)
         trailing = text.endswith("\n")
         lines = text.splitlines()
-        rewrites += prefix_decision_title(policy, note, lines)
+        rewrites += deid_lead_decision(policy, note, lines)
         rewrites += retarget_nav(vault, note, lines)
         text = "\n".join(lines) + ("\n" if trailing else "")
         tags, tags_changed = migrate_tags(note)
@@ -1921,39 +1997,46 @@ def cmd_migrate(args, policy: dict) -> int:
             touched += 1
             total_rewrites += rewrites
             print(f"vault_check: migrated {note.rel} ({rewrites} rewrites)")
+    retired = retired_reconcile(root, policy, skip)
     reconciled = payload_reconcile(root, policy, args.payload)
     print(f"vault_check: migrate touched {touched} notes,"
           f" {total_rewrites} rewrites;"
+          f" {retired} retired surface(s) cleared;"
           f" {reconciled} payload file(s) reconciled;"
           f" {total_manual} link(s) left for stewardship")
     return 0
 
 
-# Legacy round-file grammar: the brownfield names --rename migrates FROM.
-LEGACY_ROUND_RE = re.compile(r"^round-(\d+)\.md$")
-LEGACY_SPACE_ROUND_RE = re.compile(r"^space-round-(\d+)\.md$")
+# v5 legacy grammar the inverted --rename migrates FROM: chain-prefixed
+# round files (the prefix is REQUIRED, so plain v6 names never re-match)
+# and id-prefixed decision notes.
+V5_CHAIN_ROUND_RE = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*-round-(\d+)\.md$")
+V5_CHAIN_SPACE_ROUND_RE = re.compile(
+    r"^[a-z0-9]+(?:-[a-z0-9]+)*-space-round-(\d+)\.md$")
+V5_DEC_RE = re.compile(
+    r"^dec-[a-z][a-z0-9]{1,3}-\d{3,}-([a-z0-9]+(?:-[a-z0-9]+)*)\.md$")
 
 
 def build_rename_map(vault: Vault, policy: dict,
                      schema: dict) -> tuple[dict, list]:
-    """Grammar-driven rename plan: chain-qualified named files, round
-    files and dec- decision notes for every analysis space. Already
-    compliant names are skipped forward-only."""
+    """Inverted (v6) rename plan: v5 chain-qualified named files, chain
+    round files, id-prefixed decision notes and bare typed-content files
+    become plain, type-suffixed names. Forward-only: compliant names are
+    skipped; the decision skip gate is the filename-suffix test, NEVER
+    the record id (both generations carry the id alias)."""
     renames: dict[str, str] = {}
     manual: list[str] = []
     ch_folder = schema["doc_types"]["challenge_record"]["location"]["folder"]
-    dec_folder = schema["doc_types"]["decision"]["location"]["folder"]
+    plain_space = ba_compile.space_overview_rel(schema)
     roots = set()
     for rel in vault.index:
         parts = rel.split("/")
-        if len(parts) < 2:
+        if len(parts) < 2 or not rel.endswith(".md"):
             continue
-        if parts[-1] == "space.md" or parts[-1] == \
-                ba_compile.space_overview_rel(schema, parts[-2]):
+        if parts[-1] == plain_space \
+                or parts[-1] == f"{parts[-2]}-{plain_space}":
             roots.add("/".join(parts[:-1]))
     for root_rel in sorted(roots):
-        space_slug = root_rel.rsplit("/", 1)[-1]
-        space, _ = ba_compile.scan_space(vault.root / root_rel, schema)
         for rel in sorted(vault.index):
             if not rel.startswith(root_rel + "/") or not rel.endswith(".md"):
                 continue
@@ -1964,73 +2047,77 @@ def build_rename_map(vault: Vault, policy: dict,
                 node_parts.extend(rest[:2])
                 rest = rest[2:]
             node_rel = "/".join(node_parts)
-            chain = ba_compile.chain_slug(schema, space_slug, node_rel)
             node_prefix = f"{root_rel}/{node_rel}/" if node_rel \
                 else f"{root_rel}/"
             if len(rest) == 1:
                 name = rest[0]
                 for doc_type, spec in schema["doc_types"].items():
                     loc = spec["location"]
-                    if loc.get("kind") != "named_file" or name != loc["name"]:
+                    if loc.get("kind") != "named_file":
+                        continue
+                    plain = loc["name"]
+                    if name == plain:
+                        break  # already v6
+                    if not name.endswith(f"-{plain}"):
                         continue
                     if loc.get("root_only") and node_rel:
                         continue
                     if loc.get("domain_only") and not node_rel:
                         continue
-                    new_name = ba_compile.named_file_name(schema, doc_type,
-                                                          chain)
-                    if new_name != name:
-                        renames[rel] = f"{node_prefix}{new_name}"
+                    renames[rel] = f"{node_prefix}{plain}"
                     break
             elif len(rest) == 2 and rest[0] == ch_folder:
+                # Node-scoped ANCHORED inverses: the root applies only
+                # the space-round inverse and a domain only the round
+                # inverse, so plain v6 names can never re-match.
                 name = rest[1]
-                m_round = LEGACY_ROUND_RE.match(name)
-                m_space = LEGACY_SPACE_ROUND_RE.match(name)
-                new_name = None
-                if m_space and not node_rel:
-                    new_name = ba_compile.round_file_name(
-                        schema, space_slug, "space", int(m_space.group(1)))
-                elif m_round:
-                    new_name = ba_compile.round_file_name(
-                        schema, chain, "domain", int(m_round.group(1)))
+                if node_rel:
+                    m = V5_CHAIN_ROUND_RE.match(name)
+                    new_name = (ba_compile.round_file_name(
+                        schema, "domain", int(m.group(1))) if m else None)
+                else:
+                    m = V5_CHAIN_SPACE_ROUND_RE.match(name)
+                    new_name = (ba_compile.round_file_name(
+                        schema, "space", int(m.group(1))) if m else None)
                 if new_name and new_name != name:
                     renames[rel] = f"{node_prefix}{ch_folder}/{new_name}"
-            elif len(rest) == 2 and rest[0] == dec_folder:
-                name = rest[1]
-                tree = note_decision_tree(policy, rel)
-                if tree is None:
-                    continue
-                if decision_id(tree, rel) is not None:
-                    continue  # forward-only: already id-prefixed
-                # Read the DEC ruling rows off the doc itself: a fully
-                # legacy space (bare space.md) registers no node codes,
-                # so space.ids would drop the id on the code mismatch.
-                doc = space.docs.get(sub)
-                dec_ids: list[str] = []
-                if doc is not None:
-                    dec_section = schema["row_schemas"]["dec"]["section"]
-                    id_re = re.compile(
-                        rf"^{tree['id_prefix']}-([A-Z]{{2,4}})-(\d+)$")
-                    for table in doc.tables:
-                        if table.section != dec_section \
-                                or "id" not in table.columns \
-                                or "status" not in table.columns:
-                            continue
-                        for _lineno, cells in table.rows:
-                            row = dict(zip(table.columns, cells))
-                            if id_re.match(row.get("id", "")) \
-                                    and row.get("status") == "active":
-                                dec_ids.append(row["id"])
-                if len(set(dec_ids)) != 1:
-                    manual.append(rel)
-                    continue
-                _kind, code, number = dec_ids[0].split("-")
-                width = tree.get("id_min_width", 3)
-                stem = re.sub(r"[^a-z0-9-]+", "-", name[:-3].lower())
-                stem = re.sub(r"-{2,}", "-", stem).strip("-") or "decision"
-                renames[rel] = (f"{node_prefix}{dec_folder}/"
-                                f"dec-{code.lower()}-{int(number):0{width}d}"
-                                f"-{stem}.md")
+            elif len(rest) == 2:
+                folder, name = rest
+                for doc_type, spec in schema["doc_types"].items():
+                    loc = spec["location"]
+                    if loc.get("kind") != "folder" \
+                            or loc["folder"] != folder:
+                        continue
+                    suffix = loc.get("filename_suffix")
+                    if not suffix:
+                        break
+                    stem = name[:-3]
+                    if stem.endswith(f"-{suffix}"):
+                        break  # already v6 (the suffix gate, never the id)
+                    if doc_type == "decision":
+                        m = V5_DEC_RE.match(name)
+                        if m:
+                            stem = m.group(1)
+                    renames[rel] = f"{node_prefix}{folder}/{stem}-{suffix}.md"
+                    break
+    for tree in policy.get("decision_trees", {}).values():
+        # Flat (non-glob) alias-id trees: v5 prefix-number-slug names
+        # lose the id prefix and gain the type suffix.
+        if tree_is_glob(tree) or tree.get("id_source", "alias") != "alias":
+            continue
+        prefix = tree["path"].rstrip("/") + "/"
+        v5_re = re.compile(
+            rf"^{tree['id_prefix'].lower()}-\d{{{tree['id_min_width']},}}"
+            rf"-([a-z0-9]+(?:-[a-z0-9]+)*)\.md$")
+        for rel in sorted(vault.index):
+            if not rel.startswith(prefix) or not rel.endswith(".md"):
+                continue
+            name = rel[len(prefix):]
+            if "/" in name or name[:-3].endswith("-decision"):
+                continue
+            m = v5_re.match(name)
+            if m:
+                renames[rel] = f"{prefix}{m.group(1)}-decision.md"
     return renames, manual
 
 
@@ -2053,15 +2140,25 @@ def migrate_rename(args, policy: dict, vault: Vault, skip: set) -> int:
         prefix = args.scope.rstrip("/") + "/"
         renames = {o: n for o, n in renames.items() if o.startswith(prefix)}
         manual = [m for m in manual if m.startswith(prefix)]
+    # Ambiguous targets route to the manual list and the run PROCEEDS:
+    # two sources minting one target, or a target already on disk, are
+    # judgment calls (never append a code or number to disambiguate;
+    # that would reintroduce ids into filenames).
     collisions = []
-    seen_new: dict[str, str] = {}
+    by_new: dict[str, list[str]] = {}
     for old, new in sorted(renames.items()):
-        if new in vault.index and new not in renames:
-            collisions.append(f"{old} -> {new}: target already exists")
-        if new in seen_new:
-            collisions.append(
-                f"{old} -> {new}: also produced by {seen_new[new]}")
-        seen_new[new] = old
+        by_new.setdefault(new, []).append(old)
+    for new, olds in sorted(by_new.items()):
+        exists = new in vault.index and new not in renames
+        if len(olds) > 1 or exists:
+            for old in olds:
+                renames.pop(old)
+                manual.append(old)
+                collisions.append(
+                    f"{old} -> {new}: "
+                    + ("target already exists" if exists
+                       else "also produced by "
+                       + ", ".join(o for o in olds if o != old)))
     blocked = []
     for old in sorted(renames):
         blockers = sorted(
@@ -2091,12 +2188,11 @@ def migrate_rename(args, policy: dict, vault: Vault, skip: set) -> int:
                   f" blocked_by_frozen_referrer:"
                   f" {', '.join(entry['blocked_by'])}")
         for rel in sorted(manual):
-            print(f"vault_check: manual {rel} (need exactly one active DEC"
-                  " ruling row to derive the name)")
+            print(f"vault_check: manual {rel} (ambiguous rename target;"
+                  " resolve by hand)")
         for collision in collisions:
-            print(f"vault_check: COLLISION {collision}", file=sys.stderr)
-    if collisions:
-        return 1
+            print(f"vault_check: COLLISION -> manual {collision}",
+                  file=sys.stderr)
     if args.dry_run or not plan:
         if not args.json:
             print(f"vault_check: rename plan: {len(plan)} rename(s),"
@@ -2135,7 +2231,7 @@ def scoped(findings: list[Finding], policy: dict,
         return findings
     keep_prefixes = (scope.rstrip("/") + "/", policy["maps_dir"] + "/",
                      ".obsidian/")
-    keep_files = {policy["home_file"], policy["start_here_file"]}
+    keep_files = {policy["home_file"]}
     return [f for f in findings
             if f.check in GLOBAL_CHECKS
             or f.path.startswith(keep_prefixes)

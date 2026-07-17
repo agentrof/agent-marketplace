@@ -24,8 +24,9 @@ ${CLAUDE_PLUGIN_ROOT}/scripts/ba_compile.py.
      and every other machine artifact stay English).
    - Freeze set: run the PMO CLI's resume-info --project-key <key>
      --json; for each active work order (running or waiting_gate) on
-     this topic, collect its story's criterion ids from the coverage map
-     in workspace/docs/backlog.md, then ba_compile.py resolve --ids
+     this topic, collect its story's criterion ids from the database
+     (coverage list --project-key <key> --story <WP-##> --json), then
+     ba_compile.py resolve --ids
      <them> for the owning docs. Those docs are FROZEN: refuse edits and
      status flips on them (a guard hook backstops this); everything else
      in the space stays editable but must pass check before commit.
@@ -44,7 +45,7 @@ ${CLAUDE_PLUGIN_ROOT}/scripts/ba_compile.py.
      memory; conversation is not.
 2. New topic: ba_compile.py init --space
    workspace/docs/business-analysis/<slug> --title "<title>" --code
-   <CODE>. The four chain-slugged root files and _generated/ appear;
+   <CODE>. The four plain named root files and _generated/ appear;
    run render once.
 3. Adopt the business-analyst role IN THIS CONVERSATION (an interactive
    persona, not a spawn; analysis is a dialogue). Read the behavioral

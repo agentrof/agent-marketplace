@@ -16,7 +16,6 @@
     "targets",
     "verify"
   ],
-  "slug_join": "-",
   "naming": {
     "identifier_format": "^[a-z][a-z0-9_]*$",
     "identifier_columns": [
@@ -74,8 +73,7 @@
       "location": {
         "kind": "named_file",
         "name": "space.md",
-        "root_only": true,
-        "slug_prefixed": true
+        "root_only": true
       },
       "required_sections": [
         "purpose_scope",
@@ -98,8 +96,7 @@
       "location": {
         "kind": "named_file",
         "name": "domain.md",
-        "domain_only": true,
-        "slug_prefixed": true
+        "domain_only": true
       },
       "required_sections": [
         "mission",
@@ -122,7 +119,8 @@
     "process": {
       "location": {
         "kind": "folder",
-        "folder": "processes"
+        "folder": "processes",
+        "filename_suffix": "process"
       },
       "required_sections": [
         "actors",
@@ -143,7 +141,8 @@
     "entity": {
       "location": {
         "kind": "folder",
-        "folder": "entities"
+        "folder": "entities",
+        "filename_suffix": "entity"
       },
       "required_sections": [
         "fields",
@@ -163,7 +162,8 @@
     "rule_set": {
       "location": {
         "kind": "folder",
-        "folder": "rules"
+        "folder": "rules",
+        "filename_suffix": "rules"
       },
       "required_sections": [
         "rules"
@@ -184,7 +184,8 @@
     "acceptance_set": {
       "location": {
         "kind": "folder",
-        "folder": "acceptance"
+        "folder": "acceptance",
+        "filename_suffix": "acceptance"
       },
       "required_sections": [
         "criteria"
@@ -205,7 +206,8 @@
     "decision": {
       "location": {
         "kind": "folder",
-        "folder": "decisions"
+        "folder": "decisions",
+        "filename_suffix": "decision"
       },
       "required_sections": [
         "context",
@@ -228,8 +230,7 @@
       "location": {
         "kind": "named_file",
         "name": "glossary.md",
-        "root_only": true,
-        "slug_prefixed": true
+        "root_only": true
       },
       "required_sections": [
         "terms"
@@ -248,8 +249,7 @@
       "location": {
         "kind": "named_file",
         "name": "actors.md",
-        "root_only": true,
-        "slug_prefixed": true
+        "root_only": true
       },
       "required_sections": [
         "actors"
@@ -267,8 +267,7 @@
     "budget_set": {
       "location": {
         "kind": "named_file",
-        "name": "budgets.md",
-        "slug_prefixed": true
+        "name": "budgets.md"
       },
       "required_sections": [
         "performance",
@@ -294,7 +293,8 @@
       "location": {
         "kind": "folder",
         "folder": "integrations",
-        "root_only": true
+        "root_only": true,
+        "filename_suffix": "integration"
       },
       "required_sections": [
         "exchange",
@@ -460,8 +460,8 @@
   },
   "challenge": {
     "max_rounds": 3,
-    "round_file_format": "{slug}-round-{n}.md",
-    "space_round_file_format": "{slug}-space-round-{n}.md"
+    "round_file_format": "round-{n}.md",
+    "space_round_file_format": "space-round-{n}.md"
   },
   "thresholds": {
     "nesting_warn_depth": 2,

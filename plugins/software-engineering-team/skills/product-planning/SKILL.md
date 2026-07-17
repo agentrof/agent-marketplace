@@ -13,11 +13,11 @@ this skill says how to cut one and where it goes in the queue.
 ## When to Use
 
 Loaded when producing the backlog import (epics and stories in the PMO
-database; workspace/docs/backlog.md is its generated view, a vault
-surface per the obsidian-vault skill) from an
-approved analysis space (its registry is the criteria source), or
-reconciling at a merge checkpoint. An existing solution-design tree
-(workspace/docs/solution-design/) is read first: build-buy-integrate
+database, the single source of delivery state, read back through the
+CLI's item verbs) from an approved analysis space (its registry is the
+criteria source), or reconciling at a merge checkpoint. An existing
+solution-design tree (workspace/docs/solution-design/, vault law per
+the obsidian-vault skill) is read first: build-buy-integrate
 verdicts shape what is sliced versus bought; Transition ordering
 constrains story order. Not for analysis (analyst work), not for
 technical choices (architect work).
@@ -99,11 +99,11 @@ Two passes; the second never overrides the first.
 
 - The priority field carries the reason ("high: unblocks WP-04"), never
   a bare rank; tiers are critical/high/medium/low, import-enforced.
-- The quality ledger (workspace/docs/quality-ledger.md, a generated
-  view) is an ordering input: read its tail before planning; a recurring
-  finding category is risk evidence (sequence the next story touching
-  that area earlier, or mint an analysis rule), and rising
-  rounds-to-green on a module argues for smaller slices there.
+- The quality ledger (PMO database rows) is an ordering input: read its
+  tail before planning (ledger list --project-key <key> --tail <N>
+  --json); a recurring finding category is risk evidence (sequence the
+  next story touching that area earlier, or mint an analysis rule), and
+  rising rounds-to-green on a module argues for smaller slices there.
 - At the backlog gate, negotiate scope in plain must/should/deferred
   language; every "deferred" lands on the deferred list with a written
   reason, never a silent drop.

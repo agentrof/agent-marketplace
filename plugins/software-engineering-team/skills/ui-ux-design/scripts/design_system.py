@@ -686,9 +686,14 @@ def format_master_md(design_system: dict) -> str:
     radius = design_system.get("radius", {})
     motion = design_system.get("motion", {})
 
+    # Born-compliant title: a natural phrase closing in the canonical
+    # ENGLISH designation ("design master") so it passes the vault's
+    # word-boundary designation check against an English default map; a
+    # non-English project's build-docs-vault localizes it like any title.
+    title = f"{design_system.get('project_name', 'PROJECT')} design master"
     lines = []
-    lines += vault_frontmatter("design_master", "Design System Master File")
-    lines.append("# Design System Master File")
+    lines += vault_frontmatter("design_master", title)
+    lines.append(f"# {title}")
     lines.append("")
     lines.append("> **LOGIC:** When building a specific page, first check `pages/[page-name].md`")
     lines.append("> next to this file. If that file exists, its rules **override** this Master file.")
@@ -961,9 +966,12 @@ def format_page_override_md(design_system: dict, page_name: str, page_query: str
     page_title = page_name.replace("-", " ").replace("_", " ").title()
     page_overrides = _generate_intelligent_overrides(page_name, page_query, design_system)
 
+    # Born-compliant title closing in the canonical ENGLISH designation
+    # ("page override"); the check enforces it, build-docs-vault localizes.
+    title = f"{page_title} page override"
     lines = []
-    lines += vault_frontmatter("page_override", f"{page_title} Page Overrides")
-    lines.append(f"# {page_title} Page Overrides")
+    lines += vault_frontmatter("page_override", title)
+    lines.append(f"# {title}")
     lines.append("")
     lines.append(f"> **PROJECT:** {design_system.get('project_name', 'PROJECT')}")
     lines.append(f"> **Page Type:** {page_overrides.get('page_type', 'General')}")

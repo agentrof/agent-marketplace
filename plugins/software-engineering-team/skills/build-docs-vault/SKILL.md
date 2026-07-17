@@ -57,11 +57,17 @@ hook; nothing here ever changes what a document claims.
    - The curation program is summarized per area (maps, nav peers,
      titles and aliases, home localization, empty maps)
      and asked as Approve / Adjust / Pause.
-4. EXECUTE, deterministic first.
+4. EXECUTE. Mint the designation map first WHEN ABSENT: render the
+   canonical table (obsidian-vault metadata) into output_language and
+   write doc_type_designations to workspace/config.json, owner-approved,
+   so migrate's title repair and the checker read real strings (present,
+   leave it). Then deterministic first.
    a. ${CLAUDE_PLUGIN_ROOT}/scripts/vault_check.py migrate --vault
       workspace/docs, freeze-safe by construction: citation cells,
       scalar doc-ref keys, nav hub retargeting, de-id-leading of
-      decision titles and H1s, deletion of notes the law has retired
+      decision titles and H1s, appending each typed title's missing
+      designation and its H1 (challenge records excepted, retitled by
+      judgment), deletion of notes the law has retired
       (legacy scaffold and delivery-view files, with home's links to
       them stripped; runs unconditionally, even under --scope) and
       payload reconciliation. Then the approved batch via
@@ -77,9 +83,11 @@ hook; nothing here ever changes what a document claims.
       only when its tree bears content: maps are born with their tree.
    c. Judgment in-session, every write under the per-write hook: curate
       map notes (grouped, annotated, output_language), fix contextual
-      nav peers, stamp titles and aliases per the law, sync home
-      to vault reality and localize its prose, and settle
-      each empty map (fill or retire) with owner approval.
+      nav peers, stamp titles and aliases per the law, retitle the
+      challenge records (round-number placement is judgment) and anything
+      auto-append could not shape, sync home to vault reality and localize
+      its prose, and settle each empty map (fill or retire) with owner
+      approval.
 5. CLOSE.
    - Re-run the full check: green, or every residual named with its
      reason (frozen docs, unresolved PMO, deferred judgment).
@@ -93,7 +101,9 @@ hook; nothing here ever changes what a document claims.
 ## Hard Scope
 
 - The ONE entry allowed to write vault-wide: the whole docs tree plus
-  its committed payload, and never a byte outside workspace/docs/.
+  its committed payload, never a byte outside workspace/docs/ save the
+  one owner-approved config write minting the absent
+  doc_type_designations map (the title repair reads it).
 - The PMO database is touched only through event append; no other
   state writes.
 - Prose meaning stays untouched: reorganization is names, links,

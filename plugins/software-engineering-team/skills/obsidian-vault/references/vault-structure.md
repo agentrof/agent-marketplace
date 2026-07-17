@@ -35,7 +35,8 @@ policy, never ad hoc.
   folder holds its own `domain.md`
   (`domains/inventory/domain.md`, nested
   `domains/finance/domains/accounts-payable/domain.md`); review
-  records are `round-<n>.md` (space-level rounds `space-round-<n>.md`).
+  records are `round-<n>-review.md` (space-level rounds
+  `space-round-<n>-review.md`).
 - Typed content carries its type as the schema's English filename
   suffix: `<slug>-rules.md`, `<slug>-acceptance.md`,
   `<slug>-process.md`, `<slug>-entity.md`, `<slug>-decision.md`,

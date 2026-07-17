@@ -317,7 +317,7 @@ Criteria for [[business-analysis/erp/domains/inventory/processes/goods-receipt-p
 | AC-INV-002 | Given an item with a movement, when its sku is edited, then the edit is refused naming the movement date. | [[business-analysis/erp/domains/inventory/rules/stock-item-lifecycle-rules\\|BR-INV-001]] | attempt the edit; assert refusal message content | active |
 """)
     write(space / "domains" / "inventory" / "reviews"
-          / "round-1.md", """---
+          / "round-1-review.md", """---
 type: challenge_record
 title: Inventory Challenge Round 1
 status: approved
@@ -354,7 +354,7 @@ Independent audit reviewed the covered disposition; no disagreement.
 
 Converged: zero blocking findings this round.
 """)
-    write(space / "reviews" / "space-round-1.md", """---
+    write(space / "reviews" / "space-round-1-review.md", """---
 type: challenge_record
 title: Space Challenge Round 1
 status: approved
@@ -481,7 +481,7 @@ def break_approval_preconditions(space: Path) -> None:
 
 
 def break_challenge_record(space: Path) -> None:
-    edit(space / INV / "reviews" / "round-1.md",
+    edit(space / INV / "reviews" / "round-1-review.md",
          "| minor | Damaged-goods refusal already covered. |",
          "| blocking | Damaged-goods refusal already covered. |")
 
@@ -717,11 +717,11 @@ class ApproveTests(unittest.TestCase):
         self.assertEqual(code, 2, err)
 
     def test_challenge_record_requires_verdict_and_locks(self):
-        target = self.space / INV / "reviews" / "round-1.md"
+        target = self.space / INV / "reviews" / "round-1-review.md"
         edit(target, "status: approved\napproved_at: 2026-07-12",
              "status: in_review")
         edit(target, "verdict: converged\nlocked: true", "verdict: continue")
-        rel = "domains/inventory/reviews/round-1.md"
+        rel = "domains/inventory/reviews/round-1-review.md"
         code, _, err = run(["approve", "--space", str(self.space),
                             "--doc", rel])
         self.assertEqual(code, 2, err)

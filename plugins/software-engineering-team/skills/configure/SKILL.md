@@ -41,7 +41,11 @@ Config changes go through this gate, never through hand edits.
    and comments, commit messages and PR bodies; the machine layer, file
    names, keys, ids, CLI output, always stays English); max_parallel an
    optional positive integer (the delivery-lanes flow's lane-proposal
-   cap; absent means 3; this gate is its only writer).
+   cap; absent means 3; this gate is its only writer);
+   doc_type_designations a map of each taxonomy type-kebab to its
+   rendered designation string, minted from the canonical English table
+   into output_language, machine-managed and, like the language axes,
+   changed only through this gate, a change re-checking every vault title.
 4. Present the impact analysis before writing: which roles' skill
    bindings change (the static role-to-skill map lives in
    ${CLAUDE_PLUGIN_ROOT}/flows/develop.md, step 0; method skills such as

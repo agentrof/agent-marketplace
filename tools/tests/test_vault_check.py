@@ -62,6 +62,14 @@ def edit(path: Path, old: str, new: str) -> None:
     path.write_text(text.replace(old, new), encoding="utf-8")
 
 
+def typed_note(note_type: str, title: str, extra_fm: str = "") -> str:
+    """A minimal authored note of a given type and title. Firing tests that
+    only assert one finding is PRESENT tolerate the note's side findings."""
+    tag = note_type.replace("_", "-")
+    return (f"---\ntype: {note_type}\ntitle: {title}\n{extra_fm}"
+            f"tags:\n  - doc/{tag}\n---\n\n# {title}\n\nBody text.\n")
+
+
 SD = "solution-design"
 DEC = f"{SD}/decisions"
 
@@ -74,8 +82,40 @@ NAV = """## Navigation <!-- sec: nav -->
 BA = "business-analysis"
 BA_SPACE = f"{BA}/erp"
 
+# The consumer's rendered designation map (generic English values, one per
+# taxonomy type in the shipped universe). Written to <workspace>/config.json
+# so titles that already close in their designation pass the check.
+DESIGNATIONS = {
+    "space": "space overview",
+    "domain": "domain overview",
+    "glossary": "glossary",
+    "actor-roster": "actors",
+    "budget-set": "budgets",
+    "process": "process",
+    "entity": "entity",
+    "rule-set": "rules",
+    "acceptance-set": "acceptance criteria",
+    "decision": "decision",
+    "challenge-record": "review round",
+    "integration": "integration",
+    "landscape": "landscape",
+    "engagement": "engagement",
+    "design-master": "design master",
+    "page-override": "page override",
+}
+
+
+def write_config(root: Path, designations=DESIGNATIONS) -> None:
+    """Mint the consumer designation map at <workspace>/config.json (the
+    workspace is the vault's parent, mirroring the runtime derivation)."""
+    payload = {"terminology_language": "English"}
+    if designations is not None:
+        payload["doc_type_designations"] = designations
+    write(root.parent / "config.json", json.dumps(payload, indent=2))
+
 
 def make_valid_vault(root: Path) -> None:
+    write_config(root)
     write(root / "home.md", """---
 type: home
 title: Shop Knowledge Base
@@ -114,7 +154,7 @@ tags:
 """)
     write(root / BA_SPACE / "space.md", """---
 type: space
-title: ERP Analysis
+title: ERP analysis space overview
 status: approved
 code: ERP
 tags:
@@ -124,7 +164,7 @@ aliases:
   - ERP
 ---
 
-# ERP Analysis
+# ERP analysis space overview
 
 The pilot analysis space. Its rules registry backs
 [[business-analysis/erp/space|BR-ERP-001]] style citations.
@@ -813,29 +853,40 @@ class RenameVerbTests(unittest.TestCase):
         self.assertTrue((self.root / BA_SPACE / "space.md").is_file())
 
     def test_rename_round_inverses_are_node_scoped(self):
-        """Red-team 3: the root applies only the space-round inverse and
-        a domain only the round inverse, both anchored on a REQUIRED
-        chain prefix, so plain v6 names never re-match."""
+        """The review-suffix inversion maps BOTH the v6 plain forms and the
+        v4/v5 chain forms to the -review target, node-scoped: the root only
+        applies the space-round inverse and a domain only the round inverse,
+        so a domain never claims a space-round name. Already-suffixed names
+        never re-match (idempotent)."""
         reviews = self.root / BA_SPACE / "reviews"
-        write(reviews / "erp-space-round-1.md", "# r\n")
-        write(reviews / "space-round-2.md", "# r\n")
+        write(reviews / "erp-space-round-1.md", "# r\n")   # v5 chain, root
+        write(reviews / "space-round-2.md", "# r\n")        # v6 plain, root
         dom = self.root / BA_SPACE / "domains" / "inventory" / "reviews"
-        write(dom / "erp-inventory-round-1.md", "# r\n")
-        write(dom / "round-2.md", "# r\n")
+        write(dom / "erp-inventory-round-1.md", "# r\n")    # v5 chain, domain
+        write(dom / "round-2.md", "# r\n")                   # v6 plain, domain
+        write(dom / "round-3-review.md", "# r\n")            # v7, already done
+        write(dom / "space-round-9.md", "# r\n")             # misplaced space
         code, out, err = run(["migrate", "--vault", str(self.root),
                               "--rename", "--dry-run", "--json"])
         self.assertEqual(code, 0, out + err)
         payload = json.loads(out)
         plan = {e["old"]: e["new"] for e in payload["renames"]}
         self.assertEqual(plan.get(f"{BA_SPACE}/reviews/erp-space-round-1.md"),
-                         f"{BA_SPACE}/reviews/space-round-1.md")
+                         f"{BA_SPACE}/reviews/space-round-1-review.md")
+        self.assertEqual(plan.get(f"{BA_SPACE}/reviews/space-round-2.md"),
+                         f"{BA_SPACE}/reviews/space-round-2-review.md")
         self.assertEqual(
             plan.get(f"{BA_SPACE}/domains/inventory/reviews/"
                      "erp-inventory-round-1.md"),
-            f"{BA_SPACE}/domains/inventory/reviews/round-1.md")
-        self.assertNotIn(f"{BA_SPACE}/reviews/space-round-2.md", plan)
+            f"{BA_SPACE}/domains/inventory/reviews/round-1-review.md")
+        self.assertEqual(
+            plan.get(f"{BA_SPACE}/domains/inventory/reviews/round-2.md"),
+            f"{BA_SPACE}/domains/inventory/reviews/round-2-review.md")
+        # already -review is a no-op; a domain never claims a space-round
         self.assertNotIn(
-            f"{BA_SPACE}/domains/inventory/reviews/round-2.md", plan)
+            f"{BA_SPACE}/domains/inventory/reviews/round-3-review.md", plan)
+        self.assertNotIn(
+            f"{BA_SPACE}/domains/inventory/reviews/space-round-9.md", plan)
 
     def test_rename_dry_run_counts_and_writes_nothing(self):
         v5_shaped_names(self.root)
@@ -973,6 +1024,29 @@ See [the landscape](landscape.md).
         self.assertEqual(code, 0,
                          [f"{f['check']}: {f['message']}" for f in findings])
 
+    def test_migrate_appends_missing_designation_title_and_h1(self):
+        """A typed title lacking its designation gains it in migrate, and
+        the first H1 is rewritten in the SAME write; the append is
+        idempotent (the same fold/word-boundary test the check uses)."""
+        space = self.root / BA_SPACE / "space.md"
+        edit(space, "title: ERP analysis space overview",
+             "title: ERP analysis")
+        edit(space, "# ERP analysis space overview", "# ERP analysis")
+        code, findings = check_findings(self.root)
+        self.assertEqual(code, 1)  # the missing designation is an error
+        code, out, _ = run(["migrate", "--vault", str(self.root)])
+        self.assertEqual(code, 0, out)
+        text = space.read_text(encoding="utf-8")
+        self.assertIn("title: ERP analysis space overview", text)
+        self.assertIn("# ERP analysis space overview", text)
+        before = space.read_bytes()
+        code, _, _ = run(["migrate", "--vault", str(self.root)])
+        self.assertEqual(code, 0)
+        self.assertEqual(space.read_bytes(), before)
+        code, findings = check_findings(self.root)
+        self.assertEqual(code, 0,
+                         [f"{f['check']}: {f['message']}" for f in findings])
+
     def test_migrate_deletes_retired_scaffold_unscoped(self):
         """Red-team 4: the retired scaffold files leave the vault inside
         ANY migrate run (scope or not), and a scoped gate on a v5-shaped
@@ -1076,22 +1150,29 @@ class DesignSystemWriterTests(unittest.TestCase):
         finally:
             sys.path.remove(str(scripts))
 
-    def assert_born_compliant(self, text: str, doc_type: str):
+    def assert_born_compliant(self, text: str, doc_type: str,
+                              designation: str):
         fm, _, fm_error = ba.parse_frontmatter(text)
         self.assertIsNone(fm_error, text[:120])
         self.assertEqual(fm.get("type"), doc_type)
         self.assertEqual(fm.get("tags"), [f"doc/{doc_type.replace('_', '-')}"])
         self.assertIn("<!-- sec: nav -->", text)
         self.assertIn("[[maps/design-system|Design System]]", text)
+        # Born-compliant title: carries the canonical English designation
+        # (word-boundary check) and the first H1 is byte-identical to it.
+        title = fm.get("title")
+        self.assertTrue(vc.designation_present(title, designation),
+                        f"title {title!r} lacks designation {designation!r}")
+        self.assertIn(f"# {title}\n", text)
 
     def test_master_is_born_compliant(self):
         text = self.ds.format_master_md({"project_name": "Shop"})
-        self.assert_born_compliant(text, "design_master")
+        self.assert_born_compliant(text, "design_master", "design master")
 
     def test_page_override_is_born_compliant(self):
         text = self.ds.format_page_override_md(
             {"project_name": "Shop"}, "dashboard")
-        self.assert_born_compliant(text, "page_override")
+        self.assert_born_compliant(text, "page_override", "page override")
         self.assertIn("[[design-system/MASTER|Design Master]]", text)
 
 
@@ -1171,6 +1252,137 @@ class HookTests(unittest.TestCase):
         code, err = self.hook(vh.post, self.payload(
             f"{SD}/landscape.md", "ignored"))
         self.assertEqual(code, 0, err)
+
+
+class DesignationCheckTests(unittest.TestCase):
+    """The deterministic title-designation slice: word-boundary containment
+    against the config map, standalone round number, and the fail-closed
+    map-absence and map-coverage findings."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self.tmp.name) / "docs"
+        make_valid_vault(self.root)
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def has(self, findings, severity, needle):
+        return any(f["check"] == "title_shape" and f["severity"] == severity
+                   and needle in f["message"] for f in findings)
+
+    def test_mid_word_false_pass_fires(self):
+        """'Identity management' embeds 'entity' inside 'identity'; the left
+        word-boundary match rejects it where a bare substring would pass."""
+        write(self.root / SD / "identity-entity.md",
+              typed_note("entity", "Identity management"))
+        code, findings = check_findings(self.root)
+        self.assertEqual(code, 1)
+        self.assertTrue(self.has(findings, "error",
+                                 "does not carry the 'entity' designation"),
+                        findings)
+
+    def test_designation_missing_fires(self):
+        edit(self.root / BA_SPACE / "space.md",
+             "title: ERP analysis space overview", "title: ERP analysis")
+        edit(self.root / BA_SPACE / "space.md",
+             "# ERP analysis space overview", "# ERP analysis")
+        code, findings = check_findings(self.root)
+        self.assertEqual(code, 1)
+        self.assertTrue(self.has(findings, "error",
+                                 "does not carry the 'space' designation"),
+                        findings)
+
+    def test_review_round_number_missing_fires(self):
+        """A challenge-record title carrying the designation but not its
+        round number as a standalone token is an error."""
+        write(self.root / BA_SPACE / "reviews" / "space-round-2-review.md",
+              typed_note("challenge_record", "Payments review round",
+                         "status: draft\nowner_role: business_analyst\n"
+                         "round: 2\nreview_scope: space\n"
+                         "verdict: converged\n"))
+        code, findings = check_findings(self.root)
+        self.assertEqual(code, 1)
+        self.assertTrue(self.has(
+            findings, "error",
+            "does not carry its round number 2 as a standalone token"),
+            findings)
+
+    def test_review_round_digit_boundary(self):
+        """The round number is a STANDALONE token: a '2' buried inside '12'
+        does not satisfy round 2."""
+        write(self.root / BA_SPACE / "reviews" / "space-round-2-review.md",
+              typed_note("challenge_record", "Payments review round 12",
+                         "status: draft\nowner_role: business_analyst\n"
+                         "round: 2\nreview_scope: space\n"
+                         "verdict: converged\n"))
+        code, findings = check_findings(self.root)
+        self.assertEqual(code, 1)
+        self.assertTrue(self.has(
+            findings, "error", "round number 2 as a standalone token"),
+            findings)
+        # the same title with the standalone number passes the round check
+        edit(self.root / BA_SPACE / "reviews" / "space-round-2-review.md",
+             "Payments review round 12", "Payments review round 2")
+        code, findings = check_findings(self.root)
+        self.assertFalse(self.has(findings, "error", "standalone token"),
+                         findings)
+
+    def test_unconfigured_config_warns(self):
+        (self.root.parent / "config.json").unlink()
+        code, findings = check_findings(self.root)
+        self.assertEqual(code, 0)  # warnings only, never a hard block
+        self.assertTrue(self.has(findings, "warning",
+                                 "type designations are not configured"),
+                        findings)
+
+    def test_unreadable_config_warns_fail_closed(self):
+        (self.root.parent / "config.json").write_text("{ not json",
+                                                       encoding="utf-8")
+        code, findings = check_findings(self.root)
+        self.assertEqual(code, 0)
+        self.assertTrue(self.has(findings, "warning",
+                                 "type designations are not configured"),
+                        findings)
+
+    def test_map_coverage_missing_type_warns(self):
+        partial = dict(DESIGNATIONS)
+        del partial["decision"]
+        write_config(self.root, partial)
+        code, findings = check_findings(self.root)
+        self.assertEqual(code, 0)  # a missing type is the mint-duty warning
+        self.assertTrue(self.has(
+            findings, "warning",
+            "doc type 'decision' has no designation in the configured map"),
+            findings)
+
+    def test_map_coverage_unknown_key_errors(self):
+        extra = dict(DESIGNATIONS)
+        extra["ghost"] = "specter"
+        write_config(self.root, extra)
+        code, findings = check_findings(self.root)
+        self.assertEqual(code, 1)
+        self.assertTrue(self.has(
+            findings, "error",
+            "designation map key 'ghost' names no known doc type"),
+            findings)
+
+
+class FoldUnitTests(unittest.TestCase):
+    def test_fold_is_nfkc_casefold(self):
+        import unicodedata
+        self.assertEqual(vc.fold("SÜREÇ"),
+                         unicodedata.normalize("NFKC", "SÜREÇ").casefold())
+        # the Turkish dotted-I hazard: casefold on NFKC-normalized text is
+        # deterministic (no locale lower()); it does not raise.
+        self.assertEqual(vc.fold("İŞ"),
+                         unicodedata.normalize("NFKC", "İŞ").casefold())
+
+    def test_designation_present_non_ascii_boundary(self):
+        # boundary match on a non-ASCII designation
+        self.assertTrue(vc.designation_present("Sipariş süreç", "süreç"))
+        # mid-word rejection on a non-ASCII designation (left boundary)
+        self.assertFalse(vc.designation_present("Fessüreç", "süreç"))
 
 
 if __name__ == "__main__":

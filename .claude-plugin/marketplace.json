@@ -6,7 +6,7 @@
   },
   "metadata": {
     "description": "A catalog of curated, end-to-end agent teams for Claude Code. Install a complete team and run at the goal.",
-    "version": "6.0.0"
+    "version": "7.0.0"
   },
   "plugins": [
     {
@@ -20,7 +20,7 @@
       "name": "software-engineering-team",
       "source": "./plugins/software-engineering-team",
       "description": "A complete, orchestrated software and product development team: analysis, planning, architecture, design system, implementation, review, verification and a containerized environment.",
-      "version": "6.0.0",
+      "version": "7.0.0",
       "license": "MIT"
     }
   ]

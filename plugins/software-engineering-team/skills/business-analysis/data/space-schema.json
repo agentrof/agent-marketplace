@@ -317,7 +317,8 @@
     "challenge_record": {
       "location": {
         "kind": "folder",
-        "folder": "reviews"
+        "folder": "reviews",
+        "filename_suffix": "review"
       },
       "required_sections": [
         "panel",
@@ -460,8 +461,8 @@
   },
   "challenge": {
     "max_rounds": 3,
-    "round_file_format": "round-{n}.md",
-    "space_round_file_format": "space-round-{n}.md"
+    "round_file_format": "round-{n}-review.md",
+    "space_round_file_format": "space-round-{n}-review.md"
   },
   "thresholds": {
     "nesting_warn_depth": 2,

@@ -31,7 +31,9 @@ produces lives under `workspace/`:
   solution-design, system-architecture, design-system), maintained as
   one vault: open `workspace/docs/` as the vault root (never the repo
   root); on first open the vault app asks ONCE to trust the vendored
-  community plugins (that click enables the title-based labels);
+  community plugins (that click enables the title-based labels, each
+  ending in its type designation from config.json's machine-managed
+  doc_type_designations map);
   `home.md` is the knowledge-base root and `maps/` the navigation
   layer; the global graph colors notes by document type, one color per
   type; citations are vault-absolute wikilinks; the obsidian-vault

@@ -998,11 +998,12 @@ def check_ba_schema_shape(tree: Tree, findings: list[Finding]) -> None:
                 value = (challenge.get(key)
                          if isinstance(challenge, dict) else None)
                 if not (isinstance(value, str) and "{n}" in value
-                        and value.endswith(".md")):
-                    err(f"challenge.{key} must be a .md format string"
-                        " carrying {n}",
-                        "round filenames are schema-driven; the format is"
-                        " data, not code")
+                        and value.endswith("-review.md")):
+                    err(f"challenge.{key} must be a format string carrying"
+                        " {n} and ending in -review.md",
+                        "review round filenames are schema-driven; every"
+                        " typed review file carries the -review suffix like"
+                        " the rest of the folder law")
             row_schemas = schema.get("row_schemas", {})
             all_columns = {c for row in row_schemas.values()
                            if isinstance(row, dict)
@@ -1032,16 +1033,15 @@ def check_ba_schema_shape(tree: Tree, findings: list[Finding]) -> None:
                             "every doc type declares sections, mints and gating")
                 location = spec.get("location")
                 if isinstance(location, dict) \
-                        and location.get("kind") == "folder" \
-                        and type_name != "challenge_record":
+                        and location.get("kind") == "folder":
                     suffix = location.get("filename_suffix")
                     if not (isinstance(suffix, str) and suffix):
                         err(f"doc type '{type_name}' folder location must"
                             " carry a non-empty filename_suffix",
-                            "typed content files are <slug>-<suffix>.md;"
-                            " the suffix is schema data, never implied"
-                            " (challenge records alone follow the round"
-                            " file format)")
+                            "typed content files carry a -<suffix>; the"
+                            " suffix is schema data, never implied (review"
+                            " rounds carry the review suffix through their"
+                            " round file format)")
                 for kind in spec.get("mints", []) or []:
                     if str(kind).lower() not in row_schemas:
                         err(f"doc type '{type_name}' mints '{kind}' which has"

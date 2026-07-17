@@ -86,13 +86,13 @@ detected candidates plus free-form input.
    verbs up, down, seed <scenario>, logs, url <service>; contract in the
    environment stack skill; verify by one up-then-down, or record
    unverified for the first environment story's QA gate), source_dirs,
-   output_language (scope: body prose of authored .md documents) and
-   terminology_language (scope: names, technical terms, code and comments,
-   commit messages and PR bodies; the machine layer, file names, keys,
-   ids, CLI output, always stays English). Both language keys default
-   English, are always written, "English" spelled out on the accepted
-   default; absence never encodes one. An unsupported stack is refused
-   honestly: tested stacks only; new stacks arrive as maintainer releases.
+   output_language (scope: .md body prose) and terminology_language
+   (names, technical terms, code, comments, commits, PR bodies; the
+   machine layer always stays English), both defaulting English, always
+   written, "English" spelled out on the accepted default. Then mint
+   doc_type_designations: render the canonical table (obsidian-vault
+   metadata) into output_language, one per taxonomy type, for owner
+   review. An unsupported stack is refused honestly: tested stacks only.
 7. Continuous integration: no PR-triggered test workflow in the
    repository's CI directory (for GitHub, .github/workflows/): offer to
    add one from ${CLAUDE_PLUGIN_ROOT}/templates/ci-tests.yml,

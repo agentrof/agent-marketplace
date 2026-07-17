@@ -27,6 +27,7 @@ import json
 import re
 import shutil
 import sys
+import unicodedata
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -98,6 +99,17 @@ NAV_MARKER = "<!-- sec: nav -->"
 BLOCK_ID_RE = re.compile(r"(?:^|\s)\^([a-z0-9]+(?:-[a-z0-9]+)*)\s*$")
 FLOW_LIST_RE = re.compile(r"^\[.*\]$")
 
+# Navigation note types (the home note and the map hubs) carry no title
+# designation. Every OTHER taxonomy type must; the designation universe
+# is the color-completeness universe minus these two.
+NAV_DOC_TYPES = ("home", "moc")
+
+# The consumer's rendered designation map lives in <workspace>/config.json,
+# the workspace being the vault's parent (the same derivation the freeze
+# glob uses). This label paths the map-coverage findings, which name the
+# map itself rather than any single note.
+DESIGNATION_CONFIG_REL = "config.json"
+
 
 @dataclass(frozen=True)
 class Finding:
@@ -133,6 +145,12 @@ class Vault:
     index: set = field(default_factory=set)   # every file, posix rel
     notes: dict = field(default_factory=dict)  # rel -> Note
     inbound: dict = field(default_factory=dict)  # rel -> set of citing rels
+    # The consumer's rendered {kebab type -> designation} map, or None when
+    # config.json is missing, unreadable, or omits the key (fail-closed).
+    designations: dict | None = None
+    # The kebab taxonomy types that must carry a designation (same source
+    # as the graph color-completeness guard, minus the nav types).
+    taxonomy_types: set = field(default_factory=set)
 
 
 # ---------------------------------------------------------------------------
@@ -284,12 +302,80 @@ def build_vault(root: Path, policy: dict) -> Vault:
         targets.extend(t for (_, t) in note.fm_targets if t)
         for target in targets:
             vault.inbound.setdefault(f"{target}.md", set()).add(note.rel)
+    vault.designations = load_designations(root)
+    vault.taxonomy_types = designation_type_universe(policy)
     return vault
 
 
 def authored(vault: Vault) -> list[Note]:
     return [n for n in sorted(vault.notes.values(), key=lambda n: n.rel)
             if not n.generated]
+
+
+# ---------------------------------------------------------------------------
+# Title designations (deterministic, config-driven data)
+# ---------------------------------------------------------------------------
+
+
+def fold(value: str) -> str:
+    """Language-agnostic case fold: NFKC-normalize, then casefold. casefold
+    on raw text mangles some scripts (the Turkish dotted/dotless I injects a
+    combining dot); NFKC first is the robust fold. Residual dotted/dotless-I
+    edge cases in the designation position stay a known, stated limit."""
+    return unicodedata.normalize("NFKC", value).casefold()
+
+
+def designation_present(title: str, designation: str) -> bool:
+    """The folded designation appears in the folded title at a LEFT word
+    boundary, right side open. Left-anchoring rejects a mid-word false pass
+    (an entity designation buried inside 'identity'); the open right side
+    keeps inflected and agglutinative endings legal (a designation that is
+    a legal prefix of a longer word still passes, a named tolerance)."""
+    if not designation:
+        return False
+    pattern = r"(?<![^\W\d_])" + re.escape(fold(designation))
+    return re.search(pattern, fold(title)) is not None
+
+
+def schema_doc_types() -> set:
+    """The kebab doc-type names of the shipped analysis schema. Read through
+    ba_compile (the single schema parser), fail-soft to empty."""
+    try:
+        schema = ba_compile.load_schema(ba_compile.DEFAULT_SCHEMA)
+    except (OSError, json.JSONDecodeError, SystemExit):
+        return set()
+    doc_types = schema.get("doc_types") if isinstance(schema, dict) else None
+    return {kebab(t) for t in doc_types} if isinstance(doc_types, dict) else set()
+
+
+def designation_type_universe(policy: dict) -> set:
+    """The kebab types that must carry a title designation: the SAME source
+    the graph color-completeness guard draws on (analysis schema doc_types,
+    kebab-ized, UNION policy extra_doc_types), minus the navigation types.
+    One derivation from one pair of shipped data files, so adding a doc type
+    extends this guard and the color guard together and they cannot drift."""
+    universe = schema_doc_types() | set(policy.get("extra_doc_types", []))
+    return universe - set(NAV_DOC_TYPES)
+
+
+def load_designations(vault_root: Path) -> dict | None:
+    """The consumer's rendered doc_type_designations map from
+    <workspace>/config.json (the workspace is the vault's parent, derived
+    exactly as the freeze glob derives it). Fail-closed: a missing,
+    unreadable, or malformed config, or one that omits the map key, returns
+    None so the title check warns the mint duty rather than passing blind."""
+    config_path = vault_root.parent / "config.json"
+    try:
+        data = json.loads(config_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    if not isinstance(data, dict):
+        return None
+    raw = data.get("doc_type_designations")
+    if not isinstance(raw, dict):
+        return None
+    return {str(k): str(v).strip() for k, v in raw.items()
+            if isinstance(v, str) and str(v).strip()}
 
 
 # ---------------------------------------------------------------------------
@@ -606,6 +692,78 @@ def check_title_shape(vault: Vault, findings: list[Finding]) -> None:
                 " qualify one of them"))
         else:
             seen_titles[title] = note.rel
+        note_type = note.fm.get("type")
+        kebab_type = kebab(note_type) if note_type else ""
+        if kebab_type in vault.taxonomy_types:
+            check_title_designation(vault, note, title, kebab_type, findings)
+    check_designation_coverage(vault, findings)
+
+
+def check_title_designation(vault: Vault, note: Note, title: str,
+                            kebab_type: str, findings: list[Finding]) -> None:
+    """The title carries its type's configured designation (word-boundary,
+    folded), and a challenge-record title also carries its round number as a
+    standalone token. The map is config data: absent, or missing this type,
+    is the mint-duty WARNING (never a silent pass); present binds the
+    containment ERROR."""
+    designations = vault.designations
+    if designations is None:
+        findings.append(Finding(
+            "warning", note.rel, 1, "title_shape",
+            "type designations are not configured, so the title cannot be"
+            " verified to carry its type's designation",
+            "run setup/configure or build-docs-vault to mint"
+            " doc_type_designations in workspace/config.json"))
+        return
+    designation = designations.get(kebab_type)
+    if not designation:
+        findings.append(Finding(
+            "warning", note.rel, 1, "title_shape",
+            f"type '{kebab_type}' has no configured designation, so the"
+            " title cannot be verified",
+            "run setup/configure or build-docs-vault to mint this type's"
+            " designation in workspace/config.json"))
+        return
+    if not designation_present(title, designation):
+        findings.append(Finding(
+            "error", note.rel, 1, "title_shape",
+            f"title '{title}' does not carry the '{kebab_type}'"
+            f" designation '{designation}'",
+            "the title is a natural output_language phrase carrying its"
+            " type's designation; the migrate verb appends it"))
+    if kebab_type == "challenge-record":
+        round_no = note.fm.get("round")
+        if isinstance(round_no, int) and not re.search(
+                r"(?<!\d)" + re.escape(str(round_no)) + r"(?!\d)", title):
+            findings.append(Finding(
+                "error", note.rel, 1, "title_shape",
+                f"review-round title '{title}' does not carry its round"
+                f" number {round_no} as a standalone token",
+                "review-round titles read '<scope> <review-round"
+                " designation> <n>'; retitle it (auto-append leaves"
+                " round-number placement to judgment)"))
+
+
+def check_designation_coverage(vault: Vault, findings: list[Finding]) -> None:
+    """The configured map covers exactly the taxonomy universe. A type with
+    no map entry is a mint-duty WARNING; a map key naming no known type is a
+    dead-entry ERROR. Silent when no map is configured (the per-note
+    warnings already name the duty)."""
+    designations = vault.designations
+    if designations is None:
+        return
+    for missing in sorted(vault.taxonomy_types - set(designations)):
+        findings.append(Finding(
+            "warning", DESIGNATION_CONFIG_REL, 1, "title_shape",
+            f"doc type '{missing}' has no designation in the configured map",
+            "mint one designation per taxonomy type; run setup/configure or"
+            " build-docs-vault"))
+    for unknown in sorted(set(designations) - vault.taxonomy_types):
+        findings.append(Finding(
+            "error", DESIGNATION_CONFIG_REL, 1, "title_shape",
+            f"designation map key '{unknown}' names no known doc type",
+            "map keys are kebab taxonomy types; drop the stale key or"
+            " declare the type"))
 
 
 def check_map_coverage(vault: Vault, findings: list[Finding]) -> None:
@@ -1651,6 +1809,47 @@ def deid_lead_decision(policy: dict, note: Note,
     return changed
 
 
+def append_designation(vault: Vault, note: Note, lines: list[str]) -> int:
+    """Append the type's configured designation to a title that lacks it,
+    rewriting the first H1 in the same write (title == H1 law). Reads the
+    CURRENT title from lines, so it composes with the id-lead strip; skips
+    when the map is absent, the type is nav or unmapped, or the designation
+    is already present (idempotent through the SAME test the check uses).
+    Challenge records are excluded: round-number placement is judgment, so
+    they stay a check finding for build-docs-vault to retitle."""
+    designations = vault.designations
+    if designations is None:
+        return 0
+    note_type = note.fm.get("type")
+    kebab_type = kebab(note_type) if note_type else ""
+    if kebab_type not in vault.taxonomy_types or kebab_type == "challenge-record":
+        return 0
+    designation = designations.get(kebab_type)
+    if not designation:
+        return 0
+    title_idx = None
+    current = ""
+    for i in range(min(note.fm_end - 1, len(lines))):
+        stripped = lines[i].strip()
+        if stripped.startswith("title:"):
+            current = stripped[len("title:"):].strip().strip("\"'")
+            title_idx = i
+            break
+    if title_idx is None or not current or designation_present(current, designation):
+        return 0
+    new_title = f"{current} {designation}"
+    indent = lines[title_idx][:len(lines[title_idx])
+                              - len(lines[title_idx].lstrip())]
+    quoted = f'"{new_title}"' if ":" in new_title else new_title
+    lines[title_idx] = f"{indent}title: {quoted}"
+    for i in range(note.fm_end - 1, len(lines)):
+        if lines[i].startswith("# "):
+            if lines[i][2:].strip() == current:
+                lines[i] = f"# {new_title}"
+            break
+    return 1
+
+
 def retarget_nav(vault: Vault, note: Note, lines: list[str]) -> int:
     """Rewrite a maps/<subtree> nav first link to the covering hub that
     EXISTS in the current index (composing with --rename in either
@@ -1985,6 +2184,7 @@ def cmd_migrate(args, policy: dict) -> int:
         trailing = text.endswith("\n")
         lines = text.splitlines()
         rewrites += deid_lead_decision(policy, note, lines)
+        rewrites += append_designation(vault, note, lines)
         rewrites += retarget_nav(vault, note, lines)
         text = "\n".join(lines) + ("\n" if trailing else "")
         tags, tags_changed = migrate_tags(note)
@@ -2007,12 +2207,16 @@ def cmd_migrate(args, policy: dict) -> int:
     return 0
 
 
-# v5 legacy grammar the inverted --rename migrates FROM: chain-prefixed
-# round files (the prefix is REQUIRED, so plain v6 names never re-match)
-# and id-prefixed decision notes.
-V5_CHAIN_ROUND_RE = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*-round-(\d+)\.md$")
-V5_CHAIN_SPACE_ROUND_RE = re.compile(
-    r"^[a-z0-9]+(?:-[a-z0-9]+)*-space-round-(\d+)\.md$")
+# Review-round filenames the inverted --rename migrates FROM: the v6 plain
+# forms (round-N.md, space-round-N.md) and the v4/v5 chain-prefixed forms
+# both map to the -review target. The chain prefix is OPTIONAL; the \.md
+# anchor sits right after the digits, so an already-suffixed round-N-review
+# name never matches (a second run is a no-op). The two are applied per node
+# (space-round at the root, round at a domain), so a domain-round pattern
+# can never claim a space-round name. V5_DEC_RE strips id-prefixed decisions.
+ROUND_RE = re.compile(r"^(?:[a-z0-9]+(?:-[a-z0-9]+)*-)?round-(\d+)\.md$")
+SPACE_ROUND_RE = re.compile(
+    r"^(?:[a-z0-9]+(?:-[a-z0-9]+)*-)?space-round-(\d+)\.md$")
 V5_DEC_RE = re.compile(
     r"^dec-[a-z][a-z0-9]{1,3}-\d{3,}-([a-z0-9]+(?:-[a-z0-9]+)*)\.md$")
 
@@ -2067,16 +2271,17 @@ def build_rename_map(vault: Vault, policy: dict,
                     renames[rel] = f"{node_prefix}{plain}"
                     break
             elif len(rest) == 2 and rest[0] == ch_folder:
-                # Node-scoped ANCHORED inverses: the root applies only
-                # the space-round inverse and a domain only the round
-                # inverse, so plain v6 names can never re-match.
+                # Node-scoped inverses: the root applies only the space-round
+                # inverse and a domain only the round inverse, so a domain
+                # never claims a space-round name; the -review target is
+                # schema-driven and already-suffixed names never re-match.
                 name = rest[1]
                 if node_rel:
-                    m = V5_CHAIN_ROUND_RE.match(name)
+                    m = None if SPACE_ROUND_RE.match(name) else ROUND_RE.match(name)
                     new_name = (ba_compile.round_file_name(
                         schema, "domain", int(m.group(1))) if m else None)
                 else:
-                    m = V5_CHAIN_SPACE_ROUND_RE.match(name)
+                    m = SPACE_ROUND_RE.match(name)
                     new_name = (ba_compile.round_file_name(
                         schema, "space", int(m.group(1))) if m else None)
                 if new_name and new_name != name:

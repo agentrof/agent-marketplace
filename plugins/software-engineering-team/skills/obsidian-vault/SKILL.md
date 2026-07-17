@@ -36,25 +36,25 @@ variation points live in `data/vault-policy.json`, never in prose.
 ## Naming and Title Law
 
 - Naming Law: named files are plain per-folder contracts (`space.md`,
-  `domain.md`, `glossary.md`, `actors.md`, `budgets.md`, `round-<n>.md`);
+  `domain.md`, `glossary.md`, `actors.md`, `budgets.md`, `round-<n>-review.md`);
   typed content is `<slug>-<type>.md` with the schema's English suffix
   (`checkout-rules.md`, `order-events-decision.md`). No chain or id
   prefixes; duplicates across folders are legal, and only a
   policy-banned generic basename where a slug is due is an error.
 - Title Law: `title` is the user-facing graph label, shown instead of
   the filename by the vetted display plugin: a natural output_language
-  phrase naming the content and ENDING with its type designation,
-  rendered in the output_language (canonical English table in
-  references/metadata.md). Never id-led, never the raw stem; the H1
-  equals the title byte-for-byte. The checker holds presence, the H1
-  match, the id-lead ban and uniqueness.
+  phrase naming the content and ENDING with its type designation. Never
+  id-led, never the raw stem; the H1 equals the title byte-for-byte. The
+  designation is MECHANICAL - the checker requires the type's
+  `doc_type_designations` config string (word boundary, NFKC+casefold;
+  challenge records also the round number) alongside presence, H1 match,
+  id-lead ban and uniqueness; the map renders per project from the
+  canonical English table in references/metadata.md.
 - Alias Law: ids live in frontmatter, never in filenames or titles: a
-  note that owns an id or node code carries it in `aliases`; an
-  id-shaped link alias must decorate a link to the id's owning note,
-  nothing else.
-- The policy lists the vetted community-plugin set (the front-matter
-  title display plugin, bare `title` template) in the committed
-  payload; without it, labels fall back to the meaningful slug names.
+  note owning an id or node code carries it in `aliases`; an id-shaped
+  link alias must decorate a link to the id's owning note, nothing else.
+- The policy lists the vetted community-plugin set (the title display
+  plugin) in the committed payload; else labels fall back to slug names.
 
 ## Metadata Law
 

@@ -45,12 +45,14 @@ aliases:
 
 ## Type designations
 
-The title's closing designation is canonical in ENGLISH, one per doc
-type; the authoring persona RENDERS it into the project's
-output_language at authoring time. A translated word cannot be
-regexed, so the mechanical slice stays presence, H1 match, id-lead ban
-and uniqueness; the designation itself is this table plus
-build-docs-vault curation.
+The title's closing designation is now MECHANICAL. The canonical
+ENGLISH table below is rendered ONCE per project into config.json's
+`doc_type_designations` map (type-kebab -> designation) in the
+output_language, owner-approved. The checker holds each typed note's
+title against that DATA: the designation at a word boundary under an
+NFKC+casefold fold, and a challenge-record title also its round number
+as a standalone token. Map absent or config unreadable warns per note
+naming the mint duty, never a silent pass; only the English table ships.
 
 | doc type | designation |
 |---|---|
@@ -71,18 +73,16 @@ build-docs-vault curation.
 | design-master | design master |
 | page-override | page override |
 
-Nav-layer notes (home, the maps) are curated per the structure law and
-carry no designation. Worked shapes, generic English (render the
-designation in the project's output_language):
+Nav-layer notes (home, maps) carry no designation. Worked shapes,
+generic English (render the designation into the output_language):
 
 - `rules/checkout-rules.md` holds `title: Checkout rules`.
-- `processes/order-fulfillment-process.md` holds
-  `title: Order fulfillment process`.
+- `processes/order-fulfillment-process.md` holds `title: Order fulfillment process`.
 - `entities/customer-entity.md` holds `title: Customer entity`.
 - `decisions/order-events-decision.md` holds
   `title: Order event distribution decision`, alias `SD-007`.
 - Review rounds follow `<scope name> <review-round designation> <n>`:
-  `reviews/round-2.md` holds `title: Payments review round 2`.
+  `reviews/round-2-review.md` holds `title: Payments review round 2`.
 
 In every case the H1 repeats the title byte-for-byte.
 

@@ -10,7 +10,7 @@ The solution tree's contract. One living tree per project at workspace/docs/solu
 | decisions/sd-###-<kebab-slug>.md | one solution decision per note: alternatives, tradeoffs, exit path, sustainability judgment, revisit trigger; supersede, never edit | frontmatter contract in the skeleton below |
 | decision-log.md | GENERATED index of decisions/ (marker first line; rendered, never authored) | none: rendered |
 | engagements/<slug>.md | one study per invocation topic: framing, options matrix, verdict | Summary, Framing, Options, Verdict |
-| reviews/<slug>-round-<n>.md | one challenge round: findings table plus dispositions | Summary, Findings |
+| reviews/<slug>-round-<n>-review.md | one challenge round: findings table plus dispositions | Summary, Findings |
 
 The subtree carries a map duty: every doc birth or retirement updates
 maps/solution-design.md in the same session.
@@ -19,7 +19,7 @@ maps/solution-design.md in the same session.
 
 - landscape.md: `# Landscape`, `## Summary` (one paragraph plus the Engagements index table: slug, status, minted decision ids), `## Current`, `## Target`, `## Transition`, `## Components` (table: component, verdict, decision, engagement, status).
 - engagements/<slug>.md: `# <Title>`, `## Summary` (first body line `Status: open`), `## Framing`, `## Options`, `## Verdict`.
-- reviews/<slug>-round-<n>.md: `# Round <n>: <slug>`, `## Summary`, `## Findings` (table: lens, finding, severity, disposition).
+- reviews/<slug>-round-<n>-review.md: `# Round <n>: <slug>`, `## Summary`, `## Findings` (table: lens, finding, severity, disposition).
 - decision-log.md has NO skeleton: the first `render-decisions` births it.
 - decisions/sd-###-<kebab-slug>.md, the decision-note skeleton (empty
   supersedes/superseded_by keys are omitted entirely; decided_at exists
@@ -82,7 +82,7 @@ Greenfield first run: Current states "Nothing built yet" plus any inherited cons
 ## reviews/
 
 - One file per challenge round: the findings table (lens, finding, severity) and the disposition per finding (fix with the landing doc, reject with the one-line reason, defer with the gate note).
-- Landscape-scoped rounds are `reviews/landscape-round-<n>.md`, numbered in their own sequence.
+- Landscape-scoped rounds are `reviews/landscape-round-<n>-review.md`, numbered in their own sequence.
 - Round files are locked at round close; the gate presentation cites them.
 
 ## Linking Rules (the tree is a graph)

@@ -90,7 +90,7 @@ separate id key.
 | actor_roster | actors.md (root) | AS, OQ | actors, roles, permission vocabulary |
 | budget_set | budgets.md (root or domain) | AS, OQ | all six non-functional categories, empty ones written as "none stated, confirmed" |
 | integration | integrations/<slug>-integration.md (root) | AS, OQ | carries system_name and direction; exchange, failure semantics, ownership |
-| challenge_record | reviews/round-<n>.md | CH | plain round files (space rounds: space-round-<n>.md); the challenge loop's audit record; see the challenge-review skill |
+| challenge_record | reviews/round-<n>-review.md | CH | round files with the review suffix (space rounds: space-round-<n>-review.md); the challenge loop's audit record; see the challenge-review skill |
 
 Required sections carry language-neutral anchors so the checker never
 parses translated heading text: the H2 text is free (it follows the

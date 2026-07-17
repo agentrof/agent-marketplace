@@ -60,8 +60,10 @@ ${CLAUDE_PLUGIN_ROOT}/scripts/ba_compile.py.
 4. Author incrementally, per domain.
    - New docs come from ba_compile.py stub (born compliant with the
      vault frontmatter and nav section; it prints the node's next free
-     ids). Grow domains only on the decomposition reference's split
-     signals; a small topic stays one node. A new space or domain hub
+     ids); each title carries its type designation (obsidian-vault Title
+     Law), mechanically checked against the config map. Grow domains only
+     on the decomposition reference's split signals; a small topic stays
+     one node. A new space or domain hub
      joins maps/business-analysis.md in the same milestone; the tree's
      FIRST content also materializes the map seed from the templates
      and adds the home map line (dynamic home).
@@ -82,7 +84,7 @@ ${CLAUDE_PLUGIN_ROOT}/scripts/ba_compile.py.
    knowledge skill and run its loop: cast lenses and topic experts, spawn
    them fresh-context and read-only, triage every finding into the space
    (covered / fix / assumption / question / rejected), audit the burial
-   paths, record the round as reviews/round-<n>.md via stub, close it
+   paths, record the round as reviews/round-<n>-review.md via stub, close it
    locked. Round 1 is mandatory; rounds 2-3 run only while blocking
    findings appear; the record is part of the gate.
 6. Gates, in order; before presenting any gate run check --gate approval

@@ -347,8 +347,8 @@ def break_ba_schema_shape(root: Path) -> None:
             "id_format": "^(BR)-([A-Z]{2,4})-([0-9]{3,})$",
             "id_citation_columns": ["cites"],
             "challenge": {
-                "round_file_format": "round-{n}.md",
-                "space_round_file_format": "space-round-{n}.md",
+                "round_file_format": "round-{n}-review.md",
+                "space_round_file_format": "space-round-{n}-review.md",
             },
             "doc_types": {"note": {"required_sections": [], "mints": ["BR"],
                                    "gate_blocking": True}},

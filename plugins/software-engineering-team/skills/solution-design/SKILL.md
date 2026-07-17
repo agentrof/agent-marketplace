@@ -62,8 +62,9 @@ gate, and a decision log the planner and the software architect read.
      constraints, then the options matrix and the verdict.
    - Debate in rounds; every accepted verdict lands as its own decision
      note under decisions/ (landscape-docs contract; supersede via the
-     stamp-decision verb, never edit) and the landscape updates to
-     match. Nothing decided lives only in conversation.
+     stamp-decision verb, never edit), its title carrying the decision
+     designation (obsidian-vault Title Law), and the landscape updates
+     to match. Nothing decided lives only in conversation.
    - Build, buy or integrate per component; a verdict that would change
      the configured stack enums routes to the configure entry and the
      maintainer path, never around them.
@@ -78,7 +79,7 @@ gate, and a decision log the planner and the software architect read.
    software-engineering-team-domain-expert with an explicit expert profile. Triage
    every finding in conversation: fix (doc or record updated), reject
    (one-line reason), defer (named at the gate). Record the round as
-   reviews/<slug>-round-<n>.md (findings table plus dispositions).
+   reviews/<slug>-round-<n>-review.md (findings table plus dispositions).
    Round 1 is mandatory; further rounds only while blocking findings
    appear, cap 3. A landscape-scoped round runs on user demand or when
    fold-in reveals a contradiction.
@@ -114,7 +115,6 @@ gate, and a decision log the planner and the software architect read.
    "${AGENTROF_HOME:-$HOME/.agentrof}/bin/pmo_cli.py" (develop flow's
    state contract). Content stays in files; the database pulses.
 7. HARD SCOPE LIMIT: writes only under workspace/docs/solution-design/,
-   plus home and its own map note repair, and vault payload
-   materialization (per-file, only where missing). Requirements gaps
-   route to business-analysis, implementation to request, stack changes
-   to configure, per-story design to the develop flow.
+   plus home, its own map note and vault payload (per-file, where
+   missing). Requirements gaps route to business-analysis, implementation
+   to request, stacks to configure, per-story design to the develop flow.

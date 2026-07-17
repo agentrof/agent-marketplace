@@ -60,12 +60,97 @@ def split_wikilink(inner: str) -> tuple[str, str, str]:
             break
     target, _, anchor = inner.partition("#")
     return target.strip(), anchor.strip(), alias.strip()
+
+
+def split_row_cells(raw: str) -> list[str]:
+    """Split a table row on unescaped pipes only: an escaped alias pipe
+    ('\\|') inside a cell wikilink stays inside its cell."""
+    return re.split(r"(?<!\\)\|", raw.strip().strip("|"))
+
+
+def normalize_cell(cell: str) -> str:
+    """Collapse id-aliased wikilinks to their bare ids. The normalized
+    form feeds the rows dict (registry, render, cited_by, statements and
+    their sha256 hashes), so rewriting a bare citation cell into a
+    wikilink never changes a statement hash."""
+    def collapse(match: re.Match) -> str:
+        _target, _anchor, alias = split_wikilink(match.group("inner"))
+        if NAMESPACED_ID_RE.fullmatch(alias) or BARE_ID_RE.fullmatch(alias):
+            return alias
+        return match.group(0)
+    return WIKILINK_RE.sub(collapse, cell).strip()
 SEC_RE = re.compile(r"<!--\s*sec:\s*([a-z_]+)\s*-->")
 DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 NAMESPACED_ID_RE = re.compile(r"\b(BR|AC|AS|OQ|DEC|CH)-([A-Z]{2,4})-(\d{3,})\b")
 BARE_ID_RE = re.compile(r"\b(BR|AC|AS|OQ|DEC)-(\d{3,})\b")
-ROUND_FILE_RE = re.compile(r"^round-(\d+)\.md$")
-SPACE_ROUND_FILE_RE = re.compile(r"^space-round-(\d+)\.md$")
+
+
+# ---------------------------------------------------------------------------
+# Naming: chain-qualified slugs (the schema's slug_join rule)
+# ---------------------------------------------------------------------------
+
+
+def slug_join(schema: dict) -> str:
+    return schema.get("slug_join", "-")
+
+
+def chain_slug(schema: dict, space_slug: str, node_rel: str) -> str:
+    """The chain-qualified slug of a node: the space directory slug at the
+    root, extended with every domain folder name on the way down. A single
+    folder-name slug would re-create collisions across spaces and domains;
+    the chain keeps basenames unique vault-wide."""
+    parts = [space_slug]
+    segments = node_rel.split("/") if node_rel else []
+    parts.extend(segments[i] for i in range(1, len(segments), 2))
+    return slug_join(schema).join(parts)
+
+
+def named_file_name(schema: dict, doc_type: str, chain: str) -> str:
+    loc = schema["doc_types"][doc_type]["location"]
+    if loc.get("slug_prefixed"):
+        return f"{chain}{slug_join(schema)}{loc['name']}"
+    return loc["name"]
+
+
+def space_overview_rel(schema: dict, space_slug: str) -> str:
+    return named_file_name(schema, "space", space_slug)
+
+
+def node_overview_rel(schema: dict, space_slug: str, node_rel: str) -> str:
+    if node_rel == "":
+        return space_overview_rel(schema, space_slug)
+    name = named_file_name(schema, "domain",
+                           chain_slug(schema, space_slug, node_rel))
+    return f"{node_rel}/{name}"
+
+
+def root_file_rels(schema: dict, space_slug: str) -> list[str]:
+    """The required root skeleton files, chain-slugged."""
+    return [named_file_name(schema, t, space_slug)
+            for t in ("space", "glossary", "actor_roster", "budget_set")]
+
+
+def _format_re(fmt: str, chain: str) -> re.Pattern:
+    pattern = re.escape(fmt)
+    pattern = pattern.replace(re.escape("{slug}"), re.escape(chain))
+    pattern = pattern.replace(re.escape("{n}"), r"(\d+)")
+    return re.compile(f"^{pattern}$")
+
+
+def round_file_re(schema: dict, chain: str) -> re.Pattern:
+    return _format_re(schema["challenge"]["round_file_format"], chain)
+
+
+def space_round_file_re(schema: dict, space_slug: str) -> re.Pattern:
+    return _format_re(schema["challenge"]["space_round_file_format"],
+                      space_slug)
+
+
+def round_file_name(schema: dict, chain: str, scope: str,
+                    n: int | str) -> str:
+    key = ("space_round_file_format" if scope == "space"
+           else "round_file_format")
+    return schema["challenge"][key].format(slug=chain, n=n)
 
 # Every check id this compiler can emit. The test suite's builder registry
 # stays in lockstep with this tuple: a check without a firing fixture
@@ -98,7 +183,12 @@ class Table:
     section: str | None
     header_line: int
     columns: list[str]
-    rows: list[tuple[int, list[str]]]
+    rows: list[tuple[int, list[str]]]       # NORMALIZED cells
+    # Cells exactly as authored. Enforcement (mint shape, bare citation
+    # cells) reads the raw evidence; registry, render, cited_by and the
+    # statement hashes read the normalized rows, so a cell rewrite from
+    # bare id to wikilink never trips a statement-hash tripwire.
+    raw_cells: list[tuple[int, list[str]]] = field(default_factory=list)
 
 
 @dataclass
@@ -124,6 +214,7 @@ class Doc:
 class Space:
     root: Path
     schema: dict
+    slug: str = ""  # the space directory name; the naming chain's root
     docs: dict = field(default_factory=dict)     # rel -> Doc
     nodes: dict = field(default_factory=dict)    # rel -> code ("" = root)
     ids: dict = field(default_factory=dict)      # id -> {kind, doc, row, line}
@@ -253,10 +344,13 @@ def parse_doc_body(doc: Doc) -> None:
             if len(block) >= 2 and set(block[1][1].replace("|", "").strip()) <= set("-: "):
                 columns = [c.strip().lower() for c in block[0][1].strip().strip("|").split("|")]
                 rows = []
+                raw_cells = []
                 for lineno, raw in block[2:]:
-                    cells = [c.strip() for c in raw.strip().strip("|").split("|")]
-                    rows.append((lineno, cells))
-                doc.tables.append(Table(section_of(block_start), block[0][0], columns, rows))
+                    cells = [c.strip() for c in split_row_cells(raw)]
+                    raw_cells.append((lineno, cells))
+                    rows.append((lineno, [normalize_cell(c) for c in cells]))
+                doc.tables.append(Table(section_of(block_start), block[0][0],
+                                        columns, rows, raw_cells))
             continue
         idx += 1
 
@@ -277,9 +371,11 @@ def parse_doc_body(doc: Doc) -> None:
 # ---------------------------------------------------------------------------
 
 
-def classify_location(schema: dict, rel_parts: tuple[str, ...]) -> tuple[str, str] | None:
+def classify_location(schema: dict, space_slug: str,
+                      rel_parts: tuple[str, ...]) -> tuple[str, str] | None:
     """Return (node_rel, expected_type) for a markdown file path, or None
-    when the location is illegal."""
+    when the location is illegal. Named files carry their chain-qualified
+    slug prefix; the bare contract names are dead grammar."""
     parts = list(rel_parts)
     node: list[str] = []
     while len(parts) > 2 and parts[0] == "domains":
@@ -289,17 +385,18 @@ def classify_location(schema: dict, rel_parts: tuple[str, ...]) -> tuple[str, st
     is_root = node_rel == ""
     if len(parts) == 1:
         name = parts[0]
+        chain = chain_slug(schema, space_slug, node_rel)
         for type_name, spec in schema["doc_types"].items():
             loc = spec["location"]
-            if loc["kind"] != "named_file" or loc["name"] != name:
+            if loc["kind"] != "named_file":
+                continue
+            if name != named_file_name(schema, type_name, chain):
                 continue
             if loc.get("root_only") and not is_root:
                 return None
             if loc.get("domain_only") and is_root:
                 return None
             return node_rel, type_name
-        if name == "domain.md" and is_root:
-            return None
         return None
     if len(parts) == 2:
         folder, _name = parts
@@ -315,7 +412,7 @@ def classify_location(schema: dict, rel_parts: tuple[str, ...]) -> tuple[str, st
 
 
 def scan_space(space_dir: Path, schema: dict) -> tuple[Space, list[Finding]]:
-    space = Space(root=space_dir, schema=schema)
+    space = Space(root=space_dir, schema=schema, slug=space_dir.name)
     findings: list[Finding] = []
 
     def err(path: str, line: int, check: str, message: str, fix: str) -> None:
@@ -355,14 +452,15 @@ def scan_space(space_dir: Path, schema: dict) -> tuple[Space, list[Finding]]:
                      "deep trees hide content; prefer wider domain maps")
 
     for node_rel in sorted(space.nodes):
-        node_dir = space_dir / node_rel if node_rel else space_dir
-        overview = "space.md" if node_rel == "" else "domain.md"
-        if not (node_dir / overview).is_file():
-            err((Path(node_rel) / overview).as_posix() if node_rel else overview,
-                1, "space_layout", f"node is missing its overview file {overview}",
-                "every node carries exactly one overview document")
+        overview_rel = node_overview_rel(schema, space.slug, node_rel)
+        if not (space_dir / overview_rel).is_file():
+            overview = overview_rel.rsplit("/", 1)[-1]
+            err(overview_rel, 1, "space_layout",
+                f"node is missing its overview file {overview}",
+                "every node carries exactly one chain-slugged overview"
+                " document")
 
-    for name in ("space.md", "glossary.md", "actors.md", "budgets.md"):
+    for name in root_file_rels(schema, space.slug):
         if not (space_dir / name).is_file():
             err(name, 1, "space_layout",
                 f"space root is missing required file {name}",
@@ -396,11 +494,12 @@ def scan_space(space_dir: Path, schema: dict) -> tuple[Space, list[Finding]]:
                 "generated-marker file outside _generated",
                 "generated views live only under _generated/")
             continue
-        location = classify_location(schema, tuple(parts))
+        location = classify_location(schema, space.slug, tuple(parts))
         if location is None:
             err(rel, 1, "space_layout",
                 "file location matches no document type",
-                "place docs in their type folder; see the space standard")
+                "place docs in their type folder and give named files their"
+                " chain-qualified slug prefix; see the space standard")
             continue
         node_rel, expected_type = location
         fm, fm_end, fm_error = parse_frontmatter(text)
@@ -449,6 +548,13 @@ def scan_space(space_dir: Path, schema: dict) -> tuple[Space, list[Finding]]:
                                     f"node code '{code}' is already used by {seen_codes[code]}",
                                     "codes are unique across the whole space"))
             continue
+        aliases = doc.fm.get("aliases")
+        if not (isinstance(aliases, list) and code in aliases):
+            findings.append(Finding(
+                "error", rel, 1, "frontmatter_schema",
+                f"aliases must contain the node code '{code}'",
+                "the code alias makes the bare code searchable and"
+                " linkable in the vault"))
         seen_codes[code] = rel
         space.nodes[doc.node] = code
 
@@ -490,6 +596,10 @@ def collect_ids(space: Space, findings: list[Finding]) -> None:
                         f" {' | '.join(row_schema['columns'])}",
                         "row tables use the fixed English snake_case headers"))
                     continue
+                raw_by_line = dict(table.raw_cells)
+                citation_columns = [c for c in
+                                    schema.get("id_citation_columns", [])
+                                    if c in table.columns]
                 for lineno, cells in table.rows:
                     if len(cells) != len(table.columns):
                         findings.append(Finding(
@@ -498,6 +608,27 @@ def collect_ids(space: Space, findings: list[Finding]) -> None:
                             "one cell per column, in order"))
                         continue
                     row = dict(zip(table.columns, cells))
+                    raw_row = dict(zip(table.columns,
+                                       raw_by_line.get(lineno, cells)))
+                    if WIKILINK_RE.search(raw_row.get("id", "")):
+                        findings.append(Finding(
+                            "error", rel, lineno, "id_minting",
+                            "mint cell is written as a wikilink",
+                            "a mint declares the bare id; every other"
+                            " surface links to it"))
+                        continue
+                    for column in citation_columns:
+                        residue = WIKILINK_RE.sub(" ", raw_row.get(column, ""))
+                        bare = list(NAMESPACED_ID_RE.finditer(residue)) + \
+                            list(BARE_ID_RE.finditer(residue))
+                        for m_bare in bare:
+                            findings.append(Finding(
+                                "error", rel, lineno, "id_links",
+                                f"bare id {m_bare.group(0)} in citation"
+                                f" column '{column}'",
+                                "citation cells carry escaped-pipe wikilinks"
+                                " to the owning doc; vault_check.py migrate"
+                                " rewrites this class"))
                     id_value = row["id"]
                     m = NAMESPACED_ID_RE.fullmatch(id_value)
                     if m:
@@ -845,10 +976,16 @@ def check_challenge_record(space: Space, doc: Doc, findings: list[Finding]) -> N
             "the loop is capped; residue goes to the gate as open questions")
         round_no = None
     name = Path(rel).name
-    m = SPACE_ROUND_FILE_RE.match(name) if scope == "space" else ROUND_FILE_RE.match(name)
+    chain = chain_slug(schema, space.slug, doc.node)
+    m = (space_round_file_re(schema, space.slug).match(name)
+         if scope == "space"
+         else round_file_re(schema, chain).match(name))
     if not m:
+        expected = round_file_name(schema, space.slug if scope == "space"
+                                   else chain, scope, "N")
         err(1, f"filename '{name}' does not match its review_scope '{scope}'",
-            "domain records are round-N.md; space records are space-round-N.md")
+            f"round records here are named {expected} (chain-slugged,"
+            " schema-driven)")
     elif round_no is not None and int(m.group(1)) != round_no:
         err(1, f"filename round {m.group(1)} disagrees with frontmatter round"
             f" {round_no}", "the filename carries the round number")
@@ -1016,7 +1153,7 @@ def check_semantic_links(space: Space, findings: list[Finding]) -> None:
                                             f"{key} points at {' or '.join(wanted)} docs"))
 
     for node_rel in sorted(space.nodes):
-        overview_rel = (f"{node_rel}/domain.md" if node_rel else "space.md")
+        overview_rel = node_overview_rel(space.schema, space.slug, node_rel)
         overview = space.docs.get(overview_rel)
         if overview is None:
             continue
@@ -1041,7 +1178,7 @@ def check_semantic_links(space: Space, findings: list[Finding]) -> None:
                     if r.startswith(f"{prefix}domains/") and
                     r.count("/") == (node_rel.count("/") + 2 if node_rel else 1)]
         for child in sorted(children):
-            child_overview = f"{child}/domain.md"
+            child_overview = node_overview_rel(space.schema, space.slug, child)
             if child_overview in space.docs and child_overview not in linked:
                 findings.append(Finding(
                     "error", overview_rel, 1, "semantic_links",
@@ -1060,15 +1197,16 @@ def check_semantic_links(space: Space, findings: list[Finding]) -> None:
 
 def check_thresholds(space: Space, findings: list[Finding], warn) -> None:
     th = space.schema["thresholds"]
+    space_rel = space_overview_rel(space.schema, space.slug)
     total_docs = len(space.docs)
     total_bytes = sum(len("\n".join(d.lines).encode("utf-8"))
                       for d in space.docs.values())
     if total_docs > th["space_docs_warn"]:
-        warn("space.md", 1, "thresholds",
+        warn(space_rel, 1, "thresholds",
              f"space holds {total_docs} docs (threshold {th['space_docs_warn']})",
              "consider splitting the topic into multiple spaces")
     if total_bytes > th["space_bytes_warn"]:
-        warn("space.md", 1, "thresholds",
+        warn(space_rel, 1, "thresholds",
              f"space totals {total_bytes} bytes (threshold {th['space_bytes_warn']})",
              "review the decomposition; snapshot size follows space size")
 
@@ -1076,7 +1214,7 @@ def check_thresholds(space: Space, findings: list[Finding], warn) -> None:
         own = [d for d in space.docs.values() if d.node == node_rel]
         direct = [d for d in own if d.doc_type not in
                   ("space", "domain", "challenge_record")]
-        overview_rel = f"{node_rel}/domain.md" if node_rel else "space.md"
+        overview_rel = node_overview_rel(space.schema, space.slug, node_rel)
         if len(direct) > th["node_direct_docs_warn"]:
             warn(overview_rel, 1, "thresholds",
                  f"node owns {len(direct)} content docs"
@@ -1233,7 +1371,7 @@ def run_gate_checks(space: Space, findings: list[Finding], gate_node: str) -> No
     def err(path, line, message, fix):
         findings.append(Finding("error", path, line, "gate_approval", message, fix))
 
-    for name in ("space.md", "glossary.md", "actors.md", "budgets.md"):
+    for name in root_file_rels(space.schema, space.slug):
         doc = space.docs.get(name)
         if doc is None:
             continue
@@ -1254,7 +1392,7 @@ def run_gate_checks(space: Space, findings: list[Finding], gate_node: str) -> No
                      if gate_node == "" or n == gate_node
                      or n.startswith(gate_node + "/")]
     for node_rel in subtree_nodes:
-        overview = f"{node_rel}/domain.md" if node_rel else "space.md"
+        overview = node_overview_rel(space.schema, space.slug, node_rel)
         reason = record_satisfies_gate(space, latest_record(space, node_rel, "domain"))
         if reason:
             err(overview, 1, f"challenge gate unsatisfied: {reason}",
@@ -1264,7 +1402,8 @@ def run_gate_checks(space: Space, findings: list[Finding], gate_node: str) -> No
     if gate_node == "" and has_domains:
         reason = record_satisfies_gate(space, latest_record(space, "", "space"))
         if reason:
-            err("space.md", 1, f"space-level challenge gate unsatisfied: {reason}",
+            err(space_overview_rel(space.schema, space.slug), 1,
+                f"space-level challenge gate unsatisfied: {reason}",
                 "run the cross-domain round before closing the space")
 
     for folder, type_name in (("processes", "process"), ("rules", "rule_set"),
@@ -1273,7 +1412,7 @@ def run_gate_checks(space: Space, findings: list[Finding], gate_node: str) -> No
                      and space.docs[rel].doc_type == type_name
                      for rel in space.docs)
         if not exists:
-            anchor = f"{gate_node}/domain.md" if gate_node else "space.md"
+            anchor = node_overview_rel(space.schema, space.slug, gate_node)
             err(anchor, 1, f"subtree holds no {type_name} document",
                 "the distributed brief contract requires processes, rules"
                 " and acceptance criteria")
@@ -1335,7 +1474,7 @@ def node_rollup(space: Space, node_rel: str) -> str:
 
 def foundation_approved(space: Space) -> bool:
     return all(doc_status(space.docs[n]) == "approved"
-               for n in ("space.md", "glossary.md", "actors.md", "budgets.md")
+               for n in root_file_rels(space.schema, space.slug)
                if n in space.docs)
 
 
@@ -1372,8 +1511,9 @@ def render_views(space: Space, warnings: list[Finding]) -> dict[str, str]:
                 space.vault_root.resolve()).as_posix() + "/"
         except ValueError:
             vault_prefix = ""
-    title = str(space.docs.get("space.md").fm.get("title", "")) \
-        if "space.md" in space.docs else ""
+    space_rel = space_overview_rel(space.schema, space.slug)
+    title = str(space.docs.get(space_rel).fm.get("title", "")) \
+        if space_rel in space.docs else ""
     stable_warnings = [w for w in warnings
                        if w.severity == "warning" and w.check != "aging"]
 
@@ -1596,7 +1736,7 @@ def emit(findings: list[Finding], as_json: bool) -> int:
 
 def load_schema(path: Path) -> dict:
     schema = json.loads(path.read_text(encoding="utf-8"))
-    if schema.get("schema_version") != 1:
+    if schema.get("schema_version") != 2:
         raise SystemExit(f"ba_compile: unknown schema_version in {path}")
     return schema
 
@@ -1611,8 +1751,15 @@ def table_skeleton(columns: list[str]) -> list[str]:
             "|" + "---|" * len(columns)]
 
 
+def humanize(target: str) -> str:
+    return target.rsplit("/", 1)[-1].replace("-", " ").title()
+
+
 def stub_lines(schema: dict, doc_type: str, title: str,
-               vault_prefix: str = "", **extra) -> list[str]:
+               vault_prefix: str = "", nav_hub: str = "",
+               aliases: list[str] | None = None,
+               seed_rows: dict[str, list[str]] | None = None,
+               **extra) -> list[str]:
     spec = schema["doc_types"][doc_type]
     fm = ["---", f"type: {doc_type}", f"title: {title}", "status: draft",
           "owner_role: business_analyst"]
@@ -1631,6 +1778,9 @@ def stub_lines(schema: dict, doc_type: str, title: str,
         else:
             fm.append(f"{key}: {value}")
     fm += ["tags:", f"  - doc/{doc_type.replace('_', '-')}", "  - status/draft"]
+    if aliases:
+        fm.append("aliases:")
+        fm.extend(f"  - {a}" for a in aliases)
     fm.append("---")
     body = ["", f"# {title}", "", f"One-line summary of {title}.", ""]
     section_titles = {token: token.replace("_", " ").title()
@@ -1644,19 +1794,28 @@ def stub_lines(schema: dict, doc_type: str, title: str,
         kind = row_by_section.get(token)
         if kind:
             body += table_skeleton(schema["row_schemas"][kind.lower()]["columns"])
+            if seed_rows and token in seed_rows:
+                body.append("| " + " | ".join(seed_rows[token]) + " |")
         else:
             body.append("To be analyzed.")
         body.append("")
+    # Nav first link: the owning hub per the vault's hub ladder; overview
+    # docs (hubs themselves) and callers without a hub keep the subtree map.
+    nav_target = nav_hub or "maps/business-analysis"
     body += ["## Navigation <!-- sec: nav -->", "",
-             "[[maps/business-analysis|Business Analysis]]", ""]
+             f"[[{nav_target}|{humanize(nav_target)}]]", ""]
     return fm + body
 
 
 def write_stub(schema: dict, path: Path, doc_type: str, title: str,
-               vault_prefix: str = "", **extra) -> None:
+               vault_prefix: str = "", nav_hub: str = "",
+               aliases: list[str] | None = None,
+               seed_rows: dict[str, list[str]] | None = None,
+               **extra) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text("\n".join(
-        stub_lines(schema, doc_type, title, vault_prefix, **extra)
+        stub_lines(schema, doc_type, title, vault_prefix, nav_hub,
+                   aliases, seed_rows, **extra)
     ).rstrip("\n") + "\n", encoding="utf-8")
 
 
@@ -1712,17 +1871,28 @@ def cmd_init(args, schema: dict) -> int:
         print(f"ba_compile: FAIL: {space_dir} already exists and is not empty",
               file=sys.stderr)
         return 1
+    vault_root = require_vault_root(args)
+    if vault_root is None:
+        return 2
+    slug = space_dir.name
+    prefix = vault_prefix_for(space_dir, vault_root)
+    hub = f"{prefix}{space_overview_rel(schema, slug)[:-3]}"
     (space_dir / GENERATED_DIR).mkdir(parents=True, exist_ok=True)
-    write_stub(schema, space_dir / "space.md", "space", args.title, code=args.code)
-    write_stub(schema, space_dir / "glossary.md", "glossary", "Glossary")
-    write_stub(schema, space_dir / "actors.md", "actor_roster", "Actors")
-    write_stub(schema, space_dir / "budgets.md", "budget_set",
-               "Non-Functional Budgets", scope="space")
-    for name in ("glossary.md", "actors.md", "budgets.md"):
-        path = space_dir / name
-        text = path.read_text(encoding="utf-8")
-        path.write_text(text.replace("To be analyzed.", "None stated, confirmed.")
-                        if name == "budgets.md" else text, encoding="utf-8")
+    write_stub(schema, space_dir / space_overview_rel(schema, slug), "space",
+               args.title, code=args.code, aliases=[args.code])
+    write_stub(schema, space_dir / named_file_name(schema, "glossary", slug),
+               "glossary", f"{args.title} Glossary", nav_hub=hub)
+    write_stub(schema, space_dir / named_file_name(schema, "actor_roster", slug),
+               "actor_roster", f"{args.title} Actors", nav_hub=hub)
+    budgets_name = named_file_name(schema, "budget_set", slug)
+    write_stub(schema, space_dir / budgets_name, "budget_set",
+               f"{args.title} Non-Functional Budgets", nav_hub=hub,
+               scope="space")
+    budgets_path = space_dir / budgets_name
+    budgets_path.write_text(
+        budgets_path.read_text(encoding="utf-8")
+        .replace("To be analyzed.", "None stated, confirmed."),
+        encoding="utf-8")
     print(f"ba_compile: space initialized at {space_dir} (code {args.code})")
     return 0
 
@@ -1735,29 +1905,61 @@ def cmd_stub(args, schema: dict) -> int:
     if vault_root is None:
         return 2
     space_dir = Path(args.space)
+    space_slug = space_dir.name
     prefix = vault_prefix_for(space_dir, vault_root)
     spec = schema["doc_types"][args.type]
     loc = spec["location"]
     node = args.node.strip("/")
+    chain = chain_slug(schema, space_slug, node)
+    title = args.title
     extra: dict = {}
+    aliases: list[str] | None = None
+    seed_rows: dict[str, list[str]] | None = None
+    # Overview docs are hubs and nav to the subtree map (the default);
+    # everything else navs to its owning node's overview hub.
+    nav_hub = ("" if args.type in ("space", "domain")
+               else f"{prefix}{node_overview_rel(schema, space_slug, node)[:-3]}")
     if args.type == "domain":
-        target = space_dir / node / "domain.md" if node else None
-        if target is None or not node.split("/")[-2:][0]:
+        if not node:
             print("ba_compile: FAIL: domain stubs need --node domains/<slug>",
                   file=sys.stderr)
             return 2
+        target = space_dir / node / named_file_name(schema, "domain", chain)
         extra["code"] = args.code or ""
+        aliases = [args.code] if args.code else None
     elif loc["kind"] == "named_file":
-        target = space_dir / node / loc["name"] if node else space_dir / loc["name"]
+        name = named_file_name(schema, args.type, chain)
+        target = space_dir / node / name if node else space_dir / name
         if args.type == "budget_set":
             extra["scope"] = "domain" if node else "space"
         if args.type == "space":
             extra["code"] = args.code or ""
+            aliases = [args.code] if args.code else None
     elif args.type == "challenge_record":
-        name = (f"space-round-{args.round}.md" if args.review_scope == "space"
-                else f"round-{args.round}.md")
+        name = round_file_name(
+            schema, space_slug if args.review_scope == "space" else chain,
+            args.review_scope, args.round)
         base = space_dir / node if node else space_dir
         target = base / loc["folder"] / name
+    elif args.type == "decision":
+        if not args.slug:
+            print("ba_compile: FAIL: folder docs need --slug", file=sys.stderr)
+            return 2
+        pre_space, _ = scan_space(space_dir, schema)
+        code = nearest_code(pre_space, node)
+        if not code:
+            print("ba_compile: FAIL: decision stubs need an owning node"
+                  " code; declare the node overview first", file=sys.stderr)
+            return 2
+        dec_id = next_ids(pre_space, code)["DEC"]
+        number = dec_id.rsplit("-", 1)[-1]
+        base = space_dir / node if node else space_dir
+        target = (base / loc["folder"]
+                  / f"dec-{code.lower()}-{number}-{args.slug}.md")
+        title = f"{dec_id}: {args.title}"
+        aliases = [dec_id]
+        seed_rows = {"ruling": [dec_id, "To be decided.", "active",
+                                utc_today().isoformat()]}
     else:
         if not args.slug:
             print("ba_compile: FAIL: folder docs need --slug", file=sys.stderr)
@@ -1785,8 +1987,9 @@ def cmd_stub(args, schema: dict) -> int:
     if target.exists():
         print(f"ba_compile: FAIL: {target} already exists", file=sys.stderr)
         return 1
-    write_stub(schema, target, args.type, args.title,
-               vault_prefix=prefix, **extra)
+    write_stub(schema, target, args.type, title, vault_prefix=prefix,
+               nav_hub=nav_hub, aliases=aliases, seed_rows=seed_rows,
+               **extra)
     space, _ = scan_space(space_dir, schema)
     code = nearest_code(space, node)
     print(f"ba_compile: created {target}")
@@ -1999,6 +2202,7 @@ def main(argv: list[str] | None = None) -> int:
 
     p = sub.add_parser("init")
     p.add_argument("--space", required=True)
+    p.add_argument("--vault-root", default="", dest="vault_root")
     p.add_argument("--title", required=True)
     p.add_argument("--code", required=True)
 

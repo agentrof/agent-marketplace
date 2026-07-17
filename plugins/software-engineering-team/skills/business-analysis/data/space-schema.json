@@ -1,5 +1,5 @@
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "statuses": [
     "draft",
     "in_review",
@@ -9,6 +9,14 @@
   "code_format": "^[A-Z]{2,4}$",
   "reserved_codes": [],
   "id_format": "^(BR|AC|AS|OQ|DEC|CH)-([A-Z]{2,4})-([0-9]{3,})$",
+  "id_citation_columns": [
+    "cites",
+    "affects",
+    "blocks",
+    "targets",
+    "verify"
+  ],
+  "slug_join": "-",
   "naming": {
     "identifier_format": "^[a-z][a-z0-9_]*$",
     "identifier_columns": [
@@ -66,7 +74,8 @@
       "location": {
         "kind": "named_file",
         "name": "space.md",
-        "root_only": true
+        "root_only": true,
+        "slug_prefixed": true
       },
       "required_sections": [
         "purpose_scope",
@@ -89,7 +98,8 @@
       "location": {
         "kind": "named_file",
         "name": "domain.md",
-        "domain_only": true
+        "domain_only": true,
+        "slug_prefixed": true
       },
       "required_sections": [
         "mission",
@@ -218,7 +228,8 @@
       "location": {
         "kind": "named_file",
         "name": "glossary.md",
-        "root_only": true
+        "root_only": true,
+        "slug_prefixed": true
       },
       "required_sections": [
         "terms"
@@ -237,7 +248,8 @@
       "location": {
         "kind": "named_file",
         "name": "actors.md",
-        "root_only": true
+        "root_only": true,
+        "slug_prefixed": true
       },
       "required_sections": [
         "actors"
@@ -255,7 +267,8 @@
     "budget_set": {
       "location": {
         "kind": "named_file",
-        "name": "budgets.md"
+        "name": "budgets.md",
+        "slug_prefixed": true
       },
       "required_sections": [
         "performance",
@@ -446,7 +459,9 @@
     ]
   },
   "challenge": {
-    "max_rounds": 3
+    "max_rounds": 3,
+    "round_file_format": "{slug}-round-{n}.md",
+    "space_round_file_format": "{slug}-space-round-{n}.md"
   },
   "thresholds": {
     "nesting_warn_depth": 2,

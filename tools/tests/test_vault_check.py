@@ -71,6 +71,10 @@ NAV = """## Navigation <!-- sec: nav -->
 """
 
 
+BA = "business-analysis"
+BA_SPACE = f"{BA}/erp"
+
+
 def make_valid_vault(root: Path) -> None:
     write(root / "home.md", """---
 type: home
@@ -81,6 +85,7 @@ tags:
 
 # Shop Knowledge Base
 
+- [[maps/business-analysis|Business Analysis]]
 - [[maps/solution-design|Solution Design]]
 - [[maps/delivery|Delivery]]
 - [[start-here|Start Here]]
@@ -120,6 +125,76 @@ tags:
 - [[backlog|Backlog]]
 - [[quality-ledger|Quality Ledger]]
 """)
+    write(root / "maps" / "business-analysis.md", """---
+type: moc
+title: Business Analysis
+tags:
+  - doc/moc
+---
+
+# Business Analysis
+
+- [[business-analysis/erp/erp-space|ERP Analysis]]
+- [[business-analysis/erp/decisions/dec-erp-001-pilot-scope|DEC-ERP-001]]
+""")
+    write(root / BA_SPACE / "erp-space.md", """---
+type: space
+title: ERP Analysis
+status: approved
+code: ERP
+tags:
+  - doc/space
+  - status/approved
+aliases:
+  - ERP
+---
+
+# ERP Analysis
+
+The pilot analysis space. Its rules registry backs
+[[business-analysis/erp/erp-space|BR-ERP-001]] style citations.
+
+## Navigation <!-- sec: nav -->
+[[maps/business-analysis|Business Analysis]] -
+[[business-analysis/erp/decisions/dec-erp-001-pilot-scope|DEC-ERP-001]]
+""")
+    write(root / BA_SPACE / "decisions" / "dec-erp-001-pilot-scope.md", """---
+type: decision
+title: "DEC-ERP-001: Pilot scope"
+status: approved
+tags:
+  - doc/decision
+  - status/approved
+aliases:
+  - DEC-ERP-001
+---
+
+# DEC-ERP-001: Pilot scope
+
+The pilot covers inventory only, per
+[[business-analysis/erp/erp-space|ERP Analysis]].
+
+## Ruling <!-- sec: ruling -->
+
+| id | ruling | status | decided_on |
+|---|---|---|---|
+| DEC-ERP-001 | The pilot covers inventory only. | active | 2026-07-10 |
+
+## Navigation <!-- sec: nav -->
+[[business-analysis/erp/erp-space|ERP Analysis]] -
+[[maps/business-analysis|Business Analysis]]
+""")
+    write(root / BA_SPACE / "_generated" / "registry.json", json.dumps({
+        "schema_version": 2,
+        "codes": {"ERP": "(root)"},
+        "ids": {
+            "BR-ERP-001": {"kind": "BR", "doc": "erp-space.md",
+                           "row_status": "active"},
+            "DEC-ERP-001": {"kind": "DEC",
+                            "doc": "decisions/dec-erp-001-pilot-scope.md",
+                            "row_status": "active"},
+        },
+    }, indent=2))
     write(root / SD / "landscape.md", """---
 type: landscape
 title: Landscape
@@ -142,7 +217,7 @@ The components and their owning decisions.
         "[[solution-design/decisions/sd-002-order-events-v2|SD-002]]")))
     write(root / DEC / "sd-001-order-events.md", """---
 type: decision
-title: Order events v1
+title: "SD-001: Order events v1"
 status: superseded
 owner_role: solution_architect
 decided_at: 2026-01-10
@@ -165,7 +240,7 @@ aliases:
         "[[solution-design/decisions/sd-002-order-events-v2|SD-002]]")))
     write(root / DEC / "sd-002-order-events-v2.md", """---
 type: decision
-title: Order events v2
+title: "SD-002: Order events v2"
 status: accepted
 owner_role: solution_architect
 decided_at: 2026-02-01
@@ -204,13 +279,42 @@ aliases:
     write(obsidian / "core-plugins.json",
           json.dumps(["graph", "backlinks", "page-preview", "properties"]))
     write(obsidian / "graph.json", json.dumps({
+        "search": POLICY["graph_search"],
         "colorGroups": [
-            {"query": 'path:"solution-design/"', "color": {"a": 1, "rgb": 1}},
+            {"query": query, "color": {"a": 1, "rgb": i + 1}}
+            for i, query in enumerate(POLICY["graph_color_groups"])
         ],
         "showOrphans": True, "hideUnresolved": False, "showTags": False,
     }))
     write(obsidian / "types.json",
           json.dumps({"types": POLICY["property_types"]}))
+    write(obsidian / "community-plugins.json",
+          json.dumps(POLICY["community_plugins"]))
+    plugin_dir = obsidian / "plugins" / "obsidian-front-matter-title-plugin"
+    write(plugin_dir / "manifest.json", json.dumps({
+        "id": "obsidian-front-matter-title-plugin",
+        "name": "Front Matter Title",
+        "version": "4.1.1",
+        "minAppVersion": "1.0.0",
+    }))
+    # Tiny stand-in build; the settings shape follows the REAL upstream
+    # contract (bare "title" key, "suggest" not "switcher", noteLink and
+    # alias pinned off).
+    write(plugin_dir / "main.js", "module.exports = { onload() {} };\n")
+    write(plugin_dir / "data.json", json.dumps({
+        "version": "4.1.1",
+        "templates": {"common": {"main": "title", "fallback": None}},
+        "features": {
+            "explorer": {"enabled": True},
+            "graph": {"enabled": True},
+            "search": {"enabled": True},
+            "suggest": {"enabled": True},
+            "tab": {"enabled": True},
+            "canvas": {"enabled": True},
+            "noteLink": {"enabled": False},
+            "alias": {"enabled": False},
+        },
+    }))
     write(obsidian / "snippets" / "brand.css", ".theme-dark {}\n")
     code, out, err = run(["render-decisions", "--vault", str(root)])
     assert code == 0, f"fixture render failed: {out} {err}"
@@ -257,6 +361,51 @@ def break_table_pipe(root: Path) -> None:
          "[[solution-design/decisions/sd-002-order-events-v2|SD-002]]")
 
 
+def break_table_shape(root: Path) -> None:
+    edit(root / SD / "landscape.md",
+         "The components and their owning decisions.",
+         "The components and their owning decisions.\n\n"
+         "| component | note |\n"
+         "```\nfenced text right after the header\n```")
+
+
+def break_basename_collision(root: Path) -> None:
+    write(root / SD / "notes.md", """---
+type: note
+title: Working Notes
+tags:
+  - doc/note
+---
+
+# Working Notes
+
+Scratch notes under a policy-banned basename.
+
+""" + NAV.format(peers=(
+        "[[solution-design/landscape|Landscape]] -\n"
+        "[[solution-design/decisions/sd-001-order-events|SD-001]]")))
+    edit(root / "maps" / "solution-design.md",
+         "- [[solution-design/landscape|Landscape]]",
+         "- [[solution-design/landscape|Landscape]]\n"
+         "- [[solution-design/notes|Working Notes]]")
+
+
+def break_title_shape(root: Path) -> None:
+    edit(root / SD / "landscape.md", "title: Landscape\n", "")
+
+
+def break_map_coverage(root: Path) -> None:
+    edit(root / "maps" / "business-analysis.md",
+         "- [[business-analysis/erp/erp-space|ERP Analysis]]\n", "")
+
+
+def break_alias_ownership(root: Path) -> None:
+    edit(root / SD / "landscape.md",
+         "The components and their owning decisions.",
+         "The components and their owning decisions, per"
+         " [[solution-design/landscape|SD-001]].")
+
+
 def break_orphans(root: Path) -> None:
     write(root / SD / "floating.md", """---
 type: note
@@ -278,12 +427,12 @@ def break_moc_coverage(root: Path) -> None:
     for name, other in (("loop-a", "loop-b"), ("loop-b", "loop-a")):
         write(root / SD / f"{name}.md", f"""---
 type: note
-title: {name}
+title: Loop {name[-1].upper()}
 tags:
   - doc/note
 ---
 
-# {name}
+# Loop {name[-1].upper()}
 
 Mutual: [[solution-design/{other}|{other}]].
 
@@ -331,11 +480,16 @@ VAULT_BUILDERS = {
     "anchor_resolution": break_anchor_resolution,
     "link_policy": break_link_policy,
     "table_pipe": break_table_pipe,
+    "table_shape": break_table_shape,
+    "basename_collision": break_basename_collision,
+    "title_shape": break_title_shape,
     "orphans": break_orphans,
     "moc_coverage": break_moc_coverage,
+    "map_coverage": break_map_coverage,
     "nav_footer": break_nav_footer,
     "frontmatter_props": break_frontmatter_props,
     "tags_mirror": break_tags_mirror,
+    "alias_ownership": break_alias_ownership,
     "decision_records": break_decision_records,
     "generated_views": break_generated_views,
     "home_shape": break_home_shape,
@@ -438,7 +592,7 @@ class VerbTests(unittest.TestCase):
         note = self.root / DEC / "sd-003-order-retries.md"
         write(note, """---
 type: decision
-title: Order retries
+title: "SD-003: Order retries"
 status: proposed
 owner_role: solution_architect
 territory: asynchronous work
@@ -481,7 +635,7 @@ aliases:
         note = self.root / DEC / "sd-003-order-events-v3.md"
         write(note, """---
 type: decision
-title: Order events v3
+title: "SD-003: Order events v3"
 status: proposed
 owner_role: solution_architect
 territory: asynchronous work
@@ -563,6 +717,201 @@ See [the landscape](landscape.md) and
             "[[solution-design/decisions/sd-001-order-events|SD-001]]", text)
         self.assertIn("- doc/note", text)
         self.assertNotIn("doc/wrong", text)
+        code, findings = check_findings(self.root)
+        self.assertEqual(code, 0,
+                         [f"{f['check']}: {f['message']}" for f in findings])
+
+
+def legacy_ba_names(root: Path) -> None:
+    """Rewind the mini analysis space to its pre-reform names: bare
+    space.md, un-prefixed decision file, referrers pointing at both."""
+    (root / BA_SPACE / "erp-space.md").rename(root / BA_SPACE / "space.md")
+    (root / BA_SPACE / "decisions" / "dec-erp-001-pilot-scope.md").rename(
+        root / BA_SPACE / "decisions" / "pilot-scope.md")
+    for rel in ("maps/business-analysis.md", f"{BA_SPACE}/space.md",
+                f"{BA_SPACE}/decisions/pilot-scope.md"):
+        path = root / rel
+        text = path.read_text(encoding="utf-8")
+        text = text.replace("business-analysis/erp/erp-space",
+                            "business-analysis/erp/space")
+        text = text.replace(
+            "business-analysis/erp/decisions/dec-erp-001-pilot-scope",
+            "business-analysis/erp/decisions/pilot-scope")
+        path.write_text(text, encoding="utf-8")
+
+
+class RenameVerbTests(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self.tmp.name) / "docs"
+        make_valid_vault(self.root)
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def test_rename_round_trip_restores_green(self):
+        legacy_ba_names(self.root)
+        code, out, err = run(["migrate", "--vault", str(self.root),
+                              "--rename"])
+        self.assertEqual(code, 0, out + err)
+        self.assertTrue((self.root / BA_SPACE / "erp-space.md").is_file())
+        self.assertTrue((self.root / BA_SPACE / "decisions"
+                         / "dec-erp-001-pilot-scope.md").is_file())
+        self.assertFalse((self.root / BA_SPACE / "space.md").exists())
+        map_text = (self.root / "maps" / "business-analysis.md").read_text(
+            encoding="utf-8")
+        self.assertIn("business-analysis/erp/erp-space", map_text)
+        self.assertIn("dec-erp-001-pilot-scope", map_text)
+        code, findings = check_findings(self.root)
+        self.assertEqual(code, 0,
+                         [f"{f['check']}: {f['message']}" for f in findings])
+
+    def test_rename_dry_run_counts_and_writes_nothing(self):
+        legacy_ba_names(self.root)
+        code, out, err = run(["migrate", "--vault", str(self.root),
+                              "--rename", "--dry-run", "--json"])
+        self.assertEqual(code, 0, out + err)
+        payload = json.loads(out)
+        self.assertTrue(payload["dry_run"])
+        by_old = {entry["old"]: entry for entry in payload["renames"]}
+        space_entry = by_old[f"{BA_SPACE}/space.md"]
+        self.assertEqual(space_entry["new"], f"{BA_SPACE}/erp-space.md")
+        self.assertGreaterEqual(space_entry["referrers"], 2)
+        self.assertTrue((self.root / BA_SPACE / "space.md").is_file())
+
+    def test_rename_vetoes_frozen_referrer(self):
+        legacy_ba_names(self.root)
+        write(self.root.parent / "work-orders" / "wo-7" / "freeze.json",
+              json.dumps({"frozen_paths":
+                          ["workspace/docs/maps/business-analysis.md"]}))
+        code, out, err = run(["migrate", "--vault", str(self.root),
+                              "--rename", "--dry-run", "--json"])
+        self.assertEqual(code, 0, out + err)
+        payload = json.loads(out)
+        blocked = {entry["old"]: entry for entry in payload["blocked"]}
+        self.assertIn(f"{BA_SPACE}/space.md", blocked)
+        self.assertIn("maps/business-analysis.md",
+                      blocked[f"{BA_SPACE}/space.md"]["blocked_by"])
+        self.assertEqual(sorted(payload["blocked_paths"]),
+                         sorted(blocked))
+
+    def test_migrate_keeps_frozen_note_byte_identical(self):
+        legacy = self.root / SD / "legacy.md"
+        write(legacy, """---
+type: note
+title: Frozen Legacy
+tags:
+  - doc/note
+---
+
+# Frozen Legacy
+
+See [the landscape](landscape.md).
+
+""" + NAV.format(peers=(
+            "[[solution-design/landscape|Landscape]] -\n"
+            "[[solution-design/decisions/sd-001-order-events|SD-001]]")))
+        write(self.root.parent / "work-orders" / "wo-9" / "freeze.json",
+              json.dumps({"frozen_paths":
+                          ["workspace/docs/solution-design/legacy.md"]}))
+        before = legacy.read_bytes()
+        code, out, _ = run(["migrate", "--vault", str(self.root)])
+        self.assertEqual(code, 0, out)
+        self.assertEqual(legacy.read_bytes(), before)
+
+    def test_migrate_exclude_skips_note(self):
+        legacy = self.root / SD / "legacy.md"
+        write(legacy, """---
+type: note
+title: Excluded Legacy
+tags:
+  - doc/note
+---
+
+# Excluded Legacy
+
+See [the landscape](landscape.md).
+
+""" + NAV.format(peers=(
+            "[[solution-design/landscape|Landscape]] -\n"
+            "[[solution-design/decisions/sd-001-order-events|SD-001]]")))
+        before = legacy.read_bytes()
+        code, _, _ = run(["migrate", "--vault", str(self.root),
+                          "--exclude", f"{SD}/legacy.md"])
+        self.assertEqual(code, 0)
+        self.assertEqual(legacy.read_bytes(), before)
+
+    def test_migrate_rewrites_bare_citation_cells(self):
+        scratch = self.root / BA_SPACE / "cites-scratch.md"
+        write(scratch, "| ref | cites |\n|---|---|\n| a | DEC-ERP-001 |\n")
+        code, _, _ = run(["migrate", "--vault", str(self.root)])
+        self.assertEqual(code, 0)
+        text = scratch.read_text(encoding="utf-8")
+        self.assertIn(
+            "[[business-analysis/erp/decisions/dec-erp-001-pilot-scope"
+            "\\|DEC-ERP-001]]", text)
+
+    def test_migrate_retargets_nav_first_link_to_hub(self):
+        dec = self.root / BA_SPACE / "decisions" / "dec-erp-001-pilot-scope.md"
+        edit(dec,
+             "[[business-analysis/erp/erp-space|ERP Analysis]] -\n"
+             "[[maps/business-analysis|Business Analysis]]",
+             "[[maps/business-analysis|Business Analysis]] -\n"
+             "[[business-analysis/erp/erp-space|ERP Analysis]]")
+        code, _, _ = run(["migrate", "--vault", str(self.root)])
+        self.assertEqual(code, 0)
+        text = dec.read_text(encoding="utf-8")
+        nav = text.split("<!-- sec: nav -->", 1)[1]
+        links = vc.WIKILINK_RE.findall(nav)
+        # promoted to first; the map link dropped instead of duplicated
+        self.assertIn("business-analysis/erp/erp-space", links[0][1])
+        self.assertEqual(
+            sum("erp-space" in inner for _e, inner in links), 1)
+
+    def test_migrate_converts_scalar_governs_to_block_list(self):
+        target = self.root / SD / "landscape.md"
+        edit(target, "status: approved\n",
+             "status: approved\ngoverns: \"[[solution-design/landscape]]\"\n")
+        code, _, _ = run(["migrate", "--vault", str(self.root)])
+        self.assertEqual(code, 0)
+        text = target.read_text(encoding="utf-8")
+        self.assertIn(
+            "governs:\n  - \"[[solution-design/landscape]]\"", text)
+        code, findings = check_findings(self.root)
+        self.assertEqual(code, 0,
+                         [f"{f['check']}: {f['message']}" for f in findings])
+
+    def test_migrate_prefixes_decision_title(self):
+        target = self.root / DEC / "sd-001-order-events.md"
+        edit(target, 'title: "SD-001: Order events v1"',
+             "title: Order events v1")
+        code, _, _ = run(["migrate", "--vault", str(self.root)])
+        self.assertEqual(code, 0)
+        self.assertIn('title: "SD-001: Order events v1"',
+                      target.read_text(encoding="utf-8"))
+        code, findings = check_findings(self.root)
+        self.assertEqual(code, 0,
+                         [f"{f['check']}: {f['message']}" for f in findings])
+
+    def test_payload_reconcile_heals_asserted_keys_only(self):
+        graph_path = self.root / ".obsidian" / "graph.json"
+        data = json.loads(graph_path.read_text(encoding="utf-8"))
+        data["search"] = ""
+        data["colorGroups"] = []
+        data["scale"] = 2  # a consumer-tuned knob the law does not assert
+        graph_path.write_text(json.dumps(data), encoding="utf-8")
+        (self.root / ".obsidian" / "community-plugins.json").unlink()
+        code, out, _ = run(["migrate", "--vault", str(self.root)])
+        self.assertEqual(code, 0, out)
+        healed = json.loads(graph_path.read_text(encoding="utf-8"))
+        self.assertEqual([g["query"] for g in healed["colorGroups"]],
+                         POLICY["graph_color_groups"])
+        self.assertEqual(healed["search"], POLICY["graph_search"])
+        self.assertEqual(healed["scale"], 2)
+        enabled = json.loads(
+            (self.root / ".obsidian" / "community-plugins.json")
+            .read_text(encoding="utf-8"))
+        self.assertEqual(enabled, POLICY["community_plugins"])
         code, findings = check_findings(self.root)
         self.assertEqual(code, 0,
                          [f"{f['check']}: {f['message']}" for f in findings])

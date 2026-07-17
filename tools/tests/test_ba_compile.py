@@ -62,15 +62,18 @@ def seed_vault_scaffolding(space: Path) -> None:
 
 def make_valid_space(space: Path) -> None:
     """A gate-passing ERP space with one inventory domain: approved docs,
-    cited rules, a converged locked challenge round."""
+    wikilink-cited rules, a converged locked challenge round. Named files
+    carry their chain-qualified slug prefixes."""
     seed_vault_scaffolding(space)
-    write(space / "space.md", """---
+    write(space / "erp-space.md", """---
 type: space
 title: ERP Analysis
 status: approved
 approved_at: 2026-07-12
 owner_role: business_analyst
 code: ERP
+aliases:
+  - ERP
 ---
 
 # ERP Analysis
@@ -83,21 +86,21 @@ Track sellable stock per warehouse with auditable movements.
 
 ## Domain Map <!-- sec: domain_map -->
 
-- [[business-analysis/erp/domains/inventory/domain|Inventory]]
+- [[business-analysis/erp/domains/inventory/erp-inventory-domain|Inventory]]
 
 ## Out Of Scope <!-- sec: out_of_scope -->
 
 Payroll and manufacturing.
 """)
-    write(space / "glossary.md", """---
+    write(space / "erp-glossary.md", """---
 type: glossary
-title: Glossary
+title: ERP Glossary
 status: approved
 approved_at: 2026-07-12
 owner_role: business_analyst
 ---
 
-# Glossary
+# ERP Glossary
 
 One vocabulary for the whole space.
 
@@ -108,15 +111,15 @@ One vocabulary for the whole space.
 | movement | stock_movement | one typed quantity change against a stock item |
 | warehouse zone | | a named storage area inside a warehouse |
 """)
-    write(space / "actors.md", """---
+    write(space / "erp-actors.md", """---
 type: actor_roster
-title: Actors
+title: ERP Actors
 status: approved
 approved_at: 2026-07-12
 owner_role: business_analyst
 ---
 
-# Actors
+# ERP Actors
 
 Roles that appear across the space.
 
@@ -126,16 +129,16 @@ Roles that appear across the space.
 |---|---|---|
 | warehouse operator | records receipts | create movements |
 """)
-    write(space / "budgets.md", """---
+    write(space / "erp-budgets.md", """---
 type: budget_set
-title: Non-Functional Budgets
+title: ERP Non-Functional Budgets
 status: approved
 approved_at: 2026-07-12
 owner_role: business_analyst
 scope: space
 ---
 
-# Non-Functional Budgets
+# ERP Non-Functional Budgets
 
 Space-level quantified budgets, all six categories covered.
 
@@ -163,13 +166,15 @@ None stated, confirmed.
 
 None stated, confirmed.
 """)
-    write(space / "domains" / "inventory" / "domain.md", """---
+    write(space / "domains" / "inventory" / "erp-inventory-domain.md", """---
 type: domain
 title: Inventory
 status: approved
 approved_at: 2026-07-12
 owner_role: business_analyst
 code: INV
+aliases:
+  - INV
 ---
 
 # Inventory
@@ -288,7 +293,7 @@ Lifecycle constraints for [[business-analysis/erp/domains/inventory/entities/sto
 
 | id | statement | source | affects | status | opened_on |
 |---|---|---|---|---|---|
-| AS-INV-001 | Negative on-hand is never permitted. | owner confirmed in round two | BR-INV-002 | confirmed | 2026-07-09 |
+| AS-INV-001 | Negative on-hand is never permitted. | owner confirmed in round two | [[business-analysis/erp/domains/inventory/rules/stock-item-lifecycle\\|BR-INV-002]] | confirmed | 2026-07-09 |
 """)
     write(space / "domains" / "inventory" / "acceptance" / "goods-receipt.md", """---
 type: acceptance_set
@@ -308,10 +313,11 @@ Criteria for [[business-analysis/erp/domains/inventory/processes/goods-receipt|G
 
 | id | criterion | cites | verify | status |
 |---|---|---|---|---|
-| AC-INV-001 | Given an accepted line, when the receipt posts, then a movement row exists and on-hand rises by the line quantity. | BR-INV-002 | assert movement row and quantity delta via the stock query | active |
-| AC-INV-002 | Given an item with a movement, when its sku is edited, then the edit is refused naming the movement date. | BR-INV-001 | attempt the edit; assert refusal message content | active |
+| AC-INV-001 | Given an accepted line, when the receipt posts, then a movement row exists and on-hand rises by the line quantity. | [[business-analysis/erp/domains/inventory/rules/stock-item-lifecycle\\|BR-INV-002]] | assert movement row and quantity delta via the stock query | active |
+| AC-INV-002 | Given an item with a movement, when its sku is edited, then the edit is refused naming the movement date. | [[business-analysis/erp/domains/inventory/rules/stock-item-lifecycle\\|BR-INV-001]] | attempt the edit; assert refusal message content | active |
 """)
-    write(space / "domains" / "inventory" / "reviews" / "round-1.md", """---
+    write(space / "domains" / "inventory" / "reviews"
+          / "erp-inventory-round-1.md", """---
 type: challenge_record
 title: Inventory Challenge Round 1
 status: approved
@@ -338,7 +344,7 @@ Round 1 panel found no blocking gaps; one minor finding triaged.
 
 | id | lens | severity | finding | disposition | targets |
 |---|---|---|---|---|---|
-| CH-INV-001 | warehouse operations expert | minor | Damaged-goods refusal already covered. | covered | BR-INV-002 |
+| CH-INV-001 | warehouse operations expert | minor | Damaged-goods refusal already covered. | covered | [[business-analysis/erp/domains/inventory/rules/stock-item-lifecycle\\|BR-INV-002]] |
 
 ## Triage Audit <!-- sec: triage_audit -->
 
@@ -348,7 +354,7 @@ Independent audit reviewed the covered disposition; no disagreement.
 
 Converged: zero blocking findings this round.
 """)
-    write(space / "reviews" / "space-round-1.md", """---
+    write(space / "reviews" / "erp-space-round-1.md", """---
 type: challenge_record
 title: Space Challenge Round 1
 status: approved
@@ -374,7 +380,7 @@ Cross-domain round over the registry and the inventory overview.
 
 | id | lens | severity | finding | disposition | targets |
 |---|---|---|---|---|---|
-| CH-ERP-001 | cross-domain consistency | minor | Movement wording consistent with glossary. | covered | BR-INV-002 |
+| CH-ERP-001 | cross-domain consistency | minor | Movement wording consistent with glossary. | covered | [[business-analysis/erp/domains/inventory/rules/stock-item-lifecycle\\|BR-INV-002]] |
 
 ## Triage Audit <!-- sec: triage_audit -->
 
@@ -443,15 +449,19 @@ def break_id_unique(space: Path) -> None:
 
 
 def break_id_minting(space: Path) -> None:
+    # A mint cell written as a wikilink: the mint declares the bare id.
     edit(space / INV / "rules" / "stock-item-lifecycle.md",
          "| BR-INV-002 | On-hand quantity",
-         "| BR-FIN-009 | Wrong code. | constraint | active | |\n"
-         "| BR-INV-002 | On-hand quantity")
+         "| [[business-analysis/erp/domains/inventory/rules/"
+         "stock-item-lifecycle\\|BR-INV-002]] | On-hand quantity")
 
 
 def break_id_links(space: Path) -> None:
-    edit(space / INV / "processes" / "goods-receipt.md",
-         "Damaged goods are refused", "Per BR-INV-001, damaged goods are refused")
+    # A bare id in an id-citation column: cells cite ids as wikilinks.
+    edit(space / INV / "acceptance" / "goods-receipt.md",
+         "| [[business-analysis/erp/domains/inventory/rules/"
+         "stock-item-lifecycle\\|BR-INV-002]] | assert movement row",
+         "| BR-INV-002 | assert movement row")
 
 
 def break_row_schema(space: Path) -> None:
@@ -460,7 +470,8 @@ def break_row_schema(space: Path) -> None:
 
 
 def break_semantic_links(space: Path) -> None:
-    edit(space / "space.md", "- [[business-analysis/erp/domains/inventory/domain|Inventory]]",
+    edit(space / "erp-space.md",
+         "- [[business-analysis/erp/domains/inventory/erp-inventory-domain|Inventory]]",
          "The domain list is maintained elsewhere.")
 
 
@@ -470,7 +481,7 @@ def break_approval_preconditions(space: Path) -> None:
 
 
 def break_challenge_record(space: Path) -> None:
-    edit(space / INV / "reviews" / "round-1.md",
+    edit(space / INV / "reviews" / "erp-inventory-round-1.md",
          "| minor | Damaged-goods refusal already covered. |",
          "| blocking | Damaged-goods refusal already covered. |")
 
@@ -504,7 +515,7 @@ def break_generated_freshness(space: Path) -> None:
 
 
 def break_future_dates(space: Path) -> None:
-    edit(space / "space.md", "approved_at: 2026-07-12",
+    edit(space / "erp-space.md", "approved_at: 2026-07-12",
          "approved_at: 9999-01-01")
 
 
@@ -624,7 +635,7 @@ class BuilderFixtureTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             space = Path(tmp) / "docs" / "business-analysis" / "erp"
             make_valid_space(space)
-            edit(space / "glossary.md", "| stock_movement |",
+            edit(space / "erp-glossary.md", "| stock_movement |",
                  "| stokHareketi |")
             findings = collect(space)
             self.assertTrue(
@@ -675,7 +686,7 @@ class ApproveTests(unittest.TestCase):
 
     def test_approve_already_approved_fails(self):
         code, _, err = run(["approve", "--space", str(self.space),
-                            "--doc", "space.md"])
+                            "--doc", "erp-space.md"])
         self.assertEqual(code, 1)
         self.assertIn("already approved", err)
 
@@ -706,11 +717,11 @@ class ApproveTests(unittest.TestCase):
         self.assertEqual(code, 2, err)
 
     def test_challenge_record_requires_verdict_and_locks(self):
-        target = self.space / INV / "reviews" / "round-1.md"
+        target = self.space / INV / "reviews" / "erp-inventory-round-1.md"
         edit(target, "status: approved\napproved_at: 2026-07-12",
              "status: in_review")
         edit(target, "verdict: converged\nlocked: true", "verdict: continue")
-        rel = "domains/inventory/reviews/round-1.md"
+        rel = "domains/inventory/reviews/erp-inventory-round-1.md"
         code, _, err = run(["approve", "--space", str(self.space),
                             "--doc", rel])
         self.assertEqual(code, 2, err)
@@ -752,6 +763,45 @@ class SubcommandTests(unittest.TestCase):
         structural = [f for f in findings if f.check in
                       ("frontmatter_schema", "required_sections", "status_legality")]
         self.assertEqual(structural, [])
+
+    def test_stub_nav_targets_owning_hub(self):
+        """Content stubs nav to their owning overview hub; overview stubs
+        (hubs themselves) nav to the subtree map."""
+        space = self.root / "topic"
+        run(["init", "--space", str(space), "--title", "Topic", "--code", "TOP"])
+        run(["stub", "--space", str(space), "--type", "process",
+             "--slug", "intake", "--title", "Intake"])
+        text = (space / "processes" / "intake.md").read_text(encoding="utf-8")
+        self.assertIn("[[business-analysis/topic/topic-space|", text)
+        overview = (space / "topic-space.md").read_text(encoding="utf-8")
+        self.assertIn("[[maps/business-analysis|Business Analysis]]", overview)
+
+    def test_decision_stub_mints_id_prefixed_note(self):
+        """Decision stubs mint dec-<code>-<nnn>-<slug>.md with an id-led H1
+        and title, the id alias, a seeded ruling row and a hub-first nav."""
+        space = self.root / "erp"
+        make_valid_space(space)
+        code, _, err = run(["stub", "--space", str(space), "--type", "decision",
+                            "--node", "domains/inventory",
+                            "--slug", "batch-sizing", "--title", "Batch sizing"])
+        self.assertEqual(code, 0, err)
+        target = (space / "domains" / "inventory" / "decisions"
+                  / "dec-inv-001-batch-sizing.md")
+        self.assertTrue(target.is_file())
+        text = target.read_text(encoding="utf-8")
+        self.assertIn("title: DEC-INV-001: Batch sizing", text)
+        self.assertIn("# DEC-INV-001: Batch sizing", text)
+        self.assertIn("aliases:\n  - DEC-INV-001", text)
+        self.assertIn("| DEC-INV-001 | To be decided. | active |", text)
+        self.assertIn(
+            "[[business-analysis/erp/domains/inventory/erp-inventory-domain|",
+            text)
+        code, _, _ = run(["render", "--space", str(space)])
+        self.assertEqual(code, 0)
+        findings = [f for f in collect(space)
+                    if f.path.startswith("domains/inventory/decisions/")]
+        self.assertEqual(findings, [],
+                         [f"{f.check}: {f.message}" for f in findings])
 
     def test_resolve_known_and_unknown(self):
         space = self.root / "erp"

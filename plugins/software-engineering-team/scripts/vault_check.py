@@ -22,17 +22,22 @@ case or separators fail identically on every platform.
 from __future__ import annotations
 
 import argparse
+import fnmatch
 import json
 import re
+import shutil
 import sys
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 
+import ba_compile
 from ba_compile import (
+    BARE_ID_RE,
     DATE_RE,
     INLINE_CODE_RE,
     LINK_RE,
+    NAMESPACED_ID_RE,
     WIKILINK_RE,
     parse_frontmatter,
     split_wikilink,
@@ -50,17 +55,30 @@ GENERATED_INDEX_MARKER = (
 # stays in lockstep with this tuple (same doctrine as ba_compile).
 CHECK_IDS = (
     "vault_layout", "wikilink_resolution", "anchor_resolution",
-    "link_policy", "table_pipe", "orphans", "moc_coverage", "nav_footer",
-    "frontmatter_props", "tags_mirror", "decision_records",
-    "generated_views", "home_shape", "obsidian_payload",
+    "link_policy", "table_pipe", "table_shape", "basename_collision",
+    "title_shape", "orphans", "moc_coverage", "map_coverage", "nav_footer",
+    "frontmatter_props", "tags_mirror", "alias_ownership",
+    "decision_records", "generated_views", "home_shape", "obsidian_payload",
 )
 
 # Checks that judge the vault as a whole; --scope never silences them,
 # because any session may repair their subjects (payload, layout).
+# basename_collision stays OUT of this set deliberately: its findings are
+# per file, so a scoped gate repairs only its own subtree instead of
+# deadlocking on renames it cannot perform.
 GLOBAL_CHECKS = {"vault_layout", "obsidian_payload"}
 
 PAYLOAD_FILES = ("app.json", "appearance.json", "core-plugins.json",
                  "graph.json", "types.json", "snippets/brand.css")
+
+# The vetted title-display plugin's settings contract, verified against
+# the upstream source: a drifted feature key must never silently no-op.
+TITLE_PLUGIN_ID = "obsidian-front-matter-title-plugin"
+TITLE_PLUGIN_FEATURES_ON = ("explorer", "graph", "search", "suggest",
+                            "tab", "canvas")
+# noteLink rewrites note files on disk (bypassing the write-time hooks);
+# alias is pinned off for determinism.
+TITLE_PLUGIN_FEATURES_OFF = ("noteLink", "alias")
 
 # app.json keys that change what the vault app WRITES; drift here makes
 # the app author links against the law, so exact values are asserted.
@@ -129,6 +147,71 @@ def load_policy(path: Path) -> dict:
 
 def utc_today() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%d")
+
+
+def glob_match(pattern: str, path: str) -> bool:
+    """Single-segment glob match: '*' never crosses '/'. ONE matcher
+    serves the hub ladder and the decision-tree globs so the two can
+    never drift."""
+    pattern_parts = pattern.split("/")
+    parts = path.split("/")
+    if len(pattern_parts) != len(parts):
+        return False
+    return all(fnmatch.fnmatchcase(seg, pat)
+               for pat, seg in zip(pattern_parts, parts))
+
+
+def machine_dir_set(policy: dict) -> set:
+    return set(policy.get("machine_dirs", []))
+
+
+def in_machine_dir(policy: dict, rel: str) -> bool:
+    return any(part in machine_dir_set(policy)
+               for part in rel.split("/")[:-1])
+
+
+def normalize_vault_rel(raw: str) -> str:
+    """Map a repo- or workspace-relative path onto its vault-relative
+    form (freeze manifests and callers hand in either)."""
+    p = raw.replace("\\", "/")
+    for prefix in ("workspace/docs/", "docs/"):
+        if p.startswith(prefix):
+            return p[len(prefix):]
+    return p
+
+
+def is_hub(policy: dict, rel: str) -> bool:
+    return any(glob_match(entry.get("note", ""), rel)
+               for entry in policy.get("hubs", []))
+
+
+def resolve_hub(policy: dict, index: set, rel: str) -> str | None:
+    """The deepest EXISTING hub note covering rel, or None. Index-aware:
+    a hub file that is not in the current index cannot be a nav target,
+    so rename and retarget compose in either order."""
+    entries = sorted(policy.get("hubs", []),
+                     key=lambda e: -len(e.get("covers", "").split("/")))
+    for entry in entries:
+        covers_parts = entry.get("covers", "").split("/")
+        parts = rel.split("/")
+        if len(parts) <= len(covers_parts):
+            continue
+        covered_dir = "/".join(parts[:len(covers_parts)])
+        if not glob_match(entry["covers"], covered_dir):
+            continue
+        candidates = sorted(
+            c for c in index
+            if c != rel and c.startswith(covered_dir + "/")
+            and glob_match(entry.get("note", ""), c))
+        if candidates:
+            return candidates[0]
+    return None
+
+
+def subtree_has_notes(vault: Vault, subtree: str) -> bool:
+    prefix = subtree + "/"
+    return any(rel.startswith(prefix) and rel.endswith(".md")
+               for rel in vault.index)
 
 
 def rel_posix(root: Path, path: Path) -> str:
@@ -226,6 +309,8 @@ def check_vault_layout(vault: Vault, findings: list[Finding]) -> None:
     for subtree in policy["subtrees"]:
         if not (vault.root / subtree).is_dir():
             continue
+        if not subtree_has_notes(vault, subtree):
+            continue  # a map is born with its tree's first note
         map_rel = f"{maps_dir}/{subtree}.md"
         if map_rel not in vault.index:
             findings.append(Finding(
@@ -255,6 +340,8 @@ def check_vault_layout(vault: Vault, findings: list[Finding]) -> None:
         top = rel.split("/")[0]
         if rel.rsplit("/", 1)[-1] == ".gitkeep":
             continue  # git plumbing for empty skeleton directories
+        if in_machine_dir(policy, rel):
+            continue  # compiler-owned directories manage their own files
         if rel.endswith(".base"):
             findings.append(Finding(
                 "error", rel, 1, "vault_layout",
@@ -384,6 +471,216 @@ def check_table_pipe(vault: Vault, findings: list[Finding]) -> None:
                         "escape it as \\| or the pipe splits the row"))
 
 
+def is_separator_row(line: str) -> bool:
+    stripped = line.strip()
+    return (stripped.startswith("|") and "-" in stripped
+            and set(stripped.replace("|", "").strip()) <= set("-: "))
+
+
+def check_table_shape(vault: Vault, findings: list[Finding]) -> None:
+    for note in authored(vault):
+        in_fence = False
+        prev_is_row = False
+        for lineno, line in enumerate(note.lines, start=1):
+            if lineno < note.fm_end:
+                continue
+            if line.lstrip().startswith("```"):
+                in_fence = not in_fence
+                prev_is_row = False
+                continue
+            if in_fence:
+                continue
+            row_here = is_table_row(line)
+            if row_here and not prev_is_row:
+                nxt = note.lines[lineno] if lineno < len(note.lines) else ""
+                if not is_separator_row(nxt):
+                    findings.append(Finding(
+                        "error", note.rel, lineno, "table_shape",
+                        "table header row is not followed by its separator"
+                        " row",
+                        "put the |---| separator directly under the header;"
+                        " a fenced block right after the header swallows the"
+                        " whole table into plain text"))
+            prev_is_row = row_here
+
+
+def check_basename_collision(vault: Vault, findings: list[Finding]) -> None:
+    """Duplicate or policy-banned authored basenames. Findings are per
+    FILE (never vault-global) so scoped gates compose: each gate repairs
+    only its own subtree."""
+    policy = vault.policy
+    banned = set(policy.get("banned_basenames", []))
+    by_name: dict[str, list[str]] = {}
+    for note in authored(vault):
+        if in_machine_dir(policy, note.rel):
+            continue
+        by_name.setdefault(note.rel.rsplit("/", 1)[-1], []).append(note.rel)
+    for name, rels in sorted(by_name.items()):
+        if name in banned:
+            for rel in rels:
+                findings.append(Finding(
+                    "error", rel, 1, "basename_collision",
+                    f"basename '{name}' is policy-banned",
+                    "give the file its chain-qualified slug name (for a"
+                    " nested domain, rename the domain folder so the chain"
+                    " stays unique); migrate --rename heals this class"))
+        elif len(rels) > 1:
+            for rel in rels:
+                other = next(r for r in rels if r != rel)
+                findings.append(Finding(
+                    "error", rel, 1, "basename_collision",
+                    f"basename '{name}' is also used by {other}",
+                    "authored basenames are vault-unique (graph labels and"
+                    " links depend on it); rename with the chain-qualified"
+                    " slug, renaming the domain folder when the chain"
+                    " itself collides"))
+
+
+def note_decision_tree(policy: dict, rel: str) -> dict | None:
+    for tree in policy.get("decision_trees", {}).values():
+        path = tree["path"].rstrip("/")
+        if "*" in path:
+            if "/" in rel and glob_match(path, rel.rsplit("/", 1)[0]):
+                return tree
+        elif rel.startswith(path + "/"):
+            return tree
+    return None
+
+
+def check_title_shape(vault: Vault, findings: list[Finding]) -> None:
+    policy = vault.policy
+    banned_stems = {b[:-3] for b in policy.get("banned_basenames", [])}
+    seen_titles: dict[str, str] = {}
+    for note in authored(vault):
+        if in_machine_dir(policy, note.rel):
+            continue
+        title = note.fm.get("title")
+        if not isinstance(title, str) or not title.strip():
+            findings.append(Finding(
+                "error", note.rel, 1, "title_shape",
+                "authored note has no title",
+                "the title is the user-facing graph label: human-readable,"
+                " output_language, id-led when the note owns an id"))
+            continue
+        tree = note_decision_tree(policy, note.rel)
+        if tree is not None:
+            rec_id = decision_id(tree, note.rel)
+            if rec_id and not title.startswith(f"{rec_id}: "):
+                findings.append(Finding(
+                    "error", note.rel, 1, "title_shape",
+                    f"decision title must start '{rec_id}: '",
+                    "the id leads the label so the graph and search show"
+                    " it; the migrate verb prefixes this class"))
+        stem = note.rel.rsplit("/", 1)[-1][:-3]
+        if title == stem:
+            findings.append(Finding(
+                "warning", note.rel, 1, "title_shape",
+                "title is byte-identical to the basename stem",
+                "titles are human-readable output_language labels; a"
+                " humanized form of the slug is compliant, the raw stem"
+                " is not"))
+        if title.strip().lower() in banned_stems:
+            findings.append(Finding(
+                "warning", note.rel, 1, "title_shape",
+                f"generic title '{title}'",
+                "a generic label is meaningless in the graph; qualify it"
+                " with its owning space or subject"))
+        if title in seen_titles:
+            findings.append(Finding(
+                "warning", note.rel, 1, "title_shape",
+                f"title '{title}' is also used by {seen_titles[title]}",
+                "duplicate labels are indistinguishable in the graph;"
+                " qualify one of them"))
+        else:
+            seen_titles[title] = note.rel
+
+
+def check_map_coverage(vault: Vault, findings: list[Finding]) -> None:
+    """Every policy-hub note is linked from its subtree map. Leaves stay
+    optional on maps; hubs are the map's contract."""
+    policy = vault.policy
+    maps_dir = policy["maps_dir"]
+    for rel in sorted(vault.notes):
+        note = vault.notes[rel]
+        if note.generated or not is_hub(policy, rel):
+            continue
+        map_rel = f"{maps_dir}/{rel.split('/')[0]}.md"
+        map_note = vault.notes.get(map_rel)
+        if map_note is None:
+            continue  # vault_layout reports the missing map
+        targets = {t for (_, _, t, _, _, _) in map_note.wikilinks}
+        if rel[:-3] not in targets:
+            findings.append(Finding(
+                "error", map_rel, 1, "map_coverage",
+                f"map does not link the hub '{rel[:-3]}'",
+                "every policy hub gets an inbound link from its subtree"
+                " map; leaves are optional, hubs are not"))
+
+
+def check_alias_ownership(vault: Vault, findings: list[Finding]) -> None:
+    """An id-shaped link alias must decorate a link to the id's owning
+    note: decision-tree ids resolve by filename, BA row ids through the
+    target space's generated registry. Absent or unknown = silent skip."""
+    policy = vault.policy
+    owners: dict[str, str] = {}
+    for tree in policy.get("decision_trees", {}).values():
+        for note in decision_notes(vault, tree):
+            rec_id = decision_id(tree, note.rel)
+            if rec_id is not None:
+                owners.setdefault(rec_id, note.rel)
+    registries: dict[str, dict | None] = {}
+
+    def space_registry(rel: str) -> tuple[str, dict] | None:
+        parts = rel.split("/")
+        for i in range(1, len(parts)):
+            root = "/".join(parts[:i])
+            reg_rel = f"{root}/_generated/registry.json"
+            if reg_rel not in vault.index:
+                continue
+            if root not in registries:
+                try:
+                    registries[root] = json.loads(
+                        (vault.root / reg_rel).read_text(encoding="utf-8"))
+                except (OSError, json.JSONDecodeError):
+                    registries[root] = None
+            data = registries[root]
+            return (root, data) if isinstance(data, dict) else None
+        return None
+
+    for note in authored(vault):
+        for (lineno, embed, target, _anchor, alias, _inner) in note.wikilinks:
+            if embed or not target or not alias:
+                continue
+            aid = alias.strip()
+            owner = owners.get(aid)
+            if owner is not None:
+                if f"{target}.md" != owner:
+                    findings.append(Finding(
+                        "error", note.rel, lineno, "alias_ownership",
+                        f"alias '{aid}' decorates a link to '{target}' but"
+                        f" the id's owning note is {owner}",
+                        "an id-shaped alias always rides a link to its"
+                        " owner; use plain prose for anything else"))
+                continue
+            if not NAMESPACED_ID_RE.fullmatch(aid):
+                continue
+            resolved = space_registry(f"{target}.md")
+            if resolved is None:
+                continue  # no registry in reach: silent skip
+            root, registry = resolved
+            info = registry.get("ids", {}).get(aid)
+            if not isinstance(info, dict) or "doc" not in info:
+                continue  # unknown id: silent skip
+            owner_rel = f"{root}/{info['doc']}"
+            if f"{target}.md" != owner_rel:
+                findings.append(Finding(
+                    "error", note.rel, lineno, "alias_ownership",
+                    f"alias '{aid}' decorates a link to '{target}' but the"
+                    f" registry declares its owner as {owner_rel}",
+                    "an id-shaped alias always rides a link to its owner;"
+                    " re-render the space if the registry is stale"))
+
+
 def check_orphans(vault: Vault, findings: list[Finding]) -> None:
     policy = vault.policy
     home = policy["home_file"]
@@ -451,12 +748,19 @@ def check_nav_footer(vault: Vault, findings: list[Finding]) -> None:
                  for (lineno, embed, target, _a, _al, _inner) in note.wikilinks
                  if lineno >= nav_line and target and not embed]
         owning_map = f"{maps_dir}/{note.subtree}"
-        if not links or links[0][1] != owning_map:
+        if is_hub(policy, note.rel):
+            expected = owning_map
+        else:
+            hub = resolve_hub(policy, vault.index, note.rel)
+            expected = hub[:-3] if hub else owning_map
+        if not links or links[0][1] != expected:
             findings.append(Finding(
                 "error", note.rel, nav_line, "nav_footer",
-                f"nav section's first wikilink must be the owning map"
-                f" '{owning_map}'",
-                "the up-edge is positional: owning map first, peers after"))
+                f"nav section's first wikilink must be the owning hub"
+                f" '{expected}'",
+                "the up-edge is positional: the policy hub ladder's owner"
+                " first (hubs and uncovered notes keep the subtree map),"
+                " peers after"))
             continue
         peers = [t for (_, t) in links[1:] if f"{t}.md" in vault.index]
         floor = min(peer_min, max(subtree_counts.get(note.subtree, 1) - 1, 0))
@@ -568,13 +872,28 @@ def check_tags_mirror(vault: Vault, findings: list[Finding]) -> None:
                 " never hand-pick tags"))
 
 
+def tree_is_glob(tree: dict) -> bool:
+    return "*" in tree["path"]
+
+
 def decision_notes(vault: Vault, tree: dict) -> list[Note]:
+    ordered = sorted(vault.notes.values(), key=lambda n: n.rel)
+    if tree_is_glob(tree):
+        pattern = tree["path"].rstrip("/")
+        return [n for n in ordered
+                if not n.generated and "/" in n.rel
+                and glob_match(pattern, n.rel.rsplit("/", 1)[0])]
     prefix = tree["path"].rstrip("/") + "/"
-    return [n for n in sorted(vault.notes.values(), key=lambda n: n.rel)
+    return [n for n in ordered
             if n.rel.startswith(prefix) and not n.generated]
 
 
 def decision_filename_re(tree: dict) -> re.Pattern:
+    if tree.get("code_in_filename"):
+        return re.compile(
+            rf"^{tree['id_prefix'].lower()}-([a-z][a-z0-9]{{1,3}})"
+            rf"-(\d{{{tree['id_min_width']},}})"
+            rf"-[a-z0-9]+(?:-[a-z0-9]+)*\.md$")
     return re.compile(
         rf"^{tree['id_prefix'].lower()}-(\d{{{tree['id_min_width']},}})"
         rf"-[a-z0-9]+(?:-[a-z0-9]+)*\.md$")
@@ -584,33 +903,40 @@ def decision_id(tree: dict, note_rel: str) -> str | None:
     match = decision_filename_re(tree).match(note_rel.rsplit("/", 1)[-1])
     if not match:
         return None
+    if tree.get("code_in_filename"):
+        return (f"{tree['id_prefix']}-{match.group(1).upper()}"
+                f"-{match.group(2)}")
     return f"{tree['id_prefix']}-{match.group(1)}"
 
 
 def check_decision_records(vault: Vault, findings: list[Finding]) -> None:
     for tree_name, tree in sorted(vault.policy.get("decision_trees", {}).items()):
+        code_tree = bool(tree.get("code_in_filename"))
         seen: dict[str, str] = {}
         notes = decision_notes(vault, tree)
         for note in notes:
             rec_id = decision_id(tree, note.rel)
             if rec_id is None:
+                grammar = (f"{tree['id_prefix'].lower()}-<code>-"
+                           f"<{tree['id_min_width']}+ digits>-<kebab-slug>.md"
+                           if code_tree else
+                           f"{tree['id_prefix'].lower()}-"
+                           f"<{tree['id_min_width']}+ digits>-<kebab-slug>.md")
                 findings.append(Finding(
                     "error", note.rel, 1, "decision_records",
                     f"filename does not match the {tree['id_prefix']} note"
                     " grammar",
-                    f"decision notes are {tree['id_prefix'].lower()}-"
-                    f"<{tree['id_min_width']}+ digits>-<kebab-slug>.md"))
+                    f"decision notes are {grammar}"))
                 continue
-            number = rec_id.split("-")[1]
-            if number in seen:
+            key = tuple(rec_id.split("-")[1:])  # (code, number) or (number,)
+            if key in seen:
                 findings.append(Finding(
                     "error", note.rel, 1, "decision_records",
-                    f"decision id number {number} already minted by"
-                    f" {seen[number]}",
+                    f"decision id {rec_id} already minted by {seen[key]}",
                     "ids are unique per tree; renumber the younger note and"
                     " rewrite its referrers in the same commit"))
             else:
-                seen[number] = note.rel
+                seen[key] = note.rel
             first_heading = note.headings[0][1] if note.headings else ""
             if not first_heading.startswith(f"{rec_id}: "):
                 findings.append(Finding(
@@ -626,13 +952,19 @@ def check_decision_records(vault: Vault, findings: list[Finding]) -> None:
                     "error", note.rel, 1, "decision_records",
                     f"aliases must contain the bare id '{rec_id}'",
                     "the alias makes the bare id searchable and linkable"))
-            for key in ("supersedes", "superseded_by"):
-                target = dict(note.fm_targets).get(key, "")
-                raw = note.fm.get(key, "")
+            if code_tree:
+                # The BA supersede lifecycle belongs to ba_compile (the
+                # schema has superseded_by and no supersedes), so the
+                # supersede shape and symmetry sub-rules stay scoped to
+                # non-glob trees.
+                continue
+            for key_name in ("supersedes", "superseded_by"):
+                target = dict(note.fm_targets).get(key_name, "")
+                raw = note.fm.get(key_name, "")
                 if raw and not target:
                     findings.append(Finding(
                         "error", note.rel, 1, "decision_records",
-                        f"'{key}' must be a quoted wikilink or empty",
+                        f"'{key_name}' must be a quoted wikilink or empty",
                         "the supersede chain is a pair of frontmatter"
                         " wikilinks"))
             fm_map = dict(note.fm_targets)
@@ -647,6 +979,8 @@ def check_decision_records(vault: Vault, findings: list[Finding]) -> None:
                         "supersede chain is not symmetric",
                         "stamp-decision writes both ends in one operation;"
                         " never hand-edit the chain"))
+        if not tree.get("render_index", True):
+            continue  # no generated index for this tree
         index_rel = index_path_for(tree)
         expected = render_decision_index(vault, tree)
         actual_path = vault.root / index_rel
@@ -664,7 +998,8 @@ def check_generated_views(vault: Vault, findings: list[Finding]) -> None:
     policy = vault.policy
     marker_prefix = policy.get("generated_marker_prefix", "<!-- generated by")
     decision_indexes = {index_path_for(tree)
-                        for tree in policy.get("decision_trees", {}).values()}
+                        for tree in policy.get("decision_trees", {}).values()
+                        if tree.get("render_index", True)}
     for view in policy.get("generated_views", []):
         path = vault.root / view
         if not path.is_file():
@@ -694,6 +1029,7 @@ def check_home_shape(vault: Vault, findings: list[Finding]) -> None:
     home = vault.notes.get(policy["home_file"])
     start_stem = policy["start_here_file"].rsplit(".", 1)[0]
     if home is not None:
+        targets = {t for (_l, _e, t, _a, _al, _inner) in home.wikilinks}
         for (lineno, _e, target, _a, _al, _inner) in home.wikilinks:
             if not (target.startswith(f"{maps_dir}/") or target == start_stem):
                 findings.append(Finding(
@@ -706,6 +1042,29 @@ def check_home_shape(vault: Vault, findings: list[Finding]) -> None:
                 "error", home.rel, 1, "home_shape",
                 "home note must carry type: home",
                 "home and maps are navigation, typed as such"))
+        # Dynamic home: every content-bearing subtree's map, the extra
+        # maps and start-here are linked; empty-tree maps are not.
+        required = [f"{maps_dir}/{name}"
+                    for name in policy.get("extra_maps", [])]
+        required.append(start_stem)
+        for subtree in policy["subtrees"]:
+            if subtree_has_notes(vault, subtree):
+                required.append(f"{maps_dir}/{subtree}")
+            elif f"{maps_dir}/{subtree}" in targets:
+                findings.append(Finding(
+                    "error", home.rel, 1, "home_shape",
+                    f"home links the empty tree's map"
+                    f" '{maps_dir}/{subtree}'",
+                    "home is dynamic: a map line joins when its tree"
+                    " gains content, not before"))
+        for target in required:
+            if target not in targets:
+                findings.append(Finding(
+                    "error", home.rel, 1, "home_shape",
+                    f"home does not link '{target}'",
+                    "home links start-here, the extra maps and every"
+                    " content-bearing subtree map; the birthing entry adds"
+                    " the line"))
     for rel, note in sorted(vault.notes.items()):
         if not rel.startswith(f"{maps_dir}/") or note.generated:
             continue
@@ -786,6 +1145,131 @@ def check_obsidian_payload(vault: Vault, findings: list[Finding],
                     f"property '{key}' must be typed '{expected}'",
                     "types.json is derived from vault-policy.json"
                     " property_types; restore the drifted entry"))
+    graph_path = obsidian / "graph.json"
+    if graph_path.is_file() and isinstance(
+            policy.get("graph_color_groups"), list):
+        try:
+            graph = json.loads(graph_path.read_text(encoding="utf-8"))
+        except json.JSONDecodeError:
+            graph = None
+            findings.append(Finding(
+                "error", ".obsidian/graph.json", 1, "obsidian_payload",
+                "graph.json does not parse", "restore it from the payload"))
+        if isinstance(graph, dict):
+            queries = [str(g.get("query", ""))
+                       for g in graph.get("colorGroups", [])
+                       if isinstance(g, dict)]
+            if queries != policy["graph_color_groups"]:
+                findings.append(Finding(
+                    "error", ".obsidian/graph.json", 1, "obsidian_payload",
+                    "graph.json colorGroups do not match policy"
+                    " graph_color_groups (same queries, same order)",
+                    "the type-based legend is policy data; the migrate"
+                    " verb reconciles it without touching tuned knobs"))
+            if graph.get("search", "") != policy.get("graph_search", ""):
+                findings.append(Finding(
+                    "error", ".obsidian/graph.json", 1, "obsidian_payload",
+                    "graph.json search does not match policy graph_search",
+                    "the global graph filter is policy data; the migrate"
+                    " verb reconciles it"))
+    community = policy.get("community_plugins", [])
+    if community:
+        cp_path = obsidian / "community-plugins.json"
+        cp_data = None
+        if not cp_path.is_file():
+            findings.append(Finding(
+                "error", ".obsidian/community-plugins.json", 1,
+                "obsidian_payload",
+                "committed payload file is missing",
+                "copy the vault payload (per-file, only where missing)"))
+        else:
+            try:
+                cp_data = json.loads(cp_path.read_text(encoding="utf-8"))
+            except json.JSONDecodeError:
+                findings.append(Finding(
+                    "error", ".obsidian/community-plugins.json", 1,
+                    "obsidian_payload",
+                    "community-plugins.json does not parse",
+                    "restore it from the payload"))
+        if isinstance(cp_data, list) and sorted(cp_data) != sorted(community):
+            findings.append(Finding(
+                "error", ".obsidian/community-plugins.json", 1,
+                "obsidian_payload",
+                "enabled community plugins must be exactly the"
+                " policy-vetted set",
+                "the vetted set lives in vault-policy.json"
+                " community_plugins; enable nothing else"))
+        for plugin_id in community:
+            plugin_dir = obsidian / "plugins" / plugin_id
+            for fname in ("manifest.json", "main.js", "data.json"):
+                if not (plugin_dir / fname).is_file():
+                    findings.append(Finding(
+                        "error", f".obsidian/plugins/{plugin_id}/{fname}",
+                        1, "obsidian_payload",
+                        "vendored plugin file is missing",
+                        "copy the vault payload (per-file, only where"
+                        " missing)"))
+            manifest_path = plugin_dir / "manifest.json"
+            if manifest_path.is_file():
+                try:
+                    manifest = json.loads(
+                        manifest_path.read_text(encoding="utf-8"))
+                except json.JSONDecodeError:
+                    manifest = {}
+                if isinstance(manifest, dict) \
+                        and manifest.get("id") != plugin_id:
+                    findings.append(Finding(
+                        "error",
+                        f".obsidian/plugins/{plugin_id}/manifest.json", 1,
+                        "obsidian_payload",
+                        f"manifest id '{manifest.get('id')}' does not match"
+                        f" the plugin directory '{plugin_id}'",
+                        "the enable list, the directory and the manifest"
+                        " name one plugin"))
+            if plugin_id == TITLE_PLUGIN_ID:
+                check_title_plugin_data(plugin_dir / "data.json", findings)
+
+
+def check_title_plugin_data(data_path: Path,
+                            findings: list[Finding]) -> None:
+    """The title plugin's settings contract, asserted key by key so a
+    drifted key can never silently no-op."""
+    rel = f".obsidian/plugins/{TITLE_PLUGIN_ID}/data.json"
+    if not data_path.is_file():
+        return  # the missing-file finding is already emitted
+    try:
+        data = json.loads(data_path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError:
+        findings.append(Finding(
+            "error", rel, 1, "obsidian_payload",
+            "data.json does not parse", "restore it from the payload"))
+        return
+    common = (data.get("templates", {}) or {}).get("common", {}) \
+        if isinstance(data, dict) else {}
+    if not isinstance(common, dict) or common.get("main") != "title":
+        findings.append(Finding(
+            "error", rel, 1, "obsidian_payload",
+            "templates.common.main must be the bare key 'title'",
+            "the plugin reads a bare frontmatter key name here; any other"
+            " form breaks every displayed label"))
+    features = data.get("features", {}) if isinstance(data, dict) else {}
+    for name in TITLE_PLUGIN_FEATURES_ON:
+        spec = features.get(name) if isinstance(features, dict) else None
+        if not (isinstance(spec, dict) and spec.get("enabled") is True):
+            findings.append(Finding(
+                "error", rel, 1, "obsidian_payload",
+                f"features.{name}.enabled must be true",
+                "titles replace filenames in every read surface; a"
+                " disabled feature silently shows raw filenames"))
+    for name in TITLE_PLUGIN_FEATURES_OFF:
+        spec = features.get(name) if isinstance(features, dict) else None
+        if not (isinstance(spec, dict) and spec.get("enabled") is False):
+            findings.append(Finding(
+                "error", rel, 1, "obsidian_payload",
+                f"features.{name}.enabled must be false",
+                "noteLink rewrites notes on disk past the write-time"
+                " hooks and alias generation is pinned off for"
+                " determinism"))
 
 
 CHECKS = {
@@ -794,11 +1278,16 @@ CHECKS = {
     "anchor_resolution": check_anchor_resolution,
     "link_policy": check_link_policy,
     "table_pipe": check_table_pipe,
+    "table_shape": check_table_shape,
+    "basename_collision": check_basename_collision,
+    "title_shape": check_title_shape,
     "orphans": check_orphans,
     "moc_coverage": check_moc_coverage,
+    "map_coverage": check_map_coverage,
     "nav_footer": check_nav_footer,
     "frontmatter_props": check_frontmatter_props,
     "tags_mirror": check_tags_mirror,
+    "alias_ownership": check_alias_ownership,
     "decision_records": check_decision_records,
     "generated_views": check_generated_views,
     "home_shape": check_home_shape,
@@ -806,7 +1295,8 @@ CHECKS = {
 
 # Per-file checks the --changed fast path (the per-write hook) runs.
 CHANGED_CHECKS = ("wikilink_resolution", "anchor_resolution", "link_policy",
-                  "table_pipe", "nav_footer", "frontmatter_props",
+                  "table_pipe", "table_shape", "title_shape",
+                  "alias_ownership", "nav_footer", "frontmatter_props",
                   "tags_mirror", "decision_records")
 
 
@@ -856,6 +1346,8 @@ def render_decision_index(vault: Vault, tree: dict) -> str:
 def cmd_render_decisions(args, policy: dict) -> int:
     vault = build_vault(args.vault.resolve(), policy)
     for tree_name, tree in sorted(policy.get("decision_trees", {}).items()):
+        if not tree.get("render_index", True):
+            continue  # this tree renders no index by policy
         notes = decision_notes(vault, tree)
         numbers: dict[str, str] = {}
         for note in notes:
@@ -926,10 +1418,14 @@ def cmd_stamp_decision(args, policy: dict) -> int:
     vault = build_vault(root, policy)
     note_rel = args.note.replace("\\", "/")
     note = vault.notes.get(note_rel)
-    tree = next((t for t in policy.get("decision_trees", {}).values()
-                 if note_rel.startswith(t["path"].rstrip("/") + "/")), None)
+    tree = note_decision_tree(policy, note_rel)
     if note is None or tree is None:
         print(f"vault_check: '{args.note}' is not a decision note",
+              file=sys.stderr)
+        return 2
+    if tree_is_glob(tree):
+        print("vault_check: this decision tree is governed by the analysis"
+              " compiler; approve through ba_compile.py approve",
               file=sys.stderr)
         return 2
     stamps = {"status": args.status, "decided_at": utc_today()}
@@ -955,13 +1451,99 @@ def cmd_stamp_decision(args, policy: dict) -> int:
 # ---------------------------------------------------------------------------
 
 
-def migrate_note(vault: Vault, note: Note) -> tuple[str, int, int]:
+def table_row_columns(note: Note) -> dict[int, list[str]]:
+    """lineno -> header columns for every data row of a well-formed table."""
+    mapping: dict[int, list[str]] = {}
+    in_fence = False
+    block: list[tuple[int, str]] = []
+
+    def flush() -> None:
+        if len(block) >= 2 and is_separator_row(block[1][1]):
+            columns = [c.strip().lower()
+                       for c in re.split(r"(?<!\\)\|",
+                                         block[0][1].strip().strip("|"))]
+            for lineno, _raw in block[2:]:
+                mapping[lineno] = columns
+        block.clear()
+
+    for lineno, line in enumerate(note.lines, start=1):
+        if lineno < note.fm_end:
+            continue
+        if line.lstrip().startswith("```"):
+            flush()
+            in_fence = not in_fence
+            continue
+        if in_fence:
+            continue
+        if is_table_row(line):
+            block.append((lineno, line))
+        else:
+            flush()
+    flush()
+    return mapping
+
+
+def ba_id_lookup(vault: Vault) -> dict[str, str]:
+    """id -> vault-absolute owner rel (no .md) for every analysis space
+    in the vault, through ba_compile.scan_space (the single parser)."""
+    lookup: dict[str, str] = {}
+    try:
+        schema = ba_compile.load_schema(ba_compile.DEFAULT_SCHEMA)
+    except (OSError, json.JSONDecodeError, SystemExit):
+        return lookup
+    roots = set()
+    for rel in vault.index:
+        parts = rel.split("/")
+        if len(parts) >= 2 and parts[-1] == ba_compile.space_overview_rel(
+                schema, parts[-2]):
+            roots.add("/".join(parts[:-1]))
+    for root_rel in sorted(roots):
+        space, _ = ba_compile.scan_space(vault.root / root_rel, schema)
+        for id_value, info in space.ids.items():
+            lookup.setdefault(id_value, f"{root_rel}/{info['doc'][:-3]}")
+    return lookup
+
+
+def rewrite_citation_cells(line: str, columns: list[str],
+                           citation_columns: list[str],
+                           id_lookup: dict[str, str]) -> tuple[str, int, int]:
+    """Rewrite bare id tokens in id-citation cells to escaped-pipe
+    wikilinks targeting the owning doc; unresolvable ids stay manual."""
+    parts = re.split(r"(?<!\\)\|", line)
+    if len(parts) != len(columns) + 2:
+        return line, 0, 0
+    rewrites = manual = 0
+    for i, column in enumerate(columns, start=1):
+        if column not in citation_columns:
+            continue
+        cell = parts[i]
+        masked = WIKILINK_RE.sub(lambda m: "\0" * len(m.group(0)), cell)
+        matches = sorted(
+            list(NAMESPACED_ID_RE.finditer(masked))
+            + list(BARE_ID_RE.finditer(masked)),
+            key=lambda m: -m.start())
+        for match in matches:
+            token = match.group(0)
+            owner = id_lookup.get(token)
+            if owner is None:
+                manual += 1
+                continue
+            cell = (cell[:match.start()] + f"[[{owner}\\|{token}]]"
+                    + cell[match.end():])
+            rewrites += 1
+        parts[i] = cell
+    return "|".join(parts), rewrites, manual
+
+
+def migrate_note(vault: Vault, note: Note, citation_columns: list[str],
+                 id_lookup: dict[str, str]) -> tuple[str, int, int]:
     """Return (new_text, rewrites, manual_left) for one note."""
     root = vault.root
     rewrites = 0
     manual = 0
     out: list[str] = []
     in_fence = False
+    row_columns = table_row_columns(note) if citation_columns else {}
     for lineno, line in enumerate(note.lines, start=1):
         if lineno < note.fm_end:
             new_line, n = migrate_fm_line(vault, note, line)
@@ -999,6 +1581,11 @@ def migrate_note(vault: Vault, note: Note) -> tuple[str, int, int]:
                         + f"[[{inner}{sep}{alias}]]"
                         + new_line[match.end():])
             rewrites += 1
+        if lineno in row_columns:
+            new_line, n, m = rewrite_citation_cells(
+                new_line, row_columns[lineno], citation_columns, id_lookup)
+            rewrites += n
+            manual += m
         if is_table_row(new_line):
             fixed = fix_table_pipes(new_line)
             if fixed != new_line:
@@ -1011,6 +1598,81 @@ def migrate_note(vault: Vault, note: Note) -> tuple[str, int, int]:
     return text, rewrites, manual
 
 
+def prefix_decision_title(policy: dict, note: Note,
+                          lines: list[str]) -> int:
+    """Give a decision-tree note's title its '<ID>: ' prefix when the
+    prefix is missing (the title itself stays untouched otherwise)."""
+    tree = note_decision_tree(policy, note.rel)
+    if tree is None:
+        return 0
+    rec_id = decision_id(tree, note.rel)
+    if rec_id is None:
+        return 0
+    for i in range(min(note.fm_end - 1, len(lines))):
+        stripped = lines[i].strip()
+        if not stripped.startswith("title:"):
+            continue
+        value = stripped[len("title:"):].strip().strip("\"'")
+        if not value or value.startswith(f"{rec_id}: "):
+            return 0
+        indent = lines[i][:len(lines[i]) - len(lines[i].lstrip())]
+        lines[i] = f'{indent}title: "{rec_id}: {value}"'
+        return 1
+    return 0
+
+
+def retarget_nav(vault: Vault, note: Note, lines: list[str]) -> int:
+    """Rewrite a maps/<subtree> nav first link to the covering hub that
+    EXISTS in the current index (composing with --rename in either
+    order); a hub already among the peers is promoted by dropping the
+    map link instead of duplicating it."""
+    policy = vault.policy
+    maps_dir = policy["maps_dir"]
+    if not note.subtree or note.subtree == maps_dir \
+            or is_hub(policy, note.rel):
+        return 0
+    hub = resolve_hub(policy, vault.index, note.rel)
+    if hub is None:
+        return 0
+    hub_stem = hub[:-3]
+    owning_map = f"{maps_dir}/{note.subtree}"
+    nav_idx = next((i for i, l in enumerate(lines) if NAV_MARKER in l), None)
+    if nav_idx is None:
+        return 0
+    nav_text = "\n".join(lines[nav_idx:])
+    matches = list(WIKILINK_RE.finditer(nav_text))
+    if not matches:
+        return 0
+    first_target, _, _ = split_wikilink(matches[0].group("inner"))
+    if first_target != owning_map:
+        return 0
+    hub_note = vault.notes.get(hub)
+    alias = str(hub_note.fm.get("title") or "") if hub_note else ""
+    if not alias:
+        alias = hub_stem.rsplit("/", 1)[-1].replace("-", " ").title()
+    peer_targets = [split_wikilink(m.group("inner"))[0] for m in matches[1:]]
+    nav_text = (nav_text[:matches[0].start()] + f"[[{hub_stem}|{alias}]]"
+                + nav_text[matches[0].end():])
+    if hub_stem in peer_targets:
+        for match in list(WIKILINK_RE.finditer(nav_text))[1:]:
+            target, _, _ = split_wikilink(match.group("inner"))
+            if target == hub_stem:
+                nav_text = (nav_text[:match.start()] + "\0DROP\0"
+                            + nav_text[match.end():])
+                break
+        cleaned = []
+        for line in nav_text.splitlines():
+            if "\0DROP\0" in line:
+                line = line.replace("\0DROP\0", "").strip()
+                line = line.strip("-").strip()
+                if not line:
+                    continue
+            cleaned.append(line)
+        nav_text = "\n".join(cleaned)
+    lines[nav_idx:] = nav_text.splitlines()
+    return 1
+
+
 def fix_table_pipes(line: str) -> str:
     def fix(match: re.Match) -> str:
         inner = match.group("inner")
@@ -1019,13 +1681,23 @@ def fix_table_pipes(line: str) -> str:
     return WIKILINK_RE.sub(fix, line)
 
 
+# Doc-ref keys whose contract form is a BLOCK LIST (single target = one
+# item); a scalar value is the migrate class that converts it.
+LIST_REF_KEYS = ("governs", "verifies")
+
+
 def migrate_fm_line(vault: Vault, note: Note, line: str) -> tuple[str, int]:
     stripped = line.strip()
     for key in DOC_REF_KEYS:
         if not stripped.startswith(f"{key}:"):
             continue
         value = stripped[len(key) + 1:].strip().strip("\"'")
-        if not value or value.startswith("[["):
+        if not value:
+            return line, 0
+        indent = line[:len(line) - len(line.lstrip())]
+        if value.startswith("[["):
+            if key in LIST_REF_KEYS:
+                return f"{indent}{key}:\n{indent}  - \"{value}\"", 1
             return line, 0
         resolved = (note.path.parent / value).resolve()
         try:
@@ -1033,8 +1705,10 @@ def migrate_fm_line(vault: Vault, note: Note, line: str) -> tuple[str, int]:
         except ValueError:
             return line, 0
         if rel in vault.index and rel.endswith(".md"):
-            indent = line[:len(line) - len(line.lstrip())]
-            return f"{indent}{key}: \"[[{rel[:-3]}]]\"", 1
+            link = f"\"[[{rel[:-3]}]]\""
+            if key in LIST_REF_KEYS:
+                return f"{indent}{key}:\n{indent}  - {link}", 1
+            return f"{indent}{key}: {link}", 1
     return line, 0
 
 
@@ -1088,17 +1762,155 @@ def apply_tags(text: str, tags: list[str]) -> str:
     return "\n".join(out) + ("\n" if text.endswith("\n") else "")
 
 
+def freeze_skip_set(vault_path: Path) -> set:
+    """Vault-relative paths frozen by any work order. MECHANICAL and
+    PMO-independent: the workspace root is derived from --vault, the
+    manifests are globbed from work-orders/, and the set is loaded
+    BEFORE any write. PMO absence never voids freeze protection."""
+    frozen: set = set()
+    orders = vault_path.resolve().parent / "work-orders"
+    if not orders.is_dir():
+        return frozen
+    for manifest in sorted(orders.glob("*/freeze.json")):
+        try:
+            data = json.loads(manifest.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        paths = data.get("frozen_paths", []) if isinstance(data, dict) else data
+        if not isinstance(paths, list):
+            continue
+        frozen.update(normalize_vault_rel(p) for p in paths
+                      if isinstance(p, str))
+    return frozen
+
+
+GRAPH_PALETTE = (16007990, 5431378, 2201331, 16750592, 10233776, 38536,
+                 9741240)
+
+
+def payload_reconcile(root: Path, policy: dict,
+                      payload_src: Path | None) -> int:
+    """Heal present-but-stale payload files by rewriting ONLY the
+    policy-asserted keys, preserving the consumer's tuned unasserted
+    knobs. community-plugins.json and plugins/ are only-if-missing
+    copies."""
+    changed = 0
+    obsidian = root / ".obsidian"
+    if not obsidian.is_dir():
+        return 0
+
+    def load_json(path: Path):
+        try:
+            return json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            return None
+
+    def dump(path: Path, data) -> None:
+        path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+
+    graph_path = obsidian / "graph.json"
+    groups = policy.get("graph_color_groups")
+    if graph_path.is_file() and isinstance(groups, list):
+        data = load_json(graph_path)
+        if isinstance(data, dict):
+            new = dict(data)
+            dirty = False
+            queries = [str(g.get("query", ""))
+                       for g in data.get("colorGroups", [])
+                       if isinstance(g, dict)]
+            if queries != groups:
+                old_colors = {str(g.get("query", "")): g.get("color")
+                              for g in data.get("colorGroups", [])
+                              if isinstance(g, dict)}
+                new["colorGroups"] = [
+                    {"query": q,
+                     "color": old_colors.get(q)
+                     or {"a": 1, "rgb": GRAPH_PALETTE[i % len(GRAPH_PALETTE)]}}
+                    for i, q in enumerate(groups)]
+                dirty = True
+            if new.get("search", "") != policy.get("graph_search", ""):
+                new["search"] = policy.get("graph_search", "")
+                dirty = True
+            if dirty:
+                dump(graph_path, new)
+                changed += 1
+    types_path = obsidian / "types.json"
+    if types_path.is_file():
+        data = load_json(types_path)
+        if isinstance(data, dict):
+            types = dict(data.get("types") or {})
+            dirty = False
+            for key, value in policy.get("property_types", {}).items():
+                if types.get(key) != value:
+                    types[key] = value
+                    dirty = True
+            if dirty:
+                new = dict(data)
+                new["types"] = types
+                dump(types_path, new)
+                changed += 1
+    app_path = obsidian / "app.json"
+    if app_path.is_file():
+        data = load_json(app_path)
+        if isinstance(data, dict):
+            sentinels = dict(APP_SENTINELS)
+            sentinels["attachmentFolderPath"] = policy.get(
+                "attachments_dir", "_attachments")
+            new = dict(data)
+            dirty = False
+            for key, value in sentinels.items():
+                if new.get(key) != value:
+                    new[key] = value
+                    dirty = True
+            if dirty:
+                dump(app_path, new)
+                changed += 1
+    community = policy.get("community_plugins", [])
+    if community:
+        cp_path = obsidian / "community-plugins.json"
+        if not cp_path.is_file():
+            dump(cp_path, list(community))
+            changed += 1
+        for plugin_id in community:
+            plugin_dir = obsidian / "plugins" / plugin_id
+            src = (payload_src / "plugins" / plugin_id
+                   if payload_src is not None else None)
+            if not plugin_dir.is_dir() and src is not None and src.is_dir():
+                shutil.copytree(src, plugin_dir)
+                changed += 1
+    return changed
+
+
 def cmd_migrate(args, policy: dict) -> int:
     root = args.vault.resolve()
     vault = build_vault(root, policy)
+    frozen = set() if args.override_freeze else freeze_skip_set(args.vault)
+    skip = frozen | {normalize_vault_rel(x) for x in (args.exclude or [])}
+    if args.rename:
+        return migrate_rename(args, policy, vault, skip)
+    try:
+        schema = ba_compile.load_schema(ba_compile.DEFAULT_SCHEMA)
+    except (OSError, json.JSONDecodeError, SystemExit):
+        schema = None
+    citation_columns = (list(schema.get("id_citation_columns", []))
+                        if schema else [])
+    id_lookup = ba_id_lookup(vault) if citation_columns else {}
     total_rewrites = 0
     total_manual = 0
     touched = 0
     for note in authored(vault):
+        if note.rel in skip:
+            continue
         if args.scope and not (note.rel.startswith(args.scope.rstrip("/") + "/")
                                or note.subtree == ""):
             continue
-        text, rewrites, manual = migrate_note(vault, note)
+        text, rewrites, manual = migrate_note(vault, note, citation_columns,
+                                              id_lookup)
+        trailing = text.endswith("\n")
+        lines = text.splitlines()
+        rewrites += prefix_decision_title(policy, note, lines)
+        rewrites += retarget_nav(vault, note, lines)
+        text = "\n".join(lines) + ("\n" if trailing else "")
         tags, tags_changed = migrate_tags(note)
         if tags_changed:
             text = apply_tags(text, tags)
@@ -1109,9 +1921,206 @@ def cmd_migrate(args, policy: dict) -> int:
             touched += 1
             total_rewrites += rewrites
             print(f"vault_check: migrated {note.rel} ({rewrites} rewrites)")
+    reconciled = payload_reconcile(root, policy, args.payload)
     print(f"vault_check: migrate touched {touched} notes,"
           f" {total_rewrites} rewrites;"
-          f" {total_manual} heading-anchor links left for stewardship")
+          f" {reconciled} payload file(s) reconciled;"
+          f" {total_manual} link(s) left for stewardship")
+    return 0
+
+
+# Legacy round-file grammar: the brownfield names --rename migrates FROM.
+LEGACY_ROUND_RE = re.compile(r"^round-(\d+)\.md$")
+LEGACY_SPACE_ROUND_RE = re.compile(r"^space-round-(\d+)\.md$")
+
+
+def build_rename_map(vault: Vault, policy: dict,
+                     schema: dict) -> tuple[dict, list]:
+    """Grammar-driven rename plan: chain-qualified named files, round
+    files and dec- decision notes for every analysis space. Already
+    compliant names are skipped forward-only."""
+    renames: dict[str, str] = {}
+    manual: list[str] = []
+    ch_folder = schema["doc_types"]["challenge_record"]["location"]["folder"]
+    dec_folder = schema["doc_types"]["decision"]["location"]["folder"]
+    roots = set()
+    for rel in vault.index:
+        parts = rel.split("/")
+        if len(parts) < 2:
+            continue
+        if parts[-1] == "space.md" or parts[-1] == \
+                ba_compile.space_overview_rel(schema, parts[-2]):
+            roots.add("/".join(parts[:-1]))
+    for root_rel in sorted(roots):
+        space_slug = root_rel.rsplit("/", 1)[-1]
+        space, _ = ba_compile.scan_space(vault.root / root_rel, schema)
+        for rel in sorted(vault.index):
+            if not rel.startswith(root_rel + "/") or not rel.endswith(".md"):
+                continue
+            sub = rel[len(root_rel) + 1:]
+            rest = sub.split("/")
+            node_parts: list[str] = []
+            while len(rest) > 2 and rest[0] == "domains":
+                node_parts.extend(rest[:2])
+                rest = rest[2:]
+            node_rel = "/".join(node_parts)
+            chain = ba_compile.chain_slug(schema, space_slug, node_rel)
+            node_prefix = f"{root_rel}/{node_rel}/" if node_rel \
+                else f"{root_rel}/"
+            if len(rest) == 1:
+                name = rest[0]
+                for doc_type, spec in schema["doc_types"].items():
+                    loc = spec["location"]
+                    if loc.get("kind") != "named_file" or name != loc["name"]:
+                        continue
+                    if loc.get("root_only") and node_rel:
+                        continue
+                    if loc.get("domain_only") and not node_rel:
+                        continue
+                    new_name = ba_compile.named_file_name(schema, doc_type,
+                                                          chain)
+                    if new_name != name:
+                        renames[rel] = f"{node_prefix}{new_name}"
+                    break
+            elif len(rest) == 2 and rest[0] == ch_folder:
+                name = rest[1]
+                m_round = LEGACY_ROUND_RE.match(name)
+                m_space = LEGACY_SPACE_ROUND_RE.match(name)
+                new_name = None
+                if m_space and not node_rel:
+                    new_name = ba_compile.round_file_name(
+                        schema, space_slug, "space", int(m_space.group(1)))
+                elif m_round:
+                    new_name = ba_compile.round_file_name(
+                        schema, chain, "domain", int(m_round.group(1)))
+                if new_name and new_name != name:
+                    renames[rel] = f"{node_prefix}{ch_folder}/{new_name}"
+            elif len(rest) == 2 and rest[0] == dec_folder:
+                name = rest[1]
+                tree = note_decision_tree(policy, rel)
+                if tree is None:
+                    continue
+                if decision_id(tree, rel) is not None:
+                    continue  # forward-only: already id-prefixed
+                # Read the DEC ruling rows off the doc itself: a fully
+                # legacy space (bare space.md) registers no node codes,
+                # so space.ids would drop the id on the code mismatch.
+                doc = space.docs.get(sub)
+                dec_ids: list[str] = []
+                if doc is not None:
+                    dec_section = schema["row_schemas"]["dec"]["section"]
+                    id_re = re.compile(
+                        rf"^{tree['id_prefix']}-([A-Z]{{2,4}})-(\d+)$")
+                    for table in doc.tables:
+                        if table.section != dec_section \
+                                or "id" not in table.columns \
+                                or "status" not in table.columns:
+                            continue
+                        for _lineno, cells in table.rows:
+                            row = dict(zip(table.columns, cells))
+                            if id_re.match(row.get("id", "")) \
+                                    and row.get("status") == "active":
+                                dec_ids.append(row["id"])
+                if len(set(dec_ids)) != 1:
+                    manual.append(rel)
+                    continue
+                _kind, code, number = dec_ids[0].split("-")
+                width = tree.get("id_min_width", 3)
+                stem = re.sub(r"[^a-z0-9-]+", "-", name[:-3].lower())
+                stem = re.sub(r"-{2,}", "-", stem).strip("-") or "decision"
+                renames[rel] = (f"{node_prefix}{dec_folder}/"
+                                f"dec-{code.lower()}-{int(number):0{width}d}"
+                                f"-{stem}.md")
+    return renames, manual
+
+
+def rename_referrers(vault: Vault, old_rel: str) -> list:
+    """Authored notes citing old_rel; generated views re-render instead."""
+    return sorted(r for r in vault.inbound.get(old_rel, set())
+                  if r in vault.notes and not vault.notes[r].generated
+                  and r != old_rel)
+
+
+def migrate_rename(args, policy: dict, vault: Vault, skip: set) -> int:
+    try:
+        schema = ba_compile.load_schema(ba_compile.DEFAULT_SCHEMA)
+    except (OSError, json.JSONDecodeError, SystemExit) as exc:
+        print(f"vault_check: --rename needs the analysis schema: {exc}",
+              file=sys.stderr)
+        return 2
+    renames, manual = build_rename_map(vault, policy, schema)
+    if args.scope:
+        prefix = args.scope.rstrip("/") + "/"
+        renames = {o: n for o, n in renames.items() if o.startswith(prefix)}
+        manual = [m for m in manual if m.startswith(prefix)]
+    collisions = []
+    seen_new: dict[str, str] = {}
+    for old, new in sorted(renames.items()):
+        if new in vault.index and new not in renames:
+            collisions.append(f"{old} -> {new}: target already exists")
+        if new in seen_new:
+            collisions.append(
+                f"{old} -> {new}: also produced by {seen_new[new]}")
+        seen_new[new] = old
+    blocked = []
+    for old in sorted(renames):
+        blockers = sorted(
+            ({old} if old in skip else set())
+            | {r for r in rename_referrers(vault, old) if r in skip})
+        if blockers:
+            blocked.append({"old": old, "new": renames.pop(old),
+                            "blocked_by": blockers})
+    plan = [{"old": old, "new": renames[old],
+             "referrers": len(rename_referrers(vault, old))}
+            for old in sorted(renames)]
+    if args.json:
+        print(json.dumps({
+            "renames": plan,
+            "blocked": blocked,
+            "blocked_paths": [b["old"] for b in blocked],
+            "manual": sorted(manual),
+            "collisions": collisions,
+            "dry_run": bool(args.dry_run),
+        }, indent=2, sort_keys=True))
+    else:
+        for entry in plan:
+            print(f"vault_check: rename {entry['old']} -> {entry['new']}"
+                  f" ({entry['referrers']} referrers)")
+        for entry in blocked:
+            print(f"vault_check: BLOCKED {entry['old']} -> {entry['new']}"
+                  f" blocked_by_frozen_referrer:"
+                  f" {', '.join(entry['blocked_by'])}")
+        for rel in sorted(manual):
+            print(f"vault_check: manual {rel} (need exactly one active DEC"
+                  " ruling row to derive the name)")
+        for collision in collisions:
+            print(f"vault_check: COLLISION {collision}", file=sys.stderr)
+    if collisions:
+        return 1
+    if args.dry_run or not plan:
+        if not args.json:
+            print(f"vault_check: rename plan: {len(plan)} rename(s),"
+                  f" {len(blocked)} blocked, {len(manual)} manual"
+                  + (" (dry run)" if args.dry_run else ""))
+        return 0
+    # Referrer rewrite across the WHOLE vault first (files still at their
+    # old paths), then the renames; one operation, either scope.
+    stem_map = {old[:-3]: renames[old][:-3] for old in renames}
+    pattern = re.compile(
+        r"\[\[(" + "|".join(re.escape(s) for s in sorted(stem_map)) + r")"
+        r"(?=[#|\\\]])")
+    for note in authored(vault):
+        text = "\n".join(note.lines)
+        trailing = note.path.read_text(encoding="utf-8").endswith("\n")
+        new_text = pattern.sub(lambda m: f"[[{stem_map[m.group(1)]}", text)
+        if new_text != text:
+            note.path.write_text(new_text + ("\n" if trailing else ""),
+                                 encoding="utf-8")
+    for old in sorted(renames):
+        (vault.root / old).rename(vault.root / renames[old])
+        print(f"vault_check: renamed {old} -> {renames[old]}")
+    print(f"vault_check: renamed {len(renames)} file(s); generated views"
+          " must be re-rendered (render, render-decisions)")
     return 0
 
 
@@ -1136,14 +2145,7 @@ def scoped(findings: list[Finding], policy: dict,
 def excluded(findings: list[Finding], excludes: list[str]) -> list[Finding]:
     if not excludes:
         return findings
-    normalized = set()
-    for raw in excludes:
-        p = raw.replace("\\", "/")
-        for prefix in ("workspace/docs/", "docs/"):
-            if p.startswith(prefix):
-                p = p[len(prefix):]
-                break
-        normalized.add(p)
+    normalized = {normalize_vault_rel(raw) for raw in excludes}
     out: list[Finding] = []
     for f in findings:
         if f.path in normalized:
@@ -1222,6 +2224,15 @@ def main(argv: list[str] | None = None) -> int:
     p = sub.add_parser("migrate")
     p.add_argument("--vault", type=Path, required=True)
     p.add_argument("--scope", default=None)
+    p.add_argument("--exclude", action="append", default=[])
+    p.add_argument("--payload", type=Path, default=DEFAULT_PAYLOAD)
+    p.add_argument("--rename", action="store_true")
+    p.add_argument("--dry-run", action="store_true", dest="dry_run")
+    p.add_argument("--json", action="store_true")
+    p.add_argument("--override-freeze", action="store_true",
+                   dest="override_freeze",
+                   help="sanctioned override: skip the work-order freeze"
+                        " veto for this run")
     p.set_defaults(func=cmd_migrate)
 
     args = parser.parse_args(argv)

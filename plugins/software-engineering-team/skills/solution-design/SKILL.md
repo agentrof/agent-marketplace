@@ -38,9 +38,8 @@ gate, and a decision log the planner and the software architect read.
      pre-existing systems, baselining precedes engagement one: write
      Current from the repository, minted as one dated baseline decision
      note the Components rows cite.
-   - Session resume (the tree outlives conversations): orient from the
-     landscape and the generated decision index plus open engagements;
-     read only the active engagement's docs fully.
+   - Session resume: orient from the landscape, decision index and open
+     engagements; read only the active engagement's docs fully.
    - Staleness sweep, every session: compare each live record's revisit
      trigger and cited budgets (the generated decision index) against
      the analysis space; a breach opens a re-evaluation engagement
@@ -105,16 +104,17 @@ gate, and a decision log the planner and the software architect read.
      --stamp-engagement <slug> --status approved (the script writes the
      UTC date; never type it), land deferred questions in the Verdict
      with a revisit note (a recorded row, never silence), fold the
-     outcome into landscape.md, re-render the generated index via the
-     render-decisions verb, update the map note and commit the tree.
+     outcome into landscape.md, re-render the index (render-decisions),
+     update the map note, ensure home.md links this tree's map (dynamic
+     home: the map seed materializes with the tree's first content) and
+     commit the tree.
 6. Process pulses: at each round and gate close, append an event via
    the PMO CLI (event append) naming the engagement, round and finding
    counts; the CLI is the launcher at
-   "${AGENTROF_HOME:-$HOME/.agentrof}/bin/pmo_cli.py", per the develop
-   flow's state contract. Content stays in files; the database pulses.
-7. HARD SCOPE LIMIT: this entry writes only under
-   workspace/docs/solution-design/, plus its own map note, home and
-   start-here repair, and vault payload materialization (per-file,
-   only where missing). Requirements gaps route to business-analysis,
-   implementation to request, stack changes to configure, per-story
-   design to the develop flow.
+   "${AGENTROF_HOME:-$HOME/.agentrof}/bin/pmo_cli.py" (develop flow's
+   state contract). Content stays in files; the database pulses.
+7. HARD SCOPE LIMIT: writes only under workspace/docs/solution-design/,
+   plus its own map note, home and start-here repair, and vault payload
+   materialization (per-file, only where missing). Requirements gaps
+   route to business-analysis, implementation to request, stack changes
+   to configure, per-story design to the develop flow.

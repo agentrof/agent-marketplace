@@ -205,12 +205,26 @@ ADR); otherwise paraphrase the procedure and drop the brand.
 
 A plugin that ships vault authoring rules declares every variation point
 in one policy file, `skills/<skill>/data/vault-policy.json` (subtrees,
-map notes, tag namespaces, nav peer range, decision-id grammars,
-generated views, property types). The `vault_policy_shape` rule validates
-the shape and holds the policy, the `templates/vault/` seeds and the
-committed graph config in parity: a policy subtree without a map seed, a
-home seed that does not link every map, or a missing graph color group is
-an error. JSON files under `templates/**/.obsidian/` carry the vault
+map notes, machine dirs, banned basenames, the vetted community-plugin
+set, the graph search filter and ordered color-group queries, the hubs
+ladder, tag namespaces, nav peer range, decision-tree grammars,
+generated views, property types). The `vault_policy_shape` rule
+validates the shape (including the graph-query grammar: no pipe-OR, no
+tag wildcards) and holds the policy, the `templates/vault/` seeds and
+the committed graph config in parity: a policy subtree or extra map
+without a map seed, a stray seed the policy does not name, or a
+`graph.json` whose colorGroups or search drift from the policy is an
+error. The home seed is minimal and DYNAMIC: it must link the extra
+maps and the start-here note and must NOT link any subtree map; subtree
+map lines are added in the consuming project by the entry that births
+each tree. The enable list `community-plugins.json` must equal the
+policy's plugin set, and a vendored plugin directory under
+`templates/vault/.obsidian/plugins/<id>/` must carry `manifest.json`,
+`main.js` and `data.json` together with the manifest id matching the
+directory. Files under `templates/**/.obsidian/plugins/` are vendored
+third-party bundles: they are exempt from the `template_placeholders`
+rule (their own template tokens are not substitutions this plugin's
+skills owe). JSON files under `templates/**/.obsidian/` carry the vault
 app's own key schema and are exempt from the snake_case key rule only
 there; they must still parse. In a plugin shipping the vault-law skill,
 every entry or flow that names the docs tree must also name

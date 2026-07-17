@@ -41,9 +41,12 @@ detected candidates plus free-form input.
      and a profile.md, or a directory containing them)?"; given paths
      are copied verbatim per file, otherwise me.md and profile.md come
      from the templates.
-   - workspace/docs/ vault payload: copy ${CLAUDE_PLUGIN_ROOT}/templates/vault/
-     per file, only where missing (.obsidian payload, home, start-here,
-     maps/ seeds; the obsidian-vault skill owns their law).
+   - workspace/docs/ vault payload from ${CLAUDE_PLUGIN_ROOT}/templates/vault/,
+     per file, only where missing: home, start-here, the extra_maps
+     seeds and the .obsidian payload with plugins/ copied recursively
+     (the vault app asks a one-time trust prompt to enable them). Each
+     subtree map seed is materialized by its tree-birthing entry, born
+     with its tree, never by setup; the obsidian-vault skill owns their law.
 4. Create the skeleton, only missing parts: workspace/apps/,
    workspace/docs/business-analysis/, workspace/docs/solution-design/,
    workspace/docs/system-architecture/, workspace/docs/maps/,
@@ -65,36 +68,31 @@ detected candidates plus free-form input.
    project_key into the config; idempotent). Every flow resolves the
    project by that key. Render the delivery views once (render backlog
    and render ledger) so the delivery map resolves from day zero.
-6. Build workspace/config.json interactively. Its first key is always
-   "managed_by": "software-engineering-team plugin; change only through the
-   configure entry". An existing config.json is never re-interviewed:
-   only missing keys are asked for and added. Detect from project
-   manifests first (a pyproject.toml or requirements.txt implies the
-   python backend; a package.json depending on react implies the
-   typescript frontend), ask only for gaps: backend_stack (supported:
-   python-fastapi), frontend_stack (supported: react-typescript),
-   databases (set drawn from sql, nosql; one or both, never empty),
-   test_command (the one command that runs the whole suite; point it at
-   a script or make target when several stacks must run),
-   mutation_command (the mutation-testing runner for the stacks, with a
-   {{changed_files}} placeholder; required on code stories, absence is
-   a blocking finding; verify by one one-file run, or record unverified
-   in a no-code project for the first code story's QA gate to verify),
-   environment_stack (supported: docker-compose; detect from an existing
-   compose file under workspace/environment/), env_command (one entry
-   point for the verbs up, down, seed <scenario>, logs, url <service>;
-   contract in the environment stack skill; verify by one up-then-down,
-   or record unverified for the first environment story's QA gate to
-   verify), source_dirs, output_language
-   (default English; its scope: the body prose of authored .md
-   documents), terminology_language (default English; its scope: names,
-   technical terms, code and comments, commit messages and PR bodies;
-   the machine layer, file names, keys, ids, CLI output, always stays
-   English). Both language keys are always written into config.json,
-   "English" spelled out when the default is accepted; absence never
-   encodes a default. A stack outside the supported set is refused
-   honestly: this team ships tested stacks only, and new stacks arrive
-   as maintainer releases.
+6. Build workspace/config.json interactively; first key always
+   "managed_by": "software-engineering-team plugin; change only through
+   the configure entry". An existing config.json is never re-interviewed:
+   missing keys are asked and added. Detect from manifests first
+   (pyproject.toml or requirements.txt: the python backend; a package.json
+   depending on react: the typescript frontend), ask only the gaps:
+   backend_stack (supported: python-fastapi), frontend_stack (supported:
+   react-typescript), databases (from sql, nosql; one or both, never
+   empty), test_command (one command for the whole suite; a script or make
+   target when several stacks run), mutation_command (the mutation-testing
+   runner, {{changed_files}} placeholder; required on code stories,
+   absence a blocking finding; verify by one one-file run, or in a no-code
+   project record unverified for the first code story's QA gate),
+   environment_stack (supported: docker-compose; detect from a compose
+   file in workspace/environment/), env_command (one entry point for the
+   verbs up, down, seed <scenario>, logs, url <service>; contract in the
+   environment stack skill; verify by one up-then-down, or record
+   unverified for the first environment story's QA gate), source_dirs,
+   output_language (scope: body prose of authored .md documents) and
+   terminology_language (scope: names, technical terms, code and comments,
+   commit messages and PR bodies; the machine layer, file names, keys,
+   ids, CLI output, always stays English). Both language keys default
+   English, are always written, "English" spelled out on the accepted
+   default; absence never encodes one. An unsupported stack is refused
+   honestly: tested stacks only; new stacks arrive as maintainer releases.
 7. Continuous integration: no PR-triggered test workflow in the
    repository's CI directory (for GitHub, .github/workflows/): offer to
    add one from ${CLAUDE_PLUGIN_ROOT}/templates/ci-tests.yml,
@@ -114,7 +112,9 @@ detected candidates plus free-form input.
 8. Close: run ${CLAUDE_PLUGIN_ROOT}/scripts/vault_check.py check
    --vault workspace/docs. Fresh tree: any finding is a setup bug.
    Existing tree: findings in setup-authored files are setup bugs;
-   pre-existing content findings are named as vault degradation for the
-   next docs gate's stewardship (offer the migrate verb now). Then the
-   pointers: business-analysis first, solution-design for foundations,
-   design-system before screen work, then request.
+   pre-existing content findings are named as vault degradation and
+   routed to the build-docs-vault entry, the on-demand full-vault
+   reorganization (scoped stewardship at each docs gate still repairs
+   its own subtree). Then the pointers: business-analysis first,
+   solution-design for foundations, design-system before screen work,
+   then request.

@@ -59,7 +59,9 @@ The only place the design master is born or changed.
    preference. Run the consolidation sweep when asked (the develop
    flow's periodic reconciliation requests it).
 6. Close: update maps/design-system.md to match (one wikilink per
-   override with its deviation summary), then run
+   override with its deviation summary), ensure home.md links this
+   tree's map (dynamic home: the map seed materializes with the tree's
+   first content), then run
    ${CLAUDE_PLUGIN_ROOT}/scripts/vault_check.py check --vault
    workspace/docs --scope design-system; repair every finding before
    closing (obsidian-vault skill; migrate covers the deterministic

@@ -7,12 +7,13 @@ same pull request.
 ## Surfaces and routes
 
 Entry skills (user surface): request, sketch, demo, business-analysis,
-solution-design, design-system, setup, configure, delivery-lanes.
+solution-design, design-system, setup, configure, delivery-lanes,
+build-docs-vault.
 Entries stay thin: parse input, run the pre-flight, then either
 delegate to a flow file via the plugin root variable (request, sketch,
 demo, delivery-lanes) or execute their own short interactive procedure
 in the main conversation (business-analysis, solution-design,
-design-system, setup, configure).
+design-system, setup, configure, build-docs-vault).
 Internal flows: design, develop, delivery-lanes.
 
 Routes:
@@ -75,6 +76,12 @@ Routes:
 - **setup** is idempotent bootstrap (including the PMO prerequisite
   check and project registration); **configure** is the single change
   gate for the project config file.
+- **build-docs-vault** is the on-demand vault librarian: a full-width
+  audit of the docs vault, an owner-gated rename batch and curation
+  program, deterministic migration before judgment repairs, closing on
+  a green re-check. Setup routes pre-existing vault degradation here;
+  the per-entry stewardship each docs gate runs stays scoped to its
+  own subtree.
 
 ## Critical behavioral rules (head of every flow)
 

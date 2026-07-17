@@ -944,6 +944,12 @@ def check_template_placeholders(tree: Tree, findings: list[Finding]) -> None:
             read_text(p) for p in sorted(skills_dir.glob("*/SKILL.md"))
         ) if skills_dir.is_dir() else ""
         for tpl in sorted(p for p in templates.rglob("*") if p.is_file()):
+            parts = tpl.parts
+            if ".obsidian" in parts and "plugins" in parts:
+                # Vendored third-party vault plugins are shipped verbatim;
+                # their bundles carry their own template tokens, which are
+                # never substitutions this plugin's skills owe.
+                continue
             for lineno, line in enumerate(read_text(tpl).splitlines(), start=1):
                 for token in PLACEHOLDER_RE.findall(line):
                     if f"{{{{{token}}}}}" not in skill_text:
@@ -987,7 +993,40 @@ def check_ba_schema_shape(tree: Tree, findings: list[Finding]) -> None:
             except re.error:
                 err("id_format does not compile as a regex",
                     "id_format is the id law; it must compile")
+            slug_join = schema.get("slug_join")
+            if not (isinstance(slug_join, str) and slug_join):
+                err("slug_join must be a non-empty string",
+                    "named files carry chain-qualified slug prefixes; the"
+                    " join character is schema data, never implied")
+            challenge = schema.get("challenge")
+            for key in ("round_file_format", "space_round_file_format"):
+                value = (challenge.get(key)
+                         if isinstance(challenge, dict) else None)
+                if not (isinstance(value, str) and "{slug}" in value
+                        and "{n}" in value and value.endswith(".md")):
+                    err(f"challenge.{key} must be a .md format string"
+                        " carrying {slug} and {n}",
+                        "round filenames are schema-driven and chain-slug"
+                        " qualified; the format is data, not code")
             row_schemas = schema.get("row_schemas", {})
+            all_columns = {c for row in row_schemas.values()
+                           if isinstance(row, dict)
+                           for c in (row.get("columns") or [])}
+            citation_columns = schema.get("id_citation_columns")
+            if not (isinstance(citation_columns, list) and citation_columns
+                    and all(isinstance(c, str) and c
+                            for c in citation_columns)):
+                err("id_citation_columns must be a non-empty list of column"
+                    " names",
+                    "the columns whose cells cite ids as wikilinks are"
+                    " schema-listed, never inferred")
+            else:
+                for column in citation_columns:
+                    if column not in all_columns:
+                        err(f"id_citation_column '{column}' appears in no"
+                            " row schema",
+                            "every citation column is a real row-schema"
+                            " column")
             seen_prefixes: dict[str, str] = {}
             for type_name, spec in sorted(doc_types.items()):
                 for key, expected in (("required_sections", list),
@@ -996,6 +1035,14 @@ def check_ba_schema_shape(tree: Tree, findings: list[Finding]) -> None:
                         err(f"doc type '{type_name}' key '{key}' must be"
                             f" {expected.__name__}",
                             "every doc type declares sections, mints and gating")
+                location = spec.get("location")
+                if isinstance(location, dict) \
+                        and location.get("kind") == "named_file" \
+                        and not isinstance(location.get("slug_prefixed"), bool):
+                    err(f"doc type '{type_name}' named_file location must"
+                        " carry a boolean slug_prefixed",
+                        "unique chain-slugged basenames are the naming law;"
+                        " every named file declares its stance")
                 for kind in spec.get("mints", []) or []:
                     if str(kind).lower() not in row_schemas:
                         err(f"doc type '{type_name}' mints '{kind}' which has"
@@ -1138,6 +1185,75 @@ def check_vault_policy_shape(tree: Tree, findings: list[Finding]) -> None:
                 err("extra_maps must be a list of kebab-case names",
                     "name the non-subtree map notes (or ship an empty list)")
                 extra_maps = []
+            machine_dirs = policy.get("machine_dirs")
+            if (not isinstance(machine_dirs, list) or not machine_dirs
+                    or not all(isinstance(s, str) and s and "/" not in s
+                               for s in machine_dirs)):
+                err("machine_dirs must be a non-empty list of directory"
+                    " names",
+                    "compiler-owned directories are policy-listed so the"
+                    " checker tolerates them mechanically")
+            banned = policy.get("banned_basenames")
+            if (not isinstance(banned, list) or not banned
+                    or not all(isinstance(s, str) and s.endswith(".md")
+                               for s in banned)):
+                err("banned_basenames must be a non-empty list of .md"
+                    " basenames",
+                    "generic basenames are policy-listed; the naming law is"
+                    " data, not prose")
+            community = policy.get("community_plugins")
+            if (not isinstance(community, list)
+                    or not all(isinstance(s, str) and KEBAB_RE.match(s)
+                               for s in community)):
+                err("community_plugins must be a list of kebab-case plugin"
+                    " ids",
+                    "the vetted community-plugin set is policy-listed; an"
+                    " empty list means none are allowed")
+                community = []
+            graph_search = policy.get("graph_search")
+            if not isinstance(graph_search, str):
+                err("graph_search must be a string",
+                    "the global graph filter is policy data")
+                graph_search = None
+            color_groups = policy.get("graph_color_groups")
+            if (not isinstance(color_groups, list) or not color_groups
+                    or not all(isinstance(s, str) and s
+                               for s in color_groups)):
+                err("graph_color_groups must be a non-empty list of graph"
+                    " query strings",
+                    "the graph legend is policy-ordered; the committed"
+                    " graph config derives from it")
+                color_groups = None
+            else:
+                for query in color_groups:
+                    if "|" in query or re.search(r"tag:#\S*\*", query):
+                        err(f"graph_color_groups query '{query}' uses"
+                            " grammar the graph does not support",
+                            "graph queries have no pipe-OR and no tag"
+                            " wildcards; write OR-joined full tags")
+            hubs = policy.get("hubs")
+            if not isinstance(hubs, list):
+                err("hubs must be a list of {note, covers} objects",
+                    "the hub ladder is policy data; ship an empty list when"
+                    " no subtree has hubs")
+            else:
+                for entry in hubs:
+                    if (not isinstance(entry, dict)
+                            or not (isinstance(entry.get("note"), str)
+                                    and entry.get("note", "").endswith(".md"))
+                            or not (isinstance(entry.get("covers"), str)
+                                    and entry.get("covers"))):
+                        err("each hubs entry needs a .md note glob and a"
+                            " covers glob",
+                            "a hub entry names the hub file pattern and the"
+                            " subtree it owns")
+                        continue
+                    if entry["note"].rsplit("/", 1)[0] != entry["covers"]:
+                        err(f"hubs note '{entry['note']}' does not live in"
+                            f" its covers directory '{entry['covers']}'",
+                            "the hub file sits at the root of the tree it"
+                            " covers; the ladder and the matcher share"
+                            " segments")
             namespaces = policy.get("tag_namespaces")
             if (not isinstance(namespaces, list) or not namespaces
                     or not all(isinstance(s, str) and KEBAB_RE.match(s)
@@ -1175,6 +1291,12 @@ def check_vault_policy_shape(tree: Tree, findings: list[Finding]) -> None:
                         " positive integer",
                         "ids are zero-padded to the minimum width; more digits"
                         " stay legal")
+                for flag in ("code_in_filename", "render_index"):
+                    if not isinstance(spec.get(flag), bool):
+                        err(f"decision tree '{tree_name}' must carry a"
+                            f" boolean {flag}",
+                            "glob trees declare their filename grammar and"
+                            " index stance explicitly; no default")
             for key in ("generated_views", "generated_subtrees"):
                 value = policy.get(key)
                 if (not isinstance(value, list)
@@ -1211,32 +1333,86 @@ def check_vault_policy_shape(tree: Tree, findings: list[Finding]) -> None:
                     " the policy",
                     "add it to subtrees or extra_maps, or drop the seed")
             home = vault_tpl / home_file
+            start_stem = (policy.get("start_here_file")
+                          or "start-here.md").rsplit(".", 1)[0]
             if not home.is_file():
                 err(f"templates/vault/{home_file} is missing",
                     "the home seed is the vault's navigation root")
             else:
                 home_text = read_text(home)
-                for name in sorted(expected_maps):
+                for name in sorted(extra_maps):
                     if f"[[{maps_dir}/{name}" not in home_text:
                         err(f"home seed does not link [[{maps_dir}/{name}]]",
-                            "home links every map note; the graph star"
-                            " topology depends on it")
+                            "home always links the extra maps and start-here")
+                if f"[[{start_stem}" not in home_text:
+                    err(f"home seed does not link [[{start_stem}]]",
+                        "home always links the extra maps and start-here")
+                for name in sorted(subtrees):
+                    if f"[[{maps_dir}/{name}" in home_text:
+                        err(f"home seed links [[{maps_dir}/{name}]]",
+                            "home is dynamic: a subtree's map line is added"
+                            " by the entry that births the tree, never"
+                            " shipped in the seed")
             graph = vault_tpl / ".obsidian" / "graph.json"
             if graph.is_file():
                 try:
                     graph_data = json.loads(read_text(graph))
                 except json.JSONDecodeError:
                     graph_data = {}  # json_hygiene reports the parse failure
-                queries = " ".join(
-                    str(group.get("query", ""))
-                    for group in graph_data.get("colorGroups", [])
-                    if isinstance(group, dict))
-                for name in sorted(subtrees):
-                    if f'path:"{name}/' not in queries:
-                        err(f"graph.json has no color group for subtree"
-                            f" '{name}'",
-                            "one slash-anchored path query per subtree keeps"
-                            " the graph clusters readable")
+                queries = [str(group.get("query", ""))
+                           for group in graph_data.get("colorGroups", [])
+                           if isinstance(group, dict)]
+                if color_groups is not None and queries != color_groups:
+                    err("graph.json colorGroups do not match policy"
+                        " graph_color_groups (same queries, same order)",
+                        "the committed graph legend derives from the policy;"
+                        " regenerate graph.json from graph_color_groups")
+                if graph_search is not None \
+                        and graph_data.get("search", "") != graph_search:
+                    err("graph.json search does not match policy"
+                        " graph_search",
+                        "the global graph filter is policy data; restore it")
+            cp_file = vault_tpl / ".obsidian" / "community-plugins.json"
+            if community:
+                cp_data = None
+                if not cp_file.is_file():
+                    err("templates/vault/.obsidian/community-plugins.json is"
+                        " missing",
+                        "the vetted plugin enable list ships with the"
+                        " payload")
+                else:
+                    try:
+                        cp_data = json.loads(read_text(cp_file))
+                    except json.JSONDecodeError:
+                        cp_data = None  # json_hygiene reports the failure
+                if cp_data is not None and sorted(cp_data) != sorted(community):
+                    err("community-plugins.json does not match policy"
+                        " community_plugins",
+                        "the enable list and the policy set are one fact")
+            for plugin_id in community:
+                plugin_dir = vault_tpl / ".obsidian" / "plugins" / plugin_id
+                if not plugin_dir.is_dir():
+                    continue  # vendored payload lands separately; parity
+                    # binds the moment the directory exists
+                for fname in ("manifest.json", "main.js", "data.json"):
+                    if not (plugin_dir / fname).is_file():
+                        err(f"vendored plugin '{plugin_id}' is missing"
+                            f" {fname}",
+                            "a vendored plugin ships manifest, build and"
+                            " settings together")
+                manifest_path = plugin_dir / "manifest.json"
+                if manifest_path.is_file():
+                    try:
+                        manifest = json.loads(read_text(manifest_path))
+                    except json.JSONDecodeError:
+                        manifest = {}  # json_hygiene reports the failure
+                    if isinstance(manifest, dict) \
+                            and manifest.get("id") != plugin_id:
+                        err(f"vendored plugin manifest id"
+                            f" '{manifest.get('id')}' does not match its"
+                            f" directory '{plugin_id}'",
+                            "the enable list, the directory and the manifest"
+                            " name one plugin")
 
 
 CHECKS = {

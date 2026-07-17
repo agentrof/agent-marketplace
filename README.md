@@ -21,7 +21,7 @@ automatically as a dependency;
 <!-- counts:start -->
 | Plugins | Agents | Entry skills | Knowledge skills |
 |---|---|---|---|
-| 2 | 12 | 10 | 14 |
+| 2 | 12 | 11 | 14 |
 <!-- counts:end -->
 
 Counts above are injected by `tools/counts.py`; they are never written by
@@ -62,6 +62,7 @@ skills stay behind them.
 | `/software-engineering-team:request` | Real work. Atomic asks ship as a small PR; everything else runs the backlog path with gates. |
 | `/software-engineering-team:delivery-lanes` | The integrator surface for parallel delivery: proposes lanes, opens worktrees the user drives in their own sessions, owns every merge checkpoint. |
 | `/software-engineering-team:configure` | The single change gate for the project config. |
+| `/software-engineering-team:build-docs-vault` | On-demand reorganization of the whole docs vault: full audit, owner-gated renames, deterministic migration, curated maps and titles. |
 | `/project-management-office:control-tower` | Starts Control Tower, the read-only web dashboard over the central database, and replies with the clickable URL. |
 
 A first session usually looks like: `setup`, then `business-analysis`

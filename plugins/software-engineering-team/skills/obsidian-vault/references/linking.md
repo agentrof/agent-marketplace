@@ -6,19 +6,21 @@ invisible; every edge follows one grammar or the graph lies.
 ## Wikilink grammar
 
 ```markdown
-[[solution-design/decisions/sd-007-order-events|SD-007]]   link, aliased
-[[business-analysis/shop/space|analysis space]]            link, aliased
-![[_attachments/checkout-flow.png]]                        embed
-[[business-analysis/shop/budgets#^event-volume|budget]]    block anchor
+[[solution-design/decisions/sd-007-order-events|SD-007]]     link, aliased
+[[business-analysis/shop/shop-space|analysis space]]         link, aliased
+![[_attachments/checkout-flow.png]]                          embed
+[[business-analysis/shop/shop-budgets#^event-volume|budget]] block anchor
 ```
 
 - Targets are vault-absolute: the path from the vault root, forward
   slashes, exact case, no leading slash, no `.md` extension on notes.
-  Never rely on shortest-name resolution; contract filenames repeat
-  across subtrees and the tie-break is undefined.
+  Never rely on shortest-name resolution: the vault-absolute path is
+  the one grammar the checker resolves deterministically, and it stays
+  valid however the tree grows.
 - Always alias prose links: the reader sees the id or a noun phrase,
-  never a raw path. A bare id in prose is always the ALIAS of a link to
-  the doc that mints it.
+  never a raw path. A bare id in prose is always the ALIAS of a link
+  to the doc that mints it; an id-shaped alias on any other target is
+  an `alias_ownership` error.
 - Embeds (`![[...]]`) are for attachments and deliberate transclusion
   only; a normal citation is a link, not an embed.
 
@@ -40,8 +42,14 @@ Inside a table row the alias pipe must be escaped or it splits the cell:
 | decision | [[solution-design/decisions/sd-007-order-events\|SD-007]] |
 ```
 
-Schema-declared id columns in analysis registries keep BARE ids (they
-are machine-parsed data; the prose citation carries the edge).
+Schema-declared id-citation columns (cites, affects, blocks, targets,
+verify) carry the SAME escaped-pipe wikilink form, targeting the doc
+that mints the id: `[[business-analysis/shop/domains/inventory/rules/stock-item-lifecycle\|BR-INV-001]]`.
+The old bare-cell law is dead: the compiler normalizes citation cells
+back to bare ids for the registry, so the machine layer lost nothing,
+and a bare id left in a citation cell is an error the `migrate` verb
+rewrites. The ONE place a bare id stays legal is its mint: the id
+column of the owning row, where a wikilink is the error instead.
 
 ## What stays a markdown link
 
@@ -52,8 +60,16 @@ are machine-parsed data; the prose citation carries the edge).
 
 ## Renames
 
-The vault app's rename refactoring never runs headlessly. A rename is a
-migration: grep the old path across the vault, rewrite every referrer
-(body links, frontmatter values, map rows) in the same commit, then run
-the vault check. Decision notes are never renamed after acceptance; the
+The vault app's rename refactoring never runs headlessly, and a manual
+grep is no longer the runbook. A rename is a migration owned by the
+checker: `vault_check.py migrate --rename [--dry-run] [--json]` builds
+the grammar-driven rename map (chain-qualified named files, id-prefixed
+decision notes; already-compliant files are skipped), then renames and
+rewrites every referrer across the WHOLE vault (body links, frontmatter
+values, map rows) in one operation, even when `--scope` narrows the
+map; generated views are re-rendered by their owning verbs afterwards.
+A rename whose referrers include a frozen path is VETOED and reported
+as `blocked_by_frozen_referrer` with the blocking paths; `--dry-run`
+prints each old -> new pair with its referrer count for the gate
+conversation. Decision notes are never renamed after acceptance; the
 alias and the generated index absorb discoverability.

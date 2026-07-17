@@ -1,6 +1,6 @@
 {
   "collapse-filter": false,
-  "search": "",
+  "search": "-path:_generated",
   "showTags": false,
   "showAttachments": false,
   "hideUnresolved": false,
@@ -8,42 +8,49 @@
   "collapse-color-groups": false,
   "colorGroups": [
     {
-      "query": "path:\"business-analysis/\"",
+      "query": "tag:#doc/rule-set",
       "color": {
         "a": 1,
-        "rgb": 1193960
+        "rgb": 16007990
       }
     },
     {
-      "query": "path:\"solution-design/\"",
+      "query": "tag:#doc/decision",
       "color": {
         "a": 1,
-        "rgb": 4056063
+        "rgb": 5431378
       }
     },
     {
-      "query": "path:\"system-architecture/\"",
+      "query": "tag:#doc/acceptance-set",
       "color": {
         "a": 1,
-        "rgb": 8152319
+        "rgb": 2201331
       }
     },
     {
-      "query": "path:\"design-system/\"",
+      "query": "tag:#doc/process",
       "color": {
         "a": 1,
-        "rgb": 16742953
+        "rgb": 16750592
+      }
+    },
+    {
+      "query": "tag:#doc/entity",
+      "color": {
+        "a": 1,
+        "rgb": 10233776
+      }
+    },
+    {
+      "query": "tag:#doc/moc OR tag:#doc/home OR tag:#doc/guide",
+      "color": {
+        "a": 1,
+        "rgb": 38536
       }
     },
     {
       "query": "path:\"maps/delivery\" OR path:\"backlog\" OR path:\"quality-ledger\"",
-      "color": {
-        "a": 1,
-        "rgb": 2278750
-      }
-    },
-    {
-      "query": "path:\"maps/\" OR file:\"home\" OR file:\"start-here\"",
       "color": {
         "a": 1,
         "rgb": 9741240

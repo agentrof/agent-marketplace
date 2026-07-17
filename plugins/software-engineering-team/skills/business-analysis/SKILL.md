@@ -44,7 +44,8 @@ ${CLAUDE_PLUGIN_ROOT}/scripts/ba_compile.py.
      memory; conversation is not.
 2. New topic: ba_compile.py init --space
    workspace/docs/business-analysis/<slug> --title "<title>" --code
-   <CODE>. The five root files and _generated/ appear; run render once.
+   <CODE>. The four chain-slugged root files and _generated/ appear;
+   run render once.
 3. Adopt the business-analyst role IN THIS CONVERSATION (an interactive
    persona, not a spawn; analysis is a dialogue). Read the behavioral
    constitution at ${CLAUDE_PLUGIN_ROOT}/constitution.md and honor it;
@@ -59,8 +60,10 @@ ${CLAUDE_PLUGIN_ROOT}/scripts/ba_compile.py.
    - New docs come from ba_compile.py stub (born compliant with the
      vault frontmatter and nav section; it prints the node's next free
      ids). Grow domains only on the decomposition reference's split
-     signals; a small topic stays one node. A new space or domain joins
-     maps/business-analysis.md in the same milestone.
+     signals; a small topic stays one node. A new space or domain hub
+     joins maps/business-analysis.md in the same milestone; the tree's
+     FIRST content also materializes the map seed from the templates
+     and adds the home map line (dynamic home).
    - Question in rounds through the AskUserQuestion popup (at most four
      questions per round, options with tradeoffs, recommended first);
      flush every answer into its owning doc per the fact-routing test.
@@ -85,9 +88,9 @@ ${CLAUDE_PLUGIN_ROOT}/scripts/ba_compile.py.
    (scoped with --node for a domain), render, and the vault stewardship
    check from step 1; a red compile or a red vault check blocks the
    gate.
-   - FOUNDATION gate, once: space.md, glossary.md, actors.md,
-     budgets.md approved together; the approval is asked through the
-     AskUserQuestion popup.
+   - FOUNDATION gate, once: <slug>-space.md, <slug>-glossary.md,
+     <slug>-actors.md and <slug>-budgets.md approved together; the
+     approval is asked through the AskUserQuestion popup.
    - DOMAIN gate, per domain as its analysis closes: present
      _generated/status.md and the open-questions board; the user
      approves or defers named questions explicitly through the

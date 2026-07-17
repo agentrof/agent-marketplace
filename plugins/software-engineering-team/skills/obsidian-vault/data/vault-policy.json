@@ -1,5 +1,5 @@
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "vault_root_dirname": "docs",
   "home_file": "home.md",
   "start_here_file": "start-here.md",
@@ -11,6 +11,45 @@
     "design-system"
   ],
   "extra_maps": ["delivery"],
+  "machine_dirs": ["_generated"],
+  "banned_basenames": [
+    "space.md",
+    "domain.md",
+    "budgets.md",
+    "glossary.md",
+    "actors.md",
+    "index.md",
+    "registry.md",
+    "status.md",
+    "notes.md",
+    "overview.md",
+    "readme.md"
+  ],
+  "community_plugins": ["obsidian-front-matter-title-plugin"],
+  "graph_search": "-path:_generated",
+  "graph_color_groups": [
+    "tag:#doc/rule-set",
+    "tag:#doc/decision",
+    "tag:#doc/acceptance-set",
+    "tag:#doc/process",
+    "tag:#doc/entity",
+    "tag:#doc/moc OR tag:#doc/home OR tag:#doc/guide",
+    "path:\"maps/delivery\" OR path:\"backlog\" OR path:\"quality-ledger\""
+  ],
+  "hubs": [
+    {
+      "note": "business-analysis/*/*-space.md",
+      "covers": "business-analysis/*"
+    },
+    {
+      "note": "business-analysis/*/domains/*/*-domain.md",
+      "covers": "business-analysis/*/domains/*"
+    },
+    {
+      "note": "business-analysis/*/domains/*/domains/*/*-domain.md",
+      "covers": "business-analysis/*/domains/*/domains/*"
+    }
+  ],
   "tag_namespaces": ["doc", "status"],
   "nav_peer_min": 2,
   "nav_peer_max": 5,
@@ -20,13 +59,38 @@
       "path": "solution-design/decisions",
       "id_prefix": "SD",
       "id_min_width": 3,
+      "code_in_filename": false,
+      "render_index": true,
       "extra_column": "territory"
     },
     "system_architecture": {
       "path": "system-architecture/decisions",
       "id_prefix": "ADR",
       "id_min_width": 3,
+      "code_in_filename": false,
+      "render_index": true,
       "extra_column": "story"
+    },
+    "ba_space": {
+      "path": "business-analysis/*/decisions",
+      "id_prefix": "DEC",
+      "id_min_width": 3,
+      "code_in_filename": true,
+      "render_index": false
+    },
+    "ba_domain": {
+      "path": "business-analysis/*/domains/*/decisions",
+      "id_prefix": "DEC",
+      "id_min_width": 3,
+      "code_in_filename": true,
+      "render_index": false
+    },
+    "ba_domain_nested": {
+      "path": "business-analysis/*/domains/*/domains/*/decisions",
+      "id_prefix": "DEC",
+      "id_min_width": 3,
+      "code_in_filename": true,
+      "render_index": false
     }
   },
   "generated_views": [
@@ -50,6 +114,16 @@
     "territory": "text",
     "revisit_trigger": "text",
     "story": "text",
+    "governs": "list",
+    "verifies": "list",
+    "code": "text",
+    "scope": "text",
+    "review_scope": "text",
+    "verdict": "text",
+    "system_name": "text",
+    "direction": "text",
+    "round": "number",
+    "locked": "checkbox",
     "tags": "list",
     "aliases": "list"
   }

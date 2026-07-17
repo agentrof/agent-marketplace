@@ -1,17 +1,20 @@
 # Vault Structure
 
 The graph reads as deliberate architecture because the topology is law:
-a two-level star from the home note through map notes into the doc
-trees, leaves linking back up and sideways.
+home into map notes, maps into their trees' hubs, hubs into leaves,
+leaves linking back up and sideways.
 
 ## The layout
 
 ```text
 workspace/docs/            the vault root (open THIS in the vault app)
-  home.md                  navigation root; links only maps + start-here
+  home.md                  navigation root; dynamic, links maps + start-here
   start-here.md            human onboarding note
   maps/                    one map note per subtree + delivery
   business-analysis/       analysis spaces (space standard governs)
+    shop/                  a space: shop-space.md, shop-glossary.md,
+                           shop-actors.md, shop-budgets.md, domains/,
+                           decisions/, reviews/, _generated/
   solution-design/         landscape, engagements, decisions/, index
   system-architecture/     living documents, decisions/, index
   design-system/           MASTER and page overrides
@@ -22,20 +25,45 @@ workspace/docs/            the vault root (open THIS in the vault app)
   .obsidian/               committed payload + local UI state
 ```
 
-Subtrees, map names, generated views and the attachments directory are
-policy (`data/vault-policy.json`); an unknown top-level directory is a
-layout error, so new trees enter through policy, never ad hoc.
+Subtrees, map names, machine directories, generated views and the
+attachments directory are policy (`data/vault-policy.json`); an unknown
+top-level directory is a layout error, so new trees enter through
+policy, never ad hoc.
+
+## Naming
+
+- Authored basenames are vault-unique and the policy's
+  `banned_basenames` list kills the generic set; both violations are
+  per-file `basename_collision` errors, so a scoped gate repairs its
+  own subtree.
+- Named-file contracts carry the chain-qualified slug: the space
+  directory's slug leads and every domain folder on the path extends
+  it. Root files are `shop-space.md`, `shop-glossary.md`,
+  `shop-actors.md`, `shop-budgets.md`; a domain overview is
+  `domains/inventory/shop-inventory-domain.md`; a nested one is
+  `domains/finance/domains/accounts-payable/shop-finance-accounts-payable-domain.md`.
+- When the chain itself collides (two folder paths spelling one
+  chain), the remediation is to RENAME THE DOMAIN FOLDER so the chain
+  stays unique, then let `migrate --rename` regenerate the filenames
+  and rewrite every referrer.
 
 ## Home and maps
 
-- `home.md` links ONLY map notes and the start-here note. Linking a
-  leaf from home fuses the clusters into one gravity well.
-- Each map note (`type: moc`, no status) is the curated hub of its
-  subtree: the producing persona updates it in the same session that
-  creates, renames or retires docs. Maps link hubs directly (an
-  analysis space's space.md, the landscape, MASTER); deep leaves get
-  their edges from their own hubs, and generated index rows count as
-  edges.
+- `home.md` is DYNAMIC: it links the start-here note, the policy's
+  extra maps (delivery) and the map of every subtree that BEARS notes;
+  linking an empty tree's map is an error, exactly like omitting a
+  content-bearing one. The entry that births a tree materializes its
+  map seed from the templates and adds the home line in the same
+  session; template seeds ship for every map, copy time is the tree's
+  birth.
+- Maps link HUBS, hubs link leaves, leaves are NOT required on maps.
+  Each map note (`type: moc`, no status) curates its subtree: it links
+  the policy-ladder hubs (a space's overview, each domain's overview)
+  plus the tree's top documents (the landscape, MASTER); deep leaves
+  get their edges from their hubs, nav sections and generated index
+  rows. Every policy hub MUST have an inbound link from its subtree
+  map (`map_coverage`); the producing persona updates the map in the
+  same session that creates, renames or retires docs.
 - `maps/delivery.md` links the generated backlog and quality-ledger
   views so delivery state is one hop from home.
 
@@ -45,16 +73,27 @@ Every authored leaf ends with the nav section:
 
 ```markdown
 ## Baglantilar <!-- sec: nav -->
+[[business-analysis/shop/domains/inventory/shop-inventory-domain|Inventory]] -
+[[business-analysis/shop/domains/inventory/entities/stock-item|Stock Item]] -
+[[business-analysis/shop/shop-glossary|Glossary]]
+```
+
+The marker line is the fixed machine layer; the heading text above it
+follows the project's output language. The FIRST wikilink is the owning
+HUB per the policy hubs ladder: the deepest existing hub note covering
+this file (above, the domain overview). Hubs themselves and notes no
+ladder entry covers keep the subtree map first:
+
+```markdown
+## Baglantilar <!-- sec: nav -->
 [[maps/solution-design|Solution Design]] -
 [[solution-design/landscape|Landscape]] -
 [[solution-design/decisions/sd-007-order-events|SD-007]]
 ```
 
-The marker line is the fixed machine layer; the heading text above it
-follows the project's output language. First wikilink = the owning map
-(the up edge, positional). Then 2-5 peers a reader would jump to next
-(policy range; the floor relaxes while a subtree holds fewer than three
-notes). Home, start-here and map notes carry no nav section.
+After the first link come 2-5 peers a reader would jump to next (policy
+range; the floor relaxes while a subtree holds fewer than three notes).
+Home, start-here and map notes carry no nav section.
 
 ## Generated surfaces
 
@@ -63,6 +102,10 @@ notes). Home, start-here and map notes carry no nav section.
   subject, legal as a link target, guard-denied to hand edits, healed
   only by its owning render verb. Index merge conflicts are resolved by
   re-rendering, never by hand.
+- Policy `machine_dirs` (`_generated/`) are compiler-owned directories
+  the layout check tolerates wholesale, including non-note files such
+  as `registry.json`; authored docs never link into them, and the
+  global graph filters them out.
 - `api/` and other policy-listed generated subtrees hold non-note
   exports; they are never orphans and never carry frontmatter.
 

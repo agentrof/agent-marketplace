@@ -139,11 +139,60 @@ def scan_install(install_path: Path) -> dict:
             "commands": commands, "flows": flows}
 
 
+def scan_plugin_roots(teams: dict, errors: list) -> None:
+    """Harness-neutral install records: the plugin_roots registry that
+    hooks and the setup entry maintain (the same file the agentrof_run
+    dispatcher resolves from). Registry membership itself is the team
+    marker: only this marketplace's own plugins register there, so the
+    Codex manifests' lack of a dependencies field costs nothing."""
+    registry_file = pmo_cli.data_dir() / "plugin_roots.json"
+    if not registry_file.is_file():
+        return
+    try:
+        registry = json.loads(registry_file.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        errors.append(f"plugin_roots.json unreadable: {registry_file}")
+        return
+    harness = registry.get("harness", "")
+    for plugin_name, entry in sorted((registry.get("plugins") or {}).items()):
+        if plugin_name in teams:
+            continue  # the Claude registry record is richer; keep it
+        install_path = Path(entry.get("root", ""))
+        if not install_path.is_dir():
+            errors.append(
+                f"{plugin_name}: registered root missing: {install_path}")
+            continue
+        detail = scan_install(install_path)
+        manifest = detail["manifest"]
+        is_backbone = plugin_name == "project-management-office"
+        teams[plugin_name] = {
+            "plugin_name": plugin_name,
+            "marketplace": "",
+            "display_name": plugin_name.replace("-", " ").title(),
+            "description": manifest.get("description", ""),
+            "kind": "backbone" if is_backbone else "team",
+            "installed": True,
+            "in_use": False,
+            "installs": [{
+                "version": entry.get("version", ""),
+                "scope": f"harness:{harness}" if harness else "harness",
+                "project_path": "",
+                "last_updated": entry.get("registered_at", ""),
+            }],
+            "agents": detail["agents"],
+            "skills": detail["skills"],
+            "commands": detail["commands"],
+            "flows": detail["flows"],
+        }
+
+
 def scan_catalog() -> dict:
     """Team plugins on this machine: install records from the Claude plugin
-    registry, detail scanned from each installed copy, usage joined from the
-    database teams table. A team plugin is recognized mechanically: its
-    manifest declares a dependency on project-management-office."""
+    registry plus the harness-neutral plugin_roots registry, detail
+    scanned per installed copy, usage joined from the database teams
+    table. A Claude-registry plugin is recognized mechanically by its
+    manifest's dependency on project-management-office; a plugin_roots
+    record is ours by construction."""
     registry_path = plugins_dir() / "installed_plugins.json"
     registry = {}
     if registry_path.is_file():
@@ -192,6 +241,7 @@ def scan_catalog() -> dict:
                 "project_path": entry.get("projectPath", ""),
                 "last_updated": entry.get("lastUpdated", ""),
             })
+    scan_plugin_roots(teams, errors)
     return {"teams": teams, "errors": errors}
 
 

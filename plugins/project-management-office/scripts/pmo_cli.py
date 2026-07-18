@@ -26,8 +26,8 @@ import sys
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
-PMO_VERSION = "1.1.0"
-SCHEMA_VERSION = 1
+PMO_VERSION = "1.2.0"
+SCHEMA_VERSION = 2
 DB_NAME = "agentrof.db"
 
 WO_STATUSES = {"running", "waiting_gate", "blocked", "escalated", "complete"}
@@ -128,6 +128,7 @@ CREATE TABLE IF NOT EXISTS task_attempts (
     CHECK (outcome IN ('running', 'done', 'blocked', 'failed')),
   failure_reason TEXT NOT NULL DEFAULT '',
   cost_usd REAL,
+  source TEXT NOT NULL DEFAULT 'hook',
   UNIQUE (task_id, attempt)
 );
 CREATE TABLE IF NOT EXISTS story_criteria (
@@ -242,6 +243,10 @@ CREATE TABLE IF NOT EXISTS events (
   action TEXT NOT NULL,
   payload_json TEXT NOT NULL DEFAULT '{}'
 );
+CREATE TABLE IF NOT EXISTS meta (
+  key TEXT PRIMARY KEY,
+  value TEXT NOT NULL
+);
 CREATE INDEX IF NOT EXISTS idx_work_item_deps_reverse ON work_item_deps(depends_on_id);
 CREATE INDEX IF NOT EXISTS idx_task_attempts_task ON task_attempts(task_id);
 CREATE INDEX IF NOT EXISTS idx_events_project ON events(project_id, id);
@@ -253,6 +258,17 @@ CREATE INDEX IF NOT EXISTS idx_findings_wo_status ON findings(work_order_id, sta
 # block above always describes the final shape; each step only transforms what
 # an older database already holds. events rows are history and are never
 # rewritten: consumers that match action names accept old and new vocabulary.
+MIGRATIONS: dict[int, list[str]] = {
+    # 1 -> 2: the integrity meta table and the attempt source column. The
+    # meta table itself arrives via the idempotent DDL; only the column
+    # needs an explicit transform on an existing database.
+    1: [
+        "ALTER TABLE task_attempts ADD COLUMN source TEXT NOT NULL"
+        " DEFAULT 'hook'",
+    ],
+}
+
+
 def now() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
 
@@ -285,8 +301,69 @@ class Rule(Exception):
     """A rule violation: reported on stderr, exit 1."""
 
 
+def content_fingerprint(con: sqlite3.Connection) -> str:
+    """Deterministic hash of the full database content (every table except
+    meta, rows ordered by rowid). The database is small by design, so a
+    full-content hash is affordable and catches foreign UPDATEs that row
+    counts and max ids would miss."""
+    import hashlib
+    digest = hashlib.sha256()
+    tables = [row[0] for row in con.execute(
+        "SELECT name FROM sqlite_master WHERE type = 'table'"
+        " AND name != 'meta' ORDER BY name")]
+    for table in tables:
+        digest.update(table.encode("utf-8"))
+        for row in con.execute(f"SELECT * FROM {table} ORDER BY rowid"):
+            digest.update(repr(tuple(row)).encode("utf-8"))
+    return digest.hexdigest()
+
+
+def _integrity_stamp(con: sqlite3.Connection) -> None:
+    """Update the tamper tripwire inside the current transaction: the
+    generation counter and the content fingerprint move together with
+    every sanctioned mutation. A foreign writer changes content without
+    them, which `verify` detects at the next gate."""
+    try:
+        row = con.execute(
+            "SELECT value FROM meta WHERE key = 'generation'").fetchone()
+        generation = int(row["value"]) + 1 if row else 1
+        fingerprint = content_fingerprint(con)
+        for key, value in (("generation", str(generation)),
+                           ("fingerprint", fingerprint),
+                           ("stamped_at", now())):
+            con.execute(
+                "INSERT INTO meta (key, value) VALUES (?, ?)"
+                " ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+                (key, value),
+            )
+    except sqlite3.OperationalError:
+        pass  # pre-migration database without a meta table
+
+
+def verify_integrity(con: sqlite3.Connection) -> str | None:
+    """None when the content matches the recorded fingerprint; otherwise a
+    human-readable problem statement. An empty meta table (fresh or
+    pre-migration database) is not a finding."""
+    try:
+        row = con.execute(
+            "SELECT value FROM meta WHERE key = 'fingerprint'").fetchone()
+    except sqlite3.OperationalError:
+        return None
+    if row is None:
+        return None
+    actual = content_fingerprint(con)
+    if actual == row["value"]:
+        return None
+    return (
+        "database content does not match the recorded integrity"
+        " fingerprint: a writer other than the PMO CLI has touched the"
+        " database since the last sanctioned mutation"
+    )
+
+
 def mutate(con: sqlite3.Connection):
-    """Context manager: BEGIN IMMEDIATE, commit on success, rollback on error."""
+    """Context manager: BEGIN IMMEDIATE, commit on success, rollback on
+    error. Every successful commit re-stamps the integrity tripwire."""
     class _Tx:
         def __enter__(self):
             con.execute("BEGIN IMMEDIATE")
@@ -294,6 +371,7 @@ def mutate(con: sqlite3.Connection):
 
         def __exit__(self, exc_type, exc, tb):
             if exc_type is None:
+                _integrity_stamp(con)
                 con.execute("COMMIT")
             else:
                 con.execute("ROLLBACK")
@@ -600,7 +678,7 @@ def close_running_attempts(con, task_id: int, outcome: str, stamp: str,
 
 
 def open_attempt(con, task_id: int, role: str, agent_name: str,
-                 session_id: str, stamp: str) -> int:
+                 session_id: str, stamp: str, source: str = "hook") -> int:
     """Insert the next attempt row for a task; returns the attempt number."""
     highest = con.execute(
         "SELECT COALESCE(MAX(attempt), 0) AS n FROM task_attempts WHERE task_id = ?",
@@ -609,8 +687,8 @@ def open_attempt(con, task_id: int, role: str, agent_name: str,
     attempt = highest + 1
     con.execute(
         "INSERT INTO task_attempts (task_id, attempt, agent_name, role,"
-        " session_id, started_at) VALUES (?, ?, ?, ?, ?, ?)",
-        (task_id, attempt, agent_name, role, session_id, stamp),
+        " session_id, started_at, source) VALUES (?, ?, ?, ?, ?, ?, ?)",
+        (task_id, attempt, agent_name, role, session_id, stamp, source),
     )
     return attempt
 
@@ -629,6 +707,15 @@ def cmd_init_db(args) -> int:
             f"database schema version {version} is newer than this CLI"
             f" ({SCHEMA_VERSION}); update the project-management-office plugin"
         )
+    # Stepwise migrations first: each step transforms what an older
+    # database already holds and stamps the version it reached, so a crash
+    # mid-ladder resumes at the right rung. The DDL then fills in every
+    # net-new object idempotently.
+    while 0 < version < SCHEMA_VERSION:
+        for statement in MIGRATIONS.get(version, []):
+            con.execute(statement)
+        version += 1
+        con.execute(f"PRAGMA user_version = {version}")
     con.executescript(DDL)  # commits itself; keep it outside the transaction
     with mutate(con):
         if con.execute("PRAGMA user_version").fetchone()[0] == 0:
@@ -1028,6 +1115,9 @@ def cmd_wo_validate(args) -> int:
     con = connect()
     order = get_work_order(con, args.work_order_key)
     problems: list[str] = []
+    integrity = verify_integrity(con)
+    if integrity:
+        problems.append(integrity)
     if order["status"] not in WO_STATUSES:
         problems.append(f"work order status not in enum: {order['status']}")
     steps = {
@@ -1067,6 +1157,10 @@ def cmd_resume_info(args) -> int:
     orders = active_work_orders(con, project["id"])
     info = {"project_key": args.project_key, "active_work_orders": [],
             "recent_events": []}
+    integrity = verify_integrity(con)
+    if integrity:
+        info["integrity_warning"] = integrity
+        print(f"pmo: WARNING: {integrity}", file=sys.stderr)
     for order in orders:
         steps = con.execute(
             "SELECT step_id, status, attempts FROM work_order_steps"
@@ -1721,7 +1815,29 @@ def cmd_task_close(args) -> int:
             " WHERE id = ?",
             (args.outcome, finished, now(), task["id"]),
         )
-        close_running_attempts(con, task["id"], args.outcome, now())
+        closed = close_running_attempts(con, task["id"], args.outcome, now())
+        if closed == 0:
+            # No hook ever opened an attempt (hook-less harness or hooks
+            # not trusted): the CLI is the guarantee, so synthesize one
+            # spanning the task's own stamps, honestly labeled.
+            existing = con.execute(
+                "SELECT COUNT(*) AS n FROM task_attempts WHERE task_id = ?",
+                (task["id"],),
+            ).fetchone()["n"]
+            if existing == 0:
+                started = task["started_at"] or task["created_at"]
+                attempt = open_attempt(con, task["id"], args.role, "",
+                                       "", started, source="cli_inferred")
+                con.execute(
+                    "UPDATE task_attempts SET outcome = ?, finished_at = ?"
+                    " WHERE task_id = ? AND attempt = ?",
+                    (args.outcome, finished, task["id"], attempt),
+                )
+                record(con, "attempt_synthesized",
+                       project_id=order["project_id"],
+                       work_order_id=order["id"],
+                       payload={"task": task["external_id"],
+                                "source": "cli_inferred"})
         record(con, "task_closed", project_id=order["project_id"],
                work_order_id=order["id"],
                payload={"task": task["external_id"], "outcome": args.outcome})
@@ -2080,6 +2196,79 @@ def cmd_load(args) -> int:
     return 0
 
 
+def cmd_verify(args) -> int:
+    """The integrity tripwire: compare database content against the
+    fingerprint the last sanctioned mutation recorded. Foreign writes
+    (anything that is not this CLI) are detected here, at gate time and
+    at resume, which is the detect-after guarantee on harnesses whose
+    hooks cannot deny before write."""
+    con = connect()
+    problem = verify_integrity(con)
+    if args.json:
+        print(json.dumps({"ok": problem is None,
+                          "problem": problem or ""}, sort_keys=True))
+    if problem:
+        if not args.json:
+            print(f"pmo: INVALID: {problem}", file=sys.stderr)
+        return 1
+    if not args.json:
+        print("pmo: database integrity verified")
+    return 0
+
+
+def cmd_session_reconcile(args) -> int:
+    """Infer the dangling-session audit event on harnesses without a
+    session-end hook: at the next session start, an active work order in
+    this worktree whose newest event is not already the dangling marker
+    gets one, honestly labeled as inferred. Idempotent per session
+    boundary (the dedup rule): reconcile directly after a recorded
+    session end appends nothing."""
+    con = connect()
+    project = get_project(con, args.project_key)
+    orders = active_work_orders(con, project["id"])
+    if args.worktree:
+        wanted = norm_path(args.worktree)
+        orders = [o for o in orders if o["worktree_path"] == wanted]
+    appended = 0
+    with mutate(con):
+        for order in orders:
+            newest = con.execute(
+                "SELECT action FROM events WHERE work_order_id = ?"
+                " ORDER BY id DESC LIMIT 1",
+                (order["id"],),
+            ).fetchone()
+            if newest and newest["action"] == "session_ended_with_active_work_order":
+                continue
+            record(con, "session_ended_with_active_work_order",
+                   project_id=project["id"], work_order_id=order["id"],
+                   actor="hook",
+                   payload={"reason": "inferred_at_next_start",
+                            "current_step": order["current_step"]})
+            appended += 1
+    print(f"pmo: session reconcile appended {appended} event(s)")
+    return 0
+
+
+def cmd_ensure(args) -> int:
+    """One idempotent bootstrap: initialize the database, sync the
+    launcher and report integrity. Entry pre-flights call this on every
+    harness, so hooks are accelerators and never the only path to a
+    working backbone. Bootstrap must not brick a session: an integrity
+    problem is reported loudly but exits 0; gates fail on it via
+    work-order validate."""
+    code = cmd_init_db(args)
+    if code != 0:
+        return code
+    sync_args = argparse.Namespace(force=False)
+    cmd_sync_launcher(sync_args)
+    con = connect()
+    problem = verify_integrity(con)
+    if problem:
+        print(f"pmo: WARNING: {problem}", file=sys.stderr)
+    print("pmo: ensure complete")
+    return 0
+
+
 def dashboard_assets() -> tuple[Path, Path]:
     """(module path, index.html path) next to this script. Works from both the
     plugin layout (scripts/ + dashboard/) and the synced layout (bin/ +
@@ -2103,6 +2292,14 @@ def cmd_sync_launcher(args) -> int:
     module_src, index_src = dashboard_assets()
     if module_src.is_file() and module_src != bin_dir / "pmo_dashboard.py":
         shutil.copyfile(module_src, bin_dir / "pmo_dashboard.py")
+    # The dispatcher and the generated harness data travel with the
+    # launcher: every "$RUN" invocation in shipped content resolves
+    # through them, on every harness.
+    for extra in ("agentrof_run.py", "harness_runtime.json"):
+        extra_src = source.parent / extra
+        extra_dst = bin_dir / extra
+        if extra_src.is_file() and extra_src != extra_dst:
+            shutil.copyfile(extra_src, extra_dst)
     if index_src.is_file():
         index_dst = data_dir() / "dashboard" / "index.html"
         if index_src != index_dst:
@@ -2171,6 +2368,18 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("sync-launcher")
     p.add_argument("--force", action="store_true")
     p.set_defaults(func=cmd_sync_launcher)
+
+    p = sub.add_parser("verify")
+    p.add_argument("--json", action="store_true")
+    p.set_defaults(func=cmd_verify)
+
+    p = sub.add_parser("session-reconcile")
+    p.add_argument("--project-key", required=True)
+    p.add_argument("--worktree", default="")
+    p.set_defaults(func=cmd_session_reconcile)
+
+    p = sub.add_parser("ensure")
+    p.set_defaults(func=cmd_ensure)
 
     p = sub.add_parser("dashboard")
     p.add_argument("--port", type=int, default=8787)

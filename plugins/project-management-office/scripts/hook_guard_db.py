@@ -171,14 +171,14 @@ def stamped_dates(text: str) -> set[str]:
     return found
 
 
-def hand_stamped_date(target: Path, tool_input: dict) -> str | None:
+def hand_stamped_date(target: Path, written: dict) -> str | None:
     """Return a stamp-field date the model is introducing by hand, or
     None. Dates already present in the on-disk file are not introduced
     (rewrites and restructures of historical stamps pass); the value is
     irrelevant, today's date included: stamp fields are script-owned."""
     if target.suffix != ".md":
         return None
-    new_text = str(tool_input.get("content") or tool_input.get("new_string")
+    new_text = str(written.get("content") or written.get("new_string")
                    or "")
     new_stamps = stamped_dates(new_text)
     if not new_stamps:
@@ -211,13 +211,26 @@ def terminology_language(cwd: str) -> str:
 
 
 def guard_bash(tool_input: dict, cwd: str) -> int:
-    """Deny branch names carrying non-ASCII text always (machine layer),
-    and git commit / gh pr payloads carrying non-ASCII text unless the
-    project's terminology_language is configured non-English. Only
-    inline payloads are judged (-m/--message, --title/--body), so a
+    """Deny shell commands that name the PMO database file (the single
+    writer is the CLI; sqlite3 or redirection against the file is a
+    foreign write), branch names carrying non-ASCII text always (machine
+    layer), and git commit / gh pr payloads carrying non-ASCII text
+    unless the project's terminology_language is configured non-English.
+    Only inline payloads are judged (-m/--message, --title/--body), so a
     compound command that also writes configured-language .md content
     passes; file-fed payloads (-F, --body-file) are named residuals."""
     command = str(tool_input.get("command", ""))
+    try:
+        import pmo_cli as _pmo
+        if _pmo.DB_NAME in command:
+            return deny(
+                "this command names the PMO database file; the database is"
+                " written only through the PMO CLI, and even reads go"
+                " through its subcommands or the read-only dashboard. Use"
+                " the CLI."
+            )
+    except Exception:
+        pass
     for pattern in BRANCH_NAME_RES:
         for name in pattern.findall(command):
             if not name.isascii():
@@ -247,7 +260,7 @@ def guard_bash(tool_input: dict, cwd: str) -> int:
 
 
 def main() -> int:
-    payload = hook_common.read_payload()
+    payload = hook_common.normalize_payload(hook_common.read_payload())
     tool_input = payload.get("tool_input", {})
     if not isinstance(tool_input, dict):
         return 0
@@ -257,11 +270,23 @@ def main() -> int:
     # imported here so the Bash fast path never pays for it.
     global pmo_cli
     import pmo_cli
-    file_path = str(tool_input.get("file_path", "") or tool_input.get("path", ""))
+    for written in payload.get("file_targets", []):
+        code = guard_file(written, payload)
+        if code:
+            return code
+    return 0
+
+
+def guard_file(written: dict, payload: dict) -> int:
+    file_path = str(written.get("file_path", ""))
     if not file_path:
         return 0
+    cwd = str(payload.get("cwd", ""))
     try:
-        target = Path(file_path).resolve()
+        raw = Path(file_path)
+        if not raw.is_absolute() and cwd:
+            raw = Path(cwd) / raw
+        target = raw.resolve()
         db = pmo_cli.db_path().resolve()
     except Exception:
         return 0
@@ -326,7 +351,7 @@ def main() -> int:
             " and PR bodies. Rename in English ASCII."
         )
     try:
-        stamp = hand_stamped_date(target, tool_input)
+        stamp = hand_stamped_date(target, written)
     except Exception:
         return 0
     if stamp:

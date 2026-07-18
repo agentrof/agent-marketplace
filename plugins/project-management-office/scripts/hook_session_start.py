@@ -82,12 +82,31 @@ def resume_lines(payload) -> list[str]:
 
 
 def main() -> int:
-    payload = hook_common.read_payload()
+    payload = hook_common.normalize_payload(hook_common.read_payload())
     try:
         hook_common.run_cli(["init-db"])
         hook_common.run_cli(["sync-launcher"])
     except Exception as exc:
         hook_common.log(f"session_start bootstrap failed: {exc}")
+    try:
+        hook_common.register_plugin_root(
+            "project-management-office",
+            Path(__file__).resolve().parents[1],
+            hook_common.detect_harness(payload),
+        )
+    except Exception as exc:
+        hook_common.log(f"session_start registration failed: {exc}")
+    try:
+        resolved = hook_common.resolve_project(payload.get("cwd", ""))
+        if resolved is not None:
+            project_key, project_root = resolved
+            hook_common.run_cli([
+                "session-reconcile",
+                "--project-key", project_key,
+                "--worktree", project_root,
+            ])
+    except Exception as exc:
+        hook_common.log(f"session_start reconcile failed: {exc}")
 
     lines = [clock_line()]
     try:

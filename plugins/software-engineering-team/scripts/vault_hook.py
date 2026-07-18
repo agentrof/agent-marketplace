@@ -15,10 +15,17 @@ Two moments, one law (the obsidian-vault skill):
   run vault_check's --changed fast path and surface its findings to the
   writing session immediately, so link and metadata duties are repaired
   in-session instead of at a distant gate. Gates stay the hard barrier.
+- register (sessionStart): record this plugin's install root in the
+  shared plugin_roots registry the agentrof_run dispatcher resolves
+  from; env-free (the root comes from this file's own location), so it
+  works identically on every harness.
 
-File operations through the shell (moves, deletes) bypass Write/Edit
-hooks by nature; the next --changed write or gate-time vault_check
-surfaces them. Stdlib only.
+The same script serves every supported harness; the small normalize shim
+below absorbs payload differences (tool-name vocabulary, top-level
+file_path from afterFileEdit, apply_patch envelopes). File operations
+through the shell (moves, deletes) bypass Write/Edit hooks by nature;
+the next --changed write or gate-time vault_check surfaces them.
+Stdlib only.
 """
 
 from __future__ import annotations
@@ -26,13 +33,26 @@ from __future__ import annotations
 import contextlib
 import io
 import json
+import os
 import re
 import sys
+import tempfile
 from pathlib import Path
 
 import vault_check
 
 VAULT_SEGMENTS = ("workspace", "docs")
+
+# Harness tool-name vocabulary -> the canonical pair this hook reasons in.
+TOOL_NAME_CANON = {
+    "Write": "Write", "write": "Write", "create_file": "Write",
+    "search_replace": "Write",
+    "Edit": "Edit", "edit": "Edit", "edit_file": "Edit", "MultiEdit": "Edit",
+    "apply_patch": "apply_patch",
+}
+
+APPLY_PATCH_FILE_RE = re.compile(
+    r"^\*\*\* (?:Update|Add) File: (.+)$", re.MULTILINE)
 
 # Machine-managed config keys with a single sanctioned writer (the
 # vault_check.py reconcile-designations verb). The verb writes via
@@ -59,6 +79,96 @@ def read_payload() -> dict:
         return json.load(sys.stdin)
     except Exception:
         return {}
+
+
+def normalize(payload: dict) -> dict:
+    """One canonical shape across harness payloads: tool_name mapped into
+    Write/Edit, top-level file_path lifted (afterFileEdit carries it
+    there), apply_patch envelopes expanded into per-file write targets
+    under 'file_targets'."""
+    out = dict(payload) if isinstance(payload, dict) else {}
+    tool_input = out.get("tool_input")
+    tool_input = dict(tool_input) if isinstance(tool_input, dict) else {}
+    if "file_path" not in tool_input and isinstance(out.get("file_path"), str):
+        tool_input["file_path"] = out["file_path"]
+    tool = TOOL_NAME_CANON.get(str(out.get("tool_name", "")),
+                               str(out.get("tool_name", "")))
+    if not tool and tool_input.get("file_path"):
+        tool = "Edit"  # afterFileEdit implies the tool
+    targets: list[dict] = []
+    if tool == "apply_patch":
+        patch_text = str(tool_input.get("patch") or tool_input.get("input")
+                         or tool_input.get("command") or "")
+        sections = APPLY_PATCH_FILE_RE.split(patch_text)
+        for i in range(1, len(sections) - 1, 2):
+            added = "\n".join(line[1:]
+                              for line in sections[i + 1].splitlines()
+                              if line.startswith("+"))
+            targets.append({"file_path": sections[i].strip(),
+                            "content": added})
+        if targets:
+            tool = "Write"
+    elif tool in ("Write", "Edit"):
+        file_path = str(tool_input.get("file_path", ""))
+        if file_path:
+            target = {"file_path": file_path}
+            for key in ("content", "new_string", "old_string"):
+                if key in tool_input:
+                    target[key] = str(tool_input.get(key) or "")
+            targets = [target]
+    out["tool_name"] = tool
+    out["tool_input"] = tool_input
+    out["file_targets"] = targets
+    return out
+
+
+def data_dir() -> Path:
+    override = os.environ.get("AGENTROF_HOME", "").strip()
+    return Path(override) if override else Path.home() / ".agentrof"
+
+
+def register(payload: dict) -> int:
+    """Record this plugin's root in the shared plugin_roots registry;
+    a bookkeeping hook, so it never takes a session down."""
+    try:
+        root = Path(__file__).resolve().parents[1]
+        registry_file = data_dir() / "plugin_roots.json"
+        registry_file.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            registry = json.loads(registry_file.read_text(encoding="utf-8"))
+        except Exception:
+            registry = {}
+        if not isinstance(registry, dict):
+            registry = {}
+        registry.setdefault("schema_version", 1)
+        if "cursor_version" in payload or os.environ.get("CURSOR_PLUGIN_ROOT"):
+            registry["harness"] = "cursor"
+        elif os.environ.get("PLUGIN_ROOT"):
+            registry["harness"] = "codex"
+        elif os.environ.get("CLAUDE_PLUGIN_ROOT"):
+            registry["harness"] = "claude_code"
+        version = ""
+        try:
+            version = json.loads(
+                (root / ".claude-plugin" / "plugin.json")
+                .read_text(encoding="utf-8")).get("version", "")
+        except Exception:
+            pass
+        from datetime import datetime, timezone
+        registry.setdefault("plugins", {})[root.name] = {
+            "root": str(root),
+            "version": version,
+            "registered_at": datetime.now(timezone.utc).isoformat(
+                timespec="seconds"),
+        }
+        fd, tmp = tempfile.mkstemp(dir=str(registry_file.parent),
+                                   prefix=".plugin_roots.")
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
+            fh.write(json.dumps(registry, indent=2, sort_keys=True) + "\n")
+        os.replace(tmp, registry_file)
+    except Exception:
+        pass
+    return 0
 
 
 def deny(message: str) -> int:
@@ -205,19 +315,26 @@ def config_guard(tool_input: dict, file_path: str) -> int:
 
 
 def pre(payload: dict) -> int:
-    tool_input = payload.get("tool_input", {})
-    if not isinstance(tool_input, dict):
-        return 0
-    file_path = str(tool_input.get("file_path", ""))
+    if "file_targets" not in payload:
+        payload = normalize(payload)
+    for written in payload.get("file_targets", []):
+        code = pre_target(written)
+        if code:
+            return code
+    return 0
+
+
+def pre_target(written: dict) -> int:
+    file_path = str(written.get("file_path", ""))
     if is_workspace_config(file_path):
         try:
-            return config_guard(tool_input, file_path)
+            return config_guard(written, file_path)
         except Exception:
             return 0  # a guard never takes the session down
     rel = vault_relative(file_path)
     if rel is None or not rel.endswith(".md"):
         return 0
-    content = written_content(tool_input)
+    content = written_content(written)
     if INLINE_FLOW_LIST_RE.search(content):
         return deny(
             "tags:/aliases: as an inline flow list; the vault contract is a"
@@ -247,10 +364,16 @@ def pre(payload: dict) -> int:
 
 
 def post(payload: dict) -> int:
-    tool_input = payload.get("tool_input", {})
-    if not isinstance(tool_input, dict):
-        return 0
-    file_path = str(tool_input.get("file_path", ""))
+    if "file_targets" not in payload:
+        payload = normalize(payload)
+    for written in payload.get("file_targets", []):
+        code = post_target(str(written.get("file_path", "")))
+        if code:
+            return code
+    return 0
+
+
+def post_target(file_path: str) -> int:
     rel = vault_relative(file_path)
     if rel is None or not rel.endswith(".md"):
         return 0
@@ -280,6 +403,9 @@ def post(payload: dict) -> int:
 def main() -> int:
     mode = sys.argv[1] if len(sys.argv) > 1 else "pre"
     payload = read_payload()
+    if mode == "register":
+        return register(payload)
+    payload = normalize(payload)
     if payload.get("tool_name") not in ("Write", "Edit"):
         return 0
     return pre(payload) if mode == "pre" else post(payload)

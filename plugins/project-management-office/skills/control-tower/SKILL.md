@@ -21,9 +21,14 @@ starts it and hands back the URL.
 ## Procedure
 
 1. Resolve the CLI: prefer the synced launcher
-   `PMO="${AGENTROF_HOME:-$HOME/.agentrof}/bin/pmo_cli.py"`; if that file
-   does not exist, use `${CLAUDE_PLUGIN_ROOT}/scripts/pmo_cli.py` and run
-   its `sync-launcher` subcommand once. Run the idempotent `init-db`.
+   `PMO="${AGENTROF_HOME:-$HOME/.agentrof}/bin/pmo_cli.py"`. If that file
+   does not exist, find this plugin's installed copy of scripts/pmo_cli.py
+   and run its `ensure` subcommand once (it syncs the launcher): on Claude
+   Code the install root is listed in installed_plugins.json inside the
+   user-level Claude plugins directory; on Codex it is the newest version
+   directory of this plugin inside the user-level Codex plugin cache; on
+   Cursor the session-start hook syncs the launcher, so starting a new
+   session is the path. Then use `"$PMO"` and run the idempotent `ensure`.
 2. Start the server as a BACKGROUND process: `"$PMO" dashboard
    --no-browser`. The FIRST stdout line carries the running URL. If the
    default port is taken, retry once with `--port 0` and read the bound

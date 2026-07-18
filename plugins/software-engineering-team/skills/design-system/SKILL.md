@@ -34,7 +34,8 @@ The only place the design master is born or changed.
    open taste input stays free-form. The user's own files win over
    generated suggestions.
 3. CREATION mode: spawn software-engineering-team-ux-designer (spawn template from
-   ${CLAUDE_PLUGIN_ROOT}/flows/design.md) to generate the requested
+   the flow printed by "$RUN" path "$TEAM" flows/design.md, the
+   dispatcher per its preconditions) to generate the requested
    number of CANDIDATE systems (default three) using the bound design
    knowledge skill: each candidate is a coherent system dressed onto a
    sample screen, produced with a deliberately different search emphasis,
@@ -64,7 +65,7 @@ The only place the design master is born or changed.
    override with its deviation summary), ensure home.md links this
    tree's map (dynamic home: the map seed materializes with the tree's
    first content), then run
-   ${CLAUDE_PLUGIN_ROOT}/scripts/vault_check.py check --vault
+   "$RUN" run "$TEAM" scripts/vault_check.py check --vault
    workspace/docs --scope design-system; repair every finding before
    closing (obsidian-vault skill; migrate covers the deterministic
    classes). A leftover candidates.html is a finding, never an

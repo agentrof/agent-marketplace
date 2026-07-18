@@ -6,7 +6,8 @@ markdown documents. Authored files are the single source of truth;
 everything derived (index, registries, backlinks, status, question board)
 is generated into <space>/_generated/ by the compiler and protected
 against hand edits. The compiler
-(${CLAUDE_PLUGIN_ROOT}/scripts/ba_compile.py) reads its taxonomy from the
+(ba_compile.py, run through the dispatcher per the develop flow's
+state contract) reads its taxonomy from the
 schema data file shipped with the business-analysis skill; this reference
 explains the standard to a human and to the analyst persona. When the two
 ever disagree, the schema and the compiler win: a rule that is not

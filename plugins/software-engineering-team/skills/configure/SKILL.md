@@ -51,8 +51,9 @@ Config changes go through this gate, never through hand edits.
    taxonomy type, value a non-empty output_language phrase, refused
    when fold-equal to another type's current designation.
 4. Present the impact analysis before writing: which roles' skill
-   bindings change (the static role-to-skill map lives in
-   ${CLAUDE_PLUGIN_ROOT}/flows/develop.md, step 0; method skills such as
+   bindings change (the static role-to-skill map lives in the develop
+   flow, step 0, printed by "$RUN" path "$TEAM" flows/develop.md, the
+   dispatcher per its state contract; method skills such as
    the architect's architecture skill are static and config-independent),
    what future packages will do differently (for example: adding a
    document store means the architect loads both database skills and
@@ -67,7 +68,7 @@ Config changes go through this gate, never through hand edits.
    metadata into the new language and passes every pair), the impact
    analysis IS the verb's plan (the title law it transitions is that
    skill's):
-   ${CLAUDE_PLUGIN_ROOT}/scripts/vault_check.py reconcile-designations
+   "$RUN" run "$TEAM" scripts/vault_check.py reconcile-designations
    --vault workspace/docs --set <type>=<value> ... --dry-run --json.
    Render the popup from that plan: apply / reject / adjust wording,
    with the before -> after retitles and alias sweeps in the

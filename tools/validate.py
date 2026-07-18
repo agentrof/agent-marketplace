@@ -56,9 +56,10 @@ SKILL_MAX_LINES = 150
 SKILL_WARN_LINES = 120
 SKILL_MAX_BYTES = 8192
 CONSTITUTION_MAX_LINES = 60
-# Raised from 400 with the vault-law wiring (develop.md carries the
-# decision-note and stewardship mechanics); applies to every flow.
-FLOW_MAX_LINES = 416
+# Raised from 400 with the vault-law wiring, then from 416 with the
+# harness-neutral dispatcher paragraph and the decision-gate formula
+# (develop.md carries both); applies to every flow.
+FLOW_MAX_LINES = 432
 REFERENCE_WARN_LINES = 500
 
 AUTO_TRIGGER_RE = re.compile(
@@ -892,11 +893,20 @@ def check_naive_clock(tree: Tree, findings: list[Finding]) -> None:
 
 SCRIPT_REF_RE = re.compile(r"\$\{CLAUDE_PLUGIN_ROOT\}/([A-Za-z0-9_\-./]+\.py)\b")
 
+# The dispatcher grammar shipped content uses to reach plugin files:
+# "$RUN" run|path "$TEAM"|<plugin-name> <relpath>. "$TEAM" resolves to
+# the plugin whose markdown carries the reference.
+RUN_REF_RE = re.compile(
+    r"\"\$RUN\"\s+(run|path)\s+(\"\$TEAM\"|[a-z0-9]+(?:-[a-z0-9]+)*)"
+    r"\s+([A-Za-z0-9_\-./]+)")
+
 
 def check_script_references(tree: Tree, findings: list[Finding]) -> None:
-    """Every ${CLAUDE_PLUGIN_ROOT}/...py token in a plugin's markdown must
-    resolve to a shipped file: a flow naming a script that does not exist is
-    a broken contract, not documentation."""
+    """Every plugin-file reference in shipped markdown must resolve to a
+    shipped file: a flow naming a script or flow that does not exist is a
+    broken contract, not documentation. Covers the legacy
+    ${CLAUDE_PLUGIN_ROOT} script tokens and the dispatcher grammar
+    ("$RUN" run|path ... <relpath>)."""
     for plugin in plugin_dirs(tree):
         for path in sorted(plugin.rglob("*.md")):
             for lineno, line in enumerate(read_text(path).splitlines(), start=1):
@@ -907,6 +917,33 @@ def check_script_references(tree: Tree, findings: list[Finding]) -> None:
                             f"referenced script does not exist: {match.group(1)}",
                             "ship the script or fix the reference; flows carry"
                             " only real mechanics",
+                        ))
+                for match in RUN_REF_RE.finditer(line):
+                    verb, owner, relpath = match.groups()
+                    target_plugin = plugin if owner == '"$TEAM"' \
+                        else tree.plugins_dir / owner
+                    if not target_plugin.is_dir():
+                        findings.append(Finding(
+                            "error", rel(tree, path), lineno, "script_references",
+                            f"dispatcher reference names unknown plugin: {owner}",
+                            "name a shipped plugin or use \"$TEAM\"",
+                        ))
+                        continue
+                    target = target_plugin / relpath
+                    if verb == "run" and relpath.endswith(".py") \
+                            and not target.is_file():
+                        findings.append(Finding(
+                            "error", rel(tree, path), lineno, "script_references",
+                            f"dispatched script does not exist: {relpath}",
+                            "ship the script or fix the reference; flows carry"
+                            " only real mechanics",
+                        ))
+                    elif verb == "path" and "<" not in relpath \
+                            and not target.exists():
+                        findings.append(Finding(
+                            "error", rel(tree, path), lineno, "script_references",
+                            f"dispatched path does not exist: {relpath}",
+                            "ship the file or fix the reference",
                         ))
 
 

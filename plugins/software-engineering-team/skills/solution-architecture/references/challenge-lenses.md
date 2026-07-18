@@ -7,7 +7,9 @@ The adversarial round for solution engagements. Each lens is one fresh-context, 
 Per lens, one spawn of software-engineering-team-analysis-challenger:
 
 1. Identity: "You are software-engineering-team-analysis-challenger, challenging solution engagement <slug> through the <lens> lens."
-2. The constitution body, read from ${CLAUDE_PLUGIN_ROOT}/constitution.md
+2. The constitution body, read from the file printed by
+   "$RUN" path "$TEAM" constitution.md (dispatcher per the develop
+   flow's state contract)
    and pasted verbatim: {{constitution}}
 3. The lens block below, pasted verbatim.
 4. Inputs: read-fully the engagement doc and the decision notes it minted (decisions/); summary-only landscape.md and cited analysis docs.

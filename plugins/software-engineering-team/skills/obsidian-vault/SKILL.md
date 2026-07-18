@@ -9,9 +9,10 @@ user-invocable: false
 The consuming project's docs tree (workspace/docs/) is ONE vault: the
 owner opens it in the vault app and reads the knowledge graph; agents
 author every note headlessly. This skill is the single home of the vault
-law. Every rule below is enforced by
-`${CLAUDE_PLUGIN_ROOT}/scripts/vault_check.py` and the per-write hook;
-variation points live in `data/vault-policy.json`, never in prose.
+law. Every rule below is enforced by the checker (vault_check.py, run
+as `"$RUN" run "$TEAM" scripts/vault_check.py`, the dispatcher per the
+develop flow's state contract) and the per-write hook; variation points
+live in `data/vault-policy.json`, never in prose.
 
 ## When to Use
 
@@ -97,7 +98,7 @@ variation points live in `data/vault-policy.json`, never in prose.
 ## Stewardship
 
 Vault stewardship is a standing duty, cited by every docs-producing
-entry: run `${CLAUDE_PLUGIN_ROOT}/scripts/vault_check.py check --vault
+entry: run `"$RUN" run "$TEAM" scripts/vault_check.py check --vault
 workspace/docs --scope <subtree>`; every finding it names is THIS
 session's repair work before the gate; deterministic classes go through
 the `migrate` verb; repairs to generated files are re-renders; pass the

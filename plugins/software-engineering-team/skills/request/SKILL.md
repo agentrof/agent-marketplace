@@ -15,14 +15,16 @@ Front door for real work: classify, confirm, deliver.
 ## Procedure
 
 1. Pre-flight: read workspace/config.json (missing, or without a
-   project_key: route to the setup entry and stop). Run the PMO CLI's
-   resume-info --project-key <key> (launcher per the develop flow's
-   state contract): an active work order whose worktree field matches
+   project_key: route to the setup entry and stop). Resolve the PMO CLI
+   and the dispatcher ("$RUN", "$TEAM") per the develop flow's state
+   contract and run the idempotent ensure. Run resume-info
+   --project-key <key>: an active work order whose worktree field matches
    THIS resolved git root means offer Resume or Release through the
    AskUserQuestion popup; never start a
    second work order here. Active orders in OTHER worktrees are parallel
    lanes coordinated by the delivery-lanes entry: name them and continue.
-   Resume means: load ${CLAUDE_PLUGIN_ROOT}/flows/develop.md, read the
+   Resume means: load the flow printed by "$RUN" path "$TEAM"
+   flows/develop.md, read the
    work order's state (resume-info), and continue from the first step
    that is not done, under the full state contract; never redo done
    steps and never work outside the flow.
@@ -31,9 +33,9 @@ Front door for real work: classify, confirm, deliver.
    construction and was already sliced and approved at the backlog gate:
    skip classification and the brief precondition, confirm through the
    AskUserQuestion popup ("Delivering WP-03 <title>." with proceed /
-   adjust options), and execute
-   ${CLAUDE_PLUGIN_ROOT}/flows/develop.md for that story (its step 0.5
-   readiness gate still guards).
+   adjust options), and execute the flow printed by "$RUN" path "$TEAM"
+   flows/develop.md for that story (its step 0.5 readiness gate still
+   guards).
 2. Classify BINARY, in this conversation (this is the product-owner hat
    as instruction text, not an agent spawn; classification must be able
    to question the user, and spawned agents cannot talk to the user):
@@ -50,14 +52,14 @@ Front door for real work: classify, confirm, deliver.
    Confirm the route through the AskUserQuestion popup ("Reading this
    as: <atomic|large>, because <reason>." with proceed / reclassify
    options) and wait.
-3. ATOMIC route: execute the atomic variant in
-   ${CLAUDE_PLUGIN_ROOT}/flows/develop.md exactly. Its escape hatch is
+3. ATOMIC route: execute the atomic variant in the flow printed by
+   "$RUN" path "$TEAM" flows/develop.md exactly. Its escape hatch is
    binding: the moment the work touches model, contract, schema or the
    environment's service or store set, stop and re-enter this procedure
    as LARGE.
 4. LARGE route:
    a. Brief precondition, mechanical: run
-      ${CLAUDE_PLUGIN_ROOT}/scripts/ba_compile.py check --space
+      "$RUN" run "$TEAM" scripts/ba_compile.py check --space
       workspace/docs/business-analysis/<slug> --gate approval (scoped
       with --node for a single-domain ask). Nonzero or no space: the
       business-analysis entry flow runs first, here, in this
@@ -80,8 +82,8 @@ Front door for real work: classify, confirm, deliver.
       single source of delivery state, read back through the CLI; no
       backlog view is rendered into the docs vault (its law is the
       obsidian-vault skill's).
-   d. Story loop: for each ready story in order, execute
-      ${CLAUDE_PLUGIN_ROOT}/flows/develop.md end to end. After each
+   d. Story loop: for each ready story in order, execute the flow
+      printed by "$RUN" path "$TEAM" flows/develop.md end to end. After each
       story's merge checkpoint (which updates the database on the main
       line), ask through the
       AskUserQuestion popup whether to continue with the next story.

@@ -28,8 +28,9 @@ session's entry.
    `git rev-parse --git-common-dir`. A linked worktree fails that test:
    refuse, name the primary checkout path, and route lane work to the
    request entry.
-2. Load ${CLAUDE_PLUGIN_ROOT}/flows/delivery-lanes.md and execute it under its
-   full state contract.
+2. Load the flow printed by "$RUN" path "$TEAM" flows/delivery-lanes.md
+   (dispatcher variables per that state contract) and execute it under
+   its full state contract.
 3. Gate approvals belong to the owning lane session, never to this one;
    the CLI's worktree binding enforces it, and every approval request is
    answered with the owning lane's worktree path.

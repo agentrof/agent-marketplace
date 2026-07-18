@@ -30,8 +30,9 @@ hook; nothing here ever changes what a document claims.
      missing or without a project_key: stop and route to the setup
      entry. output_language governs curated map, nav and home
      prose; the machine layer stays English.
-   - Resolve the PMO CLI: the launcher at
-     "${AGENTROF_HOME:-$HOME/.agentrof}/bin/pmo_cli.py". An
+   - Resolve the PMO CLI and the dispatcher ("$RUN", "$TEAM") per the
+     develop flow's state contract; scripts below run as
+     "$RUN" run "$TEAM" scripts/<x>.py. An
      unresolvable PMO only skips the event pulses below and
      is named honestly as a residual at close. Freeze truth never
      depends on it: the migrate verb globs
@@ -40,10 +41,10 @@ hook; nothing here ever changes what a document claims.
      the active work orders explain the frozen docs behind any deferred
      rename when the gate is presented.
 2. AUDIT, always full width, never --scope.
-   - ${CLAUDE_PLUGIN_ROOT}/scripts/vault_check.py check --vault
+   - "$RUN" run "$TEAM" scripts/vault_check.py check --vault
      workspace/docs --json for the finding inventory (designation_drift
      findings inventory stale or double-suffixed titles).
-   - ${CLAUDE_PLUGIN_ROOT}/scripts/vault_check.py migrate --vault
+   - "$RUN" run "$TEAM" scripts/vault_check.py migrate --vault
      workspace/docs --rename --dry-run --json for the rename plan: old
      and new names, per-rename referrer counts, the manual list and the
      blocked entries (blocked_by_frozen_referrer) with their blocking
@@ -73,7 +74,7 @@ hook; nothing here ever changes what a document claims.
    titles heal through the same verb, approved above, BEFORE migrate so
    the append step never meets a retired tail). Then deterministic
    first.
-   a. ${CLAUDE_PLUGIN_ROOT}/scripts/vault_check.py migrate --vault
+   a. "$RUN" run "$TEAM" scripts/vault_check.py migrate --vault
       workspace/docs, freeze-safe by construction: citation cells,
       scalar doc-ref keys, nav hub retargeting, de-id-leading of
       decision titles and H1s, appending each typed title's missing
@@ -85,9 +86,9 @@ hook; nothing here ever changes what a document claims.
       migrate --vault workspace/docs --rename: every referrer is
       rewritten vault-wide in the same operation.
    b. Re-render every generated surface:
-      ${CLAUDE_PLUGIN_ROOT}/scripts/vault_check.py render-decisions
+      "$RUN" run "$TEAM" scripts/vault_check.py render-decisions
       --vault workspace/docs;
-      ${CLAUDE_PLUGIN_ROOT}/scripts/ba_compile.py render --space
+      "$RUN" run "$TEAM" scripts/ba_compile.py render --space
       workspace/docs/business-analysis/<slug> for EVERY analysis space,
       because a post-rename registry must match the new filenames or
       alias ownership checks poison. Materialize a subtree's map seed

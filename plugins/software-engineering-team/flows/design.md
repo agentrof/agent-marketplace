@@ -21,8 +21,11 @@ You MUST follow these rules exactly. Violating any of them is a failure.
 
 ## Preconditions
 
+- Dispatcher, as in the develop flow's state contract:
+  RUN="${AGENTROF_HOME:-$HOME/.agentrof}/bin/agentrof_run.py" with
+  TEAM=software-engineering-team; plugin files are reached only through it.
 - The topic's analysis space passes its approval gate for the touched
-  scope: run ${CLAUDE_PLUGIN_ROOT}/scripts/ba_compile.py check --space
+  scope: run "$RUN" run "$TEAM" scripts/ba_compile.py check --space
   workspace/docs/business-analysis/<slug> --gate approval (add --node
   domains/<name> when the work touches one domain; a buildable domain
   does not wait for the others). Nonzero, or no space at all: stop and
@@ -39,8 +42,8 @@ Spawns follow the develop flow's template shape. Inside a develop work
 order, identity and constitution sourcing are the develop flow's.
 Standalone (sketch, demo, design-system entries), identity is "You are
 <agent-name>, executing the design flow for <topic>." and the
-constitution body is read from ${CLAUDE_PLUGIN_ROOT}/constitution.md,
-then pasted verbatim:
+constitution body is read from the file printed by
+"$RUN" path "$TEAM" constitution.md, then pasted verbatim:
 
 {{constitution}}
 

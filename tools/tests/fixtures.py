@@ -317,7 +317,7 @@ def break_naive_clock(root: Path) -> None:
 def break_script_references(root: Path) -> None:
     write(
         root / "plugins" / PLUGIN / "flows" / "check.md",
-        VALID_FLOW + "\nRun ${CLAUDE_PLUGIN_ROOT}/scripts/missing_tool.py here.\n",
+        VALID_FLOW + "\nRun \"$RUN\" run \"$TEAM\" scripts/missing_tool.py here.\n",
     )
 
 

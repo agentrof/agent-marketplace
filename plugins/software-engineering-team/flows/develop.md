@@ -24,10 +24,15 @@ All process state lives in the central PMO database. ONE writer: you,
 the main conversation, through the PMO CLI only. Agents never touch it;
 hooks record spawn/stop mechanics; a guard blocks direct file writes.
 
-CLI resolution, once per work order: the launcher at
-"${AGENTROF_HOME:-$HOME/.agentrof}/bin/pmo_cli.py"; missing means run
-the project-management-office plugin's control-tower entry once to bootstrap it (project-management-office absent entirely: STOP,
-reinstall this plugin). Run the idempotent init-db before first use.
+CLI resolution, once per work order (re-read this paragraph after any
+compaction): PMO="${AGENTROF_HOME:-$HOME/.agentrof}/bin/pmo_cli.py";
+missing means run the project-management-office control-tower entry once
+to bootstrap it (project-management-office absent entirely: STOP,
+reinstall this plugin). Run the idempotent ensure before first use. The
+dispatcher lives beside it, RUN="${AGENTROF_HOME:-$HOME/.agentrof}/bin/agentrof_run.py"
+with TEAM=software-engineering-team: `"$RUN" run "$TEAM" scripts/<x>.py`
+executes a plugin script, `"$RUN" path "$TEAM" <relpath>` prints a
+plugin file to read; plugin files are reached only through it.
 
 Work order identity: project_key comes from workspace/config.json
 (stamped by setup); the key is <yyyymmdd>-<kebab-slug> (suffix -2, -3
@@ -103,11 +108,11 @@ single message; consume their artifacts from disk afterwards.
 ## Mechanical post-step check
 
 After every spawned step, BEFORE advancing state, run
-${CLAUDE_PLUGIN_ROOT}/scripts/artifact_check.py --path <artifact>
+"$RUN" run "$TEAM" scripts/artifact_check.py --path <artifact>
 --require-sections "<the artifact's mandated sections>" (data model:
 "Summary, Entities"; contract: "Summary, Error cases"; environment
 contract: "Commands, Scenarios, Tolerated Warnings"). Analysis-space
-checking has a single home: ${CLAUDE_PLUGIN_ROOT}/scripts/ba_compile.py
+checking has a single home: "$RUN" run "$TEAM" scripts/ba_compile.py
 check, never artifact_check. Exit 1: re-spawn the SAME step exactly once
 with the violation named; a second failure sets the step blocked via
 set-step and halts with resume instructions. The script proves structure;
@@ -123,7 +128,7 @@ still read the artifact for semantic sanity before presenting any gate.
   route to the setup entry. Unsupported stack values: refuse and stop.
 - Resolve the PMO CLI per the state contract and run init-db.
 - Brief precondition, mechanical: run
-  ${CLAUDE_PLUGIN_ROOT}/scripts/ba_compile.py check --space
+  "$RUN" run "$TEAM" scripts/ba_compile.py check --space
   workspace/docs/business-analysis/<slug> --gate approval (--node
   <domain> when the story touches one domain), then render. Nonzero
   blocks init: route to the business-analysis entry.
@@ -131,7 +136,7 @@ still read the artifact for semantic sanity before presenting any gate.
   --work-order-key <id> --request "<request>" --worktree <git root>
   --story <WP-##> --bindings '<json>'
   --order-dir workspace/work-orders/<key>
-  --constitution ${CLAUDE_PLUGIN_ROOT}/constitution.md
+  --constitution "$("$RUN" path "$TEAM" constitution.md)"
   --brief workspace/docs/business-analysis/<slug> --config
   workspace/config.json. It claims the worktree and the story, marks the
   story in_development, writes the step skeleton and copies the
@@ -179,7 +184,7 @@ still read the artifact for semantic sanity before presenting any gate.
   changed decisions land as their own notes under
   workspace/docs/system-architecture/decisions/ per the decision-records
   contract; afterwards the flow re-renders the generated index via
-  ${CLAUDE_PLUGIN_ROOT}/scripts/vault_check.py render-decisions --vault
+  "$RUN" run "$TEAM" scripts/vault_check.py render-decisions --vault
   workspace/docs) and returns
   the ownership map; the delta declares its environment impact (services,
   stores, runtime variables, seed needs, or an explicit none) and the map
@@ -195,9 +200,9 @@ still read the artifact for semantic sanity before presenting any gate.
   breaking-change flag, denormalization decisions with their recorded
   rationale. The full record is the git diff.
 - Mechanical half, BEFORE presenting the gate:
-  ${CLAUDE_PLUGIN_ROOT}/scripts/contract_check.py --contract
+  "$RUN" run "$TEAM" scripts/contract_check.py --contract
   workspace/docs/system-architecture/api-contract.md (every endpoint
-  declares error cases); ${CLAUDE_PLUGIN_ROOT}/scripts/vault_check.py
+  declares error cases); "$RUN" run "$TEAM" scripts/vault_check.py
   check --vault workspace/docs --scope system-architecture (freeze.json
   paths passed as --exclude); and work-order validate; any nonzero
   blocks the gate, routed back to the architect as the named violation.
@@ -333,7 +338,7 @@ still read the artifact for semantic sanity before presenting any gate.
   - publish the exported interface schema under workspace/docs/api/;
   - vault stewardship: clear this order's freeze.json (the flow authors
     the manifest), re-render the decision indexes (vault_check.py
-    render-decisions), then run ${CLAUDE_PLUGIN_ROOT}/scripts/vault_check.py
+    render-decisions), then run "$RUN" run "$TEAM" scripts/vault_check.py
     check --vault workspace/docs and repair every finding now, map notes
     included (index conflicts heal by re-render, never hand-merge);
   - update the analysis-space BR rows changed by fix-atomic work since
@@ -404,7 +409,7 @@ store set is never atomic; fix-atomic work substitutes the skill-defined
 from-scratch reproduction for the failing test.
 
 Tripwire, BEFORE finalize on both tiers: run
-${CLAUDE_PLUGIN_ROOT}/scripts/atomic_tripwire.py --repo . --range
+"$RUN" run "$TEAM" scripts/atomic_tripwire.py --repo . --range
 main...HEAD. Exit 1 proves the work was never atomic: STOP, report "not
 atomic" with the flagged files, and hand the request to the large route
 unchanged. Disposition: set the work order escalated (work-order

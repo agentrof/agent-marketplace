@@ -16,7 +16,9 @@ zero code.
 ## Procedure
 
 1. Pre-flight: read workspace/config.json (missing: route to the setup
-   entry and stop).
+   entry and stop). Dispatcher for plugin files:
+   RUN="${AGENTROF_HOME:-$HOME/.agentrof}/bin/agentrof_run.py" and
+   TEAM=software-engineering-team.
 2. Preconditions, in order:
    a. Approved brief for the topic; missing: run the business-analysis
       entry flow first (pre-sales briefs may leave technical sections
@@ -25,7 +27,8 @@ zero code.
       note; the obsidian-vault skill owns its docs-tree law); missing:
       stop, say "no design system yet", route the user into the
       design-system entry, and continue here once it exists.
-3. Execute ${CLAUDE_PLUGIN_ROOT}/flows/design.md in demo mode:
+3. Execute the flow printed by "$RUN" path "$TEAM" flows/design.md in
+   demo mode:
    directions, pick, refinement, then expansion of the chosen direction
    into a multi-screen navigable package: one self-contained file with
    in-file navigation, realistic placeholder data, zero external

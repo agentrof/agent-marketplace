@@ -23,7 +23,20 @@ detected candidates plus free-form input.
 1. Git check: resolve the project git root and anchor everything there.
    No repository: offer to initialize one; the team cannot work without
    git (every story ends in a pull request). Sub-directory invocation
-   still anchors at the root.
+   still anchors at the root. Then resolve the backbone: the launcher
+   PMO="${AGENTROF_HOME:-$HOME/.agentrof}/bin/pmo_cli.py" and the
+   dispatcher RUN="${AGENTROF_HOME:-$HOME/.agentrof}/bin/agentrof_run.py"
+   with TEAM=software-engineering-team. A missing launcher is
+   bootstrapped from the project-management-office plugin's installed
+   copy of scripts/pmo_cli.py, found per harness: on Claude Code its
+   install path is listed in installed_plugins.json under
+   $HOME/.claude/plugins/; on Codex it is the newest version directory
+   of that plugin in the user-level plugin cache; on Cursor the
+   session-start hook syncs the launcher, so start a new session. No
+   installed copy anywhere: stop, the project-management-office plugin
+   must be installed. Run its `ensure` once (idempotent), then register
+   both plugin roots when the hooks have not:
+   "$RUN" register --plugin <name> --root <install path>.
 2. Workspace collision: a foreign workspace/ directory at the root: ask
    for an alternative name and use it consistently, substituting it for
    workspace/ in every materialized template content and skeleton path
@@ -31,8 +44,8 @@ detected candidates plus free-form input.
    The team's layout is recognized by config.json's managed_by note or
    the docs/ plus memory/ pair; anything else is foreign. Record the
    chosen name in the project CLAUDE.md once step 3 materializes it.
-3. Materialize templates from ${CLAUDE_PLUGIN_ROOT}/templates/, only
-   where missing (idempotency: never overwrite an existing file, only
+3. Materialize templates from the directory printed by
+   "$RUN" path "$TEAM" templates, only where missing (idempotency: never overwrite an existing file, only
    add):
    - .gitignore: create from the template, or append only its missing
      lines (the work-orders/ ignore rule is mandatory).
@@ -41,8 +54,8 @@ detected candidates plus free-form input.
      and a profile.md, or a directory containing them)?"; given paths
      are copied verbatim per file, otherwise me.md and profile.md come
      from the templates.
-   - workspace/docs/ vault payload from ${CLAUDE_PLUGIN_ROOT}/templates/vault/,
-     per file, only where missing: home and the .obsidian payload with
+   - workspace/docs/ vault payload from the template directory's
+     vault/ subtree, per file, only where missing: home and the .obsidian payload with
      plugins/ copied recursively (the vault app asks a one-time trust
      prompt to enable them). Each subtree map seed is materialized by
      its tree-birthing entry, born with its tree, never by setup; the
@@ -56,13 +69,7 @@ detected candidates plus free-form input.
    folder created (work-orders/ is gitignored and needs none). Topic
    analysis spaces inside workspace/docs/business-analysis/ are created
    by the business-analysis entry, never by setup.
-5. PMO backbone: resolve the PMO CLI (the launcher at
-   "${AGENTROF_HOME:-$HOME/.agentrof}/bin/pmo_cli.py"; missing: look up
-   the project-management-office entry in
-   $HOME/.claude/plugins/installed_plugins.json, use its install path
-   plus scripts/pmo_cli.py, run its sync-launcher once; no entry means
-   the plugin is missing: stop, tell the user to reinstall, the
-   dependency brings it in). Run init-db, then register the
+5. PMO backbone: with the CLI resolved in step 1, register the
    project: project register --key <kebab project name> --name "<name>"
    --team software-engineering-team --stamp-config workspace/config.json (stamps
    project_key into the config; idempotent). Every flow resolves the
@@ -99,7 +106,8 @@ detected candidates plus free-form input.
    stack is refused honestly: tested stacks only.
 7. Continuous integration: no PR-triggered test workflow in the
    repository's CI directory (for GitHub, .github/workflows/): offer to
-   add one from ${CLAUDE_PLUGIN_ROOT}/templates/ci-tests.yml,
+   add one from the file printed by "$RUN" path "$TEAM"
+   templates/ci-tests.yml,
    substituting every placeholder. {{test_command}} takes the configured
    test command. {{audit_command}} takes one audit command per
    configured stack, anchored at that stack's lockfile: python-fastapi
@@ -113,7 +121,7 @@ detected candidates plus free-form input.
    workflow missing the smoke job counts as a gap once the probe passes.
    Keep the dependency-audit job, and route any advisory it raises
    through the request entry as a fix-atomic lockfile bump.
-8. Close: run ${CLAUDE_PLUGIN_ROOT}/scripts/vault_check.py check
+8. Close: run "$RUN" run "$TEAM" scripts/vault_check.py check
    --vault workspace/docs. Fresh tree: any finding is a setup bug.
    Existing tree: findings in setup-authored files are setup bugs;
    pre-existing content findings are named as vault degradation and

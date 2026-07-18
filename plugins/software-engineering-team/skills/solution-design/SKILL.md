@@ -21,12 +21,15 @@ gate, and a decision log the planner and the software architect read.
 ## Procedure
 
 1. Pre-flight.
+   - Resolve the PMO CLI and the dispatcher ("$RUN", "$TEAM") per the
+     develop flow's state contract; scripts below run as
+     "$RUN" run "$TEAM" scripts/<x>.py.
    - Read workspace/config.json. Missing or without a project_key: stop
      and route to the setup entry. output_language governs ONLY .md body
      prose; names and technical terms follow terminology_language
      (default English); file names, ids and Status lines stay English.
    - Grounding, mechanical: when the engagement cites analysis content,
-     run ${CLAUDE_PLUGIN_ROOT}/scripts/ba_compile.py check --space
+     run "$RUN" run "$TEAM" scripts/ba_compile.py check --space
      workspace/docs/business-analysis/<slug> --gate approval --node
      <domain> per cited domain; nonzero routes to business-analysis. No
      space at all is allowed ONLY for pre-analysis groundwork: the
@@ -45,14 +48,14 @@ gate, and a decision log the planner and the software architect read.
      the analysis space; a breach opens a re-evaluation engagement
      citing the record before any new topic.
    - Vault stewardship (obsidian-vault skill): run
-     ${CLAUDE_PLUGIN_ROOT}/scripts/vault_check.py check --vault
+     "$RUN" run "$TEAM" scripts/vault_check.py check --vault
      workspace/docs --scope solution-design; its findings are this
      session's repair work (migrate covers the deterministic classes).
 2. Adopt the solution-architect role IN THIS CONVERSATION (an
    interactive persona, not a spawn; solution design is a debate). Read
-   the behavioral constitution at ${CLAUDE_PLUGIN_ROOT}/constitution.md
-   and honor it; follow the agent constitution at
-   ${CLAUDE_PLUGIN_ROOT}/agents/solution-architect.md exactly, and load
+   the behavioral constitution printed by "$RUN" path "$TEAM"
+   constitution.md and honor it; follow the agent constitution printed
+   by "$RUN" path "$TEAM" agents/solution-architect.md exactly, and load
    its bound knowledge skills (solution-architecture and obsidian-vault):
    the dimension set governs every evaluation, the doc contract governs
    where every verdict lands, the vault law governs every docs write.
@@ -69,7 +72,7 @@ gate, and a decision log the planner and the software architect read.
      the configured stack enums routes to the configure entry and the
      maintainer path, never around them.
    - After every milestone run
-     ${CLAUDE_PLUGIN_ROOT}/scripts/artifact_check.py --path <doc>
+     "$RUN" run "$TEAM" scripts/artifact_check.py --path <doc>
      --require-sections per the doc contract; fix findings immediately.
 4. CHALLENGE ROUND, before the gate. Spawn
    software-engineering-team-analysis-challenger fresh-context and read-only, one
@@ -85,11 +88,11 @@ gate, and a decision log the planner and the software architect read.
    fold-in reveals a contradiction.
 5. SOLUTION gate, per engagement.
    - Mechanical half first: artifact_check on every touched doc;
-     ${CLAUDE_PLUGIN_ROOT}/scripts/landscape_check.py --tree
+     "$RUN" run "$TEAM" scripts/landscape_check.py --tree
      workspace/docs/solution-design exit 0;
-     ${CLAUDE_PLUGIN_ROOT}/scripts/vault_check.py check --vault
+     "$RUN" run "$TEAM" scripts/vault_check.py check --vault
      workspace/docs --scope solution-design exit 0 (freeze set passed
-     as --exclude); ${CLAUDE_PLUGIN_ROOT}/scripts/ba_compile.py resolve
+     as --exclude); "$RUN" run "$TEAM" scripts/ba_compile.py resolve
      --space <space> --ids <every cited id>, nonzero blocks the gate;
      all rounds recorded.
    - Present: each verdict with its strongest rejected alternative,
@@ -101,7 +104,7 @@ gate, and a decision log the planner and the software architect read.
    - Approve / Request changes / Pause, asked through the
      AskUserQuestion popup (tradeoffs in the option descriptions). On
      approve: stamp the engagement via
-     ${CLAUDE_PLUGIN_ROOT}/scripts/landscape_check.py --tree <tree>
+     "$RUN" run "$TEAM" scripts/landscape_check.py --tree <tree>
      --stamp-engagement <slug> --status approved (the script writes the
      UTC date; never type it), land deferred questions in the Verdict
      with a revisit note (a recorded row, never silence), fold the

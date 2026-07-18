@@ -20,8 +20,9 @@ with what context, how findings return, and how they enter the space.
    record with a one-line why each.
 2. Fan out: one fresh-context, read-only spawn per lens or profile
    (analysis-challenger role; domain-expert for named questions). Every
-   spawn prompt carries the constitution body, read from
-   ${CLAUDE_PLUGIN_ROOT}/constitution.md and pasted verbatim:
+   spawn prompt carries the constitution body, read from the file
+   printed by "$RUN" path "$TEAM" constitution.md (dispatcher per the
+   develop flow's state contract) and pasted verbatim:
    {{constitution}}
 3. Triage: the analyst, the space's single writer, disposes every
    finding: covered / fix / assumption / question / rejected, each with

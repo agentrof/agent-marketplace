@@ -294,6 +294,15 @@ class DispatcherTests(unittest.TestCase):
         code, out, _ = self.dispatch(["harness"])
         self.assertEqual(out.strip(), "codex")
 
+    def test_stanza_prints_exact_paste(self):
+        code, out, err = self.dispatch(["stanza", "--harness", "codex"])
+        self.assertEqual(code, 0, err)
+        self.assertIn("config.toml", out)
+        self.assertIn("/.agentrof", out)
+        self.assertNotIn("{home}", out, "home placeholder must be expanded")
+        code, out, _ = self.dispatch(["stanza", "--harness", "claude_code"])
+        self.assertIn("no sandbox stanza", out)
+
     def test_unregistered_plugin_names_the_remedy(self):
         code, _, err = self.dispatch(["run", "ghost-team", "scripts/x.py"])
         self.assertEqual(code, 1)

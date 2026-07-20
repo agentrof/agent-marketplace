@@ -159,6 +159,31 @@ def cmd_harness(args) -> int:
     return 0
 
 
+def cmd_stanza(args) -> int:
+    """Print the recorded harness's sandbox stanza with the real home
+    directory substituted, so setup hands the user an exact paste
+    instead of prose. The stanza table ships in harness_runtime.json
+    beside this script (generated from tools/data/harnesses.json)."""
+    try:
+        data = json.loads(
+            (Path(__file__).resolve().parent / "harness_runtime.json")
+            .read_text(encoding="utf-8"))
+    except Exception:
+        data = {}
+    harness_id = args.harness or load_registry().get("harness", "unknown")
+    stanza = (data.get("sandbox_stanzas") or {}).get(harness_id)
+    if not stanza:
+        print(f"agentrof: no sandbox stanza for harness '{harness_id}'")
+        return 0
+    home = str(Path.home())
+    print(f"file: {stanza.get('file', '')}")
+    print(stanza.get("stanza", "").replace("{home}", home))
+    note = stanza.get("note", "")
+    if note:
+        print(f"note: {note}")
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     sub = parser.add_subparsers(dest="command", required=True)
@@ -182,6 +207,10 @@ def build_parser() -> argparse.ArgumentParser:
 
     p = sub.add_parser("harness")
     p.set_defaults(func=cmd_harness)
+
+    p = sub.add_parser("stanza")
+    p.add_argument("--harness", default="")
+    p.set_defaults(func=cmd_stanza)
 
     return parser
 

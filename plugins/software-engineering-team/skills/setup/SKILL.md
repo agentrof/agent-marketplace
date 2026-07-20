@@ -24,44 +24,40 @@ detected candidates plus free-form input.
 
 1. Git check: resolve the project git root and anchor everything there.
    No repository: offer to initialize one; the team cannot work without
-   git (every story ends in a pull request). Sub-directory invocation
-   still anchors at the root. Then resolve the backbone: the launcher
+   git (every story ends in a pull request). Then resolve the
+   backbone: the launcher
    PMO="${AGENTROF_HOME:-$HOME/.agentrof}/bin/pmo_cli.py" and the
    dispatcher RUN="${AGENTROF_HOME:-$HOME/.agentrof}/bin/agentrof_run.py"
-   with TEAM=software-engineering-team. A missing launcher is
-   bootstrapped from the project-management-office plugin's installed
-   copy of scripts/pmo_cli.py, found per harness: on Claude Code its
-   install path is listed in installed_plugins.json under
-   $HOME/.claude/plugins/; on Codex it is the newest version directory
-   of that plugin in the user-level plugin cache; on Cursor the
-   session-start hook syncs the launcher, so start a new session. No
-   installed copy anywhere: stop, the project-management-office plugin
-   must be installed. Run its `ensure` once (idempotent), then register
-   both plugin roots when the hooks have not:
-   "$RUN" register --plugin <name> --root <install path>.
-2. Workspace collision: a foreign workspace/ directory at the root: ask
-   for an alternative name and use it consistently, substituting it for
-   workspace/ in every materialized template content and skeleton path
-   (the .gitignore work-orders rule, the CLAUDE.md import, source_dirs).
+   with TEAM=software-engineering-team. Launcher missing: bootstrap per
+   the control-tower entry's per-harness discovery, run `ensure` once,
+   and register both plugin roots when the hooks have not ("$RUN"
+   register --plugin <name> --root <install path>). Record
+   HARNESS=$("$RUN" harness) for the steps below.
+2. Workspace collision: a foreign workspace/ directory at the root:
+   ask for an alternative name and use it consistently, substituting
+   it in every materialized template content and skeleton path (the
+   .gitignore work-orders rule, the context-file import, source_dirs).
    The team's layout is recognized by config.json's managed_by note or
    the docs/ plus memory/ pair; anything else is foreign. Record the
-   chosen name in the project CLAUDE.md once step 3 materializes it.
+   chosen name in the context file once step 3 materializes it.
 3. Materialize templates from the directory printed by
    "$RUN" path "$TEAM" templates, only where missing (idempotency: never overwrite an existing file, only
    add):
    - .gitignore: create from the template, or append only its missing
      lines (the work-orders/ ignore rule is mandatory).
-   - CLAUDE.md: create from the template with the memory import.
+   - The context file, per HARNESS: claude_code gets CLAUDE.md from
+     the template (with the memory import); cursor and codex get
+     AGENTS.md (same template, import dropped); unknown: both.
    - workspace/memory/: ask "do you have personal rule files (a me.md
      and a profile.md, or a directory containing them)?"; given paths
      are copied verbatim per file, otherwise me.md and profile.md come
      from the templates.
    - workspace/docs/ vault payload from the template directory's
-     vault/ subtree, per file, only where missing: home and the .obsidian payload with
-     plugins/ copied recursively (the vault app asks a one-time trust
-     prompt to enable them). Each subtree map seed is materialized by
-     its tree-birthing entry, born with its tree, never by setup; the
-     obsidian-vault skill owns their law.
+     vault/ subtree, per file, only where missing: home and the
+     .obsidian payload with plugins/ copied recursively (the vault app
+     asks a one-time trust prompt to enable them). Subtree map seeds
+     are born with their trees by the tree-birthing entries, never by
+     setup; the obsidian-vault skill owns their law.
 4. Create the skeleton, only missing parts: workspace/apps/,
    workspace/docs/business-analysis/, workspace/docs/solution-design/,
    workspace/docs/system-architecture/, workspace/docs/maps/,
@@ -75,8 +71,7 @@ detected candidates plus free-form input.
    project: project register --key <kebab project name> --name "<name>"
    --team software-engineering-team --stamp-config workspace/config.json (stamps
    project_key into the config; idempotent). Every flow resolves the
-   project by that key; delivery state lives in the database, read
-   through the CLI.
+   project by that key.
 6. Build workspace/config.json interactively; first key always
    "managed_by": "software-engineering-team plugin; change only through
    the configure entry". An existing config.json is never re-interviewed:
@@ -98,13 +93,12 @@ detected candidates plus free-form input.
    output_language (scope: .md body prose) and terminology_language
    (names, technical terms, code, comments, commits, PR bodies; the
    machine layer always stays English), both defaulting English, always
-   written, "English" spelled out on the accepted default. Then mint
+   written out. Then mint
    doc_type_designations: render the canonical table (obsidian-vault
    metadata) into output_language, one per taxonomy type, for owner
    review, and write it through the checker's reconcile-designations
    verb (one --set per type): the designation keys and their history
-   ledger are hook-guarded with the verb as sole writer, so the
-   interactive config write itself never carries them. An unsupported
+   ledger are hook-guarded with the verb as sole writer. An unsupported
    stack is refused honestly: tested stacks only.
 7. Continuous integration: no PR-triggered test workflow in the
    repository's CI directory (for GitHub, .github/workflows/): offer to
@@ -123,7 +117,16 @@ detected candidates plus free-form input.
    workflow missing the smoke job counts as a gap once the probe passes.
    Keep the dependency-audit job, and route any advisory it raises
    through the request entry as a fix-atomic lockfile bump.
-8. Close: run "$RUN" run "$TEAM" scripts/vault_check.py check
+8. Harness fit; claude_code needs nothing here.
+   - cursor or codex: print the paste from "$RUN" stanza and ask the
+     user to apply it to the named file; without it every backbone
+     write outside the workspace escalates per attempt.
+   - codex additionally: run "$RUN" run "$TEAM"
+     scripts/sync_codex_agents.py, then state: agent definitions and
+     newly trusted hooks load at session start, start a NEW session
+     before the first request; untrusted hooks mean detect-after mode
+     (gates catch, nothing denies).
+9. Close: run "$RUN" run "$TEAM" scripts/vault_check.py check
    --vault workspace/docs. Fresh tree: any finding is a setup bug.
    Existing tree: findings in setup-authored files are setup bugs;
    pre-existing content findings are named as vault degradation and

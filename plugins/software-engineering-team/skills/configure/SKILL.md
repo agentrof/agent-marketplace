@@ -42,6 +42,10 @@ Config changes go through this gate, never through hand edits.
    names, keys, ids, CLI output, always stays English); max_parallel an
    optional positive integer (the delivery-lanes flow's lane-proposal
    cap; absent means 3; this gate is its only writer);
+   model_overrides reserved schema room for future per-harness model
+   pinning: refused on claude_code (the source alias enum stands) and
+   consumed by no supported harness yet, so any requested value is
+   declined with that reason;
    doc_type_designations a map of each taxonomy type-kebab to its
    rendered designation string, minted from the canonical English table
    into output_language. It and its doc_type_designation_history ledger

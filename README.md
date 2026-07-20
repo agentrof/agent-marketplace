@@ -1,7 +1,8 @@
 # Agent Marketplace
 
-A catalog of curated, end-to-end agent teams for Claude Code. Install a
-complete team and run at the goal; this is not a parts store.
+A catalog of curated, end-to-end agent teams for agentic coding
+harnesses (Claude Code native; Cursor and Codex CLI supported). Install
+a complete team and run at the goal; this is not a parts store.
 
 The first team, `software-engineering-team`, is an orchestrated software and product
 development team: business analysis, planning, architecture, design

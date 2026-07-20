@@ -18,7 +18,7 @@ You MUST follow these rules exactly. Violating any of them is a failure.
    Approve / Request changes (revise, re-gate) / Pause (save, stop).
 4. Halt on failure: present the error and ask. Never continue silently.
 5. Spawn only this plugin's agents.
-6. Never enter plan mode. This flow IS the plan.
+6. Never defer to an external planning mode. This flow IS the plan.
 
 ## State contract
 
@@ -104,8 +104,9 @@ Every agent spawn assembles, in this order:
 6. Output: the exact artifact path(s), the requirement to end with
    SELF-CHECK, write nothing else, and never touch the PMO database.
 
-Parallel dispatch: independent spawns go out as multiple Task calls in a
-single message; consume their artifacts from disk afterwards.
+Parallel dispatch: independent spawns go out as parallel subagent
+dispatches in a single message; consume their artifacts from disk
+afterwards.
 
 ## Mechanical post-step check
 

@@ -18,7 +18,7 @@ You MUST follow these rules exactly. Violating any of them is a failure.
    tradeoffs, recommended first).
 4. Halt on failure; present the error and ask. Never continue silently.
 5. Spawn only this plugin's agents.
-6. Never enter plan mode. This flow IS the plan.
+6. Never defer to an external planning mode. This flow IS the plan.
 
 ## Preconditions
 

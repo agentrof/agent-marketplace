@@ -20,7 +20,7 @@ You MUST follow these rules exactly. Violating any of them is a failure.
    exactly: Approve / Skip / Pause.
 4. Halt on failure: present the error and ask. Never continue silently.
 5. Spawn only this plugin's agents.
-6. Never enter plan mode. This flow IS the plan.
+6. Never defer to an external planning mode. This flow IS the plan.
 7. Single writer per work order. This session's database writes are
    ONLY: backlog mutations on main (item import / update / add-dep /
    add-dod) and closing writes for MERGED lanes
@@ -106,7 +106,7 @@ PROPOSE before ending the cycle.
 
   Lane opened for WP-<nn> <story title>.
   Directory: ../<project-dir>-wp-<nn>
-  1. Open a NEW Claude Code session in that directory.
+  1. Open a NEW agent session in that directory.
   2. Say: "request: deliver WP-<nn>"
   3. Approvals for this story happen in THAT session only.
   4. The lane ends at an opened pull request. Report back here and I

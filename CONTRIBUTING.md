@@ -55,7 +55,12 @@ orchestration model in [docs/orchestration.md](docs/orchestration.md).
    working directory. Outputs are anchored at the consuming project's
    git root, never at user or system level.
 5. Run `make check`, then `make counts` if the README counter table is
-   now stale. Never edit counted numbers by hand.
+   now stale. Never edit counted numbers by hand. The scaffolder
+   regenerates the harness artifacts itself; after hand edits to
+   frontmatter, hooks or manifests, run `make generate` (generated
+   files are never hand-edited; the drift gate is red otherwise, and a
+   new frontmatter key, hook event or model alias needs its row in
+   `tools/data/harnesses.json` first).
 
 New stacks for the software team (a config enum value plus a skills
 folder plus tests) are maintainer releases: the team ships tested stacks

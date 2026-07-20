@@ -20,3 +20,111 @@ fails on drift.
 | Model policy | alias enum in agent frontmatter | all aliases resolve to inherit; the session model governs | all aliases resolve to inherit; the session model governs |
 | Windows | supported | out of scope (POSIX shell commands) | out of scope (POSIX shell commands) |
 <!-- harness-matrix:end -->
+
+
+## Install
+
+Claude Code (native, unchanged):
+
+```
+/plugin marketplace add agentrof/agent-marketplace
+/plugin install software-engineering-team
+```
+
+Cursor (2.5 or later). Team-marketplace import is the supported channel
+(an admin feature: Dashboard, Plugins, Team Marketplaces, Add
+Marketplace with this repository; it reads
+.cursor-plugin/marketplace.json and refreshes from the default branch).
+Individuals without a team dashboard clone the repository and symlink
+the two plugin directories into the local plugins directory until the
+marketplace publication lands. Then: apply the sandbox paste the setup
+entry prints, start a new session, run the setup entry.
+
+Codex CLI, in this exact order (two restarts are real):
+
+1. `codex plugin marketplace add agentrof/agent-marketplace`
+2. Install BOTH plugins from the plugins browser; Codex manifests have
+   no dependency field, so project-management-office is explicit.
+3. Review and trust the plugin hooks in the hooks browser. Codex never
+   prompts; untrusted hooks stay silently dormant, which is
+   detect-after mode (the pre-flight probe will say so).
+4. Apply the sandbox paste the setup entry prints (writable roots for
+   the backbone data directory and the personal agents directory).
+5. Start a NEW session; bundled skills load at session start.
+6. Run the setup entry; it registers plugin roots, syncs the agent
+   definitions into the personal scope and materializes AGENTS.md.
+7. Start a NEW session; agent definitions load at session start.
+8. Work normally through the entry skills.
+
+## Enforcement across harnesses
+
+Deny-before-write holds on Claude Code and on Cursor (guard hooks are
+generated fail-closed with explicit timeouts; denial is exit code 2
+everywhere, never the JSON reply, which fails open on malformed
+output). On Codex, hooks intercept shell commands, patches and MCP
+calls only, and only while trusted; the platform states that hooks are
+a guardrail rather than complete enforcement. Wherever a write-time
+denial cannot fire, the system runs in detect-after mode with named
+mechanical barriers: the database integrity tripwire (every sanctioned
+CLI commit re-stamps a content fingerprint; `verify` fails on foreign
+writes, fatally inside work-order validate at every gate), the gate
+check scripts, the spec-fork checkpoint and the consuming project's CI.
+The CLI is the guarantee; hooks are the accelerator.
+
+## Lifecycle
+
+- Updates: Cursor team marketplaces refresh from the repository on
+  their own cadence, which can change flow text under an open work
+  order; import a release tag or branch, not a moving default branch.
+  Codex updates land in a new version directory of the plugin cache;
+  the session-start hook re-registers the root, and hook-less installs
+  re-run the setup entry after updating. Claude Code hot-reloads skill
+  text while hook commands keep the previous version's paths until a
+  restart or a plugin reload; restart after updating.
+- The dispatcher refuses a stale or missing registered root and names
+  the remedy instead of running the wrong copy.
+- Uninstall: remove the plugin through the harness, then delete the
+  backbone data directory (AGENTROF_HOME, default .agentrof under the
+  user home) if the database should go too; the synced launcher and
+  registry live there and `ensure` re-creates them.
+
+## Sandboxes and network
+
+The backbone's data directory lives outside every default workspace
+sandbox. The setup entry prints the exact one-time paste per harness
+("$RUN" stanza): Codex writable roots in the user config file, Cursor
+additional read-write paths in the user sandbox file. Without the
+paste, every backbone write escalates for approval per attempt. Local
+network binding is denied by both default sandboxes, so the dashboard
+is hand-launched in the user's own terminal on Cursor and Codex; the
+control-tower entry prints the command.
+
+## Model policy
+
+Source agents carry an alias from the config enum; concrete model ids
+are banned in source. Both supported harnesses resolve every alias to
+inherit: Cursor silently substitutes the session model on unknown or
+unavailable ids (a silent downgrade is worse than an honest inherit),
+and Codex rejects unknown slugs at request time mid-flow while its
+slugs churn across releases. The session model governs; the map is
+config, so a future tier mapping or the reserved per-project
+model_overrides lands as data, not code.
+
+## Out of scope
+
+Windows is out of scope: the dispatcher and hook commands are POSIX
+shell. The Codex hook schema's per-platform command field is the
+extension point when that changes.
+
+## Verified live, or explicitly open
+
+Platform behavior that this design leans on but only a live install
+proves: Cursor tolerating the unknown user-invocable key in source
+skills, Cursor matcher strings against Claude tool names, the Codex
+plugin manifest hooks pointer and hook-time environment from the
+plugin cache, Cursor hook command base resolution, hook processes
+writing the backbone directory under the user's sandbox paste, agent
+definitions loading at the next session start, and Codex marketplace
+precedence when both registry files exist. Each has a wired fallback
+in tools/data/harnesses.json or in the install story; a failed
+assumption is a config flip, not a redesign.

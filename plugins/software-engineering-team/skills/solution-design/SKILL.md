@@ -102,7 +102,8 @@ gate, and a decision log the planner and the software architect read.
      owner for re-slicing, never silently), deferred findings for the
      owner's ruling.
    - Approve / Request changes / Pause, asked through the
-     AskUserQuestion popup (tradeoffs in the option descriptions). On
+     AskUserQuestion popup (tradeoffs in the option descriptions; popup
+     unavailable: a numbered option list). On
      approve: stamp the engagement via
      "$RUN" run "$TEAM" scripts/landscape_check.py --tree <tree>
      --stamp-engagement <slug> --status approved (the script writes the

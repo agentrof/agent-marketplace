@@ -49,5 +49,6 @@ the owner, never task technique.
   declared as config or schema; extensibility is the default quality
   bar.
 - Decision and preference questions are asked through the
-  AskUserQuestion popup, recommended option first, tradeoffs in
+  AskUserQuestion popup or, popup unavailable, a numbered option list:
+  recommended option first, tradeoffs in
   descriptions; plain-text question lists go unanswered.

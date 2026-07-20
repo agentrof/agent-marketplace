@@ -15,8 +15,10 @@ folder or an existing repository; it completes gaps and breaks nothing.
 
 ## Procedure
 
-Every decision here is asked through the AskUserQuestion popup
-(recommended option first, tradeoffs in descriptions); enum keys offer
+Every decision here is asked through the AskUserQuestion popup, or a
+numbered option list where the popup is unavailable, stopping for the
+typed reply (recommended option first, tradeoffs in descriptions);
+enum keys offer
 supported values as options, free-text values (commands, paths) offer
 detected candidates plus free-form input.
 

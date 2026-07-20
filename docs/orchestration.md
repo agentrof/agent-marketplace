@@ -89,12 +89,13 @@ Routes:
 2. State and artifacts are the source of truth: read prior steps from
    the PMO database and from files, never from conversation memory;
    after any compaction run resume-info and re-read before acting.
-3. Stop at every gate and wait for explicit user choice. Develop-flow
-   gates offer Approve, Request changes (revise and re-gate), Pause
-   (save and stop); design-flow gates offer their own choices (pick a
-   direction or re-run with different emphases; approve the refined
-   preview). Decision and preference questions go through the
-   AskUserQuestion popup: options carry tradeoffs in their
+3. Stop at every gate and wait for explicit user choice, asked through
+   the AskUserQuestion popup, or a numbered option list where the popup
+   is unavailable. Develop-flow gates offer Approve, Request changes
+   (revise and re-gate), Pause (save and stop); design-flow gates offer
+   their own choices (pick a direction or re-run with different
+   emphases; approve the refined preview). Decision and preference
+   questions carry options with tradeoffs in their
    descriptions, the recommended option is first with a
    "(Recommended)"-style suffix in the conversation's language, at most
    four options per question and four questions per batch; free-text

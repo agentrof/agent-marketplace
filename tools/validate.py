@@ -802,25 +802,44 @@ def check_orchestrator_integrity(tree: Tree, findings: list[Finding]) -> None:
 
 QUESTION_POPUP_MARKER = "explicit user choice"
 QUESTION_POPUP_TOKEN = "AskUserQuestion"
+QUESTION_POPUP_FALLBACK = "numbered option list"
+QUESTION_POPUP_WINDOW = 3
 
 
 def check_question_popup(tree: Tree, findings: list[Finding]) -> None:
-    """A gate declared with the standard marker phrase must name the
-    AskUserQuestion popup, so the popup discipline cannot be silently
-    stripped from a gate-declaring file."""
+    """The decision-gate formula, bidirectional and per site (a window of
+    lines absorbs prose wrapping):
+    (a) a gate declared with the marker phrase must name the popup
+        nearby, so the popup discipline cannot be silently stripped from
+        a gate site;
+    (b) the popup token must carry the harness fallback (a numbered
+        option list) nearby, so the same shipped content still asks on a
+        harness without the popup."""
     for path in iter_scope_files(tree, ".md"):
-        text = read_text(path)
-        if QUESTION_POPUP_MARKER in text and QUESTION_POPUP_TOKEN not in text:
-            lineno = next(
-                (i for i, line in enumerate(text.splitlines(), start=1)
-                 if QUESTION_POPUP_MARKER in line), 1)
-            findings.append(Finding(
-                "error", rel(tree, path), lineno, "question_popup",
-                f"file declares a gate ('{QUESTION_POPUP_MARKER}') without"
-                f" naming the {QUESTION_POPUP_TOKEN} popup",
-                "decision gates ask through the AskUserQuestion popup;"
-                " state it where the gate is declared",
-            ))
+        lines = read_text(path).splitlines()
+        for idx, line in enumerate(lines):
+            lo = max(0, idx - QUESTION_POPUP_WINDOW)
+            window = lines[lo:idx + QUESTION_POPUP_WINDOW + 1]
+            if (QUESTION_POPUP_MARKER in line
+                    and not any(QUESTION_POPUP_TOKEN in w for w in window)):
+                findings.append(Finding(
+                    "error", rel(tree, path), idx + 1, "question_popup",
+                    f"gate marker ('{QUESTION_POPUP_MARKER}') without the"
+                    f" {QUESTION_POPUP_TOKEN} popup named nearby",
+                    "decision gates ask through the AskUserQuestion popup"
+                    " (a numbered option list where the popup is"
+                    " unavailable); state it at the gate site",
+                ))
+            if (QUESTION_POPUP_TOKEN in line
+                    and not any(QUESTION_POPUP_FALLBACK in w for w in window)):
+                findings.append(Finding(
+                    "error", rel(tree, path), idx + 1, "question_popup",
+                    f"{QUESTION_POPUP_TOKEN} named without the harness"
+                    " fallback nearby",
+                    f"every popup site carries '{QUESTION_POPUP_FALLBACK}'"
+                    " within three lines, so the gate still asks on a"
+                    " harness without the popup",
+                ))
 
 
 # Fallback for runtimes that predate sys.stdlib_module_names.

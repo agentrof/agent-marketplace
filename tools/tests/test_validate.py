@@ -94,6 +94,23 @@ class ValidatorFixtureTests(unittest.TestCase):
         self.assertTrue(any("names no known doc type" in m
                             for m in messages), findings)
 
+    def test_popup_without_fallback_fires(self):
+        """The bidirectional half of question_popup: naming the popup
+        without the harness fallback nearby is an error, so shipped
+        content still asks on a harness without the popup."""
+        from fixtures import PLUGIN, VALID_FLOW, write
+
+        def popup_no_fallback(root):
+            write(
+                root / "plugins" / PLUGIN / "flows" / "asker.md",
+                VALID_FLOW + "\n3. Ask via the AskUserQuestion popup.\n",
+            )
+
+        findings = self.run_on(popup_no_fallback)
+        self.assertEqual(len(findings), 1, findings)
+        self.assertEqual(findings[0].check, "question_popup")
+        self.assertIn("fallback", findings[0].message)
+
     def test_out_of_scope_violations_are_not_caught(self):
         findings = self.run_on(extra=fixtures.plant_out_of_scope_violations)
         self.assertEqual(

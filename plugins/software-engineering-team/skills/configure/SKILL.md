@@ -62,7 +62,8 @@ Config changes go through this gate, never through hand edits.
    names only; existing names, glossary rows and merged code are never
    renamed, state this fork whenever the key changes on a project with
    authored content. The apply / reject decision is asked through the
-   AskUserQuestion popup (impact summary in the option descriptions).
+   AskUserQuestion popup (impact summary in the option descriptions;
+   popup unavailable: a numbered option list).
    For a designation change (or an output_language change, which
    re-renders the canonical table from the obsidian-vault skill's
    metadata into the new language and passes every pair), the impact

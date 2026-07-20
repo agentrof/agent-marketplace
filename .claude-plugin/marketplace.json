@@ -6,21 +6,21 @@
   },
   "metadata": {
     "description": "A catalog of curated, end-to-end agent teams for agentic coding harnesses. Install a complete team and run at the goal.",
-    "version": "8.0.0"
+    "version": "8.1.0"
   },
   "plugins": [
     {
       "name": "project-management-office",
       "source": "./plugins/project-management-office",
       "description": "Project Management Office: the shared operations backbone for every team plugin. One central database for projects, epics, stories, tasks with attempt history, dependencies, DoD records, work orders, findings and audit events, written only through its CLI, recorded deterministically via hooks, and viewed through a read-only web dashboard.",
-      "version": "1.5.0",
+      "version": "1.6.0",
       "license": "MIT"
     },
     {
       "name": "software-engineering-team",
       "source": "./plugins/software-engineering-team",
       "description": "A complete, orchestrated software and product development team: analysis, planning, architecture, design system, implementation, review, verification and a containerized environment.",
-      "version": "8.0.0",
+      "version": "8.1.0",
       "license": "MIT"
     }
   ]

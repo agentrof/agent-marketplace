@@ -21,17 +21,8 @@ import scaffold  # noqa: E402
 import validate  # noqa: E402
 
 
-def register(root: Path, plugin: str) -> None:
-    marketplace = root / ".claude-plugin" / "marketplace.json"
-    data = json.loads(marketplace.read_text(encoding="utf-8"))
-    data["plugins"].append({
-        "name": plugin,
-        "source": f"./plugins/{plugin}",
-        "description": f"{plugin} plugin.",
-        "version": "0.1.0",
-        "license": "MIT",
-    })
-    marketplace.write_text(json.dumps(data, indent=2), encoding="utf-8")
+# new-plugin registers itself in the marketplace; scaffold.regenerate
+# refreshes the generated harness artifacts after every subcommand.
 
 
 class ScaffoldTests(unittest.TestCase):
@@ -43,20 +34,22 @@ class ScaffoldTests(unittest.TestCase):
     def tearDown(self):
         self.tmp.cleanup()
 
-    def test_new_plugin_passes_validation_after_registration(self):
+    def test_new_plugin_passes_validation(self):
         scaffold.new_plugin(self.root, "demo-team")
-        register(self.root, "demo-team")
+        scaffold.regenerate(self.root)
         findings = validate.run(self.root)
         self.assertEqual(findings, [], f"scaffolded plugin must be clean: {findings}")
 
     def test_new_agent_passes_validation(self):
         scaffold.new_agent(self.root, fixtures.PLUGIN, "coordinator")
+        scaffold.regenerate(self.root)
         findings = validate.run(self.root)
         self.assertEqual(findings, [], f"scaffolded agent must be clean: {findings}")
 
     def test_new_skill_both_kinds_pass_validation(self):
         scaffold.new_skill(self.root, fixtures.PLUGIN, "intake", "entry")
         scaffold.new_skill(self.root, fixtures.PLUGIN, "domain-notes", "hidden")
+        scaffold.regenerate(self.root)
         findings = validate.run(self.root)
         self.assertEqual(findings, [], f"scaffolded skills must be clean: {findings}")
 

@@ -1,0 +1,5 @@
+interface:
+  display_name: "Control Tower"
+  short_description: "Starts Control Tower, the read-only web dashboard over the central database, as a background process and replies with the clickable running URL. The remote-control of the operations backbone."
+policy:
+  allow_implicit_invocation: false

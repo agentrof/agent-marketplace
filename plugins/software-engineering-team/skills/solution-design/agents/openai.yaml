@@ -1,0 +1,5 @@
+interface:
+  display_name: "Solution Design"
+  short_description: "Interactive solution design. The solution-architect persona runs a multi-turn working session over the end-to-end landscape and records technology, topology and method decisions the whole team consumes; grounded on the analysis space, challenged per round, gated per engagement."
+policy:
+  allow_implicit_invocation: false

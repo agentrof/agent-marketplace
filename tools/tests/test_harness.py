@@ -331,6 +331,20 @@ class RealRepoRenderTests(unittest.TestCase):
             if "/codex/agents/" in key:
                 self.assertNotIn("model =", content, key)
 
+    def test_real_repo_guard_options_survive_command_rewrite(self):
+        """The rewrite re-quotes the path unit; guard classification must
+        run on the source command or 'vault_hook.py pre' loses its
+        fail-closed options exactly where they matter."""
+        config = harness.load_config(REPO_ROOT)
+        rendered = harness.render_all(REPO_ROOT, config)
+        hooks = json.loads(rendered[
+            "plugins/software-engineering-team/cursor/hooks/hooks.json"])
+        pre = hooks["hooks"]["preToolUse"][0]
+        self.assertIn("vault_hook.py", pre["command"])
+        self.assertTrue(pre.get("failClosed"), pre)
+        post = hooks["hooks"]["postToolUse"][0]
+        self.assertNotIn("failClosed", post)
+
     def test_real_repo_runtime_data(self):
         config = harness.load_config(REPO_ROOT)
         rendered = harness.render_all(REPO_ROOT, config)

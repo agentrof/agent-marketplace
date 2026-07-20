@@ -9,7 +9,16 @@ a fixture cannot merge.
 from __future__ import annotations
 
 import json
+import shutil
+import sys
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+import harness  # noqa: E402
+
+REAL_HARNESS_CONFIG = (Path(__file__).resolve().parents[1]
+                       / "data" / "harnesses.json")
 
 PLUGIN = "sample-team"
 
@@ -188,6 +197,24 @@ def make_valid_root(root: Path) -> None:
         "version": "0.0.1",
         "templates": {"common": {"main": "title", "fallback": None}},
     }, indent=2))
+    # The harness policy file plus the committed generated artifacts, so
+    # the valid root is clean under the harness checks and every fixture
+    # exercises the production render path.
+    shutil.copyfile(REAL_HARNESS_CONFIG,
+                    write_path(root / "tools" / "data" / "harnesses.json"))
+    resync(root)
+
+
+def write_path(path: Path) -> Path:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    return path
+
+
+def resync(root: Path) -> None:
+    """Regenerate the committed harness artifacts after a builder mutated
+    renderer inputs, so a planted defect yields exactly its own finding
+    and never a secondary harness_drift one."""
+    harness.write_all(root, harness.load_config(root))
 
 
 # --- one builder per validator check -------------------------------------
@@ -196,16 +223,19 @@ def make_valid_root(root: Path) -> None:
 def break_frontmatter_shape(root: Path) -> None:
     text = VALID_AGENT.replace("model: sonnet", "model: sonnet\ncolor: blue")
     write(root / "plugins" / PLUGIN / "agents" / "planner.md", text)
+    resync(root)
 
 
 def break_agent_name(root: Path) -> None:
     text = VALID_AGENT.replace("name: sample-team-planner", "name: planner")
     write(root / "plugins" / PLUGIN / "agents" / "planner.md", text)
+    resync(root)
 
 
 def break_skill_name(root: Path) -> None:
     text = VALID_SKILL.replace("name: notes", "name: memo")
     write(root / "plugins" / PLUGIN / "skills" / "notes" / "SKILL.md", text)
+    resync(root)
 
 
 def break_trigger_policy(root: Path) -> None:
@@ -214,17 +244,20 @@ def break_trigger_policy(root: Path) -> None:
         "description: Planner role. Use PROACTIVELY when planning work.",
     )
     write(root / "plugins" / PLUGIN / "agents" / "planner.md", text)
+    resync(root)
 
 
 def break_size_caps(root: Path) -> None:
     padding = "\n".join(f"- padding line {i}" for i in range(1, 70))
     text = VALID_AGENT.rstrip() + "\n" + padding + "\n"
     write(root / "plugins" / PLUGIN / "agents" / "planner.md", text)
+    resync(root)
 
 
 def break_section_contract(root: Path) -> None:
     text = VALID_AGENT.replace("## Boundaries", "## Limits")
     write(root / "plugins" / PLUGIN / "agents" / "planner.md", text)
+    resync(root)
 
 
 def break_agent_tech_nouns(root: Path) -> None:
@@ -233,6 +266,7 @@ def break_agent_tech_nouns(root: Path) -> None:
         "- Does: planning and ordering with python scripts.",
     )
     write(root / "plugins" / PLUGIN / "agents" / "planner.md", text)
+    resync(root)
 
 
 def break_content_bans(root: Path) -> None:
@@ -266,6 +300,7 @@ Field notes knowledge.
 - [depth](references/depth.md): deeper notes without a trigger clause.
 """)
     write(base / "references" / "depth.md", "# Depth\n\nDeeper notes.\n")
+    resync(root)
 
 
 def break_registration(root: Path) -> None:
@@ -275,6 +310,7 @@ def break_registration(root: Path) -> None:
         "description": "unregistered plugin",
         "license": "MIT",
     }, indent=2))
+    resync(root)
 
 
 def break_json_hygiene(root: Path) -> None:
@@ -285,6 +321,7 @@ def break_json_hygiene(root: Path) -> None:
         "license": "MIT",
         "displayName": "Sample Team",
     }, indent=2))
+    resync(root)
 
 
 def break_orchestrator_integrity(root: Path) -> None:
@@ -364,6 +401,7 @@ def break_wikilink_ban(root: Path) -> None:
         "- Cite the vault note [[notes/decisions|decision]] directly.",
     )
     write(root / "plugins" / PLUGIN / "skills" / "notes" / "SKILL.md", text)
+    resync(root)
 
 
 def break_version_sync(root: Path) -> None:
@@ -373,6 +411,7 @@ def break_version_sync(root: Path) -> None:
         "description": "fixture plugin",
         "license": "MIT",
     }, indent=2))
+    resync(root)
 
 
 def break_vault_policy_shape(root: Path) -> None:
@@ -399,6 +438,44 @@ Vault authoring rules.
 """)
     write(root / "plugins" / PLUGIN / "flows" / "docs.md",
           VALID_FLOW + "\n3. Write the outcome under workspace/docs/notes/.\n")
+    resync(root)
+
+
+def break_harness_config_shape(root: Path) -> None:
+    config_path = root / "tools" / "data" / "harnesses.json"
+    config = json.loads(config_path.read_text(encoding="utf-8"))
+    del config["model_aliases"]
+    config_path.write_text(json.dumps(config, indent=2), encoding="utf-8")
+
+
+def break_model_map_completeness(root: Path) -> None:
+    config_path = root / "tools" / "data" / "harnesses.json"
+    config = json.loads(config_path.read_text(encoding="utf-8"))
+    del config["harnesses"]["cursor"]["model_map"]["haiku"]
+    config_path.write_text(json.dumps(config, indent=2), encoding="utf-8")
+
+
+def break_hook_event_coverage(root: Path) -> None:
+    # An event with no route and no unsupported listing; the renderer
+    # refuses to render it, so drift skips and coverage owns the finding.
+    hooks_path = root / "plugins" / PLUGIN / "hooks" / "hooks.json"
+    data = json.loads(hooks_path.read_text(encoding="utf-8"))
+    data["hooks"]["PreCompact"] = [
+        {"hooks": [{"type": "command", "command": "true"}]}]
+    hooks_path.write_text(json.dumps(data, indent=2), encoding="utf-8")
+
+
+def break_portable_frontmatter(root: Path) -> None:
+    config_path = root / "tools" / "data" / "harnesses.json"
+    config = json.loads(config_path.read_text(encoding="utf-8"))
+    del config["harnesses"]["cursor"]["agent_frontmatter"]["tools"]
+    config_path.write_text(json.dumps(config, indent=2), encoding="utf-8")
+
+
+def break_harness_drift(root: Path) -> None:
+    manifest = (root / "plugins" / PLUGIN / ".cursor-plugin" / "plugin.json")
+    manifest.write_text(
+        manifest.read_text(encoding="utf-8") + "\n", encoding="utf-8")
 
 
 BUILDERS = {
@@ -427,6 +504,11 @@ BUILDERS = {
     "version_sync": break_version_sync,
     "vault_policy_shape": break_vault_policy_shape,
     "vault_wiring": break_vault_wiring,
+    "harness_config_shape": break_harness_config_shape,
+    "model_map_completeness": break_model_map_completeness,
+    "hook_event_coverage": break_hook_event_coverage,
+    "portable_frontmatter": break_portable_frontmatter,
+    "harness_drift": break_harness_drift,
 }
 
 

@@ -17,7 +17,12 @@ from __future__ import annotations
 import argparse
 import json
 import re
+import sys
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+import harness  # noqa: E402
 
 KEBAB_RE = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
 
@@ -120,15 +125,23 @@ def new_plugin(root: Path, name: str) -> None:
     (plugin / ".claude-plugin" / "plugin.json").write_text(
         json.dumps(manifest, indent=2) + "\n", encoding="utf-8"
     )
-    print(f"scaffold: created plugins/{name}")
-    print("scaffold: add this entry to .claude-plugin/marketplace.json plugins[]:")
-    print(json.dumps({
+    # Registration is part of birth: the harness marketplaces derive from
+    # this registry, so a scaffolded-but-unregistered plugin would leave
+    # the generated artifacts stale the moment someone registered it by
+    # hand. One writer, one moment.
+    marketplace_path = root / ".claude-plugin" / "marketplace.json"
+    marketplace = json.loads(marketplace_path.read_text(encoding="utf-8"))
+    marketplace.setdefault("plugins", []).append({
         "name": name,
         "source": f"./plugins/{name}",
         "description": manifest["description"],
         "version": manifest["version"],
         "license": "MIT",
-    }, indent=2))
+    })
+    marketplace_path.write_text(
+        json.dumps(marketplace, indent=2) + "\n", encoding="utf-8")
+    print(f"scaffold: created plugins/{name} and registered it in"
+          " .claude-plugin/marketplace.json")
 
 
 def new_agent(root: Path, plugin_name: str, name: str) -> None:
@@ -192,7 +205,22 @@ def main() -> int:
         new_agent(root, args.plugin, args.name)
     elif args.command == "new-skill":
         new_skill(root, args.plugin, args.name, args.kind)
+    regenerate(root)
     return 0
+
+
+def regenerate(root: Path) -> None:
+    """Portable by construction: every scaffolded component immediately
+    gets its generated harness artifacts, so make check stays green
+    without a separate generate step."""
+    try:
+        config = harness.load_config(root)
+    except harness.HarnessConfigError as exc:
+        print(f"scaffold: WARNING: harness artifacts not regenerated ({exc})")
+        return
+    changed = harness.write_all(root, config)
+    if changed:
+        print(f"scaffold: regenerated {len(changed)} harness artifact(s)")
 
 
 if __name__ == "__main__":

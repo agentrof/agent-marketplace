@@ -1,0 +1,5 @@
+interface:
+  display_name: "Delivery Lanes"
+  short_description: "The integrator surface for parallel delivery; it never delivers a story itself. Proposes which ready stories can start together from dependencies and claims, opens git worktree lanes the user drives through their own request sessions, tracks where gate approvals are pending, and owns every merge checkpoint on the main line."
+policy:
+  allow_implicit_invocation: false

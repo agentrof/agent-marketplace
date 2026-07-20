@@ -22,6 +22,10 @@ import unicodedata
 from dataclasses import dataclass, field
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+import harness  # noqa: E402  (tools/harness.py: renderer + generated scope)
+
 # ---------------------------------------------------------------------------
 # Constants and policy tables
 # ---------------------------------------------------------------------------
@@ -139,6 +143,7 @@ class Tree:
     docs_dir: Path
     readme: Path
     marketplace: Path
+    config: dict | None = None  # tools/data/harnesses.json, None when unloadable
     md_files: list[Path] = field(default_factory=list)
     json_files: list[Path] = field(default_factory=list)
 
@@ -194,6 +199,16 @@ def heading_has_emoji(line: str) -> bool:
     return False
 
 
+def is_gen(tree: Tree, path: Path) -> bool:
+    """Generated harness artifacts are never content-scanned: they are
+    proven by renderer construction plus byte-drift equality
+    (harness_drift), a stronger guarantee than pattern scanning. This
+    predicate is consumed by EVERY walker, not only iter_scope_files."""
+    if tree.config is None:
+        return False
+    return harness.is_generated(tree.root, tree.config, path)
+
+
 def iter_scope_files(tree: Tree, suffix: str) -> list[Path]:
     files: list[Path] = []
     if tree.plugins_dir.is_dir():
@@ -206,10 +221,13 @@ def iter_scope_files(tree: Tree, suffix: str) -> list[Path]:
         contributing = tree.root / "CONTRIBUTING.md"
         if contributing.is_file():
             files.append(contributing)
+        agents_md = tree.root / "AGENTS.md"
+        if agents_md.is_file():
+            files.append(agents_md)
     if suffix == ".json":
         if tree.marketplace.is_file():
             files.append(tree.marketplace)
-    return files
+    return [p for p in files if not is_gen(tree, p)]
 
 
 def plugin_dirs(tree: Tree) -> list[Path]:
@@ -281,11 +299,14 @@ def check_frontmatter_shape(tree: Tree, findings: list[Finding]) -> None:
                         " omit the key",
                     ))
             model = fm.get("model", "")
-            if model and model not in AGENT_MODEL_ENUM:
+            model_enum = set((tree.config or {}).get("model_aliases")
+                             or AGENT_MODEL_ENUM)
+            if model and model not in model_enum:
                 findings.append(Finding(
                     "error", rel(tree, path), 1, "frontmatter_shape",
-                    f"agent model '{model}' is not in {sorted(AGENT_MODEL_ENUM)}",
-                    "use an alias from the enum; concrete model ids are banned",
+                    f"agent model '{model}' is not in {sorted(model_enum)}",
+                    "use an alias from the enum (tools/data/harnesses.json"
+                    " model_aliases); concrete model ids are banned",
                 ))
         for sdir in skill_dirs(plugin):
             skill_md = sdir / "SKILL.md"
@@ -742,6 +763,7 @@ def check_json_hygiene(tree: Tree, findings: list[Finding]) -> None:
         json_paths.append(tree.marketplace)
     if tree.plugins_dir.is_dir():
         json_paths.extend(sorted(tree.plugins_dir.rglob("*.json")))
+    json_paths = [p for p in json_paths if not is_gen(tree, p)]
     for path in json_paths:
         try:
             data = json.loads(read_text(path))
@@ -788,6 +810,8 @@ def check_orchestrator_integrity(tree: Tree, findings: list[Finding]) -> None:
                     ))
         pattern = re.compile(AGENT_ROLE_SUFFIX_RE_TPL.format(plugin=re.escape(plugin.name)))
         for path in sorted(plugin.rglob("*.md")):
+            if is_gen(tree, path):
+                continue
             text = read_text(path)
             for lineno, line in enumerate(text.splitlines(), start=1):
                 for match in pattern.finditer(line):
@@ -927,7 +951,21 @@ def check_script_references(tree: Tree, findings: list[Finding]) -> None:
     ${CLAUDE_PLUGIN_ROOT} script tokens and the dispatcher grammar
     ("$RUN" run|path ... <relpath>)."""
     for plugin in plugin_dirs(tree):
+        hooks_manifest = plugin / "hooks" / "hooks.json"
+        if hooks_manifest.is_file():
+            for lineno, line in enumerate(
+                    read_text(hooks_manifest).splitlines(), start=1):
+                for match in SCRIPT_REF_RE.finditer(line):
+                    if not (plugin / match.group(1)).is_file():
+                        findings.append(Finding(
+                            "error", rel(tree, hooks_manifest), lineno,
+                            "script_references",
+                            f"hook command names a missing script: {match.group(1)}",
+                            "ship the script or fix the hook command",
+                        ))
         for path in sorted(plugin.rglob("*.md")):
+            if is_gen(tree, path):
+                continue
             for lineno, line in enumerate(read_text(path).splitlines(), start=1):
                 for match in SCRIPT_REF_RE.finditer(line):
                     if not (plugin / match.group(1)).is_file():
@@ -1000,6 +1038,8 @@ def check_template_placeholders(tree: Tree, findings: list[Finding]) -> None:
             read_text(p) for p in sorted(skills_dir.glob("*/SKILL.md"))
         ) if skills_dir.is_dir() else ""
         for tpl in sorted(p for p in templates.rglob("*") if p.is_file()):
+            if is_gen(tree, tpl):
+                continue
             parts = tpl.parts
             if ".obsidian" in parts and "plugins" in parts:
                 # Vendored third-party vault plugins are shipped verbatim;
@@ -1171,12 +1211,43 @@ def check_version_sync(tree: Tree, findings: list[Finding]) -> None:
         except json.JSONDecodeError:
             continue
         plugin_version = pj.get("version", "")
+        mismatched: list[str] = []
         if entry_version and plugin_version and entry_version != plugin_version:
+            mismatched.append(f"marketplace entry '{entry_version}'")
+        # Defense in depth over the generated harness manifests: they are
+        # byte-derived (harness_drift), but a release that forgets `make
+        # generate` should fail HERE with the release rule named. This
+        # check READS generated files deliberately; it is a named consumer
+        # of the generated scope, unlike the content walkers that skip it.
+        plugin_dir = plugin_json.parent.parent
+        for harness_id, cfg in ((tree.config or {}).get("harnesses") or {}).items():
+            manifest = plugin_dir / cfg.get("plugin_manifest_path", "")
+            if not manifest.is_file():
+                continue
+            try:
+                version = json.loads(read_text(manifest)).get("version", "")
+            except json.JSONDecodeError:
+                continue
+            if version and plugin_version and version != plugin_version:
+                mismatched.append(f"{harness_id} manifest '{version}'")
+        cursor_cfg = ((tree.config or {}).get("harnesses") or {}).get("cursor", {})
+        cursor_market = tree.root / cursor_cfg.get("marketplace_path", "")
+        if cursor_market.is_file():
+            try:
+                for centry in json.loads(read_text(cursor_market)).get("plugins", []):
+                    if centry.get("name") == pj.get("name"):
+                        cv = centry.get("version", "")
+                        if cv and plugin_version and cv != plugin_version:
+                            mismatched.append(f"cursor marketplace entry '{cv}'")
+            except json.JSONDecodeError:
+                pass
+        if mismatched:
             findings.append(Finding(
                 "error", rel(tree, plugin_json), 1, "version_sync",
-                f"plugin version '{plugin_version}' does not match marketplace"
-                f" entry '{entry_version}'",
-                "bump plugin.json and its marketplace.json entry together",
+                f"plugin version '{plugin_version}' does not match:"
+                f" {'; '.join(mismatched)}",
+                "a release bumps plugin.json and its marketplace entry"
+                " together and runs `make generate` in the same commit",
             ))
 
 
@@ -1530,6 +1601,185 @@ def check_vault_policy_shape(tree: Tree, findings: list[Finding]) -> None:
                             " name one plugin")
 
 
+HARNESS_CONFIG_REQUIRED_BLOCKS = (
+    "marketplace_path", "plugin_manifest_path", "agents_dir",
+    "agent_format", "hooks_manifest", "hook_routes", "agent_frontmatter",
+    "skill_frontmatter", "model_map",
+)
+
+
+def _config_shape_errors(config: dict) -> list[str]:
+    problems: list[str] = []
+    if not isinstance(config.get("schema_version"), int):
+        problems.append("schema_version must be an integer")
+    aliases = config.get("model_aliases")
+    if (not isinstance(aliases, list) or not aliases
+            or not all(isinstance(a, str) and KEBAB_RE.match(a)
+                       for a in aliases)):
+        problems.append("model_aliases must be a non-empty kebab-case list")
+    harnesses_obj = config.get("harnesses")
+    if not isinstance(harnesses_obj, dict) or not harnesses_obj:
+        problems.append("harnesses must be a non-empty object")
+        return problems
+    for harness_id, cfg in sorted(harnesses_obj.items()):
+        if not isinstance(cfg, dict):
+            problems.append(f"harness '{harness_id}' must be an object")
+            continue
+        for key in HARNESS_CONFIG_REQUIRED_BLOCKS:
+            if key not in cfg:
+                problems.append(f"harness '{harness_id}' missing '{key}'")
+        for table in ("agent_frontmatter", "skill_frontmatter"):
+            for key, spec in (cfg.get(table) or {}).items():
+                action = (spec or {}).get("action", "")
+                if action not in harness.FRONTMATTER_ACTIONS:
+                    problems.append(
+                        f"harness '{harness_id}' {table} key '{key}' uses"
+                        f" unknown action '{action}'")
+    return problems
+
+
+def _config_usable(tree: Tree) -> bool:
+    return tree.config is not None and not _config_shape_errors(tree.config)
+
+
+def check_harness_config_shape(tree: Tree, findings: list[Finding]) -> None:
+    """tools/data/harnesses.json is the single per-harness policy file;
+    an unloadable or malformed config would let every downstream harness
+    guarantee silently lapse, so its shape is validated like any other
+    policy artifact."""
+    where = harness.CONFIG_RELPATH
+    if tree.config is None:
+        findings.append(Finding(
+            "error", where, 1, "harness_config_shape",
+            "harness config is missing or not valid JSON",
+            "restore tools/data/harnesses.json; every per-harness value"
+            " lives there",
+        ))
+        return
+    for problem in _config_shape_errors(tree.config):
+        findings.append(Finding(
+            "error", where, 1, "harness_config_shape", problem,
+            "fix the config block; the closed action vocabulary and the"
+            " required blocks are documented in docs/authoring.md",
+        ))
+
+
+def check_model_map_completeness(tree: Tree, findings: list[Finding]) -> None:
+    """Every model alias resolves on every harness, or the release does
+    not ship: a missing row would silently fall back at generate time."""
+    if not _config_usable(tree):
+        return  # harness_config_shape owns the finding
+    where = harness.CONFIG_RELPATH
+    aliases = set(tree.config["model_aliases"])
+    for harness_id, cfg in sorted(tree.config["harnesses"].items()):
+        model_map = cfg.get("model_map") or {}
+        rows = set(model_map)
+        for alias in sorted(aliases - rows):
+            findings.append(Finding(
+                "error", where, 1, "model_map_completeness",
+                f"harness '{harness_id}' model_map has no row for alias"
+                f" '{alias}'",
+                "add the row; every alias resolves explicitly on every"
+                " harness",
+            ))
+        for alias in sorted(rows - aliases):
+            findings.append(Finding(
+                "error", where, 1, "model_map_completeness",
+                f"harness '{harness_id}' model_map row '{alias}' is not a"
+                " declared alias",
+                "drop the row or declare the alias in model_aliases",
+            ))
+        for alias, row in sorted(model_map.items()):
+            if not isinstance(row, dict):
+                findings.append(Finding(
+                    "error", where, 1, "model_map_completeness",
+                    f"harness '{harness_id}' model_map row '{alias}' must be"
+                    " an object",
+                    "use an object; empty means inherit (omit model keys)",
+                ))
+        fallback = cfg.get("model_fallback", "")
+        if fallback not in aliases:
+            findings.append(Finding(
+                "error", where, 1, "model_map_completeness",
+                f"harness '{harness_id}' model_fallback '{fallback}' is not"
+                " a declared alias",
+                "point model_fallback at a declared alias",
+            ))
+
+
+def check_hook_event_coverage(tree: Tree, findings: list[Finding]) -> None:
+    """Every hook event a plugin ships has an explicit disposition on
+    every harness: a mapped route or a listed unsupported_events entry.
+    Silence never drops an event."""
+    if not _config_usable(tree):
+        return
+    for plugin in plugin_dirs(tree):
+        hooks_path = plugin / "hooks" / "hooks.json"
+        if not hooks_path.is_file():
+            continue
+        try:
+            events = set(json.loads(read_text(hooks_path)).get("hooks", {}))
+        except json.JSONDecodeError:
+            continue  # json_hygiene reports the parse failure
+        uncovered: dict[str, list[str]] = {}
+        for harness_id, cfg in sorted(tree.config["harnesses"].items()):
+            routed = {r.get("source_event") for r in cfg.get("hook_routes", [])}
+            unsupported = set(cfg.get("unsupported_events", []))
+            for event in sorted(events - routed - unsupported):
+                uncovered.setdefault(event, []).append(harness_id)
+        for event, harness_ids in sorted(uncovered.items()):
+            findings.append(Finding(
+                "error", rel(tree, hooks_path), 1, "hook_event_coverage",
+                f"event '{event}' has no disposition for:"
+                f" {', '.join(harness_ids)}",
+                "add a hook_routes row or list it in unsupported_events;"
+                " silence never drops an event",
+            ))
+
+
+def check_portable_frontmatter(tree: Tree, findings: list[Finding]) -> None:
+    """Every frontmatter key the source contract allows carries a
+    disposition row on every harness, so a new key cannot ship without
+    its portability being decided."""
+    if not _config_usable(tree):
+        return
+    where = harness.CONFIG_RELPATH
+    contracts = (
+        ("agent_frontmatter", AGENT_REQUIRED_KEYS | AGENT_OPTIONAL_KEYS),
+        ("skill_frontmatter", SKILL_REQUIRED_KEYS | SKILL_VISIBILITY_KEYS),
+    )
+    for harness_id, cfg in sorted(tree.config["harnesses"].items()):
+        for table, legal_keys in contracts:
+            rows = set(cfg.get(table) or {})
+            for key in sorted(legal_keys - rows):
+                findings.append(Finding(
+                    "error", where, 1, "portable_frontmatter",
+                    f"harness '{harness_id}' {table} has no disposition for"
+                    f" source key '{key}'",
+                    "add a row with an action from the closed vocabulary;"
+                    " every legal source key is decided per harness",
+                ))
+
+
+def check_harness_drift(tree: Tree, findings: list[Finding]) -> None:
+    """Committed generated artifacts are byte-identical to the renderer:
+    missing, stale or orphaned files are CI-red. This is the guarantee
+    that replaces content scanning for generated files."""
+    if not _config_usable(tree):
+        return
+    try:
+        problems = harness.diff(tree.root, tree.config)
+    except harness.HarnessConfigError:
+        return  # hook_event_coverage or config shape owns the finding
+    for relpath, reason in problems:
+        findings.append(Finding(
+            "error", relpath, 1, "harness_drift",
+            f"generated artifact is {reason}",
+            "run `make generate` and commit the result; generated files"
+            " are never hand-edited",
+        ))
+
+
 CHECKS = {
     "frontmatter_shape": check_frontmatter_shape,
     "agent_name": check_agent_name,
@@ -1556,6 +1806,11 @@ CHECKS = {
     "version_sync": check_version_sync,
     "vault_policy_shape": check_vault_policy_shape,
     "vault_wiring": check_vault_wiring,
+    "harness_config_shape": check_harness_config_shape,
+    "model_map_completeness": check_model_map_completeness,
+    "hook_event_coverage": check_hook_event_coverage,
+    "portable_frontmatter": check_portable_frontmatter,
+    "harness_drift": check_harness_drift,
 }
 
 
@@ -1565,12 +1820,17 @@ CHECKS = {
 
 
 def build_tree(root: Path) -> Tree:
+    try:
+        config = harness.load_config(root)
+    except harness.HarnessConfigError:
+        config = None  # harness_config_shape reports it
     return Tree(
         root=root,
         plugins_dir=root / "plugins",
         docs_dir=root / "docs",
         readme=root / "README.md",
         marketplace=root / ".claude-plugin" / "marketplace.json",
+        config=config,
     )
 
 

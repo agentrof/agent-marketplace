@@ -1,0 +1,29 @@
+{
+  "version": 1,
+  "hooks": {
+    "sessionStart": [
+      {
+        "command": "python3 \"${CURSOR_PLUGIN_ROOT:-.}/scripts/vault_hook.py\" register"
+      }
+    ],
+    "preToolUse": [
+      {
+        "command": "python3 \"${CURSOR_PLUGIN_ROOT:-.}/scripts/vault_hook.py\" pre",
+        "matcher": "Write|write|create_file|search_replace|Edit|edit_file|MultiEdit",
+        "failClosed": true,
+        "timeout": 30
+      }
+    ],
+    "postToolUse": [
+      {
+        "command": "python3 \"${CURSOR_PLUGIN_ROOT:-.}/scripts/vault_hook.py\" post",
+        "matcher": "Write|write|create_file|search_replace|Edit|edit_file|MultiEdit"
+      }
+    ],
+    "afterFileEdit": [
+      {
+        "command": "python3 \"${CURSOR_PLUGIN_ROOT:-.}/scripts/vault_hook.py\" post"
+      }
+    ]
+  }
+}

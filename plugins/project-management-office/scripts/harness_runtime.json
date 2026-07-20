@@ -1,0 +1,53 @@
+{
+  "schema_version": 1,
+  "harness_signals": {
+    "claude_code": {
+      "env": "CLAUDE_PLUGIN_ROOT",
+      "stdin_field": ""
+    },
+    "cursor": {
+      "env": "CURSOR_PLUGIN_ROOT",
+      "stdin_field": "cursor_version"
+    },
+    "codex": {
+      "env": "PLUGIN_ROOT",
+      "stdin_field": ""
+    }
+  },
+  "install_roots": {
+    "claude_code": {
+      "registry": "~/.claude/plugins/installed_plugins.json",
+      "globs": [],
+      "pick": "registry"
+    },
+    "cursor": {
+      "registry": "",
+      "globs": [],
+      "pick": "hook_only"
+    },
+    "codex": {
+      "registry": "",
+      "globs": [
+        "~/.codex/plugins/cache/*/{plugin}/*"
+      ],
+      "pick": "newest_version"
+    }
+  },
+  "sandbox_stanzas": {
+    "cursor": {
+      "file": "~/.cursor/sandbox.json",
+      "stanza": "{\"additionalReadwritePaths\": [\"{home}/.agentrof\"]}",
+      "note": "Merge into the existing file when one exists; the sandbox denies writes outside the workspace by default."
+    },
+    "codex": {
+      "file": "~/.codex/config.toml",
+      "stanza": "[sandbox_workspace_write]\nwritable_roots = [\"{home}/.agentrof\", \"{home}/.codex/agents\"]",
+      "note": "Without this, every write outside the workspace escalates for approval per attempt."
+    }
+  },
+  "restart_after_setup": {
+    "claude_code": false,
+    "cursor": false,
+    "codex": true
+  }
+}

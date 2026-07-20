@@ -337,13 +337,18 @@ def render_hooks(source: dict, harness: dict, harness_id: str) -> dict:
                 else:
                     target_matcher = matcher
                 for hook in entry.get("hooks", []):
-                    command = rewrite_command(hook.get("command", ""), rewrite)
+                    source_command = hook.get("command", "")
+                    # Guard classification runs on the SOURCE command:
+                    # rewrite policies may re-quote the path unit, which
+                    # must never cost a guard its fail-closed options.
+                    is_guard = _is_guard_command(source_command, harness)
+                    command = rewrite_command(source_command, rewrite)
                     target = route["target_event"]
                     if cursor_style:
                         item: dict = {"command": command}
                         if target_matcher:
                             item["matcher"] = target_matcher
-                        if _is_guard_command(command, harness):
+                        if is_guard:
                             item.update(harness.get("guard_options", {}))
                         out_events.setdefault(target, []).append(item)
                     else:

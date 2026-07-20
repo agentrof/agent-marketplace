@@ -1,0 +1,21 @@
+{
+  "name": "agent-marketplace",
+  "plugins": [
+    {
+      "name": "project-management-office",
+      "description": "Project Management Office: the shared operations backbone for every team plugin. One central database for projects, epics, stories, tasks with attempt history, dependencies, DoD records, work orders, findings and audit events, written only through its CLI, recorded deterministically via hooks, and viewed through a read-only web dashboard.",
+      "source": {
+        "source": "local",
+        "path": "./plugins/project-management-office"
+      }
+    },
+    {
+      "name": "software-engineering-team",
+      "description": "A complete, orchestrated software and product development team: analysis, planning, architecture, design system, implementation, review, verification and a containerized environment.",
+      "source": {
+        "source": "local",
+        "path": "./plugins/software-engineering-team"
+      }
+    }
+  ]
+}

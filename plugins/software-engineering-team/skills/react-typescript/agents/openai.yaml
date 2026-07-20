@@ -1,0 +1,5 @@
+interface:
+  display_name: "React Typescript"
+  short_description: "React and TypeScript frontend expertise loaded by software-engineering-team agents for client-side work. Use when building components from approved designs, deciding where a piece of state lives, consuming design tokens, enforcing strict typing, meeting performance and accessibility bars, or writing component and hook tests with business-rule traceability."
+policy:
+  allow_implicit_invocation: true

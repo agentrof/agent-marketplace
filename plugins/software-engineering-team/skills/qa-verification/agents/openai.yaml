@@ -1,0 +1,5 @@
+interface:
+  display_name: "Qa Verification"
+  short_description: "Verification framework for the QA role. Defines the test-plan categories, the coverage audit, live runtime verification, severity classification, and the PASS/FAIL verdict contract. Loaded for QA steps by software-engineering-team flows."
+policy:
+  allow_implicit_invocation: true

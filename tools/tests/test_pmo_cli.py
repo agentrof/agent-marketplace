@@ -175,7 +175,7 @@ class PmoCliTests(unittest.TestCase):
         tables = {r["name"] for r in con.execute(
             "SELECT name FROM sqlite_master WHERE type = 'table'")}
         for table in ("work_orders", "work_order_steps", "work_item_deps",
-                      "dod_items", "task_attempts"):
+                      "dod_items", "task_attempts", "issue_candidates"):
             self.assertIn(table, tables)
         self.assertNotIn("runs", tables)
 
@@ -187,6 +187,124 @@ class PmoCliTests(unittest.TestCase):
         code, _, err = run(["init-db"])
         self.assertEqual(code, 1)
         self.assertIn("newer than this CLI", err)
+
+    def test_v2_to_v3_migration_adds_table_and_keeps_events(self):
+        """A pre-v3 database (no issue_candidates) migrates to v3: the table
+        arrives via the idempotent DDL and history is never rewritten."""
+        con = self.db()
+        con.execute("DROP TABLE issue_candidates")
+        con.execute("PRAGMA user_version = 2")
+        con.execute("INSERT INTO events (ts, actor, action, payload_json)"
+                    " VALUES ('2026-01-01T00:00:00+00:00', 'x', 'legacy', '{}')")
+        con.commit()
+        con.close()
+        code, _, err = run(["init-db"])
+        self.assertEqual(code, 0, err)
+        con = self.db()
+        self.assertEqual(con.execute("PRAGMA user_version").fetchone()[0], 3)
+        self.assertTrue(con.execute("SELECT name FROM sqlite_master WHERE"
+                                    " type='table' AND name='issue_candidates'"
+                                    ).fetchone())
+        self.assertTrue(con.execute("SELECT 1 FROM events WHERE action='legacy'"
+                                    ).fetchone())
+
+    # -- issue candidates ------------------------------------------------------
+
+    def test_issue_open_mints_global_id_without_project(self):
+        code, out, err = run(["issue", "open", "--title", "gh missing",
+                              "--kind", "defect", "--evidence", "session A"])
+        self.assertEqual(code, 0, err)
+        self.assertIn("IC-001", out)
+        code, out, _ = run(["issue", "open", "--title", "capture idea",
+                            "--kind", "improvement"])
+        self.assertIn("IC-002", out)
+        row = self.db().execute(
+            "SELECT * FROM issue_candidates WHERE external_id='IC-001'").fetchone()
+        self.assertIsNone(row["project_id"])
+        self.assertIsNone(row["work_order_id"])
+        self.assertEqual(row["status"], "candidate")
+
+    def test_issue_id_sequence_is_global_not_project_scoped(self):
+        run(["issue", "open", "--title", "a", "--kind", "defect"])
+        code, out, err = run(["issue", "open", "--title", "b", "--kind",
+                              "improvement", "--project-key", "shop"])
+        self.assertEqual(code, 0, err)
+        self.assertIn("IC-002", out)  # shared sequence across project-less/bound
+        row = self.db().execute(
+            "SELECT * FROM issue_candidates WHERE external_id='IC-002'").fetchone()
+        project = self.db().execute(
+            "SELECT id FROM projects WHERE project_key='shop'").fetchone()
+        self.assertEqual(row["project_id"], project["id"])
+
+    def test_issue_open_binds_work_order(self):
+        self.import_backlog()
+        self.init_wo()
+        code, _, err = run(["issue", "open", "--title", "wo defect",
+                            "--kind", "defect", "--work-order-key", "wo1"])
+        self.assertEqual(code, 0, err)
+        row = self.db().execute(
+            "SELECT * FROM issue_candidates WHERE external_id='IC-001'").fetchone()
+        order = self.db().execute(
+            "SELECT id, project_id FROM work_orders WHERE work_order_key='wo1'"
+        ).fetchone()
+        self.assertEqual(row["work_order_id"], order["id"])
+        self.assertEqual(row["project_id"], order["project_id"])
+
+    def test_issue_open_rejects_bad_kind(self):
+        code, _, _ = run(["issue", "open", "--title", "x", "--kind", "bug"])
+        self.assertEqual(code, 2)
+
+    def test_issue_update_fields_and_dismiss(self):
+        run(["issue", "open", "--title", "old", "--kind", "defect"])
+        code, out, err = run(["issue", "update", "--issue", "IC-001",
+                              "--title", "new", "--status", "dismissed"])
+        self.assertEqual(code, 0, err)
+        row = self.db().execute(
+            "SELECT * FROM issue_candidates WHERE external_id='IC-001'").fetchone()
+        self.assertEqual(row["title"], "new")
+        self.assertEqual(row["status"], "dismissed")
+
+    def test_issue_update_cannot_set_filed(self):
+        run(["issue", "open", "--title", "x", "--kind", "defect"])
+        code, _, _ = run(["issue", "update", "--issue", "IC-001",
+                          "--status", "filed"])
+        self.assertEqual(code, 2)  # filed is set only by 'issue file'
+
+    def test_issue_update_needs_a_field(self):
+        run(["issue", "open", "--title", "x", "--kind", "defect"])
+        code, _, err = run(["issue", "update", "--issue", "IC-001"])
+        self.assertEqual(code, 2)
+        self.assertIn("nothing to update", err)
+
+    def test_issue_file_records_url_and_event(self):
+        run(["issue", "open", "--title", "x", "--kind", "defect"])
+        url = "https://github.com/agentrof/agent-marketplace/issues/9"
+        code, _, err = run(["issue", "file", "--issue", "IC-001", "--url", url])
+        self.assertEqual(code, 0, err)
+        row = self.db().execute(
+            "SELECT * FROM issue_candidates WHERE external_id='IC-001'").fetchone()
+        self.assertEqual(row["status"], "filed")
+        self.assertEqual(row["issue_url"], url)
+        event = self.db().execute(
+            "SELECT 1 FROM events WHERE action='issue_candidate_filed'").fetchone()
+        self.assertTrue(event)
+
+    def test_issue_file_refuses_double_file(self):
+        run(["issue", "open", "--title", "x", "--kind", "defect"])
+        run(["issue", "file", "--issue", "IC-001", "--url", "https://a"])
+        code, _, err = run(["issue", "file", "--issue", "IC-001",
+                            "--url", "https://b"])
+        self.assertEqual(code, 2)
+        self.assertIn("already filed", err)
+
+    def test_issue_list_filters_by_status_json(self):
+        run(["issue", "open", "--title", "a", "--kind", "defect"])
+        run(["issue", "open", "--title", "b", "--kind", "improvement"])
+        run(["issue", "update", "--issue", "IC-002", "--status", "dismissed"])
+        code, out, err = run(["issue", "list", "--status", "candidate", "--json"])
+        self.assertEqual(code, 0, err)
+        rows = json.loads(out)
+        self.assertEqual([r["external_id"] for r in rows], ["IC-001"])
 
     # -- backlog import ------------------------------------------------------
 

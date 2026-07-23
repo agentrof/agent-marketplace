@@ -3,6 +3,8 @@
   "owner": {
     "name": "Agentrof"
   },
+  "repository": "https://github.com/agentrof/agent-marketplace",
+  "issues_url": "https://github.com/agentrof/agent-marketplace/issues",
   "plugins": [
     {
       "name": "project-management-office",

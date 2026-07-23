@@ -4,6 +4,8 @@
     "name": "Agentrof",
     "url": "https://github.com/agentrof"
   },
+  "repository": "https://github.com/agentrof/agent-marketplace",
+  "issues_url": "https://github.com/agentrof/agent-marketplace/issues",
   "metadata": {
     "description": "A catalog of curated, end-to-end agent teams for agentic coding harnesses. Install a complete team and run at the goal.",
     "version": "8.1.0"

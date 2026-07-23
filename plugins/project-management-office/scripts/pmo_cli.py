@@ -26,8 +26,8 @@ import sys
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
-PMO_VERSION = "1.2.0"
-SCHEMA_VERSION = 2
+PMO_VERSION = "1.3.0"
+SCHEMA_VERSION = 3
 DB_NAME = "agentrof.db"
 
 WO_STATUSES = {"running", "waiting_gate", "blocked", "escalated", "complete"}
@@ -41,6 +41,11 @@ STATUSES_BY_KIND = {"epic": EPIC_STATUSES, "story": STORY_STATUSES, "task": TASK
 FINDING_SOURCES = {"review", "qa", "design_qa"}
 FINDING_STATUSES = {"open", "fixed", "waived"}
 FINDING_SEVERITIES = {"critical", "high", "medium", "low"}
+# Issue candidates: marketplace defect/improvement notes captured during a
+# run, filed to the agentrof marketplace repo only on explicit owner
+# approval. Unlike findings they are not bound to a work order.
+ISSUE_KINDS = {"defect", "improvement"}
+ISSUE_STATUSES = {"candidate", "filed", "dismissed"}
 BUDGET_VERDICTS = {"verified", "unverified"}
 COVERAGE_VERDICTS = {"pass", "fail", "no_test"}
 DOD_STATUSES = {"pending", "verified", "failed"}
@@ -243,6 +248,21 @@ CREATE TABLE IF NOT EXISTS events (
   action TEXT NOT NULL,
   payload_json TEXT NOT NULL DEFAULT '{}'
 );
+CREATE TABLE IF NOT EXISTS issue_candidates (
+  id INTEGER PRIMARY KEY,
+  project_id INTEGER REFERENCES projects(id),
+  work_order_id INTEGER REFERENCES work_orders(id),
+  external_id TEXT NOT NULL UNIQUE,
+  title TEXT NOT NULL,
+  body TEXT NOT NULL DEFAULT '',
+  evidence TEXT NOT NULL DEFAULT '',
+  kind TEXT NOT NULL CHECK (kind IN ('defect', 'improvement')),
+  status TEXT NOT NULL DEFAULT 'candidate'
+    CHECK (status IN ('candidate', 'filed', 'dismissed')),
+  issue_url TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
 CREATE TABLE IF NOT EXISTS meta (
   key TEXT PRIMARY KEY,
   value TEXT NOT NULL
@@ -252,6 +272,7 @@ CREATE INDEX IF NOT EXISTS idx_task_attempts_task ON task_attempts(task_id);
 CREATE INDEX IF NOT EXISTS idx_events_project ON events(project_id, id);
 CREATE INDEX IF NOT EXISTS idx_work_items_pks ON work_items(project_id, kind, status);
 CREATE INDEX IF NOT EXISTS idx_findings_wo_status ON findings(work_order_id, status);
+CREATE INDEX IF NOT EXISTS idx_issue_candidates_status ON issue_candidates(status);
 """
 
 # Stepwise schema migrations, keyed by the version they upgrade FROM. The DDL
@@ -266,6 +287,9 @@ MIGRATIONS: dict[int, list[str]] = {
         "ALTER TABLE task_attempts ADD COLUMN source TEXT NOT NULL"
         " DEFAULT 'hook'",
     ],
+    # 2 -> 3: the issue_candidates table is net-new and arrives via the
+    # idempotent DDL below; the ladder only needs to bump the version.
+    2: [],
 }
 
 
@@ -459,6 +483,18 @@ def next_finding_id(con, project_id: int) -> str:
         if tail.isdigit():
             highest = max(highest, int(tail))
     return f"F-{highest + 1:03d}"
+
+
+def next_issue_candidate_id(con) -> str:
+    """Mint IC-NNN globally: issue candidates may be project-less, so the
+    sequence is not scoped by project the way findings are."""
+    rows = con.execute("SELECT external_id FROM issue_candidates").fetchall()
+    highest = 0
+    for row in rows:
+        tail = row["external_id"].rsplit("-", 1)[-1]
+        if tail.isdigit():
+            highest = max(highest, int(tail))
+    return f"IC-{highest + 1:03d}"
 
 
 def priority_tier(value: str) -> str:
@@ -2016,6 +2052,113 @@ def cmd_finding_list(args) -> int:
     return 0
 
 
+def cmd_issue_open(args) -> int:
+    if args.kind not in ISSUE_KINDS:
+        return fail(f"kind not in enum: {args.kind}", 2)
+    con = connect()
+    with mutate(con):
+        project_id = None
+        work_order_id = None
+        if args.work_order_key:
+            order = get_work_order(con, args.work_order_key)
+            work_order_id = order["id"]
+            project_id = order["project_id"]
+        elif args.project_key:
+            project_id = get_project(con, args.project_key)["id"]
+        external_id = next_issue_candidate_id(con)
+        con.execute(
+            "INSERT INTO issue_candidates (project_id, work_order_id,"
+            " external_id, title, body, evidence, kind, created_at, updated_at)"
+            " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (project_id, work_order_id, external_id, args.title, args.body,
+             args.evidence, args.kind, now(), now()),
+        )
+        record(con, "issue_candidate_opened", project_id=project_id,
+               work_order_id=work_order_id,
+               payload={"candidate": external_id, "kind": args.kind})
+    print(f"pmo: issue candidate {external_id} opened ({args.kind})")
+    return 0
+
+
+def cmd_issue_update(args) -> int:
+    if args.status is not None and args.status not in ("candidate", "dismissed"):
+        return fail(f"status not settable here: {args.status}"
+                    " (filed is set by 'issue file')", 2)
+    con = connect()
+    with mutate(con):
+        row = con.execute(
+            "SELECT * FROM issue_candidates WHERE external_id = ?",
+            (args.issue,),
+        ).fetchone()
+        if row is None:
+            raise Rule(f"no issue candidate '{args.issue}'")
+        updates: list[str] = []
+        params: list = []
+        for name, value in (("title", args.title), ("body", args.body),
+                            ("evidence", args.evidence),
+                            ("status", args.status)):
+            if value is not None:
+                updates.append(name)
+                params.append(value)
+        if not updates:
+            return fail("nothing to update: pass a field or --status", 2)
+        assignments = ", ".join(f"{name} = ?" for name in updates)
+        params.append(now())
+        params.append(row["id"])
+        con.execute(
+            f"UPDATE issue_candidates SET {assignments}, updated_at = ?"
+            " WHERE id = ?", params)
+        record(con, "issue_candidate_updated", project_id=row["project_id"],
+               work_order_id=row["work_order_id"],
+               payload={"candidate": args.issue, "fields": updates})
+    print(f"pmo: issue candidate {args.issue} updated ({', '.join(updates)})")
+    return 0
+
+
+def cmd_issue_list(args) -> int:
+    con = connect()
+    query = "SELECT * FROM issue_candidates"
+    params: list = []
+    if args.status:
+        query += " WHERE status = ?"
+        params.append(args.status)
+    query += " ORDER BY external_id"
+    rows = con.execute(query, params).fetchall()
+    if args.json:
+        print(json.dumps([dict(r) for r in rows], indent=2, sort_keys=True))
+    else:
+        for row in rows:
+            print(f"pmo: {row['external_id']} [{row['kind']}]"
+                  f" {row['status']:9} {row['title']}")
+        if not rows:
+            print("pmo: no issue candidates recorded")
+    return 0
+
+
+def cmd_issue_file(args) -> int:
+    con = connect()
+    with mutate(con):
+        row = con.execute(
+            "SELECT * FROM issue_candidates WHERE external_id = ?",
+            (args.issue,),
+        ).fetchone()
+        if row is None:
+            raise Rule(f"no issue candidate '{args.issue}'")
+        if row["status"] == "filed":
+            return fail(f"issue candidate {args.issue} is already filed:"
+                        f" {row['issue_url']}", 2)
+        con.execute(
+            "UPDATE issue_candidates SET status = 'filed', issue_url = ?,"
+            " updated_at = ? WHERE id = ?",
+            (args.url, now(), row["id"]),
+        )
+        record(con, "issue_candidate_filed", project_id=row["project_id"],
+               work_order_id=row["work_order_id"],
+               payload={"candidate": args.issue, "issue_url": args.url})
+    print(f"pmo: issue candidate {args.issue} filed -> {args.url}")
+    return 0
+
+
 def cmd_coverage_import(args) -> int:
     con = connect()
     with mutate(con):
@@ -2295,7 +2438,7 @@ def cmd_sync_launcher(args) -> int:
     # The dispatcher and the generated harness data travel with the
     # launcher: every "$RUN" invocation in shipped content resolves
     # through them, on every harness.
-    for extra in ("agentrof_run.py", "harness_runtime.json"):
+    for extra in ("agentrof_run.py", "harness_runtime.json", "file_issue.py"):
         extra_src = source.parent / extra
         extra_dst = bin_dir / extra
         if extra_src.is_file() and extra_src != extra_dst:
@@ -2555,6 +2698,31 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--status", default="")
     p.add_argument("--json", action="store_true")
     p.set_defaults(func=cmd_finding_list)
+
+    issue = sub.add_parser("issue").add_subparsers(dest="subcommand", required=True)
+    p = issue.add_parser("open")
+    p.add_argument("--title", required=True)
+    p.add_argument("--kind", required=True, choices=sorted(ISSUE_KINDS))
+    p.add_argument("--body", default="")
+    p.add_argument("--evidence", default="")
+    p.add_argument("--project-key", default="")
+    p.add_argument("--work-order-key", default="")
+    p.set_defaults(func=cmd_issue_open)
+    p = issue.add_parser("update")
+    p.add_argument("--issue", required=True)
+    p.add_argument("--title", default=None)
+    p.add_argument("--body", default=None)
+    p.add_argument("--evidence", default=None)
+    p.add_argument("--status", default=None, choices=["candidate", "dismissed"])
+    p.set_defaults(func=cmd_issue_update)
+    p = issue.add_parser("list")
+    p.add_argument("--status", default="", choices=["", *sorted(ISSUE_STATUSES)])
+    p.add_argument("--json", action="store_true")
+    p.set_defaults(func=cmd_issue_list)
+    p = issue.add_parser("file")
+    p.add_argument("--issue", required=True)
+    p.add_argument("--url", required=True)
+    p.set_defaults(func=cmd_issue_file)
 
     coverage = sub.add_parser("coverage").add_subparsers(dest="subcommand", required=True)
     p = coverage.add_parser("import")

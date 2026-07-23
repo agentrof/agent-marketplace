@@ -26,6 +26,7 @@ VALID_AGENT = """---
 name: sample-team-planner
 description: Planner role for orchestrated team runs. Invoked by sample-team flows with explicit inputs.
 model: sonnet
+output_contract: prose
 ---
 
 # Planner

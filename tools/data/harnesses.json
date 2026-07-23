@@ -46,6 +46,7 @@
         "name": {"action": "keep"},
         "description": {"action": "keep"},
         "model": {"action": "map_model"},
+        "output_contract": {"action": "keep"},
         "tools": {"action": "replace_when_present", "key": "readonly", "value": true}
       },
       "skill_frontmatter": {
@@ -90,6 +91,7 @@
         "name": {"action": "keep"},
         "description": {"action": "keep"},
         "model": {"action": "map_model"},
+        "output_contract": {"action": "keep"},
         "tools": {"action": "replace_when_present", "key": "sandbox_mode", "value": "read-only"}
       },
       "skill_frontmatter": {

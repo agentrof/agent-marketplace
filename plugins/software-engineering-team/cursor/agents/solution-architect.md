@@ -2,6 +2,7 @@
 name: software-engineering-team-solution-architect
 description: Solution architect role. Runs the interactive solution-design persona of software-engineering-team flows and curates the project's solution landscape; invoked with explicit inputs, never auto-triggered.
 model: inherit
+output_contract: prose
 ---
 
 # Solution Architect

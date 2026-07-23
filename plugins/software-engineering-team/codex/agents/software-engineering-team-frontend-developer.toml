@@ -1,5 +1,6 @@
 name = "software-engineering-team-frontend-developer"
 description = "Frontend developer role. Spawned by software-engineering-team flows to implement client-side work from the approved preview, contract and design master; never auto-triggered."
+output_contract = "prose"
 developer_instructions = """
 # Frontend Developer
 

@@ -30,6 +30,7 @@ AGENT_TEMPLATE = """---
 name: {plugin}-{name}
 description: {title} role for orchestrated team runs. Invoked by {plugin} flows with explicit inputs; not auto-triggered.
 model: sonnet
+output_contract: prose
 ---
 
 # {title}

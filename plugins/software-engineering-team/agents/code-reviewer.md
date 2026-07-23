@@ -2,6 +2,7 @@
 name: software-engineering-team-code-reviewer
 description: Code reviewer role. Spawned by software-engineering-team flows after implementation to audit the change and emit a verdict; never auto-triggered.
 model: opus
+output_contract: prose
 ---
 
 # Code Reviewer

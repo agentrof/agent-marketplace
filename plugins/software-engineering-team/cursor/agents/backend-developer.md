@@ -2,6 +2,7 @@
 name: software-engineering-team-backend-developer
 description: Backend developer role. Spawned by software-engineering-team flows to implement server-side work against approved contracts; never auto-triggered.
 model: inherit
+output_contract: prose
 ---
 
 # Backend Developer

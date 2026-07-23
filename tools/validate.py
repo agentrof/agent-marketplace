@@ -32,8 +32,13 @@ import harness  # noqa: E402  (tools/harness.py: renderer + generated scope)
 
 EM_DASH = "—"
 
-AGENT_REQUIRED_KEYS = {"name", "description", "model"}
+AGENT_REQUIRED_KEYS = {"name", "description", "model", "output_contract"}
 AGENT_MODEL_ENUM = {"opus", "sonnet", "haiku", "inherit"}
+# How the role hands results back. prose: findings/artifacts in the reply
+# text (every current persona). structured: a forced tool call. Declared so
+# a composer can refuse pairing a prose persona with schema forcing; the
+# repo's own flows spawn via the Agent tool and never force schema.
+AGENT_OUTPUT_CONTRACT_ENUM = {"prose", "structured"}
 # Optional capability restriction: an agent MAY carry tools: as a whitelist,
 # and only the read-only set is legal. Read-only roles (challengers, expert
 # panels) are denied write capability at spawn time, not by instruction.
@@ -278,14 +283,15 @@ def check_frontmatter_shape(tree: Tree, findings: list[Finding]) -> None:
                 findings.append(Finding(
                     "error", rel(tree, path), 1, "frontmatter_shape",
                     f"agent frontmatter missing keys: {sorted(missing)}",
-                    "add the missing keys; agents require exactly name, description, model",
+                    "add the missing keys; agents require name, description,"
+                    " model, output_contract",
                 ))
             if extra:
                 findings.append(Finding(
                     "error", rel(tree, path), 1, "frontmatter_shape",
                     f"agent frontmatter has unsupported keys: {sorted(extra)}",
-                    "remove them; agents carry name, description, model and"
-                    " optionally a read-only tools whitelist",
+                    "remove them; agents carry name, description, model,"
+                    " output_contract and optionally a read-only tools whitelist",
                 ))
             if "tools" in fm:
                 tools = {t.strip() for t in fm["tools"].split(",") if t.strip()}
@@ -307,6 +313,15 @@ def check_frontmatter_shape(tree: Tree, findings: list[Finding]) -> None:
                     f"agent model '{model}' is not in {sorted(model_enum)}",
                     "use an alias from the enum (tools/data/harnesses.json"
                     " model_aliases); concrete model ids are banned",
+                ))
+            contract = fm.get("output_contract", "")
+            if contract and contract not in AGENT_OUTPUT_CONTRACT_ENUM:
+                findings.append(Finding(
+                    "error", rel(tree, path), 1, "frontmatter_shape",
+                    f"agent output_contract '{contract}' is not in"
+                    f" {sorted(AGENT_OUTPUT_CONTRACT_ENUM)}",
+                    "declare how the role returns results: prose (findings in"
+                    " the reply) or structured (a forced tool call)",
                 ))
         for sdir in skill_dirs(plugin):
             skill_md = sdir / "SKILL.md"

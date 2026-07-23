@@ -111,6 +111,36 @@ class ValidatorFixtureTests(unittest.TestCase):
         self.assertEqual(findings[0].check, "question_popup")
         self.assertIn("fallback", findings[0].message)
 
+    def test_agent_missing_output_contract_fires(self):
+        """Dropping the required output_contract key is a single
+        frontmatter_shape finding naming the missing key."""
+        from fixtures import PLUGIN, VALID_AGENT, resync, write
+
+        def drop_contract(root: Path) -> None:
+            text = VALID_AGENT.replace("output_contract: prose\n", "")
+            write(root / "plugins" / PLUGIN / "agents" / "planner.md", text)
+            resync(root)
+
+        findings = self.run_on(drop_contract)
+        self.assertEqual(len(findings), 1, findings)
+        self.assertEqual(findings[0].check, "frontmatter_shape")
+        self.assertIn("output_contract", findings[0].message)
+
+    def test_agent_bad_output_contract_enum_fires(self):
+        """A value outside the enum is a single frontmatter_shape finding."""
+        from fixtures import PLUGIN, VALID_AGENT, resync, write
+
+        def bad_contract(root: Path) -> None:
+            text = VALID_AGENT.replace("output_contract: prose",
+                                       "output_contract: bogus")
+            write(root / "plugins" / PLUGIN / "agents" / "planner.md", text)
+            resync(root)
+
+        findings = self.run_on(bad_contract)
+        self.assertEqual(len(findings), 1, findings)
+        self.assertEqual(findings[0].check, "frontmatter_shape")
+        self.assertIn("output_contract", findings[0].message)
+
     def test_out_of_scope_violations_are_not_caught(self):
         findings = self.run_on(extra=fixtures.plant_out_of_scope_violations)
         self.assertEqual(

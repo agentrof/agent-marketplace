@@ -25,7 +25,11 @@ plugin.json dependencies, so it installs automatically).
    constitutions (Principles, Boundaries, Approach, Output Contract) with
    zero technology nouns. All technology and method knowledge lives in
    skills with progressive disclosure: a thin SKILL.md decision surface
-   and depth in references/.
+   and depth in references/. Each agent declares a machine-readable
+   `output_contract` (`prose` or `structured`); this states how the role
+   returns results so a composer can refuse pairing a prose persona with
+   schema forcing, and does not by itself stop the harness-side stall
+   (anthropics/claude-code#79395).
 3. **Encapsulation.** Entry skills are the only user surface
    (`disable-model-invocation: true`). Knowledge skills are hidden
    (`user-invocable: false`). Agents are passive: no auto-trigger

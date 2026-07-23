@@ -34,9 +34,15 @@ A plugin ships four component kinds:
 
 ## Frontmatter
 
-Agents carry exactly `name`, `description`, `model` (an alias from the
-`model_aliases` enum in `tools/data/harnesses.json`). Descriptions are PASSIVE: no auto-trigger
-phrasing; say the role is invoked by the plugin's flows.
+Agents carry `name`, `description`, `model` (an alias from the
+`model_aliases` enum in `tools/data/harnesses.json`) and `output_contract`
+(`prose` or `structured`: how the role hands results back; every current
+persona is `prose`). A read-only role may also carry a `tools` whitelist
+(`Read, Grep, Glob`) to deny write capability at spawn time. Descriptions
+are PASSIVE: no auto-trigger phrasing; say the role is invoked by the
+plugin's flows. `output_contract` declares the return channel so a composer
+can refuse pairing a prose persona with a StructuredOutput-forcing harness;
+it does not by itself prevent the harness-side stall (anthropics/claude-code#79395).
 
 Skills carry `name`, `description` and exactly one visibility flag:
 
@@ -91,6 +97,7 @@ Copy this shape exactly; only the content of the sections varies by role.
 name: software-engineering-team-backend-developer
 description: Backend developer role for orchestrated team runs. Invoked by software-engineering-team flows with explicit inputs; not auto-triggered.
 model: sonnet
+output_contract: prose
 ---
 
 # Backend Developer

@@ -1,5 +1,6 @@
 name = "software-engineering-team-qa-engineer"
 description = "QA engineer role. Spawned by software-engineering-team flows after review to audit coverage, run the suite and verify the running application; never auto-triggered."
+output_contract = "prose"
 developer_instructions = """
 # QA Engineer
 

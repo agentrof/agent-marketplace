@@ -354,7 +354,16 @@ def api_overview(params) -> dict:
                 "last_event_ts": last_event["ts"] if last_event else None,
             })
         head = con.execute("SELECT COALESCE(MAX(id), 0) FROM events").fetchone()[0]
-        return {"projects": projects, "head_id": head}
+        try:
+            open_candidates = rows(
+                con,
+                "SELECT * FROM issue_candidates WHERE status = 'candidate'"
+                " ORDER BY external_id")
+        except sqlite3.OperationalError:
+            open_candidates = []  # pre-v3 database without the table
+        return {"projects": projects, "head_id": head,
+                "open_candidates": len(open_candidates),
+                "issue_candidates": open_candidates}
     finally:
         con.close()
 
@@ -628,6 +637,27 @@ def api_events(params) -> dict:
         con.close()
 
 
+def api_issue_candidates(params) -> dict:
+    con = open_ro()
+    try:
+        check_schema(con)
+        status = params.get("status", [""])[0].strip()
+        query = "SELECT * FROM issue_candidates"
+        args: list = []
+        if status:
+            query += " WHERE status = ?"
+            args.append(status)
+        query += " ORDER BY external_id"
+        try:
+            candidates = rows(con, query, args)
+        except sqlite3.OperationalError:
+            candidates = []  # pre-v3 database without the table
+        head = con.execute("SELECT COALESCE(MAX(id), 0) FROM events").fetchone()[0]
+        return {"issue_candidates": candidates, "head_id": head}
+    finally:
+        con.close()
+
+
 ROUTES = {
     "/api/head": api_head,
     "/api/overview": api_overview,
@@ -637,6 +667,7 @@ ROUTES = {
     "/api/work_order": api_work_order,
     "/api/ledger": api_ledger,
     "/api/events": api_events,
+    "/api/issue_candidates": api_issue_candidates,
 }
 
 

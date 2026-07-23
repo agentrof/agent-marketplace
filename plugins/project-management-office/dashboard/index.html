@@ -619,6 +619,7 @@ var EVENT_ICON_MAP = {
   task_started:'bot', task_finished:'bot', task_opened:'bot', task_closed:'bot', task_touch_unmatched:'bot',
   gate_recorded:'shield-task', ledger_checkpoint:'shield-task',
   finding_opened:'warning', finding_updated:'warning',
+  issue_candidate_opened:'warning', issue_candidate_updated:'warning', issue_candidate_filed:'checkmark-circle',
   dep_added:'link', dep_removed:'link',
   dod_added:'checkmark-circle', dod_updated:'checkmark-circle',
   backlog_imported:'board', item_updated:'board', project_registered:'board',
@@ -745,6 +746,7 @@ function renderOverview(data){
     + '<div class="obs-mini-kpi"><div class="lbl">'+icon('board')+'Projects</div><div class="val tnum">'+projects.length+'</div></div>'
     + '<div class="obs-mini-kpi"><div class="lbl">'+icon('shield-task')+'Waiting approval</div><div class="val tnum">'+totalWaiting+'</div></div>'
     + '<div class="obs-mini-kpi"><div class="lbl">'+icon('warning')+'Open findings</div><div class="val tnum">'+totalFindings+'</div></div>'
+    + '<div class="obs-mini-kpi"><div class="lbl">'+icon('document-bullet-list')+'Open candidates</div><div class="val tnum">'+(data.open_candidates||0)+'</div></div>'
     + '<div class="obs-mini-kpi"><div class="lbl">'+icon('people-team')+'Teams</div><div class="val tnum">'+teamSet.size+'</div></div>'
     + '</div></div>';
   if(!projects.length){
@@ -752,7 +754,15 @@ function renderOverview(data){
   } else {
     html += projects.map(projectOverviewCard).join('');
   }
+  html += issueCandidatesPanel(data.issue_candidates || []);
   viewEl.innerHTML = html;
+}
+function issueCandidatesPanel(candidates){
+  if(!candidates.length) return '';
+  var body = candidates.map(function(c){
+    return '<tr><td class="tnum">'+esc(c.external_id)+'</td><td><span class="obs-tag neutral">'+esc(c.kind)+'</span></td><td>'+esc(c.title)+'</td></tr>';
+  }).join('');
+  return '<div class="obs-panel"><div class="obs-panel-head"><h3>Open issue candidates</h3><span class="obs-count">'+candidates.length+'</span></div>'+tableWrap(['Id','Kind','Title'], body)+'</div>';
 }
 function viewOverview(key, token){
   renderLoadingShell(['Active work orders']);

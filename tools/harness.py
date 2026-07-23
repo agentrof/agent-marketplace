@@ -435,6 +435,9 @@ def render_cursor_marketplace(source_marketplace: dict) -> dict:
     owner = source_marketplace.get("owner") or {}
     out: dict = {"name": source_marketplace.get("name", "")}
     out["owner"] = {"name": owner.get("name", "")}
+    for key in ("repository", "issues_url"):
+        if source_marketplace.get(key):
+            out[key] = source_marketplace[key]
     out["plugins"] = [
         {
             "name": entry.get("name", ""),
@@ -449,17 +452,19 @@ def render_cursor_marketplace(source_marketplace: dict) -> dict:
 
 
 def render_codex_marketplace(source_marketplace: dict) -> dict:
-    return {
-        "name": source_marketplace.get("name", ""),
-        "plugins": [
-            {
-                "name": entry.get("name", ""),
-                "description": entry.get("description", ""),
-                "source": {"source": "local", "path": entry.get("source", "")},
-            }
-            for entry in source_marketplace.get("plugins", [])
-        ],
-    }
+    out: dict = {"name": source_marketplace.get("name", "")}
+    for key in ("repository", "issues_url"):
+        if source_marketplace.get(key):
+            out[key] = source_marketplace[key]
+    out["plugins"] = [
+        {
+            "name": entry.get("name", ""),
+            "description": entry.get("description", ""),
+            "source": {"source": "local", "path": entry.get("source", "")},
+        }
+        for entry in source_marketplace.get("plugins", [])
+    ]
+    return out
 
 
 # ---------------------------------------------------------------------------

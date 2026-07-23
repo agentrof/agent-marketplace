@@ -254,6 +254,30 @@ class PmoDashboardTests(unittest.TestCase):
         status, rest = self.get(f"/api/events?since_id={last_id}")
         self.assertTrue(all(e["id"] > last_id for e in rest["events"]))
 
+    def test_issue_candidates_endpoint(self):
+        env = {"AGENTROF_HOME": self.home}
+        code, _, err = cli(["issue", "open", "--title", "dash candidate",
+                            "--kind", "improvement"], env)
+        self.assertEqual(code, 0, err)
+        status, data = self.get("/api/issue_candidates")
+        self.assertEqual(status, 200)
+        self.assertIn("IC-001",
+                      [c["external_id"] for c in data["issue_candidates"]])
+        status, filtered = self.get("/api/issue_candidates?status=candidate")
+        self.assertEqual(status, 200)
+        self.assertTrue(all(c["status"] == "candidate"
+                            for c in filtered["issue_candidates"]))
+
+    def test_overview_reports_open_candidates(self):
+        env = {"AGENTROF_HOME": self.home}
+        cli(["issue", "open", "--title", "shown in overview",
+             "--kind", "defect"], env)
+        status, data = self.get("/api/overview")
+        self.assertEqual(status, 200)
+        self.assertGreaterEqual(data["open_candidates"], 1)
+        self.assertIn("shown in overview",
+                      [c["title"] for c in data["issue_candidates"]])
+
     # -- static and hardening --------------------------------------------------
 
     def test_index_served_at_root(self):

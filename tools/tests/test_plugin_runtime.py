@@ -1,6 +1,6 @@
-"""Multi-harness runtime tests: payload normalization across the three
-hook stdin schemas, the integrity tripwire, CLI-side lifecycle inference,
-the plugin-root dispatcher and the harness-neutral dashboard catalog."""
+"""Plugin runtime tests: hook payload normalization, the DB guard, the
+integrity tripwire, CLI-side lifecycle inference, the plugin-root
+dispatcher and the dashboard catalog."""
 
 from __future__ import annotations
 
@@ -49,61 +49,19 @@ class NormalizePayloadTests(unittest.TestCase):
         self.assertEqual(out["file_targets"],
                          [{"file_path": "/proj/a.md", "content": "x"}])
 
-    def test_cursor_camelcase_and_workspace_roots(self):
+    def test_multiedit_maps_to_edit(self):
         out = hook_common.normalize_payload({
-            "hook_event_name": "preToolUse", "tool_name": "edit_file",
-            "workspace_roots": ["/proj"],
-            "tool_input": {"file_path": "b.md", "old_string": "a",
+            "hook_event_name": "PreToolUse", "tool_name": "MultiEdit",
+            "cwd": "/proj",
+            "tool_input": {"file_path": "/proj/a.md", "old_string": "a",
                            "new_string": "b"},
         })
-        self.assertEqual(out["hook_event_name"], "PreToolUse")
         self.assertEqual(out["tool_name"], "Edit")
-        self.assertEqual(out["cwd"], "/proj")
         self.assertEqual(out["file_targets"][0]["new_string"], "b")
         self.assertNotIn("content", out["file_targets"][0])
 
-    def test_cursor_shell_and_file_edit_events_imply_tools(self):
-        shell = hook_common.normalize_payload({
-            "hook_event_name": "beforeShellExecution",
-            "command": "rm -rf x", "cwd": "/proj",
-        })
-        self.assertEqual(shell["tool_name"], "Bash")
-        self.assertEqual(shell["tool_input"]["command"], "rm -rf x")
-        edited = hook_common.normalize_payload({
-            "hook_event_name": "afterFileEdit",
-            "file_path": "/proj/workspace/docs/n.md", "cwd": "/proj",
-        })
-        self.assertEqual(edited["tool_name"], "Edit")
-        self.assertEqual(edited["file_targets"][0]["file_path"],
-                         "/proj/workspace/docs/n.md")
 
-    def test_codex_apply_patch_envelope(self):
-        patch = ("*** Begin Patch\n"
-                 "*** Update File: workspace/docs/note.md\n"
-                 "+added line one\n"
-                 "-removed line\n"
-                 "+added line two\n"
-                 "*** Add File: workspace/docs/new.md\n"
-                 "+fresh content\n"
-                 "*** End Patch\n")
-        out = hook_common.normalize_payload({
-            "hook_event_name": "PreToolUse", "tool_name": "apply_patch",
-            "cwd": "/proj", "tool_input": {"patch": patch},
-        })
-        self.assertEqual(out["tool_name"], "Write")
-        self.assertEqual(len(out["file_targets"]), 2)
-        self.assertEqual(out["file_targets"][0]["file_path"],
-                         "workspace/docs/note.md")
-        self.assertIn("added line one", out["file_targets"][0]["content"])
-        self.assertNotIn("removed line", out["file_targets"][0]["content"])
-
-    def test_harness_detection_from_stdin_field(self):
-        self.assertEqual(
-            hook_common.detect_harness({"cursor_version": "2.5.1"}),
-            "cursor")
-
-
-class GuardAcrossHarnessesTests(unittest.TestCase):
+class DbGuardTests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.home = Path(self.tmp.name) / "agentrof"
@@ -113,10 +71,10 @@ class GuardAcrossHarnessesTests(unittest.TestCase):
     def tearDown(self):
         self.tmp.cleanup()
 
-    def test_cursor_payload_direct_db_write_denied(self):
+    def test_direct_db_write_denied(self):
         code, _, err = run_script(PMO_SCRIPTS / "hook_guard_db.py", {
-            "hook_event_name": "preToolUse", "tool_name": "write",
-            "workspace_roots": [self.tmp.name],
+            "hook_event_name": "PreToolUse", "tool_name": "Write",
+            "cwd": self.tmp.name,
             "tool_input": {"file_path": str(self.home / "agentrof.db"),
                            "content": "x"},
         }, self.env)
@@ -125,17 +83,20 @@ class GuardAcrossHarnessesTests(unittest.TestCase):
 
     def test_shell_command_naming_db_file_denied(self):
         code, _, err = run_script(PMO_SCRIPTS / "hook_guard_db.py", {
-            "hook_event_name": "beforeShellExecution",
-            "command": f"sqlite3 {self.home}/agentrof.db 'DELETE FROM events'",
+            "hook_event_name": "PreToolUse", "tool_name": "Bash",
             "cwd": self.tmp.name,
+            "tool_input": {"command":
+                           f"sqlite3 {self.home}/agentrof.db"
+                           " 'DELETE FROM events'"},
         }, self.env)
         self.assertEqual(code, 2)
         self.assertIn("database", err)
 
     def test_ordinary_shell_command_passes(self):
         code, _, _ = run_script(PMO_SCRIPTS / "hook_guard_db.py", {
-            "hook_event_name": "beforeShellExecution",
-            "command": "ls -la", "cwd": self.tmp.name,
+            "hook_event_name": "PreToolUse", "tool_name": "Bash",
+            "cwd": self.tmp.name,
+            "tool_input": {"command": "ls -la"},
         }, self.env)
         self.assertEqual(code, 0)
 
@@ -277,10 +238,10 @@ class DispatcherTests(unittest.TestCase):
         return run_script(PMO_SCRIPTS / "agentrof_run.py", None, self.env,
                           argv)
 
-    def test_register_path_run_harness(self):
+    def test_register_path_run(self):
         code, out, err = self.dispatch(
             ["register", "--plugin", "sample-team",
-             "--root", str(self.plugin_root), "--harness", "codex"])
+             "--root", str(self.plugin_root)])
         self.assertEqual(code, 0, err)
         code, out, _ = self.dispatch(["path", "sample-team", "scripts/hello.py"])
         self.assertEqual(code, 0)
@@ -291,17 +252,6 @@ class DispatcherTests(unittest.TestCase):
             ["run", "sample-team", "scripts/hello.py", "world"])
         self.assertEqual(code, 0)
         self.assertIn("hello world", out)
-        code, out, _ = self.dispatch(["harness"])
-        self.assertEqual(out.strip(), "codex")
-
-    def test_stanza_prints_exact_paste(self):
-        code, out, err = self.dispatch(["stanza", "--harness", "codex"])
-        self.assertEqual(code, 0, err)
-        self.assertIn("config.toml", out)
-        self.assertIn("/.agentrof", out)
-        self.assertNotIn("{home}", out, "home placeholder must be expanded")
-        code, out, _ = self.dispatch(["stanza", "--harness", "claude_code"])
-        self.assertIn("no sandbox stanza", out)
 
     def test_unregistered_plugin_names_the_remedy(self):
         code, _, err = self.dispatch(["run", "ghost-team", "scripts/x.py"])
@@ -320,34 +270,12 @@ class DispatcherTests(unittest.TestCase):
     def test_hook_registration_feeds_dispatcher(self):
         code, _, err = run_script(
             SET_SCRIPTS / "vault_hook.py",
-            {"hook_event_name": "sessionStart", "cursor_version": "2.5"},
+            {"hook_event_name": "SessionStart"},
             self.env, ["register"])
         self.assertEqual(code, 0, err)
         registry = json.loads(
             (self.home / "plugin_roots.json").read_text(encoding="utf-8"))
         self.assertIn("software-engineering-team", registry["plugins"])
-        self.assertEqual(registry["harness"], "cursor")
-
-
-class SyncCodexAgentsTests(unittest.TestCase):
-    def test_sync_into_codex_home(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            codex_home = Path(tmp) / "codex"
-            env = {"CODEX_HOME": str(codex_home)}
-            source = SET_SCRIPTS.parent / "codex" / "agents"
-            code, out, err = run_script(
-                SET_SCRIPTS / "sync_codex_agents.py", None, env)
-            if not source.is_dir():
-                self.assertEqual(code, 1)
-                self.assertIn("codex/agents", err)
-                return
-            self.assertEqual(code, 0, err)
-            synced = sorted((codex_home / "agents").glob("*.toml"))
-            self.assertEqual(len(synced), len(list(source.glob("*.toml"))))
-            code2, out2, _ = run_script(
-                SET_SCRIPTS / "sync_codex_agents.py", None, env)
-            self.assertEqual(code2, 0)
-            self.assertIn("0 synced", out2, "second run must be a no-op")
 
 
 class DashboardCatalogTests(unittest.TestCase):
@@ -362,7 +290,7 @@ class DashboardCatalogTests(unittest.TestCase):
                             "version": "1.2.0",
                             "description": "backbone"}), encoding="utf-8")
             (home / "plugin_roots.json").write_text(json.dumps({
-                "schema_version": 1, "harness": "codex",
+                "schema_version": 1,
                 "plugins": {"project-management-office": {
                     "root": str(install), "version": "1.2.0",
                     "registered_at": "2026-07-18T00:00:00+00:00"}},
@@ -380,7 +308,7 @@ class DashboardCatalogTests(unittest.TestCase):
             catalog = json.loads(proc.stdout)
             team = catalog["teams"]["project-management-office"]
             self.assertEqual(team["kind"], "backbone")
-            self.assertEqual(team["installs"][0]["scope"], "harness:codex")
+            self.assertEqual(team["installs"][0]["version"], "1.2.0")
 
 
 if __name__ == "__main__":

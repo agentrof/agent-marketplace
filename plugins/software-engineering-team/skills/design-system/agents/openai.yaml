@@ -1,5 +1,0 @@
-interface:
-  display_name: "Design System"
-  short_description: "Creates and updates the project's design system, the single source of visual truth. Interactive; candidates are generated from curated design data, the user picks, MASTER.md is written. Touches only the design-system folder."
-policy:
-  allow_implicit_invocation: false

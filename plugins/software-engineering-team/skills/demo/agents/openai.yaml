@@ -1,5 +1,0 @@
-interface:
-  display_name: "Demo"
-  short_description: "Pre-sales package builder. Produces a customer-ready, multi-screen, navigable single-file demo with realistic mock data; no code is written. An approved demo later seeds real development."
-policy:
-  allow_implicit_invocation: false

@@ -1,5 +1,0 @@
-interface:
-  display_name: "Request"
-  short_description: "The software-engineering-team front door for real work. The user states an ask; it is classified as atomic or large, confirmed in one line, and driven to a pull request through the develop flow."
-policy:
-  allow_implicit_invocation: false

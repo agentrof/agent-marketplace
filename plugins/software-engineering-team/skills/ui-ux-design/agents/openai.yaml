@@ -1,5 +1,0 @@
-interface:
-  display_name: "Ui Ux Design"
-  short_description: "Search-driven design intelligence for web interfaces. Generates complete design systems (pattern, style, semantic light+dark palette, typography, radius, motion, breakpoints, icon set) from a curated corpus, persists them as a Master file plus page overrides under workspace/docs/design-system/, and enforces professional UI rules through checklists and forbidden patterns."
-policy:
-  allow_implicit_invocation: true

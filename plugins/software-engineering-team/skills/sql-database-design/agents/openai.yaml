@@ -1,5 +1,0 @@
-interface:
-  display_name: "Sql Database Design"
-  short_description: "Relational database schema design expertise, loaded by software-engineering-team agents for database work. Practical normalization, key and null rules, index architecture, constraint engineering, and zero-downtime schema evolution. Loaded by the database role agent when the project stack is relational."
-policy:
-  allow_implicit_invocation: true

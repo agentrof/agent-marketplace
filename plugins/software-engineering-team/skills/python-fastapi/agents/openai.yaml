@@ -1,5 +1,0 @@
-interface:
-  display_name: "Python Fastapi"
-  short_description: "Python and FastAPI backend expertise loaded by software-engineering-team agents for server-side work. Use when implementing REST endpoints from an API contract, structuring a service into router, service, and repository layers, adding request validation and consistent error responses, wiring authentication and authorization flows, configuring the app from environment settings, or writing pytest suites with fixtures and business-rule traceability."
-policy:
-  allow_implicit_invocation: true

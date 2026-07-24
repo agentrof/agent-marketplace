@@ -1,5 +1,0 @@
-interface:
-  display_name: "Sketch"
-  short_description: "Design exploration for thinking. Produces genuinely divergent mock-data directions for a topic, refines the pick, and keeps the result as a committed seed for later demo or development work."
-policy:
-  allow_implicit_invocation: false

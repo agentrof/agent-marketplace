@@ -1,5 +1,0 @@
-interface:
-  display_name: "Product Planning"
-  short_description: "Product planning knowledge for the team's product-owner role. Loaded by software-engineering-team flows; not user-facing."
-policy:
-  allow_implicit_invocation: true

@@ -1,5 +1,0 @@
-interface:
-  display_name: "Challenge Review"
-  short_description: "Knowledge skill for the analysis challenge loop. Loaded by the business-analysis entry and its challenger and expert roles; not user-facing."
-policy:
-  allow_implicit_invocation: true

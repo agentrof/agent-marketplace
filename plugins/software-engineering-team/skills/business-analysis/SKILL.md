@@ -70,8 +70,7 @@ run through the dispatcher).
      joins maps/business-analysis.md in the same milestone; the tree's
      FIRST content also materializes the map seed from the templates
      and adds the home map line (dynamic home).
-   - Question in rounds through the AskUserQuestion popup or, popup
-     unavailable, a numbered option list (at most four questions per
+   - Question in rounds through the AskUserQuestion popup (at most four questions per
      round, options with tradeoffs, recommended first);
      flush every answer into its owning doc per the fact-routing test.
      Ids are table rows; citations are links.
@@ -97,12 +96,11 @@ run through the dispatcher).
    gate.
    - FOUNDATION gate, once: <slug>-space.md, <slug>-glossary.md,
      <slug>-actors.md and <slug>-budgets.md approved together; the
-     approval is asked through the AskUserQuestion popup (unavailable:
-     a numbered option list).
+     approval is asked through the AskUserQuestion popup.
    - DOMAIN gate, per domain as its analysis closes: present
      _generated/status.md and the open-questions board; the user
      approves or defers named questions explicitly through the
-     AskUserQuestion popup (unavailable: a numbered option list;
+     AskUserQuestion popup (
      deferral is a row status with a revisit note, never silence).
      Approve flips the
      subtree statuses; commit authored plus generated files together.

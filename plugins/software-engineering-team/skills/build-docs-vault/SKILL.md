@@ -53,8 +53,7 @@ hook; nothing here ever changes what a document claims.
      (reconcile-designations --set <type>=<current value> per type,
      --dry-run --json) surfaces the retitle, manual and locked lists
      mechanically.
-3. PLAN and GATE, asked through the AskUserQuestion popup, or a
-   numbered option list where the popup is unavailable (recommended
+3. PLAN and GATE, asked through the AskUserQuestion popup (recommended
    option first, tradeoffs in every description).
    - The rename batch is an explicit user choice: present every planned
      rename with its new name and referrer count, then ask Approve

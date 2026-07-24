@@ -30,9 +30,8 @@ The only place the design master is born or changed.
    - Neither: CREATION mode.
 2. Gather inputs interactively: industry and product type, brand
    material the user owns, taste preferences and reference likes, target
-   audience; preference questions go through the AskUserQuestion popup
-   (unavailable: a numbered option list), open taste input stays
-   free-form. The user's own files win over
+   audience; preference questions go through the AskUserQuestion popup,
+   open taste input stays free-form. The user's own files win over
    generated suggestions.
 3. CREATION mode: spawn software-engineering-team-ux-designer (spawn template from
    the flow printed by "$RUN" path "$TEAM" flows/design.md, the
@@ -45,7 +44,7 @@ The only place the design master is born or changed.
    difference stated per candidate. The preview is a working artifact:
    delete it after MASTER is written.
 4. DS GATE: the user picks a candidate through the AskUserQuestion
-   popup or, popup unavailable, a numbered option list, one option per
+   popup, one option per
    candidate with its emphasis in the description
    (or requests different emphases; one re-run). The pick is written as
    workspace/docs/design-system/MASTER.md: vault frontmatter and nav

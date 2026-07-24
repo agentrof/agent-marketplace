@@ -64,9 +64,8 @@ SKILL_WARN_LINES = 120
 SKILL_MAX_BYTES = 8192
 CONSTITUTION_MAX_LINES = 60
 # Raised from 400 with the vault-law wiring, then from 416 with the
-# harness-neutral dispatcher paragraph and the decision-gate formula
-# (develop.md carries both); applies to every flow.
-FLOW_MAX_LINES = 432
+# dispatcher paragraph (develop.md carries it); applies to every flow.
+FLOW_MAX_LINES = 424
 REFERENCE_WARN_LINES = 500
 
 AUTO_TRIGGER_RE = re.compile(
@@ -823,19 +822,14 @@ def check_orchestrator_integrity(tree: Tree, findings: list[Finding]) -> None:
 
 QUESTION_POPUP_MARKER = "explicit user choice"
 QUESTION_POPUP_TOKEN = "AskUserQuestion"
-QUESTION_POPUP_FALLBACK = "numbered option list"
 QUESTION_POPUP_WINDOW = 3
 
 
 def check_question_popup(tree: Tree, findings: list[Finding]) -> None:
-    """The decision-gate formula, bidirectional and per site (a window of
-    lines absorbs prose wrapping):
-    (a) a gate declared with the marker phrase must name the popup
-        nearby, so the popup discipline cannot be silently stripped from
-        a gate site;
-    (b) the popup token must carry the harness fallback (a numbered
-        option list) nearby, so the same shipped content still asks on a
-        harness without the popup."""
+    """The decision-gate formula, per site (a window of lines absorbs
+    prose wrapping): a gate declared with the marker phrase must name
+    the popup nearby, so the popup discipline cannot be silently
+    stripped from a gate site."""
     for path in iter_scope_files(tree, ".md"):
         lines = read_text(path).splitlines()
         for idx, line in enumerate(lines):
@@ -847,19 +841,8 @@ def check_question_popup(tree: Tree, findings: list[Finding]) -> None:
                     "error", rel(tree, path), idx + 1, "question_popup",
                     f"gate marker ('{QUESTION_POPUP_MARKER}') without the"
                     f" {QUESTION_POPUP_TOKEN} popup named nearby",
-                    "decision gates ask through the AskUserQuestion popup"
-                    " (a numbered option list where the popup is"
-                    " unavailable); state it at the gate site",
-                ))
-            if (QUESTION_POPUP_TOKEN in line
-                    and not any(QUESTION_POPUP_FALLBACK in w for w in window)):
-                findings.append(Finding(
-                    "error", rel(tree, path), idx + 1, "question_popup",
-                    f"{QUESTION_POPUP_TOKEN} named without the harness"
-                    " fallback nearby",
-                    f"every popup site carries '{QUESTION_POPUP_FALLBACK}'"
-                    " within three lines, so the gate still asks on a"
-                    " harness without the popup",
+                    "decision gates ask through the AskUserQuestion popup;"
+                    " state it at the gate site",
                 ))
 
 

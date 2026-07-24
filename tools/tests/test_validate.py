@@ -94,23 +94,6 @@ class ValidatorFixtureTests(unittest.TestCase):
         self.assertTrue(any("names no known doc type" in m
                             for m in messages), findings)
 
-    def test_popup_without_fallback_fires(self):
-        """The bidirectional half of question_popup: naming the popup
-        without the harness fallback nearby is an error, so shipped
-        content still asks on a harness without the popup."""
-        from fixtures import PLUGIN, VALID_FLOW, write
-
-        def popup_no_fallback(root):
-            write(
-                root / "plugins" / PLUGIN / "flows" / "asker.md",
-                VALID_FLOW + "\n3. Ask via the AskUserQuestion popup.\n",
-            )
-
-        findings = self.run_on(popup_no_fallback)
-        self.assertEqual(len(findings), 1, findings)
-        self.assertEqual(findings[0].check, "question_popup")
-        self.assertIn("fallback", findings[0].message)
-
     def test_agent_missing_output_contract_fires(self):
         """Dropping the required output_contract key is a single
         frontmatter_shape finding naming the missing key."""

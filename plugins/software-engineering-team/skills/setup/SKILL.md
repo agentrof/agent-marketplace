@@ -15,10 +15,8 @@ folder or an existing repository; it completes gaps and breaks nothing.
 
 ## Procedure
 
-Every decision here is asked through the AskUserQuestion popup, or a
-numbered option list where the popup is unavailable, stopping for the
-typed reply (recommended option first, tradeoffs in descriptions);
-enum keys offer
+Every decision here is asked through the AskUserQuestion popup
+(recommended option first, tradeoffs in descriptions); enum keys offer
 supported values as options, free-text values (commands, paths) offer
 detected candidates plus free-form input.
 
@@ -35,10 +33,10 @@ detected candidates plus free-form input.
 2. Workspace collision: a foreign workspace/ directory at the root:
    ask for an alternative name and use it consistently, substituting
    it in every materialized template content and skeleton path (the
-   .gitignore work-orders rule, the context-file import, source_dirs).
+   .gitignore work-orders rule, the CLAUDE.md import, source_dirs).
    The team's layout is recognized by config.json's managed_by note or
    the docs/ plus memory/ pair; anything else is foreign. Record the
-   chosen name in the context file once step 3 materializes it.
+   chosen name in CLAUDE.md once step 3 materializes it.
 3. Materialize templates from the directory printed by
    "$RUN" path "$TEAM" templates, only where missing (idempotency: never overwrite an existing file, only
    add):

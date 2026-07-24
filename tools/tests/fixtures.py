@@ -14,6 +14,8 @@ from pathlib import Path
 
 REAL_MODEL_CONFIG = (Path(__file__).resolve().parents[1]
                      / "data" / "models.json")
+REAL_LIMITS_CONFIG = (Path(__file__).resolve().parents[1]
+                      / "data" / "limits.json")
 
 PLUGIN = "sample-team"
 
@@ -193,10 +195,12 @@ def make_valid_root(root: Path) -> None:
         "version": "0.0.1",
         "templates": {"common": {"main": "title", "fallback": None}},
     }, indent=2))
-    # The model-alias policy file, so the valid root is clean under the
-    # model_config_shape check.
+    # The policy files, so the valid root is clean under the
+    # model_config_shape and limits_config_shape checks.
     shutil.copyfile(REAL_MODEL_CONFIG,
                     write_path(root / "tools" / "data" / "models.json"))
+    shutil.copyfile(REAL_LIMITS_CONFIG,
+                    write_path(root / "tools" / "data" / "limits.json"))
 
 
 def write_path(path: Path) -> Path:
@@ -422,6 +426,13 @@ def break_model_config_shape(root: Path) -> None:
     config_path.write_text(json.dumps(config, indent=2), encoding="utf-8")
 
 
+def break_limits_config_shape(root: Path) -> None:
+    config_path = root / "tools" / "data" / "limits.json"
+    config = json.loads(config_path.read_text(encoding="utf-8"))
+    del config["authoring_caps"]
+    config_path.write_text(json.dumps(config, indent=2), encoding="utf-8")
+
+
 BUILDERS = {
     "frontmatter_shape": break_frontmatter_shape,
     "agent_name": break_agent_name,
@@ -449,6 +460,7 @@ BUILDERS = {
     "vault_policy_shape": break_vault_policy_shape,
     "vault_wiring": break_vault_wiring,
     "model_config_shape": break_model_config_shape,
+    "limits_config_shape": break_limits_config_shape,
 }
 
 

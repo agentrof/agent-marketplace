@@ -122,6 +122,50 @@ class ValidatorFixtureTests(unittest.TestCase):
         self.assertEqual(findings[0].check, "frontmatter_shape")
         self.assertIn("output_contract", findings[0].message)
 
+    def test_size_caps_read_from_limits_file(self):
+        """Lowering a cap in the fixture's limits.json makes size_caps
+        fire: the data file is live, not a decorative mirror."""
+        import json
+
+        def lower_agent_cap(root: Path) -> None:
+            path = root / "tools" / "data" / "limits.json"
+            data = json.loads(path.read_text(encoding="utf-8"))
+            data["authoring_caps"]["agent_body_max_lines"] = 10
+            path.write_text(json.dumps(data, indent=2), encoding="utf-8")
+
+        findings = self.run_on(lower_agent_cap)
+        self.assertEqual(len(findings), 1, findings)
+        self.assertEqual(findings[0].check, "size_caps")
+        self.assertIn("(cap 10)", findings[0].message)
+
+    def test_missing_limits_file_falls_back(self):
+        """Deleting limits.json yields only the shape finding: size_caps
+        neither crashed nor fired, the constants carried it."""
+
+        def drop_limits(root: Path) -> None:
+            (root / "tools" / "data" / "limits.json").unlink()
+
+        findings = self.run_on(drop_limits)
+        self.assertEqual(len(findings), 1, findings)
+        self.assertEqual(findings[0].check, "limits_config_shape")
+
+    def test_shipped_limits_match_fallback_constants(self):
+        """The data file and the in-code fallbacks move together; a cap
+        bump edits both in one commit."""
+        caps = {
+            "agent_body_max_lines": validate.AGENT_BODY_MAX_LINES,
+            "skill_max_lines": validate.SKILL_MAX_LINES,
+            "skill_warn_lines": validate.SKILL_WARN_LINES,
+            "skill_max_bytes": validate.SKILL_MAX_BYTES,
+            "constitution_max_lines": validate.CONSTITUTION_MAX_LINES,
+            "flow_max_lines": validate.FLOW_MAX_LINES,
+            "reference_warn_lines": validate.REFERENCE_WARN_LINES,
+        }
+        import json
+        shipped = json.loads(
+            fixtures.REAL_LIMITS_CONFIG.read_text(encoding="utf-8"))
+        self.assertEqual(shipped["authoring_caps"], caps)
+
     def test_out_of_scope_violations_are_not_caught(self):
         findings = self.run_on(extra=fixtures.plant_out_of_scope_violations)
         self.assertEqual(

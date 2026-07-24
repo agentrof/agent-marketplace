@@ -80,12 +80,15 @@ as product-i18n subject matter; anything else is a hard-code defect.
 
 ## Size caps
 
+The enforced values live in `tools/data/limits.json` (`authoring_caps`);
+this table mirrors that file.
+
 | file | cap |
 |---|---|
 | agent body (below frontmatter) | 80 lines (target 40-75) |
 | SKILL.md | 150 lines and 8 KB (warn at 120) |
 | constitution.md | 60 lines |
-| flows/*.md | 416 lines |
+| flows/*.md | 424 lines |
 | references/*.md | warn above 500 lines |
 
 ## Agent template

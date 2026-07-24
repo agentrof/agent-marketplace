@@ -29,6 +29,7 @@ from pathlib import Path
 EM_DASH = "—"
 
 MODEL_CONFIG_RELPATH = "tools/data/models.json"
+LIMITS_CONFIG_RELPATH = "tools/data/limits.json"
 
 AGENT_REQUIRED_KEYS = {"name", "description", "model", "output_contract"}
 AGENT_MODEL_ENUM = {"opus", "sonnet", "haiku", "inherit"}
@@ -58,6 +59,9 @@ TECH_SKILLS = {
 }
 RESERVED_CHECKLISTS = ["review-checklist.md", "qa-checklist.md"]
 
+# Authoring size caps. tools/data/limits.json (authoring_caps) is
+# authoritative; these constants are the fallbacks when that file is
+# unloadable, and a cap bump edits both in one commit.
 AGENT_BODY_MAX_LINES = 80
 SKILL_MAX_LINES = 150
 SKILL_WARN_LINES = 120
@@ -67,6 +71,12 @@ CONSTITUTION_MAX_LINES = 60
 # dispatcher paragraph (develop.md carries it); applies to every flow.
 FLOW_MAX_LINES = 424
 REFERENCE_WARN_LINES = 500
+
+AUTHORING_CAP_KEYS = {
+    "agent_body_max_lines", "skill_max_lines", "skill_warn_lines",
+    "skill_max_bytes", "constitution_max_lines", "flow_max_lines",
+    "reference_warn_lines",
+}
 
 AUTO_TRIGGER_RE = re.compile(
     r"use\s+proactively|use\s+when|use\s+this\s+skill\s+when|trigger\s+when|auto-?loads?\s+when|must\s+be\s+used",
@@ -146,6 +156,7 @@ class Tree:
     readme: Path
     marketplace: Path
     config: dict | None = None  # tools/data/models.json, None when unloadable
+    limits: dict | None = None  # tools/data/limits.json, None when unloadable
     md_files: list[Path] = field(default_factory=list)
     json_files: list[Path] = field(default_factory=list)
 
@@ -447,15 +458,36 @@ def check_trigger_policy(tree: Tree, findings: list[Finding]) -> None:
                 ))
 
 
+def _cap(caps: dict, key: str, default: int) -> int:
+    """Effective cap: the limits-file value when it is a usable integer,
+    else the in-code fallback (a malformed value is limits_config_shape's
+    finding, never a crash here)."""
+    value = caps.get(key)
+    if isinstance(value, int) and not isinstance(value, bool) and value > 0:
+        return value
+    return default
+
+
 def check_size_caps(tree: Tree, findings: list[Finding]) -> None:
+    caps = (tree.limits or {}).get("authoring_caps") or {}
+    if not isinstance(caps, dict):
+        caps = {}
+    agent_body_max = _cap(caps, "agent_body_max_lines", AGENT_BODY_MAX_LINES)
+    skill_max = _cap(caps, "skill_max_lines", SKILL_MAX_LINES)
+    skill_warn = _cap(caps, "skill_warn_lines", SKILL_WARN_LINES)
+    skill_bytes = _cap(caps, "skill_max_bytes", SKILL_MAX_BYTES)
+    constitution_max = _cap(caps, "constitution_max_lines",
+                            CONSTITUTION_MAX_LINES)
+    flow_max = _cap(caps, "flow_max_lines", FLOW_MAX_LINES)
+    reference_warn = _cap(caps, "reference_warn_lines", REFERENCE_WARN_LINES)
     for plugin in plugin_dirs(tree):
         for path in agent_files(plugin):
             _, body_start, body = parse_frontmatter(read_text(path))
             body_lines = len([l for l in body.splitlines()])
-            if body_lines > AGENT_BODY_MAX_LINES:
+            if body_lines > agent_body_max:
                 findings.append(Finding(
                     "error", rel(tree, path), body_start, "size_caps",
-                    f"agent body is {body_lines} lines (cap {AGENT_BODY_MAX_LINES})",
+                    f"agent body is {body_lines} lines (cap {agent_body_max})",
                     "cut to constitution altitude; move any depth into skills",
                 ))
         for sdir in skill_dirs(plugin):
@@ -463,51 +495,51 @@ def check_size_caps(tree: Tree, findings: list[Finding]) -> None:
             if skill_md.is_file():
                 text = read_text(skill_md)
                 n = len(text.splitlines())
-                if n > SKILL_MAX_LINES:
+                if n > skill_max:
                     findings.append(Finding(
                         "error", rel(tree, skill_md), 1, "size_caps",
-                        f"SKILL.md is {n} lines (cap {SKILL_MAX_LINES})",
+                        f"SKILL.md is {n} lines (cap {skill_max})",
                         "move depth into references/ and keep SKILL.md a decision surface",
                     ))
-                elif n > SKILL_WARN_LINES:
+                elif n > skill_warn:
                     findings.append(Finding(
                         "warning", rel(tree, skill_md), 1, "size_caps",
-                        f"SKILL.md is {n} lines (warn threshold {SKILL_WARN_LINES})",
+                        f"SKILL.md is {n} lines (warn threshold {skill_warn})",
                         "consider moving detail into references/",
                     ))
-                if len(text.encode("utf-8")) > SKILL_MAX_BYTES:
+                if len(text.encode("utf-8")) > skill_bytes:
                     findings.append(Finding(
                         "error", rel(tree, skill_md), 1, "size_caps",
-                        f"SKILL.md exceeds {SKILL_MAX_BYTES} bytes",
+                        f"SKILL.md exceeds {skill_bytes} bytes",
                         "move depth into references/",
                     ))
             refs = sdir / "references"
             if refs.is_dir():
                 for ref in sorted(refs.rglob("*.md")):
                     n = len(read_text(ref).splitlines())
-                    if n > REFERENCE_WARN_LINES:
+                    if n > reference_warn:
                         findings.append(Finding(
                             "warning", rel(tree, ref), 1, "size_caps",
-                            f"reference is {n} lines (warn threshold {REFERENCE_WARN_LINES})",
+                            f"reference is {n} lines (warn threshold {reference_warn})",
                             "split into focused reference files",
                         ))
         constitution = plugin / "constitution.md"
         if constitution.is_file():
             n = len(read_text(constitution).splitlines())
-            if n > CONSTITUTION_MAX_LINES:
+            if n > constitution_max:
                 findings.append(Finding(
                     "error", rel(tree, constitution), 1, "size_caps",
-                    f"constitution is {n} lines (cap {CONSTITUTION_MAX_LINES})",
+                    f"constitution is {n} lines (cap {constitution_max})",
                     "the constitution must stay terse; cut to principle altitude",
                 ))
         flows = plugin / "flows"
         if flows.is_dir():
             for flow in sorted(flows.glob("*.md")):
                 n = len(read_text(flow).splitlines())
-                if n > FLOW_MAX_LINES:
+                if n > flow_max:
                     findings.append(Finding(
                         "error", rel(tree, flow), 1, "size_caps",
-                        f"flow is {n} lines (cap {FLOW_MAX_LINES})",
+                        f"flow is {n} lines (cap {flow_max})",
                         "tighten the state-machine prose; flows are procedures, not essays",
                     ))
 
@@ -1648,6 +1680,52 @@ def check_model_config_shape(tree: Tree, findings: list[Finding]) -> None:
         ))
 
 
+def _limits_shape_errors(config: dict) -> list[str]:
+    problems: list[str] = []
+    if not isinstance(config.get("schema_version"), int):
+        problems.append("schema_version must be an integer")
+    caps = config.get("authoring_caps")
+    if not isinstance(caps, dict):
+        problems.append("authoring_caps must be an object")
+        return problems
+    missing = AUTHORING_CAP_KEYS - set(caps)
+    if missing:
+        problems.append(f"authoring_caps missing keys: {sorted(missing)}")
+    extra = set(caps) - AUTHORING_CAP_KEYS
+    if extra:
+        problems.append(f"authoring_caps has unknown keys: {sorted(extra)}")
+    bad = sorted(k for k in AUTHORING_CAP_KEYS & set(caps)
+                 if not isinstance(caps[k], int) or isinstance(caps[k], bool)
+                 or caps[k] <= 0)
+    if bad:
+        problems.append(
+            f"authoring_caps values must be positive integers: {bad}")
+    return problems
+
+
+def check_limits_config_shape(tree: Tree, findings: list[Finding]) -> None:
+    """tools/data/limits.json carries the authoring size caps that
+    check_size_caps enforces; an unloadable or malformed file (or a
+    typoed key) would let a cap silently fall back to the in-code
+    default, so its shape is validated like any other policy artifact
+    with a closed key set."""
+    if tree.limits is None:
+        findings.append(Finding(
+            "error", LIMITS_CONFIG_RELPATH, 1, "limits_config_shape",
+            "limits config is missing or not valid JSON",
+            "restore tools/data/limits.json; the authoring size caps live"
+            " there",
+        ))
+        return
+    for problem in _limits_shape_errors(tree.limits):
+        findings.append(Finding(
+            "error", LIMITS_CONFIG_RELPATH, 1, "limits_config_shape",
+            problem,
+            "fix the config block; authoring_caps feeds the size_caps"
+            " check",
+        ))
+
+
 CHECKS = {
     "frontmatter_shape": check_frontmatter_shape,
     "agent_name": check_agent_name,
@@ -1675,6 +1753,7 @@ CHECKS = {
     "vault_policy_shape": check_vault_policy_shape,
     "vault_wiring": check_vault_wiring,
     "model_config_shape": check_model_config_shape,
+    "limits_config_shape": check_limits_config_shape,
 }
 
 
@@ -1683,21 +1762,23 @@ CHECKS = {
 # ---------------------------------------------------------------------------
 
 
-def build_tree(root: Path) -> Tree:
+def load_policy_json(root: Path, relpath: str) -> dict | None:
     try:
-        config = json.loads(
-            (root / MODEL_CONFIG_RELPATH).read_text(encoding="utf-8"))
-        if not isinstance(config, dict):
-            config = None
+        config = json.loads((root / relpath).read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
-        config = None  # model_config_shape reports it
+        return None  # the owning *_config_shape check reports it
+    return config if isinstance(config, dict) else None
+
+
+def build_tree(root: Path) -> Tree:
     return Tree(
         root=root,
         plugins_dir=root / "plugins",
         docs_dir=root / "docs",
         readme=root / "README.md",
         marketplace=root / ".claude-plugin" / "marketplace.json",
-        config=config,
+        config=load_policy_json(root, MODEL_CONFIG_RELPATH),
+        limits=load_policy_json(root, LIMITS_CONFIG_RELPATH),
     )
 
 

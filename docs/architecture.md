@@ -92,8 +92,9 @@ plugin.json dependencies, so it installs automatically).
   web dashboard); a dependency of every team plugin, never a team itself.
 - `docs/`: this map, the authoring guide, the orchestration spec.
 - `tools/`: validator, counts injector, scaffolder and their tests;
-  `tools/data/models.json` is the model-alias policy file, validated
-  like any other policy artifact.
+  `tools/data/models.json` (model aliases) and `tools/data/limits.json`
+  (authoring size caps) are the policy files, validated like any other
+  policy artifact.
 - `memory/`: maintainer rules; excluded from all tooling.
 - Research material stays out of shipped content and leaves the default
   branch at release.

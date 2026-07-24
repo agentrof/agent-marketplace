@@ -494,7 +494,7 @@ def break_br_uncited(space: Path) -> None:
 
 
 def break_thresholds(space: Path) -> None:
-    filler = "\n".join(f"Exception narration line {i}." for i in range(160))
+    filler = "\n".join(f"Exception narration line {i}." for i in range(1400))
     edit(space / INV / "processes" / "goods-receipt-process.md",
          "Damaged goods are refused at the line level.", filler)
 
@@ -926,14 +926,14 @@ class ProjectLimitsTests(unittest.TestCase):
         break_thresholds(self.space)
         hits = [f for f in collect(self.space) if f.check == "thresholds"]
         self.assertEqual(len(hits), 1, hits)
-        self.assertIn("(warn at 150)", hits[0].message)
+        self.assertIn("(warn at 1350)", hits[0].message)
 
     def test_scale_multiplies_volume_warns(self):
         write_config(self.space, {"scale": "medium"})
         th = self.effective()["thresholds"]
-        self.assertEqual(th["node_direct_docs_warn"], 36)
-        self.assertEqual(th["process_doc_lines_warn"], 450)
-        self.assertEqual(th["space_bytes_warn"], 4500000)
+        self.assertEqual(th["node_direct_docs_warn"], 324)
+        self.assertEqual(th["process_doc_lines_warn"], 4050)
+        self.assertEqual(th["space_bytes_warn"], 40500000)
         break_thresholds(self.space)  # 160-line process doc
         hits = [f for f in collect(self.space) if f.check == "thresholds"]
         self.assertEqual(hits, [], "medium raises the cap past 160 lines")
@@ -944,15 +944,15 @@ class ProjectLimitsTests(unittest.TestCase):
         for level, multiplier in ladder.items():
             write_config(self.space, {"scale": level})
             th = self.effective()["thresholds"]
-            self.assertEqual(th["node_direct_docs_warn"], 12 * multiplier,
+            self.assertEqual(th["node_direct_docs_warn"], 108 * multiplier,
                              level)
             self.assertEqual(th["open_row_age_days_warn"], 14,
                              f"{level}: age never scales")
 
     def test_nesting_ladder_is_additive(self):
-        expected = {"small": (2, 3), "medium": (3, 4), "large": (4, 5),
-                    "x-large": (5, 6), "xx-large": (6, 7),
-                    "enterprise": (7, 8)}
+        expected = {"small": (4, 5), "medium": (5, 6), "large": (6, 7),
+                    "x-large": (7, 8), "xx-large": (8, 9),
+                    "enterprise": (9, 10)}
         for level, (warn_at, fail_at) in expected.items():
             write_config(self.space, {"scale": level})
             th = self.effective()["thresholds"]
@@ -966,7 +966,7 @@ class ProjectLimitsTests(unittest.TestCase):
         break_thresholds(self.space)
         hits = [f for f in collect(self.space) if f.check == "thresholds"]
         self.assertEqual(len(hits), 1, hits)
-        self.assertIn("(warn at 150: project override)", hits[0].message)
+        self.assertIn("(warn at 150: project override)", hits[0].message)  # override below scale
 
     def test_structural_values_never_scale(self):
         write_config(self.space, {"scale": "enterprise"})
@@ -1007,12 +1007,12 @@ class ProjectLimitsTests(unittest.TestCase):
         write_config(self.space, {"limits": {"nesting_warn_depth": 9}})
         th = self.effective()["thresholds"]
         self.assertEqual((th["nesting_warn_depth"],
-                          th["nesting_fail_depth"]), (2, 3))
+                          th["nesting_fail_depth"]), (4, 5))
         write_config(self.space, {"scale": "medium",
                                   "limits": {"nesting_warn_depth": 9}})
         th = self.effective()["thresholds"]
         self.assertEqual((th["nesting_warn_depth"],
-                          th["nesting_fail_depth"]), (3, 4),
+                          th["nesting_fail_depth"]), (5, 6),
                          "inversion falls back to the scale ladder values")
 
     def test_advisory_grouping_in_views(self):
@@ -1023,7 +1023,7 @@ class ProjectLimitsTests(unittest.TestCase):
             encoding="utf-8")
         self.assertIn("## Advisories: split proposals", status)
         self.assertIn("split proposal: process doc is", status)
-        self.assertIn("(warn at 150)", status)
+        self.assertIn("(warn at 1350)", status)
         self.assertIn("explicit owner", status)
         index = (self.space / "_generated" / "index.md").read_text(
             encoding="utf-8")

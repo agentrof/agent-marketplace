@@ -33,8 +33,9 @@ with what context, how findings return, and how they enter the space.
 5. Apply fixes, run the compiler's check and render, close the record
    locked. Verdict converged means zero blocking findings this round.
 6. Rounds: 1 is mandatory per domain; run another only while the last
-   round produced blocking findings; hard cap 3; residue becomes open
-   questions at the gate. Cross-domain lenses run once at space level
+   round produced blocking findings; hard cap from the space schema
+   (default 3; a project limits override may change it); residue
+   becomes open questions at the gate. Cross-domain lenses run once at space level
    before the space closes.
 
 ## Core Rules

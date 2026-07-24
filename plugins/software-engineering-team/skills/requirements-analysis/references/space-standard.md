@@ -101,7 +101,8 @@ project's output language), the marker is fixed English:
 
 Head summary: the lines between the H1 and the first H2. Cap: 30 lines
 for the space overview (the brief contract's summary survives here), 10
-lines for every other doc.
+lines for every other doc (schema defaults; a project limits override
+may change them).
 
 ## The distributed brief contract
 

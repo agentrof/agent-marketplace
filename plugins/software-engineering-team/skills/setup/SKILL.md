@@ -88,7 +88,15 @@ detected candidates plus free-form input.
    output_language (scope: .md body prose) and terminology_language
    (names, technical terms, code, comments, commits, PR bodies; the
    machine layer always stays English), both defaulting English, always
-   written out. Then mint
+   written out; scale (optional; absent means small): one popup
+   question "Expected project scale?" with four options: small
+   (Recommended: today's thresholds, feature- or single-team-scale
+   analysis), medium (3x volume thresholds, one extra nesting level),
+   large (9x, two extra levels) and "larger than large" (opens the
+   follow-up); when "larger than large" is chosen, a second question
+   offers exactly x-large (45x), xx-large (225x) and enterprise
+   (1125x); write the chosen value even when it is small (the config
+   self-documents). Then mint
    doc_type_designations: render the canonical table (obsidian-vault
    metadata) into output_language, one per taxonomy type, for owner
    review, and write it through the checker's reconcile-designations

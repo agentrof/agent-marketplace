@@ -65,7 +65,10 @@ run through the dispatcher).
      vault frontmatter and nav section; it prints the node's next free
      ids); each title carries its type designation (obsidian-vault Title
      Law), mechanically checked against the config map. Grow domains only
-     on the decomposition reference's split signals; a small topic stays
+     through approved split proposals: a signal or the compiler's
+     advisory "split proposal" warning NOMINATES a split, the owner
+     approves it through the AskUserQuestion popup (split now / defer
+     with a revisit note) before any split lands; a small topic stays
      one node. A new space or domain hub
      joins maps/business-analysis.md in the same milestone; the tree's
      FIRST content also materializes the map seed from the templates
@@ -89,8 +92,9 @@ run through the dispatcher).
    them fresh-context and read-only, triage every finding into the space
    (covered / fix / assumption / question / rejected), audit the burial
    paths, record the round as reviews/round-<n>-review.md via stub, close it
-   locked. Round 1 is mandatory; rounds 2-3 run only while blocking
-   findings appear; the record is part of the gate.
+   locked. Round 1 is mandatory; later rounds run only while blocking
+   findings appear, up to the schema's round cap (default 3; a project
+   limits override may change it); the record is part of the gate.
 6. Gates, in order; before presenting any gate run check --gate approval
    (scoped with --node for a domain), render, and the vault stewardship
    check from step 1; a red compile or a red vault check blocks the

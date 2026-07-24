@@ -42,6 +42,28 @@ Config changes go through this gate, never through hand edits.
    names, keys, ids, CLI output, always stays English); max_parallel an
    optional positive integer (the delivery-lanes flow's lane-proposal
    cap; absent means 3; this gate is its only writer);
+   scale an optional project-size declaration, enum small, medium,
+   large, x-large, xx-large, enterprise (absent means small, today's
+   shipped thresholds); a level multiplies the analysis-space volume
+   warn thresholds and raises the domain-nesting ladder one step per
+   level, per the scale_profiles table shipped in the business-analysis
+   space schema; aging, summary caps, challenge rounds and nav peers
+   never scale;
+   limits an optional flat object of per-key threshold overrides
+   consumed by the space compiler and the vault checker; known keys
+   exactly: node_direct_docs_warn, rule_sets_per_node_warn,
+   active_br_per_node_warn, rules_per_set_warn, criteria_per_set_warn,
+   process_doc_lines_warn, open_row_age_days_warn, space_docs_warn,
+   space_bytes_warn, nesting_warn_depth, nesting_fail_depth,
+   challenge_max_rounds, summary_max_lines_space,
+   summary_max_lines_default, nav_peer_min, nav_peer_max; every value
+   a positive integer; validate the EFFECTIVE pair after precedence
+   (limits beats scale beats shipped default): nesting_warn_depth
+   strictly below nesting_fail_depth, nav_peer_min at most
+   nav_peer_max; an unknown key, a non-integer or an inconsistent pair
+   is refused honestly naming the key (the checkers additionally
+   fail-soft on hand-edited garbage, so no config state can brick a
+   space);
    model_overrides reserved schema room for future model pinning:
    consumed by nothing yet (the source alias enum stands), so any
    requested value is declined with that reason;
@@ -64,7 +86,17 @@ Config changes go through this gate, never through hand edits.
    existing work. A terminology_language change governs newly authored
    names only; existing names, glossary rows and merged code are never
    renamed, state this fork whenever the key changes on a project with
-   authored content. The apply / reject decision is asked through the
+   authored content. For a scale or limits change: name each affected
+   key with its before -> after effective value and the checker that
+   enforces it (the space compiler: volume, nesting, aging, summary,
+   challenge rounds; the vault checker: nav peers), state that findings
+   will carry the new provenance ("warn at N: scale <level>" or "warn
+   at N: project override") and that generated views go stale until the
+   next render; and state the sharp edge: LOWERING a value can turn a
+   green space into split proposals, while lowering nesting_fail_depth,
+   summary caps or challenge_max_rounds can turn approved content into
+   a red compile. Run check right after the write and present new
+   findings. The apply / reject decision is asked through the
    AskUserQuestion popup (impact summary in the option descriptions).
    For a designation change (or an output_language change, which
    re-renders the canonical table from the obsidian-vault skill's

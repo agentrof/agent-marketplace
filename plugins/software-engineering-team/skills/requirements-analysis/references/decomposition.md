@@ -16,7 +16,9 @@ shapes; this reference decides WHICH shape.
 3. Start ALL content analysis in the root node. A small feature ends
    where it started: one node, one gate, exactly the old single-brief
    behavior.
-4. Split a domain out only when a split signal fires. The tree is a
+4. Split a domain out only when the owner approves a split proposal:
+   a signal NOMINATES the split, the owner's explicit approval (asked
+   through the AskUserQuestion popup) creates it. The tree is a
    consequence of the analysis, never a promise made before it.
 
 ## Domain split signals
@@ -35,8 +37,13 @@ Judgment signals, each with the question that tests it:
 - Compliance boundary: a regulation names a subset (payroll,
   e-invoicing) whose rules change on an external schedule.
 
-Mechanical triggers (the compiler warns; crossing one forces either a
-split or a written deferral in the node's open questions):
+Mechanical triggers (the compiler's advisory class: warnings labeled
+"split proposal", grouped under Advisories in _generated/status.md,
+each naming its effective threshold and its source: shipped default,
+scale level, or project override). A fired trigger is a PROPOSAL,
+never an instruction: present it through the AskUserQuestion popup;
+the owner either approves the split or the decline is recorded as a
+written deferral in the node's open questions:
 
 - A node's direct content docs exceed the schema threshold.
 - A node's rule_sets or its active BR count exceed their thresholds.

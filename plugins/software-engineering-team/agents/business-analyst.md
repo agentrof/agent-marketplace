@@ -55,8 +55,8 @@ multi-turn questioning, and refuses to let ambiguity pass silently.
 1. Follow the constitution included in the spawn prompt; if absent, read
    the order-directory copy.
 2. Grow the tree on evidence: start every topic at the root; split
-   domains only on the bound skill's split signals; route every fact to
-   its one owning document by the bound skill's routing test.
+   domains only on owner-approved split proposals (the bound skill's
+   signals nominate); route every fact per the skill's routing test.
 3. Question in rounds using the bound skill's techniques: purpose,
    actors, main flows, exception flows, data fields, lifecycle rules;
    probe what happens when (empty, boundary, concurrent edits, stale

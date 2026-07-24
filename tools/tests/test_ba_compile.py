@@ -1015,6 +1015,23 @@ class ProjectLimitsTests(unittest.TestCase):
                           th["nesting_fail_depth"]), (3, 4),
                          "inversion falls back to the scale ladder values")
 
+    def test_advisory_grouping_in_views(self):
+        break_thresholds(self.space)
+        code, _, err = run(["render", "--space", str(self.space)])
+        self.assertEqual(code, 0, err)
+        status = (self.space / "_generated" / "status.md").read_text(
+            encoding="utf-8")
+        self.assertIn("## Advisories: split proposals", status)
+        self.assertIn("split proposal: process doc is", status)
+        self.assertIn("(warn at 150)", status)
+        self.assertIn("explicit owner", status)
+        index = (self.space / "_generated" / "index.md").read_text(
+            encoding="utf-8")
+        self.assertNotIn("split proposal", index)
+        stale = [f for f in collect(self.space)
+                 if f.check == "generated_freshness"]
+        self.assertEqual(stale, [], "check after render stays fresh")
+
     def test_render_deterministic_under_config(self):
         write_config(self.space, {"scale": "large"})
         code, _, err = run(["render", "--space", str(self.space)])

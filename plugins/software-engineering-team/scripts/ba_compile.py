@@ -7,7 +7,12 @@ truth) plus machine-generated views under _generated/. This script is the
 single mechanical authority over that structure. It contains zero document
 taxonomy of its own: every doc type, section token, id kind, row schema and
 threshold comes from the shipped schema data file
-(skills/business-analysis/data/space-schema.json).
+(skills/business-analysis/data/space-schema.json). At run time the
+project's workspace/config.json may relax thresholds over those shipped
+defaults (a scale level plus per-key limits; precedence limits > scale >
+shipped), every finding names its effective value and source, and the
+volume warnings form an advisory class: split PROPOSALS grouped in
+status.md, acted on only with explicit owner approval.
 
 Subcommands:
   init          create a new space skeleton
@@ -1195,16 +1200,18 @@ def check_thresholds(space: Space, findings: list[Finding], warn) -> None:
                       for d in space.docs.values())
     if total_docs > th["space_docs_warn"]:
         warn(space_rel, 1, "thresholds",
-             f"space holds {total_docs} docs (warn at"
+             f"split proposal: space holds {total_docs} docs (warn at"
              f" {th['space_docs_warn']}"
              f"{limit_provenance(space.schema, 'space_docs_warn')})",
-             "consider splitting the topic into multiple spaces")
+             "propose splitting the topic into multiple spaces; a space split"
+             " needs explicit owner approval")
     if total_bytes > th["space_bytes_warn"]:
         warn(space_rel, 1, "thresholds",
-             f"space totals {total_bytes} bytes (warn at"
+             f"split proposal: space totals {total_bytes} bytes (warn at"
              f" {th['space_bytes_warn']}"
              f"{limit_provenance(space.schema, 'space_bytes_warn')})",
-             "review the decomposition; snapshot size follows space size")
+             "a split proposal: review the decomposition; snapshot size"
+             " follows space size")
 
     for node_rel in sorted(space.nodes):
         own = [d for d in space.docs.values() if d.node == node_rel]
@@ -1213,53 +1220,63 @@ def check_thresholds(space: Space, findings: list[Finding], warn) -> None:
         overview_rel = node_overview_rel(space.schema, node_rel)
         if len(direct) > th["node_direct_docs_warn"]:
             warn(overview_rel, 1, "thresholds",
-                 f"node owns {len(direct)} content docs (warn at"
+                 f"split proposal: node owns {len(direct)} content docs (warn at"
                  f" {th['node_direct_docs_warn']}"
                  f"{limit_provenance(space.schema, 'node_direct_docs_warn')})",
-                 "a split signal: consider a child domain")
+                 "a split proposal: offer a child domain through the"
+                 " AskUserQuestion popup; splits need explicit owner"
+                 " approval")
         rule_sets = [d for d in own if d.doc_type == "rule_set"]
         if len(rule_sets) > th["rule_sets_per_node_warn"]:
             warn(overview_rel, 1, "thresholds",
-                 f"node owns {len(rule_sets)} rule sets (warn at"
+                 f"split proposal: node owns {len(rule_sets)} rule sets (warn at"
                  f" {th['rule_sets_per_node_warn']}"
                  f"{limit_provenance(space.schema, 'rule_sets_per_node_warn')})",
-                 "a split signal: consider a child domain")
+                 "a split proposal: offer a child domain through the"
+                 " AskUserQuestion popup; splits need explicit owner"
+                 " approval")
         active_br = sum(1 for i in space.ids.values()
                         if i["kind"] == "BR" and i["row"].get("status") == "active"
                         and space.docs[i["doc"]].node == node_rel)
         if active_br > th["active_br_per_node_warn"]:
             warn(overview_rel, 1, "thresholds",
-                 f"node holds {active_br} active business rules (warn at"
+                 f"split proposal: node holds {active_br} active business rules"
+                 f" (warn at"
                  f" {th['active_br_per_node_warn']}"
                  f"{limit_provenance(space.schema, 'active_br_per_node_warn')})",
-                 "a split signal: consider a child domain")
+                 "a split proposal: offer a child domain through the"
+                 " AskUserQuestion popup; splits need explicit owner"
+                 " approval")
         for d in own:
             if d.doc_type == "process" and len(d.lines) > th["process_doc_lines_warn"]:
                 warn(d.rel, 1, "thresholds",
-                     f"process doc is {len(d.lines)} lines (warn at"
+                     f"split proposal: process doc is {len(d.lines)} lines (warn at"
                      f" {th['process_doc_lines_warn']}"
                      f"{limit_provenance(space.schema, 'process_doc_lines_warn')})",
-                     "split by workflow stage or variant")
+                     "a split proposal: offer a split by workflow stage or"
+                     " variant; owner approval required")
             if d.doc_type == "rule_set":
                 count = sum(1 for i in space.ids.values()
                             if i["doc"] == d.rel and i["kind"] == "BR"
                             and i["row"].get("status") == "active")
                 if count > th["rules_per_set_warn"]:
                     warn(d.rel, 1, "thresholds",
-                         f"rule set holds {count} active rules (warn at"
+                         f"split proposal: rule set holds {count} active rules (warn at"
                          f" {th['rules_per_set_warn']}"
                          f"{limit_provenance(space.schema, 'rules_per_set_warn')})",
-                         "split by governed target")
+                         "a split proposal: offer a split by governed target;"
+                         " owner approval required")
             if d.doc_type == "acceptance_set":
                 count = sum(1 for i in space.ids.values()
                             if i["doc"] == d.rel and i["kind"] == "AC"
                             and i["row"].get("status") == "active")
                 if count > th["criteria_per_set_warn"]:
                     warn(d.rel, 1, "thresholds",
-                         f"acceptance set holds {count} active criteria"
+                         f"split proposal: acceptance set holds {count} active criteria"
                          f" (warn at {th['criteria_per_set_warn']}"
                          f"{limit_provenance(space.schema, 'criteria_per_set_warn')})",
-                         "split by flow: main versus exceptions")
+                         "a split proposal: offer a split by flow (main versus"
+                         " exceptions); owner approval required")
 
         processes = [d for d in own if d.doc_type == "process"]
         if len(processes) >= 2:
@@ -1295,8 +1312,10 @@ def check_thresholds(space: Space, findings: list[Finding], warn) -> None:
             real = [g for g in groups if g["entities"]]
             if len(real) >= 2 and all(len(g["procs"]) >= 2 for g in real):
                 warn(overview_rel, 1, "thresholds",
-                     "node's processes touch disjoint entity clusters",
-                     "a split signal: the clusters may be separate domains")
+                     "split proposal: node's processes touch disjoint"
+                     " entity clusters",
+                     "the clusters may be separate domains; offer the"
+                     " split, owner approval required")
 
 
 def check_br_citations(space: Space, findings: list[Finding],
@@ -1518,8 +1537,13 @@ def render_views(space: Space, warnings: list[Finding]) -> dict[str, str]:
     space_rel = space_overview_rel(space.schema)
     title = str(space.docs.get(space_rel).fm.get("title", "")) \
         if space_rel in space.docs else ""
-    stable_warnings = [w for w in warnings
-                       if w.severity == "warning" and w.check != "aging"]
+    stable = [w for w in warnings
+              if w.severity == "warning" and w.check != "aging"]
+    # The volume family (check id 'thresholds') is the advisory class:
+    # split proposals, grouped in status.md, never listed as plain
+    # warnings in the index.
+    advisories = [w for w in stable if w.check == "thresholds"]
+    stable_warnings = [w for w in stable if w.check != "thresholds"]
 
     lines = [GENERATED_MARKER, f"# Index: {title}", ""]
     lines.append(f"Foundation approved: {'yes' if foundation_approved(space) else 'no'}")
@@ -1667,6 +1691,14 @@ def render_views(space: Space, warnings: list[Finding]) -> dict[str, str]:
                     open_blocking += 1
         lines.append(f"| {node_rel or '(root)'} | {len(records)} |"
                      f" {last.fm.get('verdict') if last else ''} | {open_blocking} |")
+    if advisories:
+        lines += ["", "## Advisories: split proposals", "",
+                  "Proposals, not instructions: a domain or space splits only",
+                  "on explicit owner approval, asked through the",
+                  "AskUserQuestion popup; a declined proposal is recorded as a",
+                  "deferral row in the node's open questions.", ""]
+        for w in sorted(advisories, key=lambda f: (f.path, f.line, f.check)):
+            lines.append(f"- {w.path}:{w.line} [{w.check}] {w.message}")
     status_md = "\n".join(lines) + "\n"
 
     groups = {"open": [], "deferred": [], "answered": []}

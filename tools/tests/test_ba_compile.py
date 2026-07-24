@@ -563,14 +563,23 @@ GATE_CHECKS = {"gate_approval"}
 
 
 def collect(space: Path, gate: bool = False) -> list:
-    schema = SCHEMA
+    vault_root = ba.resolve_vault_root(space, "")
+    schema = ba.effective_schema(SCHEMA, vault_root)
     scanned, base = ba.scan_space(space, schema)
-    scanned.vault_root = ba.resolve_vault_root(space, "")
+    scanned.vault_root = vault_root
     findings = ba.run_checks(scanned, base, gate=gate, gate_node="")
     if not scanned.broken:
         warnings = [f for f in findings if f.severity == "warning"]
         findings += ba.freshness_findings(scanned, warnings)
     return findings
+
+
+def write_config(space: Path, payload) -> None:
+    """workspace/config.json for the test workspace (the vault root's
+    parent, i.e. two levels above the space's business-analysis parent)."""
+    target = space.parent.parent.parent / "config.json"
+    text = payload if isinstance(payload, str) else json.dumps(payload)
+    target.write_text(text, encoding="utf-8")
 
 
 class ValidSpaceTests(unittest.TestCase):
@@ -889,6 +898,132 @@ class SubcommandTests(unittest.TestCase):
         entry = payload["ids"]["BR-INV-002"]
         self.assertEqual(entry["cited_by"], ["AC-INV-001"])
         self.assertEqual(entry["doc_status"], "approved")
+
+
+
+
+class ProjectLimitsTests(unittest.TestCase):
+    """workspace/config.json scale and limits merge over the shipped
+    schema: precedence limits > scale > shipped, provenance in messages,
+    silent degradation on garbage."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.space = Path(self.tmp.name) / "docs" / "business-analysis" / "erp"
+        make_valid_space(self.space)
+        self.vault_root = self.space.parent.parent
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def effective(self):
+        return ba.effective_schema(SCHEMA, self.vault_root)
+
+    def test_absent_config_keeps_shipped_defaults(self):
+        merged = self.effective()
+        self.assertEqual(merged["thresholds"], SCHEMA["thresholds"])
+        self.assertEqual(merged["_limit_provenance"], {})
+        break_thresholds(self.space)
+        hits = [f for f in collect(self.space) if f.check == "thresholds"]
+        self.assertEqual(len(hits), 1, hits)
+        self.assertIn("(warn at 150)", hits[0].message)
+
+    def test_scale_multiplies_volume_warns(self):
+        write_config(self.space, {"scale": "medium"})
+        th = self.effective()["thresholds"]
+        self.assertEqual(th["node_direct_docs_warn"], 36)
+        self.assertEqual(th["process_doc_lines_warn"], 450)
+        self.assertEqual(th["space_bytes_warn"], 4500000)
+        break_thresholds(self.space)  # 160-line process doc
+        hits = [f for f in collect(self.space) if f.check == "thresholds"]
+        self.assertEqual(hits, [], "medium raises the cap past 160 lines")
+
+    def test_full_ladder_table(self):
+        ladder = {"small": 1, "medium": 3, "large": 9, "x-large": 45,
+                  "xx-large": 225, "enterprise": 1125}
+        for level, multiplier in ladder.items():
+            write_config(self.space, {"scale": level})
+            th = self.effective()["thresholds"]
+            self.assertEqual(th["node_direct_docs_warn"], 12 * multiplier,
+                             level)
+            self.assertEqual(th["open_row_age_days_warn"], 14,
+                             f"{level}: age never scales")
+
+    def test_nesting_ladder_is_additive(self):
+        expected = {"small": (2, 3), "medium": (3, 4), "large": (4, 5),
+                    "x-large": (5, 6), "xx-large": (6, 7),
+                    "enterprise": (7, 8)}
+        for level, (warn_at, fail_at) in expected.items():
+            write_config(self.space, {"scale": level})
+            th = self.effective()["thresholds"]
+            self.assertEqual(
+                (th["nesting_warn_depth"], th["nesting_fail_depth"]),
+                (warn_at, fail_at), level)
+
+    def test_override_beats_scale_with_provenance(self):
+        write_config(self.space, {"scale": "medium",
+                                  "limits": {"process_doc_lines_warn": 150}})
+        break_thresholds(self.space)
+        hits = [f for f in collect(self.space) if f.check == "thresholds"]
+        self.assertEqual(len(hits), 1, hits)
+        self.assertIn("(warn at 150: project override)", hits[0].message)
+
+    def test_structural_values_never_scale(self):
+        write_config(self.space, {"scale": "enterprise"})
+        merged = self.effective()
+        self.assertEqual(merged["challenge"]["max_rounds"], 3)
+        self.assertEqual(merged["summary_max_lines"],
+                         SCHEMA["summary_max_lines"])
+        break_aging(self.space)
+        hits = [f for f in collect(self.space) if f.check == "aging"]
+        self.assertEqual(len(hits), 1, hits)
+        self.assertIn("(warn at 14)", hits[0].message)
+        self.assertNotIn("scale", hits[0].message)
+
+    def test_structural_overrides_apply(self):
+        write_config(self.space, {"limits": {"challenge_max_rounds": 5,
+                                             "summary_max_lines_default": 3}})
+        merged = self.effective()
+        self.assertEqual(merged["challenge"]["max_rounds"], 5)
+        self.assertEqual(merged["summary_max_lines"]["default"], 3)
+        self.assertEqual(merged["summary_max_lines"]["space"], 30)
+        self.assertEqual(
+            ba.limit_provenance(merged, "challenge_max_rounds"),
+            ": project override")
+
+    def test_invalid_config_fails_soft(self):
+        write_config(self.space, {"scale": "galactic",
+                                  "limits": {"process_doc_lines_warn": -5,
+                                             "bogus_key": 7,
+                                             "rules_per_set_warn": "many"}})
+        merged = self.effective()
+        self.assertEqual(merged["thresholds"], SCHEMA["thresholds"])
+        self.assertEqual(merged["_limit_provenance"], {})
+        write_config(self.space, "{not json")
+        merged = self.effective()
+        self.assertEqual(merged["thresholds"], SCHEMA["thresholds"])
+
+    def test_nesting_inversion_dropped(self):
+        write_config(self.space, {"limits": {"nesting_warn_depth": 9}})
+        th = self.effective()["thresholds"]
+        self.assertEqual((th["nesting_warn_depth"],
+                          th["nesting_fail_depth"]), (2, 3))
+        write_config(self.space, {"scale": "medium",
+                                  "limits": {"nesting_warn_depth": 9}})
+        th = self.effective()["thresholds"]
+        self.assertEqual((th["nesting_warn_depth"],
+                          th["nesting_fail_depth"]), (3, 4),
+                         "inversion falls back to the scale ladder values")
+
+    def test_render_deterministic_under_config(self):
+        write_config(self.space, {"scale": "large"})
+        code, _, err = run(["render", "--space", str(self.space)])
+        self.assertEqual(code, 0, err)
+        first = (self.space / "_generated" / "index.md").read_bytes()
+        code, _, _ = run(["render", "--space", str(self.space)])
+        self.assertEqual(code, 0)
+        second = (self.space / "_generated" / "index.md").read_bytes()
+        self.assertEqual(first, second)
 
 
 if __name__ == "__main__":

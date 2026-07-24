@@ -1920,5 +1920,42 @@ class FoldUnitTests(unittest.TestCase):
         self.assertFalse(vc.designation_present("Fessüreç", "süreç"))
 
 
+
+
+class ProjectLimitsVaultTests(unittest.TestCase):
+    """workspace/config.json limits override the shipped nav-peer policy
+    values; an inconsistent pair drops both overrides."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self.tmp.name) / "docs"
+        make_valid_vault(self.root)
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def add_limits(self, limits) -> None:
+        cfg = self.root.parent / "config.json"
+        data = json.loads(cfg.read_text(encoding="utf-8"))
+        data["limits"] = limits
+        cfg.write_text(json.dumps(data, indent=2), encoding="utf-8")
+
+    def test_nav_peer_override_fires_with_provenance(self):
+        self.add_limits({"nav_peer_min": 1, "nav_peer_max": 1})
+        code, findings = check_findings(self.root)
+        navs = [f for f in findings if f["check"] == "nav_footer"]
+        self.assertEqual(code, 1)
+        self.assertTrue(navs, findings)
+        self.assertIn("(policy range 1-1: project override)",
+                      navs[0]["message"])
+
+    def test_nav_peer_invalid_pair_dropped(self):
+        self.add_limits({"nav_peer_min": 9, "nav_peer_max": 2})
+        code, findings = check_findings(self.root)
+        self.assertEqual(code, 0)
+        self.assertEqual(findings, [],
+                         [f"{f['check']}: {f['message']}" for f in findings])
+
+
 if __name__ == "__main__":
     unittest.main()

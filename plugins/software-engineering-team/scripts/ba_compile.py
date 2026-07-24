@@ -425,13 +425,19 @@ def scan_space(space_dir: Path, schema: dict) -> tuple[Space, list[Finding]]:
         if is_node:
             space.nodes[rel] = ""
             depth = len(parts) // 2
-            if depth >= schema["thresholds"]["nesting_fail_depth"]:
+            fail_at = schema["thresholds"]["nesting_fail_depth"]
+            warn_at = schema["thresholds"]["nesting_warn_depth"]
+            if depth >= fail_at:
                 err(rel, 1, "space_layout",
-                    f"domain nesting depth {depth} exceeds the cap",
+                    f"domain nesting depth {depth} exceeds the cap (fail at"
+                    f" {fail_at}"
+                    f"{limit_provenance(schema, 'nesting_fail_depth')})",
                     "restructure: promote the subtree or merge domains")
-            elif depth >= schema["thresholds"]["nesting_warn_depth"]:
+            elif depth >= warn_at:
                 warn(rel, 1, "space_layout",
-                     f"domain nesting depth {depth}; consider restructuring",
+                     f"domain nesting depth {depth} (warn at {warn_at}"
+                     f"{limit_provenance(schema, 'nesting_warn_depth')});"
+                     " consider restructuring",
                      "deep trees hide content; prefer wider domain maps")
 
     for node_rel in sorted(space.nodes):
@@ -780,9 +786,12 @@ def run_checks(space: Space, base: list[Finding], gate: bool = False,
 
         cap = schema["summary_max_lines"].get(doc.doc_type,
                                               schema["summary_max_lines"]["default"])
+        cap_key = ("summary_max_lines_space" if doc.doc_type == "space"
+                   else "summary_max_lines_default")
         if doc.summary_lines > cap:
             err(rel, 1, "summary_caps",
-                f"head summary is {doc.summary_lines} lines (cap {cap})",
+                f"head summary is {doc.summary_lines} lines (cap {cap}"
+                f"{limit_provenance(schema, cap_key)})",
                 "the summary between the H1 and the first H2 is capped")
 
         for idx, line in enumerate(doc.lines, start=1):
@@ -901,7 +910,8 @@ def run_checks(space: Space, base: list[Finding], gate: bool = False,
                         if age > limit:
                             warn(rel, info["line"], "aging",
                                  f"{id_value} has been open for {age} days"
-                                 f" (threshold {limit})",
+                                 f" (warn at {limit}"
+                                 f"{limit_provenance(schema, 'open_row_age_days_warn')})",
                                  "force it to an answer or defer it explicitly"
                                  " with a revisit trigger")
                 if kind == "AC":
@@ -955,8 +965,10 @@ def check_challenge_record(space: Space, doc: Doc, findings: list[Finding]) -> N
         err(1, f"verdict '{verdict}' not in enum", "converged or continue")
     round_no = doc.fm.get("round")
     max_rounds = schema["challenge"]["max_rounds"]
+    rounds_prov = limit_provenance(schema, "challenge_max_rounds")
+    rounds_note = f" (max_rounds{rounds_prov})" if rounds_prov else ""
     if not isinstance(round_no, int) or not 1 <= round_no <= max_rounds:
-        err(1, f"round '{round_no}' outside 1..{max_rounds}",
+        err(1, f"round '{round_no}' outside 1..{max_rounds}{rounds_note}",
             "the loop is capped; residue goes to the gate as open questions")
         round_no = None
     name = Path(rel).name
@@ -1183,11 +1195,15 @@ def check_thresholds(space: Space, findings: list[Finding], warn) -> None:
                       for d in space.docs.values())
     if total_docs > th["space_docs_warn"]:
         warn(space_rel, 1, "thresholds",
-             f"space holds {total_docs} docs (threshold {th['space_docs_warn']})",
+             f"space holds {total_docs} docs (warn at"
+             f" {th['space_docs_warn']}"
+             f"{limit_provenance(space.schema, 'space_docs_warn')})",
              "consider splitting the topic into multiple spaces")
     if total_bytes > th["space_bytes_warn"]:
         warn(space_rel, 1, "thresholds",
-             f"space totals {total_bytes} bytes (threshold {th['space_bytes_warn']})",
+             f"space totals {total_bytes} bytes (warn at"
+             f" {th['space_bytes_warn']}"
+             f"{limit_provenance(space.schema, 'space_bytes_warn')})",
              "review the decomposition; snapshot size follows space size")
 
     for node_rel in sorted(space.nodes):
@@ -1197,28 +1213,32 @@ def check_thresholds(space: Space, findings: list[Finding], warn) -> None:
         overview_rel = node_overview_rel(space.schema, node_rel)
         if len(direct) > th["node_direct_docs_warn"]:
             warn(overview_rel, 1, "thresholds",
-                 f"node owns {len(direct)} content docs"
-                 f" (threshold {th['node_direct_docs_warn']})",
+                 f"node owns {len(direct)} content docs (warn at"
+                 f" {th['node_direct_docs_warn']}"
+                 f"{limit_provenance(space.schema, 'node_direct_docs_warn')})",
                  "a split signal: consider a child domain")
         rule_sets = [d for d in own if d.doc_type == "rule_set"]
         if len(rule_sets) > th["rule_sets_per_node_warn"]:
             warn(overview_rel, 1, "thresholds",
-                 f"node owns {len(rule_sets)} rule sets"
-                 f" (threshold {th['rule_sets_per_node_warn']})",
+                 f"node owns {len(rule_sets)} rule sets (warn at"
+                 f" {th['rule_sets_per_node_warn']}"
+                 f"{limit_provenance(space.schema, 'rule_sets_per_node_warn')})",
                  "a split signal: consider a child domain")
         active_br = sum(1 for i in space.ids.values()
                         if i["kind"] == "BR" and i["row"].get("status") == "active"
                         and space.docs[i["doc"]].node == node_rel)
         if active_br > th["active_br_per_node_warn"]:
             warn(overview_rel, 1, "thresholds",
-                 f"node holds {active_br} active business rules"
-                 f" (threshold {th['active_br_per_node_warn']})",
+                 f"node holds {active_br} active business rules (warn at"
+                 f" {th['active_br_per_node_warn']}"
+                 f"{limit_provenance(space.schema, 'active_br_per_node_warn')})",
                  "a split signal: consider a child domain")
         for d in own:
             if d.doc_type == "process" and len(d.lines) > th["process_doc_lines_warn"]:
                 warn(d.rel, 1, "thresholds",
-                     f"process doc is {len(d.lines)} lines"
-                     f" (threshold {th['process_doc_lines_warn']})",
+                     f"process doc is {len(d.lines)} lines (warn at"
+                     f" {th['process_doc_lines_warn']}"
+                     f"{limit_provenance(space.schema, 'process_doc_lines_warn')})",
                      "split by workflow stage or variant")
             if d.doc_type == "rule_set":
                 count = sum(1 for i in space.ids.values()
@@ -1226,8 +1246,9 @@ def check_thresholds(space: Space, findings: list[Finding], warn) -> None:
                             and i["row"].get("status") == "active")
                 if count > th["rules_per_set_warn"]:
                     warn(d.rel, 1, "thresholds",
-                         f"rule set holds {count} active rules"
-                         f" (threshold {th['rules_per_set_warn']})",
+                         f"rule set holds {count} active rules (warn at"
+                         f" {th['rules_per_set_warn']}"
+                         f"{limit_provenance(space.schema, 'rules_per_set_warn')})",
                          "split by governed target")
             if d.doc_type == "acceptance_set":
                 count = sum(1 for i in space.ids.values()
@@ -1236,7 +1257,8 @@ def check_thresholds(space: Space, findings: list[Finding], warn) -> None:
                 if count > th["criteria_per_set_warn"]:
                     warn(d.rel, 1, "thresholds",
                          f"acceptance set holds {count} active criteria"
-                         f" (threshold {th['criteria_per_set_warn']})",
+                         f" (warn at {th['criteria_per_set_warn']}"
+                         f"{limit_provenance(space.schema, 'criteria_per_set_warn')})",
                          "split by flow: main versus exceptions")
 
         processes = [d for d in own if d.doc_type == "process"]
@@ -1336,6 +1358,8 @@ def latest_record(space: Space, node_rel: str, scope: str) -> Doc | None:
 def record_satisfies_gate(space: Space, record: Doc | None) -> str | None:
     """Return None when the record satisfies the gate, else the reason."""
     max_rounds = space.schema["challenge"]["max_rounds"]
+    rounds_prov = limit_provenance(space.schema, "challenge_max_rounds")
+    rounds_note = f" (max_rounds{rounds_prov})" if rounds_prov else ""
     if record is None:
         return "no challenge record exists"
     if record.fm.get("locked") is not True:
@@ -1343,7 +1367,7 @@ def record_satisfies_gate(space: Space, record: Doc | None) -> str | None:
     if str(record.fm.get("verdict")) != "converged" \
             and record.fm.get("round") != max_rounds:
         return (f"{record.rel} is not converged and is not the final round"
-                f" {max_rounds}")
+                f" {max_rounds}{rounds_note}")
     return None
 
 
@@ -1722,6 +1746,114 @@ def load_schema(path: Path) -> dict:
 
 
 # ---------------------------------------------------------------------------
+# Project limits: workspace config merged over the shipped schema
+# ---------------------------------------------------------------------------
+
+# Flat limits-namespace keys that live outside the thresholds block.
+STRUCTURAL_LIMIT_TARGETS = {
+    "challenge_max_rounds": ("challenge", "max_rounds"),
+    "summary_max_lines_space": ("summary_max_lines", "space"),
+    "summary_max_lines_default": ("summary_max_lines", "default"),
+}
+
+
+def load_project_config(vault_root: Path | None) -> dict:
+    """workspace/config.json (the workspace is the vault root's parent,
+    the same derivation the vault checker's designation loader uses).
+    Fail-soft: missing, unreadable or malformed returns {} and the
+    shipped defaults stand."""
+    if vault_root is None:
+        return {}
+    try:
+        data = json.loads((vault_root.parent / "config.json")
+                          .read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def _positive_int(value) -> bool:
+    return (isinstance(value, int) and not isinstance(value, bool)
+            and value > 0)
+
+
+def effective_schema(schema: dict, vault_root: Path | None) -> dict:
+    """A deep-copied schema with the project's scale and limits merged
+    over the shipped defaults; precedence limits > scale > shipped.
+    Scale multiplies the scaled_thresholds keys and steps the
+    nesting_thresholds keys by the level's nesting_bonus; limits
+    overwrites single keys (thresholds keys plus the structural names in
+    STRUCTURAL_LIMIT_TARGETS). Unknown or invalid config values degrade
+    silently: the configure gate is the validator, this is a degrader.
+    Attaches the runtime-only _limit_provenance map; a key absent there
+    is a shipped default."""
+    merged = json.loads(json.dumps({k: v for k, v in schema.items()
+                                    if k != "_limit_provenance"}))
+    provenance: dict[str, str] = {}
+    config = load_project_config(vault_root)
+    thresholds = merged.setdefault("thresholds", {})
+    level = config.get("scale")
+    applied_bonus = 0
+    for row in merged.get("scale_profiles") or []:
+        if not (isinstance(row, dict) and row.get("level") == level):
+            continue
+        multiplier = row.get("multiplier")
+        bonus = row.get("nesting_bonus")
+        if not (_positive_int(multiplier) and isinstance(bonus, int)
+                and not isinstance(bonus, bool) and bonus >= 0):
+            break
+        if multiplier == 1 and bonus == 0:
+            break  # the baseline level leaves shipped values untouched
+        applied_bonus = bonus
+        for key in merged.get("scaled_thresholds") or []:
+            if _positive_int(thresholds.get(key)):
+                thresholds[key] = int(round(thresholds[key] * multiplier))
+                provenance[key] = f"scale {level}"
+        for key in merged.get("nesting_thresholds") or []:
+            if _positive_int(thresholds.get(key)):
+                thresholds[key] = thresholds[key] + bonus
+                provenance[key] = f"scale {level}"
+        break
+    limits = config.get("limits")
+    if isinstance(limits, dict):
+        for key, value in sorted(limits.items()):
+            if not _positive_int(value):
+                continue
+            if key in thresholds:
+                thresholds[key] = value
+                provenance[key] = "project override"
+            elif key in STRUCTURAL_LIMIT_TARGETS:
+                block, leaf = STRUCTURAL_LIMIT_TARGETS[key]
+                target = merged.get(block)
+                if isinstance(target, dict):
+                    target[leaf] = value
+                    provenance[key] = "project override"
+    warn_depth = thresholds.get("nesting_warn_depth")
+    fail_depth = thresholds.get("nesting_fail_depth")
+    if (isinstance(warn_depth, int) and isinstance(fail_depth, int)
+            and warn_depth >= fail_depth):
+        # An inverted pair never ships: both overrides drop back to the
+        # scale ladder's values, which are consistent by construction.
+        shipped = schema.get("thresholds") or {}
+        for key in ("nesting_warn_depth", "nesting_fail_depth"):
+            if isinstance(shipped.get(key), int):
+                thresholds[key] = shipped[key] + applied_bonus
+                if applied_bonus:
+                    provenance[key] = f"scale {level}"
+                else:
+                    provenance.pop(key, None)
+    merged["_limit_provenance"] = provenance
+    return merged
+
+
+def limit_provenance(schema: dict, key: str) -> str:
+    """':' plus the threshold's source for finding messages; empty for a
+    shipped default."""
+    source = (schema.get("_limit_provenance") or {}).get(key, "")
+    return f": {source}" if source else ""
+
+
+# ---------------------------------------------------------------------------
 # Stubs
 # ---------------------------------------------------------------------------
 
@@ -1981,6 +2113,7 @@ def cmd_check(args, schema: dict) -> int:
     vault_root = require_vault_root(args)
     if vault_root is None:
         return 2
+    schema = effective_schema(schema, vault_root)
     space, base = scan_space(Path(args.space), schema)
     space.vault_root = vault_root
     findings = run_checks(space, base, gate=args.gate == "approval",
@@ -2022,6 +2155,7 @@ def cmd_approve(args, schema: dict) -> int:
     vault_root = require_vault_root(args)
     if vault_root is None:
         return 2
+    schema = effective_schema(schema, vault_root)
     space, base = scan_space(space_dir, schema)
     space.vault_root = vault_root
     rel = args.doc
@@ -2083,6 +2217,7 @@ def cmd_render(args, schema: dict) -> int:
     vault_root = require_vault_root(args)
     if vault_root is None:
         return 2
+    schema = effective_schema(schema, vault_root)
     space, base = scan_space(Path(args.space), schema)
     space.vault_root = vault_root
     if space.broken:

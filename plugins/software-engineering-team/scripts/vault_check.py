@@ -442,6 +442,30 @@ def designation_type_universe(policy: dict) -> set:
     return universe - set(NAV_DOC_TYPES)
 
 
+def effective_policy(policy: dict, vault_root: Path) -> dict:
+    """A copied policy with the project's nav-peer limits merged over the
+    shipped values (workspace/config.json limits block; the workspace is
+    the vault root's parent). Fail-soft: an invalid value or an
+    inconsistent pair (min above max) drops both overrides. Attaches the
+    runtime-only _limit_provenance map like ba_compile's schema merge."""
+    merged = dict(policy)
+    provenance: dict[str, str] = {}
+    limits = ba_compile.load_project_config(vault_root).get("limits")
+    if isinstance(limits, dict):
+        for key in ("nav_peer_min", "nav_peer_max"):
+            value = limits.get(key)
+            if (isinstance(value, int) and not isinstance(value, bool)
+                    and value > 0):
+                merged[key] = value
+                provenance[key] = "project override"
+    if merged.get("nav_peer_min", 0) > merged.get("nav_peer_max", 0):
+        for key in ("nav_peer_min", "nav_peer_max"):
+            merged[key] = policy[key]
+            provenance.pop(key, None)
+    merged["_limit_provenance"] = provenance
+    return merged
+
+
 def load_designations(vault_root: Path) -> dict | None:
     """The consumer's rendered doc_type_designations map from
     <workspace>/config.json (the workspace is the vault's parent, derived
@@ -1173,10 +1197,14 @@ def check_nav_footer(vault: Vault, findings: list[Finding]) -> None:
         peers = [t for (_, t) in links[1:] if f"{t}.md" in vault.index]
         floor = min(peer_min, max(subtree_counts.get(note.subtree, 1) - 1, 0))
         if not floor <= len(peers) <= peer_max:
+            overridden = policy.get("_limit_provenance") or {}
+            prov = (": project override"
+                    if ("nav_peer_min" in overridden
+                        or "nav_peer_max" in overridden) else "")
             findings.append(Finding(
                 "error", note.rel, nav_line, "nav_footer",
                 f"nav section has {len(peers)} resolving peer links"
-                f" (policy range {floor}-{peer_max})",
+                f" (policy range {floor}-{peer_max}{prov})",
                 "link the contextual peers a reader would jump to next"))
 
 
@@ -3124,6 +3152,7 @@ def cmd_check(args, policy: dict) -> int:
         print(f"vault_check: vault directory not found: {args.vault}",
               file=sys.stderr)
         return 2
+    policy = effective_policy(policy, root)
     vault = build_vault(root, policy)
     findings: list[Finding] = []
     if args.changed:

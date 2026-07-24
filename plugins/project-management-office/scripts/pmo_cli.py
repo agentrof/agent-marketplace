@@ -26,7 +26,7 @@ import sys
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
-PMO_VERSION = "1.3.0"
+PMO_VERSION = "1.4.0"
 SCHEMA_VERSION = 3
 DB_NAME = "agentrof.db"
 
@@ -1853,8 +1853,8 @@ def cmd_task_close(args) -> int:
         )
         closed = close_running_attempts(con, task["id"], args.outcome, now())
         if closed == 0:
-            # No hook ever opened an attempt (hook-less harness or hooks
-            # not trusted): the CLI is the guarantee, so synthesize one
+            # No hook ever opened an attempt (hooks disabled or not
+            # trusted): the CLI is the guarantee, so synthesize one
             # spanning the task's own stamps, honestly labeled.
             existing = con.execute(
                 "SELECT COUNT(*) AS n FROM task_attempts WHERE task_id = ?",
@@ -2343,8 +2343,8 @@ def cmd_verify(args) -> int:
     """The integrity tripwire: compare database content against the
     fingerprint the last sanctioned mutation recorded. Foreign writes
     (anything that is not this CLI) are detected here, at gate time and
-    at resume, which is the detect-after guarantee on harnesses whose
-    hooks cannot deny before write."""
+    at resume, which is the detect-after guarantee when hooks were not
+    active to deny before write."""
     con = connect()
     problem = verify_integrity(con)
     if args.json:
@@ -2360,8 +2360,8 @@ def cmd_verify(args) -> int:
 
 
 def cmd_session_reconcile(args) -> int:
-    """Infer the dangling-session audit event on harnesses without a
-    session-end hook: at the next session start, an active work order in
+    """Infer the dangling-session audit event when no session-end hook
+    recorded one: at the next session start, an active work order in
     this worktree whose newest event is not already the dangling marker
     gets one, honestly labeled as inferred. Idempotent per session
     boundary (the dedup rule): reconcile directly after a recorded
@@ -2394,11 +2394,10 @@ def cmd_session_reconcile(args) -> int:
 
 def cmd_ensure(args) -> int:
     """One idempotent bootstrap: initialize the database, sync the
-    launcher and report integrity. Entry pre-flights call this on every
-    harness, so hooks are accelerators and never the only path to a
-    working backbone. Bootstrap must not brick a session: an integrity
-    problem is reported loudly but exits 0; gates fail on it via
-    work-order validate."""
+    launcher and report integrity. Entry pre-flights call this, so hooks
+    are accelerators and never the only path to a working backbone.
+    Bootstrap must not brick a session: an integrity problem is reported
+    loudly but exits 0; gates fail on it via work-order validate."""
     code = cmd_init_db(args)
     if code != 0:
         return code
@@ -2435,14 +2434,17 @@ def cmd_sync_launcher(args) -> int:
     module_src, index_src = dashboard_assets()
     if module_src.is_file() and module_src != bin_dir / "pmo_dashboard.py":
         shutil.copyfile(module_src, bin_dir / "pmo_dashboard.py")
-    # The dispatcher and the generated harness data travel with the
-    # launcher: every "$RUN" invocation in shipped content resolves
-    # through them, on every harness.
-    for extra in ("agentrof_run.py", "harness_runtime.json", "file_issue.py"):
+    # The dispatcher travels with the launcher: every "$RUN" invocation
+    # in shipped content resolves through it.
+    for extra in ("agentrof_run.py", "file_issue.py"):
         extra_src = source.parent / extra
         extra_dst = bin_dir / extra
         if extra_src.is_file() and extra_src != extra_dst:
             shutil.copyfile(extra_src, extra_dst)
+    # Files earlier releases synced but this version no longer ships.
+    stale = bin_dir / "harness_runtime.json"
+    if stale.is_file():
+        stale.unlink()
     if index_src.is_file():
         index_dst = data_dir() / "dashboard" / "index.html"
         if index_src != index_dst:

@@ -19,8 +19,7 @@ def main() -> int:
         hook_common.log(f"subagent hook called with bad phase: {phase!r}")
         return 0
     payload = hook_common.normalize_payload(hook_common.read_payload())
-    agent_type = str(payload.get("agent_type", "")
-                     or payload.get("agent_name", ""))
+    agent_type = str(payload.get("agent_type", ""))
     role = hook_common.team_role(agent_type)
     if role is None:
         return 0

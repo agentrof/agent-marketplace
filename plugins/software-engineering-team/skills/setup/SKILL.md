@@ -29,10 +29,9 @@ detected candidates plus free-form input.
    PMO="${AGENTROF_HOME:-$HOME/.agentrof}/bin/pmo_cli.py" and the
    dispatcher RUN="${AGENTROF_HOME:-$HOME/.agentrof}/bin/agentrof_run.py"
    with TEAM=software-engineering-team. Launcher missing: bootstrap per
-   the control-tower entry's per-harness discovery, run `ensure` once,
+   the control-tower entry's launcher discovery, run `ensure` once,
    and register both plugin roots when the hooks have not ("$RUN"
-   register --plugin <name> --root <install path>). Record
-   HARNESS=$("$RUN" harness) for the steps below.
+   register --plugin <name> --root <install path>).
 2. Workspace collision: a foreign workspace/ directory at the root:
    ask for an alternative name and use it consistently, substituting
    it in every materialized template content and skeleton path (the
@@ -45,9 +44,7 @@ detected candidates plus free-form input.
    add):
    - .gitignore: create from the template, or append only its missing
      lines (the work-orders/ ignore rule is mandatory).
-   - The context file, per HARNESS: claude_code gets CLAUDE.md from
-     the template (with the memory import); cursor and codex get
-     AGENTS.md (same template, import dropped); unknown: both.
+   - CLAUDE.md from the template (with the memory import).
    - workspace/memory/: ask "do you have personal rule files (a me.md
      and a profile.md, or a directory containing them)?"; given paths
      are copied verbatim per file, otherwise me.md and profile.md come
@@ -117,16 +114,7 @@ detected candidates plus free-form input.
    workflow missing the smoke job counts as a gap once the probe passes.
    Keep the dependency-audit job, and route any advisory it raises
    through the request entry as a fix-atomic lockfile bump.
-8. Harness fit; claude_code needs nothing here.
-   - cursor or codex: print the paste from "$RUN" stanza and ask the
-     user to apply it to the named file; without it every backbone
-     write outside the workspace escalates per attempt.
-   - codex additionally: run "$RUN" run "$TEAM"
-     scripts/sync_codex_agents.py, then state: agent definitions and
-     newly trusted hooks load at session start, start a NEW session
-     before the first request; untrusted hooks mean detect-after mode
-     (gates catch, nothing denies).
-9. Close: run "$RUN" run "$TEAM" scripts/vault_check.py check
+8. Close: run "$RUN" run "$TEAM" scripts/vault_check.py check
    --vault workspace/docs. Fresh tree: any finding is a setup bug.
    Existing tree: findings in setup-authored files are setup bugs;
    pre-existing content findings are named as vault degradation and

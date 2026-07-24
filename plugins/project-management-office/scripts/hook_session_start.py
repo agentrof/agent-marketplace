@@ -92,7 +92,6 @@ def main() -> int:
         hook_common.register_plugin_root(
             "project-management-office",
             Path(__file__).resolve().parents[1],
-            hook_common.detect_harness(payload),
         )
     except Exception as exc:
         hook_common.log(f"session_start registration failed: {exc}")

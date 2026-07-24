@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""Plugin-root dispatcher: the harness-independent way shipped content
-reaches plugin files.
+"""Plugin-root dispatcher: the fixed way shipped content reaches plugin
+files.
 
-Skills and flows never know where a harness installs plugins; they call
+Skills and flows never know where Claude Code installs plugins; they call
 this dispatcher (synced into the data directory's bin/ next to the PMO
 CLI) and it resolves through the plugin_roots registry, which hooks and
 the setup entry maintain.
@@ -10,8 +10,7 @@ the setup entry maintain.
 Verbs:
   run <plugin> <relpath> [args...]   execute a plugin script
   path <plugin> <relpath>            print the absolute path
-  register --plugin X --root PATH [--harness H]
-  harness                            print the recorded harness id
+  register --plugin X --root PATH
 
 A missing or stale root errors with the re-run-setup instruction instead
 of running the wrong copy. Stdlib only.
@@ -72,9 +71,9 @@ def manifest_version(root: Path) -> str:
 
 def resolve_root(plugin: str) -> Path | None:
     """The registered install root, staleness-checked. A moved or removed
-    root (plugin updates relocate the install on some harnesses) is an
-    error, never a silent run of the wrong copy; a version drift against
-    the on-disk manifest refreshes the registry entry."""
+    root (plugin updates relocate the install) is an error, never a
+    silent run of the wrong copy; a version drift against the on-disk
+    manifest refreshes the registry entry."""
     registry = load_registry()
     entry = (registry.get("plugins") or {}).get(plugin)
     if not entry:
@@ -140,8 +139,6 @@ def cmd_register(args) -> int:
         return fail(f"root is not a directory: {root}")
     registry = load_registry()
     registry.setdefault("schema_version", 1)
-    if args.harness:
-        registry["harness"] = args.harness
     plugins = registry.setdefault("plugins", {})
     plugins[args.plugin] = {
         "root": str(root),
@@ -151,36 +148,6 @@ def cmd_register(args) -> int:
     }
     save_registry(registry)
     print(f"agentrof: registered {args.plugin} at {root}")
-    return 0
-
-
-def cmd_harness(args) -> int:
-    print(load_registry().get("harness", "unknown"))
-    return 0
-
-
-def cmd_stanza(args) -> int:
-    """Print the recorded harness's sandbox stanza with the real home
-    directory substituted, so setup hands the user an exact paste
-    instead of prose. The stanza table ships in harness_runtime.json
-    beside this script (generated from tools/data/harnesses.json)."""
-    try:
-        data = json.loads(
-            (Path(__file__).resolve().parent / "harness_runtime.json")
-            .read_text(encoding="utf-8"))
-    except Exception:
-        data = {}
-    harness_id = args.harness or load_registry().get("harness", "unknown")
-    stanza = (data.get("sandbox_stanzas") or {}).get(harness_id)
-    if not stanza:
-        print(f"agentrof: no sandbox stanza for harness '{harness_id}'")
-        return 0
-    home = str(Path.home())
-    print(f"file: {stanza.get('file', '')}")
-    print(stanza.get("stanza", "").replace("{home}", home))
-    note = stanza.get("note", "")
-    if note:
-        print(f"note: {note}")
     return 0
 
 
@@ -202,15 +169,7 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("register")
     p.add_argument("--plugin", required=True)
     p.add_argument("--root", required=True)
-    p.add_argument("--harness", default="")
     p.set_defaults(func=cmd_register)
-
-    p = sub.add_parser("harness")
-    p.set_defaults(func=cmd_harness)
-
-    p = sub.add_parser("stanza")
-    p.add_argument("--harness", default="")
-    p.set_defaults(func=cmd_stanza)
 
     return parser
 

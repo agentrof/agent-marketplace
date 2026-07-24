@@ -309,6 +309,7 @@ class DashboardCatalogTests(unittest.TestCase):
             team = catalog["teams"]["project-management-office"]
             self.assertEqual(team["kind"], "backbone")
             self.assertEqual(team["installs"][0]["version"], "1.2.0")
+            self.assertEqual(team["installs"][0]["scope"], "local")
 
 
 if __name__ == "__main__":

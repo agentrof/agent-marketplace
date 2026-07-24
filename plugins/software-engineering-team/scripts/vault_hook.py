@@ -15,17 +15,14 @@ Two moments, one law (the obsidian-vault skill):
   run vault_check's --changed fast path and surface its findings to the
   writing session immediately, so link and metadata duties are repaired
   in-session instead of at a distant gate. Gates stay the hard barrier.
-- register (sessionStart): record this plugin's install root in the
+- register (SessionStart): record this plugin's install root in the
   shared plugin_roots registry the agentrof_run dispatcher resolves
-  from; env-free (the root comes from this file's own location), so it
-  works identically on every harness.
+  from; env-free (the root comes from this file's own location).
 
-The same script serves every supported harness; the small normalize shim
-below absorbs payload differences (tool-name vocabulary, top-level
-file_path from afterFileEdit, apply_patch envelopes). File operations
-through the shell (moves, deletes) bypass Write/Edit hooks by nature;
-the next --changed write or gate-time vault_check surfaces them.
-Stdlib only.
+The normalize shim gives both moments one payload shape (canonical tool
+name, per-file write targets). File operations through the shell (moves,
+deletes) bypass Write/Edit hooks by nature; the next --changed write or
+gate-time vault_check surfaces them. Stdlib only.
 """
 
 from __future__ import annotations
@@ -43,16 +40,11 @@ import vault_check
 
 VAULT_SEGMENTS = ("workspace", "docs")
 
-# Harness tool-name vocabulary -> the canonical pair this hook reasons in.
+# Tool-name vocabulary -> the canonical pair this hook reasons in.
 TOOL_NAME_CANON = {
-    "Write": "Write", "write": "Write", "create_file": "Write",
-    "search_replace": "Write",
-    "Edit": "Edit", "edit": "Edit", "edit_file": "Edit", "MultiEdit": "Edit",
-    "apply_patch": "apply_patch",
+    "Write": "Write",
+    "Edit": "Edit", "MultiEdit": "Edit",
 }
-
-APPLY_PATCH_FILE_RE = re.compile(
-    r"^\*\*\* (?:Update|Add) File: (.+)$", re.MULTILINE)
 
 # Machine-managed config keys with a single sanctioned writer (the
 # vault_check.py reconcile-designations verb). The verb writes via
@@ -82,33 +74,15 @@ def read_payload() -> dict:
 
 
 def normalize(payload: dict) -> dict:
-    """One canonical shape across harness payloads: tool_name mapped into
-    Write/Edit, top-level file_path lifted (afterFileEdit carries it
-    there), apply_patch envelopes expanded into per-file write targets
-    under 'file_targets'."""
+    """One canonical payload shape: tool_name mapped into Write/Edit,
+    the write target expanded under 'file_targets'."""
     out = dict(payload) if isinstance(payload, dict) else {}
     tool_input = out.get("tool_input")
     tool_input = dict(tool_input) if isinstance(tool_input, dict) else {}
-    if "file_path" not in tool_input and isinstance(out.get("file_path"), str):
-        tool_input["file_path"] = out["file_path"]
     tool = TOOL_NAME_CANON.get(str(out.get("tool_name", "")),
                                str(out.get("tool_name", "")))
-    if not tool and tool_input.get("file_path"):
-        tool = "Edit"  # afterFileEdit implies the tool
     targets: list[dict] = []
-    if tool == "apply_patch":
-        patch_text = str(tool_input.get("patch") or tool_input.get("input")
-                         or tool_input.get("command") or "")
-        sections = APPLY_PATCH_FILE_RE.split(patch_text)
-        for i in range(1, len(sections) - 1, 2):
-            added = "\n".join(line[1:]
-                              for line in sections[i + 1].splitlines()
-                              if line.startswith("+"))
-            targets.append({"file_path": sections[i].strip(),
-                            "content": added})
-        if targets:
-            tool = "Write"
-    elif tool in ("Write", "Edit"):
+    if tool in ("Write", "Edit"):
         file_path = str(tool_input.get("file_path", ""))
         if file_path:
             target = {"file_path": file_path}
@@ -127,7 +101,7 @@ def data_dir() -> Path:
     return Path(override) if override else Path.home() / ".agentrof"
 
 
-def register(payload: dict) -> int:
+def register() -> int:
     """Record this plugin's root in the shared plugin_roots registry;
     a bookkeeping hook, so it never takes a session down."""
     try:
@@ -141,12 +115,6 @@ def register(payload: dict) -> int:
         if not isinstance(registry, dict):
             registry = {}
         registry.setdefault("schema_version", 1)
-        if "cursor_version" in payload or os.environ.get("CURSOR_PLUGIN_ROOT"):
-            registry["harness"] = "cursor"
-        elif os.environ.get("PLUGIN_ROOT"):
-            registry["harness"] = "codex"
-        elif os.environ.get("CLAUDE_PLUGIN_ROOT"):
-            registry["harness"] = "claude_code"
         version = ""
         try:
             version = json.loads(
@@ -404,7 +372,7 @@ def main() -> int:
     mode = sys.argv[1] if len(sys.argv) > 1 else "pre"
     payload = read_payload()
     if mode == "register":
-        return register(payload)
+        return register()
     payload = normalize(payload)
     if payload.get("tool_name") not in ("Write", "Edit"):
         return 0

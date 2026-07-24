@@ -140,11 +140,10 @@ def scan_install(install_path: Path) -> dict:
 
 
 def scan_plugin_roots(teams: dict, errors: list) -> None:
-    """Harness-neutral install records: the plugin_roots registry that
-    hooks and the setup entry maintain (the same file the agentrof_run
-    dispatcher resolves from). Registry membership itself is the team
-    marker: only this marketplace's own plugins register there, so the
-    Codex manifests' lack of a dependencies field costs nothing."""
+    """Local install records: the plugin_roots registry that hooks and
+    the setup entry maintain (the same file the agentrof_run dispatcher
+    resolves from). Registry membership itself is the team marker: only
+    this marketplace's own plugins register there."""
     registry_file = pmo_cli.data_dir() / "plugin_roots.json"
     if not registry_file.is_file():
         return
@@ -153,7 +152,6 @@ def scan_plugin_roots(teams: dict, errors: list) -> None:
     except (OSError, json.JSONDecodeError):
         errors.append(f"plugin_roots.json unreadable: {registry_file}")
         return
-    harness = registry.get("harness", "")
     for plugin_name, entry in sorted((registry.get("plugins") or {}).items()):
         if plugin_name in teams:
             continue  # the Claude registry record is richer; keep it
@@ -175,7 +173,7 @@ def scan_plugin_roots(teams: dict, errors: list) -> None:
             "in_use": False,
             "installs": [{
                 "version": entry.get("version", ""),
-                "scope": f"harness:{harness}" if harness else "harness",
+                "scope": "local",
                 "project_path": "",
                 "last_updated": entry.get("registered_at", ""),
             }],
@@ -188,11 +186,11 @@ def scan_plugin_roots(teams: dict, errors: list) -> None:
 
 def scan_catalog() -> dict:
     """Team plugins on this machine: install records from the Claude plugin
-    registry plus the harness-neutral plugin_roots registry, detail
-    scanned per installed copy, usage joined from the database teams
-    table. A Claude-registry plugin is recognized mechanically by its
-    manifest's dependency on project-management-office; a plugin_roots
-    record is ours by construction."""
+    registry plus the local plugin_roots registry, detail scanned per
+    installed copy, usage joined from the database teams table. A
+    Claude-registry plugin is recognized mechanically by its manifest's
+    dependency on project-management-office; a plugin_roots record is
+    ours by construction."""
     registry_path = plugins_dir() / "installed_plugins.json"
     registry = {}
     if registry_path.is_file():

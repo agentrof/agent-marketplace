@@ -30,12 +30,10 @@ from pathlib import Path
 # The one and only target. This script never files anywhere else.
 MARKETPLACE_REPO = "agentrof/agent-marketplace"
 
-# Marketplace manifest locations, one per harness. Any of them, if reachable
-# above this script, is read to cross-check the locked target.
+# Marketplace manifest location. If reachable above this script, it is
+# read to cross-check the locked target.
 MANIFEST_RELPATHS = (
     Path(".claude-plugin") / "marketplace.json",
-    Path(".cursor-plugin") / "marketplace.json",
-    Path(".agents") / "plugins" / "marketplace.json",
 )
 
 

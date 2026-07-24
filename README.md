@@ -1,7 +1,6 @@
 # Agent Marketplace
 
-A catalog of curated, end-to-end agent teams for agentic coding
-harnesses (Claude Code native; Cursor and Codex CLI supported). Install
+A catalog of curated, end-to-end agent teams for Claude Code. Install
 a complete team and run at the goal; this is not a parts store.
 
 The first team, `software-engineering-team`, is an orchestrated software and product
@@ -30,8 +29,6 @@ hand anywhere in this repository.
 
 ## Install
 
-Claude Code (native):
-
 ```
 /plugin marketplace add agentrof/agent-marketplace
 /plugin install software-engineering-team
@@ -48,19 +45,6 @@ Then, inside your project:
 
 Setup bootstraps the project workspace, asks for anything it cannot
 detect, and points you at the next step.
-
-Cursor (2.5 or later): add this repository as a team marketplace and
-install both plugins (the backbone is explicit there), then run the
-setup entry. Codex CLI:
-
-```
-codex plugin marketplace add agentrof/agent-marketplace
-```
-
-then install both plugins, trust the plugin hooks, and follow the
-numbered sequence in [docs/harnesses.md](docs/harnesses.md); setup
-prints the one-time sandbox paste each harness needs and the restart
-points.
 
 ## Quickstart
 

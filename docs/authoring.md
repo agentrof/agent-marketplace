@@ -27,7 +27,7 @@ A plugin ships four component kinds:
 | agent frontmatter name | `<plugin>-<file-stem>`, globally unique | software-engineering-team-code-reviewer |
 | skill directory + frontmatter name | identical bare kebab | skills/python-fastapi/ |
 | skill entry file | SKILL.md (uppercase) | skills/request/SKILL.md |
-| skill subfolders | references/, scripts/, data/, agents/ (generated harness policy) | references/patterns.md |
+| skill subfolders | references/, scripts/, data/ | references/patterns.md |
 | reserved checklists (tech skills) | fixed names | references/review-checklist.md, references/qa-checklist.md |
 | flow file | flows/<name>.md | flows/develop.md |
 | forbidden everywhere | double underscore in names; the em dash character; emoji in headings; hand-written derived counts; absolute or home paths | |
@@ -35,7 +35,7 @@ A plugin ships four component kinds:
 ## Frontmatter
 
 Agents carry `name`, `description`, `model` (an alias from the
-`model_aliases` enum in `tools/data/harnesses.json`) and `output_contract`
+`model_aliases` enum in `tools/data/models.json`) and `output_contract`
 (`prose` or `structured`: how the role hands results back; every current
 persona is `prose`). A read-only role may also carry a `tools` whitelist
 (`Read, Grep, Glob`) to deny write capability at spawn time. Descriptions
@@ -238,43 +238,19 @@ every entry or flow that names the docs tree must also name
 `obsidian-vault` (the `vault_wiring` rule): the law cannot be skipped
 by omission.
 
-## Harness portability
+## Dispatcher and popups
 
-The source tree is Claude Code native and ships to Cursor and Codex
-through generated artifacts (invariant 12; per-harness behavior in
-[harnesses.md](harnesses.md)). Portability is config-complete, enforced
-by named checks:
-
-- A new frontmatter key ships with a disposition row for every harness
-  in `tools/data/harnesses.json` (`portable_frontmatter` errors
-  otherwise), using the closed action vocabulary: keep, drop, rename,
-  replace_when_present, map_model, policy_flag, nest.
-- A new hook event ships with a `hook_routes` row or an explicit
-  `unsupported_events` listing per harness (`hook_event_coverage`);
-  silence never drops an event.
-- A new model alias ships with a `model_map` row for every harness
-  (`model_map_completeness`).
 - Bodies reach plugin files only through the dispatcher grammar
   (`"$RUN" run "$TEAM" scripts/<x>.py`, `"$RUN" path "$TEAM"
-  <relpath>`; `script_references` verifies every target ships) and
-  every popup site carries the harness fallback phrase
-  (`question_popup`, both directions).
-- Generated paths are never hand-edited: the two registries at the
-  repo root, per-plugin `.cursor-plugin/` and `.codex-plugin/`
-  manifests, `cursor/` and `codex/` trees, `skills/<s>/agents/`
-  policy files, `templates/AGENTS.md`, the runtime data file and the
-  matrix block in harnesses.md. Run `make generate` after touching
-  their inputs; `harness_drift` and `make generate-check` are red
-  otherwise.
+  <relpath>`); the `script_references` rule verifies every named
+  target ships.
+- Every decision gate names the AskUserQuestion popup at the gate site
+  (`question_popup`).
 
 ## Releases
 
 A release bumps `plugin.json` and its `marketplace.json` entry to the
-same version and runs `make generate` in one commit; the
-`version_sync` and `harness_drift` rules error on drift. A release
-that touches any `hooks/hooks.json` states in its notes that Codex
-users must re-trust the plugin hooks (trust is hash-bound and goes
-dormant silently on change).
+same version in one commit; the `version_sync` rule errors on drift.
 
 ## Scaffolding
 

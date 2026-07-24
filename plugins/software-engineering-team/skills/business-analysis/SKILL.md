@@ -70,9 +70,10 @@ run through the dispatcher).
      joins maps/business-analysis.md in the same milestone; the tree's
      FIRST content also materializes the map seed from the templates
      and adds the home map line (dynamic home).
-   - Question in rounds through the AskUserQuestion popup (at most four questions per
-     round, options with tradeoffs, recommended first);
-     flush every answer into its owning doc per the fact-routing test.
+   - Question in rounds through the AskUserQuestion popup (at most
+     four questions per round, options with tradeoffs, recommended
+     first); flush every answer into its owning doc per the
+     fact-routing test.
      Ids are table rows; citations are links.
    - After every authoring milestone: check + render. Fix findings
      immediately; a red compile never accumulates.
@@ -100,10 +101,9 @@ run through the dispatcher).
    - DOMAIN gate, per domain as its analysis closes: present
      _generated/status.md and the open-questions board; the user
      approves or defers named questions explicitly through the
-     AskUserQuestion popup (
-     deferral is a row status with a revisit note, never silence).
-     Approve flips the
-     subtree statuses; commit authored plus generated files together.
+     AskUserQuestion popup (deferral is a row status with a revisit
+     note, never silence). Approve flips the subtree statuses; commit
+     authored plus generated files together.
    - A buildable domain unblocks request, sketch and demo for its scope;
      other domains keep analyzing in parallel.
 7. Process pulses: at each gate and challenge-round close, append an

@@ -20,9 +20,7 @@ Front door for real work: classify, confirm, deliver.
    contract and run the idempotent ensure. Run resume-info
    --project-key <key>: an active work order whose worktree field matches
    THIS resolved git root means offer Resume or Release through the
-   AskUserQuestion popup; never
-   start a
-   second work order here. Active orders in OTHER worktrees are parallel
+   AskUserQuestion popup; never start a second work order here. Active orders in OTHER worktrees are parallel
    lanes coordinated by the delivery-lanes entry: name them and continue.
    Resume means: load the flow printed by "$RUN" path "$TEAM"
    flows/develop.md, read the
@@ -34,8 +32,7 @@ Front door for real work: classify, confirm, deliver.
    construction and was already sliced and approved at the backlog gate:
    skip classification and the brief precondition, confirm through the
    AskUserQuestion popup ("Delivering WP-03 <title>." with proceed /
-   adjust options), and
-   execute the flow printed by "$RUN" path "$TEAM"
+   adjust options), and execute the flow printed by "$RUN" path "$TEAM"
    flows/develop.md for that story (its step 0.5 readiness gate still
    guards).
 2. Classify BINARY, in this conversation (this is the product-owner hat
@@ -75,9 +72,8 @@ Front door for real work: classify, confirm, deliver.
       _generated/index.md. Use the develop flow's spawn template.
    c. BACKLOG GATE: present the epic and story summary with the coverage
       map; Approve / Request changes / Pause, asked through the
-      AskUserQuestion popup. On
-      approve, first verify
-      the import against the space (ba_compile.py verify-import --space
+      AskUserQuestion popup. On approve, first verify the import
+      against the space (ba_compile.py verify-import --space
       <space> --json-file <file>; nonzero blocks the approve action with
       the named ids), then load it into the PMO database (item import
       --project-key <key> --json-file <file>; the CLI rejects stories
@@ -88,7 +84,6 @@ Front door for real work: classify, confirm, deliver.
    d. Story loop: for each ready story in order, execute the flow
       printed by "$RUN" path "$TEAM" flows/develop.md end to end. After each
       story's merge checkpoint (which updates the database on the main
-      line), ask through the
-      AskUserQuestion popup
-      whether to continue with the next story.
+      line), ask through the AskUserQuestion popup whether to continue
+      with the next story.
 5. All gates are manual; there is no autonomous mode.

@@ -13,8 +13,8 @@ You MUST follow these rules exactly. Violating any of them is a failure.
 2. State and artifacts are the source of truth: read prior outputs from
    FILES, never from conversation memory; re-read after any compaction.
 3. Stop at every gate and wait for explicit user choice, asked through
-   the AskUserQuestion popup (options with
-   tradeoffs, recommended first).
+   the AskUserQuestion popup (options with tradeoffs, recommended
+   first).
 4. Halt on failure; present the error and ask. Never continue silently.
 5. Spawn only this plugin's agents.
 6. Never enter plan mode. This flow IS the plan.
@@ -92,8 +92,7 @@ develop template do not apply.
 ### GATE: handshake
 
 - The user approves the refined preview through the AskUserQuestion
-  popup. The approved file IS the
-  specification; no separate spec
+  popup. The approved file IS the specification; no separate spec
   document exists.
 - Before approval is offered, the designer must have passed the
   pre-delivery checklist and its adversarial self-critique (contrast,

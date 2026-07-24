@@ -15,8 +15,8 @@ You MUST follow these rules exactly. Violating any of them is a failure.
    database and from FILES, never from conversation memory. After any
    compaction, re-run the LANES view before acting.
 3. Every lane start and every merge is an explicit user choice, asked
-   through the AskUserQuestion popup. Offer
-   exactly: Approve / Skip / Pause.
+   through the AskUserQuestion popup. Offer exactly: Approve / Skip /
+   Pause.
 4. Halt on failure: present the error and ask. Never continue silently.
 5. Spawn only this plugin's agents.
 6. Never enter plan mode. This flow IS the plan.
@@ -85,9 +85,8 @@ PROPOSE before ending the cycle.
 - Present exactly in this shape: "WP-03 and WP-05 can start; ownership
   expected disjoint; WP-04 waits: SHARES orders endpoint with WP-02 in
   flight." The human approves each lane individually through the
-  AskUserQuestion popup, one
-  question per lane, the SHARES holdback stated in the option
-  description; a holdback override is recorded via
+  AskUserQuestion popup, one question per lane, the SHARES holdback
+  stated in the option description; a holdback override is recorded via
   event append.
 - On first PROPOSE in a project, recommend once: enable the repository's
   branch protection rule "require branches to be up to date before
@@ -119,9 +118,8 @@ PROPOSE before ending the cycle.
   for that lane, others may proceed.
 - The human merges the pull request (merging is a human act; the
   merge-here-or-on-platform choice is asked through the AskUserQuestion
-  popup). Then, on the primary checkout:
-  pull main; run the
-  configured test_command. Red suite: STOP all further merges, route a
+  popup). Then, on the primary checkout: pull main; run the configured
+  test_command. Red suite: STOP all further merges, route a
   fix-atomic through the request entry, resume merging only on green.
 - Environment smoke, when env_command is configured: from-scratch
   bring-up on the merged main (env_command up, then down). A failed

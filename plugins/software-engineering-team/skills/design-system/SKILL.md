@@ -44,8 +44,7 @@ The only place the design master is born or changed.
    difference stated per candidate. The preview is a working artifact:
    delete it after MASTER is written.
 4. DS GATE: the user picks a candidate through the AskUserQuestion
-   popup, one option per
-   candidate with its emphasis in the description
+   popup, one option per candidate with its emphasis in the description
    (or requests different emphases; one re-run). The pick is written as
    workspace/docs/design-system/MASTER.md: vault frontmatter and nav
    section (the persist script emits them), logic header, global rules

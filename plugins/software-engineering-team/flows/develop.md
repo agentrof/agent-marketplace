@@ -12,8 +12,7 @@ You MUST follow these rules exactly. Violating any of them is a failure.
    the PMO database and from FILES, never from conversation memory;
    after any compaction, run resume-info and re-read before acting.
 3. Stop at every GATE and CHECKPOINT for explicit user choice via the
-   AskUserQuestion popup (tradeoffs in
-   descriptions). Offer exactly:
+   AskUserQuestion popup (tradeoffs in descriptions). Offer exactly:
    Approve / Request changes (revise, re-gate) / Pause (save, stop).
 4. Halt on failure: present the error and ask. Never continue silently.
 5. Spawn only this plugin's agents.
@@ -361,9 +360,9 @@ still read the artifact for semantic sanity before presenting any gate.
     complete) only when every step is done and every finding is closed;
     on story work orders the coverage rows and the ledger line must be
     in the database; the CLI's complete guard refuses otherwise;
-  then ask "continue with the next story?" via the AskUserQuestion popup
-  (solo) or hand back to the
-  delivery-lanes flow's PROPOSE (parallel).
+  then ask "continue with the next story?" via the AskUserQuestion
+  popup (solo) or hand back to the delivery-lanes flow's PROPOSE
+  (parallel).
 
 ## Atomic route variant
 

@@ -17,7 +17,6 @@ from __future__ import annotations
 import argparse
 import json
 import re
-import sys
 from pathlib import Path
 
 KEBAB_RE = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")

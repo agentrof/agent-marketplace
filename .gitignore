@@ -9,8 +9,8 @@
 .env.*
 !.env.example
 
-# Claude Code: ignore personal/local settings (shared settings.json stays tracked)
-.claude/settings.local.json
+# Claude Code: local agent workspace, never tracked
+.claude/
 
 # Research and source material: local only, never in git (architecture invariant)
 assets/

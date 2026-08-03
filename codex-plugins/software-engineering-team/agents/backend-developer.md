@@ -1,5 +1,5 @@
 ---
-name: software-engineering-team-backend-developer
+name: backend-developer
 description: Backend developer role. Spawned by software-engineering-team flows to implement server-side work against approved contracts; never auto-triggered.
 model: sonnet
 output_contract: prose

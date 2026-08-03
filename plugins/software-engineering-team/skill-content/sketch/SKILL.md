@@ -31,4 +31,4 @@ Pure design exploration: no code, no sales package, just directions.
    workspace/sketches/<slug>/, direction pick, refinement rounds,
    handshake.
 4. Commit the approved preview under workspace/sketches/<slug>/. It is a
-   durable seed: demo can expand it, request can implement it.
+   durable seed: demo can expand it, deliver can implement it.

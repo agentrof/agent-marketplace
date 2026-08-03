@@ -689,7 +689,7 @@ def format_master_md(design_system: dict) -> str:
     # Born-compliant title: a natural phrase closing in the canonical
     # ENGLISH designation ("design master") so it passes the vault's
     # word-boundary designation check against an English default map; a
-    # non-English project's build-docs-vault localizes it like any title.
+    # non-English project's organize-docs localizes it like any title.
     title = f"{design_system.get('project_name', 'PROJECT')} design master"
     lines = []
     lines += vault_frontmatter("design_master", title)
@@ -967,7 +967,7 @@ def format_page_override_md(design_system: dict, page_name: str, page_query: str
     page_overrides = _generate_intelligent_overrides(page_name, page_query, design_system)
 
     # Born-compliant title closing in the canonical ENGLISH designation
-    # ("page override"); the check enforces it, build-docs-vault localizes.
+    # ("page override"); the check enforces it, organize-docs localizes.
     title = f"{page_title} page override"
     lines = []
     lines += vault_frontmatter("page_override", title)

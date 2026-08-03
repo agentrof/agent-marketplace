@@ -819,10 +819,10 @@ class PmoCliTests(unittest.TestCase):
         self.init_wo()
         run(["task", "touch", "--project-key", "shop",
              "--role", "backend_developer", "--phase", "start",
-             "--session-id", "s1", "--agent", "software-engineering-team-backend-developer"])
+             "--session-id", "s1", "--agent", "backend-developer"])
         run(["task", "touch", "--project-key", "shop",
              "--role", "backend_developer", "--phase", "start",
-             "--session-id", "s2", "--agent", "software-engineering-team-backend-developer"])
+             "--session-id", "s2", "--agent", "backend-developer"])
         run(["task", "touch", "--project-key", "shop",
              "--role", "backend_developer", "--phase", "stop",
              "--session-id", "s2", "--cost-usd", "1.25"])
@@ -836,7 +836,7 @@ class PmoCliTests(unittest.TestCase):
         self.assertEqual(attempts[1]["outcome"], "done")
         self.assertEqual(attempts[1]["cost_usd"], 1.25)
         self.assertEqual(attempts[1]["agent_name"],
-                         "software-engineering-team-backend-developer")
+                         "backend-developer")
         actions = []
         for row in con.execute("SELECT action FROM events ORDER BY id"):
             actions.append(row["action"])

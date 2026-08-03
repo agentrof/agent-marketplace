@@ -33,7 +33,7 @@ The only place the design master is born or changed.
    audience; preference questions go through the AskUserQuestion popup,
    open taste input stays free-form. The user's own files win over
    generated suggestions.
-3. CREATION mode: spawn software-engineering-team-ux-designer (spawn template from
+3. CREATION mode: spawn ux-designer (spawn template from
    the flow printed by "$RUN" path "$TEAM" flows/design.md, the
    dispatcher per its preconditions) to generate the requested
    number of CANDIDATE systems (default three) using the bound design
@@ -74,4 +74,4 @@ The only place the design master is born or changed.
    workspace/docs/design-system/, plus home and its own map note
    repair, and vault payload materialization (per-file, only where
    missing). Requests to design product pages or write code are
-   refused and routed to sketch or request.
+   refused and routed to sketch or deliver.

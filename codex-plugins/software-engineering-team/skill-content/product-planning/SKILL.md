@@ -42,7 +42,7 @@ Three levels, only two authored:
   one user-observable behavior with a named criterion.
 - The micro-story tripwire: a story whose whole scope is one role's few
   edits (rename a field, restyle a button) is atomic work for the
-  request entry, or a task the work order records itself.
+  deliver entry, or a task the work order records itself.
 
 ## Slicing Rules
 

@@ -1,4 +1,4 @@
-# Agentrof Software Engineering Team
+# Software Engineering Team
 
 Read and follow `{{workspace}}/memory/me.md` before team work.
 

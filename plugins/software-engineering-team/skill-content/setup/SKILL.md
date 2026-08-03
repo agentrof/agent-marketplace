@@ -113,8 +113,8 @@ pre-flight, gate, materialization, and restart rules. In template paths,
    --vault workspace/docs. Fresh tree: any finding is a setup bug.
    Existing tree: findings in setup-authored files are setup bugs;
    pre-existing content findings are named as vault degradation and
-   routed to the build-docs-vault entry, the on-demand full-vault
+   routed to the organize-docs entry, the on-demand full-vault
    reorganization (scoped stewardship at each docs gate still repairs
    its own subtree). Then the pointers: business-analysis first,
    solution-design for foundations, design-system before screen work,
-   then request.
+   then deliver.

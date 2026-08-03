@@ -1,7 +1,7 @@
 {
   "name": "agent-marketplace",
   "interface": {
-    "displayName": "Agentrof Marketplace"
+    "displayName": "Agent Marketplace"
   },
   "plugins": [
     {

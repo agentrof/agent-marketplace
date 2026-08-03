@@ -75,11 +75,11 @@ gate, and a decision log the planner and the software architect read.
      "$RUN" run "$TEAM" scripts/artifact_check.py --path <doc>
      --require-sections per the doc contract; fix findings immediately.
 4. CHALLENGE ROUND, before the gate. Spawn
-   software-engineering-team-analysis-challenger fresh-context and read-only, one
+   analysis-challenger fresh-context and read-only, one
    spawn per lens, files only; the four lenses and their spawn shape
    come from the solution architecture skill's challenge-lenses
    reference. Named practitioner questions go to
-   software-engineering-team-domain-expert with an explicit expert profile. Triage
+   domain-expert with an explicit expert profile. Triage
    every finding in conversation: fix (doc or record updated), reject
    (one-line reason), defer (named at the gate). Record the round as
    reviews/<slug>-round-<n>-review.md (findings table plus dispositions).
@@ -120,4 +120,4 @@ gate, and a decision log the planner and the software architect read.
 7. HARD SCOPE LIMIT: writes only under workspace/docs/solution-design/,
    plus home, its own map note and vault payload (per-file, where
    missing). Requirements gaps route to business-analysis, implementation
-   to request, stacks to configure, per-story design to the develop flow.
+   to deliver, stacks to configure, per-story design to the develop flow.

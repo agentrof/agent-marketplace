@@ -25,7 +25,7 @@ import sync_skill_surfaces
 KEBAB_RE = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
 
 AGENT_TEMPLATE = """---
-name: {plugin}-{name}
+name: {name}
 description: {title} role for orchestrated team runs. Invoked by {plugin} flows with explicit inputs; not auto-triggered.
 model: sonnet
 output_contract: prose
@@ -135,7 +135,14 @@ def sync_codex(root: Path) -> None:
 
 
 def title_of(name: str) -> str:
-    return " ".join(word.capitalize() for word in name.split("-"))
+    display_tokens = {
+        "api": "API", "cli": "CLI", "devops": "DevOps",
+        "fastapi": "FastAPI", "nosql": "NoSQL", "pmo": "PMO",
+        "qa": "QA", "sql": "SQL", "ui": "UI", "ux": "UX",
+    }
+    return " ".join(
+        display_tokens.get(word, word.capitalize()) for word in name.split("-")
+    )
 
 
 def require_kebab(value: str, what: str) -> str:

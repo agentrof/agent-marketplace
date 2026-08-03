@@ -1,6 +1,6 @@
 ---
 name: build-docs-vault
-description: On-demand reorganization of the whole workspace docs vault. Full-width audit, an owner-gated rename batch, deterministic migration, re-rendered generated views and in-session curation, closing on a green re-check. The vault librarian; scoped stewardship at each docs gate stays where it is.
+description: Deprecated compatibility alias for the software-engineering-team organize-docs entry. Use organize-docs for new work; this alias delegates without changing the workflow.
 disable-model-invocation: true
 ---
 
@@ -8,4 +8,4 @@ disable-model-invocation: true
 
 # Build Docs Vault
 
-Read `${CLAUDE_PLUGIN_ROOT}/skill-content/build-docs-vault/SKILL.md` completely, then follow it as the authoritative workflow. Resolve every relative resource from that canonical skill directory.
+Read `${CLAUDE_PLUGIN_ROOT}/skill-content/build-docs-vault/SKILL.md` completely, then follow it as the authoritative workflow. Resolve every relative resource from that canonical skill directory. When it says to spawn a bare canonical agent id, use this plugin's `software-engineering-team:<agent-id>` Claude identity.

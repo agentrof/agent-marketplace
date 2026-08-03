@@ -1,5 +1,5 @@
 ---
-name: software-engineering-team-ux-designer
+name: ux-designer
 description: UX designer role. Spawned by software-engineering-team flows to produce divergent design candidates and refined previews; never auto-triggered.
 model: sonnet
 output_contract: prose

@@ -1,0 +1,6 @@
+interface:
+  display_name: "Organize Docs"
+  short_description: "Start the Organize Docs guided workflow"
+  default_prompt: "Use $software-engineering-team:organize-docs to start this workflow."
+policy:
+  allow_implicit_invocation: false

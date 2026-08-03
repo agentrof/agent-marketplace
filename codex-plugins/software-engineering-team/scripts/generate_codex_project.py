@@ -83,6 +83,10 @@ def render_agents(plugin_root: Path) -> dict[str, str]:
         name = fields.get("name", "")
         if not re.fullmatch(r"[a-z0-9]+(?:-[a-z0-9]+)*", name):
             raise ValueError(f"{source}: invalid Codex agent name {name!r}")
+        if name != source.stem:
+            raise ValueError(
+                f"{source}: agent name {name!r} must equal file stem {source.stem!r}"
+            )
         rendered[f"{name}.toml"] = agent_toml(fields, body)
     return rendered
 

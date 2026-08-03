@@ -16,7 +16,7 @@
   ],
   "skills": "./skills/",
   "interface": {
-    "displayName": "Agentrof Project Management Office",
+    "displayName": "Project Management Office",
     "shortDescription": "Deterministic operations backbone for agent teams",
     "longDescription": "Track projects, work orders, stories, tasks, attempts, findings, and audit events through one guarded PMO database and dashboard.",
     "developerName": "Agentrof",
@@ -28,8 +28,8 @@
     ],
     "websiteURL": "https://github.com/agentrof/agent-marketplace",
     "defaultPrompt": [
-      "Open the Agentrof Control Tower.",
-      "Review captured Agentrof marketplace issues."
+      "Open Control Tower.",
+      "Review captured marketplace issues."
     ],
     "brandColor": "#2563EB"
   }

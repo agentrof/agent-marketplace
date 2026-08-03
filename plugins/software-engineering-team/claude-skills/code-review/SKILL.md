@@ -8,4 +8,4 @@ user-invocable: false
 
 # Code Review
 
-Read `${CLAUDE_PLUGIN_ROOT}/skill-content/code-review/SKILL.md` completely, then follow it as the authoritative workflow. Resolve every relative resource from that canonical skill directory.
+Read `${CLAUDE_PLUGIN_ROOT}/skill-content/code-review/SKILL.md` completely, then follow it as the authoritative workflow. Resolve every relative resource from that canonical skill directory. When it says to spawn a bare canonical agent id, use this plugin's `software-engineering-team:<agent-id>` Claude identity.

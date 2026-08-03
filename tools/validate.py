@@ -113,6 +113,11 @@ TECH_NOUN_RE = re.compile(
 MD_LINK_RE = re.compile(r"(?<!\!)\[[^\]]*\]\(([^)\s]+?)(?:\s+\"[^\"]*\")?\)")
 
 KEBAB_RE = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
+DISPLAY_TOKENS = {
+    "api": "API", "cli": "CLI", "devops": "DevOps",
+    "fastapi": "FastAPI", "nosql": "NoSQL", "pmo": "PMO",
+    "qa": "QA", "sql": "SQL", "ui": "UI", "ux": "UX",
+}
 
 SNAKE_KEY_RE = re.compile(r"^[a-z0-9_]+$")
 
@@ -176,6 +181,12 @@ def rel(tree: Tree, path: Path) -> str:
 
 def read_text(path: Path) -> str:
     return path.read_text(encoding="utf-8", errors="replace")
+
+
+def display_title(name: str) -> str:
+    return " ".join(
+        DISPLAY_TOKENS.get(part, part.capitalize()) for part in name.split("-")
+    )
 
 
 def parse_frontmatter(text: str) -> tuple[dict[str, str], int, str]:
@@ -353,32 +364,45 @@ def check_frontmatter_shape(tree: Tree, findings: list[Finding]) -> None:
 
 
 def check_agent_name(tree: Tree, findings: list[Finding]) -> None:
-    seen: dict[str, str] = {}
     for plugin in plugin_dirs(tree):
+        seen: dict[str, str] = {}
         for path in agent_files(plugin):
-            fm, _, _ = parse_frontmatter(read_text(path))
+            fm, _, body = parse_frontmatter(read_text(path))
             name = fm.get("name", "")
-            expected = f"{plugin.name}-{path.stem}"
+            expected = path.stem
             if name != expected:
                 findings.append(Finding(
                     "error", rel(tree, path), 1, "agent_name",
                     f"agent frontmatter name '{name}' must equal '{expected}'",
-                    f"set name: {expected} (plugin-prefixed, collision-safe)",
+                    f"set name: {expected}; the host adds the plugin namespace",
                 ))
             if name:
                 if name in seen:
                     findings.append(Finding(
                         "error", rel(tree, path), 1, "agent_name",
                         f"agent name '{name}' already used by {seen[name]}",
-                        "agent names must be globally unique across the repo",
+                        "agent names must be unique within their plugin",
                     ))
                 else:
                     seen[name] = rel(tree, path)
+            h1 = next(
+                (line[2:].strip() for line in body.splitlines()
+                 if line.startswith("# ")),
+                "",
+            )
+            expected_h1 = display_title(path.stem)
+            if h1 != expected_h1:
+                findings.append(Finding(
+                    "error", rel(tree, path), 1, "agent_name",
+                    f"agent title '{h1}' must equal '{expected_h1}'",
+                    "keep the human label aligned with the canonical id and"
+                    " the acronym casing registry",
+                ))
 
 
 def check_skill_name(tree: Tree, findings: list[Finding]) -> None:
-    seen: dict[str, str] = {}
     for plugin in plugin_dirs(tree):
+        seen: dict[str, str] = {}
         if not KEBAB_RE.match(plugin.name):
             findings.append(Finding(
                 "error", rel(tree, plugin), 1, "skill_name",
@@ -421,7 +445,7 @@ def check_skill_name(tree: Tree, findings: list[Finding]) -> None:
                     findings.append(Finding(
                         "error", rel(tree, skill_md), 1, "skill_name",
                         f"skill name '{name}' already used by {seen[name]}",
-                        "skill names must be unique across the repo",
+                        "skill names must be unique within their plugin",
                     ))
                 else:
                     seen[name] = rel(tree, skill_md)
@@ -802,6 +826,11 @@ def check_codex_packaging(tree: Tree, findings: list[Finding]) -> None:
     if marketplace.get("name") != "agent-marketplace":
         error(tree.codex_marketplace, "Codex marketplace name must be agent-marketplace",
               "keep the documented install selector stable")
+    interface = marketplace.get("interface") or {}
+    if interface.get("displayName") != "Agent Marketplace":
+        error(tree.codex_marketplace,
+              "Codex marketplace display name must be Agent Marketplace",
+              "keep the public marketplace name identical across product surfaces")
     entries = {
         entry.get("name", ""): entry
         for entry in marketplace.get("plugins", [])
@@ -850,6 +879,17 @@ def check_codex_packaging(tree: Tree, findings: list[Finding]) -> None:
             error(source_manifest,
                   f"Claude/Codex manifest identity drift for {plugin.name}",
                   "keep plugin names and versions equal across both hosts")
+        expected_display = display_title(plugin.name)
+        for manifest_path, data in manifests:
+            if manifest_path == claude_manifest:
+                continue
+            actual_display = (data.get("interface") or {}).get("displayName")
+            if actual_display != expected_display:
+                error(manifest_path,
+                      f"{plugin.name} display name is {actual_display!r},"
+                      f" expected {expected_display!r}",
+                      "derive the public title from the technical plugin id"
+                      " without a publisher prefix")
         if not (archive / ".agentrof-generated-codex-plugin").is_file():
             error(archive, "Codex archive lacks its generated ownership marker",
                   "rebuild with tools/build_codex_plugins.py")
@@ -879,9 +919,13 @@ def check_codex_packaging(tree: Tree, findings: list[Finding]) -> None:
                   "sync skill surfaces and rebuild Codex plugins")
         for name in entries_only:
             metadata = plugin / "codex-skills" / name / "agents" / "openai.yaml"
-            if not metadata.is_file() or "allow_implicit_invocation: false" not in read_text(metadata):
+            metadata_text = read_text(metadata) if metadata.is_file() else ""
+            if "allow_implicit_invocation: false" not in metadata_text:
                 error(metadata, f"{name} lacks explicit-only Codex policy",
                       "generate agents/openai.yaml with implicit invocation disabled")
+            if f"${plugin.name}:{name}" not in metadata_text:
+                error(metadata, f"{name} lacks its fully namespaced Codex prompt",
+                      "generate default_prompt with $<plugin>:<skill>")
 
 
 def _walk_keys(obj: object, path: str, out: list[tuple[str, str]]) -> None:

@@ -54,5 +54,5 @@ produces lives under `workspace/`:
   lives in the central PMO database, read through the PMO CLI.
 
 Start work with the team's entry skills: setup, business-analysis,
-solution-design, design-system, sketch, demo, request, delivery-lanes,
+solution-design, design-system, sketch, demo, deliver, delivery-lanes,
 configure.

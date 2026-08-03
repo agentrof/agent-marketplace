@@ -1,5 +1,5 @@
 ---
-name: software-engineering-team-qa-engineer
+name: qa-engineer
 description: QA engineer role. Spawned by software-engineering-team flows after review to audit coverage, run the suite and verify the running application; never auto-triggered.
 model: sonnet
 output_contract: prose

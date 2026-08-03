@@ -58,7 +58,7 @@ CONFIG_GUARD_KEYS = ("doc_type_designations", "doc_type_designation_history")
 CONFIG_GUARD_MESSAGE = (
     "doc_type_designations and its history ledger are machine-managed;"
     " their single writer is vault_check.py reconcile-designations, driven"
-    " by the configure entry (build-docs-vault and setup mint through the"
+    " by the configure entry (organize-docs and setup mint through the"
     " same verb). Hand edits desynchronize every vault title.")
 
 # A relative markdown link that is not http(s)/mailto/anchor/root form.

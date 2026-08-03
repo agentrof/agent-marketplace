@@ -21,7 +21,7 @@
     {
       "name": "software-engineering-team",
       "source": "./plugins/software-engineering-team",
-      "description": "A complete, orchestrated software and product development team: analysis, planning, architecture, design system, implementation, review, verification and a containerized environment.",
+      "description": "Software Engineering Team: a complete, orchestrated software and product development team for analysis, planning, architecture, design, implementation, review and verification.",
       "version": "9.2.0",
       "license": "MIT"
     }

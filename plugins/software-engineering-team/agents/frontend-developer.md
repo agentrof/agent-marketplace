@@ -1,5 +1,5 @@
 ---
-name: software-engineering-team-frontend-developer
+name: frontend-developer
 description: Frontend developer role. Spawned by software-engineering-team flows to implement client-side work from the approved preview, contract and design master; never auto-triggered.
 model: sonnet
 output_contract: prose

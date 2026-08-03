@@ -4,13 +4,14 @@ A catalog of curated, end-to-end agent teams for Claude Code and native
 Codex App/CLI. Install a complete team and run at the goal; this is not a
 parts store.
 
-The first team, `software-engineering-team`, is an orchestrated software and product
-development team: business analysis, planning, architecture, design
-system, implementation, review, verification and a containerized
-environment, driven through a small set of user-invocable entry skills.
+The first team, Software Engineering Team (`software-engineering-team`), is
+an orchestrated software and product development team: business analysis,
+planning, architecture, design system, implementation, review, verification
+and a containerized environment, driven through a small set of
+user-invocable entry skills.
 
-Every team runs on the `project-management-office` plugin: a
-shared operations backbone holding one central database for projects,
+Every team runs on Project Management Office (`project-management-office`):
+a shared operations backbone holding one central database for projects,
 epics, stories, machine-generated tasks, work-order state, findings and audit
 events, written only through its CLI and recorded deterministically via
 hooks. Claude installs this backbone through the team dependency; the Codex
@@ -22,11 +23,38 @@ Tower and replies with the running URL.
 <!-- counts:start -->
 | Plugins | Agents | Entry skills | Knowledge skills |
 |---|---|---|---|
-| 2 | 12 | 12 | 14 |
+| 2 | 12 | 14 | 14 |
 <!-- counts:end -->
 
 Counts above are injected by `tools/counts.py`; they are never written by
 hand anywhere in this repository.
+
+## Naming contract
+
+| Product | Technical id | Visible name | Owner |
+|---|---|---|---|
+| Marketplace | `agent-marketplace` | Agent Marketplace | Agentrof |
+| Operations plugin | `project-management-office` | Project Management Office | Agentrof |
+| Team plugin | `software-engineering-team` | Software Engineering Team | Agentrof |
+
+Agent role ids stay short and semantic. Claude adds the plugin namespace;
+Codex uses the same bare id from the generated project agent. PMO stores the
+role in snake_case:
+
+| Visible role | Canonical and Codex id | Claude identity | PMO role |
+|---|---|---|---|
+| Analysis Challenger | `analysis-challenger` | `software-engineering-team:analysis-challenger` | `analysis_challenger` |
+| Backend Developer | `backend-developer` | `software-engineering-team:backend-developer` | `backend_developer` |
+| Business Analyst | `business-analyst` | `software-engineering-team:business-analyst` | `business_analyst` |
+| Code Reviewer | `code-reviewer` | `software-engineering-team:code-reviewer` | `code_reviewer` |
+| DevOps Engineer | `devops-engineer` | `software-engineering-team:devops-engineer` | `devops_engineer` |
+| Domain Expert | `domain-expert` | `software-engineering-team:domain-expert` | `domain_expert` |
+| Frontend Developer | `frontend-developer` | `software-engineering-team:frontend-developer` | `frontend_developer` |
+| Product Owner | `product-owner` | `software-engineering-team:product-owner` | `product_owner` |
+| QA Engineer | `qa-engineer` | `software-engineering-team:qa-engineer` | `qa_engineer` |
+| Software Architect | `software-architect` | `software-engineering-team:software-architect` | `software_architect` |
+| Solution Architect | `solution-architect` | `software-engineering-team:solution-architect` | `solution_architect` |
+| UX Designer | `ux-designer` | `software-engineering-team:ux-designer` | `ux_designer` |
 
 ## Install on Claude Code
 
@@ -57,7 +85,7 @@ codex plugin add software-engineering-team@agent-marketplace
 Start a new task/session, open `/hooks`, inspect and trust both Agentrof
 plugins, and start another task if Codex asks for a reload. Then select
 `software-engineering-team:setup` in the App skill picker or CLI `/skills`
-picker (or invoke it with `$`). Setup generates the managed Agentrof block in
+picker (or invoke `$software-engineering-team:setup`). Setup generates the managed Agentrof block in
 the project's `AGENTS.md` and native `.codex/agents/*.toml` role definitions.
 Those agents become discoverable at the next task/session boundary.
 
@@ -87,15 +115,20 @@ entry names through its skill picker and `$` invocation.
 | `/software-engineering-team:design-system` | Creates or updates the design master from picked candidates. |
 | `/software-engineering-team:sketch` | Design exploration: divergent single-file previews, no code. |
 | `/software-engineering-team:demo` | Pre-sales package: a navigable single-file demo, no code. |
-| `/software-engineering-team:request` | Real work. Atomic asks ship as a small PR; everything else runs the backlog path with gates. |
+| `/software-engineering-team:deliver` | Real work. Atomic asks ship as a small PR; everything else runs the backlog path with gates. |
 | `/software-engineering-team:delivery-lanes` | The integrator surface for parallel delivery: proposes lanes, opens worktrees the user drives in their own sessions, owns every merge checkpoint. |
 | `/software-engineering-team:configure` | The single change gate for the project config. |
-| `/software-engineering-team:build-docs-vault` | On-demand reorganization of the whole docs vault: full audit, owner-gated renames, deterministic migration, curated maps and titles. |
+| `/software-engineering-team:organize-docs` | On-demand reorganization of the whole docs vault: full audit, owner-gated renames, deterministic migration, curated maps and titles. |
 | `/project-management-office:control-tower` | Starts Control Tower, the read-only web dashboard over the central database, and replies with the clickable URL. |
+| `/project-management-office:issue-desk` | Reviews and files issues captured by marketplace safety hooks. |
+
+`software-engineering-team:request` and
+`software-engineering-team:build-docs-vault` remain deprecated 9.x aliases;
+new commands and documentation use `deliver` and `organize-docs`.
 
 A first session usually looks like: `setup`, then `business-analysis`
 for the first topic, `solution-design` for the system foundations,
-`design-system` before any screen work, then `request`.
+`design-system` before any screen work, then `deliver`.
 
 ## Repository map
 

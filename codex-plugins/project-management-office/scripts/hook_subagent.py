@@ -20,13 +20,14 @@ def run_hook() -> int:
         return 0
     payload = hook_common.normalize_payload(hook_common.read_payload())
     agent_type = str(payload.get("agent_type", ""))
-    role = hook_common.team_role(agent_type)
-    if role is None:
-        return 0
     resolved = hook_common.resolve_project(payload.get("cwd", ""))
     if resolved is None:
         return 0
     project_key, project_root = resolved
+    identity = hook_common.team_agent(agent_type, project_root)
+    if identity is None:
+        return 0
+    agent_name, role = identity
     hook_common.run_cli([
         "task", "touch",
         "--project-key", project_key,
@@ -34,7 +35,7 @@ def run_hook() -> int:
         "--phase", phase,
         "--worktree", project_root,
         "--session-id", str(payload.get("session_id", "")),
-        "--agent", agent_type.split(":", 1)[-1],
+        "--agent", agent_name,
     ])
     return 0
 

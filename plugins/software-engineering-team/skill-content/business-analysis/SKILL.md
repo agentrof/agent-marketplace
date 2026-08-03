@@ -108,7 +108,7 @@ run through the dispatcher).
      AskUserQuestion popup (deferral is a row status with a revisit
      note, never silence). Approve flips the subtree statuses; commit
      authored plus generated files together.
-   - A buildable domain unblocks request, sketch and demo for its scope;
+   - A buildable domain unblocks deliver, sketch and demo for its scope;
      other domains keep analyzing in parallel.
 7. Process pulses: at each gate and challenge-round close, append an
    event via the PMO CLI (event append) naming the space, node, round

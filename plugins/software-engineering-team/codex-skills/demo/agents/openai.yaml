@@ -1,6 +1,6 @@
 interface:
   display_name: "Demo"
-  short_description: "Run the Demo Agentrof workflow"
-  default_prompt: "Use $demo to start this Agentrof workflow."
+  short_description: "Start the Demo guided workflow"
+  default_prompt: "Use $software-engineering-team:demo to start this workflow."
 policy:
   allow_implicit_invocation: false

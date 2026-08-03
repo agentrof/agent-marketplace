@@ -1,6 +1,6 @@
 ---
 name: request
-description: The software-engineering-team front door for real work. The user states an ask; it is classified as atomic or large, confirmed in one line, and driven to a pull request through the develop flow.
+description: Deprecated compatibility alias for the software-engineering-team deliver entry. Use deliver for new work; this alias delegates without changing the workflow.
 disable-model-invocation: true
 ---
 
@@ -8,4 +8,4 @@ disable-model-invocation: true
 
 # Request
 
-Read `${CLAUDE_PLUGIN_ROOT}/skill-content/request/SKILL.md` completely, then follow it as the authoritative workflow. Resolve every relative resource from that canonical skill directory.
+Read `${CLAUDE_PLUGIN_ROOT}/skill-content/request/SKILL.md` completely, then follow it as the authoritative workflow. Resolve every relative resource from that canonical skill directory. When it says to spawn a bare canonical agent id, use this plugin's `software-engineering-team:<agent-id>` Claude identity.

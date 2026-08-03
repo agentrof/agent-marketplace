@@ -12,5 +12,5 @@ path "$TEAM" templates/ci-tests.yml`.
   when an up-then-down probe passes now. Otherwise omit the job, note that a
   later setup run will append it, and treat its later absence as a gap once
   the probe passes.
-- Keep dependency audit. Route advisories through the request entry as a
+- Keep dependency audit. Route advisories through the deliver entry as a
   fix-atomic lockfile bump.

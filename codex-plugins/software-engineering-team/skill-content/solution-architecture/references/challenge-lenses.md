@@ -4,9 +4,9 @@ The adversarial round for solution engagements. Each lens is one fresh-context, 
 
 ## Spawn Shape
 
-Per lens, one spawn of software-engineering-team-analysis-challenger:
+Per lens, one spawn of analysis-challenger:
 
-1. Identity: "You are software-engineering-team-analysis-challenger, challenging solution engagement <slug> through the <lens> lens."
+1. Identity: "You are analysis-challenger, challenging solution engagement <slug> through the <lens> lens."
 2. The constitution body, read from the file printed by
    "$RUN" path "$TEAM" constitution.md (dispatcher per the develop
    flow's state contract)
@@ -15,7 +15,7 @@ Per lens, one spawn of software-engineering-team-analysis-challenger:
 4. Inputs: read-fully the engagement doc and the decision notes it minted (decisions/); summary-only landscape.md and cited analysis docs.
 5. Output: a findings table (finding, evidence, severity blocking/minor), nothing else; read-only by constitution and by capability.
 
-Named practitioner questions (a real-world operating question the matrix cannot settle) go instead to software-engineering-team-domain-expert with an explicit expert profile and the specific questions, assembled with the same constitution paste; write the profile per the challenge-review skill's expert-casting reference. Its answers return as proposals to confirm, never facts.
+Named practitioner questions (a real-world operating question the matrix cannot settle) go instead to domain-expert with an explicit expert profile and the specific questions, assembled with the same constitution paste; write the profile per the challenge-review skill's expert-casting reference. Its answers return as proposals to confirm, never facts.
 
 ## The Four Lenses
 

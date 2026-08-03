@@ -83,7 +83,7 @@ class PmoDashboardTests(unittest.TestCase):
         cli(["task", "touch", "--project-key", "shop",
              "--role", "backend_developer", "--phase", "start",
              "--session-id", "s1",
-             "--agent", "software-engineering-team-backend-developer"], env)
+             "--agent", "backend-developer"], env)
         cli(["task", "touch", "--project-key", "shop",
              "--role", "backend_developer", "--phase", "stop",
              "--cost-usd", "0.42"], env)
@@ -99,8 +99,8 @@ class PmoDashboardTests(unittest.TestCase):
             {"name": "software-engineering-team", "version": "9.9.9",
              "description": "The software team.", "dependencies": ["project-management-office"]}))
         (install / "agents").mkdir()
-        (install / "agents" / "software-engineering-team-backend-developer.md").write_text(
-            "---\nname: software-engineering-team-backend-developer\n"
+        (install / "agents" / "backend-developer.md").write_text(
+            "---\nname: backend-developer\n"
             "description: Builds backends.\nmodel: sonnet\n---\n# X\n")
         (install / "skills" / "product-planning").mkdir(parents=True)
         (install / "skills" / "product-planning" / "SKILL.md").write_text(

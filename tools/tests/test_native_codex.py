@@ -32,6 +32,8 @@ class CodexPackageContractTests(unittest.TestCase):
             (REPO / ".agents" / "plugins" / "marketplace.json").read_text(
                 encoding="utf-8"))
         entries = {entry["name"]: entry for entry in marketplace["plugins"]}
+        self.assertEqual(marketplace["interface"]["displayName"],
+                         "Agent Marketplace")
         self.assertEqual(
             entries["project-management-office"]["policy"],
             {"installation": "INSTALLED_BY_DEFAULT", "authentication": "ON_INSTALL"})
@@ -50,6 +52,8 @@ class CodexPackageContractTests(unittest.TestCase):
             self.assertEqual({m["version"] for m in manifests}, {manifests[0]["version"]})
             self.assertEqual({m["name"] for m in manifests}, {name})
             interface = manifests[1]["interface"]
+            self.assertEqual(
+                interface["displayName"], name.replace("-", " ").title())
             self.assertEqual(interface["developerName"], "Agentrof")
             self.assertEqual(interface["category"], "Engineering")
             self.assertEqual(interface["capabilities"], ["Read", "Write", "Interactive"])
@@ -71,15 +75,16 @@ class CodexPackageContractTests(unittest.TestCase):
             self.assertEqual(codex, archived)
             for skill_name in codex:
                 policy = source / "codex-skills" / skill_name / "agents" / "openai.yaml"
-                self.assertIn("allow_implicit_invocation: false",
-                              policy.read_text(encoding="utf-8"))
+                metadata = policy.read_text(encoding="utf-8")
+                self.assertIn("allow_implicit_invocation: false", metadata)
+                self.assertIn(f"${name}:{skill_name}", metadata)
 
 
 def agent(name: str, model: str, tools: str = "") -> str:
     tools_line = f"tools: {tools}\n" if tools else ""
     return (
         "---\n"
-        f"name: team-{name}\n"
+        f"name: {name}\n"
         f"description: {name} role.\n"
         f"model: {model}\n"
         "output_contract: prose\n"
@@ -119,10 +124,10 @@ class CodexProjectGeneratorTests(unittest.TestCase):
         written = generate.materialize(self.project, self.plugin, "work")
         self.assertEqual(len(written), 5)
         agents = self.project / ".codex" / "agents"
-        architect = (agents / "team-architect.toml").read_text(encoding="utf-8")
-        developer = (agents / "team-developer.toml").read_text(encoding="utf-8")
-        scanner = (agents / "team-scanner.toml").read_text(encoding="utf-8")
-        delegate = (agents / "team-delegate.toml").read_text(encoding="utf-8")
+        architect = (agents / "architect.toml").read_text(encoding="utf-8")
+        developer = (agents / "developer.toml").read_text(encoding="utf-8")
+        scanner = (agents / "scanner.toml").read_text(encoding="utf-8")
+        delegate = (agents / "delegate.toml").read_text(encoding="utf-8")
         self.assertIn('model_reasoning_effort = "high"', architect)
         self.assertIn('sandbox_mode = "read-only"', architect)
         self.assertIn('model_reasoning_effort = "medium"', developer)
@@ -140,8 +145,9 @@ class CodexProjectGeneratorTests(unittest.TestCase):
     def test_only_owned_stale_files_are_removed(self):
         generate.materialize(self.project, self.plugin, "workspace")
         agents = self.project / ".codex" / "agents"
-        stale = agents / "team-stale.toml"
-        stale.write_text(generate.OWNER + "\nname = \"team-stale\"\n", encoding="utf-8")
+        stale = agents / "team-architect.toml"
+        stale.write_text(generate.OWNER + "\nname = \"team-architect\"\n",
+                         encoding="utf-8")
         foreign = agents / "foreign.toml"
         foreign.write_text('name = "foreign"\n', encoding="utf-8")
         changed = generate.materialize(self.project, self.plugin, "workspace")
@@ -152,12 +158,12 @@ class CodexProjectGeneratorTests(unittest.TestCase):
     def test_unmanaged_collision_aborts_before_any_write(self):
         agents = self.project / ".codex" / "agents"
         agents.mkdir(parents=True)
-        collision = agents / "team-architect.toml"
+        collision = agents / "architect.toml"
         collision.write_text('name = "mine"\n', encoding="utf-8")
         with self.assertRaisesRegex(ValueError, "unmanaged Codex agent collision"):
             generate.materialize(self.project, self.plugin, "workspace")
         self.assertEqual(collision.read_text(encoding="utf-8"), 'name = "mine"\n')
-        self.assertFalse((agents / "team-developer.toml").exists())
+        self.assertFalse((agents / "developer.toml").exists())
 
 
 if __name__ == "__main__":

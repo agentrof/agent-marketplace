@@ -61,7 +61,7 @@ def resume_lines(payload) -> list[str]:
         lines.extend(describe(o) for o in local)
         lines.append(
             "To resume, invoke the owning team plugin's entry skill (for"
-            " software-engineering-team: the request entry); its pre-flight routes back"
+            " software-engineering-team: the deliver entry); its pre-flight routes back"
             " into the work order's flow at the recorded step. Do NOT"
             " continue the work free-form: every state change goes through"
             " the PMO CLI."

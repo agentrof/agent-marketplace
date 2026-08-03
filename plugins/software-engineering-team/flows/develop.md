@@ -173,7 +173,7 @@ still read the artifact for semantic sanity before presenting any gate.
 
 ### Step 1: architecture delta
 
-- Spawn software-engineering-team-software-architect with the snapshotted analysis
+- Spawn software-architect with the snapshotted analysis
   space: read-fully the snapshot's root overview, budgets and the docs
   owning this story's claimed ids (ba_compile.py resolve against the
   snapshot); summary-only its generated registry and index, plus the
@@ -219,11 +219,10 @@ still read the artifact for semantic sanity before presenting any gate.
   run the design flow now (flows/design.md) and return.
 - Environment first: on a delta declaring environment impact (or a
   project with no environment definition yet), spawn
-  software-engineering-team-devops-engineer serially before the developers, bounded
+  devops-engineer serially before the developers, bounded
   to the environment prefix (workspace/environment/); its SELF-CHECK is
   the from-scratch cycle its bound skill defines.
-- Spawn software-engineering-team-backend-developer and
-  software-engineering-team-frontend-developer in one message, each bounded to its
+- Spawn backend-developer and frontend-developer in one message, each bounded to its
   ownership paths, read-fully inputs: the architecture delta, the
   contract, the approved preview and design master (frontend); include
   the configured environment command in the prompt. Stories without
@@ -243,7 +242,7 @@ still read the artifact for semantic sanity before presenting any gate.
 
 ### Step 3: review loop (max 3 rounds)
 
-- Spawn software-engineering-team-code-reviewer with the diff scope, the living
+- Spawn code-reviewer with the diff scope, the living
   architecture documents, and the currently open findings from finding
   list --json (empty on round one).
 - The reviewer RETURNS its verdict and findings; the FIRST action on
@@ -269,7 +268,7 @@ still read the artifact for semantic sanity before presenting any gate.
 
 ### Step 4: verification loop (max 3 rounds)
 
-- Spawn software-engineering-team-qa-engineer with the story's criteria read from
+- Spawn qa-engineer with the story's criteria read from
   the snapshot (the acceptance docs named by ba_compile.py resolve over
   the claimed ids), the currently open findings from finding list --json,
   and the configured commands (test_command, mutation_command,
@@ -296,7 +295,7 @@ still read the artifact for semantic sanity before presenting any gate.
 
 ### Step 4.5: design verification (screenful stories only)
 
-- After QA passes, spawn software-engineering-team-ux-designer READ-ONLY with the
+- After QA passes, spawn ux-designer READ-ONLY with the
   approved preview, the design master and the built screens (reuse the
   environment the QA live protocol stood up): it re-judges the
   realization with its pre-delivery checklist (contrast, spacing rhythm,

@@ -25,13 +25,31 @@ A plugin ships four component kinds:
 |---|---|---|
 | plugin directory / name | kebab-case noun | software-engineering-team |
 | agent file | agents/<role>.md, bare kebab | agents/code-reviewer.md |
-| agent frontmatter name | `<plugin>-<file-stem>`, globally unique | software-engineering-team-code-reviewer |
-| skill directory + frontmatter name | identical bare kebab | skill-content/python-fastapi/ |
-| skill entry file | SKILL.md (uppercase) | skill-content/request/SKILL.md |
+| agent frontmatter name | identical bare file stem, unique within the plugin | code-reviewer |
+| skill directory + frontmatter name | identical bare kebab, unique within the plugin | skill-content/python-fastapi/ |
+| skill entry file | SKILL.md (uppercase) | skill-content/deliver/SKILL.md |
 | skill subfolders | references/, scripts/, data/ | references/patterns.md |
 | reserved checklists (tech skills) | fixed names | references/review-checklist.md, references/qa-checklist.md |
 | flow file | flows/<name>.md | flows/develop.md |
 | forbidden everywhere | double underscore in names; the em dash character; emoji in headings; hand-written derived counts; absolute or home paths | |
+
+The component owns the short semantic name; the host owns namespacing. The
+same role may therefore exist in more than one plugin without repository-wide
+prefixes:
+
+| identity layer | example |
+|---|---|
+| visible role title | Backend Developer |
+| canonical agent id | backend-developer |
+| Claude agent identity | software-engineering-team:backend-developer |
+| Codex project agent | backend-developer |
+| PMO role | backend_developer |
+
+Public skill identity is namespaced on both hosts. Claude invokes
+`/software-engineering-team:deliver`; Codex invokes
+`$software-engineering-team:deliver`. Human-facing labels are title case with
+intentional acronym casing, such as QA Engineer, UX Designer, DevOps Engineer
+and Python FastAPI.
 
 ## Frontmatter
 
@@ -103,7 +121,7 @@ Copy this shape exactly; only the content of the sections varies by role.
 
 ```markdown
 ---
-name: software-engineering-team-backend-developer
+name: backend-developer
 description: Backend developer role for orchestrated team runs. Invoked by software-engineering-team flows with explicit inputs; not auto-triggered.
 model: sonnet
 output_contract: prose
@@ -292,9 +310,10 @@ findings) through the project-management-office plugin, never in its own files:
   directory (see the develop flow's state contract for the resolution
   line); never reference another plugin's install path, it is not a
   stable location.
-- Register the team's agent-name prefix in project-management-office's hook registry
-  (TEAM_AGENT_PREFIXES in the hook common module) so subagent spawns are
-  recorded as task activity.
+- Register the team's Claude namespace in project-management-office's hook
+  registry. Bare Codex spawns count only when the matching project TOML has
+  the team's Agentrof ownership marker, so a user's same-named local agent is
+  never attributed to the team.
 - The single-writer rule is absolute: flows call the CLI; spawned agents
   never do; anything the owner must review in git is rendered from the
   database as a generated view, not hand-written.

@@ -20,7 +20,7 @@ REAL_LIMITS_CONFIG = (Path(__file__).resolve().parents[1]
 PLUGIN = "sample-team"
 
 VALID_AGENT = """---
-name: sample-team-planner
+name: planner
 description: Planner role for orchestrated team runs. Invoked by sample-team flows with explicit inputs.
 model: sonnet
 output_contract: prose
@@ -217,7 +217,7 @@ def break_frontmatter_shape(root: Path) -> None:
 
 
 def break_agent_name(root: Path) -> None:
-    text = VALID_AGENT.replace("name: sample-team-planner", "name: planner")
+    text = VALID_AGENT.replace("name: planner", "name: sample-team-planner")
     write(root / "plugins" / PLUGIN / "agents" / "planner.md", text)
 
 
@@ -323,7 +323,7 @@ def break_codex_packaging(root: Path) -> None:
     write(archive / ".agentrof-generated-codex-plugin", "generated\n")
     write(root / ".agents" / "plugins" / "marketplace.json", json.dumps({
         "name": "agent-marketplace",
-        "interface": {"displayName": "Agentrof Marketplace"},
+        "interface": {"displayName": "Agent Marketplace"},
         "plugins": [{
             "name": PLUGIN,
             "source": {"source": "local", "path": f"./codex-plugins/{PLUGIN}"},

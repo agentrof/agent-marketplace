@@ -35,6 +35,36 @@ class ValidatorFixtureTests(unittest.TestCase):
         findings = self.run_on()
         self.assertEqual(findings, [], f"valid root must be clean, got: {findings}")
 
+    def test_agent_and_skill_names_are_scoped_per_plugin(self):
+        import json
+        from fixtures import VALID_AGENT, VALID_SKILL, write
+
+        def add_second_plugin(root: Path) -> None:
+            marketplace_path = root / ".claude-plugin" / "marketplace.json"
+            marketplace = json.loads(marketplace_path.read_text(encoding="utf-8"))
+            marketplace["plugins"].append({
+                "name": "second-team",
+                "source": "./plugins/second-team",
+                "description": "fixture plugin",
+                "version": "0.0.1",
+                "license": "MIT",
+            })
+            write(marketplace_path, json.dumps(marketplace, indent=2))
+            write(root / "plugins" / "second-team" / ".claude-plugin"
+                  / "plugin.json", json.dumps({
+                      "name": "second-team",
+                      "version": "0.0.1",
+                      "description": "fixture plugin",
+                      "license": "MIT",
+                  }, indent=2))
+            write(root / "plugins" / "second-team" / "agents" / "planner.md",
+                  VALID_AGENT)
+            write(root / "plugins" / "second-team" / "skills" / "notes"
+                  / "SKILL.md", VALID_SKILL)
+
+        findings = self.run_on(extra=add_second_plugin)
+        self.assertEqual(findings, [], findings)
+
     def test_meta_registry_lockstep(self):
         """A check without a fixture (or vice versa) cannot merge."""
         self.assertEqual(
@@ -121,6 +151,19 @@ class ValidatorFixtureTests(unittest.TestCase):
         self.assertEqual(len(findings), 1, findings)
         self.assertEqual(findings[0].check, "frontmatter_shape")
         self.assertIn("output_contract", findings[0].message)
+
+    def test_agent_human_title_is_derived_from_canonical_id(self):
+        from fixtures import PLUGIN, VALID_AGENT, write
+
+        def bad_title(root: Path) -> None:
+            text = VALID_AGENT.replace("# Planner", "# Planning Agent")
+            write(root / "plugins" / PLUGIN / "agents" / "planner.md", text)
+
+        findings = self.run_on(bad_title)
+        self.assertEqual(len(findings), 1, findings)
+        self.assertEqual(findings[0].check, "agent_name")
+        self.assertIn("agent title", findings[0].message)
+        self.assertEqual(validate.display_title("qa-devops-api"), "QA DevOps API")
 
     def test_size_caps_read_from_limits_file(self):
         """Lowering a cap in the fixture's limits.json makes size_caps

@@ -1,6 +1,6 @@
 ---
 name: delivery-lanes
-description: The integrator surface for parallel delivery; it never delivers a story itself. Proposes which ready stories can start together from dependencies and claims, opens git worktree lanes the user drives through their own request sessions, tracks where gate approvals are pending, and owns every merge checkpoint on the main line.
+description: The integrator surface for parallel delivery; it never delivers a story itself. Proposes which ready stories can start together from dependencies and claims, opens git worktree lanes the user drives through their own deliver sessions, tracks where gate approvals are pending, and owns every merge checkpoint on the main line.
 disable-model-invocation: true
 ---
 
@@ -8,4 +8,4 @@ disable-model-invocation: true
 
 # Delivery Lanes
 
-Read `${CLAUDE_PLUGIN_ROOT}/skill-content/delivery-lanes/SKILL.md` completely, then follow it as the authoritative workflow. Resolve every relative resource from that canonical skill directory.
+Read `${CLAUDE_PLUGIN_ROOT}/skill-content/delivery-lanes/SKILL.md` completely, then follow it as the authoritative workflow. Resolve every relative resource from that canonical skill directory. When it says to spawn a bare canonical agent id, use this plugin's `software-engineering-team:<agent-id>` Claude identity.

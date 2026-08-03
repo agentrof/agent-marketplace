@@ -59,7 +59,7 @@ develop template do not apply.
 
 ### Step 1: directions
 
-- Spawn software-engineering-team-ux-designer to produce the requested number of
+- Spawn ux-designer to produce the requested number of
   genuinely divergent directions (default three) in ONE self-contained
   preview file with realistic placeholder data, every value drawn from
   MASTER tokens, and the axis of difference plus rationale stated per

@@ -35,4 +35,4 @@ zero code.
    requests, opening standalone in a browser.
 4. Commit the final package as workspace/demos/<slug>/demo.html. It can
    be sent to a customer as a single file, and it seeds real development
-   later: request inherits the brief and the chosen direction.
+   later: deliver inherits the brief and the chosen direction.

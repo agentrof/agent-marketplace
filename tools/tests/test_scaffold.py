@@ -69,7 +69,7 @@ class ScaffoldTests(unittest.TestCase):
             fixtures.write(root / ".agents" / "plugins" / "marketplace.json",
                            json.dumps({
                                "name": "agent-marketplace",
-                               "interface": {"displayName": "Agentrof Marketplace"},
+                               "interface": {"displayName": "Agent Marketplace"},
                                "plugins": [],
                            }))
             (root / "plugins").mkdir()

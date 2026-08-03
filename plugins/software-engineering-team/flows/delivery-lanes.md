@@ -107,7 +107,7 @@ PROPOSE before ending the cycle.
   1. Open a NEW agent session in that directory: a Claude Code session
      on Claude, a new Codex task selecting that worktree in the App, or
      an interactive Codex CLI session started in that worktree.
-  2. Say: "request: deliver WP-<nn>"
+  2. Say: "deliver: WP-<nn>"
   3. Approvals for this story happen in THAT session only.
   4. The lane ends at an opened pull request. Report back here and I
      will run its merge checkpoint after you merge.
@@ -122,7 +122,7 @@ PROPOSE before ending the cycle.
   merge-here-or-on-platform choice is asked through the AskUserQuestion
   popup). Then, on the primary checkout: pull main; run the configured
   test_command. Red suite: STOP all further merges, route a
-  fix-atomic through the request entry, resume merging only on green.
+  fix-atomic through the deliver entry, resume merging only on green.
 - Environment smoke, when env_command is configured: from-scratch
   bring-up on the merged main (env_command up, then down). A failed
   bring-up stops further merges exactly like a red suite.
@@ -135,7 +135,7 @@ PROPOSE before ending the cycle.
 ### RE-SLICE (when a lane halts with discovered scope)
 
 - Backlog changes never ride story branches; they happen here, on main.
-  Spawn software-engineering-team-product-owner with the approved brief and its
+  Spawn product-owner with the approved brief and its
   bound planning skill per the develop flow's spawn template, the
   constitution pasted verbatim:
 
@@ -155,7 +155,7 @@ PROPOSE before ending the cycle.
   all three claims on reactivation and refuses if anything was taken
   meanwhile.
 - Dangling lane: tell the human to reopen a session in that worktree;
-  the request entry's pre-flight offers Resume there. Park it instead
+  the deliver entry's pre-flight offers Resume there. Park it instead
   (work-order release from here) only when the human abandons the lane.
 - Stale in_development story with no active order (item ready reports
   it): reset it (item update --status planned) after confirming no lane

@@ -8,4 +8,4 @@ disable-model-invocation: true
 
 # Solution Design
 
-Read `${CLAUDE_PLUGIN_ROOT}/skill-content/solution-design/SKILL.md` completely, then follow it as the authoritative workflow. Resolve every relative resource from that canonical skill directory.
+Read `${CLAUDE_PLUGIN_ROOT}/skill-content/solution-design/SKILL.md` completely, then follow it as the authoritative workflow. Resolve every relative resource from that canonical skill directory. When it says to spawn a bare canonical agent id, use this plugin's `software-engineering-team:<agent-id>` Claude identity.

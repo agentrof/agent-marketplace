@@ -855,7 +855,7 @@ def check_title_designation(vault: Vault, note: Note, title: str,
             "warning", note.rel, 1, "title_shape",
             "type designations are not configured, so the title cannot be"
             " verified to carry its type's designation",
-            "run setup/configure or build-docs-vault to mint"
+            "run setup/configure or organize-docs to mint"
             " doc_type_designations in workspace/config.json"))
         return
     designation = designations.get(kebab_type)
@@ -864,7 +864,7 @@ def check_title_designation(vault: Vault, note: Note, title: str,
             "warning", note.rel, 1, "title_shape",
             f"type '{kebab_type}' has no configured designation, so the"
             " title cannot be verified",
-            "run setup/configure or build-docs-vault to mint this type's"
+            "run setup/configure or organize-docs to mint this type's"
             " designation in workspace/config.json"))
         return
     locked = note.fm.get("locked") is True
@@ -916,7 +916,7 @@ def check_designation_coverage(vault: Vault, findings: list[Finding]) -> None:
             "warning", DESIGNATION_CONFIG_REL, 1, "title_shape",
             f"doc type '{missing}' has no designation in the configured map",
             "mint one designation per taxonomy type; run setup/configure or"
-            " build-docs-vault"))
+            " organize-docs"))
     for unknown in sorted(set(designations) - vault.taxonomy_types):
         findings.append(Finding(
             "error", DESIGNATION_CONFIG_REL, 1, "title_shape",
@@ -2083,7 +2083,7 @@ def append_designation(vault: Vault, note: Note, lines: list[str]) -> int:
     when the map is absent, the type is nav or unmapped, or the designation
     is already present (idempotent through the SAME test the check uses).
     Challenge records are excluded: round-number placement is judgment, so
-    they stay a check finding for build-docs-vault to retitle. A title
+    they stay a check finding for organize-docs to retitle. A title
     whose tail holds a RETIRED value is reconcile-designations' class:
     appending over it would mint the double suffix, so it is skipped and
     stays a designation_drift finding."""

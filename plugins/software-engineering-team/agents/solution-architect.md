@@ -1,5 +1,5 @@
 ---
-name: software-engineering-team-solution-architect
+name: solution-architect
 description: Solution architect role. Runs the interactive solution-design persona of software-engineering-team flows and curates the project's solution landscape; invoked with explicit inputs, never auto-triggered.
 model: opus
 output_contract: prose

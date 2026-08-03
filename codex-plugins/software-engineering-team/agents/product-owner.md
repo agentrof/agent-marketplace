@@ -1,5 +1,5 @@
 ---
-name: software-engineering-team-product-owner
+name: product-owner
 description: Product owner role. Spawned by software-engineering-team flows on large work to plan and maintain the epic-and-story backlog from an approved brief; never auto-triggered.
 model: sonnet
 output_contract: prose

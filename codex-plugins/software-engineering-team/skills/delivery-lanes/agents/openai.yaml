@@ -1,6 +1,6 @@
 interface:
   display_name: "Delivery Lanes"
-  short_description: "Run the Delivery Lanes Agentrof workflow"
-  default_prompt: "Use $delivery-lanes to start this Agentrof workflow."
+  short_description: "Start the Delivery Lanes guided workflow"
+  default_prompt: "Use $software-engineering-team:delivery-lanes to start this workflow."
 policy:
   allow_implicit_invocation: false

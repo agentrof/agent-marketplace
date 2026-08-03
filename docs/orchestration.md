@@ -6,19 +6,20 @@ same pull request.
 
 ## Surfaces and routes
 
-Entry skills (user surface): request, sketch, demo, business-analysis,
+Entry skills (user surface): deliver, sketch, demo, business-analysis,
 solution-design, design-system, setup, configure, delivery-lanes,
-build-docs-vault.
+organize-docs. The request and build-docs-vault entries remain thin legacy
+aliases for the 9.x line and delegate to deliver and organize-docs.
 Entries stay thin: parse input, run the pre-flight, then either
-delegate to a flow file through the plugin-root dispatcher (request, sketch,
+delegate to a flow file through the plugin-root dispatcher (deliver, sketch,
 demo, delivery-lanes) or execute their own short interactive procedure
 in the main conversation (business-analysis, solution-design,
-design-system, setup, configure, build-docs-vault).
+design-system, setup, configure, organize-docs).
 Internal flows: design, develop, delivery-lanes.
 
 Routes:
 
-- **request** classifies BINARY in the main conversation (the PO hat is
+- **deliver** classifies BINARY in the main conversation (the PO hat is
   the entry's own instruction text, never an agent spawn) and confirms the
   route in one line. Atomic has two tiers: cosmetic-atomic (no behavior
   change: owning dev agent, small diff, pull request on an atomic-<slug>
@@ -76,7 +77,7 @@ Routes:
 - **setup** is idempotent bootstrap (including the PMO prerequisite
   check and project registration); **configure** is the single change
   gate for the project config file.
-- **build-docs-vault** is the on-demand vault librarian: a full-width
+- **organize-docs** is the on-demand vault librarian: a full-width
   audit of the docs vault, an owner-gated rename batch and curation
   program, deterministic migration before judgment repairs, closing on
   a green re-check. Setup routes pre-existing vault degradation here;

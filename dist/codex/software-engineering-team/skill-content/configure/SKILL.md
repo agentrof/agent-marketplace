@@ -10,20 +10,17 @@ Config changes go through this gate, never through hand edits.
 
 ## When to Use
 - The project's stack set, test, mutation or environment command, source
-  directories, output language or terminology language must change (for
-  example: "add a document store to the databases set").
+  directories, output language or terminology language must change (for example: "add a document store to the databases set").
 
 ## Procedure
 
-1. Read workspace/config.json; missing: route to the setup entry and
-   stop. An active work order reported by the PMO CLI's resume-info
-   --project-key <key> (running or waiting_gate): REFUSE the change and
-   point at the work order; it reads its config snapshot, so a
-   mid-order change would fork the spec.
-   When present, remind the user the file is machine-managed (its
-   managed_by note says so) and this gate is its only supported writer;
-   hand edits are unsupported and carry no guarantee of surviving later
-   gate writes.
+1. Read workspace/config.json; missing: route to the setup entry and stop.
+   An active work order reported by the PMO CLI's resume-info --project-key
+   <key> (running or waiting_gate): REFUSE the change and point at the work
+   order; it reads its config snapshot, so a mid-order change would fork the spec.
+   When present, remind the user the file is machine-managed (its managed_by
+   note says so) and this gate is its only supported writer; hand edits are
+   unsupported and carry no guarantee of surviving later gate writes.
 2. Interpret the requested change into concrete key changes.
 3. Validate. Enum keys: backend_stack python-fastapi; frontend_stack
    react-typescript; environment_stack docker-compose; databases a set
@@ -40,8 +37,7 @@ Config changes go through this gate, never through hand edits.
    language name, default English (scope: names, technical terms, code
    and comments, commit messages and PR bodies; the machine layer, file
    names, keys, ids, CLI output, always stays English); max_parallel an
-   optional positive integer (the delivery-lanes flow's lane-proposal
-   cap; absent means 3; this gate is its only writer);
+   optional positive integer (the delivery-lanes flow's lane-proposal cap; absent means 3; this gate is its only writer);
    scale an optional project-size declaration, enum small, medium,
    large, x-large, xx-large, enterprise (absent means small, today's
    shipped thresholds); a level multiplies the analysis-space volume

@@ -33,9 +33,9 @@ import json
 import os
 import re
 import sys
-import tempfile
 from pathlib import Path
 
+import team_guard
 import vault_check
 
 VAULT_SEGMENTS = ("workspace", "docs")
@@ -170,45 +170,8 @@ def data_dir() -> Path:
 
 
 def register() -> int:
-    """Record this plugin's root in the shared plugin_roots registry;
-    a bookkeeping hook, so it never takes a session down."""
-    try:
-        root = Path(__file__).resolve().parents[1]
-        registry_file = data_dir() / "plugin_roots.json"
-        registry_file.parent.mkdir(parents=True, exist_ok=True)
-        try:
-            registry = json.loads(registry_file.read_text(encoding="utf-8"))
-        except Exception:
-            registry = {}
-        if not isinstance(registry, dict):
-            registry = {}
-        registry.setdefault("schema_version", 1)
-        version = ""
-        try:
-            manifest = next(
-                candidate for candidate in (
-                    root / ".codex-plugin" / "plugin.json",
-                    root / ".claude-plugin" / "plugin.json",
-                ) if candidate.is_file()
-            )
-            version = json.loads(
-                manifest.read_text(encoding="utf-8")).get("version", "")
-        except Exception:
-            pass
-        from datetime import datetime, timezone
-        registry.setdefault("plugins", {})[root.name] = {
-            "root": str(root),
-            "version": version,
-            "registered_at": datetime.now(timezone.utc).isoformat(
-                timespec="seconds"),
-        }
-        fd, tmp = tempfile.mkstemp(dir=str(registry_file.parent),
-                                   prefix=".plugin_roots.")
-        with os.fdopen(fd, "w", encoding="utf-8") as fh:
-            fh.write(json.dumps(registry, indent=2, sort_keys=True) + "\n")
-        os.replace(tmp, registry_file)
-    except Exception:
-        pass
+    """Register through the PMO-owned launcher when it is available."""
+    team_guard.register(team_guard.plugin_name())
     return 0
 
 

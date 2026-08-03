@@ -59,9 +59,9 @@ for mint and change alike, is `vault_check.py reconcile-designations`
 (the write-time hook denies any other Write/Edit of the map or the
 ledger). A change records the outgoing value in the machine-managed
 `doc_type_designation_history` ledger sibling in the SAME config write,
-then transitions every affected title and byte-matching H1 old -> new
+then transitions every affected title and byte-matching H1 source -> target
 (tail-stripping every known prior value of the note's own type, so no
-double suffix survives), sweeps wikilink aliases byte-equal to the old
+double suffix survives), sweeps wikilink aliases byte-equal to the source
 title, and re-renders the generated views. The `designation_drift`
 check holds titles against the ledger: a retired value closing a title
 is an error (mechanically fixable), a mid-title stranding or a
@@ -134,8 +134,8 @@ governs:
 
 - `governs` and `verifies` are ALWAYS block lists, one quoted wikilink
   per `- item` line, even for a single target: the property panel
-  holds one value type per key, and a scalar here is legacy the
-  `migrate` verb lifts into a one-item list.
+  holds one value type per key. The `migrate` verb lifts a scalar into
+  a one-item list.
 - The supersede chain is bidirectional (`supersedes` on the younger,
   `superseded_by` on the older) and is written by `stamp-decision` in
   one operation; hand-editing one end breaks symmetry and the check.

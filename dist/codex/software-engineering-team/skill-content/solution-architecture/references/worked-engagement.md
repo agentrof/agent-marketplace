@@ -12,7 +12,7 @@ Status: approved 2025-11-04
 How order events reach the fulfillment and notification components
 without coupling them to the order service. Decided: managed streaming
 service, integrate verdict; minted
-[[solution-design/decisions/sd-007-order-events|SD-007]].
+[[solution-design/decisions/order-event-distribution-decision|SD-007]].
 
 ## Framing
 - Question: one distribution mechanism for order events, consumed by
@@ -43,19 +43,19 @@ not serve at the cited volume; this is not a solved territory.
 Managed streaming service, integrate. Strongest rejected alternative:
 self-hosted broker; deciding dimension: sustainability and operability
 (no operator on the team). Egress cost stays a named risk on
-[[solution-design/decisions/sd-007-order-events|SD-007]]. Deferred:
+[[solution-design/decisions/order-event-distribution-decision|SD-007]]. Deferred:
 analytics retention, revisit when a requirement cites it.
 UNDECIDABLE benchmark dropped:
 the spike became unnecessary once the lead option's vendor ordering
 semantics verified against BR-ORD-014.
 ```
 
-## decisions/sd-007-order-events.md
+## decisions/order-event-distribution-decision.md
 
 ```markdown
 ---
 type: decision
-title: Order event distribution via managed streaming service
+title: Order event distribution via managed streaming service decision
 status: accepted
 owner_role: solution_architect
 decided_at: 2025-11-04
@@ -69,7 +69,7 @@ aliases:
   - SD-007
 ---
 
-# SD-007: Order event distribution via managed streaming service
+# Order event distribution via managed streaming service decision
 
 **Decision:** In the context of distributing order events to multiple
 consumers, facing BR-ORD-014's per-customer ordering guarantee and the
@@ -95,7 +95,7 @@ by stamp-decision, never typed. The generated decision-log.md gains its
 row at the next render-decisions run:
 
 ```markdown
-| [[solution-design/decisions/sd-007-order-events\|SD-007]] | Order event distribution via managed streaming service | accepted | asynchronous work and queueing | 2025-11-04 | event volume crossing 5x the cited budget, or the vendor's pricing model changing | |
+| [[solution-design/decisions/order-event-distribution-decision\|SD-007]] | Order event distribution via managed streaming service decision | accepted | asynchronous work and queueing | 2025-11-04 | event volume crossing 5x the cited budget, or the vendor's pricing model changing | |
 ```
 
 ## landscape.md fold-in excerpt
@@ -103,7 +103,7 @@ row at the next render-decisions run:
 ```markdown
 | component | verdict | decision | engagement | status |
 |---|---|---|---|---|
-| event distribution | integrate | [[solution-design/decisions/sd-007-order-events\|SD-007]] | [[solution-design/engagements/order-event-distribution\|order-event-distribution]] | decided |
+| event distribution | integrate | [[solution-design/decisions/order-event-distribution-decision\|SD-007]] | [[solution-design/engagements/order-event-distribution\|order-event-distribution]] | decided |
 ```
 
 Transition gains a step citing SD-007 (an aliased wikilink, escaped-pipe in table cells): adopt event distribution before the fulfillment story lands; precondition: none.

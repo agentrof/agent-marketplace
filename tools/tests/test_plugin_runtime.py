@@ -5,6 +5,7 @@ dispatcher and the dashboard catalog."""
 from __future__ import annotations
 
 import json
+import importlib.util
 import os
 import sqlite3
 import subprocess
@@ -20,6 +21,18 @@ SET_SCRIPTS = REPO / "dist" / "claude" / "software-engineering-team" / "scripts"
 sys.path.insert(0, str(PMO_SCRIPTS))
 
 import hook_common  # noqa: E402
+
+
+def load_vault_hook():
+    if str(SET_SCRIPTS) not in sys.path:
+        sys.path.append(str(SET_SCRIPTS))
+    spec = importlib.util.spec_from_file_location(
+        "agentrof_vault_hook", SET_SCRIPTS / "vault_hook.py"
+    )
+    module = importlib.util.module_from_spec(spec)
+    assert spec.loader is not None
+    spec.loader.exec_module(module)
+    return module
 
 
 def run_script(script_path: Path, payload: dict | None, env: dict,
@@ -39,6 +52,37 @@ def run_cli(argv: list[str], env: dict):
 
 
 class NormalizePayloadTests(unittest.TestCase):
+    def test_shared_golden_patch_corpus_stays_in_parity(self):
+        corpus = json.loads((
+            REPO / "tools" / "tests" / "data" / "hook_payloads.json"
+        ).read_text(encoding="utf-8"))
+        vault_hook = load_vault_hook()
+        for case in corpus["valid"]:
+            with self.subTest(case=case["name"]):
+                payload = {
+                    "tool_name": "apply_patch",
+                    "tool_input": {"patch": case["patch"]},
+                }
+                pmo = hook_common.normalize_payload(payload)
+                vault = vault_hook.normalize(payload)
+                self.assertEqual(vault["file_targets"], pmo["file_targets"])
+                self.assertEqual(
+                    [[item["operation"], item["file_path"]]
+                     for item in pmo["file_targets"]],
+                    case["operations"],
+                )
+        for patch in corpus["invalid"]:
+            with self.subTest(invalid=patch):
+                payload = {"tool_name": "apply_patch", "tool_input": {"patch": patch}}
+                pmo = hook_common.normalize_payload(payload)
+                vault = vault_hook.normalize(payload)
+                self.assertEqual(pmo["file_targets"], [])
+                self.assertEqual(vault["file_targets"], [])
+                self.assertIn("patch_parse_error", pmo)
+                self.assertEqual(
+                    vault.get("patch_parse_error"), pmo.get("patch_parse_error")
+                )
+
     def test_claude_code_shape_passes_through(self):
         out = hook_common.normalize_payload({
             "hook_event_name": "PreToolUse", "tool_name": "Write",
@@ -197,6 +241,137 @@ class VaultHookCodexTests(unittest.TestCase):
         }, self.env, ["pre"])
         self.assertEqual(code, 2)
         self.assertIn("fails closed", err)
+
+
+class TeamPreflightTests(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        root = Path(self.tmp.name)
+        self.home = root / "agentrof"
+        self.project = root / "project"
+        (self.project / ".git").mkdir(parents=True)
+        (self.project / "workspace").mkdir()
+        (self.project / "workspace" / "config.json").write_text(
+            json.dumps({"managed_by": "software-engineering-team"}),
+            encoding="utf-8",
+        )
+        self.env = {"AGENTROF_HOME": str(self.home)}
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def payload(self, tool="Write", **extra):
+        payload = {
+            "session_id": "session-one",
+            "cwd": str(self.project),
+            "hook_event_name": "PreToolUse",
+            "tool_name": tool,
+            "permission_mode": "default",
+            "tool_input": {"file_path": str(self.project / "change.txt"),
+                           "content": "change"},
+        }
+        payload.update(extra)
+        return payload
+
+    def guard(self, payload):
+        return run_script(
+            SET_SCRIPTS / "team_guard.py", payload, self.env, ["pre"]
+        )
+
+    def mark_ready(self):
+        code, out, err = run_script(
+            PMO_SCRIPTS / "hook_session_start.py",
+            {"session_id": "session-one", "cwd": str(self.project),
+             "hook_event_name": "SessionStart", "source": "startup"},
+            self.env,
+        )
+        self.assertEqual(code, 0, err)
+        self.assertIn("AGENTROF_PMO_READY", out)
+
+    def test_missing_pmo_state_denies_every_local_mutation_surface(self):
+        before = {
+            path.relative_to(self.project).as_posix(): path.read_bytes()
+            for path in self.project.rglob("*") if path.is_file()
+        }
+        for tool in ("Write", "Edit", "MultiEdit", "apply_patch", "Bash",
+                     "exec_command", "shell"):
+            with self.subTest(tool=tool):
+                code, _, err = self.guard(self.payload(tool))
+                self.assertEqual(code, 2)
+                self.assertIn("did not mark this session ready", err)
+                self.assertIn("No files or project state were changed", err)
+        after = {
+            path.relative_to(self.project).as_posix(): path.read_bytes()
+            for path in self.project.rglob("*") if path.is_file()
+        }
+        self.assertEqual(after, before)
+
+    def test_nonmutation_tool_passes_without_pmo(self):
+        code, _, err = self.guard(self.payload("Read"))
+        self.assertEqual(code, 0, err)
+
+    def test_exact_read_only_plugin_diagnostics_pass_without_pmo(self):
+        for tool, key, command in (
+            ("Bash", "command", "claude plugin list --json"),
+            ("exec_command", "cmd", "codex plugin list --json"),
+            ("shell", "command", "codex plugin list --json"),
+        ):
+            with self.subTest(tool=tool, command=command):
+                payload = self.payload(tool)
+                payload["tool_input"] = {key: command}
+                code, _, err = self.guard(payload)
+                self.assertEqual(code, 0, err)
+
+    def test_shell_diagnostic_variants_fail_closed_without_pmo(self):
+        for command in (
+            "codex plugin list --json && touch change.txt",
+            "codex plugin list --json > inventory.json",
+            "codex plugin list --available --json",
+            "AGENTROF_HOME=/tmp/example codex plugin list --json",
+            "codex plugin add project-management-office@agent-marketplace",
+        ):
+            with self.subTest(command=command):
+                payload = self.payload("exec_command")
+                payload["tool_input"] = {"cmd": command}
+                code, _, err = self.guard(payload)
+                self.assertEqual(code, 2)
+                self.assertIn("did not mark this session ready", err)
+
+    def test_ready_session_passes_and_registers_team(self):
+        self.mark_ready()
+        code, _, err = self.guard(self.payload())
+        self.assertEqual(code, 0, err)
+        registry = json.loads(
+            (self.home / "plugin_roots.json").read_text(encoding="utf-8")
+        )
+        self.assertIn("software-engineering-team", registry["plugins"])
+
+    def test_plan_mode_and_foreign_team_fail_closed(self):
+        self.mark_ready()
+        code, _, err = self.guard(self.payload(permission_mode="plan"))
+        self.assertEqual(code, 2)
+        self.assertIn("Plan mode", err)
+        (self.project / "workspace" / "config.json").write_text(
+            json.dumps({"managed_by": "another-team"}), encoding="utf-8"
+        )
+        code, _, err = self.guard(self.payload())
+        self.assertEqual(code, 2)
+        self.assertIn("another-team", err)
+
+    def test_session_end_revokes_readiness(self):
+        self.mark_ready()
+        code, _, err = self.guard(self.payload())
+        self.assertEqual(code, 0, err)
+        code, _, err = run_script(
+            PMO_SCRIPTS / "hook_session_end.py",
+            {"session_id": "session-one", "cwd": str(self.project),
+             "hook_event_name": "SessionEnd", "reason": "other"},
+            self.env,
+        )
+        self.assertEqual(code, 0, err)
+        code, _, err = self.guard(self.payload())
+        self.assertEqual(code, 2)
+        self.assertIn("did not mark this session ready", err)
 
 
 class IntegrityTripwireTests(unittest.TestCase):
@@ -366,14 +541,37 @@ class DispatcherTests(unittest.TestCase):
         self.assertIn("setup entry", err)
 
     def test_hook_registration_feeds_dispatcher(self):
+        run_cli(["sync-launcher"], self.env)
         code, _, err = run_script(
-            SET_SCRIPTS / "vault_hook.py",
+            SET_SCRIPTS / "team_guard.py",
             {"hook_event_name": "SessionStart"},
             self.env, ["register"])
         self.assertEqual(code, 0, err)
         registry = json.loads(
             (self.home / "plugin_roots.json").read_text(encoding="utf-8"))
         self.assertIn("software-engineering-team", registry["plugins"])
+
+    def test_concurrent_registration_keeps_every_plugin(self):
+        processes = []
+        for index in range(20):
+            processes.append(subprocess.Popen(
+                [sys.executable, str(PMO_SCRIPTS / "agentrof_run.py"),
+                 "register", "--plugin", f"team-{index}",
+                 "--root", str(self.plugin_root)],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                env={**os.environ, **self.env},
+            ))
+        for process in processes:
+            _, err = process.communicate(timeout=10)
+            self.assertEqual(process.returncode, 0, err)
+        registry = json.loads(
+            (self.home / "plugin_roots.json").read_text(encoding="utf-8")
+        )
+        self.assertEqual(
+            set(registry["plugins"]), {f"team-{index}" for index in range(20)}
+        )
 
     def test_codex_manifest_version_is_preferred(self):
         (self.plugin_root / ".codex-plugin").mkdir()

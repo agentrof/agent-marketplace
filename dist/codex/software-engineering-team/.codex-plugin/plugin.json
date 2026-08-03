@@ -18,7 +18,7 @@
   "interface": {
     "displayName": "Software Engineering Team",
     "shortDescription": "An orchestrated product and engineering team",
-    "longDescription": "Drive approved product work through analysis, architecture, design, implementation, adversarial review, QA, and pull-request delivery with Codex-native project agents.",
+    "longDescription": "Requires Project Management Office. Drive approved product work through analysis, architecture, design, implementation, adversarial review, QA, and pull-request delivery with Codex-native project agents.",
     "developerName": "Agentrof",
     "category": "Engineering",
     "capabilities": [

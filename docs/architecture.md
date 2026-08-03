@@ -11,9 +11,11 @@ tested, end-to-end team; users install a team and run at the goal. Parts
 are not sold separately: agents and knowledge skills are encapsulated
 behind a small user surface of entry skills. Supported stacks are fixed
 and tested; new stacks are added by the maintainer as a skills folder plus
-a config enum value plus tests. One plugin is not a team: project-management-office is the
-shared operations backbone every team plugin depends on. Claude resolves it
-through plugin dependencies; the Codex marketplace installs it by default.
+a config enum value plus tests. One plugin is not a team:
+project-management-office is the shared operations backbone every team plugin
+depends on. Claude resolves it through plugin dependencies. Codex users install
+it explicitly before a team; marketplace default policy is advisory and never
+the dependency contract.
 
 ## Invariants
 
@@ -88,6 +90,20 @@ through plugin dependencies; the Codex marketplace installs it by default.
    never forked workflow bodies.
    Host adapters map gates, native agent spawning, hook payloads and session
    boundaries while preserving the same PMO lifecycle and safety outcome.
+13. **Every team requires a ready PMO.** Claude manifests declare PMO as a
+   native dependency. Codex installation documents PMO before the team because
+   Codex manifests do not declare plugin dependencies. Both host contracts
+   require the PMO-ready session signal before mutation. PMO records readiness
+   against the host session id; the shared team PreToolUse guard denies Write,
+   Edit, apply_patch and Bash when that session record is absent or unhealthy.
+   This stops local mutation when PMO is missing, disabled, untrusted or failed
+   to bootstrap. The scaffolder emits this mechanical contract and the validator
+   rejects any team that drops it.
+14. **One delivery team owns one project.** PMO remains the shared backbone,
+   but workspace/config.json and setup-generated project agents may name only
+   one team. A second team stops before mutation. This preserves bare native
+   agent ids across hosts without collisions in Codex's project-wide
+   .codex/agents namespace.
 
 ## Repository layout
 
@@ -96,7 +112,9 @@ through plugin dependencies; the Codex marketplace installs it by default.
 - `plugins/<team>/`: host-neutral canonical content. Full skills live in
   `skill-content/`; agent frontmatter uses neutral exposure and reasoning enums.
 - `platforms/<host>/<team>/`: host manifest, contract and overlay source;
-  `platforms/shared/` contains runtime adapters used by both hosts.
+  `platforms/shared/` contains runtime adapters used by both hosts. `_team`
+  overlays are generated into every non-PMO plugin, so new teams inherit the
+  same PMO guard and Codex project-agent generator without copied source.
 - `dist/<host>/<team>/`: generated self-contained distributions; never edit
   them by hand.
 - `plugins/project-management-office/`: the operations backbone (central

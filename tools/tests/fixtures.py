@@ -18,6 +18,7 @@ REAL_MODEL_CONFIG = (Path(__file__).resolve().parents[1]
                      / "data" / "models.json")
 REAL_LIMITS_CONFIG = (Path(__file__).resolve().parents[1]
                       / "data" / "limits.json")
+REAL_REPOSITORY = Path(__file__).resolve().parents[2]
 
 PLUGIN = "sample-team"
 
@@ -127,6 +128,14 @@ def write(path: Path, text: str) -> None:
 
 
 def make_valid_root(root: Path) -> None:
+    shutil.copytree(
+        REAL_REPOSITORY / "platforms" / "shared" / "_team",
+        root / "platforms" / "shared" / "_team",
+    )
+    shutil.copytree(
+        REAL_REPOSITORY / "platforms" / "codex" / "_team",
+        root / "platforms" / "codex" / "_team",
+    )
     write(root / ".claude-plugin" / "marketplace.json", json.dumps({
         "name": "fixture-marketplace",
         "owner": {"name": "fixture"},
@@ -144,18 +153,27 @@ def make_valid_root(root: Path) -> None:
         "version": "0.0.1",
         "description": "fixture plugin",
         "license": "MIT",
+        "dependencies": ["project-management-office"],
         "skills": "./skills/",
     }
     write(root / "platforms" / "claude" / PLUGIN / "manifest.json",
           json.dumps(claude_manifest, indent=2))
     write(root / "platforms" / "claude" / PLUGIN / "host-contract.md",
-          "# Host Contract\n\n- Preserve canonical behavior.\n")
+          "# Host Contract\n\n"
+          "- `team_guard.py` mechanically requires"
+          " `AGENTROF_PMO_READY: project-management-office`; run"
+          " `claude plugin list --json` and recover with"
+          " `/plugin install project-management-office@agent-marketplace`"
+          " or `/plugin enable project-management-office@agent-marketplace`."
+          " No files or project state were changed.\n"
+          "- One delivery team owns a project.\n")
     codex_manifest = {
-        **claude_manifest,
+        **{key: value for key, value in claude_manifest.items()
+           if key != "dependencies"},
         "interface": {
             "displayName": "Sample Team",
             "shortDescription": "Fixture team",
-            "longDescription": "Fixture team",
+            "longDescription": "Requires Project Management Office. Fixture team",
             "developerName": "Agentrof",
             "category": "Engineering",
             "capabilities": ["Read", "Write", "Interactive"],
@@ -165,7 +183,15 @@ def make_valid_root(root: Path) -> None:
     write(root / "platforms" / "codex" / PLUGIN / "manifest.json",
           json.dumps(codex_manifest, indent=2))
     write(root / "platforms" / "codex" / PLUGIN / "host-contract.md",
-          "# Host Contract\n\n- Preserve canonical behavior.\n")
+          "# Host Contract\n\n"
+          "- `team_guard.py` mechanically requires"
+          " `AGENTROF_PMO_READY: project-management-office`; run"
+          " `codex plugin list --json`, recover with"
+          " `codex plugin add project-management-office@agent-marketplace`,"
+          " enable it in Plugins when disabled, then inspect `/hooks`."
+          " No files or project state were changed.\n"
+          "- One delivery team owns a project; setup runs"
+          " `generate_codex_project.py`.\n")
     write(root / ".agents" / "plugins" / "marketplace.json", json.dumps({
         "name": "agent-marketplace",
         "interface": {"displayName": "Agent Marketplace"},
@@ -184,7 +210,19 @@ def make_valid_root(root: Path) -> None:
     write(root / "platforms" / "claude" / PLUGIN / "overlay" / "hooks"
           / "hooks.json", json.dumps({
         "hooks": {
-            "SessionStart": [{"hooks": [{"type": "command", "command": "true"}]}],
+            "SessionStart": [{"hooks": [{"type": "command",
+                "command": "python3 team_guard.py register"}]}],
+            "PreToolUse": [{"matcher": "Write|Edit|Bash", "hooks": [{
+                "type": "command", "command": "python3 team_guard.py pre"}]}],
+        },
+    }, indent=2))
+    write(root / "platforms" / "codex" / PLUGIN / "overlay" / "hooks"
+          / "hooks.json", json.dumps({
+        "hooks": {
+            "SessionStart": [{"hooks": [{"type": "command",
+                "command": "python3 team_guard.py register"}]}],
+            "PreToolUse": [{"matcher": "Write|Edit|apply_patch|Bash", "hooks": [{
+                "type": "command", "command": "python3 team_guard.py pre"}]}],
         },
     }, indent=2))
     # Product-vault surface: the policy, the seeds and the payload describe
@@ -339,6 +377,13 @@ def break_distribution_packaging(root: Path) -> None:
     write(marketplace_path, json.dumps(marketplace, indent=2))
 
 
+def break_team_pmo_contract(root: Path) -> None:
+    manifest_path = root / "platforms" / "claude" / PLUGIN / "manifest.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest.pop("dependencies")
+    write(manifest_path, json.dumps(manifest, indent=2))
+
+
 def break_json_hygiene(root: Path) -> None:
     write(root / "plugins" / PLUGIN / "bad.json",
           json.dumps({"displayName": "Sample Team"}, indent=2))
@@ -487,6 +532,7 @@ BUILDERS = {
     "reference_triggers": break_reference_triggers,
     "registration": break_registration,
     "distribution_packaging": break_distribution_packaging,
+    "team_pmo_contract": break_team_pmo_contract,
     "json_hygiene": break_json_hygiene,
     "orchestrator_integrity": break_orchestrator_integrity,
     "choice_gate": break_choice_gate,

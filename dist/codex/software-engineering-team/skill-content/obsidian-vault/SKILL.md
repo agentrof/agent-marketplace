@@ -6,29 +6,24 @@ exposure: internal
 
 # Obsidian Vault
 
-The consuming project's docs tree (workspace/docs/) is ONE vault: the
-owner opens it in the vault app and reads the knowledge graph; agents
-author every note headlessly. This skill is the single home of the vault
-law. Every rule below is enforced by the checker (vault_check.py, run
-as `"$RUN" run "$TEAM" scripts/vault_check.py`, the dispatcher per the
-develop flow's state contract) and the per-write hook; variation points
-live in `data/vault-policy.json`, never in prose.
+The consuming project's docs tree (workspace/docs/) is ONE vault: the owner
+opens it in the vault app and reads the knowledge graph; agents author every
+note headlessly. This skill is the single home of the vault law. Every rule
+below is enforced by the checker (vault_check.py, run as `"$RUN" run "$TEAM"
+scripts/vault_check.py`, the dispatcher per the develop flow's state contract)
+and the per-write hook; variation points live in `data/vault-policy.json`, never in prose.
 
 ## When to Use
 
-- Loaded whenever a persona or spawned agent creates or edits any file
-  under the docs tree, curates a map note, or repairs a degraded vault.
+- Loaded whenever a persona or spawned agent creates or edits any file under the docs tree, curates a map note, or repairs a degraded vault.
 
 ## Linking Law
 
 - DO cite vault content as a vault-absolute wikilink with an alias:
-  `[[solution-design/decisions/order-events-decision|SD-007]]`. Paths
-  run from the vault root, forward slashes, exact case, no leading slash.
+  `[[solution-design/decisions/order-events-decision|SD-007]]`. Paths run from the vault root, forward slashes, exact case, no leading slash.
 - DON'T write relative markdown links between vault files (hook-denied);
-  external URLs stay `[text](https://...)`; targets outside the docs
-  tree stay standard relative links.
-- Heading anchors are banned; the stable in-note anchor is a block id:
-  `[[business-analysis/shop/budgets#^event-volume|volume budget]]`.
+  external URLs stay `[text](https://...)`; targets outside the docs tree stay standard relative links.
+- Heading anchors are banned; the stable in-note anchor is a block id: `[[business-analysis/shop/budgets#^event-volume|volume budget]]`.
 - In table cells escape the alias pipe: `[[path\|SD-007]]`. Schema
   id-citation columns carry these wikilinks too; a bare id is legal
   only where it is minted.
@@ -64,9 +59,8 @@ live in `data/vault-policy.json`, never in prose.
 
 ## Metadata Law
 
-- Every authored note carries frontmatter: `type` plus the `tags` mirror
-  at minimum. `tags`/`aliases` are BLOCK lists (one `- item` line each);
-  inline `[a, b]` lists are hook-denied.
+- Every authored note carries frontmatter: `type` plus the `tags` mirror at
+  minimum. `tags`/`aliases` are BLOCK lists (one `- item` line each); inline `[a, b]` lists are hook-denied.
 - Tags are exactly the stamped mirror `doc/<type>` plus
   `status/<status>` when a status exists; nothing else, never hand-picked.
 - Doc-referencing keys (supersedes, superseded_by, governs, verifies,
@@ -110,7 +104,7 @@ as named warnings; a red vault check blocks the gate like a red compile.
 - `check` validates; errors block gates, warnings are named, never block.
 - `render-decisions` renders each decision tree's index; `stamp-decision`
   stamps status, decided date, tag mirror and the supersede chain in one
-  operation; `migrate` applies the deterministic legacy rewrites, and
+  operation; `migrate` applies deterministic format normalization, and
   `migrate --rename` heals naming: it renames per the grammar and
   rewrites every referrer in one operation, vetoing renames whose
   referrers are frozen.

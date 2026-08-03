@@ -12,17 +12,17 @@ guard logic exists exactly once.
 from __future__ import annotations
 
 import json
+import hashlib
 import os
 import re
 import sys
 import tempfile
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 
 import pmo_cli
 
-# Team plugins whose host-native subagents are recorded as tasks.
-TEAM_AGENT_NAMESPACES = {"software-engineering-team"}
 AGENT_NAME_RE = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
 
 # Tool-name vocabulary -> the canonical names the guards reason in.
@@ -34,6 +34,8 @@ TOOL_NAME_CANON = {
 }
 
 PLUGIN_ROOTS_NAME = "plugin_roots.json"
+PLUGIN_ROOTS_LOCK = ".plugin_roots.lock"
+SESSION_STATE_DIR = "sessions"
 
 
 def read_payload() -> dict:
@@ -152,6 +154,84 @@ def plugin_roots_path() -> Path:
     return pmo_cli.data_dir() / PLUGIN_ROOTS_NAME
 
 
+def team_agent_namespaces() -> set[str]:
+    """Team namespaces generated into the PMO distribution at build time."""
+    try:
+        data = json.loads(
+            (Path(__file__).resolve().parents[1] / "team_plugins.json")
+            .read_text(encoding="utf-8")
+        )
+        plugins = data.get("plugins", [])
+        return {
+            value for value in plugins
+            if isinstance(value, str) and AGENT_NAME_RE.fullmatch(value)
+        }
+    except Exception:
+        return set()
+
+
+def session_state_path(session_id: str) -> Path:
+    digest = hashlib.sha256(session_id.encode("utf-8")).hexdigest()
+    return pmo_cli.data_dir() / SESSION_STATE_DIR / f"{digest}.json"
+
+
+def write_session_readiness(session_id: str, ready: bool) -> None:
+    if not session_id:
+        return
+    path = session_state_path(session_id)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    payload = {
+        "session_id": session_id,
+        "pmo_ready": bool(ready),
+        "recorded_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+    }
+    fd, tmp = tempfile.mkstemp(dir=str(path.parent), prefix=f".{path.name}.")
+    with os.fdopen(fd, "w", encoding="utf-8") as fh:
+        fh.write(json.dumps(payload, sort_keys=True) + "\n")
+    os.replace(tmp, path)
+
+
+def clear_session_readiness(session_id: str) -> None:
+    if not session_id:
+        return
+    try:
+        session_state_path(session_id).unlink(missing_ok=True)
+    except Exception as exc:
+        log(f"clear_session_readiness failed: {exc}")
+
+
+class RegistryLock:
+    """Portable inter-process lock for the registry read-modify-write."""
+
+    def __init__(self, parent: Path, timeout: float = 5.0):
+        self.path = parent / PLUGIN_ROOTS_LOCK
+        self.timeout = timeout
+
+    def __enter__(self):
+        deadline = time.monotonic() + self.timeout
+        while True:
+            try:
+                self.path.mkdir()
+                return self
+            except FileExistsError:
+                try:
+                    if time.time() - self.path.stat().st_mtime > 30:
+                        self.path.rmdir()
+                        continue
+                except OSError:
+                    pass
+                if time.monotonic() >= deadline:
+                    raise TimeoutError("timed out waiting for plugin registry lock")
+                time.sleep(0.01)
+
+    def __exit__(self, exc_type, exc, tb):
+        try:
+            self.path.rmdir()
+        except OSError:
+            pass
+        return False
+
+
 def plugin_manifest(root: Path) -> Path | None:
     """Return the active host manifest, preferring the native Codex one."""
     for relative in (
@@ -166,38 +246,38 @@ def plugin_manifest(root: Path) -> Path | None:
 
 def register_plugin_root(plugin_name: str, root: Path) -> None:
     """Record a plugin's install root in the shared registry the
-    agentrof_run dispatcher resolves from. Atomic write (temp file +
-    replace): two sessions may race."""
+    agentrof_run dispatcher resolves from."""
     try:
         registry_path = plugin_roots_path()
         registry_path.parent.mkdir(parents=True, exist_ok=True)
-        try:
-            registry = json.loads(registry_path.read_text(encoding="utf-8"))
-        except Exception:
-            registry = {}
-        if not isinstance(registry, dict):
-            registry = {}
-        registry.setdefault("schema_version", 1)
-        version = ""
-        manifest = plugin_manifest(root)
-        try:
-            if manifest is not None:
-                version = json.loads(
-                    manifest.read_text(encoding="utf-8")).get("version", "")
-        except Exception:
-            pass
-        plugins = registry.setdefault("plugins", {})
-        plugins[plugin_name] = {
-            "root": str(root),
-            "version": version,
-            "registered_at": datetime.now(timezone.utc).isoformat(
-                timespec="seconds"),
-        }
-        fd, tmp = tempfile.mkstemp(dir=str(registry_path.parent),
-                                   prefix=".plugin_roots.")
-        with os.fdopen(fd, "w", encoding="utf-8") as fh:
-            fh.write(json.dumps(registry, indent=2, sort_keys=True) + "\n")
-        os.replace(tmp, registry_path)
+        with RegistryLock(registry_path.parent):
+            try:
+                registry = json.loads(registry_path.read_text(encoding="utf-8"))
+            except Exception:
+                registry = {}
+            if not isinstance(registry, dict):
+                registry = {}
+            registry.setdefault("schema_version", 1)
+            version = ""
+            manifest = plugin_manifest(root)
+            try:
+                if manifest is not None:
+                    version = json.loads(
+                        manifest.read_text(encoding="utf-8")).get("version", "")
+            except Exception:
+                pass
+            plugins = registry.setdefault("plugins", {})
+            plugins[plugin_name] = {
+                "root": str(root),
+                "version": version,
+                "registered_at": datetime.now(timezone.utc).isoformat(
+                    timespec="seconds"),
+            }
+            fd, tmp = tempfile.mkstemp(dir=str(registry_path.parent),
+                                       prefix=".plugin_roots.")
+            with os.fdopen(fd, "w", encoding="utf-8") as fh:
+                fh.write(json.dumps(registry, indent=2, sort_keys=True) + "\n")
+            os.replace(tmp, registry_path)
     except Exception as exc:
         log(f"register_plugin_root failed for {plugin_name}: {exc}")
 
@@ -258,9 +338,10 @@ def team_agent(agent_type: str, project_root: str) -> tuple[str, str] | None:
     Claude identities are '<plugin>:<bare-agent>'. Codex identities are bare
     and count only when the matching project TOML carries the Agentrof owner
     marker."""
+    namespaces = team_agent_namespaces()
     if ":" in agent_type:
         namespace, bare = agent_type.split(":", 1)
-        if namespace not in TEAM_AGENT_NAMESPACES:
+        if namespace not in namespaces:
             return None
         if not AGENT_NAME_RE.fullmatch(bare):
             return None
@@ -275,7 +356,7 @@ def team_agent(agent_type: str, project_root: str) -> tuple[str, str] | None:
         ).splitlines()[0]
     except (OSError, IndexError):
         return None
-    for namespace in TEAM_AGENT_NAMESPACES:
+    for namespace in namespaces:
         if first_line == (
             f"# Generated by Agentrof {namespace}; do not edit by hand."
         ):

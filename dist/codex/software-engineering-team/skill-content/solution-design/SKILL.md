@@ -6,17 +6,14 @@ exposure: entry
 
 # Solution Design
 
-Turn landscape questions into recorded decisions through conversation:
-one living solution tree under workspace/docs/solution-design/, an
-engagement study per topic, an adversarial challenge round before every
-gate, and a decision log the planner and the software architect read.
+Turn landscape questions into recorded decisions through conversation: one
+living solution tree under workspace/docs/solution-design/, an engagement study
+per topic, an adversarial challenge round before every gate, and a decision log the planner and the software architect read.
 
 ## When to Use
-- The system's foundations need deciding or debating: technologies,
-  platforms, products, topology, methods, integration or orchestration
-  constructs, sustainability.
-- A new ask raises a landscape-level question before (or beside) any
-  story work. NOT for per-story design: develop step 1 owns deltas.
+- The system's foundations need deciding or debating: technologies, platforms,
+  products, topology, methods, integration or orchestration constructs, sustainability.
+- A new ask raises a landscape-level question before (or beside) any story work. NOT for per-story design: develop step 1 owns deltas.
 
 ## Procedure
 

@@ -111,9 +111,11 @@ the answer. This is UI adaptation, not a process fork.
 
 ## Operations backbone (the project-management-office plugin)
 
-Claude declares project-management-office as a dependency. Codex installs it
-by default through marketplace policy and pre-flight stops with the explicit
-install command if it is missing. PMO owns the user-level data
+Claude declares project-management-office as a dependency. Codex installs PMO
+explicitly before every team; marketplace default policy is never treated as
+a dependency. Both hosts require the PMO-ready session signal before mutation
+and stop without writes when installation, enablement, hook trust or bootstrap
+is incomplete. PMO owns the user-level data
 directory (default: .agentrof under the user's home; AGENTROF_HOME
 overrides) holding one central SQLite database for every project and
 every future team: projects, epics, stories, machine-generated tasks with their attempt

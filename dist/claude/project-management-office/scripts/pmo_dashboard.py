@@ -61,10 +61,10 @@ def open_ro() -> sqlite3.Connection:
 
 def check_schema(con: sqlite3.Connection) -> int:
     version = con.execute("PRAGMA user_version").fetchone()[0]
-    if version > pmo_cli.SCHEMA_VERSION:
-        raise ApiError(409, "schema_newer",
-                       "the database schema is newer than this dashboard;"
-                       " update the project-management-office plugin",
+    if version != pmo_cli.SCHEMA_VERSION:
+        raise ApiError(409, "schema_mismatch",
+                       "the database schema does not match this dashboard;"
+                       " start with a database created by this plugin version",
                        db_schema=version, cli_schema=pmo_cli.SCHEMA_VERSION)
     return version
 
@@ -309,13 +309,10 @@ def api_head(params) -> dict:
     try:
         version = con.execute("PRAGMA user_version").fetchone()[0]
         head = 0
-        if version <= pmo_cli.SCHEMA_VERSION:
-            try:
-                head = con.execute(
-                    "SELECT COALESCE(MAX(id), 0) FROM events"
-                ).fetchone()[0]
-            except sqlite3.OperationalError:
-                head = 0
+        if version == pmo_cli.SCHEMA_VERSION:
+            head = con.execute(
+                "SELECT COALESCE(MAX(id), 0) FROM events"
+            ).fetchone()[0]
         return {**base, "head_id": head, "db_present": True,
                 "schema_version": version}
     finally:
@@ -403,13 +400,10 @@ def api_overview(params) -> dict:
                 "last_event_ts": last_event["ts"] if last_event else None,
             })
         head = con.execute("SELECT COALESCE(MAX(id), 0) FROM events").fetchone()[0]
-        try:
-            open_candidates = rows(
-                con,
-                "SELECT * FROM issue_candidates WHERE status = 'candidate'"
-                " ORDER BY external_id")
-        except sqlite3.OperationalError:
-            open_candidates = []  # pre-v3 database without the table
+        open_candidates = rows(
+            con,
+            "SELECT * FROM issue_candidates WHERE status = 'candidate'"
+            " ORDER BY external_id")
         return {"projects": projects, "head_id": head,
                 "open_candidates": len(open_candidates),
                 "issue_candidates": open_candidates}
@@ -697,10 +691,7 @@ def api_issue_candidates(params) -> dict:
             query += " WHERE status = ?"
             args.append(status)
         query += " ORDER BY external_id"
-        try:
-            candidates = rows(con, query, args)
-        except sqlite3.OperationalError:
-            candidates = []  # pre-v3 database without the table
+        candidates = rows(con, query, args)
         head = con.execute("SELECT COALESCE(MAX(id), 0) FROM events").fetchone()[0]
         return {"issue_candidates": candidates, "head_id": head}
     finally:

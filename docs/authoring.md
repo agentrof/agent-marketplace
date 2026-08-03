@@ -286,7 +286,10 @@ by omission.
 A release bumps both platform manifests, both generated manifests and the
 Claude marketplace entry in one commit. The validator errors on identity or
 version drift; the Codex marketplace carries policy, not a second version
-field.
+field. Before release, run `make release-check` on a machine carrying both host
+CLIs. The host gate gives every team isolated state and verifies dependency or
+explicit recovery, PMO session readiness, disable/enable, remove/reinstall,
+Codex entry-skill discovery, internal-skill hiding and setup idempotency.
 
 ## Scaffolding
 
@@ -302,17 +305,29 @@ Every team plugin records its process state (runs, stories, tasks,
 findings) through the project-management-office plugin, never in its own files:
 
 - Keep the Claude dependency in its manifest. Codex manifests have no plugin
-  dependency field, so the Codex marketplace marks PMO
-  `INSTALLED_BY_DEFAULT`; team pre-flight names the explicit PMO install
-  command when it is missing.
+  dependency field, so every Codex install surface lists PMO before the team.
+  Keep PMO `INSTALLED_BY_DEFAULT` in the marketplace as an advisory policy,
+  never as the install guarantee.
+- Require the exact `AGENTROF_PMO_READY: project-management-office` session
+  signal before either host mutates team state. On absence, run the host's
+  read-only plugin inventory, stop without writes, and distinguish missing,
+  disabled and hook/bootstrap failures in the recovery message.
+- Keep the generated `team_guard.py` hook on Write, Edit and Bash for Claude,
+  and on Write, Edit, apply_patch and Bash for Codex. It checks the PMO-owned
+  session readiness record and the one-team-per-project ownership rule before
+  the tool runs. Host instructions explain recovery; the hook enforces denial.
+- Create every future team with `tools/scaffold.py`; `team_pmo_contract`
+  rejects a Claude manifest without the dependency, a Codex visible surface
+  without the requirement, or either host contract without the ready gate and
+  recovery command.
 - Invoke the CLI through the synced launcher in the user-level data
   directory (see the develop flow's state contract for the resolution
   line); never reference another plugin's install path, it is not a
   stable location.
-- Register the team's Claude namespace in project-management-office's hook
-  registry. Bare Codex spawns count only when the matching project TOML has
-  the team's Agentrof ownership marker, so a user's same-named local agent is
-  never attributed to the team.
+- The distribution builder generates PMO's team namespace registry from all
+  non-PMO plugin directories. Bare Codex spawns count only when the matching
+  project TOML has that team's Agentrof ownership marker, so a user's
+  same-named local agent is never attributed to the team.
 - The single-writer rule is absolute: flows call the CLI; spawned agents
   never do; anything the owner must review in git is rendered from the
   database as a generated view, not hand-written.

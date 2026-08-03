@@ -1,7 +1,11 @@
 {
   "hooks": {
-    "SessionStart": [{"hooks": [{"type": "command", "command": "python3 \"${PLUGIN_ROOT}\"/scripts/vault_hook.py register"}]}],
+    "SessionStart": [{"hooks": [{"type": "command", "command": "python3 \"${PLUGIN_ROOT}\"/scripts/team_guard.py register"}]}],
     "PreToolUse": [
+      {
+        "matcher": "Write|Edit|apply_patch|Bash",
+        "hooks": [{"type": "command", "command": "python3 \"${PLUGIN_ROOT}\"/scripts/team_guard.py pre"}]
+      },
       {
         "matcher": "Write|Edit|apply_patch",
         "hooks": [{"type": "command", "command": "python3 \"${PLUGIN_ROOT}\"/scripts/vault_hook.py pre"}]

@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import json
 import os
+import sqlite3
 import subprocess
 import sys
 import tempfile
@@ -173,6 +174,7 @@ class PmoHookTests(unittest.TestCase):
         data = json.loads(out)
         context = data["hookSpecificOutput"]["additionalContext"]
         self.assertIn("AGENTROF_HOOKS_ACTIVE: project-management-office", context)
+        self.assertIn("AGENTROF_PMO_READY: project-management-office", context)
         self.assertIn(f"Current UTC time at session start: {utc_today()}",
                       context)
         self.assertIn("wo1", context)
@@ -184,6 +186,21 @@ class PmoHookTests(unittest.TestCase):
         self.assertTrue(dashboard_module.is_file())
         dashboard_index = Path(self.env["AGENTROF_HOME"]) / "dashboard" / "index.html"
         self.assertTrue(dashboard_index.is_file())
+
+    def test_session_start_with_failed_bootstrap_is_not_ready(self):
+        database = Path(self.env["AGENTROF_HOME"]) / "agentrof.db"
+        connection = sqlite3.connect(database)
+        connection.execute("PRAGMA user_version = 99")
+        connection.commit()
+        connection.close()
+        code, out, err = run_hook("hook_session_start.py", self.payload(
+            hook_event_name="SessionStart", source="startup",
+        ), self.env)
+        self.assertEqual(code, 0, err)
+        context = json.loads(out)["hookSpecificOutput"]["additionalContext"]
+        self.assertIn("AGENTROF_HOOKS_ACTIVE: project-management-office", context)
+        self.assertIn("AGENTROF_PMO_UNAVAILABLE", context)
+        self.assertNotIn("AGENTROF_PMO_READY", context)
 
     def test_session_start_clock_only_outside_projects(self):
         code, out, _ = run_hook("hook_session_start.py", self.payload(

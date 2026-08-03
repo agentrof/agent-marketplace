@@ -42,7 +42,7 @@ FINDING_SOURCES = {"review", "qa", "design_qa"}
 FINDING_STATUSES = {"open", "fixed", "waived"}
 FINDING_SEVERITIES = {"critical", "high", "medium", "low"}
 # Issue candidates: marketplace defect/improvement notes captured during a
-# run, filed to the agentrof marketplace repo only on explicit owner
+# run, filed to the Agent Marketplace repository only on explicit owner
 # approval. Unlike findings they are not bound to a work order.
 ISSUE_KINDS = {"defect", "improvement"}
 ISSUE_STATUSES = {"candidate", "filed", "dismissed"}
@@ -275,23 +275,6 @@ CREATE INDEX IF NOT EXISTS idx_findings_wo_status ON findings(work_order_id, sta
 CREATE INDEX IF NOT EXISTS idx_issue_candidates_status ON issue_candidates(status);
 """
 
-# Stepwise schema migrations, keyed by the version they upgrade FROM. The DDL
-# block above always describes the final shape; each step only transforms what
-# an older database already holds. events rows are history and are never
-# rewritten: consumers that match action names accept old and new vocabulary.
-MIGRATIONS: dict[int, list[str]] = {
-    # 1 -> 2: the integrity meta table and the attempt source column. The
-    # meta table itself arrives via the idempotent DDL; only the column
-    # needs an explicit transform on an existing database.
-    1: [
-        "ALTER TABLE task_attempts ADD COLUMN source TEXT NOT NULL"
-        " DEFAULT 'hook'",
-    ],
-    # 2 -> 3: the issue_candidates table is net-new and arrives via the
-    # idempotent DDL below; the ladder only needs to bump the version.
-    2: [],
-}
-
 
 def now() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
@@ -361,13 +344,13 @@ def _integrity_stamp(con: sqlite3.Connection) -> None:
                 (key, value),
             )
     except sqlite3.OperationalError:
-        pass  # pre-migration database without a meta table
+        pass  # init-db has not created the schema yet
 
 
 def verify_integrity(con: sqlite3.Connection) -> str | None:
     """None when the content matches the recorded fingerprint; otherwise a
-    human-readable problem statement. An empty meta table (fresh or
-    pre-migration database) is not a finding."""
+    human-readable problem statement. An uninitialized database is not an
+    integrity finding; command validation routes it to init-db."""
     try:
         row = con.execute(
             "SELECT value FROM meta WHERE key = 'fingerprint'").fetchone()
@@ -737,21 +720,12 @@ def open_attempt(con, task_id: int, role: str, agent_name: str,
 def cmd_init_db(args) -> int:
     con = connect()
     version = con.execute("PRAGMA user_version").fetchone()[0]
-    if version > SCHEMA_VERSION:
+    if version not in (0, SCHEMA_VERSION):
         con.close()
         raise Rule(
-            f"database schema version {version} is newer than this CLI"
-            f" ({SCHEMA_VERSION}); update the project-management-office plugin"
+            f"database schema version {version} does not match this CLI"
+            f" ({SCHEMA_VERSION}); start with a database created by this version"
         )
-    # Stepwise migrations first: each step transforms what an older
-    # database already holds and stamps the version it reached, so a crash
-    # mid-ladder resumes at the right rung. The DDL then fills in every
-    # net-new object idempotently.
-    while 0 < version < SCHEMA_VERSION:
-        for statement in MIGRATIONS.get(version, []):
-            con.execute(statement)
-        version += 1
-        con.execute(f"PRAGMA user_version = {version}")
     con.executescript(DDL)  # commits itself; keep it outside the transaction
     with mutate(con):
         if con.execute("PRAGMA user_version").fetchone()[0] == 0:
@@ -838,6 +812,9 @@ def check_key_date_prefix(work_order_key: str) -> None:
 
 def cmd_wo_init(args) -> int:
     check_key_date_prefix(args.work_order_key)
+    brief_source = Path(args.brief) if args.brief else None
+    if brief_source is not None and not brief_source.is_dir():
+        raise Rule("--brief must name an analysis-space directory")
     con = connect()
     worktree = norm_path(args.worktree)
     with mutate(con):
@@ -900,20 +877,17 @@ def cmd_wo_init(args) -> int:
         order_dir = Path(args.order_dir)
         order_dir.mkdir(parents=True, exist_ok=True)
         for src, dest in ((args.constitution, "constitution.md"),
-                          (args.brief, "brief.snapshot.md"),
                           (args.config, "config.snapshot.json")):
             if not src:
                 continue
             source = Path(src)
-            if dest == "brief.snapshot.md" and source.is_dir():
-                # An analysis-space brief is a directory; snapshot the whole
-                # tree so the order reads one immutable spec for its lifetime.
-                dest_dir = order_dir / "brief-snapshot"
-                if dest_dir.exists():
-                    shutil.rmtree(dest_dir)
-                shutil.copytree(source, dest_dir)
-            elif source.is_file():
+            if source.is_file():
                 shutil.copyfile(src, order_dir / dest)
+        if brief_source is not None:
+            dest_dir = order_dir / "brief-snapshot"
+            if dest_dir.exists():
+                shutil.rmtree(dest_dir)
+            shutil.copytree(brief_source, dest_dir)
     print(f"pmo: work order '{args.work_order_key}' initialized (step 0 in progress)")
     return 0
 
@@ -2441,10 +2415,6 @@ def cmd_sync_launcher(args) -> int:
         extra_dst = bin_dir / extra
         if extra_src.is_file() and extra_src != extra_dst:
             shutil.copyfile(extra_src, extra_dst)
-    # Files earlier releases synced but this version no longer ships.
-    stale = bin_dir / "harness_runtime.json"
-    if stale.is_file():
-        stale.unlink()
     if index_src.is_file():
         index_dst = data_dir() / "dashboard" / "index.html"
         if index_src != index_dst:

@@ -33,14 +33,14 @@ while sitting inside the plugin directory.
 
 1. **Analyze product context.** Purpose, users, dominant content (data/text/media/forms), emotional goal (trust/energy/calm), interaction pattern (scan/keyboard/input/navigate). Method: the design-rationale-method reference below.
 2. **Generate the design system** (required first step):
-   `python scripts/search.py "<product> <industry> <tone> <density>" --design-system -p "Project Name"`
+   `"$RUN" run "$TEAM" skill-content/ui-ux-design/scripts/search.py "<product> <industry> <tone> <density>" --design-system -p "Project Name"`
 3. **Persist Master + overrides** once a candidate is chosen:
-   `python scripts/search.py "<query>" --design-system --persist -p "Project Name" [--page "dashboard"]`
+   `"$RUN" run "$TEAM" skill-content/ui-ux-design/scripts/search.py "<query>" --design-system --persist -p "Project Name" [--page "dashboard"]`
    Writes `workspace/docs/design-system/MASTER.md` and `pages/<page>.md` as vault notes (frontmatter, tags and nav section per the obsidian-vault skill; the script emits them). When building a page, read `pages/<page>.md` first; if it exists its rules override MASTER.md, otherwise follow MASTER.md strictly.
 4. **Deep-dive domains** as needed:
-   `python scripts/search.py "<keywords>" --domain <product|style|color|typography|landing|ux|chart|icons>`
+   `"$RUN" run "$TEAM" skill-content/ui-ux-design/scripts/search.py "<keywords>" --domain <product|style|color|typography|landing|ux|chart|icons>`
 5. **Stack guidance** for implementation fidelity:
-   `python scripts/search.py "<keywords>" --stack <react|html-tailwind|shadcn>`
+   `"$RUN" run "$TEAM" skill-content/ui-ux-design/scripts/search.py "<keywords>" --stack <react|html-tailwind|shadcn>`
 
 ## Query Strategy and Divergence
 

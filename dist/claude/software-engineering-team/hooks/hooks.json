@@ -5,12 +5,21 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}\"/scripts/vault_hook.py register"
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}\"/scripts/team_guard.py register"
           }
         ]
       }
     ],
     "PreToolUse": [
+      {
+        "matcher": "Write|Edit|Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}\"/scripts/team_guard.py pre"
+          }
+        ]
+      },
       {
         "matcher": "Write|Edit",
         "hooks": [

@@ -14,8 +14,7 @@ shapes; this reference decides WHICH shape.
 2. Run the purpose and actor rounds at space level; seed the glossary
    and the actor roster as the answers land.
 3. Start ALL content analysis in the root node. A small feature ends
-   where it started: one node, one gate, exactly the old single-brief
-   behavior.
+   where it started: one node and one gate.
 4. Split a domain out only when the owner approves a split proposal:
    a signal NOMINATES the split, the owner's explicit approval (asked
    through a choice gate) creates it. The tree is a

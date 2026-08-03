@@ -1,4 +1,4 @@
-.PHONY: validate counts counts-check dist-check test eval check scaffold
+.PHONY: validate counts counts-check dist-check test eval check scaffold smoke-plugin-installs integration-hosts release-check
 
 PY := python3
 
@@ -23,6 +23,14 @@ eval:
 
 check: validate counts-check dist-check test
 	@echo "check: all gates green"
+
+smoke-plugin-installs:
+	$(PY) tools/smoke_plugin_installs.py
+
+integration-hosts: smoke-plugin-installs
+
+release-check: check integration-hosts
+	@echo "release-check: deterministic and real-host gates green"
 
 scaffold:
 	@echo "usage:"

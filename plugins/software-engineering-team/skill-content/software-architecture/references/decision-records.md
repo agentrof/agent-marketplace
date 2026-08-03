@@ -59,9 +59,9 @@ Keep a record under a page. A record nobody reads protects nobody.
 
 ## Record Files and the Generated Index
 
-- One note per record at system-architecture/decisions/adr-###-<kebab-slug>.md
-  (3+ digits, zero-padded to 3, more digits legal), H1 `ADR-042: <title>`.
-  Identity is the file path plus the alias; there is no bare-id heading.
+- One note per record at system-architecture/decisions/<kebab-slug>-decision.md.
+  Its H1 equals the title; one `ADR-###` frontmatter alias owns the id.
+  The id never enters the filename, title or H1.
 - Frontmatter contract: `type: decision`, `title`, `status`,
   `owner_role`, `decided_at` (stamped only by the vault checker's
   stamp-decision verb, never hand-typed), `story` (the delta or story
@@ -69,13 +69,13 @@ Keep a record under a page. A record nobody reads protects nobody.
   mirror (`doc/decision` plus `status/<status>`), and `aliases` holding
   the bare id (`- ADR-042`).
 - The supersede chain lives in quoted vault-absolute wikilink keys
-  (`supersedes: "[[system-architecture/decisions/adr-031-offset-pagination]]"`,
+  (`supersedes: "[[system-architecture/decisions/offset-pagination-decision]]"`,
   `superseded_by` on the older note); stamp-decision writes both ends in
   one operation, and an empty relation is an absent key, never an empty
   string.
 - The links field's values are wikilinks: cited budgets as block ids,
   briefs, affected ownership rows.
-- Id allocation: scan the decisions/ filenames and take the highest
+- Id allocation: scan the decision aliases and take the highest
   number plus one. Duplicate id numbers are caught at every gate, and
   render-decisions refuses to render an index over them.
 - decision-log.md beside decisions/ is the GENERATED index (first-line

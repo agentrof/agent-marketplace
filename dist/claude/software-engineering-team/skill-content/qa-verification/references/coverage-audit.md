@@ -36,7 +36,7 @@ Both forms reduce to the same rule the script applies: the literal id string, ma
 ## Running the Audit
 
 ```
-python scripts/scenario_report.py \
+"$RUN" run "$TEAM" skill-content/qa-verification/scripts/scenario_report.py \
   --brief workspace/docs/user-stories.md workspace/docs/business-rules.md \
   --junit results-server.xml results-client.xml
 ```

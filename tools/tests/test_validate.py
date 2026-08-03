@@ -35,6 +35,34 @@ class ValidatorFixtureTests(unittest.TestCase):
         findings = self.run_on()
         self.assertEqual(findings, [], f"valid root must be clean, got: {findings}")
 
+    def test_platform_runtime_is_covered_by_stdlib_gate(self):
+        def add_dependency(root: Path) -> None:
+            fixtures.write(
+                root / "platforms" / "shared" / "_team" / "overlay"
+                / "scripts" / "dependency.py",
+                "import requests\n",
+            )
+            fixtures.build_distributions.replace_generated(root, root / "dist")
+
+        findings = self.run_on(extra=add_dependency)
+        self.assertEqual(len(findings), 1, findings)
+        self.assertEqual(findings[0].check, "stdlib_only")
+        self.assertIn("platforms/shared/_team", findings[0].path)
+
+    def test_platform_runtime_is_covered_by_utc_clock_gate(self):
+        def add_local_clock(root: Path) -> None:
+            fixtures.write(
+                root / "platforms" / "codex" / "_team" / "overlay"
+                / "scripts" / "clock.py",
+                "from datetime import date\n\nprint(date.today())\n",
+            )
+            fixtures.build_distributions.replace_generated(root, root / "dist")
+
+        findings = self.run_on(extra=add_local_clock)
+        self.assertEqual(len(findings), 1, findings)
+        self.assertEqual(findings[0].check, "naive_clock")
+        self.assertIn("platforms/codex/_team", findings[0].path)
+
     def test_agent_and_skill_names_are_scoped_per_plugin(self):
         import json
         from fixtures import VALID_AGENT, VALID_SKILL, write
@@ -55,15 +83,17 @@ class ValidatorFixtureTests(unittest.TestCase):
                       "version": "0.0.1",
                       "description": "fixture plugin",
                       "license": "MIT",
+                      "dependencies": ["project-management-office"],
                       "skills": "./skills/",
                   }
             for host in ("claude", "codex"):
                 manifest = dict(claude_manifest)
                 if host == "codex":
+                    manifest.pop("dependencies")
                     manifest["interface"] = {
                         "displayName": "Second Team",
                         "shortDescription": "Fixture team",
-                        "longDescription": "Fixture team",
+                        "longDescription": "Requires Project Management Office. Fixture team",
                         "developerName": "Agentrof",
                         "category": "Engineering",
                         "capabilities": ["Read", "Write", "Interactive"],
@@ -72,7 +102,33 @@ class ValidatorFixtureTests(unittest.TestCase):
                 write(root / "platforms" / host / "second-team" / "manifest.json",
                       json.dumps(manifest, indent=2))
                 write(root / "platforms" / host / "second-team"
-                      / "host-contract.md", "# Host Contract\n")
+                      / "host-contract.md", (
+                          "# Host Contract\n\n"
+                          "- `team_guard.py` requires"
+                          " `AGENTROF_PMO_READY: project-management-office`;"
+                          + (" run `claude plugin list --json` and recover with"
+                             " `/plugin install project-management-office@agent-marketplace`"
+                             " or `/plugin enable project-management-office@agent-marketplace`."
+                             if host == "claude" else
+                             " run `codex plugin list --json`, recover with"
+                             " `codex plugin add project-management-office@agent-marketplace`,"
+                             " enable it in Plugins when disabled, then inspect `/hooks`.")
+                          + " No files or project state were changed."
+                          " One delivery team owns a project."
+                          + ("" if host == "claude" else
+                             " Setup runs `generate_codex_project.py`.")
+                          + "\n"
+                      ))
+                matcher = "Write|Edit|Bash" if host == "claude" \
+                    else "Write|Edit|apply_patch|Bash"
+                write(root / "platforms" / host / "second-team" / "overlay"
+                      / "hooks" / "hooks.json", json.dumps({
+                          "hooks": {"PreToolUse": [{
+                              "matcher": matcher,
+                              "hooks": [{"type": "command",
+                                         "command": "python3 team_guard.py pre"}],
+                          }]}
+                      }))
             write(root / "plugins" / "second-team" / "agents" / "planner.md",
                   VALID_AGENT)
             write(root / "plugins" / "second-team" / "skill-content" / "notes"
@@ -192,6 +248,18 @@ class ValidatorFixtureTests(unittest.TestCase):
         self.assertEqual(findings[0].check, "agent_name")
         self.assertIn("agent title", findings[0].message)
         self.assertEqual(validate.display_title("qa-devops-api"), "QA DevOps API")
+
+    def test_direct_script_invocation_is_rejected(self):
+        from fixtures import PLUGIN, VALID_FLOW, write
+
+        def direct_script(root: Path) -> None:
+            write(root / "plugins" / PLUGIN / "flows" / "direct.md",
+                  VALID_FLOW + "\nRun `python scripts/tool.py` here.\n")
+
+        findings = self.run_on(direct_script)
+        matching = [f for f in findings if f.check == "script_references"]
+        self.assertEqual(len(matching), 1, findings)
+        self.assertIn("bypasses the dispatcher", matching[0].message)
 
     def test_size_caps_read_from_limits_file(self):
         """Lowering a cap in the fixture's limits.json makes size_caps

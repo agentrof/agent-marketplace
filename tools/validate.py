@@ -68,8 +68,6 @@ SKILL_MAX_LINES = 150
 SKILL_WARN_LINES = 120
 SKILL_MAX_BYTES = 8192
 CONSTITUTION_MAX_LINES = 60
-# Raised from 400 with the vault-law wiring, then from 416 with the
-# dispatcher paragraph (develop.md carries it); applies to every flow.
 FLOW_MAX_LINES = 424
 REFERENCE_WARN_LINES = 500
 
@@ -138,6 +136,8 @@ COUNTS_START = "<!-- counts:start -->"
 COUNTS_END = "<!-- counts:end -->"
 
 CONSTITUTION_PLACEHOLDER = "{{constitution}}"
+PMO_PLUGIN = "project-management-office"
+PMO_READY = "AGENTROF_PMO_READY: project-management-office"
 
 AGENT_ROLE_SUFFIX_RE_TPL = r"\b{plugin}-([a-z0-9]+(?:-[a-z0-9]+)*)\b"
 
@@ -258,10 +258,6 @@ def agent_files(plugin: Path) -> list[Path]:
 
 def skill_dirs(plugin: Path) -> list[Path]:
     skills = plugin / "skill-content"
-    if not skills.is_dir():
-        # Compatibility for validator fixtures and pre-Codex third-party
-        # plugins. Native Agentrof packages use skill-content/ exclusively.
-        skills = plugin / "skills"
     if not skills.is_dir():
         return []
     return sorted(p for p in skills.iterdir() if p.is_dir())
@@ -913,6 +909,100 @@ def check_distribution_packaging(tree: Tree, findings: list[Finding]) -> None:
                       "generate default_prompt with $<plugin>:<skill>")
 
 
+def check_team_pmo_contract(tree: Tree, findings: list[Finding]) -> None:
+    """Every team is born with the same PMO install and runtime contract."""
+    for plugin in plugin_dirs(tree):
+        if plugin.name == PMO_PLUGIN:
+            continue
+        problems: list[str] = []
+        claude_manifest_path = (
+            tree.root / "platforms" / "claude" / plugin.name / "manifest.json"
+        )
+        codex_manifest_path = (
+            tree.root / "platforms" / "codex" / plugin.name / "manifest.json"
+        )
+        claude_contract_path = (
+            tree.root / "platforms" / "claude" / plugin.name / "host-contract.md"
+        )
+        codex_contract_path = (
+            tree.root / "platforms" / "codex" / plugin.name / "host-contract.md"
+        )
+        try:
+            claude_manifest = json.loads(read_text(claude_manifest_path))
+        except (OSError, json.JSONDecodeError):
+            claude_manifest = {}
+        dependencies = claude_manifest.get("dependencies") or []
+        if not isinstance(dependencies, list) or PMO_PLUGIN not in dependencies:
+            problems.append("Claude manifest lacks the PMO dependency")
+        try:
+            codex_manifest = json.loads(read_text(codex_manifest_path))
+        except (OSError, json.JSONDecodeError):
+            codex_manifest = {}
+        if "dependencies" in codex_manifest:
+            problems.append("Codex manifest declares unsupported plugin dependencies")
+        long_description = str(
+            (codex_manifest.get("interface") or {}).get("longDescription", "")
+        )
+        if not long_description.startswith("Requires Project Management Office."):
+            problems.append("Codex visible description does not name the PMO requirement")
+        claude_contract = read_text(claude_contract_path) \
+            if claude_contract_path.is_file() else ""
+        for token in (
+            PMO_READY,
+            "team_guard.py",
+            "One delivery team",
+            "claude plugin list --json",
+            "/plugin install project-management-office@agent-marketplace",
+            "/plugin enable project-management-office@agent-marketplace",
+            "no files or project state were changed",
+        ):
+            if token.lower() not in claude_contract.lower():
+                problems.append(f"Claude host contract lacks {token!r}")
+        codex_contract = read_text(codex_contract_path) \
+            if codex_contract_path.is_file() else ""
+        for token in (
+            PMO_READY,
+            "team_guard.py",
+            "One delivery team",
+            "generate_codex_project.py",
+            "codex plugin list --json",
+            "codex plugin add project-management-office@agent-marketplace",
+            "enable it in Plugins",
+            "/hooks",
+            "no files or project state were changed",
+        ):
+            if token.lower() not in codex_contract.lower():
+                problems.append(f"Codex host contract lacks {token!r}")
+        hook_contracts = (
+            (
+                "Claude",
+                tree.root / "platforms" / "claude" / plugin.name
+                / "overlay" / "hooks" / "hooks.json",
+                ("team_guard.py", "Write|Edit|Bash"),
+            ),
+            (
+                "Codex",
+                tree.root / "platforms" / "codex" / plugin.name
+                / "overlay" / "hooks" / "hooks.json",
+                ("team_guard.py", "Write|Edit|apply_patch|Bash"),
+            ),
+        )
+        for label, hook_path, tokens in hook_contracts:
+            hook_text = read_text(hook_path) if hook_path.is_file() else ""
+            for token in tokens:
+                if token not in hook_text:
+                    problems.append(f"{label} hooks lack {token!r}")
+        if problems:
+            findings.append(Finding(
+                "error", rel(tree, claude_manifest_path), 1,
+                "team_pmo_contract",
+                f"team plugin '{plugin.name}' has an incomplete PMO contract: "
+                + "; ".join(problems),
+                "declare the Claude dependency, expose the Codex requirement,"
+                " and keep both host preflights fail-closed on PMO readiness",
+            ))
+
+
 def _walk_keys(obj: object, path: str, out: list[tuple[str, str]]) -> None:
     if isinstance(obj, dict):
         for key, value in obj.items():
@@ -1042,6 +1132,33 @@ FALLBACK_STDLIB = frozenset(
 
 def check_stdlib_only(tree: Tree, findings: list[Finding]) -> None:
     stdlib = set(getattr(sys, "stdlib_module_names", ())) or FALLBACK_STDLIB
+    scanned: set[Path] = set()
+
+    def scan(scripts: Path, local: set[str]) -> None:
+        if not scripts.is_dir():
+            return
+        for script in sorted(scripts.glob("*.py")):
+            if script in scanned:
+                continue
+            scanned.add(script)
+            for lineno, line in enumerate(read_text(script).splitlines(), start=1):
+                stripped = line.strip()
+                module = ""
+                if stripped.startswith("import "):
+                    module = stripped[7:].split()[0].split(".")[0].rstrip(",")
+                elif stripped.startswith("from "):
+                    module = stripped[5:].split()[0].split(".")[0]
+                if not module or module in ("", "."):
+                    continue
+                if module in stdlib or module in local:
+                    continue
+                findings.append(Finding(
+                    "error", rel(tree, script), lineno, "stdlib_only",
+                    f"non-stdlib import '{module}'",
+                    "skill and platform runtime scripts run anywhere;"
+                    " use only the standard library",
+                ))
+
     for plugin in plugin_dirs(tree):
         script_dirs = [sdir / "scripts" for sdir in skill_dirs(plugin)]
         script_dirs.append(plugin / "scripts")  # plugin-level runtime scripts
@@ -1055,23 +1172,25 @@ def check_stdlib_only(tree: Tree, findings: list[Finding]) -> None:
             )
             if shared_scripts.is_dir():
                 local.update(p.stem for p in shared_scripts.glob("*.py"))
-            for script in sorted(scripts.glob("*.py")):
-                for lineno, line in enumerate(read_text(script).splitlines(), start=1):
-                    stripped = line.strip()
-                    module = ""
-                    if stripped.startswith("import "):
-                        module = stripped[7:].split()[0].split(".")[0].rstrip(",")
-                    elif stripped.startswith("from "):
-                        module = stripped[5:].split()[0].split(".")[0]
-                    if not module or module in ("", "."):
-                        continue
-                    if module in stdlib or module in local:
-                        continue
-                    findings.append(Finding(
-                        "error", rel(tree, script), lineno, "stdlib_only",
-                        f"non-stdlib import '{module}'",
-                        "skill scripts run anywhere; use only the standard library",
-                    ))
+            scan(scripts, local)
+
+    platform_dirs = sorted(
+        path for path in (tree.root / "platforms").glob("*/*/overlay/scripts")
+        if path.is_dir()
+    )
+    for scripts in platform_dirs:
+        owner = scripts.parents[1].name
+        owner_dirs = [
+            path for path in platform_dirs
+            if path.parents[1].name in {owner, "_team"}
+        ]
+        canonical = tree.plugins_dir / owner / "scripts"
+        if canonical.is_dir():
+            owner_dirs.append(canonical)
+        local = {
+            path.stem for directory in owner_dirs for path in directory.glob("*.py")
+        }
+        scan(scripts, local)
 
 
 NAIVE_CLOCK_RE = re.compile(r"\bdate\.today\(\)|\bdatetime\.now\(\s*\)|\butcnow\(")
@@ -1082,28 +1201,27 @@ def check_naive_clock(tree: Tree, findings: list[Finding]) -> None:
     A naive or local clock call (date.today(), no-arg datetime.now(),
     utcnow()) puts local or deprecated time into artifacts and diverges
     from the UTC values every other writer records."""
+    all_script_dirs: set[Path] = set()
     for plugin in plugin_dirs(tree):
-        script_dirs = [sdir / "scripts" for sdir in skill_dirs(plugin)]
-        script_dirs.append(plugin / "scripts")
-        for scripts in script_dirs:
-            if not scripts.is_dir():
-                continue
-            for script in sorted(scripts.glob("*.py")):
-                for lineno, line in enumerate(read_text(script).splitlines(), start=1):
-                    if NAIVE_CLOCK_RE.search(line):
-                        findings.append(Finding(
-                            "error", rel(tree, script), lineno, "naive_clock",
-                            "local or naive clock call",
-                            "plugin scripts read the clock as"
-                            " datetime.now(timezone.utc); local time never"
-                            " enters artifacts",
-                        ))
+        candidates = [sdir / "scripts" for sdir in skill_dirs(plugin)]
+        candidates.append(plugin / "scripts")
+        all_script_dirs.update(path for path in candidates if path.is_dir())
+    all_script_dirs.update(
+        path for path in (tree.root / "platforms").glob("*/*/overlay/scripts")
+        if path.is_dir()
+    )
+    for scripts in sorted(all_script_dirs):
+        for script in sorted(scripts.glob("*.py")):
+            for lineno, line in enumerate(read_text(script).splitlines(), start=1):
+                if NAIVE_CLOCK_RE.search(line):
+                    findings.append(Finding(
+                        "error", rel(tree, script), lineno, "naive_clock",
+                        "local or naive clock call",
+                        "plugin and platform runtime scripts read the clock as"
+                        " datetime.now(timezone.utc); local time never"
+                        " enters artifacts",
+                    ))
 
-
-SCRIPT_REF_RE = re.compile(
-    r"\$\{(?:CLAUDE_PLUGIN_ROOT|PLUGIN_ROOT:-\$\{CLAUDE_PLUGIN_ROOT\})\}"
-    r"\"?/([A-Za-z0-9_\-./]+\.py)\b"
-)
 
 # The dispatcher grammar shipped content uses to reach plugin files:
 # "$RUN" run|path "$TEAM"|<plugin-name> <relpath>. "$TEAM" resolves to
@@ -1111,37 +1229,23 @@ SCRIPT_REF_RE = re.compile(
 RUN_REF_RE = re.compile(
     r"\"\$RUN\"\s+(run|path)\s+(\"\$TEAM\"|[a-z0-9]+(?:-[a-z0-9]+)*)"
     r"\s+([A-Za-z0-9_\-./]+)")
+DIRECT_SCRIPT_REF_RE = re.compile(r"\bpython3?\s+scripts/[A-Za-z0-9_./-]+\.py\b")
 
 
 def check_script_references(tree: Tree, findings: list[Finding]) -> None:
     """Every plugin-file reference in shipped markdown must resolve to a
-    shipped file: a flow naming a script or flow that does not exist is a
-    broken contract, not documentation. Covers the legacy
-    host plugin-root script tokens and the dispatcher grammar
+    shipped file and use the dispatcher grammar
     ("$RUN" run|path ... <relpath>)."""
     for plugin in plugin_dirs(tree):
-        hooks_manifest = plugin / "hooks" / "hooks.json"
-        if hooks_manifest.is_file():
-            for lineno, line in enumerate(
-                    read_text(hooks_manifest).splitlines(), start=1):
-                for match in SCRIPT_REF_RE.finditer(line):
-                    if not (plugin / match.group(1)).is_file():
-                        findings.append(Finding(
-                            "error", rel(tree, hooks_manifest), lineno,
-                            "script_references",
-                            f"hook command names a missing script: {match.group(1)}",
-                            "ship the script or fix the hook command",
-                        ))
         for path in sorted(plugin.rglob("*.md")):
             for lineno, line in enumerate(read_text(path).splitlines(), start=1):
-                for match in SCRIPT_REF_RE.finditer(line):
-                    if not (plugin / match.group(1)).is_file():
-                        findings.append(Finding(
-                            "error", rel(tree, path), lineno, "script_references",
-                            f"referenced script does not exist: {match.group(1)}",
-                            "ship the script or fix the reference; flows carry"
-                            " only real mechanics",
-                        ))
+                if DIRECT_SCRIPT_REF_RE.search(line):
+                    findings.append(Finding(
+                        "error", rel(tree, path), lineno, "script_references",
+                        "direct scripts/ invocation bypasses the dispatcher",
+                        "invoke plugin scripts through \"$RUN\" run \"$TEAM\""
+                        " <plugin-relative-path>",
+                    ))
                 for match in RUN_REF_RE.finditer(line):
                     verb, owner, relpath = match.groups()
                     target_plugin = plugin if owner == '"$TEAM"' \
@@ -1638,11 +1742,9 @@ def check_vault_policy_shape(tree: Tree, findings: list[Finding]) -> None:
                         " positive integer",
                         "ids are zero-padded to the minimum width; more digits"
                         " stay legal")
-                if spec.get("id_source") not in ("alias", "filename"):
-                    err(f"decision tree '{tree_name}' id_source must be"
-                        " 'alias' or 'filename'",
-                        "the record id's home is declared per tree: alias"
-                        " is the law, filename the legacy escape hatch")
+                if spec.get("id_source") != "alias":
+                    err(f"decision tree '{tree_name}' id_source must be 'alias'",
+                        "record ids live in frontmatter aliases")
                 if not isinstance(spec.get("render_index"), bool):
                     err(f"decision tree '{tree_name}' must carry a boolean"
                         " render_index",
@@ -1918,6 +2020,7 @@ CHECKS = {
     "reference_triggers": check_reference_triggers,
     "registration": check_registration,
     "distribution_packaging": check_distribution_packaging,
+    "team_pmo_contract": check_team_pmo_contract,
     "json_hygiene": check_json_hygiene,
     "orchestrator_integrity": check_orchestrator_integrity,
     "choice_gate": check_choice_gate,

@@ -1,6 +1,6 @@
 ---
 name: issue-desk
-description: Reviews captured issue candidates and files the owner-approved ones to the Agentrof marketplace's own repository. The draft-and-approve desk for marketplace defect and improvement reports.
+description: Reviews captured issue candidates and files the owner-approved ones to the Agent Marketplace repository. The draft-and-approve desk for marketplace defect and improvement reports.
 exposure: entry
 ---
 

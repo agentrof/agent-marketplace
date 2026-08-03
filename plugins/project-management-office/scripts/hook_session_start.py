@@ -83,9 +83,11 @@ def resume_lines(payload) -> list[str]:
 
 def main() -> int:
     payload = hook_common.normalize_payload(hook_common.read_payload())
+    bootstrap_ready = False
     try:
-        hook_common.run_cli(["init-db"])
-        hook_common.run_cli(["sync-launcher"])
+        initialized = hook_common.run_cli(["init-db"])
+        synced = hook_common.run_cli(["sync-launcher"])
+        bootstrap_ready = initialized == 0 and synced == 0
     except Exception as exc:
         hook_common.log(f"session_start bootstrap failed: {exc}")
     try:
@@ -95,6 +97,13 @@ def main() -> int:
         )
     except Exception as exc:
         hook_common.log(f"session_start registration failed: {exc}")
+    try:
+        hook_common.write_session_readiness(
+            str(payload.get("session_id", "")), bootstrap_ready
+        )
+    except Exception as exc:
+        bootstrap_ready = False
+        hook_common.log(f"session_start readiness record failed: {exc}")
     try:
         resolved = hook_common.resolve_project(payload.get("cwd", ""))
         if resolved is not None:
@@ -111,6 +120,13 @@ def main() -> int:
         "AGENTROF_HOOKS_ACTIVE: project-management-office",
         clock_line(),
     ]
+    if bootstrap_ready:
+        lines.append("AGENTROF_PMO_READY: project-management-office")
+    else:
+        lines.append(
+            "AGENTROF_PMO_UNAVAILABLE: bootstrap failed; no team workflow may"
+            " mutate state. Inspect the PMO hook log and retry in a new session."
+        )
     try:
         lines.extend(resume_lines(payload))
     except Exception as exc:

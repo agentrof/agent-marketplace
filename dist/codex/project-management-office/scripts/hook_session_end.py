@@ -13,6 +13,7 @@ import pmo_cli
 
 def main() -> int:
     payload = hook_common.read_payload()
+    hook_common.clear_session_readiness(str(payload.get("session_id", "")))
     resolved = hook_common.resolve_project(payload.get("cwd", ""))
     if resolved is None:
         return 0

@@ -22,6 +22,55 @@ from pathlib import Path
 import build_distributions
 
 KEBAB_RE = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
+PMO_PLUGIN = "project-management-office"
+PMO_READY = "AGENTROF_PMO_READY: project-management-office"
+
+CLAUDE_TEAM_CONTRACT = f"""# Host Contract
+
+- The shared `team_guard.py` PreToolUse hook mechanically requires the PMO session-ready record before Write, Edit, or Bash. Keep the exact context check `{PMO_READY}` as the user-facing diagnostic. If it is absent, run `claude plugin list --json` as a read-only diagnostic and stop. If PMO is missing, ask the user to run `/plugin install project-management-office@agent-marketplace`; if it is disabled, ask for `/plugin enable project-management-office@agent-marketplace`; if it is installed and enabled, ask for a Claude Code restart and PMO hook-log inspection. State that no files or project state were changed.
+- One delivery team owns a project. Stop without mutation when workspace/config.json or Agentrof-owned project agents name another team.
+- Preserve every canonical workflow gate and artifact.
+"""
+
+CODEX_TEAM_CONTRACT = f"""# Host Contract
+
+- The shared `team_guard.py` PreToolUse hook mechanically requires the PMO session-ready record before Write, Edit, apply_patch, or Bash. Keep the exact context check `{PMO_READY}` as the user-facing diagnostic. If it is absent, run `codex plugin list --json` as a read-only diagnostic and stop. If PMO is missing, show `codex plugin add project-management-office@agent-marketplace`; if it is disabled, ask the user to enable it in Plugins; if it is installed and enabled, ask the user to inspect and trust Project Management Office and this team plugin through `/hooks`, then start a new task. State that no files or project state were changed.
+- One delivery team owns a project. Stop without mutation when workspace/config.json or Agentrof-owned project agents name another team.
+- During setup, run the generated `scripts/generate_codex_project.py`; it owns only this team's marked AGENTS.md block and Agentrof-owned project agents.
+- Preserve every canonical workflow gate and artifact.
+"""
+
+CLAUDE_TEAM_HOOKS = {
+    "hooks": {
+        "SessionStart": [{"hooks": [{
+            "type": "command",
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}\"/scripts/team_guard.py register",
+        }]}],
+        "PreToolUse": [{
+            "matcher": "Write|Edit|Bash",
+            "hooks": [{
+                "type": "command",
+                "command": "python3 \"${CLAUDE_PLUGIN_ROOT}\"/scripts/team_guard.py pre",
+            }],
+        }],
+    }
+}
+
+CODEX_TEAM_HOOKS = {
+    "hooks": {
+        "SessionStart": [{"hooks": [{
+            "type": "command",
+            "command": "python3 \"${PLUGIN_ROOT}\"/scripts/team_guard.py register",
+        }]}],
+        "PreToolUse": [{
+            "matcher": "Write|Edit|apply_patch|Bash",
+            "hooks": [{
+                "type": "command",
+                "command": "python3 \"${PLUGIN_ROOT}\"/scripts/team_guard.py pre",
+            }],
+        }],
+    }
+}
 
 AGENT_TEMPLATE = """---
 name: {name}
@@ -100,6 +149,9 @@ PLUGIN_JSON_TEMPLATE = {
 
 
 def codex_manifest(name: str, description: str) -> dict:
+    long_description = description
+    if name != PMO_PLUGIN:
+        long_description = f"Requires Project Management Office. {description}"
     return {
         "name": name,
         "version": "0.1.0",
@@ -112,7 +164,7 @@ def codex_manifest(name: str, description: str) -> dict:
         "interface": {
             "displayName": title_of(name),
             "shortDescription": description,
-            "longDescription": description,
+            "longDescription": long_description,
             "developerName": "Agentrof",
             "category": "Engineering",
             "capabilities": ["Read", "Write", "Interactive"],
@@ -161,13 +213,23 @@ def new_plugin(root: Path, name: str) -> None:
     manifest["name"] = name
     manifest["description"] = f"{title_of(name)} plugin."
     manifest["skills"] = "./skills/"
+    if name != PMO_PLUGIN:
+        manifest["dependencies"] = [PMO_PLUGIN]
     (claude_platform / "manifest.json").write_text(
         json.dumps(manifest, indent=2) + "\n", encoding="utf-8"
     )
-    (claude_platform / "host-contract.md").write_text(
-        "# Host Contract\n\n- Preserve every canonical workflow gate and artifact.\n",
-        encoding="utf-8",
+    claude_contract = (
+        CLAUDE_TEAM_CONTRACT if name != PMO_PLUGIN
+        else "# Host Contract\n\n- Preserve every canonical workflow gate and artifact.\n"
     )
+    (claude_platform / "host-contract.md").write_text(
+        claude_contract, encoding="utf-8")
+    if name != PMO_PLUGIN:
+        claude_hooks = claude_platform / "overlay" / "hooks" / "hooks.json"
+        claude_hooks.parent.mkdir(parents=True)
+        claude_hooks.write_text(
+            json.dumps(CLAUDE_TEAM_HOOKS, indent=2) + "\n", encoding="utf-8"
+        )
     # Registration is part of birth: a scaffolded-but-unregistered plugin
     # would fail the registration rule the moment someone registered it by
     # hand. One writer, one moment.
@@ -187,10 +249,26 @@ def new_plugin(root: Path, name: str) -> None:
         json.dumps(codex_manifest(name, manifest["description"]), indent=2) + "\n",
         encoding="utf-8",
     )
-    (codex_platform / "host-contract.md").write_text(
-        "# Host Contract\n\n- Preserve every canonical workflow gate and artifact.\n",
-        encoding="utf-8",
+    codex_contract = (
+        CODEX_TEAM_CONTRACT if name != PMO_PLUGIN
+        else "# Host Contract\n\n- Preserve every canonical workflow gate and artifact.\n"
     )
+    (codex_platform / "host-contract.md").write_text(
+        codex_contract, encoding="utf-8")
+    if name != PMO_PLUGIN:
+        codex_hooks = codex_platform / "overlay" / "hooks" / "hooks.json"
+        codex_hooks.parent.mkdir(parents=True)
+        codex_hooks.write_text(
+            json.dumps(CODEX_TEAM_HOOKS, indent=2) + "\n", encoding="utf-8"
+        )
+        agents_template = codex_platform / "overlay" / "templates" / "AGENTS.md"
+        agents_template.parent.mkdir(parents=True)
+        agents_template.write_text(
+            f"# {title_of(name)}\n\n"
+            "- Read {{workspace}}/memory/me.md before team work when it exists.\n"
+            "- Use only this team's setup-generated project agents.\n",
+            encoding="utf-8",
+        )
     codex_marketplace = json.loads(codex_marketplace_path.read_text(encoding="utf-8"))
     codex_marketplace.setdefault("plugins", []).append({
         "name": name,

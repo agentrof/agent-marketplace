@@ -5,6 +5,8 @@ import io
 import json
 import os
 import sqlite3
+import subprocess
+import sys
 import tempfile
 import unittest
 from contextlib import redirect_stderr, redirect_stdout
@@ -179,34 +181,14 @@ class PmoCliTests(unittest.TestCase):
             self.assertIn(table, tables)
         self.assertNotIn("runs", tables)
 
-    def test_refuses_newer_schema(self):
+    def test_refuses_noncurrent_schema(self):
         con = self.db()
         con.execute("PRAGMA user_version = 99")
         con.commit()
         con.close()
         code, _, err = run(["init-db"])
         self.assertEqual(code, 1)
-        self.assertIn("newer than this CLI", err)
-
-    def test_v2_to_v3_migration_adds_table_and_keeps_events(self):
-        """A pre-v3 database (no issue_candidates) migrates to v3: the table
-        arrives via the idempotent DDL and history is never rewritten."""
-        con = self.db()
-        con.execute("DROP TABLE issue_candidates")
-        con.execute("PRAGMA user_version = 2")
-        con.execute("INSERT INTO events (ts, actor, action, payload_json)"
-                    " VALUES ('2026-01-01T00:00:00+00:00', 'x', 'legacy', '{}')")
-        con.commit()
-        con.close()
-        code, _, err = run(["init-db"])
-        self.assertEqual(code, 0, err)
-        con = self.db()
-        self.assertEqual(con.execute("PRAGMA user_version").fetchone()[0], 3)
-        self.assertTrue(con.execute("SELECT name FROM sqlite_master WHERE"
-                                    " type='table' AND name='issue_candidates'"
-                                    ).fetchone())
-        self.assertTrue(con.execute("SELECT 1 FROM events WHERE action='legacy'"
-                                    ).fetchone())
+        self.assertIn("does not match this CLI", err)
 
     # -- issue candidates ------------------------------------------------------
 
@@ -255,7 +237,7 @@ class PmoCliTests(unittest.TestCase):
         self.assertEqual(code, 2)
 
     def test_issue_update_fields_and_dismiss(self):
-        run(["issue", "open", "--title", "old", "--kind", "defect"])
+        run(["issue", "open", "--title", "candidate", "--kind", "defect"])
         code, out, err = run(["issue", "update", "--issue", "IC-001",
                               "--title", "new", "--status", "dismissed"])
         self.assertEqual(code, 0, err)
@@ -472,8 +454,7 @@ class PmoCliTests(unittest.TestCase):
     # -- work-order lifecycle guards -------------------------------------------
 
     def test_wo_init_snapshots_directory_brief(self):
-        """An analysis-space brief (a directory) snapshots as a whole tree to
-        brief-snapshot/; a single-file brief keeps the legacy filename."""
+        """An analysis-space brief snapshots as a whole tree."""
         self.import_backlog()
         space = Path(self.tmp.name) / "erp"
         (space / "rules").mkdir(parents=True)
@@ -491,9 +472,8 @@ class PmoCliTests(unittest.TestCase):
         self.assertTrue((snap / "space.md").is_file())
         self.assertTrue((snap / "rules" / "core.md").is_file())
         self.assertTrue((snap / "_generated" / "registry.json").is_file())
-        self.assertFalse((order_dir / "brief.snapshot.md").exists())
 
-    def test_wo_init_snapshots_file_brief(self):
+    def test_wo_init_rejects_file_brief(self):
         self.import_backlog()
         brief = Path(self.tmp.name) / "brief.md"
         brief.write_text("# Brief\n", encoding="utf-8")
@@ -502,9 +482,9 @@ class PmoCliTests(unittest.TestCase):
                             "--work-order-key", "wo-file", "--request", "build it",
                             "--worktree", str(self.wt_main), "--story", "WP-01",
                             "--order-dir", str(order_dir), "--brief", str(brief)])
-        self.assertEqual(code, 0, err)
-        self.assertEqual((order_dir / "brief.snapshot.md").read_text(encoding="utf-8"),
-                         "# Brief\n")
+        self.assertEqual(code, 1)
+        self.assertIn("analysis-space directory", err)
+        self.assertFalse(order_dir.exists())
 
     def test_same_worktree_refused(self):
         self.import_backlog()
@@ -811,6 +791,35 @@ class PmoCliTests(unittest.TestCase):
                             "--role", "qa_engineer", "--phase", "start"])
         self.assertEqual(code, 0)
         self.assertIn("auto-opened", out)
+
+    def test_concurrent_task_starts_commit_without_loss(self):
+        self.import_backlog()
+        self.init_wo()
+        processes = []
+        for index in range(12):
+            processes.append(subprocess.Popen(
+                [sys.executable, str(CLI_PATH), "task", "touch",
+                 "--project-key", "shop", "--role", f"worker_{index}",
+                 "--phase", "start", "--session-id", f"session-{index}"],
+                cwd=self.wt_main,
+                env={**os.environ},
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+            ))
+        for process in processes:
+            _, err = process.communicate(timeout=40)
+            self.assertEqual(process.returncode, 0, err)
+        code, out, err = run([
+            "item", "list", "--project-key", "shop", "--kind", "task", "--json"
+        ])
+        self.assertEqual(code, 0, err)
+        tasks = json.loads(out)
+        self.assertEqual({task["role"] for task in tasks}, {
+            f"worker_{index}" for index in range(12)
+        })
+        code, _, err = run(["verify"])
+        self.assertEqual(code, 0, err)
 
     def test_attempt_lifecycle(self):
         """Every dispatch is one attempt row: start opens, stop closes with

@@ -12,7 +12,7 @@ Verbs:
   check            validate the vault (exit 0 clean/warnings, 1 errors)
   render-decisions render each decision tree's generated index
   stamp-decision   stamp a decision note's status (one clock, one write)
-  migrate          apply the deterministic legacy-to-vault rewrites
+  migrate          normalize mechanically repairable vault content
   reconcile-designations
                    the single writer of the designation map and its
                    ledger: change (or mint) values and transition every
@@ -118,10 +118,9 @@ NAV_DOC_TYPES = ("home", "moc")
 # map itself rather than any single note.
 DESIGNATION_CONFIG_REL = "config.json"
 
-# The retired-designation ledger, a machine-managed SIBLING of the map
-# (never nested inside it: older checkers drop non-string map values
-# silently, so nesting would blank the whole map for them). The
-# reconcile-designations verb is the single writer of both keys.
+# The designation-history ledger is a machine-managed sibling of the current
+# map so each structure keeps one value shape. The reconcile-designations verb
+# is the single writer of both keys.
 DESIGNATION_HISTORY_KEY = "doc_type_designation_history"
 
 
@@ -162,8 +161,8 @@ class Vault:
     # The consumer's rendered {kebab type -> designation} map, or None when
     # config.json is missing, unreadable, or omits the key (fail-closed).
     designations: dict | None = None
-    # The retired-designation ledger, {kebab type -> [prior values]};
-    # empty when config carries none (fail-soft: the ledger is memory
+    # The designation-history ledger, {kebab type -> [prior values]}; empty
+    # when config carries none (fail-soft: the ledger is memory
     # for the drift check and the reconcile strip, never a gate itself).
     designation_history: dict = field(default_factory=dict)
     # The kebab taxonomy types that must carry a designation (same source
@@ -557,10 +556,8 @@ def check_vault_layout(vault: Vault, findings: list[Finding]) -> None:
     }
     known_roots.update(p.rstrip("/").split("/")[0]
                        for p in policy.get("generated_subtrees", []))
-    # The vault root holds exactly the home note (plus any root-level
-    # policy-listed generated view); a retired scaffold file left behind
-    # by an older generation fires "outside layout" here, which is the
-    # enforced-deletion mechanism (migrate deletes the class).
+    # The vault root holds exactly the home note plus policy-listed
+    # root-level generated views. Every other root file is outside layout.
     known_files = {home}
     known_files.update(v for v in policy.get("generated_views", [])
                        if "/" not in v)
@@ -1052,7 +1049,7 @@ def check_map_coverage(vault: Vault, findings: list[Finding]) -> None:
 
 def check_alias_ownership(vault: Vault, findings: list[Finding]) -> None:
     """An id-shaped link alias must decorate a link to the id's owning
-    note: decision-tree ids resolve by filename, BA row ids through the
+    note: decision-tree ids resolve by frontmatter alias, BA row ids through the
     target space's generated registry. Absent or unknown = silent skip."""
     policy = vault.policy
     owners: dict[str, str] = {}
@@ -1346,50 +1343,39 @@ def tree_id_aliases(tree: dict, note: Note) -> list[str]:
 
 
 def decision_id(tree: dict, note: Note) -> str | None:
-    """The record id of a decision note. id_source 'alias' (the law)
-    reads the single id-shaped frontmatter alias; 'filename' is the
-    per-tree legacy escape hatch (prefix-number-slug.md names)."""
-    if tree.get("id_source", "alias") == "filename":
-        match = re.match(
-            rf"^{tree['id_prefix'].lower()}-(\d{{{tree['id_min_width']},}})"
-            rf"-[a-z0-9]+(?:-[a-z0-9]+)*\.md$",
-            note.rel.rsplit("/", 1)[-1])
-        return f"{tree['id_prefix']}-{match.group(1)}" if match else None
+    """The single id-shaped frontmatter alias owned by a decision note."""
     ids = tree_id_aliases(tree, note)
     return ids[0] if len(ids) == 1 else None
 
 
 def check_decision_records(vault: Vault, findings: list[Finding]) -> None:
     for tree_name, tree in sorted(vault.policy.get("decision_trees", {}).items()):
-        alias_tree = tree.get("id_source", "alias") == "alias"
         seen: dict[str, str] = {}
         notes = decision_notes(vault, tree)
         for note in notes:
             stem = note.rel.rsplit("/", 1)[-1][:-3]
-            if alias_tree and not (stem.endswith("-decision")
-                                   and len(stem) > len("-decision")):
+            if not (stem.endswith("-decision")
+                    and len(stem) > len("-decision")):
                 findings.append(Finding(
                     "error", note.rel, 1, "decision_records",
                     "filename does not match the decision note grammar",
                     "decision notes are <slug>-decision.md; the id lives"
                     " in the frontmatter alias, never in the filename"))
-            if alias_tree:
-                ids = tree_id_aliases(tree, note)
-                if len(ids) != 1:
-                    findings.append(Finding(
-                        "error", note.rel, 1, "decision_records",
-                        f"note carries {len(ids)} {tree['id_prefix']}-shaped"
-                        " aliases, expected exactly one",
-                        "the frontmatter alias is the id's single home;"
-                        " mint exactly one id alias per record"))
-                    continue
+            ids = tree_id_aliases(tree, note)
+            if len(ids) != 1:
+                findings.append(Finding(
+                    "error", note.rel, 1, "decision_records",
+                    f"note carries {len(ids)} {tree['id_prefix']}-shaped"
+                    " aliases, expected exactly one",
+                    "the frontmatter alias is the id's single home;"
+                    " mint exactly one id alias per record"))
+                continue
             rec_id = decision_id(tree, note)
             if rec_id is None:
                 findings.append(Finding(
                     "error", note.rel, 1, "decision_records",
                     f"note owns no {tree['id_prefix']} record id",
-                    "legacy filename-id trees name records"
-                    f" {tree['id_prefix'].lower()}-<number>-<slug>.md"))
+                    "mint exactly one matching id in frontmatter aliases"))
                 continue
             if rec_id in seen:
                 findings.append(Finding(
@@ -1891,7 +1877,7 @@ def cmd_stamp_decision(args, policy: dict) -> int:
 
 
 # ---------------------------------------------------------------------------
-# Migrate: the deterministic legacy-to-vault rewrites
+# Mechanical vault normalization
 # ---------------------------------------------------------------------------
 
 
@@ -2044,9 +2030,8 @@ def migrate_note(vault: Vault, note: Note, citation_columns: list[str],
 
 def deid_lead_decision(policy: dict, note: Note,
                        lines: list[str]) -> int:
-    """Strip a decision-tree note's legacy '<ID>: ' lead from the title
-    AND the first H1 in the same write (title law v2: labels are never
-    id-led; the id's single home is the frontmatter alias)."""
+    """Strip an invalid '<ID>: ' lead from the title and first H1 in one
+    write; the id's single home is the frontmatter alias."""
     tree = note_decision_tree(policy, note.rel)
     if tree is None:
         return 0
@@ -2183,8 +2168,8 @@ def fix_table_pipes(line: str) -> str:
     return WIKILINK_RE.sub(fix, line)
 
 
-# Doc-ref keys whose contract form is a BLOCK LIST (single target = one
-# item); a scalar value is the migrate class that converts it.
+# Doc-ref keys whose contract form is a block list. The normalization verb
+# converts a scalar target into a one-item list.
 LIST_REF_KEYS = ("governs", "verifies")
 
 
@@ -2389,46 +2374,6 @@ def payload_reconcile(root: Path, policy: dict,
     return changed
 
 
-def retired_reconcile(root: Path, policy: dict, skip: set) -> int:
-    """Delete the retired scaffold notes and strip home's links to them.
-    Deterministic and IDEMPOTENT, and (payload_reconcile pattern) runs
-    regardless of --scope inside cmd_migrate: a scoped gate on an older
-    tree must never deadlock on root files it cannot repair."""
-    maps_dir = policy["maps_dir"]
-    retired = ["backlog.md", "quality-ledger.md", "start-here.md",
-               f"{maps_dir}/delivery.md"]
-    removed = 0
-    for rel in retired:
-        if rel in skip:
-            continue
-        path = root / rel
-        if path.is_file():
-            path.unlink()
-            removed += 1
-            print(f"vault_check: deleted retired file {rel}")
-    home_rel = policy["home_file"]
-    home = root / home_rel
-    if home.is_file() and home_rel not in skip:
-        stems = {r[:-3] for r in retired}
-        text = home.read_text(encoding="utf-8")
-        out = []
-        dirty = False
-        for line in text.splitlines():
-            targets = [split_wikilink(m.group("inner"))[0]
-                       for m in WIKILINK_RE.finditer(line)]
-            if targets and all(t in stems for t in targets):
-                dirty = True
-                continue
-            out.append(line)
-        if dirty:
-            home.write_text("\n".join(out)
-                            + ("\n" if text.endswith("\n") else ""),
-                            encoding="utf-8")
-            removed += 1
-            print(f"vault_check: stripped retired links from {home_rel}")
-    return removed
-
-
 def cmd_migrate(args, policy: dict) -> int:
     root = args.vault.resolve()
     vault = build_vault(root, policy)
@@ -2473,39 +2418,29 @@ def cmd_migrate(args, policy: dict) -> int:
             total_rewrites += rewrites
             print(f"vault_check: migrated {note.rel} ({rewrites} rewrites)"
                   + (" (dry run)" if args.dry_run else ""))
-    retired = 0 if args.dry_run else retired_reconcile(root, policy, skip)
     reconciled = (0 if args.dry_run
                   else payload_reconcile(root, policy, args.payload))
     print(f"vault_check: migrate touched {touched} notes,"
           f" {total_rewrites} rewrites;"
-          f" {retired} retired surface(s) cleared;"
           f" {reconciled} payload file(s) reconciled;"
           f" {total_manual} link(s) left for stewardship"
           + (" (dry run: nothing written)" if args.dry_run else ""))
     return 0
 
 
-# Review-round filenames the inverted --rename migrates FROM: the v6 plain
-# forms (round-N.md, space-round-N.md) and the v4/v5 chain-prefixed forms
-# both map to the -review target. The chain prefix is OPTIONAL; the \.md
-# anchor sits right after the digits, so an already-suffixed round-N-review
-# name never matches (a second run is a no-op). The two are applied per node
-# (space-round at the root, round at a domain), so a domain-round pattern
-# can never claim a space-round name. V5_DEC_RE strips id-prefixed decisions.
-ROUND_RE = re.compile(r"^(?:[a-z0-9]+(?:-[a-z0-9]+)*-)?round-(\d+)\.md$")
-SPACE_ROUND_RE = re.compile(
+# Nonconforming review names map to the schema-defined -review target. The
+# patterns are node-scoped and never match an already compliant filename.
+REVIEW_ROUND_RE = re.compile(r"^(?:[a-z0-9]+(?:-[a-z0-9]+)*-)?round-(\d+)\.md$")
+SPACE_REVIEW_ROUND_RE = re.compile(
     r"^(?:[a-z0-9]+(?:-[a-z0-9]+)*-)?space-round-(\d+)\.md$")
-V5_DEC_RE = re.compile(
+ID_PREFIXED_DECISION_RE = re.compile(
     r"^dec-[a-z][a-z0-9]{1,3}-\d{3,}-([a-z0-9]+(?:-[a-z0-9]+)*)\.md$")
 
 
 def build_rename_map(vault: Vault, policy: dict,
                      schema: dict) -> tuple[dict, list]:
-    """Inverted (v6) rename plan: v5 chain-qualified named files, chain
-    round files, id-prefixed decision notes and bare typed-content files
-    become plain, type-suffixed names. Forward-only: compliant names are
-    skipped; the decision skip gate is the filename-suffix test, NEVER
-    the record id (both generations carry the id alias)."""
+    """Build schema-derived corrections for nonconforming filenames.
+    Compliant names are skipped; record ids remain in frontmatter aliases."""
     renames: dict[str, str] = {}
     manual: list[str] = []
     ch_folder = schema["doc_types"]["challenge_record"]["location"]["folder"]
@@ -2539,7 +2474,7 @@ def build_rename_map(vault: Vault, policy: dict,
                         continue
                     plain = loc["name"]
                     if name == plain:
-                        break  # already v6
+                        break  # already compliant
                     if not name.endswith(f"-{plain}"):
                         continue
                     if loc.get("root_only") and node_rel:
@@ -2555,11 +2490,12 @@ def build_rename_map(vault: Vault, policy: dict,
                 # schema-driven and already-suffixed names never re-match.
                 name = rest[1]
                 if node_rel:
-                    m = None if SPACE_ROUND_RE.match(name) else ROUND_RE.match(name)
+                    m = (None if SPACE_REVIEW_ROUND_RE.match(name)
+                         else REVIEW_ROUND_RE.match(name))
                     new_name = (ba_compile.round_file_name(
                         schema, "domain", int(m.group(1))) if m else None)
                 else:
-                    m = SPACE_ROUND_RE.match(name)
+                    m = SPACE_REVIEW_ROUND_RE.match(name)
                     new_name = (ba_compile.round_file_name(
                         schema, "space", int(m.group(1))) if m else None)
                 if new_name and new_name != name:
@@ -2576,20 +2512,20 @@ def build_rename_map(vault: Vault, policy: dict,
                         break
                     stem = name[:-3]
                     if stem.endswith(f"-{suffix}"):
-                        break  # already v6 (the suffix gate, never the id)
+                        break  # already compliant
                     if doc_type == "decision":
-                        m = V5_DEC_RE.match(name)
+                        m = ID_PREFIXED_DECISION_RE.match(name)
                         if m:
                             stem = m.group(1)
                     renames[rel] = f"{node_prefix}{folder}/{stem}-{suffix}.md"
                     break
     for tree in policy.get("decision_trees", {}).values():
-        # Flat (non-glob) alias-id trees: v5 prefix-number-slug names
-        # lose the id prefix and gain the type suffix.
-        if tree_is_glob(tree) or tree.get("id_source", "alias") != "alias":
+        # Flat decision trees move ids out of filenames and retain them in
+        # frontmatter aliases.
+        if tree_is_glob(tree):
             continue
         prefix = tree["path"].rstrip("/") + "/"
-        v5_re = re.compile(
+        id_prefixed_re = re.compile(
             rf"^{tree['id_prefix'].lower()}-\d{{{tree['id_min_width']},}}"
             rf"-([a-z0-9]+(?:-[a-z0-9]+)*)\.md$")
         for rel in sorted(vault.index):
@@ -2598,7 +2534,7 @@ def build_rename_map(vault: Vault, policy: dict,
             name = rel[len(prefix):]
             if "/" in name or name[:-3].endswith("-decision"):
                 continue
-            m = v5_re.match(name)
+            m = id_prefixed_re.match(name)
             if m:
                 renames[rel] = f"{prefix}{m.group(1)}-decision.md"
     return renames, manual
@@ -2682,8 +2618,8 @@ def migrate_rename(args, policy: dict, vault: Vault, skip: set) -> int:
                   f" {len(blocked)} blocked, {len(manual)} manual"
                   + (" (dry run)" if args.dry_run else ""))
         return 0
-    # Referrer rewrite across the WHOLE vault first (files still at their
-    # old paths), then the renames; one operation, either scope.
+    # Referrer rewrite across the whole vault happens while source paths still
+    # exist, then the filesystem renames land in the same operation.
     stem_map = {old[:-3]: renames[old][:-3] for old in renames}
     pattern = re.compile(
         r"\[\[(" + "|".join(re.escape(s) for s in sorted(stem_map)) + r")"

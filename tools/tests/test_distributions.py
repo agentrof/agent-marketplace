@@ -31,6 +31,26 @@ generate = load_generator()
 
 
 class DistributionContractTests(unittest.TestCase):
+    def test_every_team_receives_shared_runtime_and_pmo_registry(self):
+        teams = sorted(
+            path.name for path in (REPO / "plugins").iterdir()
+            if path.is_dir() and path.name != "project-management-office"
+        )
+        for team in teams:
+            for host in ("claude", "codex"):
+                scripts = REPO / "dist" / host / team / "scripts"
+                self.assertTrue((scripts / "team_guard.py").is_file())
+            self.assertTrue((
+                REPO / "dist" / "codex" / team / "scripts"
+                / "generate_codex_project.py"
+            ).is_file())
+        for host in ("claude", "codex"):
+            registry = json.loads((
+                REPO / "dist" / host / "project-management-office"
+                / "team_plugins.json"
+            ).read_text(encoding="utf-8"))
+            self.assertEqual(registry, {"schema_version": 1, "plugins": teams})
+
     def test_marketplace_manifest_versions_policies_and_skill_visibility(self):
         marketplace = json.loads(
             (REPO / ".agents" / "plugins" / "marketplace.json").read_text(
@@ -98,6 +118,25 @@ class DistributionContractTests(unittest.TestCase):
             [],
         )
 
+    def test_canonical_source_rejects_unknown_top_level_entries(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            plugin = root / "plugins" / "sample-team"
+            plugin.mkdir(parents=True)
+            (plugin / "unexpected-surface").mkdir()
+            with self.assertRaisesRegex(
+                    ValueError, "unsupported canonical top-level entry"):
+                build_distributions.validate_canonical(root)
+
+    def test_repository_rejects_unknown_top_level_directory(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "plugins").mkdir()
+            (root / "unexpected-product-surface").mkdir()
+            with self.assertRaisesRegex(
+                    ValueError, "unsupported repository top-level directory"):
+                build_distributions.validate_canonical(root)
+
     def test_canonical_payload_is_present_on_both_hosts(self):
         for source in sorted((REPO / "plugins").iterdir()):
             if not source.is_dir():
@@ -159,6 +198,10 @@ class CodexProjectGeneratorTests(unittest.TestCase):
         self.plugin = root / "plugin"
         (self.plugin / "agents").mkdir(parents=True)
         (self.plugin / "templates").mkdir()
+        (self.plugin / ".codex-plugin").mkdir()
+        (self.plugin / ".codex-plugin" / "plugin.json").write_text(
+            json.dumps({"name": "sample-team"}), encoding="utf-8"
+        )
         (self.plugin / "templates" / "AGENTS.md").write_text(
             "# Team\n\nRead {{workspace}}/memory/me.md.\n", encoding="utf-8")
         for name, reasoning, tools in (
@@ -202,8 +245,9 @@ class CodexProjectGeneratorTests(unittest.TestCase):
     def test_only_owned_stale_files_are_removed(self):
         generate.materialize(self.project, self.plugin, "workspace")
         agents = self.project / ".codex" / "agents"
-        stale = agents / "team-architect.toml"
-        stale.write_text(generate.OWNER + "\nname = \"team-architect\"\n",
+        stale = agents / "stale-owned-agent.toml"
+        stale.write_text(generate.owner("sample-team")
+                         + "\nname = \"stale-owned-agent\"\n",
                          encoding="utf-8")
         foreign = agents / "foreign.toml"
         foreign.write_text('name = "foreign"\n', encoding="utf-8")
@@ -221,6 +265,52 @@ class CodexProjectGeneratorTests(unittest.TestCase):
             generate.materialize(self.project, self.plugin, "workspace")
         self.assertEqual(collision.read_text(encoding="utf-8"), 'name = "mine"\n')
         self.assertFalse((agents / "developer.toml").exists())
+
+    def snapshot(self):
+        return {
+            path.relative_to(self.project).as_posix(): (
+                "dir" if path.is_dir() else path.read_bytes()
+            )
+            for path in sorted(self.project.rglob("*"))
+        }
+
+    def test_incomplete_agents_block_aborts_before_any_write(self):
+        (self.project / "AGENTS.md").write_text(
+            "# User\n\n<!-- agentrof:sample-team:codex:start -->\nbroken\n",
+            encoding="utf-8",
+        )
+        before = self.snapshot()
+        with self.assertRaisesRegex(ValueError, "incomplete Agentrof managed block"):
+            generate.materialize(self.project, self.plugin, "workspace")
+        self.assertEqual(self.snapshot(), before)
+
+    def test_writer_failure_rolls_back_every_change(self):
+        before = self.snapshot()
+        calls = 0
+
+        def fail_second(path, content):
+            nonlocal calls
+            calls += 1
+            if calls == 2:
+                raise OSError("injected write failure")
+            generate.atomic_write(path, content)
+
+        with self.assertRaisesRegex(OSError, "injected write failure"):
+            generate.materialize(
+                self.project, self.plugin, "workspace", writer=fail_second
+            )
+        self.assertEqual(self.snapshot(), before)
+
+    def test_other_team_ownership_fails_closed(self):
+        workspace = self.project / "workspace"
+        workspace.mkdir()
+        (workspace / "config.json").write_text(
+            json.dumps({"managed_by": "another-team"}), encoding="utf-8"
+        )
+        before = self.snapshot()
+        with self.assertRaisesRegex(ValueError, "another-team"):
+            generate.materialize(self.project, self.plugin, "workspace")
+        self.assertEqual(self.snapshot(), before)
 
 
 if __name__ == "__main__":

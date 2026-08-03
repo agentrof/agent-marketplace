@@ -7,7 +7,7 @@ The solution tree's contract. One living tree per project at workspace/docs/solu
 | path | owns | mandated sections |
 |---|---|---|
 | landscape.md | the one living truth: current and target landscape, the transition between them, components with build-buy-integrate verdicts, topology, method choices | Summary, Current, Target, Transition, Components |
-| decisions/sd-###-<kebab-slug>.md | one solution decision per note: alternatives, tradeoffs, exit path, sustainability judgment, revisit trigger; supersede, never edit | frontmatter contract in the skeleton below |
+| decisions/<kebab-slug>-decision.md | one solution decision per note: alternatives, tradeoffs, exit path, sustainability judgment, revisit trigger; supersede, never edit | frontmatter contract in the skeleton below |
 | decision-log.md | GENERATED index of decisions/ (marker first line; rendered, never authored) | none: rendered |
 | engagements/<slug>.md | one study per invocation topic: framing, options matrix, verdict | Summary, Framing, Options, Verdict |
 | reviews/<slug>-round-<n>-review.md | one challenge round: findings table plus dispositions | Summary, Findings |
@@ -21,7 +21,7 @@ maps/solution-design.md in the same session.
 - engagements/<slug>.md: `# <Title>`, `## Summary` (first body line `Status: open`), `## Framing`, `## Options`, `## Verdict`.
 - reviews/<slug>-round-<n>-review.md: `# Round <n>: <slug>`, `## Summary`, `## Findings` (table: lens, finding, severity, disposition).
 - decision-log.md has NO skeleton: the first `render-decisions` births it.
-- decisions/sd-###-<kebab-slug>.md, the decision-note skeleton (empty
+- decisions/<kebab-slug>-decision.md, the decision-note skeleton (empty
   supersedes/superseded_by keys are omitted entirely; decided_at exists
   only once stamp-decision writes it):
 
@@ -41,7 +41,7 @@ aliases:
   - SD-007
 ---
 
-# SD-007: <title>
+# <title>
 
 <Y-statement or full record body>
 
@@ -65,8 +65,8 @@ Greenfield first run: Current states "Nothing built yet" plus any inherited cons
 ## decisions/ and the generated index
 
 - Records follow the software-architecture skill's decision-records mechanics: Y-statement for routine calls, full record for structural ones; superseded notes stay in place with a pointer forward, never edited.
-- One note per decision at decisions/sd-###-<kebab-slug>.md (3+ digits, zero-padded), H1 `SD-007: <title>`, alias `SD-007`. Identity is the file path plus the alias; the old bare-id-heading rule (`## SD-001` inside decision-log.md) is retired.
-- Id allocation: the next id is scan-max+1 over the decisions/ filenames, computed immediately before the note is born. Ids are assigned only at note birth; engagement drafts cite `pending` until then. Duplicate id numbers are caught at every gate, and render-decisions refuses to render over them.
+- One note per decision at decisions/<kebab-slug>-decision.md, with a title-matching H1 and one `SD-###` frontmatter alias. The id never enters the filename, title or H1.
+- Id allocation: the next id is scan-max+1 over the `SD-###` aliases, computed immediately before the note is born. Ids are assigned only at note birth; engagement drafts cite `pending` until then. Duplicate id numbers are caught at every gate, and render-decisions refuses to render over them.
 - Lifecycle: notes are born at verdict-accept with `status: proposed`; the gate's approve flips them to `accepted`, request-changes to `rejected` or superseded. Every status change goes ONLY through the vault checker's stamp-decision verb, which writes status, the UTC decided_at, the tag mirror and both ends of the supersede chain in one operation; a hand-typed stamp is guard-denied. The fold-in finalizes statuses; it never first-writes notes.
 - Solution notes carry, as first-class fields: the exit path, the sustainability judgment, the requirement ids and budget block-ids they rest on (so "which decisions rest on this requirement" is answerable from the note alone), and a revisit trigger: one named condition that reopens the decision (a cited budget or scale threshold crossed, a pricing or licensing term changed, a date reached). A note with no condition that could invalidate it states why.
 - decision-log.md is the GENERATED index (marker first line), rendered by `"$RUN" run "$TEAM" scripts/vault_check.py render-decisions --vault workspace/docs` (dispatcher per the develop flow's state contract) after any decision write; it is never authored or hand-edited. Session resume, the gate and the staleness sweep read only this index; a note it misses is invisible, and a re-render heals it.
@@ -92,13 +92,13 @@ Every cross-document citation is a vault-absolute wikilink with the bare id or a
 - A decision citation in prose aliases the id:
 
 ```markdown
-minted [[solution-design/decisions/sd-007-order-events|SD-007]]
+minted [[solution-design/decisions/order-event-distribution-decision|SD-007]]
 ```
 
 - The landscape's Components rows link both the owning decision and the engagement study; Engagements index and Target delta cells cite the same way. In any table cell the alias pipe is escaped:
 
 ```markdown
-| event distribution | integrate | [[solution-design/decisions/sd-007-order-events\|SD-007]] | [[solution-design/engagements/order-event-distribution\|order-event-distribution]] | decided |
+| event distribution | integrate | [[solution-design/decisions/order-event-distribution-decision\|SD-007]] | [[solution-design/engagements/order-event-distribution\|order-event-distribution]] | decided |
 ```
 
 - Every decision note links back to the engagement that minted it (the quoted `engagement` frontmatter wikilink) and forward through the quoted supersede-chain keys when a successor exists; stamp-decision writes both ends.

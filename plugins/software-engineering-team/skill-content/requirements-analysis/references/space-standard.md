@@ -26,7 +26,8 @@ machine-checked is not a rule.
   layer labels the graph. Typed content carries its type as the
   schema's English filename suffix (filename_suffix per doc type); the
   compiler refuses a typed file without its suffix, and the vault
-  checker's migrate --rename heals legacy names and rewrites referrers.
+  checker's migrate --rename repairs nonconforming names and rewrites
+  referrers.
 - Content folders inside any node, created only when non-empty:
   processes/, entities/, rules/, acceptance/, decisions/, reviews/.
 - Cross-domain concerns live ONLY at the root, one home each:
@@ -106,7 +107,7 @@ may change them).
 
 ## The distributed brief contract
 
-The old six-section brief did not disappear; it distributed:
+The brief contract is distributed across the space:
 
 | brief section | new home |
 |---|---|
@@ -241,14 +242,14 @@ space-level challenge round when child domains exist.
 - The vault checker runs at every gate alongside the compiler; frozen
   docs are passed as repeated --exclude flags and surface as named
   warnings, never silently skipped.
-- Deterministic legacy rewrites go through the vault checker's migrate
+- Deterministic format repairs go through the vault checker's migrate
   verb. Migrate is format-only and sanctioned on approved docs: it never
   touches status and never stamps.
 
 ## Rename and restructure runbook
 
 1. Renames are grammar work, not grep work: run the vault checker's
-   `migrate --rename --dry-run --json` for the plan (each old -> new
+   `migrate --rename --dry-run --json` for the plan (each source -> target
    pair with its referrer count; renames whose referrers include a
    frozen path are listed as blocked_by_frozen_referrer and stay
    deferred until release).
@@ -258,7 +259,7 @@ space-level challenge round when child domains exist.
 3. Moving a doc between nodes is still a manual move first: relocate
    the file, then run --rename so the filename follows the grammar
    and the referrers follow the file. Re-mint its ids under the new
-   code (retire the old rows in place with a superseded_by note;
+   code (supersede the prior rows in place with a superseded_by note;
    numbers are never reused) and update citations.
 4. Run check + render plus the vault check; a dead wikilink or code
    mismatch fails loudly. Re-render regenerates the registry so

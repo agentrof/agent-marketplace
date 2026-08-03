@@ -7,14 +7,12 @@ exposure: entry
 # Organize Docs
 
 Reorganize the consuming project's docs vault as one deliverable: names,
-titles, links, maps, nav and payload brought back to the vault law in a
-single owner-gated pass. Deterministic rewrites run first through the
-checker's verbs; judgment work happens in-session under the per-write
-hook; nothing here ever changes what a document claims.
+titles, links, maps, nav and payload brought back to the vault law in a single
+owner-gated pass. Deterministic rewrites run first through the checker's verbs;
+judgment work happens in-session under the per-write hook; nothing here ever changes what a document claims.
 
 ## When to Use
-- The owner asks for a full pass over the vault: naming, graph labels,
-  maps, navigation or payload have degraded beyond one subtree.
+- The owner asks for a full pass over the vault: naming, graph labels, maps, navigation or payload have degraded beyond one subtree.
 - The setup entry found pre-existing content findings and routed them
   here as vault degradation.
 - NOT for scoped repair: each docs-producing entry's stewardship still
@@ -45,8 +43,8 @@ hook; nothing here ever changes what a document claims.
      workspace/docs --json for the finding inventory (designation_drift
      findings inventory stale or double-suffixed titles).
    - "$RUN" run "$TEAM" scripts/vault_check.py migrate --vault
-     workspace/docs --rename --dry-run --json for the rename plan: old
-     and new names, per-rename referrer counts, the manual list and the
+     workspace/docs --rename --dry-run --json for the rename plan: source
+     and target names, per-rename referrer counts, the manual list and the
      blocked entries (blocked_by_frozen_referrer) with their blocking
      paths.
    - When the config map exists, a no-op-change designation dry run
@@ -79,10 +77,7 @@ hook; nothing here ever changes what a document claims.
       scalar doc-ref keys, nav hub retargeting, de-id-leading of
       decision titles and H1s, appending each typed title's missing
       designation and its H1 (challenge records excepted, retitled by
-      judgment), deletion of notes the law has retired
-      (legacy scaffold and delivery-view files, with home's links to
-      them stripped; runs unconditionally, even under --scope) and
-      payload reconciliation. Then the approved batch via
+      judgment), and payload reconciliation. Then the approved batch via
       migrate --vault workspace/docs --rename: every referrer is
       rewritten vault-wide in the same operation.
    b. Re-render every generated surface:

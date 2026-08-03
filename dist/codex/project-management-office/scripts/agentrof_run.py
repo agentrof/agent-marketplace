@@ -24,10 +24,12 @@ import os
 import subprocess
 import sys
 import tempfile
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 
 PLUGIN_ROOTS_NAME = "plugin_roots.json"
+PLUGIN_ROOTS_LOCK = ".plugin_roots.lock"
 
 
 def data_dir() -> Path:
@@ -47,13 +49,54 @@ def load_registry() -> dict:
         return {}
 
 
-def save_registry(registry: dict) -> None:
+def save_registry_unlocked(registry: dict) -> None:
     registry_path().parent.mkdir(parents=True, exist_ok=True)
     fd, tmp = tempfile.mkstemp(dir=str(registry_path().parent),
                                prefix=".plugin_roots.")
     with os.fdopen(fd, "w", encoding="utf-8") as fh:
         fh.write(json.dumps(registry, indent=2, sort_keys=True) + "\n")
     os.replace(tmp, registry_path())
+
+
+class RegistryLock:
+    def __init__(self, timeout: float = 5.0):
+        self.path = data_dir() / PLUGIN_ROOTS_LOCK
+        self.timeout = timeout
+
+    def __enter__(self):
+        data_dir().mkdir(parents=True, exist_ok=True)
+        deadline = time.monotonic() + self.timeout
+        while True:
+            try:
+                self.path.mkdir()
+                return self
+            except FileExistsError:
+                try:
+                    if time.time() - self.path.stat().st_mtime > 30:
+                        self.path.rmdir()
+                        continue
+                except OSError:
+                    pass
+                if time.monotonic() >= deadline:
+                    raise TimeoutError("timed out waiting for plugin registry lock")
+                time.sleep(0.01)
+
+    def __exit__(self, exc_type, exc, tb):
+        try:
+            self.path.rmdir()
+        except OSError:
+            pass
+        return False
+
+
+def update_registry(mutator) -> dict:
+    with RegistryLock():
+        registry = load_registry()
+        if not isinstance(registry, dict):
+            registry = {}
+        mutator(registry)
+        save_registry_unlocked(registry)
+        return registry
 
 
 def fail(message: str) -> int:
@@ -90,12 +133,16 @@ def resolve_root(plugin: str) -> Path | None:
         return None
     on_disk = manifest_version(root)
     if on_disk and on_disk != entry.get("version", ""):
-        entry["version"] = on_disk
-        entry["registered_at"] = datetime.now(timezone.utc).isoformat(
-            timespec="seconds")
-        registry["plugins"][plugin] = entry
         try:
-            save_registry(registry)
+            def refresh(current):
+                latest = (current.get("plugins") or {}).get(plugin)
+                if not isinstance(latest, dict):
+                    return
+                latest["version"] = on_disk
+                latest["registered_at"] = datetime.now(timezone.utc).isoformat(
+                    timespec="seconds")
+                current["plugins"][plugin] = latest
+            update_registry(refresh)
         except Exception:
             pass
     return root
@@ -144,16 +191,19 @@ def cmd_register(args) -> int:
     root = Path(args.root).resolve()
     if not root.is_dir():
         return fail(f"root is not a directory: {root}")
-    registry = load_registry()
-    registry.setdefault("schema_version", 1)
-    plugins = registry.setdefault("plugins", {})
-    plugins[args.plugin] = {
-        "root": str(root),
-        "version": manifest_version(root),
-        "registered_at": datetime.now(timezone.utc).isoformat(
-            timespec="seconds"),
-    }
-    save_registry(registry)
+    def register(registry):
+        registry.setdefault("schema_version", 1)
+        plugins = registry.setdefault("plugins", {})
+        plugins[args.plugin] = {
+            "root": str(root),
+            "version": manifest_version(root),
+            "registered_at": datetime.now(timezone.utc).isoformat(
+                timespec="seconds"),
+        }
+    try:
+        update_registry(register)
+    except (OSError, TimeoutError) as exc:
+        return fail(f"could not update plugin registry: {exc}")
     print(f"agentrof: registered {args.plugin} at {root}")
     return 0
 

@@ -14,9 +14,10 @@ Every team runs on Project Management Office (`project-management-office`):
 a shared operations backbone holding one central database for projects,
 epics, stories, machine-generated tasks, work-order state, findings and audit
 events, written only through its CLI and recorded deterministically via
-hooks. Claude installs this backbone through the team dependency; the Codex
-marketplace installs it by default. The `control-tower` entry starts Control
-Tower and replies with the running URL.
+hooks. Claude installs this backbone through the team dependency. Codex users
+install PMO explicitly before a team because Codex does not currently resolve
+plugin-to-plugin dependencies. The `control-tower` entry starts Control Tower
+and replies with the running URL.
 
 ## Catalog
 
@@ -65,6 +66,9 @@ role in snake_case:
 
 The `project-management-office` backbone installs automatically with the team (a plugin
 dependency); no separate step.
+Every Claude team entry still requires PMO's ready session signal. A disabled
+dependency or failed PMO hook bootstrap stops the entry without changing files
+or project state and reports the recovery step.
 
 Then, inside your project:
 
@@ -79,20 +83,29 @@ detect, and points you at the next step.
 
 ```text
 codex plugin marketplace add agentrof/agent-marketplace
+codex plugin add project-management-office@agent-marketplace
 codex plugin add software-engineering-team@agent-marketplace
 ```
 
-Start a new task/session, open `/hooks`, inspect and trust both Agentrof
-plugins, and start another task if Codex asks for a reload. Then select
+Start a new task/session, open `/hooks`, inspect and trust Project Management
+Office and Software Engineering Team, and start another task if Codex asks for
+a reload. Then select
 `software-engineering-team:setup` in the App skill picker or CLI `/skills`
 picker (or invoke `$software-engineering-team:setup`). Setup generates the managed Agentrof block in
 the project's `AGENTS.md` and native `.codex/agents/*.toml` role definitions.
 Those agents become discoverable at the next task/session boundary.
 
-The marketplace marks PMO for default installation. Codex App applies that
-policy; current CLI builds may show it as available without materializing it
-when a local marketplace is added. If it is absent, setup stops safely and
-prints the exact recovery command:
+One delivery team owns a project. PMO is shared infrastructure, but setup
+refuses a second team's workspace or project-agent ownership before changing
+files. This keeps the same bare agent ids on Claude and Codex without collisions
+inside the project's `.codex/agents/` directory.
+
+The PMO command is required even though the marketplace marks it
+`INSTALLED_BY_DEFAULT`; that policy is retained for marketplace hosts that
+apply it, but the install contract never relies on it. Every team entry checks
+for a ready PMO before mutation. If PMO is missing, disabled, untrusted, or
+failed to bootstrap, the entry stops without changing files or project state
+and prints the matching recovery step.
 
 ```text
 codex plugin add project-management-office@agent-marketplace

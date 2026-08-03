@@ -75,6 +75,18 @@ REPOSITORY_DIRECTORIES = {
     "tools",
 }
 SOURCE_IGNORES = {"agents"}
+PYTHON_CACHE_SUFFIXES = {".pyc", ".pyo"}
+
+
+def is_python_cache(path: Path) -> bool:
+    return "__pycache__" in path.parts or path.suffix in PYTHON_CACHE_SUFFIXES
+
+
+def ignore_python_cache(_directory: str, names: list[str]) -> set[str]:
+    return {
+        name for name in names
+        if name == "__pycache__" or Path(name).suffix in PYTHON_CACHE_SUFFIXES
+    }
 
 
 def title_of(name: str) -> str:
@@ -188,22 +200,28 @@ def claude_agent(source: Path) -> str:
 
 def copy_canonical(source: Path, target: Path) -> None:
     def ignore(directory: str, names: list[str]) -> set[str]:
+        ignored = ignore_python_cache(directory, names)
         if Path(directory) == source:
-            return {name for name in names if name in SOURCE_IGNORES}
-        return set()
+            ignored.update(name for name in names if name in SOURCE_IGNORES)
+        return ignored
 
     shutil.copytree(source, target, ignore=ignore)
 
 
 def copy_overlay(root: Path, target: Path) -> None:
     if root.is_dir():
-        shutil.copytree(root, target, dirs_exist_ok=True)
+        shutil.copytree(
+            root, target, dirs_exist_ok=True, ignore=ignore_python_cache
+        )
 
 
 def apply_appends(root: Path, target: Path) -> None:
     if not root.is_dir():
         return
-    for fragment in sorted(path for path in root.rglob("*") if path.is_file()):
+    for fragment in sorted(
+        path for path in root.rglob("*")
+        if path.is_file() and not is_python_cache(path)
+    ):
         relative = fragment.relative_to(root)
         destination = target / relative
         if not destination.is_file():
@@ -246,7 +264,10 @@ def generate_agents(source: Path, target: Path, host: str) -> None:
 
 
 def normalize_generated_text(root: Path) -> None:
-    for path in sorted(candidate for candidate in root.rglob("*") if candidate.is_file()):
+    for path in sorted(
+        candidate for candidate in root.rglob("*")
+        if candidate.is_file() and not is_python_cache(candidate)
+    ):
         data = path.read_bytes()
         if b"\0" in data:
             continue
@@ -306,6 +327,8 @@ def validate_canonical(root: Path) -> None:
             )
     for source in sorted(path for path in (root / "plugins").iterdir() if path.is_dir()):
         for child in sorted(source.iterdir()):
+            if is_python_cache(child):
+                continue
             if child.name not in CANONICAL_COMPONENTS:
                 problems.append(
                     f"{child}: unsupported canonical top-level entry; "
@@ -322,7 +345,10 @@ def validate_canonical(root: Path) -> None:
                 problems.append(f"{agent}: reasoning must be high/medium/low/inherit")
             if "model" in fields:
                 problems.append(f"{agent}: canonical agents use reasoning, not model")
-        for path in sorted(candidate for candidate in source.rglob("*") if candidate.is_file()):
+        for path in sorted(
+            candidate for candidate in source.rglob("*")
+            if candidate.is_file() and not is_python_cache(candidate)
+        ):
             try:
                 text = path.read_text(encoding="utf-8")
             except (UnicodeDecodeError, OSError):
@@ -367,12 +393,20 @@ def compare_dirs(expected: Path, actual: Path) -> list[str]:
     problems: list[str] = []
     comparison = filecmp.dircmp(expected, actual)
     for name in comparison.left_only:
+        if is_python_cache(Path(name)):
+            continue
         problems.append(f"missing from generated tree: {actual / name}")
     for name in comparison.right_only:
+        if is_python_cache(Path(name)):
+            continue
         problems.append(f"stale in generated tree: {actual / name}")
     for name in comparison.diff_files + comparison.funny_files:
+        if is_python_cache(Path(name)):
+            continue
         problems.append(f"out of sync: {actual / name}")
     for name in comparison.common_dirs:
+        if is_python_cache(Path(name)):
+            continue
         problems.extend(compare_dirs(expected / name, actual / name))
     return problems
 

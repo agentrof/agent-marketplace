@@ -118,6 +118,33 @@ class DistributionContractTests(unittest.TestCase):
             [],
         )
 
+    def test_python_runtime_caches_never_enter_or_dirty_distributions(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            source = root / "source"
+            overlay = root / "overlay"
+            target = root / "target"
+            (source / "scripts" / "__pycache__").mkdir(parents=True)
+            (source / "scripts" / "tool.py").write_text("print(1)\n")
+            (source / "scripts" / "__pycache__" / "tool.pyc").write_bytes(b"cache")
+            build_distributions.copy_canonical(source, target)
+            self.assertTrue((target / "scripts" / "tool.py").is_file())
+            self.assertFalse((target / "scripts" / "__pycache__").exists())
+
+            (overlay / "__pycache__").mkdir(parents=True)
+            (overlay / "hook.py").write_text("print(2)\n")
+            (overlay / "__pycache__" / "hook.pyc").write_bytes(b"cache")
+            build_distributions.copy_overlay(overlay, target)
+            self.assertTrue((target / "hook.py").is_file())
+            self.assertFalse((target / "__pycache__").exists())
+
+            expected = root / "expected"
+            actual = root / "actual"
+            expected.mkdir()
+            (actual / "__pycache__").mkdir(parents=True)
+            (actual / "__pycache__" / "runtime.pyc").write_bytes(b"cache")
+            self.assertEqual(build_distributions.compare_dirs(expected, actual), [])
+
     def test_canonical_source_rejects_unknown_top_level_entries(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -141,8 +168,11 @@ class DistributionContractTests(unittest.TestCase):
         for source in sorted((REPO / "plugins").iterdir()):
             if not source.is_dir():
                 continue
-            for path in sorted(candidate for candidate in source.rglob("*")
-                               if candidate.is_file()):
+            for path in sorted(
+                candidate for candidate in source.rglob("*")
+                if candidate.is_file()
+                and not build_distributions.is_python_cache(candidate)
+            ):
                 relative = path.relative_to(source)
                 if relative.parts[0] == "agents":
                     continue  # each host receives its native agent surface

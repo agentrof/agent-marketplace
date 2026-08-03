@@ -1,0 +1,6 @@
+interface:
+  display_name: "Configure"
+  short_description: "Run the Configure Agentrof workflow"
+  default_prompt: "Use $configure to start this Agentrof workflow."
+policy:
+  allow_implicit_invocation: false

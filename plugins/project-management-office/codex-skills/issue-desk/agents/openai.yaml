@@ -1,0 +1,6 @@
+interface:
+  display_name: "Issue Desk"
+  short_description: "Run the Issue Desk Agentrof workflow"
+  default_prompt: "Use $issue-desk to start this Agentrof workflow."
+policy:
+  allow_implicit_invocation: false

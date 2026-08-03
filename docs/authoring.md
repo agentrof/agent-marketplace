@@ -11,8 +11,9 @@ A plugin ships four component kinds:
 - **Agents** (`agents/<role>.md`): platform-independent role constitutions.
   They carry judgment, never technology. Batch roles run as subagents;
   interactive roles run as personas in the main conversation.
-- **Skills** (`skills/<name>/SKILL.md`): all knowledge lives here.
-  Entry skills are the user surface; knowledge skills are loaded by agents.
+- **Skills** (`skill-content/<name>/SKILL.md`): all canonical knowledge lives
+  here. Entry skills are the user surface; knowledge skills are loaded by
+  agents. `claude-skills/` and `codex-skills/` are generated host wrappers.
 - **Flows** (`flows/<name>.md`): internal state-machine procedures that
   entry skills delegate to. Not user-facing, not skills.
 - **Templates** (`templates/`): files the setup entry materializes into a
@@ -25,8 +26,8 @@ A plugin ships four component kinds:
 | plugin directory / name | kebab-case noun | software-engineering-team |
 | agent file | agents/<role>.md, bare kebab | agents/code-reviewer.md |
 | agent frontmatter name | `<plugin>-<file-stem>`, globally unique | software-engineering-team-code-reviewer |
-| skill directory + frontmatter name | identical bare kebab | skills/python-fastapi/ |
-| skill entry file | SKILL.md (uppercase) | skills/request/SKILL.md |
+| skill directory + frontmatter name | identical bare kebab | skill-content/python-fastapi/ |
+| skill entry file | SKILL.md (uppercase) | skill-content/request/SKILL.md |
 | skill subfolders | references/, scripts/, data/ | references/patterns.md |
 | reserved checklists (tech skills) | fixed names | references/review-checklist.md, references/qa-checklist.md |
 | flow file | flows/<name>.md | flows/develop.md |
@@ -48,6 +49,11 @@ Skills carry `name`, `description` and exactly one visibility flag:
 
 - Entry skill (user surface): `disable-model-invocation: true`
 - Knowledge skill (agent-loaded): `user-invocable: false`
+
+The generator preserves that metadata in `claude-skills/`. It creates a
+Codex wrapper only for entry skills; each wrapper uses Codex-compatible
+frontmatter plus `agents/openai.yaml` with
+`policy.allow_implicit_invocation: false`. Do not edit either wrapper tree.
 
 ## Time
 
@@ -214,7 +220,7 @@ ADR); otherwise paraphrase the procedure and drop the brand.
 ## Product vault surface
 
 A plugin that ships vault authoring rules declares every variation point
-in one policy file, `skills/<skill>/data/vault-policy.json` (subtrees,
+in one policy file, `skill-content/<skill>/data/vault-policy.json` (subtrees,
 map notes, machine dirs, banned basenames, the vetted community-plugin
 set, the graph search filter and ordered color-group queries, the hubs
 ladder, tag namespaces, nav peer range, decision-tree grammars,
@@ -249,25 +255,39 @@ by omission.
   target ships.
 - Every decision gate names the AskUserQuestion popup at the gate site
   (`question_popup`).
+- The Codex host contract maps that popup to one concise, option-preserving
+  turn-ending question. Mutating flows refuse Plan mode. Claude uses named
+  plugin agents; Codex uses the setup-generated project agents, launches
+  independent read-only work together, and waits for all results.
+- Hook write normalization covers Claude Write/Edit and Codex `apply_patch`
+  add, update, delete, move and multi-file payloads. Unparseable patches fail
+  closed in safety hooks.
 
 ## Releases
 
-A release bumps `plugin.json` and its `marketplace.json` entry to the
-same version in one commit; the `version_sync` rule errors on drift.
+A release bumps the Claude manifest, Codex source manifest, generated Codex
+manifest and Claude marketplace entry in one commit. The validator errors on
+identity or version drift; the Codex marketplace carries policy, not a second
+version field.
 
 ## Scaffolding
 
 Use `tools/scaffold.py` to create components; its output passes
 `make check` with zero findings by construction, and a test keeps it that
-way.
+way. Canonical skill edits are followed by
+`python3 tools/sync_skill_surfaces.py` and
+`python3 tools/build_codex_plugins.py`; `make check` verifies both generated
+trees are current.
 
 ## Depending on the operations backbone
 
 Every team plugin records its process state (runs, stories, tasks,
 findings) through the project-management-office plugin, never in its own files:
 
-- Declare the dependency in plugin.json: `"dependencies": ["project-management-office"]`;
-  installing the team then installs project-management-office automatically.
+- Keep the Claude dependency in its manifest. Codex manifests have no plugin
+  dependency field, so the Codex marketplace marks PMO
+  `INSTALLED_BY_DEFAULT`; team pre-flight names the explicit PMO install
+  command when it is missing.
 - Invoke the CLI through the synced launcher in the user-level data
   directory (see the develop flow's state contract for the resolution
   line); never reference another plugin's install path, it is not a

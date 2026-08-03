@@ -19,6 +19,9 @@ import json
 import re
 from pathlib import Path
 
+import build_codex_plugins
+import sync_skill_surfaces
+
 KEBAB_RE = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
 
 AGENT_TEMPLATE = """---
@@ -97,6 +100,40 @@ PLUGIN_JSON_TEMPLATE = {
 }
 
 
+def codex_manifest(name: str, description: str) -> dict:
+    return {
+        "name": name,
+        "version": "0.1.0",
+        "description": description,
+        "author": {"name": "Agentrof", "url": "https://github.com/agentrof"},
+        "homepage": "https://github.com/agentrof/agent-marketplace",
+        "repository": "https://github.com/agentrof/agent-marketplace",
+        "license": "MIT",
+        "skills": "./skills/",
+        "interface": {
+            "displayName": title_of(name),
+            "shortDescription": description,
+            "longDescription": description,
+            "developerName": "Agentrof",
+            "category": "Engineering",
+            "capabilities": ["Read", "Write", "Interactive"],
+            "websiteURL": "https://github.com/agentrof/agent-marketplace",
+        },
+    }
+
+
+def sync_codex(root: Path) -> None:
+    for plugin in sorted(path for path in (root / "plugins").iterdir() if path.is_dir()):
+        problems = sync_skill_surfaces.sync_plugin(plugin, check=False)
+        if problems:
+            raise SystemExit("scaffold: " + "; ".join(problems))
+    output = root / "codex-plugins"
+    try:
+        build_codex_plugins.replace_generated(root, output)
+    except ValueError as exc:
+        raise SystemExit(f"scaffold: {exc}") from exc
+
+
 def title_of(name: str) -> str:
     return " ".join(word.capitalize() for word in name.split("-"))
 
@@ -114,10 +151,21 @@ def new_plugin(root: Path, name: str) -> None:
         raise SystemExit(f"scaffold: plugin '{name}' already exists")
     (plugin / ".claude-plugin").mkdir(parents=True)
     (plugin / "agents").mkdir()
-    (plugin / "skills").mkdir()
+    native_codex = (root / ".agents" / "plugins" / "marketplace.json").is_file()
+    if native_codex:
+        (plugin / "skill-content").mkdir()
+        (plugin / "claude-skills").mkdir()
+        (plugin / "codex-skills").mkdir()
+        (plugin / "codex").mkdir()
+    else:
+        # Transitional repositories can still use the scaffolder while they
+        # adopt the dual-host marketplace contract.
+        (plugin / "skills").mkdir()
     manifest = dict(PLUGIN_JSON_TEMPLATE)
     manifest["name"] = name
     manifest["description"] = f"{title_of(name)} plugin."
+    if native_codex:
+        manifest["skills"] = "./claude-skills/"
     (plugin / ".claude-plugin" / "plugin.json").write_text(
         json.dumps(manifest, indent=2) + "\n", encoding="utf-8"
     )
@@ -135,6 +183,23 @@ def new_plugin(root: Path, name: str) -> None:
     })
     marketplace_path.write_text(
         json.dumps(marketplace, indent=2) + "\n", encoding="utf-8")
+    codex_marketplace_path = root / ".agents" / "plugins" / "marketplace.json"
+    if native_codex:
+        (plugin / "codex" / "plugin.json").write_text(
+            json.dumps(codex_manifest(name, manifest["description"]), indent=2) + "\n",
+            encoding="utf-8",
+        )
+        codex_marketplace = json.loads(codex_marketplace_path.read_text(encoding="utf-8"))
+        codex_marketplace.setdefault("plugins", []).append({
+            "name": name,
+            "source": {"source": "local", "path": f"./codex-plugins/{name}"},
+            "policy": {"installation": "AVAILABLE", "authentication": "ON_INSTALL"},
+            "category": "Engineering",
+        })
+        codex_marketplace_path.write_text(
+            json.dumps(codex_marketplace, indent=2) + "\n", encoding="utf-8"
+        )
+        sync_codex(root)
     print(f"scaffold: created plugins/{name} and registered it in"
           " .claude-plugin/marketplace.json")
 
@@ -152,6 +217,8 @@ def new_agent(root: Path, plugin_name: str, name: str) -> None:
         AGENT_TEMPLATE.format(plugin=plugin_name, name=name, title=title_of(name)),
         encoding="utf-8",
     )
+    if (root / ".agents" / "plugins" / "marketplace.json").is_file():
+        sync_codex(root)
     print(f"scaffold: created {path.relative_to(root)}")
 
 
@@ -160,7 +227,10 @@ def new_skill(root: Path, plugin_name: str, name: str, kind: str) -> None:
     plugin = root / "plugins" / plugin_name
     if not plugin.is_dir():
         raise SystemExit(f"scaffold: plugin '{plugin_name}' does not exist")
-    sdir = plugin / "skills" / name
+    skills_root = plugin / "skill-content"
+    if not skills_root.is_dir():
+        skills_root = plugin / "skills"
+    sdir = skills_root / name
     if sdir.exists():
         raise SystemExit(f"scaffold: skill '{name}' already exists")
     sdir.mkdir(parents=True)
@@ -171,6 +241,8 @@ def new_skill(root: Path, plugin_name: str, name: str, kind: str) -> None:
     )
     if kind == "hidden":
         (sdir / "references").mkdir()
+    if (root / ".agents" / "plugins" / "marketplace.json").is_file():
+        sync_codex(root)
     print(f"scaffold: created {sdir.relative_to(root)} ({kind})")
 
 

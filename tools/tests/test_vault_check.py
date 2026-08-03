@@ -22,7 +22,7 @@ from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[2]
 SCRIPTS = REPO / "plugins" / "software-engineering-team" / "scripts"
-POLICY_PATH = (REPO / "plugins" / "software-engineering-team" / "skills"
+POLICY_PATH = (REPO / "plugins" / "software-engineering-team" / "skill-content"
                / "obsidian-vault" / "data" / "vault-policy.json")
 
 
@@ -1165,7 +1165,7 @@ class DesignSystemWriterTests(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
-        scripts = (REPO / "plugins" / "software-engineering-team" / "skills"
+        scripts = (REPO / "plugins" / "software-engineering-team" / "skill-content"
                    / "ui-ux-design" / "scripts")
         sys.path.insert(0, str(scripts))
         try:

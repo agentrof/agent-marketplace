@@ -1,0 +1,36 @@
+{
+  "name": "project-management-office",
+  "version": "2.1.0",
+  "description": "Project Management Office: the shared operations backbone for Agentrof team plugins, with deterministic state, hooks, and a read-only dashboard.",
+  "author": {
+    "name": "Agentrof",
+    "url": "https://github.com/agentrof"
+  },
+  "homepage": "https://github.com/agentrof/agent-marketplace",
+  "repository": "https://github.com/agentrof/agent-marketplace",
+  "license": "MIT",
+  "keywords": [
+    "project-management",
+    "operations",
+    "agent-workflows"
+  ],
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "Agentrof Project Management Office",
+    "shortDescription": "Deterministic operations backbone for agent teams",
+    "longDescription": "Track projects, work orders, stories, tasks, attempts, findings, and audit events through one guarded PMO database and dashboard.",
+    "developerName": "Agentrof",
+    "category": "Engineering",
+    "capabilities": [
+      "Read",
+      "Write",
+      "Interactive"
+    ],
+    "websiteURL": "https://github.com/agentrof/agent-marketplace",
+    "defaultPrompt": [
+      "Open the Agentrof Control Tower.",
+      "Review captured Agentrof marketplace issues."
+    ],
+    "brandColor": "#2563EB"
+  }
+}

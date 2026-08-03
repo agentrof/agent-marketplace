@@ -1,0 +1,6 @@
+interface:
+  display_name: "Business Analysis"
+  short_description: "Run the Business Analysis Agentrof workflow"
+  default_prompt: "Use $business-analysis to start this Agentrof workflow."
+policy:
+  allow_implicit_invocation: false

@@ -1,0 +1,141 @@
+{
+  "collapse-filter": false,
+  "search": "-path:_generated",
+  "showTags": false,
+  "showAttachments": false,
+  "hideUnresolved": false,
+  "showOrphans": true,
+  "collapse-color-groups": false,
+  "colorGroups": [
+    {
+      "query": "tag:#doc/space",
+      "color": {
+        "a": 1,
+        "rgb": 16733986
+      }
+    },
+    {
+      "query": "tag:#doc/domain",
+      "color": {
+        "a": 1,
+        "rgb": 16752640
+      }
+    },
+    {
+      "query": "tag:#doc/glossary",
+      "color": {
+        "a": 1,
+        "rgb": 16498733
+      }
+    },
+    {
+      "query": "tag:#doc/actor-roster",
+      "color": {
+        "a": 1,
+        "rgb": 9268835
+      }
+    },
+    {
+      "query": "tag:#doc/budget-set",
+      "color": {
+        "a": 1,
+        "rgb": 15483002
+      }
+    },
+    {
+      "query": "tag:#doc/entity",
+      "color": {
+        "a": 1,
+        "rgb": 2201331
+      }
+    },
+    {
+      "query": "tag:#doc/process",
+      "color": {
+        "a": 1,
+        "rgb": 48340
+      }
+    },
+    {
+      "query": "tag:#doc/rule-set",
+      "color": {
+        "a": 1,
+        "rgb": 4149685
+      }
+    },
+    {
+      "query": "tag:#doc/acceptance-set",
+      "color": {
+        "a": 1,
+        "rgb": 5431378
+      }
+    },
+    {
+      "query": "tag:#doc/decision",
+      "color": {
+        "a": 1,
+        "rgb": 10233776
+      }
+    },
+    {
+      "query": "tag:#doc/integration",
+      "color": {
+        "a": 1,
+        "rgb": 38536
+      }
+    },
+    {
+      "query": "tag:#doc/challenge-record",
+      "color": {
+        "a": 1,
+        "rgb": 10394916
+      }
+    },
+    {
+      "query": "tag:#doc/landscape",
+      "color": {
+        "a": 1,
+        "rgb": 5227511
+      }
+    },
+    {
+      "query": "tag:#doc/engagement",
+      "color": {
+        "a": 1,
+        "rgb": 8280002
+      }
+    },
+    {
+      "query": "tag:#doc/design-master",
+      "color": {
+        "a": 1,
+        "rgb": 11342935
+      }
+    },
+    {
+      "query": "tag:#doc/page-override",
+      "color": {
+        "a": 1,
+        "rgb": 13538264
+      }
+    },
+    {
+      "query": "tag:#doc/moc OR tag:#doc/home",
+      "color": {
+        "a": 1,
+        "rgb": 9741240
+      }
+    }
+  ],
+  "collapse-display": false,
+  "showArrow": true,
+  "textFadeMultiplier": 0,
+  "nodeSizeMultiplier": 1.1,
+  "lineSizeMultiplier": 1,
+  "collapse-forces": false,
+  "centerStrength": 0.45,
+  "repelStrength": 12,
+  "linkStrength": 1,
+  "linkDistance": 220,
+  "scale": 1
+}

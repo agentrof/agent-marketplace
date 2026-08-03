@@ -6,6 +6,8 @@ findings.
 
 from __future__ import annotations
 
+import json
+import shutil
 import sys
 import tempfile
 import unittest
@@ -55,6 +57,35 @@ class ScaffoldTests(unittest.TestCase):
             scaffold.new_agent(self.root, fixtures.PLUGIN, "CamelCase")
         with self.assertRaises(SystemExit):
             scaffold.new_skill(self.root, fixtures.PLUGIN, "snake_case", "entry")
+
+    def test_native_repository_scaffolds_both_host_packages(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            fixtures.write(root / ".claude-plugin" / "marketplace.json", json.dumps({
+                "name": "agent-marketplace", "owner": {"name": "Agentrof"},
+                "metadata": {"description": "native", "version": "0.1.0"},
+                "plugins": [],
+            }))
+            fixtures.write(root / ".agents" / "plugins" / "marketplace.json",
+                           json.dumps({
+                               "name": "agent-marketplace",
+                               "interface": {"displayName": "Agentrof Marketplace"},
+                               "plugins": [],
+                           }))
+            (root / "plugins").mkdir()
+            (root / "tools" / "data").mkdir(parents=True)
+            shutil.copyfile(fixtures.REAL_MODEL_CONFIG,
+                            root / "tools" / "data" / "models.json")
+            shutil.copyfile(fixtures.REAL_LIMITS_CONFIG,
+                            root / "tools" / "data" / "limits.json")
+            scaffold.new_plugin(root, "demo-team")
+            plugin = root / "plugins" / "demo-team"
+            self.assertTrue((plugin / ".claude-plugin" / "plugin.json").is_file())
+            self.assertTrue((plugin / "codex" / "plugin.json").is_file())
+            self.assertTrue((root / "codex-plugins" / "demo-team"
+                             / ".codex-plugin" / "plugin.json").is_file())
+            findings = validate.run(root)
+            self.assertEqual(findings, [], f"native scaffold must be clean: {findings}")
 
 
 if __name__ == "__main__":

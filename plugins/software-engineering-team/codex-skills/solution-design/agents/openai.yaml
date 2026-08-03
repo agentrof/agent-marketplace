@@ -1,0 +1,6 @@
+interface:
+  display_name: "Solution Design"
+  short_description: "Run the Solution Design Agentrof workflow"
+  default_prompt: "Use $solution-design to start this Agentrof workflow."
+policy:
+  allow_implicit_invocation: false

@@ -1,7 +1,8 @@
 # Agent Marketplace
 
-A catalog of curated, end-to-end agent teams for Claude Code. Install
-a complete team and run at the goal; this is not a parts store.
+A catalog of curated, end-to-end agent teams for Claude Code and native
+Codex App/CLI. Install a complete team and run at the goal; this is not a
+parts store.
 
 The first team, `software-engineering-team`, is an orchestrated software and product
 development team: business analysis, planning, architecture, design
@@ -12,9 +13,9 @@ Every team runs on the `project-management-office` plugin: a
 shared operations backbone holding one central database for projects,
 epics, stories, machine-generated tasks, work-order state, findings and audit
 events, written only through its CLI and recorded deterministically via
-hooks. Installing a team installs `project-management-office`
-automatically as a dependency;
-`/project-management-office:control-tower` starts Control Tower and replies with the running URL.
+hooks. Claude installs this backbone through the team dependency; the Codex
+marketplace installs it by default. The `control-tower` entry starts Control
+Tower and replies with the running URL.
 
 ## Catalog
 
@@ -27,7 +28,7 @@ automatically as a dependency;
 Counts above are injected by `tools/counts.py`; they are never written by
 hand anywhere in this repository.
 
-## Install
+## Install on Claude Code
 
 ```
 /plugin marketplace add agentrof/agent-marketplace
@@ -46,10 +47,37 @@ Then, inside your project:
 Setup bootstraps the project workspace, asks for anything it cannot
 detect, and points you at the next step.
 
+## Install on Codex App or CLI
+
+```text
+codex plugin marketplace add agentrof/agent-marketplace
+codex plugin add software-engineering-team@agent-marketplace
+```
+
+Start a new task/session, open `/hooks`, inspect and trust both Agentrof
+plugins, and start another task if Codex asks for a reload. Then select
+`software-engineering-team:setup` in the App skill picker or CLI `/skills`
+picker (or invoke it with `$`). Setup generates the managed Agentrof block in
+the project's `AGENTS.md` and native `.codex/agents/*.toml` role definitions.
+Those agents become discoverable at the next task/session boundary.
+
+The marketplace marks PMO for default installation. Codex App applies that
+policy; current CLI builds may show it as available without materializing it
+when a local marketplace is added. If it is absent, setup stops safely and
+prints the exact recovery command:
+
+```text
+codex plugin add project-management-office@agent-marketplace
+```
+
+Codex mutating entries run in Code/Default mode. They stop without writes in
+Plan mode and ask you to switch modes.
+
 ## Quickstart
 
-Everything runs through the team's entry skills; agents and knowledge
-skills stay behind them.
+Everything runs through the team's entry skills; agents and knowledge skills
+stay behind them. The table uses Claude's slash form; Codex exposes the same
+entry names through its skill picker and `$` invocation.
 
 | Entry | What it does |
 |---|---|
@@ -74,7 +102,10 @@ for the first topic, `solution-design` for the system foundations,
 - [docs/architecture.md](docs/architecture.md): the invariants.
 - [docs/authoring.md](docs/authoring.md): component templates and rules.
 - [docs/orchestration.md](docs/orchestration.md): the flow contract.
-- `tools/`: validator, counts injector, scaffolder, tests.
+- `plugins/*/skill-content/`: canonical skill packages shared by both hosts.
+- `.agents/plugins/marketplace.json`: native Codex marketplace policy.
+- `codex-plugins/`: generated self-contained Codex distributions.
+- `tools/`: validator, surface generators, counts injector, scaffolder, tests.
 
 ## Quality gates
 
@@ -82,8 +113,9 @@ for the first topic, `solution-design` for the system foundations,
 make check
 ```
 
-runs the validator, the counts drift gate and the test suite. CI runs the
-same command on every push and pull request; a single finding is red.
+runs the validator, Claude/Codex package drift gates, the counts drift gate
+and the test suite. CI runs the same command on every push and pull request;
+a single finding is red.
 
 ## Contributing
 

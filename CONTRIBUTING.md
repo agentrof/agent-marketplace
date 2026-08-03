@@ -29,10 +29,9 @@ If it is green locally, it is green in CI.
 - Agents are platform-independent roles: short constitutions with fixed
   sections (Principles, Boundaries, Approach, Output Contract). They
   carry zero technology knowledge.
-- Skills carry all technology and capability knowledge. Entry skills are
-  the user surface (`disable-model-invocation: true`); knowledge skills
-  are internal (`user-invocable: false`) and load only through the
-  team's flows.
+- Skills under `skill-content/` carry all technology and capability
+  knowledge. Entry skills are the user surface; knowledge skills are internal
+  and load only through the team's flows. Host wrapper trees are generated.
 - Flows are the orchestration prose under `flows/`; entries stay thin
   and delegate to them.
 
@@ -42,7 +41,7 @@ orchestration model in [docs/orchestration.md](docs/orchestration.md).
 
 ## Add a knowledge skill: walkthrough
 
-1. Scaffold it: `python3 tools/scaffold.py new-skill <plugin> <name> hidden`.
+1. Scaffold it: `python3 tools/scaffold.py new-skill --plugin <plugin> --name <name> --kind hidden`.
    The generated skeleton already passes `make check`.
 2. Write the SKILL.md as a decision surface: what to do and what never to
    do, in DO/DON'T voice. Respect the size caps; depth goes into
@@ -56,6 +55,11 @@ orchestration model in [docs/orchestration.md](docs/orchestration.md).
    git root, never at user or system level.
 5. Run `make check`, then `make counts` if the README counter table is
    now stale. Never edit counted numbers by hand.
+
+The scaffolder updates both host surfaces and the generated Codex package.
+After a manual canonical skill edit, run `python3
+tools/sync_skill_surfaces.py` and `python3 tools/build_codex_plugins.py` before
+`make check`.
 
 New stacks for the software team (a config enum value plus a skills
 folder plus tests) are maintainer releases: the team ships tested stacks

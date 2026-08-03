@@ -10,7 +10,7 @@ Entry skills (user surface): request, sketch, demo, business-analysis,
 solution-design, design-system, setup, configure, delivery-lanes,
 build-docs-vault.
 Entries stay thin: parse input, run the pre-flight, then either
-delegate to a flow file via the plugin root variable (request, sketch,
+delegate to a flow file through the plugin-root dispatcher (request, sketch,
 demo, delivery-lanes) or execute their own short interactive procedure
 in the main conversation (business-analysis, solution-design,
 design-system, setup, configure, build-docs-vault).
@@ -102,12 +102,18 @@ Routes:
    input; a plain-text question list is never the ask.
 4. Halt on failure: present the error and ask; never continue silently.
 5. Spawn only this plugin's agents.
-6. Never enter plan mode; the flow is the plan.
+6. Never enter plan mode; the flow is the plan. Codex stops without writes
+   and requests Code/Default mode when Plan mode is active.
+
+Claude gates use AskUserQuestion. Codex gates end the turn with one concise
+question carrying the same options and resume from PMO/workspace state after
+the answer. This is UI adaptation, not a process fork.
 
 ## Operations backbone (the project-management-office plugin)
 
-The software-engineering-team plugin declares the project-management-office plugin as a dependency;
-installing the team installs the backbone. Pmo owns the user-level data
+Claude declares project-management-office as a dependency. Codex installs it
+by default through marketplace policy and pre-flight stops with the explicit
+install command if it is missing. PMO owns the user-level data
 directory (default: .agentrof under the user's home; AGENTROF_HOME
 overrides) holding one central SQLite database for every project and
 every future team: projects, epics, stories, machine-generated tasks with their attempt
@@ -166,7 +172,11 @@ non-English. The analysis compiler, the landscape checker and the
 contract checker enforce identifier positions as ASCII machine-safe
 shapes regardless of the configured axes.
 
-Hooks carry the mechanics, flows carry the semantics: project-management-office's
+Hooks carry the mechanics, flows carry the semantics. SessionStart emits the
+`AGENTROF_HOOKS_ACTIVE` sentinel; Codex setup refuses writes until the user has
+inspected and trusted the plugin hooks. The shared write normalizer maps
+Claude edits and Codex `apply_patch` file operations into the same fail-closed
+guards. project-management-office's
 SubagentStart/SubagentStop hooks stamp task start and finish times for
 team agents automatically; the orchestrator's CLI calls carry which
 step, which round and which outcome. SessionStart injects resume context
@@ -233,7 +243,9 @@ workspace paths, never into the order directory.
 
 ## Spawn prompt contract
 
-Every Task spawn assembles, in order:
+Every host-native spawn assembles, in order. Claude uses its named plugin
+agent; Codex uses the matching setup-generated `.codex/agents/*.toml` agent.
+Independent read-only Codex roles launch together and all are awaited:
 
 1. Identity: role name, step, work order key, order directory.
    Standalone design spawns (sketch, demo, design-system entries) have
@@ -332,7 +344,7 @@ One active work order per worktree, one active work order per story,
 disjoint ownership across a project's active work orders: the claim
 system arbitrates parallel worktrees, and the delivery-lanes flow drives them.
 Parallel delivery is multi-session: each approved story gets a detached
-sibling worktree (../<project-dir>-wp-<nn>) and its own session running
+sibling worktree (../<project-dir>-wp-<nn>) and its own session/task running
 the develop flow up to the opened pull request; the dependency edges
 stories carry are the scheduling contract item ready consumes. Session
 scope is enforced mechanically by the CLI, not by instruction: mid-order
@@ -347,3 +359,8 @@ updated on the main line at the checkpoint after
 merge. Architecture deltas deliberately ride the story branch so model
 and code merge atomically. Each story ends in its own pull request;
 merging is a human act.
+
+The handoff surface names the host precisely: a new Claude session, a new
+Codex App task selecting the worktree, or an interactive Codex CLI session
+started in that worktree. PMO work-order format and ownership rules do not
+change.

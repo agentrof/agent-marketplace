@@ -1,0 +1,36 @@
+{
+  "name": "software-engineering-team",
+  "version": "9.2.0",
+  "description": "A complete Codex-native software and product development team for analysis, planning, architecture, design, implementation, review, and verification.",
+  "author": {
+    "name": "Agentrof",
+    "url": "https://github.com/agentrof"
+  },
+  "homepage": "https://github.com/agentrof/agent-marketplace",
+  "repository": "https://github.com/agentrof/agent-marketplace",
+  "license": "MIT",
+  "keywords": [
+    "software-engineering",
+    "product-development",
+    "multi-agent"
+  ],
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "Agentrof Software Engineering Team",
+    "shortDescription": "An orchestrated product and engineering team",
+    "longDescription": "Drive approved product work through analysis, architecture, design, implementation, adversarial review, QA, and pull-request delivery with Codex-native project agents.",
+    "developerName": "Agentrof",
+    "category": "Engineering",
+    "capabilities": [
+      "Read",
+      "Write",
+      "Interactive"
+    ],
+    "websiteURL": "https://github.com/agentrof/agent-marketplace",
+    "defaultPrompt": [
+      "Set up this repository for the Agentrof engineering team.",
+      "Deliver this request through the Agentrof engineering workflow."
+    ],
+    "brandColor": "#2563EB"
+  }
+}

@@ -1,0 +1,6 @@
+interface:
+  display_name: "Setup"
+  short_description: "Run the Setup Agentrof workflow"
+  default_prompt: "Use $setup to start this Agentrof workflow."
+policy:
+  allow_implicit_invocation: false

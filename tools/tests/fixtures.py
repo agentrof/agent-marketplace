@@ -295,6 +295,44 @@ def break_registration(root: Path) -> None:
     }, indent=2))
 
 
+def break_codex_packaging(root: Path) -> None:
+    """Create one otherwise-valid native surface, then break its policy."""
+    plugin = root / "plugins" / PLUGIN
+    claude_manifest = json.loads(
+        (plugin / ".claude-plugin" / "plugin.json").read_text(encoding="utf-8"))
+    codex_manifest = {
+        **claude_manifest,
+        "skills": "./skills/",
+        "interface": {
+            "displayName": "Sample Team",
+            "shortDescription": "Fixture team",
+            "longDescription": "Fixture team",
+            "developerName": "Agentrof",
+            "category": "Engineering",
+            "capabilities": ["Read", "Write", "Interactive"],
+            "websiteURL": "https://example.com",
+        },
+    }
+    write(plugin / "codex" / "plugin.json", json.dumps(codex_manifest, indent=2))
+    write(plugin / "claude-skills" / "notes" / "SKILL.md", VALID_SKILL)
+    (plugin / "codex-skills").mkdir()
+    archive = root / "codex-plugins" / PLUGIN
+    write(archive / ".codex-plugin" / "plugin.json",
+          json.dumps(codex_manifest, indent=2))
+    (archive / "skills").mkdir(parents=True)
+    write(archive / ".agentrof-generated-codex-plugin", "generated\n")
+    write(root / ".agents" / "plugins" / "marketplace.json", json.dumps({
+        "name": "agent-marketplace",
+        "interface": {"displayName": "Agentrof Marketplace"},
+        "plugins": [{
+            "name": PLUGIN,
+            "source": {"source": "local", "path": f"./codex-plugins/{PLUGIN}"},
+            "policy": {"installation": "AVAILABLE", "authentication": "ON_INSTALL"},
+            "category": "Wrong",
+        }],
+    }, indent=2))
+
+
 def break_json_hygiene(root: Path) -> None:
     write(root / "plugins" / PLUGIN / ".claude-plugin" / "plugin.json", json.dumps({
         "name": PLUGIN,
@@ -446,6 +484,7 @@ BUILDERS = {
     "dead_links": break_dead_links,
     "reference_triggers": break_reference_triggers,
     "registration": break_registration,
+    "codex_packaging": break_codex_packaging,
     "json_hygiene": break_json_hygiene,
     "orchestrator_integrity": break_orchestrator_integrity,
     "question_popup": break_question_popup,

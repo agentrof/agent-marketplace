@@ -1,0 +1,6 @@
+interface:
+  display_name: "Request"
+  short_description: "Run the Request Agentrof workflow"
+  default_prompt: "Use $request to start this Agentrof workflow."
+policy:
+  allow_implicit_invocation: false

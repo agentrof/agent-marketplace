@@ -12,8 +12,8 @@ are not sold separately: agents and knowledge skills are encapsulated
 behind a small user surface of entry skills. Supported stacks are fixed
 and tested; new stacks are added by the maintainer as a skills folder plus
 a config enum value plus tests. One plugin is not a team: project-management-office is the
-shared operations backbone every team plugin depends on (declared in
-plugin.json dependencies, so it installs automatically).
+shared operations backbone every team plugin depends on. Claude resolves it
+through plugin dependencies; the Codex marketplace installs it by default.
 
 ## Invariants
 
@@ -30,10 +30,10 @@ plugin.json dependencies, so it installs automatically).
    returns results so a composer can refuse pairing a prose persona with
    schema forcing, and does not by itself stop the harness-side stall
    (anthropics/claude-code#79395).
-3. **Encapsulation.** Entry skills are the only user surface
-   (`disable-model-invocation: true`). Knowledge skills are hidden
-   (`user-invocable: false`). Agents are passive: no auto-trigger
-   descriptions; they run only when a flow spawns them.
+3. **Encapsulation.** Entry skills are the only user surface. Claude marks
+   them `disable-model-invocation: true`; Codex publishes only those entries
+   and sets `policy.allow_implicit_invocation: false`. Knowledge skills stay
+   internal. Agents are passive and run only when a flow spawns them.
 4. **Zero duplication.** Each fact exists once: shared method in a process
    skill, stack specifics inside the stack skill, shared flow bodies in
    flows/ files that entries delegate to.
@@ -81,17 +81,26 @@ plugin.json dependencies, so it installs automatically).
    unless terminology_language is configured non-English; the analysis
    compiler, landscape checker and contract checker enforce identifier
    positions as ASCII shapes.
+12. **Two hosts, one semantic contract.** `skill-content/`, agents, flows,
+   scripts and templates are canonical. Generated Claude and Codex discovery
+   surfaces contain metadata and pointers, never forked workflow bodies.
+   Host adapters map gates, native agent spawning, hook payloads and session
+   boundaries while preserving the same PMO lifecycle and safety outcome.
 
 ## Repository layout
 
-- `.claude-plugin/marketplace.json`: the catalog registry.
-- `plugins/<team>/`: one complete team per plugin (agents, skills, flows,
-  templates, constitution).
+- `.claude-plugin/marketplace.json`: the Claude catalog registry.
+- `.agents/plugins/marketplace.json`: the Codex catalog and install policy.
+- `plugins/<team>/`: canonical content plus Claude/Codex source manifests and
+  generated discovery wrappers. Full skills live in `skill-content/`.
+- `codex-plugins/<team>/`: generated self-contained Codex distributions;
+  never edit them by hand.
 - `plugins/project-management-office/`: the operations backbone (central
   database CLI, hooks, the Control Tower launcher entry and its read-only
   web dashboard); a dependency of every team plugin, never a team itself.
 - `docs/`: this map, the authoring guide, the orchestration spec.
-- `tools/`: validator, counts injector, scaffolder and their tests;
+- `tools/`: validator, host-surface generators, counts injector, scaffolder
+  and their tests;
   `tools/data/models.json` (model aliases) and `tools/data/limits.json`
   (authoring size caps) are the policy files, validated like any other
   policy artifact.

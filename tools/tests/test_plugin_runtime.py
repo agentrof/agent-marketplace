@@ -60,6 +60,49 @@ class NormalizePayloadTests(unittest.TestCase):
         self.assertEqual(out["file_targets"][0]["new_string"], "b")
         self.assertNotIn("content", out["file_targets"][0])
 
+    def test_codex_apply_patch_expands_every_operation(self):
+        patch = """*** Begin Patch
+*** Add File: /proj/new.md
++new text
+*** Update File: /proj/edit.md
+@@
+-old text
++newer text
+*** Update File: /proj/source.md
+*** Move to: /proj/moved.md
+@@
+-before
++after
+*** Delete File: /proj/deleted.md
+-gone
+*** End Patch"""
+        out = hook_common.normalize_payload({
+            "hook_event_name": "PreToolUse",
+            "tool_name": "apply_patch",
+            "cwd": "/proj",
+            "tool_input": {"patch": patch},
+        })
+        self.assertEqual(out["tool_name"], "Edit")
+        self.assertNotIn("patch_parse_error", out)
+        self.assertEqual(
+            [(target["operation"], target["file_path"])
+             for target in out["file_targets"]],
+            [("add", "/proj/new.md"), ("update", "/proj/edit.md"),
+             ("update", "/proj/source.md"),
+             ("move-target", "/proj/moved.md"),
+             ("delete", "/proj/deleted.md")],
+        )
+        self.assertEqual(out["file_targets"][0]["content"], "new text")
+        self.assertEqual(out["file_targets"][1]["old_string"], "old text")
+        self.assertEqual(out["file_targets"][1]["new_string"], "newer text")
+
+    def test_codex_apply_patch_parse_failure_is_explicit(self):
+        out = hook_common.normalize_payload({
+            "tool_name": "apply_patch", "tool_input": {"patch": "not a patch"}
+        })
+        self.assertEqual(out["file_targets"], [])
+        self.assertIn("patch_parse_error", out)
+
 
 class DbGuardTests(unittest.TestCase):
     def setUp(self):
@@ -99,6 +142,61 @@ class DbGuardTests(unittest.TestCase):
             "tool_input": {"command": "ls -la"},
         }, self.env)
         self.assertEqual(code, 0)
+
+    def test_apply_patch_db_write_and_unparseable_patch_fail_closed(self):
+        db = self.home / "agentrof.db"
+        valid = "\n".join([
+            "*** Begin Patch", f"*** Update File: {db}", "@@", "-old",
+            "+new", "*** End Patch",
+        ])
+        for patch, expected in ((valid, "PMO CLI"), ("broken", "fails closed")):
+            code, _, err = run_script(PMO_SCRIPTS / "hook_guard_db.py", {
+                "hook_event_name": "PreToolUse", "tool_name": "apply_patch",
+                "cwd": self.tmp.name, "tool_input": {"patch": patch},
+            }, self.env)
+            self.assertEqual(code, 2)
+            self.assertIn(expected, err)
+
+
+class VaultHookCodexTests(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.env = {"AGENTROF_HOME": str(Path(self.tmp.name) / "agentrof")}
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def test_register_emits_hook_sentinel_as_json(self):
+        code, out, err = run_script(
+            SET_SCRIPTS / "vault_hook.py",
+            {"hook_event_name": "SessionStart"}, self.env, ["register"])
+        self.assertEqual(code, 0, err)
+        context = json.loads(out)["hookSpecificOutput"]["additionalContext"]
+        self.assertIn("AGENTROF_HOOKS_ACTIVE: software-engineering-team", context)
+
+    def test_apply_patch_multifile_vault_violation_is_denied(self):
+        project = Path(self.tmp.name) / "project"
+        (project / "workspace" / "docs").mkdir(parents=True)
+        patch = "\n".join([
+            "*** Begin Patch",
+            f"*** Add File: {project / 'ordinary.txt'}", "+safe",
+            f"*** Add File: {project / 'workspace/docs/a.md'}",
+            "+[relative](b.md)", "*** End Patch",
+        ])
+        code, _, err = run_script(SET_SCRIPTS / "vault_hook.py", {
+            "hook_event_name": "PreToolUse", "tool_name": "apply_patch",
+            "cwd": str(project), "tool_input": {"patch": patch},
+        }, self.env, ["pre"])
+        self.assertEqual(code, 2)
+        self.assertIn("vault-absolute wikilink", err)
+
+    def test_unparseable_apply_patch_fails_closed(self):
+        code, _, err = run_script(SET_SCRIPTS / "vault_hook.py", {
+            "hook_event_name": "PreToolUse", "tool_name": "apply_patch",
+            "cwd": self.tmp.name, "tool_input": {"patch": "broken"},
+        }, self.env, ["pre"])
+        self.assertEqual(code, 2)
+        self.assertIn("fails closed", err)
 
 
 class IntegrityTripwireTests(unittest.TestCase):
@@ -277,6 +375,17 @@ class DispatcherTests(unittest.TestCase):
             (self.home / "plugin_roots.json").read_text(encoding="utf-8"))
         self.assertIn("software-engineering-team", registry["plugins"])
 
+    def test_codex_manifest_version_is_preferred(self):
+        (self.plugin_root / ".codex-plugin").mkdir()
+        (self.plugin_root / ".codex-plugin" / "plugin.json").write_text(
+            json.dumps({"name": "sample-team", "version": "2.0.0"}),
+            encoding="utf-8")
+        code, _, err = self.dispatch(
+            ["register", "--plugin", "sample-team", "--root", str(self.plugin_root)])
+        self.assertEqual(code, 0, err)
+        registry = json.loads((self.home / "plugin_roots.json").read_text())
+        self.assertEqual(registry["plugins"]["sample-team"]["version"], "2.0.0")
+
 
 class DashboardCatalogTests(unittest.TestCase):
     def test_plugin_roots_registry_feeds_catalog(self):
@@ -310,6 +419,76 @@ class DashboardCatalogTests(unittest.TestCase):
             self.assertEqual(team["kind"], "backbone")
             self.assertEqual(team["installs"][0]["version"], "1.2.0")
             self.assertEqual(team["installs"][0]["scope"], "local")
+
+    def test_codex_cache_is_discovered_and_deduplicated_by_plugin(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            home = Path(tmp) / "agentrof"
+            home.mkdir()
+            cache = Path(tmp) / "codex-cache"
+            install = cache / "market" / "software-engineering-team" / "9.2.0"
+            (install / ".codex-plugin").mkdir(parents=True)
+            (install / ".codex-plugin" / "plugin.json").write_text(json.dumps({
+                "name": "software-engineering-team", "version": "9.2.0",
+                "description": "team", "author": {"name": "Agentrof"},
+            }), encoding="utf-8")
+            (install / "skills" / "setup").mkdir(parents=True)
+            (install / "skills" / "setup" / "SKILL.md").write_text(
+                "---\nname: setup\ndescription: Setup.\n---\n", encoding="utf-8")
+            env = {**os.environ, "AGENTROF_HOME": str(home),
+                   "AGENTROF_PLUGINS_DIR": str(Path(tmp) / "no-claude"),
+                   "AGENTROF_CODEX_PLUGINS_DIR": str(cache)}
+            proc = subprocess.run(
+                [sys.executable, "-c",
+                 "import sys,json;"
+                 f"sys.path.insert(0,{str(PMO_SCRIPTS)!r});"
+                 "import pmo_dashboard;"
+                 "print(json.dumps(pmo_dashboard.scan_catalog()))"],
+                capture_output=True, text=True, env=env)
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            teams = json.loads(proc.stdout)["teams"]
+            self.assertEqual(list(teams), ["software-engineering-team"])
+            self.assertEqual(teams["software-engineering-team"]["installs"], [{
+                "version": "9.2.0", "scope": "codex", "project_path": "",
+                "last_updated": "",
+            }])
+
+    def test_claude_custom_skill_surface_is_scanned_from_manifest(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            home = root / "agentrof"
+            home.mkdir()
+            plugins = root / "claude-plugins"
+            install = root / "install" / "software-engineering-team"
+            (install / ".claude-plugin").mkdir(parents=True)
+            (install / ".claude-plugin" / "plugin.json").write_text(json.dumps({
+                "name": "software-engineering-team", "version": "9.2.0",
+                "description": "team", "dependencies": ["project-management-office"],
+                "skills": "./claude-skills/",
+            }), encoding="utf-8")
+            (install / "claude-skills" / "setup").mkdir(parents=True)
+            (install / "claude-skills" / "setup" / "SKILL.md").write_text(
+                "---\nname: setup\ndescription: Setup.\n"
+                "disable-model-invocation: true\n---\n", encoding="utf-8")
+            plugins.mkdir()
+            (plugins / "installed_plugins.json").write_text(json.dumps({
+                "plugins": {"software-engineering-team@agent-marketplace": [{
+                    "installPath": str(install), "version": "9.2.0",
+                    "scope": "user", "lastUpdated": "2026-08-03T00:00:00Z",
+                }]},
+            }), encoding="utf-8")
+            env = {**os.environ, "AGENTROF_HOME": str(home),
+                   "AGENTROF_PLUGINS_DIR": str(plugins),
+                   "AGENTROF_CODEX_PLUGINS_DIR": str(root / "no-codex")}
+            proc = subprocess.run(
+                [sys.executable, "-c",
+                 "import sys,json;"
+                 f"sys.path.insert(0,{str(PMO_SCRIPTS)!r});"
+                 "import pmo_dashboard;"
+                 "print(json.dumps(pmo_dashboard.scan_catalog()))"],
+                capture_output=True, text=True, env=env)
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            team = json.loads(proc.stdout)["teams"]["software-engineering-team"]
+            self.assertEqual([skill["name"] for skill in team["skills"]], ["setup"])
 
 
 if __name__ == "__main__":

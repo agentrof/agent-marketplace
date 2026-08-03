@@ -3,7 +3,7 @@
 
 Every rule in this repo is machine-enforced or it is not a rule. This tool
 scans authored content (plugins/, docs/, README.md, CONTRIBUTING.md,
-.claude-plugin/) and emits deterministic findings. One error finding fails
+.claude-plugin/, .agents/plugins/) and emits deterministic findings. One error finding fails
 the run.
 
 Scope is an explicit allowlist; assets/, memory/, tools/ and .git/ are never
@@ -155,6 +155,7 @@ class Tree:
     docs_dir: Path
     readme: Path
     marketplace: Path
+    codex_marketplace: Path
     config: dict | None = None  # tools/data/models.json, None when unloadable
     limits: dict | None = None  # tools/data/limits.json, None when unloadable
     md_files: list[Path] = field(default_factory=list)
@@ -227,6 +228,8 @@ def iter_scope_files(tree: Tree, suffix: str) -> list[Path]:
     if suffix == ".json":
         if tree.marketplace.is_file():
             files.append(tree.marketplace)
+        if tree.codex_marketplace.is_file():
+            files.append(tree.codex_marketplace)
     return files
 
 
@@ -242,7 +245,11 @@ def agent_files(plugin: Path) -> list[Path]:
 
 
 def skill_dirs(plugin: Path) -> list[Path]:
-    skills = plugin / "skills"
+    skills = plugin / "skill-content"
+    if not skills.is_dir():
+        # Compatibility for validator fixtures and pre-Codex third-party
+        # plugins. Native Agentrof packages use skill-content/ exclusively.
+        skills = plugin / "skills"
     if not skills.is_dir():
         return []
     return sorted(p for p in skills.iterdir() if p.is_dir())
@@ -778,6 +785,105 @@ def check_registration(tree: Tree, findings: list[Finding]) -> None:
             ))
 
 
+def check_codex_packaging(tree: Tree, findings: list[Finding]) -> None:
+    """Codex marketplace, generated archive, and source surfaces stay aligned."""
+    if not tree.codex_marketplace.is_file():
+        return
+
+    def error(path: Path, message: str, remediation: str) -> None:
+        findings.append(Finding(
+            "error", rel(tree, path), 1, "codex_packaging", message, remediation
+        ))
+
+    try:
+        marketplace = json.loads(read_text(tree.codex_marketplace))
+    except json.JSONDecodeError:
+        return
+    if marketplace.get("name") != "agent-marketplace":
+        error(tree.codex_marketplace, "Codex marketplace name must be agent-marketplace",
+              "keep the documented install selector stable")
+    entries = {
+        entry.get("name", ""): entry
+        for entry in marketplace.get("plugins", [])
+        if isinstance(entry, dict)
+    }
+    for plugin in plugin_dirs(tree):
+        entry = entries.get(plugin.name)
+        if entry is None:
+            error(tree.codex_marketplace,
+                  f"Codex marketplace does not register {plugin.name}",
+                  "add a policy-complete Codex marketplace entry")
+            continue
+        source = entry.get("source")
+        path_value = source.get("path", "") if isinstance(source, dict) else ""
+        expected_path = f"./codex-plugins/{plugin.name}"
+        if path_value != expected_path:
+            error(tree.codex_marketplace,
+                  f"{plugin.name} Codex source is {path_value!r}, expected {expected_path!r}",
+                  "point the Codex marketplace at the generated archive")
+        policy = entry.get("policy") or {}
+        expected_install = (
+            "INSTALLED_BY_DEFAULT"
+            if plugin.name == "project-management-office" else "AVAILABLE"
+        )
+        if policy.get("installation") != expected_install \
+                or policy.get("authentication") != "ON_INSTALL" \
+                or entry.get("category") != "Engineering":
+            error(tree.codex_marketplace,
+                  f"{plugin.name} has incomplete or incorrect Codex policy",
+                  "set installation/authentication/category to the repository contract")
+
+        archive = tree.root / "codex-plugins" / plugin.name
+        archive_manifest = archive / ".codex-plugin" / "plugin.json"
+        source_manifest = plugin / "codex" / "plugin.json"
+        claude_manifest = plugin / ".claude-plugin" / "plugin.json"
+        manifests: list[tuple[Path, dict]] = []
+        for manifest_path in (claude_manifest, source_manifest, archive_manifest):
+            try:
+                manifests.append((manifest_path, json.loads(read_text(manifest_path))))
+            except (OSError, json.JSONDecodeError):
+                error(manifest_path, f"missing or invalid manifest for {plugin.name}",
+                      "regenerate the Codex archive and fix the source manifest")
+        versions = {data.get("version", "") for _, data in manifests}
+        names = {data.get("name", "") for _, data in manifests}
+        if len(versions) > 1 or len(names) > 1 or names not in ({plugin.name}, set()):
+            error(source_manifest,
+                  f"Claude/Codex manifest identity drift for {plugin.name}",
+                  "keep plugin names and versions equal across both hosts")
+        if not (archive / ".agentrof-generated-codex-plugin").is_file():
+            error(archive, "Codex archive lacks its generated ownership marker",
+                  "rebuild with tools/build_codex_plugins.py")
+
+        canonical_dirs = skill_dirs(plugin)
+        canonical = {path.name for path in canonical_dirs}
+        entries_only: set[str] = set()
+        for name in canonical:
+            skill_md = next(path / "SKILL.md" for path in canonical_dirs if path.name == name)
+            fm, _, _ = parse_frontmatter(read_text(skill_md))
+            if fm.get("disable-model-invocation") == "true":
+                entries_only.add(name)
+        claude_surface = {
+            path.parent.name for path in (plugin / "claude-skills").glob("*/SKILL.md")
+        }
+        codex_surface = {
+            path.parent.name for path in (plugin / "codex-skills").glob("*/SKILL.md")
+        }
+        archive_surface = {
+            path.parent.name for path in (archive / "skills").glob("*/SKILL.md")
+        }
+        if claude_surface != canonical:
+            error(plugin / "claude-skills", "Claude skill wrappers are incomplete or stale",
+                  "run tools/sync_skill_surfaces.py")
+        if codex_surface != entries_only or archive_surface != entries_only:
+            error(plugin / "codex-skills", "Codex exposes non-entry or stale skills",
+                  "sync skill surfaces and rebuild Codex plugins")
+        for name in entries_only:
+            metadata = plugin / "codex-skills" / name / "agents" / "openai.yaml"
+            if not metadata.is_file() or "allow_implicit_invocation: false" not in read_text(metadata):
+                error(metadata, f"{name} lacks explicit-only Codex policy",
+                      "generate agents/openai.yaml with implicit invocation disabled")
+
+
 def _walk_keys(obj: object, path: str, out: list[tuple[str, str]]) -> None:
     if isinstance(obj, dict):
         for key, value in obj.items():
@@ -792,6 +898,8 @@ def check_json_hygiene(tree: Tree, findings: list[Finding]) -> None:
     json_paths: list[Path] = []
     if tree.marketplace.is_file():
         json_paths.append(tree.marketplace)
+    if tree.codex_marketplace.is_file():
+        json_paths.append(tree.codex_marketplace)
     if tree.plugins_dir.is_dir():
         json_paths.extend(sorted(tree.plugins_dir.rglob("*.json")))
     for path in json_paths:
@@ -805,6 +913,10 @@ def check_json_hygiene(tree: Tree, findings: list[Finding]) -> None:
             ))
             continue
         is_hooks_manifest = path.name == "hooks.json" and path.parent.name == "hooks"
+        is_codex_schema = (
+            path == tree.codex_marketplace
+            or (path.name == "plugin.json" and path.parent.name == "codex")
+        )
         # Vault payload files under a plugin's templates/ carry the vault
         # app's own key schema (camelCase settings, kebab plugin ids); only
         # the parse requirement applies there.
@@ -812,7 +924,7 @@ def check_json_hygiene(tree: Tree, findings: list[Finding]) -> None:
         keys: list[tuple[str, str]] = []
         _walk_keys(data, "$", keys)
         for where, key in keys:
-            if is_vault_payload:
+            if is_vault_payload or is_codex_schema:
                 continue
             if (is_hooks_manifest and where == "$.hooks"
                     and HOOK_EVENT_KEY_RE.match(key)):
@@ -946,7 +1058,10 @@ def check_naive_clock(tree: Tree, findings: list[Finding]) -> None:
                         ))
 
 
-SCRIPT_REF_RE = re.compile(r"\$\{CLAUDE_PLUGIN_ROOT\}/([A-Za-z0-9_\-./]+\.py)\b")
+SCRIPT_REF_RE = re.compile(
+    r"\$\{(?:CLAUDE_PLUGIN_ROOT|PLUGIN_ROOT:-\$\{CLAUDE_PLUGIN_ROOT\})\}"
+    r"\"?/([A-Za-z0-9_\-./]+\.py)\b"
+)
 
 # The dispatcher grammar shipped content uses to reach plugin files:
 # "$RUN" run|path "$TEAM"|<plugin-name> <relpath>. "$TEAM" resolves to
@@ -960,7 +1075,7 @@ def check_script_references(tree: Tree, findings: list[Finding]) -> None:
     """Every plugin-file reference in shipped markdown must resolve to a
     shipped file: a flow naming a script or flow that does not exist is a
     broken contract, not documentation. Covers the legacy
-    ${CLAUDE_PLUGIN_ROOT} script tokens and the dispatcher grammar
+    host plugin-root script tokens and the dispatcher grammar
     ("$RUN" run|path ... <relpath>)."""
     for plugin in plugin_dirs(tree):
         hooks_manifest = plugin / "hooks" / "hooks.json"
@@ -1043,10 +1158,12 @@ def check_template_placeholders(tree: Tree, findings: list[Finding]) -> None:
         templates = plugin / "templates"
         if not templates.is_dir():
             continue
-        skills_dir = plugin / "skills"
+        canonical_skills = skill_dirs(plugin)
         skill_text = "".join(
-            read_text(p) for p in sorted(skills_dir.glob("*/SKILL.md"))
-        ) if skills_dir.is_dir() else ""
+            read_text(skill / "SKILL.md")
+            for skill in canonical_skills
+            if (skill / "SKILL.md").is_file()
+        )
         for tpl in sorted(p for p in templates.rglob("*") if p.is_file()):
             parts = tpl.parts
             if ".obsidian" in parts and "plugins" in parts:
@@ -1071,7 +1188,10 @@ def check_ba_schema_shape(tree: Tree, findings: list[Finding]) -> None:
     """Any shipped space-schema.json must be well-formed: the compiler is
     parameterized by it, so a malformed schema is a broken product."""
     for plugin in plugin_dirs(tree):
-        for path in sorted(plugin.glob("skills/*/data/space-schema.json")):
+        for skill in skill_dirs(plugin):
+            path = skill / "data" / "space-schema.json"
+            if not path.is_file():
+                continue
             def err(message: str, fix: str) -> None:
                 findings.append(Finding(
                     "error", rel(tree, path), 1, "ba_schema_shape", message, fix))
@@ -1303,9 +1423,12 @@ def check_vault_wiring(tree: Tree, findings: list[Finding]) -> None:
     name the obsidian-vault skill, so the law cannot be skipped by
     omission. Deliberately broad: readers pay one pointer sentence."""
     for plugin in plugin_dirs(tree):
-        if not (plugin / "skills" / "obsidian-vault").is_dir():
+        skills = skill_dirs(plugin)
+        if not any(path.name == "obsidian-vault" for path in skills):
             continue
-        surfaces = sorted(plugin.glob("skills/*/SKILL.md"))
+        surfaces = sorted(
+            path / "SKILL.md" for path in skills if (path / "SKILL.md").is_file()
+        )
         flows = plugin / "flows"
         if flows.is_dir():
             surfaces.extend(sorted(flows.glob("*.md")))
@@ -1324,7 +1447,10 @@ def check_vault_policy_shape(tree: Tree, findings: list[Finding]) -> None:
     the plugin's templates/vault seeds: the vault checker, the seeds and the
     graph config are all parameterized by it, so drift is a broken product."""
     for plugin in plugin_dirs(tree):
-        for path in sorted(plugin.glob("skills/*/data/vault-policy.json")):
+        for skill in skill_dirs(plugin):
+            path = skill / "data" / "vault-policy.json"
+            if not path.is_file():
+                continue
             def err(message: str, fix: str) -> None:
                 findings.append(Finding(
                     "error", rel(tree, path), 1, "vault_policy_shape",
@@ -1505,7 +1631,10 @@ def check_vault_policy_shape(tree: Tree, findings: list[Finding]) -> None:
             # every group tag names a known type. An uncolored type or a
             # dead legend entry is a mechanical error, never an oversight.
             schema_types: set[str] = set()
-            for spath in sorted(plugin.glob("skills/*/data/space-schema.json")):
+            for skill in skill_dirs(plugin):
+                spath = skill / "data" / "space-schema.json"
+                if not spath.is_file():
+                    continue
                 try:
                     sdata = json.loads(read_text(spath))
                 except json.JSONDecodeError:
@@ -1739,6 +1868,7 @@ CHECKS = {
     "dead_links": check_dead_links,
     "reference_triggers": check_reference_triggers,
     "registration": check_registration,
+    "codex_packaging": check_codex_packaging,
     "json_hygiene": check_json_hygiene,
     "orchestrator_integrity": check_orchestrator_integrity,
     "question_popup": check_question_popup,
@@ -1777,6 +1907,7 @@ def build_tree(root: Path) -> Tree:
         docs_dir=root / "docs",
         readme=root / "README.md",
         marketplace=root / ".claude-plugin" / "marketplace.json",
+        codex_marketplace=root / ".agents" / "plugins" / "marketplace.json",
         config=load_policy_json(root, MODEL_CONFIG_RELPATH),
         limits=load_policy_json(root, LIMITS_CONFIG_RELPATH),
     )

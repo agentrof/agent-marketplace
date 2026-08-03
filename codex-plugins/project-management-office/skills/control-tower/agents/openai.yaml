@@ -1,0 +1,6 @@
+interface:
+  display_name: "Control Tower"
+  short_description: "Run the Control Tower Agentrof workflow"
+  default_prompt: "Use $control-tower to start this Agentrof workflow."
+policy:
+  allow_implicit_invocation: false

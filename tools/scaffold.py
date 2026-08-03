@@ -17,6 +17,7 @@ from __future__ import annotations
 import argparse
 import json
 import re
+import shutil
 from pathlib import Path
 
 import build_distributions
@@ -181,6 +182,20 @@ def sync_distributions(root: Path) -> None:
         raise SystemExit(f"scaffold: {exc}") from exc
 
 
+def rollback_created(root: Path, paths: list[Path]) -> None:
+    """Remove only paths created by the active scaffold transaction."""
+    resolved_root = root.resolve()
+    for path in reversed(paths):
+        try:
+            path.resolve().relative_to(resolved_root)
+        except ValueError as exc:
+            raise RuntimeError(f"refusing rollback outside repository: {path}") from exc
+        if path.is_dir() and not path.is_symlink():
+            shutil.rmtree(path)
+        elif path.exists() or path.is_symlink():
+            path.unlink()
+
+
 def title_of(name: str) -> str:
     display_tokens = {
         "api": "API", "cli": "CLI", "devops": "DevOps",
@@ -203,83 +218,94 @@ def new_plugin(root: Path, name: str) -> None:
     plugin = root / "plugins" / name
     if plugin.exists():
         raise SystemExit(f"scaffold: plugin '{name}' already exists")
-    (plugin / "agents").mkdir(parents=True)
-    (plugin / "skill-content").mkdir()
+    marketplace_path = root / ".claude-plugin" / "marketplace.json"
+    codex_marketplace_path = root / ".agents" / "plugins" / "marketplace.json"
+    try:
+        marketplace = json.loads(marketplace_path.read_text(encoding="utf-8"))
+        codex_marketplace = json.loads(
+            codex_marketplace_path.read_text(encoding="utf-8")
+        )
+    except (OSError, json.JSONDecodeError) as exc:
+        raise SystemExit(f"scaffold: marketplace registry is unreadable: {exc}") from exc
+    marketplace_before = marketplace_path.read_bytes()
+    codex_marketplace_before = codex_marketplace_path.read_bytes()
     claude_platform = root / "platforms" / "claude" / name
     codex_platform = root / "platforms" / "codex" / name
-    claude_platform.mkdir(parents=True)
-    codex_platform.mkdir(parents=True)
-    manifest = dict(PLUGIN_JSON_TEMPLATE)
-    manifest["name"] = name
-    manifest["description"] = f"{title_of(name)} plugin."
-    manifest["skills"] = "./skills/"
-    if name != PMO_PLUGIN:
-        manifest["dependencies"] = [PMO_PLUGIN]
-    (claude_platform / "manifest.json").write_text(
-        json.dumps(manifest, indent=2) + "\n", encoding="utf-8"
-    )
-    claude_contract = (
-        CLAUDE_TEAM_CONTRACT if name != PMO_PLUGIN
-        else "# Host Contract\n\n- Preserve every canonical workflow gate and artifact.\n"
-    )
-    (claude_platform / "host-contract.md").write_text(
-        claude_contract, encoding="utf-8")
-    if name != PMO_PLUGIN:
-        claude_hooks = claude_platform / "overlay" / "hooks" / "hooks.json"
-        claude_hooks.parent.mkdir(parents=True)
-        claude_hooks.write_text(
-            json.dumps(CLAUDE_TEAM_HOOKS, indent=2) + "\n", encoding="utf-8"
+    created = [plugin, claude_platform, codex_platform]
+    try:
+        (plugin / "agents").mkdir(parents=True)
+        (plugin / "skill-content").mkdir()
+        claude_platform.mkdir(parents=True)
+        codex_platform.mkdir(parents=True)
+        manifest = dict(PLUGIN_JSON_TEMPLATE)
+        manifest["name"] = name
+        manifest["description"] = f"{title_of(name)} plugin."
+        manifest["skills"] = "./skills/"
+        if name != PMO_PLUGIN:
+            manifest["dependencies"] = [PMO_PLUGIN]
+        (claude_platform / "manifest.json").write_text(
+            json.dumps(manifest, indent=2) + "\n", encoding="utf-8"
         )
-    # Registration is part of birth: a scaffolded-but-unregistered plugin
-    # would fail the registration rule the moment someone registered it by
-    # hand. One writer, one moment.
-    marketplace_path = root / ".claude-plugin" / "marketplace.json"
-    marketplace = json.loads(marketplace_path.read_text(encoding="utf-8"))
-    marketplace.setdefault("plugins", []).append({
-        "name": name,
-        "source": f"./dist/claude/{name}",
-        "description": manifest["description"],
-        "version": manifest["version"],
-        "license": "MIT",
-    })
-    marketplace_path.write_text(
-        json.dumps(marketplace, indent=2) + "\n", encoding="utf-8")
-    codex_marketplace_path = root / ".agents" / "plugins" / "marketplace.json"
-    (codex_platform / "manifest.json").write_text(
-        json.dumps(codex_manifest(name, manifest["description"]), indent=2) + "\n",
-        encoding="utf-8",
-    )
-    codex_contract = (
-        CODEX_TEAM_CONTRACT if name != PMO_PLUGIN
-        else "# Host Contract\n\n- Preserve every canonical workflow gate and artifact.\n"
-    )
-    (codex_platform / "host-contract.md").write_text(
-        codex_contract, encoding="utf-8")
-    if name != PMO_PLUGIN:
-        codex_hooks = codex_platform / "overlay" / "hooks" / "hooks.json"
-        codex_hooks.parent.mkdir(parents=True)
-        codex_hooks.write_text(
-            json.dumps(CODEX_TEAM_HOOKS, indent=2) + "\n", encoding="utf-8"
+        claude_contract = (
+            CLAUDE_TEAM_CONTRACT if name != PMO_PLUGIN
+            else "# Host Contract\n\n- Preserve every canonical workflow gate and artifact.\n"
         )
-        agents_template = codex_platform / "overlay" / "templates" / "AGENTS.md"
-        agents_template.parent.mkdir(parents=True)
-        agents_template.write_text(
-            f"# {title_of(name)}\n\n"
-            "- Read {{workspace}}/memory/me.md before team work when it exists.\n"
-            "- Use only this team's setup-generated project agents.\n",
+        (claude_platform / "host-contract.md").write_text(
+            claude_contract, encoding="utf-8")
+        if name != PMO_PLUGIN:
+            claude_hooks = claude_platform / "overlay" / "hooks" / "hooks.json"
+            claude_hooks.parent.mkdir(parents=True)
+            claude_hooks.write_text(
+                json.dumps(CLAUDE_TEAM_HOOKS, indent=2) + "\n", encoding="utf-8"
+            )
+        marketplace.setdefault("plugins", []).append({
+            "name": name,
+            "source": f"./dist/claude/{name}",
+            "description": manifest["description"],
+            "version": manifest["version"],
+            "license": "MIT",
+        })
+        marketplace_path.write_text(
+            json.dumps(marketplace, indent=2) + "\n", encoding="utf-8")
+        (codex_platform / "manifest.json").write_text(
+            json.dumps(codex_manifest(name, manifest["description"]), indent=2) + "\n",
             encoding="utf-8",
         )
-    codex_marketplace = json.loads(codex_marketplace_path.read_text(encoding="utf-8"))
-    codex_marketplace.setdefault("plugins", []).append({
-        "name": name,
-        "source": {"source": "local", "path": f"./dist/codex/{name}"},
-        "policy": {"installation": "AVAILABLE", "authentication": "ON_INSTALL"},
-        "category": "Engineering",
-    })
-    codex_marketplace_path.write_text(
-        json.dumps(codex_marketplace, indent=2) + "\n", encoding="utf-8"
-    )
-    sync_distributions(root)
+        codex_contract = (
+            CODEX_TEAM_CONTRACT if name != PMO_PLUGIN
+            else "# Host Contract\n\n- Preserve every canonical workflow gate and artifact.\n"
+        )
+        (codex_platform / "host-contract.md").write_text(
+            codex_contract, encoding="utf-8")
+        if name != PMO_PLUGIN:
+            codex_hooks = codex_platform / "overlay" / "hooks" / "hooks.json"
+            codex_hooks.parent.mkdir(parents=True)
+            codex_hooks.write_text(
+                json.dumps(CODEX_TEAM_HOOKS, indent=2) + "\n", encoding="utf-8"
+            )
+            agents_template = codex_platform / "overlay" / "templates" / "AGENTS.md"
+            agents_template.parent.mkdir(parents=True)
+            agents_template.write_text(
+                f"# {title_of(name)}\n\n"
+                "- Read {{workspace}}/memory/me.md before team work when it exists.\n"
+                "- Use only this team's setup-generated project agents.\n",
+                encoding="utf-8",
+            )
+        codex_marketplace.setdefault("plugins", []).append({
+            "name": name,
+            "source": {"source": "local", "path": f"./dist/codex/{name}"},
+            "policy": {"installation": "AVAILABLE", "authentication": "ON_INSTALL"},
+            "category": "Engineering",
+        })
+        codex_marketplace_path.write_text(
+            json.dumps(codex_marketplace, indent=2) + "\n", encoding="utf-8"
+        )
+        sync_distributions(root)
+    except BaseException:
+        marketplace_path.write_bytes(marketplace_before)
+        codex_marketplace_path.write_bytes(codex_marketplace_before)
+        rollback_created(root, created)
+        raise
     print(f"scaffold: created plugins/{name}, both platform adapters,"
           " and both marketplace entries")
 
@@ -292,17 +318,23 @@ def new_agent(root: Path, plugin_name: str, name: str) -> None:
     path = plugin / "agents" / f"{name}.md"
     if path.exists():
         raise SystemExit(f"scaffold: agent '{name}' already exists")
-    path.parent.mkdir(exist_ok=True)
-    path.write_text(
-        AGENT_TEMPLATE.format(plugin=plugin_name, name=name, title=title_of(name)),
-        encoding="utf-8",
-    )
-    sync_distributions(root)
+    try:
+        path.parent.mkdir(exist_ok=True)
+        path.write_text(
+            AGENT_TEMPLATE.format(plugin=plugin_name, name=name, title=title_of(name)),
+            encoding="utf-8",
+        )
+        sync_distributions(root)
+    except BaseException:
+        rollback_created(root, [path])
+        raise
     print(f"scaffold: created {path.relative_to(root)}")
 
 
 def new_skill(root: Path, plugin_name: str, name: str, kind: str) -> None:
     require_kebab(name, "skill name")
+    if kind not in {"entry", "hidden"}:
+        raise SystemExit("scaffold: skill kind must be entry or hidden")
     plugin = root / "plugins" / plugin_name
     if not plugin.is_dir():
         raise SystemExit(f"scaffold: plugin '{plugin_name}' does not exist")
@@ -310,15 +342,19 @@ def new_skill(root: Path, plugin_name: str, name: str, kind: str) -> None:
     sdir = skills_root / name
     if sdir.exists():
         raise SystemExit(f"scaffold: skill '{name}' already exists")
-    sdir.mkdir(parents=True)
-    template = SKILL_ENTRY_TEMPLATE if kind == "entry" else SKILL_HIDDEN_TEMPLATE
-    (sdir / "SKILL.md").write_text(
-        template.format(name=name, title=title_of(name), plugin=plugin_name),
-        encoding="utf-8",
-    )
-    if kind == "hidden":
-        (sdir / "references").mkdir()
-    sync_distributions(root)
+    try:
+        sdir.mkdir(parents=True)
+        template = SKILL_ENTRY_TEMPLATE if kind == "entry" else SKILL_HIDDEN_TEMPLATE
+        (sdir / "SKILL.md").write_text(
+            template.format(name=name, title=title_of(name), plugin=plugin_name),
+            encoding="utf-8",
+        )
+        if kind == "hidden":
+            (sdir / "references").mkdir()
+        sync_distributions(root)
+    except BaseException:
+        rollback_created(root, [sdir])
+        raise
     print(f"scaffold: created {sdir.relative_to(root)} ({kind})")
 
 

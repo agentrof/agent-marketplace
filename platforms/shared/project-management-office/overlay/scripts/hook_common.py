@@ -74,7 +74,14 @@ def parse_apply_patch(patch: str) -> list[dict]:
         move_to = ""
         while index < len(lines) - 1 and PATCH_HEADER_RE.match(lines[index]) is None:
             if lines[index].startswith("*** Move to: "):
-                move_to = lines[index][len("*** Move to: "):].strip()
+                candidate = lines[index][len("*** Move to: "):].strip()
+                if operation != "Update":
+                    raise ValueError("apply_patch move is valid only for Update File")
+                if not candidate:
+                    raise ValueError("empty apply_patch move target")
+                if move_to:
+                    raise ValueError("duplicate apply_patch move target")
+                move_to = candidate
             else:
                 body.append(lines[index])
             index += 1

@@ -286,10 +286,24 @@ by omission.
 A release bumps both platform manifests, both generated manifests and the
 Claude marketplace entry in one commit. The validator errors on identity or
 version drift; the Codex marketplace carries policy, not a second version
-field. Before release, run `make release-check` on a machine carrying both host
-CLIs. The host gate gives every team isolated state and verifies dependency or
+field. `make check` is hermetic: it opens no network sockets, needs no host CLI
+and includes deterministic simulations of the complete Claude and Codex
+lifecycle. CI runs it on the primary environment plus the supported Python and
+operating-system compatibility matrix.
+
+Before release, run `make release-check` on a machine carrying both host CLIs.
+The real-host gate gives every team isolated state and verifies dependency or
 explicit recovery, PMO session readiness, disable/enable, remove/reinstall,
-Codex entry-skill discovery, internal-skill hiding and setup idempotency.
+Codex entry-skill discovery, internal-skill hiding and setup idempotency. The
+`release-hosts` workflow repeats this gate on version tags, a weekly schedule
+and explicit maintainer dispatch against current host CLIs.
+
+Validator fixture lockstep is the minimum, not the whole test contract.
+Cross-host packaging and PMO dependency branches use named adversarial cases.
+Every public PMO parser leaf and dashboard API route is registered against an
+executable semantic test. Hook patch normalization uses a shared golden corpus
+on both safety implementations. Adding a command, route, host policy branch or
+patch form requires its contract case in the same change.
 
 ## Scaffolding
 

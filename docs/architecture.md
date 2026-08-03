@@ -22,7 +22,10 @@ the dependency contract.
 1. **Machine-enforced or not a rule.** Every content rule lives in
    `tools/validate.py` with a fixture that proves it fires. CI runs
    `make check` on every push and pull request; one finding is red. There
-   are no exception files, allowlists or temporary waivers.
+   are no exception files, allowlists or temporary waivers. High-risk
+   cross-host sub-contracts carry named adversarial cases, and public PMO
+   command and dashboard route registries stay in lockstep with executable
+   tests so a new surface cannot merge without a declared contract.
 2. **Roles versus knowledge.** Agents are platform-independent role
    constitutions (Principles, Boundaries, Approach, Output Contract) with
    zero technology nouns. All technology and method knowledge lives in

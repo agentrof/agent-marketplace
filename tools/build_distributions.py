@@ -45,6 +45,8 @@ CANONICAL_HOST_TOKENS = (
     "claude",
     "codex",
     "AskUserQuestion",
+    "CLAUDE.md",
+    "AGENTS.md",
     "CLAUDE_PLUGIN_ROOT",
     "PLUGIN_ROOT",
     ".claude",
@@ -325,6 +327,15 @@ def validate_canonical(root: Path) -> None:
                 f"{child}: unsupported repository top-level directory; "
                 "use the declared repository layout"
             )
+    for surface_name in ("plugins", "platforms"):
+        surface = root / surface_name
+        if not surface.is_dir():
+            continue
+        for candidate in sorted(surface.rglob("*")):
+            if candidate.is_symlink():
+                problems.append(
+                    f"{candidate}: symbolic links are forbidden in packaged sources"
+                )
     for source in sorted(path for path in (root / "plugins").iterdir() if path.is_dir()):
         for child in sorted(source.iterdir()):
             if is_python_cache(child):
@@ -347,7 +358,8 @@ def validate_canonical(root: Path) -> None:
                 problems.append(f"{agent}: canonical agents use reasoning, not model")
         for path in sorted(
             candidate for candidate in source.rglob("*")
-            if candidate.is_file() and not is_python_cache(candidate)
+            if candidate.is_file() and not candidate.is_symlink()
+            and not is_python_cache(candidate)
         ):
             try:
                 text = path.read_text(encoding="utf-8")

@@ -13,6 +13,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest import mock
 from pathlib import Path
 
 TESTS_DIR = Path(__file__).resolve().parent
@@ -59,6 +60,84 @@ class ScaffoldTests(unittest.TestCase):
             scaffold.new_agent(self.root, fixtures.PLUGIN, "CamelCase")
         with self.assertRaises(SystemExit):
             scaffold.new_skill(self.root, fixtures.PLUGIN, "snake_case", "entry")
+
+    def test_rejects_unknown_plugin_without_writes(self):
+        before = sorted(path.relative_to(self.root) for path in self.root.rglob("*"))
+        with self.assertRaisesRegex(SystemExit, "does not exist"):
+            scaffold.new_agent(self.root, "ghost-team", "coordinator")
+        with self.assertRaisesRegex(SystemExit, "does not exist"):
+            scaffold.new_skill(self.root, "ghost-team", "start", "entry")
+        after = sorted(path.relative_to(self.root) for path in self.root.rglob("*"))
+        self.assertEqual(after, before)
+
+    def test_rejects_duplicate_agent_without_distribution_drift(self):
+        agent = self.root / "plugins" / fixtures.PLUGIN / "agents" / "planner.md"
+        before = agent.read_bytes()
+        with self.assertRaisesRegex(SystemExit, "already exists"):
+            scaffold.new_agent(self.root, fixtures.PLUGIN, "planner")
+        self.assertEqual(agent.read_bytes(), before)
+
+    def test_rejects_duplicate_skill_without_distribution_drift(self):
+        skill = (self.root / "plugins" / fixtures.PLUGIN / "skill-content"
+                 / "notes" / "SKILL.md")
+        before = skill.read_bytes()
+        with self.assertRaisesRegex(SystemExit, "already exists"):
+            scaffold.new_skill(self.root, fixtures.PLUGIN, "notes", "entry")
+        self.assertEqual(skill.read_bytes(), before)
+
+    def test_rejects_unknown_skill_kind_before_writing(self):
+        target = (self.root / "plugins" / fixtures.PLUGIN / "skill-content"
+                  / "domain-notes")
+        with self.assertRaisesRegex(SystemExit, "entry or hidden"):
+            scaffold.new_skill(self.root, fixtures.PLUGIN, "domain-notes", "private")
+        self.assertFalse(target.exists())
+
+    def test_new_plugin_rolls_back_every_surface_on_build_failure(self):
+        claude_market = self.root / ".claude-plugin" / "marketplace.json"
+        codex_market = self.root / ".agents" / "plugins" / "marketplace.json"
+        before = (claude_market.read_bytes(), codex_market.read_bytes())
+        with mock.patch.object(
+                scaffold, "sync_distributions", side_effect=RuntimeError("build failed")):
+            with self.assertRaisesRegex(RuntimeError, "build failed"):
+                scaffold.new_plugin(self.root, "demo-team")
+        self.assertEqual(
+            (claude_market.read_bytes(), codex_market.read_bytes()), before
+        )
+        for path in (
+            self.root / "plugins" / "demo-team",
+            self.root / "platforms" / "claude" / "demo-team",
+            self.root / "platforms" / "codex" / "demo-team",
+        ):
+            self.assertFalse(path.exists(), path)
+
+    def test_new_agent_rolls_back_on_build_failure(self):
+        target = (self.root / "plugins" / fixtures.PLUGIN / "agents"
+                  / "coordinator.md")
+        with mock.patch.object(
+                scaffold, "sync_distributions", side_effect=RuntimeError("build failed")):
+            with self.assertRaisesRegex(RuntimeError, "build failed"):
+                scaffold.new_agent(self.root, fixtures.PLUGIN, "coordinator")
+        self.assertFalse(target.exists())
+
+    def test_new_skill_rolls_back_on_build_failure(self):
+        target = (self.root / "plugins" / fixtures.PLUGIN / "skill-content"
+                  / "domain-notes")
+        with mock.patch.object(
+                scaffold, "sync_distributions", side_effect=RuntimeError("build failed")):
+            with self.assertRaisesRegex(RuntimeError, "build failed"):
+                scaffold.new_skill(
+                    self.root, fixtures.PLUGIN, "domain-notes", "hidden"
+                )
+        self.assertFalse(target.exists())
+
+    def test_new_plugin_rejects_malformed_registry_before_writing(self):
+        marketplace = self.root / ".agents" / "plugins" / "marketplace.json"
+        marketplace.write_text("{broken", encoding="utf-8")
+        with self.assertRaisesRegex(SystemExit, "registry is unreadable"):
+            scaffold.new_plugin(self.root, "demo-team")
+        self.assertFalse((self.root / "plugins" / "demo-team").exists())
+        self.assertFalse((self.root / "platforms" / "claude" / "demo-team").exists())
+        self.assertFalse((self.root / "platforms" / "codex" / "demo-team").exists())
 
     def test_native_repository_scaffolds_both_host_packages(self):
         with tempfile.TemporaryDirectory() as tmp:

@@ -1,0 +1,33 @@
+name: release-hosts
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "17 4 * * 1"
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: read
+
+jobs:
+  real-host-lifecycle:
+    runs-on: macos-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: Install current host CLIs
+        run: npm install --global @anthropic-ai/claude-code @openai/codex
+      - name: Record host versions
+        run: |
+          claude --version
+          codex --version
+      - name: Run deterministic and real-host gates
+        run: make release-check

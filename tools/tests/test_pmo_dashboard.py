@@ -1,9 +1,10 @@
-"""Unit tests for the PMO dashboard server: endpoint shapes over real HTTP,
-read-only enforcement, catalog scan, and failure-mode responses."""
+"""Hermetic PMO dashboard contracts: routes, read-only enforcement,
+catalog scan, HTTP adapter headers, and failure-mode responses."""
 
 from __future__ import annotations
 
 import concurrent.futures
+import io
 import importlib.util
 import json
 import os
@@ -11,10 +12,7 @@ import sqlite3
 import subprocess
 import sys
 import tempfile
-import threading
 import unittest
-import urllib.error
-import urllib.request
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[2]
@@ -38,8 +36,8 @@ def cli(argv, env):
 
 
 class PmoDashboardTests(unittest.TestCase):
-    """One seeded database and one live server for the whole class; tests
-    that need a broken database swap AGENTROF_HOME and restore it."""
+    """One seeded database for the whole class. Request dispatch stays
+    in-process so the default test gate never requires a network socket."""
 
     @classmethod
     def setUpClass(cls):
@@ -123,14 +121,9 @@ class PmoDashboardTests(unittest.TestCase):
         os.environ["AGENTROF_PLUGINS_DIR"] = str(plugins)
 
         cls.dashboard = load("pmo_dashboard")
-        cls.server = cls.dashboard.make_server("127.0.0.1", 0)
-        cls.port = cls.server.server_address[1]
-        threading.Thread(target=cls.server.serve_forever, daemon=True).start()
 
     @classmethod
     def tearDownClass(cls):
-        cls.server.shutdown()
-        cls.server.server_close()
         for key, value in (("AGENTROF_HOME", cls._old_home),
                            ("AGENTROF_PLUGINS_DIR", cls._old_plugins)):
             if value is None:
@@ -140,19 +133,10 @@ class PmoDashboardTests(unittest.TestCase):
         cls.tmp.cleanup()
 
     def get(self, path):
-        try:
-            with urllib.request.urlopen(
-                    f"http://127.0.0.1:{self.port}{path}") as response:
-                content_type = response.headers.get("Content-Type", "")
-                body = response.read()
-                if "json" in content_type:
-                    return response.status, json.loads(body)
-                return response.status, body
-        except urllib.error.HTTPError as exc:
-            body = exc.read()
-            if body.strip().startswith(b"{"):
-                return exc.code, json.loads(body)
-            return exc.code, body
+        status, body, content_type = self.dashboard.dispatch_request("GET", path)
+        if "json" in content_type:
+            return status, json.loads(body)
+        return status, body
 
     # -- endpoint shapes -------------------------------------------------------
 
@@ -307,10 +291,9 @@ class PmoDashboardTests(unittest.TestCase):
     # -- static and hardening --------------------------------------------------
 
     def test_index_served_at_root(self):
-        with urllib.request.urlopen(f"http://127.0.0.1:{self.port}/") as response:
-            self.assertEqual(response.status, 200)
-            self.assertEqual(response.headers.get("Cache-Control"), "no-store")
-            body = response.read().decode("utf-8", errors="replace")
+        status, raw = self.get("/")
+        self.assertEqual(status, 200)
+        body = raw.decode("utf-8", errors="replace")
         self.assertIn("<title>Control Tower</title>", body)
         # served self-contained: no external runtime URLs in src/href
         import re
@@ -325,12 +308,44 @@ class PmoDashboardTests(unittest.TestCase):
 
     def test_non_get_methods_405(self):
         for method in ("POST", "PUT", "DELETE", "PATCH"):
-            request = urllib.request.Request(
-                f"http://127.0.0.1:{self.port}/api/head",
-                method=method, data=b"{}")
-            with self.assertRaises(urllib.error.HTTPError) as ctx:
-                urllib.request.urlopen(request)
-            self.assertEqual(ctx.exception.code, 405, method)
+            status, body, content_type = self.dashboard.dispatch_request(
+                method, "/api/head")
+            self.assertEqual(status, 405, method)
+            self.assertIn("json", content_type)
+            self.assertEqual(json.loads(body)["error"], "method_not_allowed")
+
+    def test_http_adapter_sets_no_store_and_exact_length(self):
+        handler = self.dashboard.Handler.__new__(self.dashboard.Handler)
+        headers = {}
+        statuses = []
+        handler.wfile = io.BytesIO()
+        handler.send_response = statuses.append
+        handler.send_header = headers.__setitem__
+        handler.end_headers = lambda: None
+        handler._write(200, b"payload", "text/plain")
+        self.assertEqual(statuses, [200])
+        self.assertEqual(headers["Content-Length"], "7")
+        self.assertEqual(headers["Cache-Control"], "no-store")
+        self.assertEqual(handler.wfile.getvalue(), b"payload")
+
+    def test_every_registered_route_has_a_success_contract(self):
+        cases = {
+            "/api/head": ("/api/head", {"db_present", "head_id"}),
+            "/api/overview": ("/api/overview", {"projects"}),
+            "/api/catalog": ("/api/catalog", {"teams"}),
+            "/api/project": ("/api/project?key=shop", {"project", "epics"}),
+            "/api/work_orders": ("/api/work_orders?project_key=shop", {"work_orders"}),
+            "/api/work_order": ("/api/work_order?key=wo1", {"work_order_key", "tasks"}),
+            "/api/ledger": ("/api/ledger?project_key=shop", {"rows"}),
+            "/api/events": ("/api/events?since_id=0", {"events", "head_id"}),
+            "/api/issue_candidates": ("/api/issue_candidates", {"issue_candidates"}),
+        }
+        self.assertEqual(set(cases), set(self.dashboard.ROUTES))
+        for route, (target, expected_keys) in cases.items():
+            with self.subTest(route=route):
+                status, body = self.get(target)
+                self.assertEqual(status, 200, body)
+                self.assertTrue(expected_keys <= set(body), body)
 
     def test_read_only_connection_rejects_writes(self):
         connection = self.dashboard.open_ro()

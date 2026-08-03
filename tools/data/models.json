@@ -1,4 +1,4 @@
 {
   "schema_version": 1,
-  "model_aliases": ["opus", "sonnet", "haiku", "inherit"]
+  "reasoning_levels": ["high", "medium", "low", "inherit"]
 }

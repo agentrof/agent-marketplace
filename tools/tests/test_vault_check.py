@@ -1,5 +1,4 @@
-"""Tests for the vault checker and the per-write vault hook
-(plugins/software-engineering-team/scripts/vault_check.py, vault_hook.py),
+"""Tests for the distributed vault checker and per-write vault hook,
 run against the SHIPPED vault policy so the law and the machinery are
 welded together.
 
@@ -21,9 +20,12 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[2]
-SCRIPTS = REPO / "plugins" / "software-engineering-team" / "scripts"
-POLICY_PATH = (REPO / "plugins" / "software-engineering-team" / "skills"
+SCRIPTS = REPO / "dist" / "claude" / "software-engineering-team" / "scripts"
+POLICY_PATH = (REPO / "plugins" / "software-engineering-team" / "skill-content"
                / "obsidian-vault" / "data" / "vault-policy.json")
+# Direct script execution places sibling runtime modules on sys.path. Mirror
+# that host behavior when loading the distributed modules through importlib.
+sys.path.insert(0, str(SCRIPTS))
 
 
 def load(name: str):
@@ -617,7 +619,7 @@ class BuilderFixtureTests(unittest.TestCase):
                         f"{check}: unexpected side findings {fired - allowed}")
 
     def test_title_h1_divergence_fires(self):
-        """Title law v2: the first H1 is byte-identical to the title."""
+        """The first H1 is byte-identical to the title."""
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp) / "docs"
             make_valid_vault(root)
@@ -630,7 +632,7 @@ class BuilderFixtureTests(unittest.TestCase):
             self.assertTrue(matching, findings)
 
     def test_id_led_title_fires(self):
-        """Title law v2 flip: a title led by the note's own id alias is
+        """A title led by the note's own id alias is
         an error (ids live in the alias, never in the label)."""
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp) / "docs"
@@ -755,15 +757,15 @@ aliases:
         self.assertIn("duplicate id number 002", err)
 
     def test_migrate_rewrites_deterministic_classes(self):
-        legacy = self.root / SD / "legacy.md"
-        write(legacy, """---
+        scratch = self.root / SD / "scratch.md"
+        write(scratch, """---
 type: note
-title: Legacy
+title: Scratch
 tags:
   - doc/wrong
 ---
 
-# Legacy
+# Scratch
 
 See [the landscape](landscape.md) and
 [SD-001](decisions/order-events-decision.md).
@@ -774,10 +776,10 @@ See [the landscape](landscape.md) and
         edit(self.root / "maps" / "solution-design.md",
              "- [[solution-design/landscape|Landscape]]",
              "- [[solution-design/landscape|Landscape]]\n"
-             "- [[solution-design/legacy|Legacy]]")
+             "- [[solution-design/scratch|Scratch]]")
         code, out, _ = run(["migrate", "--vault", str(self.root)])
         self.assertEqual(code, 0)
-        text = legacy.read_text(encoding="utf-8")
+        text = scratch.read_text(encoding="utf-8")
         self.assertIn("[[solution-design/landscape|the landscape]]", text)
         self.assertIn(
             "[[solution-design/decisions/order-events-decision|SD-001]]", text)
@@ -788,9 +790,8 @@ See [the landscape](landscape.md) and
                          [f"{f['check']}: {f['message']}" for f in findings])
 
 
-def v5_shaped_names(root: Path) -> None:
-    """Rewind the mini analysis space to its v5 names: chain-prefixed
-    space file, id-prefixed decision file, referrers pointing at both."""
+def make_nonconforming_names(root: Path) -> None:
+    """Give the mini analysis space nonconforming filenames and referrers."""
     (root / BA_SPACE / "space.md").rename(root / BA_SPACE / "erp-space.md")
     (root / BA_SPACE / "decisions" / "pilot-scope-decision.md").rename(
         root / BA_SPACE / "decisions" / "dec-erp-001-pilot-scope.md")
@@ -816,7 +817,7 @@ class RenameVerbTests(unittest.TestCase):
         self.tmp.cleanup()
 
     def test_rename_round_trip_restores_green(self):
-        v5_shaped_names(self.root)
+        make_nonconforming_names(self.root)
         code, out, err = run(["migrate", "--vault", str(self.root),
                               "--rename"])
         self.assertEqual(code, 0, out + err)
@@ -836,10 +837,10 @@ class RenameVerbTests(unittest.TestCase):
                          [f"{f['check']}: {f['message']}" for f in findings])
 
     def test_rename_double_run_is_idempotent(self):
-        """Red-team 2: the decision skip gate is the filename-suffix
-        test, never the record id (both generations carry the alias), so
+        """The decision skip gate is the filename-suffix test, never the
+        record id, so
         a second --rename run plans nothing."""
-        v5_shaped_names(self.root)
+        make_nonconforming_names(self.root)
         code, _, err = run(["migrate", "--vault", str(self.root),
                             "--rename"])
         self.assertEqual(code, 0, err)
@@ -851,10 +852,10 @@ class RenameVerbTests(unittest.TestCase):
         self.assertEqual(payload["manual"], [])
 
     def test_rename_same_slug_collision_routes_manual(self):
-        """Red-team 6: two v5 decisions minting one plain target route to
+        """Two nonconforming decisions minting one target route to
         the manual list and the run proceeds; never an abort, never an
         id appended to disambiguate."""
-        v5_shaped_names(self.root)
+        make_nonconforming_names(self.root)
         source = (self.root / BA_SPACE / "decisions"
                   / "dec-erp-001-pilot-scope.md")
         twin = (self.root / BA_SPACE / "decisions"
@@ -879,19 +880,19 @@ class RenameVerbTests(unittest.TestCase):
         self.assertTrue((self.root / BA_SPACE / "space.md").is_file())
 
     def test_rename_round_inverses_are_node_scoped(self):
-        """The review-suffix inversion maps BOTH the v6 plain forms and the
-        v4/v5 chain forms to the -review target, node-scoped: the root only
+        """Review names missing the suffix map to the -review target,
+        node-scoped: the root only
         applies the space-round inverse and a domain only the round inverse,
         so a domain never claims a space-round name. Already-suffixed names
         never re-match (idempotent)."""
         reviews = self.root / BA_SPACE / "reviews"
-        write(reviews / "erp-space-round-1.md", "# r\n")   # v5 chain, root
-        write(reviews / "space-round-2.md", "# r\n")        # v6 plain, root
+        write(reviews / "erp-space-round-1.md", "# r\n")
+        write(reviews / "space-round-2.md", "# r\n")
         dom = self.root / BA_SPACE / "domains" / "inventory" / "reviews"
-        write(dom / "erp-inventory-round-1.md", "# r\n")    # v5 chain, domain
-        write(dom / "round-2.md", "# r\n")                   # v6 plain, domain
-        write(dom / "round-3-review.md", "# r\n")            # v7, already done
-        write(dom / "space-round-9.md", "# r\n")             # misplaced space
+        write(dom / "erp-inventory-round-1.md", "# r\n")
+        write(dom / "round-2.md", "# r\n")
+        write(dom / "round-3-review.md", "# r\n")
+        write(dom / "space-round-9.md", "# r\n")
         code, out, err = run(["migrate", "--vault", str(self.root),
                               "--rename", "--dry-run", "--json"])
         self.assertEqual(code, 0, out + err)
@@ -915,7 +916,7 @@ class RenameVerbTests(unittest.TestCase):
             f"{BA_SPACE}/domains/inventory/reviews/space-round-9.md", plan)
 
     def test_rename_dry_run_counts_and_writes_nothing(self):
-        v5_shaped_names(self.root)
+        make_nonconforming_names(self.root)
         code, out, err = run(["migrate", "--vault", str(self.root),
                               "--rename", "--dry-run", "--json"])
         self.assertEqual(code, 0, out + err)
@@ -931,7 +932,7 @@ class RenameVerbTests(unittest.TestCase):
         self.assertTrue((self.root / BA_SPACE / "erp-space.md").is_file())
 
     def test_rename_vetoes_frozen_referrer(self):
-        v5_shaped_names(self.root)
+        make_nonconforming_names(self.root)
         write(self.root.parent / "work-orders" / "wo-7" / "freeze.json",
               json.dumps({"frozen_paths":
                           ["workspace/docs/maps/business-analysis.md"]}))
@@ -947,15 +948,15 @@ class RenameVerbTests(unittest.TestCase):
                          sorted(blocked))
 
     def test_migrate_keeps_frozen_note_byte_identical(self):
-        legacy = self.root / SD / "legacy.md"
-        write(legacy, """---
+        scratch = self.root / SD / "scratch.md"
+        write(scratch, """---
 type: note
-title: Frozen Legacy
+title: Frozen Scratch
 tags:
   - doc/note
 ---
 
-# Frozen Legacy
+# Frozen Scratch
 
 See [the landscape](landscape.md).
 
@@ -964,33 +965,33 @@ See [the landscape](landscape.md).
             "[[solution-design/decisions/order-events-decision|SD-001]]")))
         write(self.root.parent / "work-orders" / "wo-9" / "freeze.json",
               json.dumps({"frozen_paths":
-                          ["workspace/docs/solution-design/legacy.md"]}))
-        before = legacy.read_bytes()
+                          ["workspace/docs/solution-design/scratch.md"]}))
+        before = scratch.read_bytes()
         code, out, _ = run(["migrate", "--vault", str(self.root)])
         self.assertEqual(code, 0, out)
-        self.assertEqual(legacy.read_bytes(), before)
+        self.assertEqual(scratch.read_bytes(), before)
 
     def test_migrate_exclude_skips_note(self):
-        legacy = self.root / SD / "legacy.md"
-        write(legacy, """---
+        scratch = self.root / SD / "scratch.md"
+        write(scratch, """---
 type: note
-title: Excluded Legacy
+title: Excluded Scratch
 tags:
   - doc/note
 ---
 
-# Excluded Legacy
+# Excluded Scratch
 
 See [the landscape](landscape.md).
 
 """ + NAV.format(peers=(
             "[[solution-design/landscape|Landscape]] -\n"
             "[[solution-design/decisions/order-events-decision|SD-001]]")))
-        before = legacy.read_bytes()
+        before = scratch.read_bytes()
         code, _, _ = run(["migrate", "--vault", str(self.root),
-                          "--exclude", f"{SD}/legacy.md"])
+                          "--exclude", f"{SD}/scratch.md"])
         self.assertEqual(code, 0)
-        self.assertEqual(legacy.read_bytes(), before)
+        self.assertEqual(scratch.read_bytes(), before)
 
     def test_migrate_rewrites_bare_citation_cells(self):
         scratch = self.root / BA_SPACE / "cites-scratch.md"
@@ -1033,8 +1034,7 @@ See [the landscape](landscape.md).
                          [f"{f['check']}: {f['message']}" for f in findings])
 
     def test_migrate_deid_leads_decision_title_and_h1(self):
-        """The v5 '<ID>: ' lead leaves the title AND the first H1 in one
-        write; the alias keeps the id."""
+        """An invalid '<ID>: ' lead leaves title and H1 in one write."""
         target = self.root / DEC / "order-events-decision.md"
         edit(target, "title: Order events v1 decision",
              'title: "SD-001: Order events v1 decision"')
@@ -1073,68 +1073,6 @@ See [the landscape](landscape.md).
         self.assertEqual(code, 0,
                          [f"{f['check']}: {f['message']}" for f in findings])
 
-    def test_migrate_deletes_retired_scaffold_unscoped(self):
-        """Red-team 4: the retired scaffold files leave the vault inside
-        ANY migrate run (scope or not), and a scoped gate on a v5-shaped
-        root passes right after (the deadlock regression); the class is
-        idempotent."""
-        write(self.root / "backlog.md",
-              "<!-- generated by pmo render; do not edit by hand -->\n\n"
-              "# Backlog\n")
-        write(self.root / "quality-ledger.md",
-              "<!-- generated by pmo render; do not edit by hand -->\n\n"
-              "# Quality Ledger\n")
-        write(self.root / "start-here.md", """---
-type: guide
-title: Start Here
-tags:
-  - doc/guide
----
-
-# Start Here
-
-How to read this vault.
-""")
-        write(self.root / "maps" / "delivery.md", """---
-type: moc
-title: Delivery
-tags:
-  - doc/moc
----
-
-# Delivery
-
-- [[backlog|Backlog]]
-- [[quality-ledger|Quality Ledger]]
-""")
-        edit(self.root / "home.md",
-             "- [[maps/solution-design|Solution Design]]",
-             "- [[maps/solution-design|Solution Design]]\n"
-             "- [[maps/delivery|Delivery]]\n"
-             "- [[start-here|Start Here]]")
-        code, findings = check_findings_scoped(self.root, SD)
-        self.assertEqual(code, 1)  # the v5 scaffold trips the global layout
-        code, out, err = run(["migrate", "--vault", str(self.root),
-                              "--scope", SD])
-        self.assertEqual(code, 0, out + err)
-        for rel in ("backlog.md", "quality-ledger.md", "start-here.md",
-                    "maps/delivery.md"):
-            self.assertFalse((self.root / rel).exists(), rel)
-        home_text = (self.root / "home.md").read_text(encoding="utf-8")
-        self.assertNotIn("start-here", home_text)
-        self.assertNotIn("maps/delivery", home_text)
-        code, findings = check_findings_scoped(self.root, SD)
-        self.assertEqual(code, 0,
-                         [f"{f['check']}: {f['message']}" for f in findings])
-        # idempotent: a second plain run changes nothing and stays green
-        before = (self.root / "home.md").read_bytes()
-        code, _, _ = run(["migrate", "--vault", str(self.root)])
-        self.assertEqual(code, 0)
-        self.assertEqual((self.root / "home.md").read_bytes(), before)
-        code, findings = check_findings(self.root)
-        self.assertEqual(code, 0,
-                         [f"{f['check']}: {f['message']}" for f in findings])
-
     def test_payload_reconcile_heals_asserted_keys_only(self):
         graph_path = self.root / ".obsidian" / "graph.json"
         data = json.loads(graph_path.read_text(encoding="utf-8"))
@@ -1165,7 +1103,7 @@ class DesignSystemWriterTests(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
-        scripts = (REPO / "plugins" / "software-engineering-team" / "skills"
+        scripts = (REPO / "plugins" / "software-engineering-team" / "skill-content"
                    / "ui-ux-design" / "scripts")
         sys.path.insert(0, str(scripts))
         try:

@@ -3,6 +3,7 @@ read-only enforcement, catalog scan, and failure-mode responses."""
 
 from __future__ import annotations
 
+import concurrent.futures
 import importlib.util
 import json
 import os
@@ -17,7 +18,7 @@ import urllib.request
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[2]
-SCRIPTS = REPO / "plugins" / "project-management-office" / "scripts"
+SCRIPTS = REPO / "dist" / "claude" / "project-management-office" / "scripts"
 
 
 def load(name: str):
@@ -83,7 +84,7 @@ class PmoDashboardTests(unittest.TestCase):
         cli(["task", "touch", "--project-key", "shop",
              "--role", "backend_developer", "--phase", "start",
              "--session-id", "s1",
-             "--agent", "software-engineering-team-backend-developer"], env)
+             "--agent", "backend-developer"], env)
         cli(["task", "touch", "--project-key", "shop",
              "--role", "backend_developer", "--phase", "stop",
              "--cost-usd", "0.42"], env)
@@ -99,8 +100,8 @@ class PmoDashboardTests(unittest.TestCase):
             {"name": "software-engineering-team", "version": "9.9.9",
              "description": "The software team.", "dependencies": ["project-management-office"]}))
         (install / "agents").mkdir()
-        (install / "agents" / "software-engineering-team-backend-developer.md").write_text(
-            "---\nname: software-engineering-team-backend-developer\n"
+        (install / "agents" / "backend-developer.md").write_text(
+            "---\nname: backend-developer\n"
             "description: Builds backends.\nmodel: sonnet\n---\n# X\n")
         (install / "skills" / "product-planning").mkdir(parents=True)
         (install / "skills" / "product-planning" / "SKILL.md").write_text(
@@ -278,6 +279,31 @@ class PmoDashboardTests(unittest.TestCase):
         self.assertIn("shown in overview",
                       [c["title"] for c in data["issue_candidates"]])
 
+    def test_dashboard_reads_remain_available_during_concurrent_writes(self):
+        env = {"AGENTROF_HOME": self.home}
+
+        def append_event(index):
+            return cli([
+                "event", "append", "--project-key", "shop",
+                "--action", f"concurrency_probe_{index}", "--actor", "test",
+            ], env)
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=8) as executor:
+            futures = [executor.submit(append_event, index) for index in range(24)]
+            reads = 0
+            while True:
+                status, body = self.get("/api/overview")
+                self.assertEqual(status, 200, body)
+                self.assertIn("projects", body)
+                reads += 1
+                if all(future.done() for future in futures):
+                    break
+            results = [future.result() for future in futures]
+
+        self.assertGreater(reads, 0)
+        for code, _, err in results:
+            self.assertEqual(code, 0, err)
+
     # -- static and hardening --------------------------------------------------
 
     def test_index_served_at_root(self):
@@ -317,7 +343,7 @@ class PmoDashboardTests(unittest.TestCase):
         finally:
             connection.close()
 
-    def test_missing_db_and_newer_schema_responses(self):
+    def test_missing_db_and_noncurrent_schema_responses(self):
         try:
             os.environ["AGENTROF_HOME"] = self.tmp.name + "/nowhere"
             status, head = self.get("/api/head")
@@ -340,7 +366,7 @@ class PmoDashboardTests(unittest.TestCase):
         try:
             status, body = self.get("/api/overview")
             self.assertEqual(status, 409)
-            self.assertEqual(body["error"], "schema_newer")
+            self.assertEqual(body["error"], "schema_mismatch")
             status, head = self.get("/api/head")
             self.assertEqual(status, 200)
             self.assertEqual(head["schema_version"], 99)

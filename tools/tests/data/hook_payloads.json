@@ -1,0 +1,37 @@
+{
+  "valid": [
+    {
+      "name": "all_operations",
+      "patch": "*** Begin Patch\n*** Add File: /project/new file.md\n+new text\n*** Update File: /project/edit.md\n@@\n-old text\n+newer text\n*** Update File: /project/source.md\n*** Move to: /project/moved.md\n@@\n-before\n+after\n*** Delete File: /project/deleted.md\n-gone\n*** End Patch",
+      "operations": [
+        ["add", "/project/new file.md"],
+        ["update", "/project/edit.md"],
+        ["update", "/project/source.md"],
+        ["move-target", "/project/moved.md"],
+        ["delete", "/project/deleted.md"]
+      ]
+    },
+    {
+      "name": "unicode_and_traversal_paths",
+      "patch": "*** Begin Patch\n*** Add File: /project/ünicode.md\n+safe\n*** Update File: /project/docs/../escape.md\n@@\n-before\n+after\n*** End Patch",
+      "operations": [
+        ["add", "/project/ünicode.md"],
+        ["update", "/project/docs/../escape.md"]
+      ]
+    },
+    {
+      "name": "content_looks_like_header",
+      "patch": "*** Begin Patch\n*** Add File: /project/example.txt\n+*** Add File: this is content\n+tail\n*** End Patch",
+      "operations": [
+        ["add", "/project/example.txt"]
+      ]
+    }
+  ],
+  "invalid": [
+    "not a patch",
+    "*** Begin Patch\n*** End Patch",
+    "*** Begin Patch\n*** Rename File: /project/a.md\n*** End Patch",
+    "*** Begin Patch\n*** Add File: \n+content\n*** End Patch",
+    "*** Begin Patch\n*** Add File: /project/a.md\n+content"
+  ]
+}

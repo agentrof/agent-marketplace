@@ -45,14 +45,16 @@ def compute(root: Path) -> dict[str, int]:
         agents_dir = plugin / "agents"
         if agents_dir.is_dir():
             agents += len(list(agents_dir.glob("*.md")))
-        skills_dir = plugin / "skills"
+        skills_dir = plugin / "skill-content"
+        if not skills_dir.is_dir():
+            skills_dir = plugin / "skills"
         if skills_dir.is_dir():
             for sdir in sorted(d for d in skills_dir.iterdir() if d.is_dir()):
                 skill_md = sdir / "SKILL.md"
                 if not skill_md.is_file():
                     continue
                 fm = parse_frontmatter(skill_md.read_text(encoding="utf-8"))
-                if fm.get("disable-model-invocation") == "true":
+                if fm.get("exposure") == "entry":
                     entry_skills += 1
                 else:
                     knowledge_skills += 1

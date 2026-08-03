@@ -11,8 +11,9 @@ A plugin ships four component kinds:
 - **Agents** (`agents/<role>.md`): platform-independent role constitutions.
   They carry judgment, never technology. Batch roles run as subagents;
   interactive roles run as personas in the main conversation.
-- **Skills** (`skills/<name>/SKILL.md`): all knowledge lives here.
-  Entry skills are the user surface; knowledge skills are loaded by agents.
+- **Skills** (`skill-content/<name>/SKILL.md`): all canonical knowledge lives
+  here. Entry skills are the user surface; knowledge skills are loaded by
+  agents. Host wrappers exist only in generated distributions.
 - **Flows** (`flows/<name>.md`): internal state-machine procedures that
   entry skills delegate to. Not user-facing, not skills.
 - **Templates** (`templates/`): files the setup entry materializes into a
@@ -24,18 +25,36 @@ A plugin ships four component kinds:
 |---|---|---|
 | plugin directory / name | kebab-case noun | software-engineering-team |
 | agent file | agents/<role>.md, bare kebab | agents/code-reviewer.md |
-| agent frontmatter name | `<plugin>-<file-stem>`, globally unique | software-engineering-team-code-reviewer |
-| skill directory + frontmatter name | identical bare kebab | skills/python-fastapi/ |
-| skill entry file | SKILL.md (uppercase) | skills/request/SKILL.md |
+| agent frontmatter name | identical bare file stem, unique within the plugin | code-reviewer |
+| skill directory + frontmatter name | identical bare kebab, unique within the plugin | skill-content/python-fastapi/ |
+| skill entry file | SKILL.md (uppercase) | skill-content/deliver/SKILL.md |
 | skill subfolders | references/, scripts/, data/ | references/patterns.md |
 | reserved checklists (tech skills) | fixed names | references/review-checklist.md, references/qa-checklist.md |
 | flow file | flows/<name>.md | flows/develop.md |
 | forbidden everywhere | double underscore in names; the em dash character; emoji in headings; hand-written derived counts; absolute or home paths | |
 
+The component owns the short semantic name; the host owns namespacing. The
+same role may therefore exist in more than one plugin without repository-wide
+prefixes:
+
+| identity layer | example |
+|---|---|
+| visible role title | Backend Developer |
+| canonical agent id | backend-developer |
+| Claude agent identity | software-engineering-team:backend-developer |
+| Codex project agent | backend-developer |
+| PMO role | backend_developer |
+
+Public skill identity is namespaced on both hosts. Claude invokes
+`/software-engineering-team:deliver`; Codex invokes
+`$software-engineering-team:deliver`. Human-facing labels are title case with
+intentional acronym casing, such as QA Engineer, UX Designer, DevOps Engineer
+and Python FastAPI.
+
 ## Frontmatter
 
-Agents carry `name`, `description`, `model` (an alias from the
-`model_aliases` enum in `tools/data/models.json`) and `output_contract`
+Agents carry `name`, `description`, `reasoning` (a host-neutral level from
+the `reasoning_levels` enum in `tools/data/models.json`) and `output_contract`
 (`prose` or `structured`: how the role hands results back; every current
 persona is `prose`). A read-only role may also carry a `tools` whitelist
 (`Read, Grep, Glob`) to deny write capability at spawn time. Descriptions
@@ -44,10 +63,15 @@ plugin's flows. `output_contract` declares the return channel so a composer
 can refuse pairing a prose persona with a StructuredOutput-forcing harness;
 it does not by itself prevent the harness-side stall (anthropics/claude-code#79395).
 
-Skills carry `name`, `description` and exactly one visibility flag:
+Skills carry `name`, `description` and one host-neutral exposure:
 
-- Entry skill (user surface): `disable-model-invocation: true`
-- Knowledge skill (agent-loaded): `user-invocable: false`
+- Entry skill (user surface): `exposure: entry`
+- Knowledge skill (agent-loaded): `exposure: internal`
+
+The distribution builder maps this declaration to Claude-native visibility
+metadata and creates Codex wrappers only for entry skills. Every Codex wrapper
+ships `agents/openai.yaml` with `policy.allow_implicit_invocation: false`.
+Do not edit either generated distribution.
 
 ## Time
 
@@ -97,9 +121,9 @@ Copy this shape exactly; only the content of the sections varies by role.
 
 ```markdown
 ---
-name: software-engineering-team-backend-developer
+name: backend-developer
 description: Backend developer role for orchestrated team runs. Invoked by software-engineering-team flows with explicit inputs; not auto-triggered.
-model: sonnet
+reasoning: medium
 output_contract: prose
 ---
 
@@ -140,7 +164,7 @@ nouns, version pins, model names or counts in the body.
 ---
 name: python-fastapi
 description: Backend stack knowledge for the team's server-side work. Loaded by software-engineering-team agents during runs; not user-facing.
-user-invocable: false
+exposure: internal
 ---
 
 # Python FastAPI
@@ -214,7 +238,7 @@ ADR); otherwise paraphrase the procedure and drop the brand.
 ## Product vault surface
 
 A plugin that ships vault authoring rules declares every variation point
-in one policy file, `skills/<skill>/data/vault-policy.json` (subtrees,
+in one policy file, `skill-content/<skill>/data/vault-policy.json` (subtrees,
 map notes, machine dirs, banned basenames, the vetted community-plugin
 set, the graph search filter and ordered color-group queries, the hubs
 ladder, tag namespaces, nav peer range, decision-tree grammars,
@@ -247,34 +271,63 @@ by omission.
   (`"$RUN" run "$TEAM" scripts/<x>.py`, `"$RUN" path "$TEAM"
   <relpath>`); the `script_references` rule verifies every named
   target ships.
-- Every decision gate names the AskUserQuestion popup at the gate site
-  (`question_popup`).
+- Every decision gate names the host-neutral choice gate at the gate site
+  (`choice_gate`).
+- The Codex host contract maps that gate to one concise, option-preserving
+  turn-ending question. Mutating flows refuse Plan mode. Claude uses named
+  plugin agents; Codex uses the setup-generated project agents, launches
+  independent read-only work together, and waits for all results.
+- Hook write normalization covers Claude Write/Edit and Codex `apply_patch`
+  add, update, delete, move and multi-file payloads. Unparseable patches fail
+  closed in safety hooks.
 
 ## Releases
 
-A release bumps `plugin.json` and its `marketplace.json` entry to the
-same version in one commit; the `version_sync` rule errors on drift.
+A release bumps both platform manifests, both generated manifests and the
+Claude marketplace entry in one commit. The validator errors on identity or
+version drift; the Codex marketplace carries policy, not a second version
+field. Before release, run `make release-check` on a machine carrying both host
+CLIs. The host gate gives every team isolated state and verifies dependency or
+explicit recovery, PMO session readiness, disable/enable, remove/reinstall,
+Codex entry-skill discovery, internal-skill hiding and setup idempotency.
 
 ## Scaffolding
 
 Use `tools/scaffold.py` to create components; its output passes
 `make check` with zero findings by construction, and a test keeps it that
-way.
+way. Canonical edits are followed by
+`python3 tools/build_distributions.py`; `make check` verifies both generated
+trees are current.
 
 ## Depending on the operations backbone
 
 Every team plugin records its process state (runs, stories, tasks,
 findings) through the project-management-office plugin, never in its own files:
 
-- Declare the dependency in plugin.json: `"dependencies": ["project-management-office"]`;
-  installing the team then installs project-management-office automatically.
+- Keep the Claude dependency in its manifest. Codex manifests have no plugin
+  dependency field, so every Codex install surface lists PMO before the team.
+  Keep PMO `INSTALLED_BY_DEFAULT` in the marketplace as an advisory policy,
+  never as the install guarantee.
+- Require the exact `AGENTROF_PMO_READY: project-management-office` session
+  signal before either host mutates team state. On absence, run the host's
+  read-only plugin inventory, stop without writes, and distinguish missing,
+  disabled and hook/bootstrap failures in the recovery message.
+- Keep the generated `team_guard.py` hook on Write, Edit and Bash for Claude,
+  and on Write, Edit, apply_patch and Bash for Codex. It checks the PMO-owned
+  session readiness record and the one-team-per-project ownership rule before
+  the tool runs. Host instructions explain recovery; the hook enforces denial.
+- Create every future team with `tools/scaffold.py`; `team_pmo_contract`
+  rejects a Claude manifest without the dependency, a Codex visible surface
+  without the requirement, or either host contract without the ready gate and
+  recovery command.
 - Invoke the CLI through the synced launcher in the user-level data
   directory (see the develop flow's state contract for the resolution
   line); never reference another plugin's install path, it is not a
   stable location.
-- Register the team's agent-name prefix in project-management-office's hook registry
-  (TEAM_AGENT_PREFIXES in the hook common module) so subagent spawns are
-  recorded as task activity.
+- The distribution builder generates PMO's team namespace registry from all
+  non-PMO plugin directories. Bare Codex spawns count only when the matching
+  project TOML has that team's Agentrof ownership marker, so a user's
+  same-named local agent is never attributed to the team.
 - The single-writer rule is absolute: flows call the CLI; spawned agents
   never do; anything the owner must review in git is rendered from the
   database as a generated view, not hand-written.

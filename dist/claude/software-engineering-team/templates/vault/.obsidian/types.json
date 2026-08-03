@@ -1,0 +1,28 @@
+{
+  "types": {
+    "type": "text",
+    "title": "text",
+    "status": "text",
+    "owner_role": "text",
+    "approved_at": "date",
+    "decided_at": "date",
+    "superseded_by": "text",
+    "supersedes": "text",
+    "engagement": "text",
+    "territory": "text",
+    "revisit_trigger": "text",
+    "story": "text",
+    "governs": "list",
+    "verifies": "list",
+    "code": "text",
+    "scope": "text",
+    "review_scope": "text",
+    "verdict": "text",
+    "system_name": "text",
+    "direction": "text",
+    "round": "number",
+    "locked": "checkbox",
+    "tags": "list",
+    "aliases": "list"
+  }
+}

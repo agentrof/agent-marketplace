@@ -1,0 +1,32 @@
+{
+  "name": "agent-marketplace",
+  "interface": {
+    "displayName": "Agent Marketplace"
+  },
+  "plugins": [
+    {
+      "name": "project-management-office",
+      "source": {
+        "source": "local",
+        "path": "./dist/codex/project-management-office"
+      },
+      "policy": {
+        "installation": "INSTALLED_BY_DEFAULT",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Engineering"
+    },
+    {
+      "name": "software-engineering-team",
+      "source": {
+        "source": "local",
+        "path": "./dist/codex/software-engineering-team"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Engineering"
+    }
+  ]
+}

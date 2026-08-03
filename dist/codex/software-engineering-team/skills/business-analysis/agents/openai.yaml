@@ -1,0 +1,6 @@
+interface:
+  display_name: "Business Analysis"
+  short_description: "Start the Business Analysis guided workflow"
+  default_prompt: "Use $software-engineering-team:business-analysis to start this workflow."
+policy:
+  allow_implicit_invocation: false

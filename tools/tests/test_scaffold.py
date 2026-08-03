@@ -6,6 +6,10 @@ findings.
 
 from __future__ import annotations
 
+import json
+import os
+import shutil
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -55,6 +59,100 @@ class ScaffoldTests(unittest.TestCase):
             scaffold.new_agent(self.root, fixtures.PLUGIN, "CamelCase")
         with self.assertRaises(SystemExit):
             scaffold.new_skill(self.root, fixtures.PLUGIN, "snake_case", "entry")
+
+    def test_native_repository_scaffolds_both_host_packages(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            fixtures.write(root / ".claude-plugin" / "marketplace.json", json.dumps({
+                "name": "agent-marketplace", "owner": {"name": "Agentrof"},
+                "metadata": {"description": "native", "version": "0.1.0"},
+                "plugins": [],
+            }))
+            fixtures.write(root / ".agents" / "plugins" / "marketplace.json",
+                           json.dumps({
+                               "name": "agent-marketplace",
+                               "interface": {"displayName": "Agent Marketplace"},
+                               "plugins": [],
+                           }))
+            (root / "plugins").mkdir()
+            shutil.copytree(
+                fixtures.REAL_REPOSITORY / "platforms" / "shared" / "_team",
+                root / "platforms" / "shared" / "_team",
+            )
+            shutil.copytree(
+                fixtures.REAL_REPOSITORY / "platforms" / "codex" / "_team",
+                root / "platforms" / "codex" / "_team",
+            )
+            (root / "tools" / "data").mkdir(parents=True)
+            shutil.copyfile(fixtures.REAL_MODEL_CONFIG,
+                            root / "tools" / "data" / "models.json")
+            shutil.copyfile(fixtures.REAL_LIMITS_CONFIG,
+                            root / "tools" / "data" / "limits.json")
+            scaffold.new_plugin(root, "demo-team")
+            scaffold.new_agent(root, "demo-team", "coordinator")
+            scaffold.new_skill(root, "demo-team", "start", "entry")
+            plugin = root / "plugins" / "demo-team"
+            self.assertTrue((root / "platforms" / "claude" / "demo-team"
+                             / "manifest.json").is_file())
+            self.assertTrue((root / "platforms" / "codex" / "demo-team"
+                             / "manifest.json").is_file())
+            self.assertTrue((root / "dist" / "claude" / "demo-team"
+                             / ".claude-plugin" / "plugin.json").is_file())
+            self.assertTrue((root / "dist" / "codex" / "demo-team"
+                             / ".codex-plugin" / "plugin.json").is_file())
+            self.assertTrue((root / "dist" / "claude" / "demo-team"
+                             / "scripts" / "team_guard.py").is_file())
+            self.assertTrue((root / "dist" / "codex" / "demo-team"
+                             / "scripts" / "team_guard.py").is_file())
+            self.assertTrue((root / "dist" / "codex" / "demo-team"
+                             / "scripts" / "generate_codex_project.py").is_file())
+            claude_manifest = json.loads((
+                root / "platforms" / "claude" / "demo-team" / "manifest.json"
+            ).read_text(encoding="utf-8"))
+            self.assertIn("project-management-office",
+                          claude_manifest["dependencies"])
+            codex_manifest = json.loads((
+                root / "platforms" / "codex" / "demo-team" / "manifest.json"
+            ).read_text(encoding="utf-8"))
+            self.assertNotIn("dependencies", codex_manifest)
+            self.assertTrue(
+                codex_manifest["interface"]["longDescription"].startswith(
+                    "Requires Project Management Office."
+                )
+            )
+            for host in ("claude", "codex"):
+                contract = (root / "platforms" / host / "demo-team"
+                            / "host-contract.md").read_text(encoding="utf-8")
+                self.assertIn(
+                    "AGENTROF_PMO_READY: project-management-office", contract
+                )
+                self.assertIn(
+                    "no files or project state were changed", contract.lower()
+                )
+            project = root / "consumer"
+            (project / ".git").mkdir(parents=True)
+            (project / "workspace").mkdir()
+            (project / "workspace" / "config.json").write_text(
+                json.dumps({"managed_by": "demo-team"}), encoding="utf-8"
+            )
+            generator = (
+                root / "dist" / "codex" / "demo-team" / "scripts"
+                / "generate_codex_project.py"
+            )
+            process = subprocess.run(
+                [sys.executable, str(generator), "--project-root", str(project)],
+                capture_output=True,
+                text=True,
+                env={**os.environ},
+            )
+            self.assertEqual(process.returncode, 0, process.stderr)
+            generated = project / ".codex" / "agents" / "coordinator.toml"
+            self.assertTrue(generated.is_file())
+            self.assertTrue(generated.read_text(encoding="utf-8").startswith(
+                "# Generated by Agentrof demo-team; do not edit by hand."
+            ))
+            findings = validate.run(root)
+            self.assertEqual(findings, [], f"native scaffold must be clean: {findings}")
 
 
 if __name__ == "__main__":

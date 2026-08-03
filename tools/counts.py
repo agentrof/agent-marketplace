@@ -54,7 +54,7 @@ def compute(root: Path) -> dict[str, int]:
                 if not skill_md.is_file():
                     continue
                 fm = parse_frontmatter(skill_md.read_text(encoding="utf-8"))
-                if fm.get("disable-model-invocation") == "true":
+                if fm.get("exposure") == "entry":
                     entry_skills += 1
                 else:
                     knowledge_skills += 1

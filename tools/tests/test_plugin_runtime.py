@@ -14,8 +14,8 @@ import unittest
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[2]
-PMO_SCRIPTS = REPO / "plugins" / "project-management-office" / "scripts"
-SET_SCRIPTS = REPO / "plugins" / "software-engineering-team" / "scripts"
+PMO_SCRIPTS = REPO / "dist" / "claude" / "project-management-office" / "scripts"
+SET_SCRIPTS = REPO / "dist" / "claude" / "software-engineering-team" / "scripts"
 
 sys.path.insert(0, str(PMO_SCRIPTS))
 
@@ -463,10 +463,10 @@ class DashboardCatalogTests(unittest.TestCase):
             (install / ".claude-plugin" / "plugin.json").write_text(json.dumps({
                 "name": "software-engineering-team", "version": "9.2.0",
                 "description": "team", "dependencies": ["project-management-office"],
-                "skills": "./claude-skills/",
+                "skills": "./skills/",
             }), encoding="utf-8")
-            (install / "claude-skills" / "setup").mkdir(parents=True)
-            (install / "claude-skills" / "setup" / "SKILL.md").write_text(
+            (install / "skills" / "setup").mkdir(parents=True)
+            (install / "skills" / "setup" / "SKILL.md").write_text(
                 "---\nname: setup\ndescription: Setup.\n"
                 "disable-model-invocation: true\n---\n", encoding="utf-8")
             plugins.mkdir()

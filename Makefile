@@ -1,4 +1,4 @@
-.PHONY: validate counts counts-check codex-check test eval check scaffold
+.PHONY: validate counts counts-check dist-check test eval check scaffold
 
 PY := python3
 
@@ -11,9 +11,8 @@ counts:
 counts-check:
 	$(PY) tools/counts.py --check
 
-codex-check:
-	$(PY) tools/sync_skill_surfaces.py --check
-	$(PY) tools/build_codex_plugins.py --check
+dist-check:
+	$(PY) tools/build_distributions.py --check
 
 test:
 	$(PY) -m unittest discover -s tools/tests -p 'test_*.py' -v
@@ -22,7 +21,7 @@ eval:
 	$(PY) -m unittest tools.tests.test_scenario_report tools.tests.test_runtime_scripts tools.tests.test_pmo_cli tools.tests.test_pmo_hooks tools.tests.test_pmo_dashboard tools.tests.test_ba_compile -v
 	@echo "eval: deterministic behavior assertions green"
 
-check: validate counts-check codex-check test
+check: validate counts-check dist-check test
 	@echo "check: all gates green"
 
 scaffold:

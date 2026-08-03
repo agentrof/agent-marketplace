@@ -30,10 +30,10 @@ through plugin dependencies; the Codex marketplace installs it by default.
    returns results so a composer can refuse pairing a prose persona with
    schema forcing, and does not by itself stop the harness-side stall
    (anthropics/claude-code#79395).
-3. **Encapsulation.** Entry skills are the only user surface. Claude marks
-   them `disable-model-invocation: true`; Codex publishes only those entries
-   and sets `policy.allow_implicit_invocation: false`. Knowledge skills stay
-   internal. Agents are passive and run only when a flow spawns them.
+3. **Encapsulation.** Entry skills are the only user surface. Canonical
+   skills declare `exposure: entry` or `exposure: internal`; each host build
+   maps that neutral declaration to its native discovery policy. Knowledge
+   skills stay internal. Agents are passive and run only when a flow spawns them.
 4. **Zero duplication.** Each fact exists once: shared method in a process
    skill, stack specifics inside the stack skill, shared flow bodies in
    flows/ files that entries delegate to.
@@ -81,9 +81,11 @@ through plugin dependencies; the Codex marketplace installs it by default.
    unless terminology_language is configured non-English; the analysis
    compiler, landscape checker and contract checker enforce identifier
    positions as ASCII shapes.
-12. **Two hosts, one semantic contract.** `skill-content/`, agents, flows,
-   scripts and templates are canonical. Generated Claude and Codex discovery
-   surfaces contain metadata and pointers, never forked workflow bodies.
+12. **Two hosts, one semantic contract.** `plugins/` contains only
+   host-neutral canonical skills, agents, flows, scripts and templates.
+   Platform manifests, contracts and overlays live under `platforms/`.
+   Generated Claude and Codex distributions contain metadata and pointers,
+   never forked workflow bodies.
    Host adapters map gates, native agent spawning, hook payloads and session
    boundaries while preserving the same PMO lifecycle and safety outcome.
 
@@ -91,17 +93,19 @@ through plugin dependencies; the Codex marketplace installs it by default.
 
 - `.claude-plugin/marketplace.json`: the Claude catalog registry.
 - `.agents/plugins/marketplace.json`: the Codex catalog and install policy.
-- `plugins/<team>/`: canonical content plus Claude/Codex source manifests and
-  generated discovery wrappers. Full skills live in `skill-content/`.
-- `codex-plugins/<team>/`: generated self-contained Codex distributions;
-  never edit them by hand.
+- `plugins/<team>/`: host-neutral canonical content. Full skills live in
+  `skill-content/`; agent frontmatter uses neutral exposure and reasoning enums.
+- `platforms/<host>/<team>/`: host manifest, contract and overlay source;
+  `platforms/shared/` contains runtime adapters used by both hosts.
+- `dist/<host>/<team>/`: generated self-contained distributions; never edit
+  them by hand.
 - `plugins/project-management-office/`: the operations backbone (central
   database CLI, hooks, the Control Tower launcher entry and its read-only
   web dashboard); a dependency of every team plugin, never a team itself.
 - `docs/`: this map, the authoring guide, the orchestration spec.
 - `tools/`: validator, host-surface generators, counts injector, scaffolder
   and their tests;
-  `tools/data/models.json` (model aliases) and `tools/data/limits.json`
+  `tools/data/models.json` (reasoning levels) and `tools/data/limits.json`
   (authoring size caps) are the policy files, validated like any other
   policy artifact.
 - `memory/`: maintainer rules; excluded from all tooling.

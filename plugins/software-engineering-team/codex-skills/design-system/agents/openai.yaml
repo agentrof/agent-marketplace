@@ -1,6 +1,0 @@
-interface:
-  display_name: "Design System"
-  short_description: "Start the Design System guided workflow"
-  default_prompt: "Use $software-engineering-team:design-system to start this workflow."
-policy:
-  allow_implicit_invocation: false

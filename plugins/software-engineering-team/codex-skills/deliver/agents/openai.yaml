@@ -1,6 +1,0 @@
-interface:
-  display_name: "Deliver"
-  short_description: "Start the Deliver guided workflow"
-  default_prompt: "Use $software-engineering-team:deliver to start this workflow."
-policy:
-  allow_implicit_invocation: false

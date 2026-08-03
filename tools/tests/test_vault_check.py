@@ -1,5 +1,4 @@
-"""Tests for the vault checker and the per-write vault hook
-(plugins/software-engineering-team/scripts/vault_check.py, vault_hook.py),
+"""Tests for the distributed vault checker and per-write vault hook,
 run against the SHIPPED vault policy so the law and the machinery are
 welded together.
 
@@ -21,7 +20,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[2]
-SCRIPTS = REPO / "plugins" / "software-engineering-team" / "scripts"
+SCRIPTS = REPO / "dist" / "claude" / "software-engineering-team" / "scripts"
 POLICY_PATH = (REPO / "plugins" / "software-engineering-team" / "skill-content"
                / "obsidian-vault" / "data" / "vault-policy.json")
 

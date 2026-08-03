@@ -2,8 +2,9 @@
 """Content validator for the Agent Marketplace repository.
 
 Every rule in this repo is machine-enforced or it is not a rule. This tool
-scans authored content (plugins/, docs/, README.md, CONTRIBUTING.md,
-.claude-plugin/, .agents/plugins/) and emits deterministic findings. One error finding fails
+scans authored content (plugins/, platforms/, docs/, README.md,
+CONTRIBUTING.md, .claude-plugin/, .agents/plugins/) and emits deterministic
+findings. One error finding fails
 the run.
 
 Scope is an explicit allowlist; assets/, memory/, tools/ and .git/ are never
@@ -31,8 +32,8 @@ EM_DASH = "—"
 MODEL_CONFIG_RELPATH = "tools/data/models.json"
 LIMITS_CONFIG_RELPATH = "tools/data/limits.json"
 
-AGENT_REQUIRED_KEYS = {"name", "description", "model", "output_contract"}
-AGENT_MODEL_ENUM = {"opus", "sonnet", "haiku", "inherit"}
+AGENT_REQUIRED_KEYS = {"name", "description", "reasoning", "output_contract"}
+AGENT_REASONING_ENUM = {"high", "medium", "low", "inherit"}
 # How the role hands results back. prose: findings/artifacts in the reply
 # text (every current persona). structured: a forced tool call. Declared so
 # a composer can refuse pairing a prose persona with schema forcing; the
@@ -43,8 +44,8 @@ AGENT_OUTPUT_CONTRACT_ENUM = {"prose", "structured"}
 # panels) are denied write capability at spawn time, not by instruction.
 AGENT_OPTIONAL_KEYS = {"tools"}
 AGENT_READONLY_TOOLS = {"Read", "Grep", "Glob"}
-SKILL_REQUIRED_KEYS = {"name", "description"}
-SKILL_VISIBILITY_KEYS = {"user-invocable", "disable-model-invocation"}
+SKILL_REQUIRED_KEYS = {"name", "description", "exposure"}
+SKILL_EXPOSURE_ENUM = {"entry", "internal"}
 
 AGENT_REQUIRED_SECTIONS = ["Principles", "Boundaries", "Approach", "Output Contract"]
 SKILL_REQUIRED_SECTIONS = ["When to Use"]
@@ -297,13 +298,13 @@ def check_frontmatter_shape(tree: Tree, findings: list[Finding]) -> None:
                     "error", rel(tree, path), 1, "frontmatter_shape",
                     f"agent frontmatter missing keys: {sorted(missing)}",
                     "add the missing keys; agents require name, description,"
-                    " model, output_contract",
+                    " reasoning, output_contract",
                 ))
             if extra:
                 findings.append(Finding(
                     "error", rel(tree, path), 1, "frontmatter_shape",
                     f"agent frontmatter has unsupported keys: {sorted(extra)}",
-                    "remove them; agents carry name, description, model,"
+                    "remove them; agents carry name, description, reasoning,"
                     " output_contract and optionally a read-only tools whitelist",
                 ))
             if "tools" in fm:
@@ -317,15 +318,16 @@ def check_frontmatter_shape(tree: Tree, findings: list[Finding]) -> None:
                         f" {sorted(AGENT_READONLY_TOOLS)}. Full-capability agents"
                         " omit the key",
                     ))
-            model = fm.get("model", "")
-            model_enum = set((tree.config or {}).get("model_aliases")
-                             or AGENT_MODEL_ENUM)
-            if model and model not in model_enum:
+            reasoning = fm.get("reasoning", "")
+            reasoning_enum = set((tree.config or {}).get("reasoning_levels")
+                                 or AGENT_REASONING_ENUM)
+            if reasoning and reasoning not in reasoning_enum:
                 findings.append(Finding(
                     "error", rel(tree, path), 1, "frontmatter_shape",
-                    f"agent model '{model}' is not in {sorted(model_enum)}",
-                    "use an alias from the enum (tools/data/models.json"
-                    " model_aliases); concrete model ids are banned",
+                    f"agent reasoning '{reasoning}' is not in"
+                    f" {sorted(reasoning_enum)}",
+                    "use a host-neutral level from tools/data/models.json"
+                    " reasoning_levels",
                 ))
             contract = fm.get("output_contract", "")
             if contract and contract not in AGENT_OUTPUT_CONTRACT_ENUM:
@@ -348,18 +350,19 @@ def check_frontmatter_shape(tree: Tree, findings: list[Finding]) -> None:
             fm, _, _ = parse_frontmatter(read_text(skill_md))
             keys = set(fm)
             missing = SKILL_REQUIRED_KEYS - keys
-            extra = keys - SKILL_REQUIRED_KEYS - SKILL_VISIBILITY_KEYS
+            extra = keys - SKILL_REQUIRED_KEYS
             if missing:
                 findings.append(Finding(
                     "error", rel(tree, skill_md), 1, "frontmatter_shape",
                     f"skill frontmatter missing keys: {sorted(missing)}",
-                    "add the missing keys; skills require name and description",
+                    "add the missing keys; skills require name, description,"
+                    " and exposure",
                 ))
             if extra:
                 findings.append(Finding(
                     "error", rel(tree, skill_md), 1, "frontmatter_shape",
                     f"skill frontmatter has unsupported keys: {sorted(extra)}",
-                    "remove them; allowed keys are name, description and one visibility flag",
+                    "remove them; allowed keys are name, description, and exposure",
                 ))
 
 
@@ -473,13 +476,12 @@ def check_trigger_policy(tree: Tree, findings: list[Finding]) -> None:
             if not skill_md.is_file():
                 continue
             fm, _, _ = parse_frontmatter(read_text(skill_md))
-            hidden = fm.get("user-invocable", "") == "false"
-            entry = fm.get("disable-model-invocation", "") == "true"
-            if hidden == entry:
+            exposure = fm.get("exposure", "")
+            if exposure not in SKILL_EXPOSURE_ENUM:
                 findings.append(Finding(
                     "error", rel(tree, skill_md), 1, "trigger_policy",
-                    "skill must carry exactly one visibility flag",
-                    "entry skills set disable-model-invocation: true; knowledge skills set user-invocable: false",
+                    "skill must declare a host-neutral exposure",
+                    "set exposure to entry or internal",
                 ))
             if not fm.get("description"):
                 findings.append(Finding(
@@ -647,7 +649,7 @@ def check_content_bans(tree: Tree, findings: list[Finding]) -> None:
                     findings.append(Finding(
                         "error", rel(tree, path), lineno, "content_bans",
                         "model name outside agent frontmatter",
-                        "model aliases live only in agent frontmatter model:",
+                        "host model names belong only in generated distributions",
                     ))
             if ABSOLUTE_PATH_RE.search(line):
                 findings.append(Finding(
@@ -745,7 +747,7 @@ def check_reference_triggers(tree: Tree, findings: list[Finding]) -> None:
             if not skill_md.is_file():
                 continue
             fm, body_start, body = parse_frontmatter(read_text(skill_md))
-            if fm.get("user-invocable", "") != "false":
+            if fm.get("exposure", "") != "internal":
                 continue  # entry skills carry no knowledge references
             in_fence = False
             for lineno, line in enumerate(body.splitlines(), start=body_start):
@@ -774,49 +776,41 @@ def check_registration(tree: Tree, findings: list[Finding]) -> None:
             name = entry.get("name", "")
             source = entry.get("source", "")
             registered[name] = source
-            src_dir = (tree.marketplace.parent.parent / source).resolve()
-            plugin_json = src_dir / ".claude-plugin" / "plugin.json"
-            if not plugin_json.is_file():
-                findings.append(Finding(
-                    "error", rel(tree, tree.marketplace), 1, "registration",
-                    f"registered plugin '{name}' has no plugin.json at {source}",
-                    "create .claude-plugin/plugin.json or fix the source path",
-                ))
-                continue
-            try:
-                pj = json.loads(read_text(plugin_json))
-            except json.JSONDecodeError:
-                continue
-            if pj.get("name") != name:
-                findings.append(Finding(
-                    "error", rel(tree, plugin_json), 1, "registration",
-                    f"plugin.json name '{pj.get('name')}' does not match registry entry '{name}'",
-                    "keep directory, plugin.json name and registry entry identical",
-                ))
     for plugin in plugin_dirs(tree):
         if plugin.name not in registered:
             findings.append(Finding(
                 "error", rel(tree, plugin), 1, "registration",
                 f"plugin directory '{plugin.name}' is not registered in marketplace.json",
-                "add a plugins[] entry with source ./plugins/" + plugin.name,
+                "add a plugins[] entry with source ./dist/claude/" + plugin.name,
             ))
-        pj = plugin / ".claude-plugin" / "plugin.json"
-        if not pj.is_file():
+        expected = f"./dist/claude/{plugin.name}"
+        if plugin.name in registered and registered.get(plugin.name) != expected:
             findings.append(Finding(
-                "error", rel(tree, plugin), 1, "registration",
-                f"plugin '{plugin.name}' has no .claude-plugin/plugin.json",
-                "add the plugin manifest",
+                "error", rel(tree, tree.marketplace), 1, "registration",
+                f"plugin '{plugin.name}' Claude source is"
+                f" {registered.get(plugin.name)!r}, expected {expected!r}",
+                "point the Claude marketplace at the generated distribution",
             ))
+        for host in ("claude", "codex"):
+            manifest = tree.root / "platforms" / host / plugin.name / "manifest.json"
+            contract = tree.root / "platforms" / host / plugin.name / "host-contract.md"
+            if not manifest.is_file() or not contract.is_file():
+                findings.append(Finding(
+                    "error", rel(tree, manifest), 1, "registration",
+                    f"plugin '{plugin.name}' lacks the {host} platform source",
+                    "add manifest.json and host-contract.md under platforms/",
+                ))
 
 
-def check_codex_packaging(tree: Tree, findings: list[Finding]) -> None:
-    """Codex marketplace, generated archive, and source surfaces stay aligned."""
+def check_distribution_packaging(tree: Tree, findings: list[Finding]) -> None:
+    """Both host marketplaces, adapters, and generated distributions align."""
     if not tree.codex_marketplace.is_file():
         return
 
     def error(path: Path, message: str, remediation: str) -> None:
         findings.append(Finding(
-            "error", rel(tree, path), 1, "codex_packaging", message, remediation
+            "error", rel(tree, path), 1, "distribution_packaging", message,
+            remediation
         ))
 
     try:
@@ -845,11 +839,11 @@ def check_codex_packaging(tree: Tree, findings: list[Finding]) -> None:
             continue
         source = entry.get("source")
         path_value = source.get("path", "") if isinstance(source, dict) else ""
-        expected_path = f"./codex-plugins/{plugin.name}"
+        expected_path = f"./dist/codex/{plugin.name}"
         if path_value != expected_path:
             error(tree.codex_marketplace,
                   f"{plugin.name} Codex source is {path_value!r}, expected {expected_path!r}",
-                  "point the Codex marketplace at the generated archive")
+                  "point the Codex marketplace at the generated distribution")
         policy = entry.get("policy") or {}
         expected_install = (
             "INSTALLED_BY_DEFAULT"
@@ -862,26 +856,36 @@ def check_codex_packaging(tree: Tree, findings: list[Finding]) -> None:
                   f"{plugin.name} has incomplete or incorrect Codex policy",
                   "set installation/authentication/category to the repository contract")
 
-        archive = tree.root / "codex-plugins" / plugin.name
-        archive_manifest = archive / ".codex-plugin" / "plugin.json"
-        source_manifest = plugin / "codex" / "plugin.json"
-        claude_manifest = plugin / ".claude-plugin" / "plugin.json"
+        claude_archive = tree.root / "dist" / "claude" / plugin.name
+        codex_archive = tree.root / "dist" / "codex" / plugin.name
+        claude_manifest = (
+            tree.root / "platforms" / "claude" / plugin.name / "manifest.json"
+        )
+        codex_manifest = (
+            tree.root / "platforms" / "codex" / plugin.name / "manifest.json"
+        )
+        claude_archive_manifest = claude_archive / ".claude-plugin" / "plugin.json"
+        codex_archive_manifest = codex_archive / ".codex-plugin" / "plugin.json"
         manifests: list[tuple[Path, dict]] = []
-        for manifest_path in (claude_manifest, source_manifest, archive_manifest):
+        for manifest_path in (
+            claude_manifest,
+            codex_manifest,
+            claude_archive_manifest,
+            codex_archive_manifest,
+        ):
             try:
                 manifests.append((manifest_path, json.loads(read_text(manifest_path))))
             except (OSError, json.JSONDecodeError):
                 error(manifest_path, f"missing or invalid manifest for {plugin.name}",
-                      "regenerate the Codex archive and fix the source manifest")
-        versions = {data.get("version", "") for _, data in manifests}
+                      "regenerate distributions and fix the platform manifest")
         names = {data.get("name", "") for _, data in manifests}
-        if len(versions) > 1 or len(names) > 1 or names not in ({plugin.name}, set()):
-            error(source_manifest,
-                  f"Claude/Codex manifest identity drift for {plugin.name}",
-                  "keep plugin names and versions equal across both hosts")
+        if len(names) > 1 or names not in ({plugin.name}, set()):
+            error(codex_manifest,
+                  f"Claude/Codex manifest name drift for {plugin.name}",
+                  "keep plugin names equal across both hosts")
         expected_display = display_title(plugin.name)
         for manifest_path, data in manifests:
-            if manifest_path == claude_manifest:
+            if manifest_path in {claude_manifest, claude_archive_manifest}:
                 continue
             actual_display = (data.get("interface") or {}).get("displayName")
             if actual_display != expected_display:
@@ -890,35 +894,16 @@ def check_codex_packaging(tree: Tree, findings: list[Finding]) -> None:
                       f" expected {expected_display!r}",
                       "derive the public title from the technical plugin id"
                       " without a publisher prefix")
-        if not (archive / ".agentrof-generated-codex-plugin").is_file():
-            error(archive, "Codex archive lacks its generated ownership marker",
-                  "rebuild with tools/build_codex_plugins.py")
+        for archive in (claude_archive, codex_archive):
+            if not (archive / ".agentrof-generated-distribution").is_file():
+                error(archive, "distribution lacks its generated ownership marker",
+                      "rebuild with tools/build_distributions.py")
 
-        canonical_dirs = skill_dirs(plugin)
-        canonical = {path.name for path in canonical_dirs}
-        entries_only: set[str] = set()
-        for name in canonical:
-            skill_md = next(path / "SKILL.md" for path in canonical_dirs if path.name == name)
-            fm, _, _ = parse_frontmatter(read_text(skill_md))
-            if fm.get("disable-model-invocation") == "true":
-                entries_only.add(name)
-        claude_surface = {
-            path.parent.name for path in (plugin / "claude-skills").glob("*/SKILL.md")
-        }
         codex_surface = {
-            path.parent.name for path in (plugin / "codex-skills").glob("*/SKILL.md")
+            path.parent.name for path in (codex_archive / "skills").glob("*/SKILL.md")
         }
-        archive_surface = {
-            path.parent.name for path in (archive / "skills").glob("*/SKILL.md")
-        }
-        if claude_surface != canonical:
-            error(plugin / "claude-skills", "Claude skill wrappers are incomplete or stale",
-                  "run tools/sync_skill_surfaces.py")
-        if codex_surface != entries_only or archive_surface != entries_only:
-            error(plugin / "codex-skills", "Codex exposes non-entry or stale skills",
-                  "sync skill surfaces and rebuild Codex plugins")
-        for name in entries_only:
-            metadata = plugin / "codex-skills" / name / "agents" / "openai.yaml"
+        for name in codex_surface:
+            metadata = codex_archive / "skills" / name / "agents" / "openai.yaml"
             metadata_text = read_text(metadata) if metadata.is_file() else ""
             if "allow_implicit_invocation: false" not in metadata_text:
                 error(metadata, f"{name} lacks explicit-only Codex policy",
@@ -946,6 +931,9 @@ def check_json_hygiene(tree: Tree, findings: list[Finding]) -> None:
         json_paths.append(tree.codex_marketplace)
     if tree.plugins_dir.is_dir():
         json_paths.extend(sorted(tree.plugins_dir.rglob("*.json")))
+    platforms = tree.root / "platforms"
+    if platforms.is_dir():
+        json_paths.extend(sorted(platforms.rglob("*.json")))
     for path in json_paths:
         try:
             data = json.loads(read_text(path))
@@ -959,7 +947,11 @@ def check_json_hygiene(tree: Tree, findings: list[Finding]) -> None:
         is_hooks_manifest = path.name == "hooks.json" and path.parent.name == "hooks"
         is_codex_schema = (
             path == tree.codex_marketplace
-            or (path.name == "plugin.json" and path.parent.name == "codex")
+            or (
+                path.name == "manifest.json"
+                and "platforms" in path.parts
+                and "codex" in path.parts
+            )
         )
         # Vault payload files under a plugin's templates/ carry the vault
         # app's own key schema (camelCase settings, kebab plugin ids); only
@@ -1008,28 +1000,28 @@ def check_orchestrator_integrity(tree: Tree, findings: list[Finding]) -> None:
                         ))
 
 
-QUESTION_POPUP_MARKER = "explicit user choice"
-QUESTION_POPUP_TOKEN = "AskUserQuestion"
-QUESTION_POPUP_WINDOW = 3
+CHOICE_GATE_MARKER = "explicit user choice"
+CHOICE_GATE_TOKEN = "choice gate"
+CHOICE_GATE_WINDOW = 3
 
 
-def check_question_popup(tree: Tree, findings: list[Finding]) -> None:
+def check_choice_gate(tree: Tree, findings: list[Finding]) -> None:
     """The decision-gate formula, per site (a window of lines absorbs
     prose wrapping): a gate declared with the marker phrase must name
-    the popup nearby, so the popup discipline cannot be silently
+    the host-neutral choice gate nearby, so its discipline cannot be silently
     stripped from a gate site."""
     for path in iter_scope_files(tree, ".md"):
         lines = read_text(path).splitlines()
         for idx, line in enumerate(lines):
-            lo = max(0, idx - QUESTION_POPUP_WINDOW)
-            window = lines[lo:idx + QUESTION_POPUP_WINDOW + 1]
-            if (QUESTION_POPUP_MARKER in line
-                    and not any(QUESTION_POPUP_TOKEN in w for w in window)):
+            lo = max(0, idx - CHOICE_GATE_WINDOW)
+            window = lines[lo:idx + CHOICE_GATE_WINDOW + 1]
+            if (CHOICE_GATE_MARKER in line
+                    and not any(CHOICE_GATE_TOKEN in w for w in window)):
                 findings.append(Finding(
-                    "error", rel(tree, path), idx + 1, "question_popup",
-                    f"gate marker ('{QUESTION_POPUP_MARKER}') without the"
-                    f" {QUESTION_POPUP_TOKEN} popup named nearby",
-                    "decision gates ask through the AskUserQuestion popup;"
+                    "error", rel(tree, path), idx + 1, "choice_gate",
+                    f"gate marker ('{CHOICE_GATE_MARKER}') without a"
+                    f" {CHOICE_GATE_TOKEN} named nearby",
+                    "decision gates use the host-neutral choice-gate contract;"
                     " state it at the gate site",
                 ))
 
@@ -1057,6 +1049,12 @@ def check_stdlib_only(tree: Tree, findings: list[Finding]) -> None:
             if not scripts.is_dir():
                 continue
             local = {p.stem for p in scripts.glob("*.py")}
+            shared_scripts = (
+                tree.root / "platforms" / "shared" / plugin.name
+                / "overlay" / "scripts"
+            )
+            if shared_scripts.is_dir():
+                local.update(p.stem for p in shared_scripts.glob("*.py"))
             for script in sorted(scripts.glob("*.py")):
                 for lineno, line in enumerate(read_text(script).splitlines(), start=1):
                     stripped = line.strip()
@@ -1437,27 +1435,34 @@ def check_version_sync(tree: Tree, findings: list[Finding]) -> None:
     except json.JSONDecodeError:
         return  # json_hygiene reports the parse failure
     for entry in data.get("plugins", []):
-        source = entry.get("source", "")
         entry_version = entry.get("version", "")
-        plugin_json = (tree.marketplace.parent.parent / source).resolve() \
-            / ".claude-plugin" / "plugin.json"
-        if not plugin_json.is_file():
-            continue  # registration reports the missing manifest
-        try:
-            pj = json.loads(read_text(plugin_json))
-        except json.JSONDecodeError:
-            continue
-        plugin_version = pj.get("version", "")
-        mismatched: list[str] = []
-        if entry_version and plugin_version and entry_version != plugin_version:
-            mismatched.append(f"marketplace entry '{entry_version}'")
-        if mismatched:
+        name = entry.get("name", "")
+        manifests = (
+            tree.root / "platforms" / "claude" / name / "manifest.json",
+            tree.root / "platforms" / "codex" / name / "manifest.json",
+            tree.root / "dist" / "claude" / name / ".claude-plugin" / "plugin.json",
+            tree.root / "dist" / "codex" / name / ".codex-plugin" / "plugin.json",
+        )
+        versions: dict[str, str] = {}
+        for manifest in manifests:
+            try:
+                versions[rel(tree, manifest)] = json.loads(
+                    read_text(manifest)
+                ).get("version", "")
+            except (OSError, json.JSONDecodeError):
+                continue  # registration/packaging reports missing manifests
+        expected = {entry_version} if entry_version else set()
+        actual = {version for version in versions.values() if version}
+        if expected and actual != expected:
+            details = "; ".join(
+                f"{path}='{version}'" for path, version in sorted(versions.items())
+            )
             findings.append(Finding(
-                "error", rel(tree, plugin_json), 1, "version_sync",
-                f"plugin version '{plugin_version}' does not match:"
-                f" {'; '.join(mismatched)}",
-                "a release bumps plugin.json and its marketplace entry"
-                " together in one commit",
+                "error", rel(tree, manifests[0]), 1, "version_sync",
+                f"plugin versions do not all match marketplace"
+                f" '{entry_version}': {details}",
+                "a release bumps both platform manifests, both distributions,"
+                " and the marketplace entry together",
             ))
 
 
@@ -1824,24 +1829,24 @@ def _config_shape_errors(config: dict) -> list[str]:
     problems: list[str] = []
     if not isinstance(config.get("schema_version"), int):
         problems.append("schema_version must be an integer")
-    aliases = config.get("model_aliases")
-    if (not isinstance(aliases, list) or not aliases
-            or not all(isinstance(a, str) and KEBAB_RE.match(a)
-                       for a in aliases)):
-        problems.append("model_aliases must be a non-empty kebab-case list")
+    levels = config.get("reasoning_levels")
+    if (not isinstance(levels, list) or not levels
+            or not all(isinstance(level, str) and KEBAB_RE.match(level)
+                       for level in levels)):
+        problems.append("reasoning_levels must be a non-empty kebab-case list")
     return problems
 
 
 def check_model_config_shape(tree: Tree, findings: list[Finding]) -> None:
-    """tools/data/models.json is the model-alias policy file the agent
-    frontmatter enum reads from; an unloadable or malformed config would
+    """tools/data/models.json is the reasoning policy file the canonical
+    agent frontmatter reads from; an unloadable or malformed config would
     let the enum silently fall back, so its shape is validated like any
     other policy artifact."""
     if tree.config is None:
         findings.append(Finding(
             "error", MODEL_CONFIG_RELPATH, 1, "model_config_shape",
             "model config is missing or not valid JSON",
-            "restore tools/data/models.json; the agent model alias enum"
+            "restore tools/data/models.json; the agent reasoning enum"
             " lives there",
         ))
         return
@@ -1849,7 +1854,7 @@ def check_model_config_shape(tree: Tree, findings: list[Finding]) -> None:
         findings.append(Finding(
             "error", MODEL_CONFIG_RELPATH, 1, "model_config_shape", problem,
             "fix the config block; the enum feeds the frontmatter_shape"
-            " model check",
+            " reasoning check",
         ))
 
 
@@ -1912,10 +1917,10 @@ CHECKS = {
     "dead_links": check_dead_links,
     "reference_triggers": check_reference_triggers,
     "registration": check_registration,
-    "codex_packaging": check_codex_packaging,
+    "distribution_packaging": check_distribution_packaging,
     "json_hygiene": check_json_hygiene,
     "orchestrator_integrity": check_orchestrator_integrity,
-    "question_popup": check_question_popup,
+    "choice_gate": check_choice_gate,
     "stdlib_only": check_stdlib_only,
     "naive_clock": check_naive_clock,
     "script_references": check_script_references,

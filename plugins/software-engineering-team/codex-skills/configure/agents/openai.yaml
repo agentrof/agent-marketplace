@@ -1,6 +1,0 @@
-interface:
-  display_name: "Configure"
-  short_description: "Start the Configure guided workflow"
-  default_prompt: "Use $software-engineering-team:configure to start this workflow."
-policy:
-  allow_implicit_invocation: false

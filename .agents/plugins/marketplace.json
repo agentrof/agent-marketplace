@@ -8,7 +8,7 @@
       "name": "project-management-office",
       "source": {
         "source": "local",
-        "path": "./codex-plugins/project-management-office"
+        "path": "./dist/codex/project-management-office"
       },
       "policy": {
         "installation": "INSTALLED_BY_DEFAULT",
@@ -20,7 +20,7 @@
       "name": "software-engineering-team",
       "source": {
         "source": "local",
-        "path": "./codex-plugins/software-engineering-team"
+        "path": "./dist/codex/software-engineering-team"
       },
       "policy": {
         "installation": "AVAILABLE",

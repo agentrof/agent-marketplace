@@ -12,7 +12,7 @@ from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[2]
-SCRIPT = (REPO / "plugins" / "project-management-office" / "scripts"
+SCRIPT = (REPO / "dist" / "claude" / "project-management-office" / "scripts"
           / "file_issue.py")
 
 spec = importlib.util.spec_from_file_location("file_issue", SCRIPT)

@@ -56,10 +56,9 @@ orchestration model in [docs/orchestration.md](docs/orchestration.md).
 5. Run `make check`, then `make counts` if the README counter table is
    now stale. Never edit counted numbers by hand.
 
-The scaffolder updates both host surfaces and the generated Codex package.
-After a manual canonical skill edit, run `python3
-tools/sync_skill_surfaces.py` and `python3 tools/build_codex_plugins.py` before
-`make check`.
+The scaffolder updates both host surfaces and generated distributions.
+After a manual canonical edit, run
+`python3 tools/build_distributions.py` before `make check`.
 
 New stacks for the software team (a config enum value plus a skills
 folder plus tests) are maintainer releases: the team ships tested stacks

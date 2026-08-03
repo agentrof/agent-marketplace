@@ -131,10 +131,12 @@ for the first topic, `solution-design` for the system foundations,
 - [docs/architecture.md](docs/architecture.md): the invariants.
 - [docs/authoring.md](docs/authoring.md): component templates and rules.
 - [docs/orchestration.md](docs/orchestration.md): the flow contract.
-- `plugins/*/skill-content/`: canonical skill packages shared by both hosts.
+- `plugins/`: host-neutral canonical roles, workflows, skills, scripts and templates.
+- `platforms/{claude,codex,shared}/`: host manifests, contracts and runtime overlays.
 - `.agents/plugins/marketplace.json`: native Codex marketplace policy.
-- `codex-plugins/`: generated self-contained Codex distributions.
-- `tools/`: validator, surface generators, counts injector, scaffolder, tests.
+- `.claude-plugin/marketplace.json`: Claude marketplace catalog.
+- `dist/{claude,codex}/`: generated, self-contained distributions; never edit them.
+- `tools/`: validator, distribution builder, counts injector, scaffolder, tests.
 
 ## Quality gates
 

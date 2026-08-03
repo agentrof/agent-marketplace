@@ -1,0 +1,41 @@
+# Materialized by the software-engineering-team setup entry; every
+# double-braced token is substituted from the project's configuration.
+name: tests
+
+on:
+  pull_request:
+
+jobs:
+  tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run the configured test suite
+        run: {{test_command}}
+
+  dependency_audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Audit locked dependencies for known advisories
+        # Setup substitutes the per-stack audit commands over the lockfiles
+        # (server and client). An advisory routes through the deliver entry
+        # as a fix-atomic lockfile bump.
+        run: {{audit_command}}
+
+  environment_smoke:
+    # Setup includes this job once the environment command's up-then-down
+    # probe passes; re-run setup after the first environment story to
+    # append it.
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Stand the environment up from scratch
+        run: {{env_command}} up
+      - name: Dump service logs for diagnosis
+        if: failure()
+        run: {{env_command}} logs
+      - name: Tear the environment down
+        if: always()
+        run: {{env_command}} down

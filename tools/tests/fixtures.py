@@ -12,6 +12,8 @@ import json
 import shutil
 from pathlib import Path
 
+import build_distributions
+
 REAL_MODEL_CONFIG = (Path(__file__).resolve().parents[1]
                      / "data" / "models.json")
 REAL_LIMITS_CONFIG = (Path(__file__).resolve().parents[1]
@@ -22,7 +24,7 @@ PLUGIN = "sample-team"
 VALID_AGENT = """---
 name: planner
 description: Planner role for orchestrated team runs. Invoked by sample-team flows with explicit inputs.
-model: sonnet
+reasoning: medium
 output_contract: prose
 ---
 
@@ -48,7 +50,7 @@ Turns an approved brief into an ordered plan of small packages.
 VALID_SKILL = """---
 name: notes
 description: Knowledge skill for planning notes. Loaded by sample-team agents during runs.
-user-invocable: false
+exposure: internal
 ---
 
 # Notes
@@ -131,23 +133,56 @@ def make_valid_root(root: Path) -> None:
         "metadata": {"description": "fixture", "version": "0.0.1"},
         "plugins": [{
             "name": PLUGIN,
-            "source": f"./plugins/{PLUGIN}",
+            "source": f"./dist/claude/{PLUGIN}",
             "description": "fixture plugin",
             "version": "0.0.1",
             "license": "MIT",
         }],
     }, indent=2))
-    write(root / "plugins" / PLUGIN / ".claude-plugin" / "plugin.json", json.dumps({
+    claude_manifest = {
         "name": PLUGIN,
         "version": "0.0.1",
         "description": "fixture plugin",
         "license": "MIT",
+        "skills": "./skills/",
+    }
+    write(root / "platforms" / "claude" / PLUGIN / "manifest.json",
+          json.dumps(claude_manifest, indent=2))
+    write(root / "platforms" / "claude" / PLUGIN / "host-contract.md",
+          "# Host Contract\n\n- Preserve canonical behavior.\n")
+    codex_manifest = {
+        **claude_manifest,
+        "interface": {
+            "displayName": "Sample Team",
+            "shortDescription": "Fixture team",
+            "longDescription": "Fixture team",
+            "developerName": "Agentrof",
+            "category": "Engineering",
+            "capabilities": ["Read", "Write", "Interactive"],
+            "websiteURL": "https://example.com",
+        },
+    }
+    write(root / "platforms" / "codex" / PLUGIN / "manifest.json",
+          json.dumps(codex_manifest, indent=2))
+    write(root / "platforms" / "codex" / PLUGIN / "host-contract.md",
+          "# Host Contract\n\n- Preserve canonical behavior.\n")
+    write(root / ".agents" / "plugins" / "marketplace.json", json.dumps({
+        "name": "agent-marketplace",
+        "interface": {"displayName": "Agent Marketplace"},
+        "plugins": [{
+            "name": PLUGIN,
+            "source": {"source": "local", "path": f"./dist/codex/{PLUGIN}"},
+            "policy": {"installation": "AVAILABLE", "authentication": "ON_INSTALL"},
+            "category": "Engineering",
+        }],
     }, indent=2))
     write(root / "plugins" / PLUGIN / "agents" / "planner.md", VALID_AGENT)
-    write(root / "plugins" / PLUGIN / "skills" / "notes" / "SKILL.md", VALID_SKILL)
+    write(root / "plugins" / PLUGIN / "skill-content" / "notes" / "SKILL.md",
+          VALID_SKILL)
     # Hook event names are the host platform's PascalCase schema and are
     # exempt from the snake_case law at exactly $.hooks in hooks/hooks.json.
-    write(root / "plugins" / PLUGIN / "hooks" / "hooks.json", json.dumps({
+    write(root / "platforms" / "claude" / PLUGIN / "overlay" / "hooks"
+          / "hooks.json", json.dumps({
         "hooks": {
             "SessionStart": [{"hooks": [{"type": "command", "command": "true"}]}],
         },
@@ -157,7 +192,8 @@ def make_valid_root(root: Path) -> None:
     # the templates/ wikilink_ban exemption and the json_hygiene carve-out
     # for the vault app's camelCase keys.
     vault_tpl = root / "plugins" / PLUGIN / "templates" / "vault"
-    write(root / "plugins" / PLUGIN / "skills" / "notes" / "data" / "vault-policy.json",
+    write(root / "plugins" / PLUGIN / "skill-content" / "notes" / "data"
+          / "vault-policy.json",
           json.dumps(VALID_VAULT_POLICY, indent=2))
     write(vault_tpl / "home.md", VALID_HOME_SEED)
     write(vault_tpl / "maps" / "notes.md", "# Notes Map\n\nSubtree hub.\n")
@@ -201,6 +237,7 @@ def make_valid_root(root: Path) -> None:
                     write_path(root / "tools" / "data" / "models.json"))
     shutil.copyfile(REAL_LIMITS_CONFIG,
                     write_path(root / "tools" / "data" / "limits.json"))
+    build_distributions.replace_generated(root, root / "dist")
 
 
 def write_path(path: Path) -> Path:
@@ -212,7 +249,8 @@ def write_path(path: Path) -> Path:
 
 
 def break_frontmatter_shape(root: Path) -> None:
-    text = VALID_AGENT.replace("model: sonnet", "model: sonnet\ncolor: blue")
+    text = VALID_AGENT.replace("reasoning: medium",
+                               "reasoning: medium\ncolor: blue")
     write(root / "plugins" / PLUGIN / "agents" / "planner.md", text)
 
 
@@ -223,7 +261,8 @@ def break_agent_name(root: Path) -> None:
 
 def break_skill_name(root: Path) -> None:
     text = VALID_SKILL.replace("name: notes", "name: memo")
-    write(root / "plugins" / PLUGIN / "skills" / "notes" / "SKILL.md", text)
+    write(root / "plugins" / PLUGIN / "skill-content" / "notes" / "SKILL.md",
+          text)
 
 
 def break_trigger_policy(root: Path) -> None:
@@ -266,11 +305,11 @@ def break_dead_links(root: Path) -> None:
 
 
 def break_reference_triggers(root: Path) -> None:
-    base = root / "plugins" / PLUGIN / "skills" / "field-notes"
+    base = root / "plugins" / PLUGIN / "skill-content" / "field-notes"
     write(base / "SKILL.md", """---
 name: field-notes
 description: Knowledge skill for field notes. Loaded by sample-team agents during runs.
-user-invocable: false
+exposure: internal
 ---
 
 # Field Notes
@@ -287,60 +326,22 @@ Field notes knowledge.
 
 
 def break_registration(root: Path) -> None:
-    write(root / "plugins" / "ghost-team" / ".claude-plugin" / "plugin.json", json.dumps({
-        "name": "ghost-team",
-        "version": "0.0.1",
-        "description": "unregistered plugin",
-        "license": "MIT",
-    }, indent=2))
+    marketplace_path = root / ".claude-plugin" / "marketplace.json"
+    marketplace = json.loads(marketplace_path.read_text(encoding="utf-8"))
+    marketplace["plugins"][0]["source"] = "./dist/claude/missing-team"
+    write(marketplace_path, json.dumps(marketplace, indent=2))
 
 
-def break_codex_packaging(root: Path) -> None:
-    """Create one otherwise-valid native surface, then break its policy."""
-    plugin = root / "plugins" / PLUGIN
-    claude_manifest = json.loads(
-        (plugin / ".claude-plugin" / "plugin.json").read_text(encoding="utf-8"))
-    codex_manifest = {
-        **claude_manifest,
-        "skills": "./skills/",
-        "interface": {
-            "displayName": "Sample Team",
-            "shortDescription": "Fixture team",
-            "longDescription": "Fixture team",
-            "developerName": "Agentrof",
-            "category": "Engineering",
-            "capabilities": ["Read", "Write", "Interactive"],
-            "websiteURL": "https://example.com",
-        },
-    }
-    write(plugin / "codex" / "plugin.json", json.dumps(codex_manifest, indent=2))
-    write(plugin / "claude-skills" / "notes" / "SKILL.md", VALID_SKILL)
-    (plugin / "codex-skills").mkdir()
-    archive = root / "codex-plugins" / PLUGIN
-    write(archive / ".codex-plugin" / "plugin.json",
-          json.dumps(codex_manifest, indent=2))
-    (archive / "skills").mkdir(parents=True)
-    write(archive / ".agentrof-generated-codex-plugin", "generated\n")
-    write(root / ".agents" / "plugins" / "marketplace.json", json.dumps({
-        "name": "agent-marketplace",
-        "interface": {"displayName": "Agent Marketplace"},
-        "plugins": [{
-            "name": PLUGIN,
-            "source": {"source": "local", "path": f"./codex-plugins/{PLUGIN}"},
-            "policy": {"installation": "AVAILABLE", "authentication": "ON_INSTALL"},
-            "category": "Wrong",
-        }],
-    }, indent=2))
+def break_distribution_packaging(root: Path) -> None:
+    marketplace_path = root / ".agents" / "plugins" / "marketplace.json"
+    marketplace = json.loads(marketplace_path.read_text(encoding="utf-8"))
+    marketplace["plugins"][0]["category"] = "Wrong"
+    write(marketplace_path, json.dumps(marketplace, indent=2))
 
 
 def break_json_hygiene(root: Path) -> None:
-    write(root / "plugins" / PLUGIN / ".claude-plugin" / "plugin.json", json.dumps({
-        "name": PLUGIN,
-        "version": "0.0.1",
-        "description": "fixture plugin",
-        "license": "MIT",
-        "displayName": "Sample Team",
-    }, indent=2))
+    write(root / "plugins" / PLUGIN / "bad.json",
+          json.dumps({"displayName": "Sample Team"}, indent=2))
 
 
 def break_orchestrator_integrity(root: Path) -> None:
@@ -348,7 +349,7 @@ def break_orchestrator_integrity(root: Path) -> None:
     write(root / "plugins" / PLUGIN / "flows" / "develop.md", text)
 
 
-def break_question_popup(root: Path) -> None:
+def break_choice_gate(root: Path) -> None:
     write(
         root / "plugins" / PLUGIN / "flows" / "gates.md",
         VALID_FLOW
@@ -358,14 +359,14 @@ def break_question_popup(root: Path) -> None:
 
 def break_stdlib_only(root: Path) -> None:
     write(
-        root / "plugins" / PLUGIN / "skills" / "notes" / "scripts" / "tool.py",
+        root / "plugins" / PLUGIN / "skill-content" / "notes" / "scripts" / "tool.py",
         "import requests\n\nprint(requests.__name__)\n",
     )
 
 
 def break_naive_clock(root: Path) -> None:
     write(
-        root / "plugins" / PLUGIN / "skills" / "notes" / "scripts" / "clock.py",
+        root / "plugins" / PLUGIN / "skill-content" / "notes" / "scripts" / "clock.py",
         "from datetime import date\n\nprint(date.today())\n",
     )
 
@@ -386,7 +387,7 @@ def break_template_placeholders(root: Path) -> None:
 
 def break_spawn_shape_constitution(root: Path) -> None:
     write(
-        root / "plugins" / PLUGIN / "skills" / "notes" / "spawning.md",
+        root / "plugins" / PLUGIN / "skill-content" / "notes" / "spawning.md",
         "# Spawning\n\n## Spawn Shape\n\n1. Identity line.\n2. Inputs.\n",
     )
 
@@ -396,7 +397,7 @@ def break_ba_schema_shape(root: Path) -> None:
     # fixture policy's color groups); the single defect is a minted kind
     # ('BR') that carries no row schema.
     write(
-        root / "plugins" / PLUGIN / "skills" / "notes" / "data" / "space-schema.json",
+        root / "plugins" / PLUGIN / "skill-content" / "notes" / "data" / "space-schema.json",
         json.dumps({
             "schema_version": 2,
             "statuses": ["draft", "in_review", "approved"],
@@ -419,31 +420,32 @@ def break_wikilink_ban(root: Path) -> None:
         "- Keep notes terse and decision-oriented.",
         "- Cite the vault note [[notes/decisions|decision]] directly.",
     )
-    write(root / "plugins" / PLUGIN / "skills" / "notes" / "SKILL.md", text)
+    write(root / "plugins" / PLUGIN / "skill-content" / "notes" / "SKILL.md",
+          text)
 
 
 def break_version_sync(root: Path) -> None:
-    write(root / "plugins" / PLUGIN / ".claude-plugin" / "plugin.json", json.dumps({
-        "name": PLUGIN,
-        "version": "0.0.2",
-        "description": "fixture plugin",
-        "license": "MIT",
-    }, indent=2))
+    path = root / "dist" / "claude" / PLUGIN / ".claude-plugin" / "plugin.json"
+    manifest = json.loads(path.read_text(encoding="utf-8"))
+    manifest["version"] = "0.0.2"
+    write(path, json.dumps(manifest, indent=2))
 
 
 def break_vault_policy_shape(root: Path) -> None:
     policy = {k: v for k, v in VALID_VAULT_POLICY.items()
               if k != "schema_version"}
-    write(root / "plugins" / PLUGIN / "skills" / "notes" / "data" / "vault-policy.json",
+    write(root / "plugins" / PLUGIN / "skill-content" / "notes" / "data"
+          / "vault-policy.json",
           json.dumps(policy, indent=2))
 
 
 def break_vault_wiring(root: Path) -> None:
-    write(root / "plugins" / PLUGIN / "skills" / "obsidian-vault" / "SKILL.md",
+    write(root / "plugins" / PLUGIN / "skill-content" / "obsidian-vault"
+          / "SKILL.md",
           """---
 name: obsidian-vault
 description: Knowledge skill for the vault law. Loaded by sample-team agents during runs.
-user-invocable: false
+exposure: internal
 ---
 
 # Vault Law
@@ -460,7 +462,7 @@ Vault authoring rules.
 def break_model_config_shape(root: Path) -> None:
     config_path = root / "tools" / "data" / "models.json"
     config = json.loads(config_path.read_text(encoding="utf-8"))
-    del config["model_aliases"]
+    del config["reasoning_levels"]
     config_path.write_text(json.dumps(config, indent=2), encoding="utf-8")
 
 
@@ -484,10 +486,10 @@ BUILDERS = {
     "dead_links": break_dead_links,
     "reference_triggers": break_reference_triggers,
     "registration": break_registration,
-    "codex_packaging": break_codex_packaging,
+    "distribution_packaging": break_distribution_packaging,
     "json_hygiene": break_json_hygiene,
     "orchestrator_integrity": break_orchestrator_integrity,
-    "question_popup": break_question_popup,
+    "choice_gate": break_choice_gate,
     "stdlib_only": break_stdlib_only,
     "naive_clock": break_naive_clock,
     "script_references": break_script_references,

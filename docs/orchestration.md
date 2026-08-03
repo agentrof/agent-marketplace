@@ -90,7 +90,7 @@ Routes:
    the PMO database and from files, never from conversation memory;
    after any compaction run resume-info and re-read before acting.
 3. Stop at every gate and wait for explicit user choice, asked through
-   the AskUserQuestion popup. Develop-flow gates offer Approve, Request changes
+   the host-neutral choice gate. Develop-flow gates offer Approve, Request changes
    (revise and re-gate), Pause (save and stop); design-flow gates offer
    their own choices (pick a direction or re-run with different
    emphases; approve the refined preview). Decision and preference

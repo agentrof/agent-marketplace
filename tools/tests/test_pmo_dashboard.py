@@ -17,7 +17,7 @@ import urllib.request
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[2]
-SCRIPTS = REPO / "plugins" / "project-management-office" / "scripts"
+SCRIPTS = REPO / "dist" / "claude" / "project-management-office" / "scripts"
 
 
 def load(name: str):

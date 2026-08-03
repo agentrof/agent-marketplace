@@ -80,9 +80,13 @@ class ScaffoldTests(unittest.TestCase):
                             root / "tools" / "data" / "limits.json")
             scaffold.new_plugin(root, "demo-team")
             plugin = root / "plugins" / "demo-team"
-            self.assertTrue((plugin / ".claude-plugin" / "plugin.json").is_file())
-            self.assertTrue((plugin / "codex" / "plugin.json").is_file())
-            self.assertTrue((root / "codex-plugins" / "demo-team"
+            self.assertTrue((root / "platforms" / "claude" / "demo-team"
+                             / "manifest.json").is_file())
+            self.assertTrue((root / "platforms" / "codex" / "demo-team"
+                             / "manifest.json").is_file())
+            self.assertTrue((root / "dist" / "claude" / "demo-team"
+                             / ".claude-plugin" / "plugin.json").is_file())
+            self.assertTrue((root / "dist" / "codex" / "demo-team"
                              / ".codex-plugin" / "plugin.json").is_file())
             findings = validate.run(root)
             self.assertEqual(findings, [], f"native scaffold must be clean: {findings}")

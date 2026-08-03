@@ -44,23 +44,51 @@ class ValidatorFixtureTests(unittest.TestCase):
             marketplace = json.loads(marketplace_path.read_text(encoding="utf-8"))
             marketplace["plugins"].append({
                 "name": "second-team",
-                "source": "./plugins/second-team",
+                "source": "./dist/claude/second-team",
                 "description": "fixture plugin",
                 "version": "0.0.1",
                 "license": "MIT",
             })
             write(marketplace_path, json.dumps(marketplace, indent=2))
-            write(root / "plugins" / "second-team" / ".claude-plugin"
-                  / "plugin.json", json.dumps({
+            claude_manifest = {
                       "name": "second-team",
                       "version": "0.0.1",
                       "description": "fixture plugin",
                       "license": "MIT",
-                  }, indent=2))
+                      "skills": "./skills/",
+                  }
+            for host in ("claude", "codex"):
+                manifest = dict(claude_manifest)
+                if host == "codex":
+                    manifest["interface"] = {
+                        "displayName": "Second Team",
+                        "shortDescription": "Fixture team",
+                        "longDescription": "Fixture team",
+                        "developerName": "Agentrof",
+                        "category": "Engineering",
+                        "capabilities": ["Read", "Write", "Interactive"],
+                        "websiteURL": "https://example.com",
+                    }
+                write(root / "platforms" / host / "second-team" / "manifest.json",
+                      json.dumps(manifest, indent=2))
+                write(root / "platforms" / host / "second-team"
+                      / "host-contract.md", "# Host Contract\n")
             write(root / "plugins" / "second-team" / "agents" / "planner.md",
                   VALID_AGENT)
-            write(root / "plugins" / "second-team" / "skills" / "notes"
+            write(root / "plugins" / "second-team" / "skill-content" / "notes"
                   / "SKILL.md", VALID_SKILL)
+            codex_path = root / ".agents" / "plugins" / "marketplace.json"
+            codex = json.loads(codex_path.read_text(encoding="utf-8"))
+            codex["plugins"].append({
+                "name": "second-team",
+                "source": {"source": "local",
+                           "path": "./dist/codex/second-team"},
+                "policy": {"installation": "AVAILABLE",
+                           "authentication": "ON_INSTALL"},
+                "category": "Engineering",
+            })
+            write(codex_path, json.dumps(codex, indent=2))
+            fixtures.build_distributions.replace_generated(root, root / "dist")
 
         findings = self.run_on(extra=add_second_plugin)
         self.assertEqual(findings, [], findings)
@@ -97,7 +125,7 @@ class ValidatorFixtureTests(unittest.TestCase):
         def uncolored(root: Path) -> None:
             policy = json.loads(json.dumps(VALID_VAULT_POLICY))
             policy["extra_doc_types"].append("sketch")
-            write(root / "plugins" / PLUGIN / "skills" / "notes" / "data"
+            write(root / "plugins" / PLUGIN / "skill-content" / "notes" / "data"
                   / "vault-policy.json", json.dumps(policy, indent=2))
 
         findings = self.run_on(uncolored)
@@ -115,7 +143,7 @@ class ValidatorFixtureTests(unittest.TestCase):
         def dead_legend(root: Path) -> None:
             policy = json.loads(json.dumps(VALID_VAULT_POLICY))
             policy["graph_color_groups"].append("tag:#doc/ghost")
-            write(root / "plugins" / PLUGIN / "skills" / "notes" / "data"
+            write(root / "plugins" / PLUGIN / "skill-content" / "notes" / "data"
                   / "vault-policy.json", json.dumps(policy, indent=2))
 
         findings = self.run_on(dead_legend)

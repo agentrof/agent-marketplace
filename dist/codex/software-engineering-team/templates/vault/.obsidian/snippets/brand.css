@@ -1,0 +1,23 @@
+/* House brand for the team vault: accent, headings, callouts and graph
+   variables only; no layout overrides. Light and dark cover every color
+   this snippet sets. */
+
+.theme-light {
+  --h1-color: #1237E8;
+  --h2-color: #1237E8;
+  --link-color: #1237E8;
+  --link-unresolved-color: #B42318;
+  --graph-line: #C7CDD8;
+  --graph-node-unresolved: #B42318;
+  --callout-info: 18, 55, 232;
+}
+
+.theme-dark {
+  --h1-color: #3DE3FF;
+  --h2-color: #3DE3FF;
+  --link-color: #3DE3FF;
+  --link-unresolved-color: #F97066;
+  --graph-line: #3A4150;
+  --graph-node-unresolved: #F97066;
+  --callout-info: 61, 227, 255;
+}

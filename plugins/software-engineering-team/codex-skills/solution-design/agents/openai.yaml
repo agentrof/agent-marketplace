@@ -1,6 +1,0 @@
-interface:
-  display_name: "Solution Design"
-  short_description: "Start the Solution Design guided workflow"
-  default_prompt: "Use $software-engineering-team:solution-design to start this workflow."
-policy:
-  allow_implicit_invocation: false

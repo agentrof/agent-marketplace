@@ -13,7 +13,7 @@ A plugin ships four component kinds:
   interactive roles run as personas in the main conversation.
 - **Skills** (`skill-content/<name>/SKILL.md`): all canonical knowledge lives
   here. Entry skills are the user surface; knowledge skills are loaded by
-  agents. `claude-skills/` and `codex-skills/` are generated host wrappers.
+  agents. Host wrappers exist only in generated distributions.
 - **Flows** (`flows/<name>.md`): internal state-machine procedures that
   entry skills delegate to. Not user-facing, not skills.
 - **Templates** (`templates/`): files the setup entry materializes into a
@@ -53,8 +53,8 @@ and Python FastAPI.
 
 ## Frontmatter
 
-Agents carry `name`, `description`, `model` (an alias from the
-`model_aliases` enum in `tools/data/models.json`) and `output_contract`
+Agents carry `name`, `description`, `reasoning` (a host-neutral level from
+the `reasoning_levels` enum in `tools/data/models.json`) and `output_contract`
 (`prose` or `structured`: how the role hands results back; every current
 persona is `prose`). A read-only role may also carry a `tools` whitelist
 (`Read, Grep, Glob`) to deny write capability at spawn time. Descriptions
@@ -63,15 +63,15 @@ plugin's flows. `output_contract` declares the return channel so a composer
 can refuse pairing a prose persona with a StructuredOutput-forcing harness;
 it does not by itself prevent the harness-side stall (anthropics/claude-code#79395).
 
-Skills carry `name`, `description` and exactly one visibility flag:
+Skills carry `name`, `description` and one host-neutral exposure:
 
-- Entry skill (user surface): `disable-model-invocation: true`
-- Knowledge skill (agent-loaded): `user-invocable: false`
+- Entry skill (user surface): `exposure: entry`
+- Knowledge skill (agent-loaded): `exposure: internal`
 
-The generator preserves that metadata in `claude-skills/`. It creates a
-Codex wrapper only for entry skills; each wrapper uses Codex-compatible
-frontmatter plus `agents/openai.yaml` with
-`policy.allow_implicit_invocation: false`. Do not edit either wrapper tree.
+The distribution builder maps this declaration to Claude-native visibility
+metadata and creates Codex wrappers only for entry skills. Every Codex wrapper
+ships `agents/openai.yaml` with `policy.allow_implicit_invocation: false`.
+Do not edit either generated distribution.
 
 ## Time
 
@@ -123,7 +123,7 @@ Copy this shape exactly; only the content of the sections varies by role.
 ---
 name: backend-developer
 description: Backend developer role for orchestrated team runs. Invoked by software-engineering-team flows with explicit inputs; not auto-triggered.
-model: sonnet
+reasoning: medium
 output_contract: prose
 ---
 
@@ -164,7 +164,7 @@ nouns, version pins, model names or counts in the body.
 ---
 name: python-fastapi
 description: Backend stack knowledge for the team's server-side work. Loaded by software-engineering-team agents during runs; not user-facing.
-user-invocable: false
+exposure: internal
 ---
 
 # Python FastAPI
@@ -271,9 +271,9 @@ by omission.
   (`"$RUN" run "$TEAM" scripts/<x>.py`, `"$RUN" path "$TEAM"
   <relpath>`); the `script_references` rule verifies every named
   target ships.
-- Every decision gate names the AskUserQuestion popup at the gate site
-  (`question_popup`).
-- The Codex host contract maps that popup to one concise, option-preserving
+- Every decision gate names the host-neutral choice gate at the gate site
+  (`choice_gate`).
+- The Codex host contract maps that gate to one concise, option-preserving
   turn-ending question. Mutating flows refuse Plan mode. Claude uses named
   plugin agents; Codex uses the setup-generated project agents, launches
   independent read-only work together, and waits for all results.
@@ -283,18 +283,17 @@ by omission.
 
 ## Releases
 
-A release bumps the Claude manifest, Codex source manifest, generated Codex
-manifest and Claude marketplace entry in one commit. The validator errors on
-identity or version drift; the Codex marketplace carries policy, not a second
-version field.
+A release bumps both platform manifests, both generated manifests and the
+Claude marketplace entry in one commit. The validator errors on identity or
+version drift; the Codex marketplace carries policy, not a second version
+field.
 
 ## Scaffolding
 
 Use `tools/scaffold.py` to create components; its output passes
 `make check` with zero findings by construction, and a test keeps it that
-way. Canonical skill edits are followed by
-`python3 tools/sync_skill_surfaces.py` and
-`python3 tools/build_codex_plugins.py`; `make check` verifies both generated
+way. Canonical edits are followed by
+`python3 tools/build_distributions.py`; `make check` verifies both generated
 trees are current.
 
 ## Depending on the operations backbone

@@ -30,11 +30,6 @@ DISPLAY_TOKENS = {
     "ui": "UI",
     "ux": "UX",
 }
-DISPLAY_OVERRIDES = {
-    ("software-engineering-team", "build-docs-vault"):
-        "Build Docs Vault (Legacy Alias)",
-    ("software-engineering-team", "request"): "Request (Legacy Alias)",
-}
 
 
 def parse_frontmatter(text: str) -> tuple[dict[str, str], str]:
@@ -54,10 +49,6 @@ def title_of(name: str) -> str:
     return " ".join(
         DISPLAY_TOKENS.get(part, part.capitalize()) for part in name.split("-")
     )
-
-
-def display_name(plugin: str, name: str) -> str:
-    return DISPLAY_OVERRIDES.get((plugin, name), title_of(name))
 
 
 def claude_wrapper(
@@ -93,7 +84,7 @@ def codex_wrapper(plugin: str, name: str, description: str) -> str:
 
 
 def openai_yaml(plugin: str, name: str, description: str) -> str:
-    visible = display_name(plugin, name)
+    visible = title_of(name)
     short = f"Start the {visible} guided workflow"
     if len(short) > 64:
         short = f"Run {visible}"

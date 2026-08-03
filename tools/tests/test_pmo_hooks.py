@@ -140,18 +140,6 @@ class PmoHookTests(unittest.TestCase):
         self.assertEqual(code, 0, err)
         self.assertEqual(self.tasks()[0]["role"], "backend_developer")
 
-    def test_legacy_double_prefixed_claude_agent_is_normalized(self):
-        code, _, err = run_hook("hook_subagent.py", self.payload(
-            hook_event_name="SubagentStart",
-            agent_id="a1",
-            agent_type=("software-engineering-team:"
-                        "software-engineering-team-backend-developer"),
-        ), self.env, ["start"])
-        self.assertEqual(code, 0, err)
-        task = self.tasks()[0]
-        self.assertEqual(task["role"], "backend_developer")
-        self.assertEqual(self.attempts()[0]["agent_name"], "backend-developer")
-
     def test_unowned_bare_agent_is_ignored(self):
         code, _, err = run_hook("hook_subagent.py", self.payload(
             hook_event_name="SubagentStart",

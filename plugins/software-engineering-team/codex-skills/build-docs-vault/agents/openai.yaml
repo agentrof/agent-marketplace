@@ -1,6 +1,0 @@
-interface:
-  display_name: "Build Docs Vault (Legacy Alias)"
-  short_description: "Start the Build Docs Vault (Legacy Alias) guided workflow"
-  default_prompt: "Use $software-engineering-team:build-docs-vault to start this workflow."
-policy:
-  allow_implicit_invocation: false

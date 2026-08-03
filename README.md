@@ -23,7 +23,7 @@ Tower and replies with the running URL.
 <!-- counts:start -->
 | Plugins | Agents | Entry skills | Knowledge skills |
 |---|---|---|---|
-| 2 | 12 | 14 | 14 |
+| 2 | 12 | 12 | 14 |
 <!-- counts:end -->
 
 Counts above are injected by `tools/counts.py`; they are never written by
@@ -121,10 +121,6 @@ entry names through its skill picker and `$` invocation.
 | `/software-engineering-team:organize-docs` | On-demand reorganization of the whole docs vault: full audit, owner-gated renames, deterministic migration, curated maps and titles. |
 | `/project-management-office:control-tower` | Starts Control Tower, the read-only web dashboard over the central database, and replies with the clickable URL. |
 | `/project-management-office:issue-desk` | Reviews and files issues captured by marketplace safety hooks. |
-
-`software-engineering-team:request` and
-`software-engineering-team:build-docs-vault` remain deprecated 9.x aliases;
-new commands and documentation use `deliver` and `organize-docs`.
 
 A first session usually looks like: `setup`, then `business-analysis`
 for the first topic, `solution-design` for the system foundations,

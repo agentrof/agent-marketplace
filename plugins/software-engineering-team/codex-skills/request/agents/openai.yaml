@@ -1,6 +1,0 @@
-interface:
-  display_name: "Request (Legacy Alias)"
-  short_description: "Start the Request (Legacy Alias) guided workflow"
-  default_prompt: "Use $software-engineering-team:request to start this workflow."
-policy:
-  allow_implicit_invocation: false

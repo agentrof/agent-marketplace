@@ -8,8 +8,7 @@ same pull request.
 
 Entry skills (user surface): deliver, sketch, demo, business-analysis,
 solution-design, design-system, setup, configure, delivery-lanes,
-organize-docs. The request and build-docs-vault entries remain thin legacy
-aliases for the 9.x line and delegate to deliver and organize-docs.
+organize-docs.
 Entries stay thin: parse input, run the pre-flight, then either
 delegate to a flow file through the plugin-root dispatcher (deliver, sketch,
 demo, delivery-lanes) or execute their own short interactive procedure

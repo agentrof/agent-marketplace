@@ -23,11 +23,8 @@ import pmo_cli
 
 # Team plugins whose subagents are recorded as tasks. Claude supplies the
 # plugin namespace; Codex supplies a bare name backed by an Agentrof-owned
-# project agent file. The prefix map is compatibility for pre-9.2 identities.
+# project agent file.
 TEAM_AGENT_NAMESPACES = {"software-engineering-team"}
-LEGACY_TEAM_AGENT_PREFIXES = {
-    "software-engineering-team-": "software-engineering-team",
-}
 AGENT_NAME_RE = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
 
 # Tool-name vocabulary -> the canonical names the guards reason in.
@@ -262,23 +259,14 @@ def team_agent(agent_type: str, project_root: str) -> tuple[str, str] | None:
 
     Claude identities are '<plugin>:<bare-agent>'. Codex identities are bare
     and count only when the matching project TOML carries the Agentrof owner
-    marker. Legacy prefixed identities remain readable during migration."""
+    marker."""
     if ":" in agent_type:
         namespace, bare = agent_type.split(":", 1)
         if namespace not in TEAM_AGENT_NAMESPACES:
             return None
-        legacy = f"{namespace}-"
-        if bare.startswith(legacy):
-            bare = bare[len(legacy):]
         if not AGENT_NAME_RE.fullmatch(bare):
             return None
         return bare, bare.replace("-", "_")
-
-    for prefix in LEGACY_TEAM_AGENT_PREFIXES:
-        if agent_type.startswith(prefix):
-            bare = agent_type[len(prefix):]
-            if AGENT_NAME_RE.fullmatch(bare):
-                return bare, bare.replace("-", "_")
 
     if not AGENT_NAME_RE.fullmatch(agent_type):
         return None
@@ -295,8 +283,3 @@ def team_agent(agent_type: str, project_root: str) -> tuple[str, str] | None:
         ):
             return agent_type, agent_type.replace("-", "_")
     return None
-
-
-def team_role(agent_type: str, project_root: str = "") -> str | None:
-    identity = team_agent(agent_type, project_root)
-    return identity[1] if identity is not None else None

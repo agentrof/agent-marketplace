@@ -25,13 +25,62 @@
       "operations": [
         ["add", "/project/example.txt"]
       ]
+    },
+    {
+      "name": "crlf_update",
+      "patch": "*** Begin Patch\r\n*** Update File: /project/windows.txt\r\n@@\r\n-before\r\n+after\r\n*** End Patch\r\n",
+      "operations": [
+        ["update", "/project/windows.txt"]
+      ]
+    },
+    {
+      "name": "empty_add",
+      "patch": "*** Begin Patch\n*** Add File: /project/empty.txt\n*** End Patch",
+      "operations": [
+        ["add", "/project/empty.txt"]
+      ]
+    },
+    {
+      "name": "repeated_target",
+      "patch": "*** Begin Patch\n*** Update File: /project/repeat.md\n@@\n-a\n+b\n*** Update File: /project/repeat.md\n@@\n-b\n+c\n*** End Patch",
+      "operations": [
+        ["update", "/project/repeat.md"],
+        ["update", "/project/repeat.md"]
+      ]
+    },
+    {
+      "name": "move_without_text_change",
+      "patch": "*** Begin Patch\n*** Update File: /project/old.md\n*** Move to: /project/new.md\n*** End Patch",
+      "operations": [
+        ["update", "/project/old.md"],
+        ["move-target", "/project/new.md"]
+      ]
+    },
+    {
+      "name": "relative_path",
+      "patch": "*** Begin Patch\n*** Add File: workspace/new.md\n+content\n*** End Patch",
+      "operations": [
+        ["add", "workspace/new.md"]
+      ]
+    },
+    {
+      "name": "content_looks_like_move",
+      "patch": "*** Begin Patch\n*** Add File: /project/example.txt\n+*** Move to: this is content\n*** End Patch",
+      "operations": [
+        ["add", "/project/example.txt"]
+      ]
     }
   ],
   "invalid": [
-    "not a patch",
-    "*** Begin Patch\n*** End Patch",
-    "*** Begin Patch\n*** Rename File: /project/a.md\n*** End Patch",
-    "*** Begin Patch\n*** Add File: \n+content\n*** End Patch",
-    "*** Begin Patch\n*** Add File: /project/a.md\n+content"
+    {"name": "not_a_patch", "patch": "not a patch"},
+    {"name": "empty_patch", "patch": "*** Begin Patch\n*** End Patch"},
+    {"name": "unknown_operation", "patch": "*** Begin Patch\n*** Rename File: /project/a.md\n*** End Patch"},
+    {"name": "empty_path", "patch": "*** Begin Patch\n*** Add File: \n+content\n*** End Patch"},
+    {"name": "missing_end", "patch": "*** Begin Patch\n*** Add File: /project/a.md\n+content"},
+    {"name": "empty_move_target", "patch": "*** Begin Patch\n*** Update File: /project/a.md\n*** Move to: \n*** End Patch"},
+    {"name": "move_on_add", "patch": "*** Begin Patch\n*** Add File: /project/a.md\n*** Move to: /project/b.md\n+content\n*** End Patch"},
+    {"name": "duplicate_move", "patch": "*** Begin Patch\n*** Update File: /project/a.md\n*** Move to: /project/b.md\n*** Move to: /project/c.md\n*** End Patch"},
+    {"name": "trailing_data", "patch": "*** Begin Patch\n*** Add File: /project/a.md\n+content\n*** End Patch\ntrailing"},
+    {"name": "missing_begin", "patch": "*** Add File: /project/a.md\n+content\n*** End Patch"}
   ]
 }

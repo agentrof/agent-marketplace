@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import concurrent.futures
 import importlib.util
 import json
 import sys
@@ -163,6 +164,26 @@ class DistributionContractTests(unittest.TestCase):
             with self.assertRaisesRegex(
                     ValueError, "unsupported repository top-level directory"):
                 build_distributions.validate_canonical(root)
+
+    def test_packaged_sources_reject_symbolic_links(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            plugin = root / "plugins" / "sample-team"
+            plugin.mkdir(parents=True)
+            outside = root / "outside.txt"
+            outside.write_text("outside\n", encoding="utf-8")
+            (plugin / "constitution.md").symlink_to(outside)
+            with self.assertRaisesRegex(ValueError, "symbolic links are forbidden"):
+                build_distributions.validate_canonical(root)
+
+    def test_independent_distribution_builds_are_byte_identical(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            first = root / "first"
+            second = root / "second"
+            build_distributions.build(REPO, first)
+            build_distributions.build(REPO, second)
+            self.assertEqual(build_distributions.compare_dirs(first, second), [])
 
     def test_canonical_payload_is_present_on_both_hosts(self):
         for source in sorted((REPO / "plugins").iterdir()):
@@ -341,6 +362,32 @@ class CodexProjectGeneratorTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "another-team"):
             generate.materialize(self.project, self.plugin, "workspace")
         self.assertEqual(self.snapshot(), before)
+
+    def test_concurrent_identical_setup_converges_without_partial_files(self):
+        with concurrent.futures.ThreadPoolExecutor(max_workers=8) as executor:
+            futures = [
+                executor.submit(
+                    generate.materialize,
+                    self.project,
+                    self.plugin,
+                    "workspace",
+                )
+                for _ in range(16)
+            ]
+            for future in futures:
+                future.result()
+        self.assertEqual(generate.materialize(
+            self.project, self.plugin, "workspace"), [])
+        agents = self.project / ".codex" / "agents"
+        self.assertEqual(
+            {path.name for path in agents.glob("*.toml")},
+            {"architect.toml", "developer.toml", "scanner.toml", "delegate.toml"},
+        )
+        self.assertEqual(
+            [path for path in self.project.rglob(".*") if path.is_file()
+             and path.name not in {".git"}],
+            [],
+        )
 
 
 if __name__ == "__main__":

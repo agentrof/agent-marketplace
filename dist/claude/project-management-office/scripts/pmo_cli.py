@@ -23,6 +23,7 @@ import shutil
 import sqlite3
 import subprocess
 import sys
+import tempfile
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
@@ -2295,20 +2296,91 @@ def cmd_event_append(args) -> int:
 
 def cmd_dump(args) -> int:
     con = connect()
-    output = "\n".join(con.iterdump()) + "\n"
-    Path(args.out).write_text(output, encoding="utf-8")
+    try:
+        schema_version = con.execute("PRAGMA user_version").fetchone()[0]
+        output = (
+            f"PRAGMA user_version = {schema_version};\n"
+            + "\n".join(con.iterdump())
+            + "\n"
+        )
+    finally:
+        con.close()
+    destination = Path(args.out)
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.NamedTemporaryFile(
+        mode="w", encoding="utf-8", dir=destination.parent,
+        prefix=f".{destination.name}.", delete=False,
+    ) as handle:
+        handle.write(output)
+        candidate = Path(handle.name)
+    try:
+        os.replace(candidate, destination)
+    except OSError:
+        if candidate.exists():
+            candidate.unlink()
+        raise
     print(f"pmo: database dumped to {args.out}")
     return 0
 
 
 def cmd_load(args) -> int:
-    if db_path().is_file() and not args.force:
+    destination = db_path()
+    if destination.is_file() and not args.force:
         return fail("database already exists; pass --force to overwrite", 1)
-    if db_path().is_file():
-        db_path().unlink()
-    con = connect()
-    script = Path(args.infile).read_text(encoding="utf-8")
-    con.executescript(script)
+    try:
+        script = Path(args.infile).read_text(encoding="utf-8")
+    except OSError as exc:
+        return fail(f"cannot read database dump: {exc}", 2)
+    data_dir().mkdir(parents=True, exist_ok=True)
+    with tempfile.NamedTemporaryFile(
+        dir=data_dir(), prefix=".agentrof-load.", suffix=".db", delete=False,
+    ) as handle:
+        candidate = Path(handle.name)
+    con = None
+    try:
+        con = sqlite3.connect(candidate)
+        con.row_factory = sqlite3.Row
+        con.execute("PRAGMA foreign_keys=OFF")
+        con.executescript(script)
+        con.execute("PRAGMA foreign_keys=ON")
+        foreign_key_problem = con.execute("PRAGMA foreign_key_check").fetchone()
+        if foreign_key_problem is not None:
+            raise Rule(
+                "database dump failed foreign_key_check: "
+                + ", ".join(str(value) for value in foreign_key_problem)
+            )
+        integrity = con.execute("PRAGMA integrity_check").fetchone()[0]
+        if integrity != "ok":
+            raise Rule(f"database dump failed integrity_check: {integrity}")
+        version = con.execute("PRAGMA user_version").fetchone()[0]
+        if version != SCHEMA_VERSION:
+            raise Rule(
+                f"database dump schema {version} does not match CLI schema"
+                f" {SCHEMA_VERSION}"
+            )
+        problem = verify_integrity(con)
+        if problem:
+            raise Rule(f"database dump integrity stamp is invalid: {problem}")
+        con.commit()
+        con.close()
+        con = None
+        if destination.is_file():
+            old = sqlite3.connect(destination)
+            try:
+                old.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+            finally:
+                old.close()
+        for suffix in ("-wal", "-shm"):
+            sidecar = Path(str(destination) + suffix)
+            if sidecar.exists():
+                sidecar.unlink()
+        os.replace(candidate, destination)
+    except (OSError, sqlite3.DatabaseError, Rule) as exc:
+        if con is not None:
+            con.close()
+        if candidate.exists():
+            candidate.unlink()
+        return fail(f"database dump rejected; existing database preserved: {exc}", 1)
     print(f"pmo: database loaded from {args.infile}")
     return 0
 

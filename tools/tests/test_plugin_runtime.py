@@ -12,6 +12,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+import re
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[2]
@@ -21,6 +22,10 @@ SET_SCRIPTS = REPO / "dist" / "claude" / "software-engineering-team" / "scripts"
 sys.path.insert(0, str(PMO_SCRIPTS))
 
 import hook_common  # noqa: E402
+
+PATCH_CORPUS = json.loads((
+    REPO / "tools" / "tests" / "data" / "hook_payloads.json"
+).read_text(encoding="utf-8"))
 
 
 def load_vault_hook():
@@ -52,36 +57,41 @@ def run_cli(argv: list[str], env: dict):
 
 
 class NormalizePayloadTests(unittest.TestCase):
+    def assert_valid_patch_case(self, case):
+        payload = {
+            "tool_name": "apply_patch",
+            "tool_input": {"patch": case["patch"]},
+        }
+        pmo = hook_common.normalize_payload(payload)
+        vault = load_vault_hook().normalize(payload)
+        self.assertEqual(vault["file_targets"], pmo["file_targets"])
+        self.assertEqual(
+            [[item["operation"], item["file_path"]]
+             for item in pmo["file_targets"]],
+            case["operations"],
+        )
+
+    def assert_invalid_patch_case(self, case):
+        payload = {
+            "tool_name": "apply_patch",
+            "tool_input": {"patch": case["patch"]},
+        }
+        pmo = hook_common.normalize_payload(payload)
+        vault = load_vault_hook().normalize(payload)
+        self.assertEqual(pmo["file_targets"], [])
+        self.assertEqual(vault["file_targets"], [])
+        self.assertIn("patch_parse_error", pmo)
+        self.assertEqual(
+            vault.get("patch_parse_error"), pmo.get("patch_parse_error")
+        )
+
     def test_shared_golden_patch_corpus_stays_in_parity(self):
-        corpus = json.loads((
-            REPO / "tools" / "tests" / "data" / "hook_payloads.json"
-        ).read_text(encoding="utf-8"))
-        vault_hook = load_vault_hook()
-        for case in corpus["valid"]:
+        for case in PATCH_CORPUS["valid"]:
             with self.subTest(case=case["name"]):
-                payload = {
-                    "tool_name": "apply_patch",
-                    "tool_input": {"patch": case["patch"]},
-                }
-                pmo = hook_common.normalize_payload(payload)
-                vault = vault_hook.normalize(payload)
-                self.assertEqual(vault["file_targets"], pmo["file_targets"])
-                self.assertEqual(
-                    [[item["operation"], item["file_path"]]
-                     for item in pmo["file_targets"]],
-                    case["operations"],
-                )
-        for patch in corpus["invalid"]:
-            with self.subTest(invalid=patch):
-                payload = {"tool_name": "apply_patch", "tool_input": {"patch": patch}}
-                pmo = hook_common.normalize_payload(payload)
-                vault = vault_hook.normalize(payload)
-                self.assertEqual(pmo["file_targets"], [])
-                self.assertEqual(vault["file_targets"], [])
-                self.assertIn("patch_parse_error", pmo)
-                self.assertEqual(
-                    vault.get("patch_parse_error"), pmo.get("patch_parse_error")
-                )
+                self.assert_valid_patch_case(case)
+        for case in PATCH_CORPUS["invalid"]:
+            with self.subTest(invalid=case["name"]):
+                self.assert_invalid_patch_case(case)
 
     def test_claude_code_shape_passes_through(self):
         out = hook_common.normalize_payload({
@@ -146,6 +156,27 @@ class NormalizePayloadTests(unittest.TestCase):
         })
         self.assertEqual(out["file_targets"], [])
         self.assertIn("patch_parse_error", out)
+
+
+def patch_case_test(case, valid: bool):
+    def test(self):
+        if valid:
+            self.assert_valid_patch_case(case)
+        else:
+            self.assert_invalid_patch_case(case)
+    return test
+
+
+for _valid, _cases in ((True, PATCH_CORPUS["valid"]),
+                       (False, PATCH_CORPUS["invalid"])):
+    for _index, _case in enumerate(_cases):
+        _slug = re.sub(r"[^a-z0-9]+", "_", _case["name"].lower()).strip("_")
+        _kind = "valid" if _valid else "invalid"
+        setattr(
+            NormalizePayloadTests,
+            f"test_patch_{_kind}_{_index:02d}_{_slug}",
+            patch_case_test(_case, _valid),
+        )
 
 
 class DbGuardTests(unittest.TestCase):

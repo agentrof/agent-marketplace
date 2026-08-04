@@ -716,6 +716,52 @@ ROUTES = {
 # ---------------------------------------------------------------------------
 
 
+def json_response(obj: dict, status: int = 200) -> tuple[int, bytes, str]:
+    return (
+        status,
+        json.dumps(obj, sort_keys=True).encode("utf-8"),
+        "application/json; charset=utf-8",
+    )
+
+
+def dispatch_request(method: str, target: str) -> tuple[int, bytes, str]:
+    """Resolve one request without opening a socket.
+
+    The HTTP handler is deliberately a thin transport adapter around this
+    function so route, method, error and response contracts stay hermetic in
+    the default test gate.
+    """
+    if method != "GET":
+        return json_response({
+            "error": "method_not_allowed",
+            "message": "this dashboard is read-only",
+        }, 405)
+    parsed = urlparse(target)
+    path = parsed.path.rstrip("/") or "/"
+    if path in ("/", "/index.html"):
+        index = find_index_html()
+        if index is None:
+            return json_response({
+                "error": "no_index",
+                "message": "dashboard index.html is missing; reinstall the"
+                           " project-management-office plugin",
+            }, 500)
+        return 200, index.read_bytes(), "text/html; charset=utf-8"
+    if path == "/favicon.ico":
+        return 204, b"", "image/x-icon"
+    endpoint = ROUTES.get(path)
+    if endpoint is None:
+        return json_response({"error": "not_found", "message": path}, 404)
+    try:
+        return json_response(endpoint(parse_qs(parsed.query)))
+    except ApiError as exc:
+        return json_response(exc.body, exc.status)
+    except (ValueError, KeyError) as exc:
+        return json_response({"error": "bad_request", "message": str(exc)}, 400)
+    except sqlite3.OperationalError as exc:
+        return json_response({"error": "db_unavailable", "message": str(exc)}, 503)
+
+
 class Handler(BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
     server_version = "pmo-dashboard"
@@ -739,36 +785,10 @@ class Handler(BaseHTTPRequestHandler):
         self._write(status, body, "application/json; charset=utf-8")
 
     def do_GET(self) -> None:
-        parsed = urlparse(self.path)
-        path = parsed.path.rstrip("/") or "/"
-        if path in ("/", "/index.html"):
-            index = find_index_html()
-            if index is None:
-                self.send_json({"error": "no_index",
-                                "message": "dashboard index.html is missing;"
-                                           " reinstall the project-management-office plugin"}, 500)
-                return
-            self._write(200, index.read_bytes(), "text/html; charset=utf-8")
-            return
-        if path == "/favicon.ico":
-            self._write(204, b"", "image/x-icon")
-            return
-        endpoint = ROUTES.get(path)
-        if endpoint is None:
-            self.send_json({"error": "not_found", "message": path}, 404)
-            return
-        try:
-            self.send_json(endpoint(parse_qs(parsed.query)))
-        except ApiError as exc:
-            self.send_json(exc.body, exc.status)
-        except (ValueError, KeyError) as exc:
-            self.send_json({"error": "bad_request", "message": str(exc)}, 400)
-        except sqlite3.OperationalError as exc:
-            self.send_json({"error": "db_unavailable", "message": str(exc)}, 503)
+        self._write(*dispatch_request("GET", self.path))
 
     def _reject(self) -> None:
-        self.send_json({"error": "method_not_allowed",
-                        "message": "this dashboard is read-only"}, 405)
+        self._write(*dispatch_request(self.command, self.path))
 
     do_POST = _reject
     do_PUT = _reject

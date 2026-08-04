@@ -1,5 +1,6 @@
 """Unit tests for the PMO plugin's central-database CLI."""
 
+import argparse
 import importlib.util
 import io
 import json
@@ -11,6 +12,8 @@ import tempfile
 import unittest
 from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
+from types import SimpleNamespace
+from unittest import mock
 
 REPO = Path(__file__).resolve().parents[2]
 CLI_PATH = REPO / "plugins" / "project-management-office" / "scripts" / "pmo_cli.py"
@@ -65,6 +68,68 @@ BACKLOG = {
     "open_questions": ["Which mail provider?"],
 }
 
+
+COMMAND_CONTRACTS = {
+    "init-db": "test_init_db_idempotent",
+    "version": "test_version_reports_product_version",
+    "now": "test_now_prints_iso_utc",
+    "sync-launcher": "test_sync_launcher_is_idempotent",
+    "verify": "test_verify_fresh_database",
+    "session-reconcile": "test_session_reconcile_is_idempotent",
+    "ensure": "test_ensure_bootstraps_launcher",
+    "dashboard": "test_dashboard_command_delegates_to_read_only_server",
+    "project register": "test_project_register_and_list",
+    "project list": "test_project_register_and_list",
+    "resume-info": "test_resume_info_reports_work_order_shape",
+    "work-order init": "test_story_claim_marks_in_development",
+    "work-order set-step": "test_transition_guard",
+    "work-order record-gate": "test_every_mutation_writes_an_event",
+    "work-order bump": "test_every_mutation_writes_an_event",
+    "work-order set-ownership": "test_ownership_snake_case_and_cross_order_overlap",
+    "work-order set-status": "test_complete_guard_full_chain",
+    "work-order release": "test_release_frees_worktree_and_claim",
+    "work-order validate": "test_work_order_validate",
+    "item import": "test_import_green_and_upsert",
+    "item update": "test_priority_enum_on_update",
+    "item list": "test_story_claim_marks_in_development",
+    "item add-dep": "test_add_remove_dep_and_cycle_guard",
+    "item remove-dep": "test_add_remove_dep_and_cycle_guard",
+    "item list-deps": "test_import_materializes_structured_deps",
+    "item add-dod": "test_dod_transitions",
+    "item set-dod": "test_dod_transitions",
+    "item list-dod": "test_dod_transitions",
+    "item order": "test_item_order_deterministic_with_priority_tiebreak",
+    "item ready": "test_item_ready_dep_gating",
+    "task open": "test_task_open_touch_close",
+    "task close": "test_task_open_touch_close",
+    "task touch": "test_task_open_touch_close",
+    "finding open": "test_finding_lifecycle",
+    "finding update": "test_finding_lifecycle",
+    "finding list": "test_finding_lifecycle",
+    "issue open": "test_issue_open_mints_global_id_without_project",
+    "issue update": "test_issue_update_fields_and_dismiss",
+    "issue list": "test_issue_list_filters_by_status_json",
+    "issue file": "test_issue_file_records_url_and_event",
+    "coverage import": "test_coverage_import_and_replace",
+    "coverage list": "test_coverage_list_reads_story_criteria",
+    "budget set": "test_budget_and_ledger",
+    "event append": "test_event_append_contract",
+    "ledger checkpoint": "test_budget_and_ledger",
+    "ledger list": "test_ledger_list_decodes_finding_counts",
+    "checkpoint": "test_complete_guard_full_chain",
+    "dump": "test_dump_load_round_trip_into_fresh_home",
+    "load": "test_dump_load_round_trip_into_fresh_home",
+}
+
+
+def parser_leaf_commands(parser, prefix=()) -> list[str]:
+    leaves: list[str] = []
+    for action in parser._actions:
+        if isinstance(action, argparse._SubParsersAction):
+            for name, child in action.choices.items():
+                leaves.extend(parser_leaf_commands(child, (*prefix, name)))
+    return leaves or [" ".join(prefix)]
+
 class PmoCliTests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
@@ -114,6 +179,18 @@ class PmoCliTests(unittest.TestCase):
 
     # -- clock ------------------------------------------------------------------
 
+    def test_public_command_contract_registry_is_complete(self):
+        leaves = set(parser_leaf_commands(pmo_cli.build_parser()))
+        self.assertEqual(leaves, set(COMMAND_CONTRACTS))
+        for command, method in COMMAND_CONTRACTS.items():
+            with self.subTest(command=command, method=method):
+                self.assertTrue(hasattr(type(self), method), method)
+
+    def test_version_reports_product_version(self):
+        code, out, err = run(["version"])
+        self.assertEqual(code, 0, err)
+        self.assertEqual(out.strip(), pmo_cli.PMO_VERSION)
+
     def test_now_prints_iso_utc(self):
         from datetime import datetime
         code, out, err = run(["now"])
@@ -159,6 +236,71 @@ class PmoCliTests(unittest.TestCase):
 
     # -- database and project --------------------------------------------------
 
+    def test_sync_launcher_is_idempotent(self):
+        code, _, err = run(["sync-launcher"])
+        self.assertEqual(code, 0, err)
+        first = (Path(os.environ["AGENTROF_HOME"]) / "bin" / "pmo_cli.py")
+        self.assertTrue(first.is_file())
+        before = first.read_bytes()
+        code, out, err = run(["sync-launcher"])
+        self.assertEqual(code, 0, err)
+        self.assertIn("already at version", out)
+        self.assertEqual(first.read_bytes(), before)
+
+    def test_verify_fresh_database(self):
+        code, out, err = run(["verify", "--json"])
+        self.assertEqual(code, 0, err)
+        self.assertEqual(json.loads(out), {"ok": True, "problem": ""})
+
+    def test_ensure_bootstraps_launcher(self):
+        code, out, err = run(["ensure"])
+        self.assertEqual(code, 0, err)
+        self.assertIn("ensure complete", out)
+        self.assertTrue((Path(os.environ["AGENTROF_HOME"]) / "bin"
+                         / "pmo_cli.py").is_file())
+
+    def test_session_reconcile_is_idempotent(self):
+        self.import_backlog()
+        self.init_wo()
+        argv = ["session-reconcile", "--project-key", "shop",
+                "--worktree", str(self.wt_main)]
+        code, out, err = run(argv)
+        self.assertEqual(code, 0, err)
+        self.assertIn("appended 1", out)
+        code, out, err = run(argv)
+        self.assertEqual(code, 0, err)
+        self.assertIn("appended 0", out)
+
+    def test_dashboard_command_delegates_to_read_only_server(self):
+        module = Path(self.tmp.name) / "pmo_dashboard.py"
+        index = Path(self.tmp.name) / "index.html"
+        module.write_text("# fixture\n", encoding="utf-8")
+        index.write_text("<html></html>\n", encoding="utf-8")
+        fake = SimpleNamespace(serve=mock.Mock(return_value=0))
+        with mock.patch.object(
+                pmo_cli, "dashboard_assets", return_value=(module, index)), \
+                mock.patch.dict(sys.modules, {"pmo_dashboard": fake}):
+            code, _, err = run([
+                "dashboard", "--host", "127.0.0.1", "--port", "9191",
+                "--no-browser",
+            ])
+        self.assertEqual(code, 0, err)
+        fake.serve.assert_called_once_with(
+            "127.0.0.1", 9191, open_browser=False
+        )
+
+    def test_project_register_and_list(self):
+        code, _, err = run([
+            "project", "register", "--key", "second", "--name", "Second",
+        ])
+        self.assertEqual(code, 0, err)
+        code, out, err = run(["project", "list", "--json"])
+        self.assertEqual(code, 0, err)
+        self.assertEqual(
+            [row["project_key"] for row in json.loads(out)],
+            ["second", "shop"],
+        )
+
     def test_init_db_idempotent(self):
         code1, _, _ = run(["init-db"])
         code2, _, _ = run(["init-db"])
@@ -189,6 +331,92 @@ class PmoCliTests(unittest.TestCase):
         code, _, err = run(["init-db"])
         self.assertEqual(code, 1)
         self.assertIn("does not match this CLI", err)
+
+    def test_dump_load_round_trip_into_fresh_home(self):
+        dump = Path(self.tmp.name) / "backup.sql"
+        code, _, err = run(["dump", "--out", str(dump)])
+        self.assertEqual(code, 0, err)
+        original_home = os.environ["AGENTROF_HOME"]
+        try:
+            os.environ["AGENTROF_HOME"] = str(Path(self.tmp.name) / "restored")
+            code, _, err = run(["load", "--infile", str(dump)])
+            self.assertEqual(code, 0, err)
+            code, out, err = run(["project", "list", "--json"])
+            self.assertEqual(code, 0, err)
+            self.assertEqual([row["project_key"] for row in json.loads(out)], ["shop"])
+            code, _, err = run(["verify"])
+            self.assertEqual(code, 0, err)
+        finally:
+            os.environ["AGENTROF_HOME"] = original_home
+
+    def test_dump_replace_failure_removes_temporary_file(self):
+        dump = Path(self.tmp.name) / "backup.sql"
+        with mock.patch.object(pmo_cli.os, "replace", side_effect=OSError("full")):
+            with self.assertRaisesRegex(OSError, "full"):
+                run(["dump", "--out", str(dump)])
+        self.assertFalse(dump.exists())
+        self.assertEqual(list(dump.parent.glob(f".{dump.name}.*")), [])
+
+    def test_load_without_force_preserves_existing_database(self):
+        dump = Path(self.tmp.name) / "backup.sql"
+        run(["dump", "--out", str(dump)])
+        code, _, err = run(["load", "--infile", str(dump)])
+        self.assertEqual(code, 1)
+        self.assertIn("--force", err)
+        code, out, _ = run(["project", "list", "--json"])
+        self.assertEqual([row["project_key"] for row in json.loads(out)], ["shop"])
+
+    def test_force_load_invalid_sql_preserves_existing_database(self):
+        bad = Path(self.tmp.name) / "bad.sql"
+        bad.write_text("this is not SQL;", encoding="utf-8")
+        code, _, err = run(["load", "--infile", str(bad), "--force"])
+        self.assertEqual(code, 1)
+        self.assertIn("existing database preserved", err)
+        code, out, _ = run(["project", "list", "--json"])
+        self.assertEqual([row["project_key"] for row in json.loads(out)], ["shop"])
+
+    def test_force_load_wrong_schema_preserves_existing_database(self):
+        bad = Path(self.tmp.name) / "wrong-schema.sql"
+        bad.write_text("PRAGMA user_version = 99;\n", encoding="utf-8")
+        code, _, err = run(["load", "--infile", str(bad), "--force"])
+        self.assertEqual(code, 1)
+        self.assertIn("schema 99", err)
+        code, out, _ = run(["project", "list", "--json"])
+        self.assertEqual([row["project_key"] for row in json.loads(out)], ["shop"])
+
+    def test_force_load_rejects_tampered_integrity_stamp(self):
+        dump = Path(self.tmp.name) / "backup.sql"
+        run(["dump", "--out", str(dump)])
+        text = dump.read_text(encoding="utf-8")
+        self.assertIn("Shop", text)
+        dump.write_text(text.replace("Shop", "Tampered", 1), encoding="utf-8")
+        code, _, err = run(["load", "--infile", str(dump), "--force"])
+        self.assertEqual(code, 1)
+        self.assertIn("integrity stamp is invalid", err)
+        code, out, _ = run(["project", "list", "--json"])
+        self.assertEqual(json.loads(out)[0]["name"], "Shop")
+
+    def test_force_load_valid_dump_atomically_replaces_database(self):
+        dump = Path(self.tmp.name) / "backup.sql"
+        run(["dump", "--out", str(dump)])
+        run(["project", "register", "--key", "temporary"])
+        code, _, err = run(["load", "--infile", str(dump), "--force"])
+        self.assertEqual(code, 0, err)
+        code, out, _ = run(["project", "list", "--json"])
+        self.assertEqual([row["project_key"] for row in json.loads(out)], ["shop"])
+
+    def test_load_missing_dump_is_clean_input_error(self):
+        missing = Path(self.tmp.name) / "missing.sql"
+        fresh_home = str(Path(self.tmp.name) / "empty-home")
+        original_home = os.environ["AGENTROF_HOME"]
+        try:
+            os.environ["AGENTROF_HOME"] = fresh_home
+            code, _, err = run(["load", "--infile", str(missing)])
+            self.assertEqual(code, 2)
+            self.assertIn("cannot read database dump", err)
+            self.assertFalse(Path(fresh_home, pmo_cli.DB_NAME).exists())
+        finally:
+            os.environ["AGENTROF_HOME"] = original_home
 
     # -- issue candidates ------------------------------------------------------
 
@@ -863,6 +1091,46 @@ class PmoCliTests(unittest.TestCase):
         attempt = con.execute("SELECT * FROM task_attempts").fetchone()
         self.assertEqual(attempt["outcome"], "blocked")
         self.assertTrue(attempt["finished_at"])
+
+    def test_finding_lifecycle(self):
+        self.import_backlog()
+        self.init_wo()
+        code, _, err = run([
+            "finding", "open", "--work-order-key", "wo1",
+            "--source", "review", "--severity", "high",
+            "--summary", "contract mismatch",
+        ])
+        self.assertEqual(code, 0, err)
+        code, out, err = run([
+            "finding", "list", "--work-order-key", "wo1", "--json",
+        ])
+        self.assertEqual(code, 0, err)
+        self.assertEqual(json.loads(out)[0]["status"], "open")
+        code, _, err = run([
+            "finding", "update", "--work-order-key", "wo1",
+            "--finding", "F-001", "--status", "fixed", "--round", "1",
+        ])
+        self.assertEqual(code, 0, err)
+        code, out, err = run([
+            "finding", "list", "--work-order-key", "wo1",
+            "--status", "fixed", "--json",
+        ])
+        self.assertEqual(code, 0, err)
+        self.assertEqual(json.loads(out)[0]["closed_round"], 1)
+
+    def test_event_append_contract(self):
+        code, _, err = run([
+            "event", "append", "--project-key", "shop",
+            "--action", "quality_probe", "--actor", "test",
+            "--payload", '{"gate":"green"}',
+        ])
+        self.assertEqual(code, 0, err)
+        row = self.db().execute(
+            "SELECT actor, action, payload_json FROM events"
+            " WHERE action = 'quality_probe'"
+        ).fetchone()
+        self.assertEqual(row["actor"], "test")
+        self.assertEqual(json.loads(row["payload_json"]), {"gate": "green"})
 
     # -- coverage, budgets, ledger --------------------------------------------
 

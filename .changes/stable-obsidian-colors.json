@@ -1,0 +1,6 @@
+{
+  "summary": "Standardize Obsidian graph colors across projects while preserving explicit user overrides.",
+  "components": {
+    "software-engineering-team": "patch"
+  }
+}

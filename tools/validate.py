@@ -1638,22 +1638,73 @@ def check_vault_policy_shape(tree: Tree, findings: list[Finding]) -> None:
                 err("graph_search must be a string",
                     "the global graph filter is policy data")
                 graph_search = None
-            color_groups = policy.get("graph_color_groups")
-            if (not isinstance(color_groups, list) or not color_groups
-                    or not all(isinstance(s, str) and s
-                               for s in color_groups)):
-                err("graph_color_groups must be a non-empty list of graph"
-                    " query strings",
-                    "the graph legend is policy-ordered; the committed"
-                    " graph config derives from it")
-                color_groups = None
+            color_specs = policy.get("graph_color_groups")
+            color_groups = None
+            palette = None
+            if not isinstance(color_specs, list) or not color_specs:
+                err("graph_color_groups must be a non-empty list of"
+                    " {id, query, rgb} objects",
+                    "bind each stable group id to its graph query and"
+                    " 0..16777215 RGB color in one policy record")
             else:
-                for query in color_groups:
-                    if "|" in query or re.search(r"tag:#\S*\*", query):
+                valid_specs = True
+                ids: list[str] = []
+                queries: list[str] = []
+                rgbs: list[int] = []
+                for group in color_specs:
+                    if (not isinstance(group, dict)
+                            or set(group) != {"id", "query", "rgb"}):
+                        err("each graph_color_groups entry must contain"
+                            " exactly id, query and rgb",
+                            "keep group identity, selector and standard"
+                            " color together so ordering cannot reassign"
+                            " colors")
+                        valid_specs = False
+                        continue
+                    group_id = group.get("id")
+                    query = group.get("query")
+                    rgb = group.get("rgb")
+                    if not isinstance(group_id, str) \
+                            or not KEBAB_RE.match(group_id):
+                        err("graph color group ids must be non-empty"
+                            " kebab-case strings",
+                            "use a stable semantic id such as rule-set")
+                        valid_specs = False
+                    if not isinstance(query, str) or not query:
+                        err("graph color group queries must be non-empty"
+                            " strings",
+                            "declare the exact Obsidian graph query")
+                        valid_specs = False
+                    elif "|" in query or re.search(r"tag:#\S*\*", query):
                         err(f"graph_color_groups query '{query}' uses"
                             " grammar the graph does not support",
                             "graph queries have no pipe-OR and no tag"
                             " wildcards; write OR-joined full tags")
+                        valid_specs = False
+                    if (not isinstance(rgb, int) or isinstance(rgb, bool)
+                            or not 0 <= rgb <= 0xFFFFFF):
+                        err("graph color group rgb values must be integers"
+                            " from 0 through 16777215",
+                            "store each standard six-digit RGB value as"
+                            " its decimal integer")
+                        valid_specs = False
+                    if isinstance(group_id, str):
+                        ids.append(group_id)
+                    if isinstance(query, str):
+                        queries.append(query)
+                    if isinstance(rgb, int) and not isinstance(rgb, bool):
+                        rgbs.append(rgb)
+                if len(ids) != len(set(ids)):
+                    err("graph color group ids must be unique",
+                        "one semantic id owns one standard color")
+                    valid_specs = False
+                if len(queries) != len(set(queries)):
+                    err("graph color group queries must be unique",
+                        "one graph selector owns one standard color")
+                    valid_specs = False
+                if valid_specs:
+                    color_groups = queries
+                    palette = list(zip(queries, rgbs))
             hubs = policy.get("hubs")
             if not isinstance(hubs, list):
                 err("hubs must be a list of {note, covers} objects",
@@ -1780,18 +1831,6 @@ def check_vault_policy_shape(tree: Tree, findings: list[Finding]) -> None:
                         " known doc type",
                         "a legend entry without a type is dead; drop the"
                         " group or declare the type in extra_doc_types")
-            colors = policy.get("graph_group_colors")
-            if colors is not None and (
-                    not isinstance(colors, list)
-                    or not all(isinstance(c, int)
-                               and not isinstance(c, bool)
-                               and 0 <= c <= 0xFFFFFF for c in colors)
-                    or (color_groups is not None
-                        and len(colors) != len(color_groups))):
-                err("graph_group_colors must list one 0..16777215 rgb int"
-                    " per graph_color_groups entry, same order",
-                    "the palette is policy data: one authored color per"
-                    " group; the committed graph config derives from it")
             # Parity with the shipped seeds: the policy and templates/vault
             # describe one product; they may not drift.
             vault_tpl = plugin / "templates" / "vault"
@@ -1836,21 +1875,17 @@ def check_vault_policy_shape(tree: Tree, findings: list[Finding]) -> None:
                 queries = [str(group.get("query", ""))
                            for group in graph_data.get("colorGroups", [])
                            if isinstance(group, dict)]
-                if color_groups is not None and queries != color_groups:
+                seed_palette = [
+                    (str(group.get("query", "")),
+                     (group.get("color") or {}).get("rgb"))
+                    for group in graph_data.get("colorGroups", [])
+                    if isinstance(group, dict)
+                ]
+                if palette is not None and seed_palette != palette:
                     err("graph.json colorGroups do not match policy"
-                        " graph_color_groups (same queries, same order)",
+                        " graph_color_groups (same query, RGB and order)",
                         "the committed graph legend derives from the policy;"
-                        " regenerate graph.json from graph_color_groups")
-                if (isinstance(colors, list) and color_groups is not None
-                        and len(colors) == len(color_groups)):
-                    rgbs = [(group.get("color") or {}).get("rgb")
-                            for group in graph_data.get("colorGroups", [])
-                            if isinstance(group, dict)]
-                    if rgbs != colors:
-                        err("graph.json group colors do not match policy"
-                            " graph_group_colors (same ints, same order)",
-                            "the palette is authored once in the policy;"
-                            " regenerate graph.json from it")
+                        " regenerate graph.json from the named palette")
                 if graph_search is not None \
                         and graph_data.get("search", "") != graph_search:
                     err("graph.json search does not match policy"

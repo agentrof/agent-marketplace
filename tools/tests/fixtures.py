@@ -80,7 +80,7 @@ Paste {{constitution}} here, then the inputs.
 
 
 VALID_VAULT_POLICY = {
-    "schema_version": 2,
+    "schema_version": 3,
     "vault_root_dirname": "docs",
     "home_file": "home.md",
     "maps_dir": "maps",
@@ -91,8 +91,9 @@ VALID_VAULT_POLICY = {
     "community_plugins": ["sample-title-plugin"],
     "graph_search": "-path:_generated",
     "graph_color_groups": [
-        "tag:#doc/note",
-        "tag:#doc/moc OR tag:#doc/home",
+        {"id": "note", "query": "tag:#doc/note", "rgb": 2201331},
+        {"id": "navigation", "query": "tag:#doc/moc OR tag:#doc/home",
+         "rgb": 9741240},
     ],
     "hubs": [
         {"note": "notes/*/*-overview.md", "covers": "notes/*"},
@@ -253,8 +254,9 @@ def make_valid_root(root: Path) -> None:
     write(vault_tpl / ".obsidian" / "graph.json", json.dumps({
         "search": VALID_VAULT_POLICY["graph_search"],
         "colorGroups": [
-            {"query": query, "color": {"a": 1, "rgb": 5431378}}
-            for query in VALID_VAULT_POLICY["graph_color_groups"]
+            {"query": group["query"],
+             "color": {"a": 1, "rgb": group["rgb"]}}
+            for group in VALID_VAULT_POLICY["graph_color_groups"]
         ],
         "showOrphans": True,
         "hideUnresolved": False,

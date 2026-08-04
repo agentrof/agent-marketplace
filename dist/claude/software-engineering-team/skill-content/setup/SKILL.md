@@ -50,12 +50,11 @@ and restart rules. `{{workspace}}` means the chosen workspace directory name.
      and a profile.md, or a directory containing them)?"; given paths
      are copied verbatim per file, otherwise me.md and profile.md come
      from the templates.
-   - workspace/docs/ vault payload from the template directory's
-     vault/ subtree, per file, only where missing: home and the
-   .obsidian payload with plugins/ copied recursively (the vault app
-     asks a one-time trust prompt to enable them). Subtree map seeds
-     are born with their trees by the tree-birthing entries, never by
-   setup; the obsidian-vault skill owns their law.
+   - workspace/docs/ vault payload through `"$RUN" run "$TEAM" scripts/vault_check.py materialize-payload --vault workspace/docs`.
+     It copies home and the complete .obsidian payload byte-for-byte only
+     where missing. New projects share one palette, existing user changes
+     stay untouched, and the vault app asks once to trust the plugins.
+     Subtree map seeds are born with their trees, never by setup; the obsidian-vault skill owns their law.
 4. Create the skeleton, only missing parts: workspace/apps/,
    workspace/docs/business-analysis/, workspace/docs/solution-design/,
    workspace/docs/system-architecture/, workspace/docs/maps/,

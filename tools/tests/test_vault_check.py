@@ -41,6 +41,9 @@ vc = load("vault_check")
 vh = load("vault_hook")
 
 POLICY = json.loads(POLICY_PATH.read_text(encoding="utf-8"))
+GRAPH_SPECS = POLICY["graph_color_groups"]
+GRAPH_QUERIES = [group["query"] for group in GRAPH_SPECS]
+GRAPH_RGB_BY_QUERY = {group["query"]: group["rgb"] for group in GRAPH_SPECS}
 
 
 def run(argv):
@@ -299,8 +302,9 @@ aliases:
     write(obsidian / "graph.json", json.dumps({
         "search": POLICY["graph_search"],
         "colorGroups": [
-            {"query": query, "color": {"a": 1, "rgb": i + 1}}
-            for i, query in enumerate(POLICY["graph_color_groups"])
+            {"query": group["query"],
+             "color": {"a": 1, "rgb": group["rgb"]}}
+            for group in GRAPH_SPECS
         ],
         "showOrphans": True, "hideUnresolved": False, "showTags": False,
     }))
@@ -1085,7 +1089,12 @@ See [the landscape](landscape.md).
         self.assertEqual(code, 0, out)
         healed = json.loads(graph_path.read_text(encoding="utf-8"))
         self.assertEqual([g["query"] for g in healed["colorGroups"]],
-                         POLICY["graph_color_groups"])
+                         GRAPH_QUERIES)
+        self.assertEqual(
+            {g["query"]: g["color"]["rgb"]
+             for g in healed["colorGroups"]},
+            GRAPH_RGB_BY_QUERY,
+        )
         self.assertEqual(healed["search"], POLICY["graph_search"])
         self.assertEqual(healed["scale"], 2)
         enabled = json.loads(
@@ -1095,6 +1104,72 @@ See [the landscape](landscape.md).
         code, findings = check_findings(self.root)
         self.assertEqual(code, 0,
                          [f"{f['check']}: {f['message']}" for f in findings])
+
+    def test_materialize_payload_copies_stable_defaults_and_is_idempotent(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "docs"
+            code, out, _ = run(["materialize-payload", "--vault", str(root)])
+            self.assertEqual(code, 0, out)
+            graph_path = root / ".obsidian" / "graph.json"
+            graph = json.loads(graph_path.read_text(encoding="utf-8"))
+            self.assertEqual(
+                {g["query"]: g["color"]["rgb"]
+                 for g in graph["colorGroups"]},
+                GRAPH_RGB_BY_QUERY,
+            )
+            graph["colorGroups"][0]["color"]["rgb"] = 7
+            graph_path.write_text(json.dumps(graph), encoding="utf-8")
+            code, out, _ = run(["materialize-payload", "--vault", str(root)])
+            self.assertEqual(code, 0, out)
+            preserved = json.loads(graph_path.read_text(encoding="utf-8"))
+            self.assertEqual(preserved["colorGroups"][0]["color"]["rgb"], 7)
+
+    def test_migrate_preserves_user_colors_and_defaults_new_groups(self):
+        graph_path = self.root / ".obsidian" / "graph.json"
+        graph = json.loads(graph_path.read_text(encoding="utf-8"))
+        custom_query = graph["colorGroups"][0]["query"]
+        graph["colorGroups"][0]["color"]["rgb"] = 7
+        missing_query = graph["colorGroups"][-1]["query"]
+        graph["colorGroups"].pop()
+        graph_path.write_text(json.dumps(graph), encoding="utf-8")
+        code, out, _ = run(["migrate", "--vault", str(self.root)])
+        self.assertEqual(code, 0, out)
+        healed = json.loads(graph_path.read_text(encoding="utf-8"))
+        colors = {g["query"]: g["color"]["rgb"]
+                  for g in healed["colorGroups"]}
+        self.assertEqual(colors[custom_query], 7)
+        self.assertEqual(colors[missing_query], GRAPH_RGB_BY_QUERY[missing_query])
+        code, findings = check_findings(self.root)
+        self.assertEqual(code, 0, findings)
+
+    def test_palette_lookup_is_bound_to_query_not_list_position(self):
+        reversed_policy = dict(POLICY)
+        reversed_policy["graph_color_groups"] = list(reversed(GRAPH_SPECS))
+        for query, rgb in GRAPH_RGB_BY_QUERY.items():
+            self.assertEqual(vc.group_color(reversed_policy, query)["rgb"], rgb)
+
+    def test_standardize_graph_colors_is_explicit_and_preserves_other_knobs(self):
+        graph_path = self.root / ".obsidian" / "graph.json"
+        graph = json.loads(graph_path.read_text(encoding="utf-8"))
+        graph["colorGroups"][0]["color"]["rgb"] = 7
+        graph["scale"] = 2
+        graph_path.write_text(json.dumps(graph), encoding="utf-8")
+        code, out, _ = run([
+            "standardize-graph-colors", "--vault", str(self.root),
+        ])
+        self.assertEqual(code, 0, out)
+        standardized = json.loads(graph_path.read_text(encoding="utf-8"))
+        self.assertEqual(
+            {g["query"]: g["color"]["rgb"]
+             for g in standardized["colorGroups"]},
+            GRAPH_RGB_BY_QUERY,
+        )
+        self.assertEqual(standardized["scale"], 2)
+        code, out, _ = run([
+            "standardize-graph-colors", "--vault", str(self.root),
+        ])
+        self.assertEqual(code, 0, out)
+        self.assertIn("already standard", out)
 
 
 class DesignSystemWriterTests(unittest.TestCase):

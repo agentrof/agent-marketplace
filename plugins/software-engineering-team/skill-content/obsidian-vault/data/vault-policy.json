@@ -1,5 +1,5 @@
 {
-  "schema_version": 2,
+  "schema_version": 3,
   "vault_root_dirname": "docs",
   "home_file": "home.md",
   "maps_dir": "maps",
@@ -26,23 +26,91 @@
   ],
   "graph_search": "-path:_generated",
   "graph_color_groups": [
-    "tag:#doc/space",
-    "tag:#doc/domain",
-    "tag:#doc/glossary",
-    "tag:#doc/actor-roster",
-    "tag:#doc/budget-set",
-    "tag:#doc/entity",
-    "tag:#doc/process",
-    "tag:#doc/rule-set",
-    "tag:#doc/acceptance-set",
-    "tag:#doc/decision",
-    "tag:#doc/integration",
-    "tag:#doc/challenge-record",
-    "tag:#doc/landscape",
-    "tag:#doc/engagement",
-    "tag:#doc/design-master",
-    "tag:#doc/page-override",
-    "tag:#doc/moc OR tag:#doc/home"
+    {
+      "id": "space",
+      "query": "tag:#doc/space",
+      "rgb": 16733986
+    },
+    {
+      "id": "domain",
+      "query": "tag:#doc/domain",
+      "rgb": 16752640
+    },
+    {
+      "id": "glossary",
+      "query": "tag:#doc/glossary",
+      "rgb": 16498733
+    },
+    {
+      "id": "actor-roster",
+      "query": "tag:#doc/actor-roster",
+      "rgb": 9268835
+    },
+    {
+      "id": "budget-set",
+      "query": "tag:#doc/budget-set",
+      "rgb": 15483002
+    },
+    {
+      "id": "entity",
+      "query": "tag:#doc/entity",
+      "rgb": 2201331
+    },
+    {
+      "id": "process",
+      "query": "tag:#doc/process",
+      "rgb": 48340
+    },
+    {
+      "id": "rule-set",
+      "query": "tag:#doc/rule-set",
+      "rgb": 4149685
+    },
+    {
+      "id": "acceptance-set",
+      "query": "tag:#doc/acceptance-set",
+      "rgb": 5431378
+    },
+    {
+      "id": "decision",
+      "query": "tag:#doc/decision",
+      "rgb": 10233776
+    },
+    {
+      "id": "integration",
+      "query": "tag:#doc/integration",
+      "rgb": 38536
+    },
+    {
+      "id": "challenge-record",
+      "query": "tag:#doc/challenge-record",
+      "rgb": 10394916
+    },
+    {
+      "id": "landscape",
+      "query": "tag:#doc/landscape",
+      "rgb": 5227511
+    },
+    {
+      "id": "engagement",
+      "query": "tag:#doc/engagement",
+      "rgb": 8280002
+    },
+    {
+      "id": "design-master",
+      "query": "tag:#doc/design-master",
+      "rgb": 11342935
+    },
+    {
+      "id": "page-override",
+      "query": "tag:#doc/page-override",
+      "rgb": 13538264
+    },
+    {
+      "id": "navigation",
+      "query": "tag:#doc/moc OR tag:#doc/home",
+      "rgb": 9741240
+    }
   ],
   "hubs": [
     {
@@ -138,25 +206,6 @@
     "tags": "list",
     "aliases": "list"
   },
-  "graph_group_colors": [
-    16733986,
-    16752640,
-    16498733,
-    9268835,
-    15483002,
-    2201331,
-    48340,
-    4149685,
-    5431378,
-    10233776,
-    38536,
-    10394916,
-    5227511,
-    8280002,
-    11342935,
-    13538264,
-    9741240
-  ],
   "extra_doc_types": [
     "moc",
     "home",

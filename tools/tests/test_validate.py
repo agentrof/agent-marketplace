@@ -203,7 +203,11 @@ class ValidatorFixtureTests(unittest.TestCase):
 
         def dead_legend(root: Path) -> None:
             policy = json.loads(json.dumps(VALID_VAULT_POLICY))
-            policy["graph_color_groups"].append("tag:#doc/ghost")
+            policy["graph_color_groups"].append({
+                "id": "ghost",
+                "query": "tag:#doc/ghost",
+                "rgb": 0,
+            })
             write(root / "plugins" / PLUGIN / "skill-content" / "notes" / "data"
                   / "vault-policy.json", json.dumps(policy, indent=2))
 
@@ -212,6 +216,74 @@ class ValidatorFixtureTests(unittest.TestCase):
                     if f.check == "vault_policy_shape"]
         self.assertTrue(any("names no known doc type" in m
                             for m in messages), findings)
+
+    def test_graph_palette_requires_identity_query_and_rgb_together(self):
+        """A positional or partial color record cannot reintroduce drift."""
+        import json
+        from fixtures import PLUGIN, VALID_VAULT_POLICY, write
+
+        def partial_palette(root: Path) -> None:
+            policy = json.loads(json.dumps(VALID_VAULT_POLICY))
+            del policy["graph_color_groups"][0]["rgb"]
+            write(root / "plugins" / PLUGIN / "skill-content" / "notes"
+                  / "data" / "vault-policy.json",
+                  json.dumps(policy, indent=2))
+
+        findings = self.run_on(partial_palette)
+        matches = [f for f in findings if f.check == "vault_policy_shape"]
+        self.assertEqual(len(matches), 1, findings)
+        self.assertIn("exactly id, query and rgb", matches[0].message)
+
+    def test_graph_palette_rejects_duplicate_semantic_ids(self):
+        """Reordering cannot silently make two groups share one identity."""
+        import json
+        from fixtures import PLUGIN, VALID_VAULT_POLICY, write
+
+        def duplicate_id(root: Path) -> None:
+            policy = json.loads(json.dumps(VALID_VAULT_POLICY))
+            policy["graph_color_groups"][1]["id"] = "note"
+            write(root / "plugins" / PLUGIN / "skill-content" / "notes"
+                  / "data" / "vault-policy.json",
+                  json.dumps(policy, indent=2))
+
+        findings = self.run_on(duplicate_id)
+        matches = [f for f in findings if f.check == "vault_policy_shape"]
+        self.assertEqual(len(matches), 1, findings)
+        self.assertIn("ids must be unique", matches[0].message)
+
+    def test_graph_palette_rejects_out_of_range_rgb(self):
+        """Obsidian receives a valid six-digit RGB integer or no release."""
+        import json
+        from fixtures import PLUGIN, VALID_VAULT_POLICY, write
+
+        def invalid_rgb(root: Path) -> None:
+            policy = json.loads(json.dumps(VALID_VAULT_POLICY))
+            policy["graph_color_groups"][0]["rgb"] = 0x1000000
+            write(root / "plugins" / PLUGIN / "skill-content" / "notes"
+                  / "data" / "vault-policy.json",
+                  json.dumps(policy, indent=2))
+
+        findings = self.run_on(invalid_rgb)
+        matches = [f for f in findings if f.check == "vault_policy_shape"]
+        self.assertEqual(len(matches), 1, findings)
+        self.assertIn("rgb values must be integers", matches[0].message)
+
+    def test_graph_seed_rgb_drift_fires(self):
+        """The shipped project default must mirror the named palette."""
+        import json
+        from fixtures import PLUGIN, write
+
+        def seed_drift(root: Path) -> None:
+            path = (root / "plugins" / PLUGIN / "templates" / "vault"
+                    / ".obsidian" / "graph.json")
+            graph = json.loads(path.read_text(encoding="utf-8"))
+            graph["colorGroups"][0]["color"]["rgb"] = 1
+            write(path, json.dumps(graph, indent=2))
+
+        findings = self.run_on(seed_drift)
+        matches = [f for f in findings if f.check == "vault_policy_shape"]
+        self.assertEqual(len(matches), 1, findings)
+        self.assertIn("same query, RGB and order", matches[0].message)
 
     def test_agent_missing_output_contract_fires(self):
         """Dropping the required output_contract key is a single

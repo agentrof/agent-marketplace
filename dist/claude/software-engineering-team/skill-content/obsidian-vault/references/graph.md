@@ -23,7 +23,9 @@ contract-bearing keys.
   directory and the policy in parity.
 - `graph.json`: the GLOBAL graph's committed contract: its search
   filter and ordered color groups mirror the policy's `graph_search`
-  and `graph_color_groups`, compared verbatim by the payload check.
+  and named `graph_color_groups`. Each policy record binds a stable id,
+  exact query and RGB value, so reordering or extending the legend cannot
+  move a color to another document type.
   `showOrphans: true` and `hideUnresolved: false` stay on: a defect the
   graph hides is a defect the team ships.
 - `types.json`: derived from the policy's `property_types`; the check
@@ -68,9 +70,9 @@ its copyleft binds the vendored bundle only.
 
 ## Type-based color groups
 
-The global graph is colored by document TYPE, not by folder; the
-policy's `graph_color_groups` orders the queries, first match wins,
-and EVERY type in the taxonomy owns a color:
+The global graph is colored by document TYPE, not by folder. The
+policy's `graph_color_groups` records own the stable palette and order
+the queries, first match wins. Every type in the taxonomy owns a color:
 
 - One `tag:#doc/<type-kebab>` group per doc type, across all trees:
   space, domain, glossary, actor-roster, budget-set, entity, process,
@@ -81,10 +83,9 @@ and EVERY type in the taxonomy owns a color:
   a taxonomy type without a color group AND on a group whose tag names
   no known type (a dead legend). Adding a type forces its color in the
   same commit.
-- The palette is authored once in the policy, distinct in light AND
-  dark themes: hub and overview types warm, content kinds cool, audit
-  records muted, nav neutral; the committed `graph.json` mirrors it
-  byte-level.
+- The palette is authored once in the policy. The committed `graph.json`
+  mirrors every query and RGB pair byte-for-byte, and the validator rejects
+  any seed drift.
 
 Graph queries support no pipe-OR and no tag wildcards; the policy
 writes OR-joined full tags in the legal grammar, validated before the
@@ -101,10 +102,14 @@ they are authored knowledge.
 ## What stays user-local
 
 `workspace.json`, `workspace-mobile.json` and `.trash/` are the
-gitignored UI state. Global-graph forces beyond the committed groups
-and search, and every local-graph setting, are per-user; teach owners
-the local graph (depth 1-2) as the daily tool and the global graph as
-the onboarding and QA view.
+gitignored UI state. New vaults receive the standard palette exactly.
+Later color edits in an existing `graph.json` are treated as user
+overrides and the migrate verb preserves them. Run
+`"$RUN" run "$TEAM" scripts/vault_check.py standardize-graph-colors --vault workspace/docs`
+to discard those overrides and restore every standard color. Global-graph
+forces beyond the committed groups and search, and every local-graph
+setting, are per-user; teach owners the local graph (depth 1-2) as the
+daily tool and the global graph as the onboarding and QA view.
 
 ## Reading the graph as QA
 

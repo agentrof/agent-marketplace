@@ -6,10 +6,15 @@ typed frontmatter, map hubs and a committed app payload. Every rule the
 obsidian-vault skill states is enforced here; a rule without a check is
 not a rule. Variation points (subtrees, map notes, tag namespaces, id
 grammars, peer range, generated surfaces, property types) come from the
-skill's data/vault-policy.json, never from constants.
+skill's data/vault-policy.json, including the named graph palette, rather
+than hard-coded values.
 
 Verbs:
   check            validate the vault (exit 0 clean/warnings, 1 errors)
+  materialize-payload
+                   copy the canonical vault payload only where missing
+  standardize-graph-colors
+                   reset the global graph to the canonical color palette
   render-decisions render each decision tree's generated index
   stamp-decision   stamp a decision note's status (one clock, one write)
   migrate          normalize mechanically repairable vault content
@@ -1575,8 +1580,8 @@ def check_obsidian_payload(vault: Vault, findings: list[Finding],
                     "types.json is derived from vault-policy.json"
                     " property_types; restore the drifted entry"))
     graph_path = obsidian / "graph.json"
-    if graph_path.is_file() and isinstance(
-            policy.get("graph_color_groups"), list):
+    expected_queries = graph_group_queries(policy)
+    if graph_path.is_file() and expected_queries:
         try:
             graph = json.loads(graph_path.read_text(encoding="utf-8"))
         except json.JSONDecodeError:
@@ -1588,7 +1593,7 @@ def check_obsidian_payload(vault: Vault, findings: list[Finding],
             queries = [str(g.get("query", ""))
                        for g in graph.get("colorGroups", [])
                        if isinstance(g, dict)]
-            if queries != policy["graph_color_groups"]:
+            if queries != expected_queries:
                 findings.append(Finding(
                     "error", ".obsidian/graph.json", 1, "obsidian_payload",
                     "graph.json colorGroups do not match policy"
@@ -2276,10 +2281,73 @@ def freeze_skip_set(vault_path: Path) -> set:
 DEFAULT_GROUP_RGB = 9741240
 
 
-def group_color(policy: dict, index: int) -> dict:
-    colors = policy.get("graph_group_colors") or []
-    rgb = colors[index] if index < len(colors) else DEFAULT_GROUP_RGB
+def graph_group_specs(policy: dict) -> list[dict]:
+    groups = policy.get("graph_color_groups")
+    if not isinstance(groups, list):
+        return []
+    return [group for group in groups if isinstance(group, dict)]
+
+
+def graph_group_queries(policy: dict) -> list[str]:
+    return [str(group.get("query", ""))
+            for group in graph_group_specs(policy)]
+
+
+def group_color(policy: dict, query: str) -> dict:
+    rgb = next((group.get("rgb") for group in graph_group_specs(policy)
+                if group.get("query") == query), DEFAULT_GROUP_RGB)
     return {"a": 1, "rgb": rgb}
+
+
+def standard_graph_color_groups(policy: dict) -> list[dict]:
+    return [{"query": query, "color": group_color(policy, query)}
+            for query in graph_group_queries(policy)]
+
+
+def materialize_payload(root: Path, policy: dict,
+                        payload_src: Path | None) -> int:
+    """Copy canonical vault seeds byte-for-byte, only where missing."""
+    if payload_src is None or not payload_src.is_dir():
+        raise FileNotFoundError("vault payload directory not found")
+    root.mkdir(parents=True, exist_ok=True)
+    sources: list[tuple[Path, Path]] = []
+    home_rel = Path(str(policy.get("home_file", "home.md")))
+    home_src = payload_src.parent / home_rel
+    if home_src.is_file():
+        sources.append((home_src, root / home_rel))
+    for source in sorted(path for path in payload_src.rglob("*")
+                         if path.is_file()):
+        sources.append((source, root / ".obsidian"
+                        / source.relative_to(payload_src)))
+    copied = 0
+    for source, target in sources:
+        if target.exists():
+            continue
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(source, target)
+        copied += 1
+    return copied
+
+
+def standardize_graph_colors(root: Path, policy: dict) -> int:
+    """Reset only the global graph color groups to the standard palette."""
+    graph_path = root / ".obsidian" / "graph.json"
+    if not graph_path.is_file():
+        raise FileNotFoundError(".obsidian/graph.json not found")
+    try:
+        data = json.loads(graph_path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        raise ValueError(".obsidian/graph.json does not parse") from exc
+    if not isinstance(data, dict):
+        raise ValueError(".obsidian/graph.json must contain an object")
+    groups = standard_graph_color_groups(policy)
+    if not groups:
+        raise ValueError("policy has no valid graph color palette")
+    if data.get("colorGroups") == groups:
+        return 0
+    data["colorGroups"] = groups
+    graph_path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+    return 1
 
 
 def payload_reconcile(root: Path, policy: dict,
@@ -2303,8 +2371,8 @@ def payload_reconcile(root: Path, policy: dict,
         path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
 
     graph_path = obsidian / "graph.json"
-    groups = policy.get("graph_color_groups")
-    if graph_path.is_file() and isinstance(groups, list):
+    groups = graph_group_queries(policy)
+    if graph_path.is_file() and groups:
         data = load_json(graph_path)
         if isinstance(data, dict):
             new = dict(data)
@@ -2318,8 +2386,8 @@ def payload_reconcile(root: Path, policy: dict,
                               if isinstance(g, dict)}
                 new["colorGroups"] = [
                     {"query": q,
-                     "color": old_colors.get(q) or group_color(policy, i)}
-                    for i, q in enumerate(groups)]
+                     "color": old_colors.get(q) or group_color(policy, q)}
+                    for q in groups]
                 dirty = True
             if new.get("search", "") != policy.get("graph_search", ""):
                 new["search"] = policy.get("graph_search", "")
@@ -2372,6 +2440,33 @@ def payload_reconcile(root: Path, policy: dict,
                 shutil.copytree(src, plugin_dir)
                 changed += 1
     return changed
+
+
+def cmd_materialize_payload(args, policy: dict) -> int:
+    root = args.vault.resolve()
+    try:
+        copied = materialize_payload(root, policy, args.payload)
+    except FileNotFoundError as exc:
+        print(f"vault_check: {exc}", file=sys.stderr)
+        return 2
+    print(f"vault_check: materialized {copied} missing payload file(s)")
+    return 0
+
+
+def cmd_standardize_graph_colors(args, policy: dict) -> int:
+    root = args.vault.resolve()
+    if not root.is_dir():
+        print(f"vault_check: vault directory not found: {args.vault}",
+              file=sys.stderr)
+        return 2
+    try:
+        changed = standardize_graph_colors(root, policy)
+    except (FileNotFoundError, ValueError) as exc:
+        print(f"vault_check: {exc}", file=sys.stderr)
+        return 2
+    state = "reset" if changed else "already standard"
+    print(f"vault_check: global graph colors {state}")
+    return 0
 
 
 def cmd_migrate(args, policy: dict) -> int:
@@ -3135,6 +3230,15 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--changed", default=None)
     p.add_argument("--json", action="store_true")
     p.set_defaults(func=cmd_check)
+
+    p = sub.add_parser("materialize-payload")
+    p.add_argument("--vault", type=Path, required=True)
+    p.add_argument("--payload", type=Path, default=DEFAULT_PAYLOAD)
+    p.set_defaults(func=cmd_materialize_payload)
+
+    p = sub.add_parser("standardize-graph-colors")
+    p.add_argument("--vault", type=Path, required=True)
+    p.set_defaults(func=cmd_standardize_graph_colors)
 
     p = sub.add_parser("render-decisions")
     p.add_argument("--vault", type=Path, required=True)

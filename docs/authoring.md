@@ -240,15 +240,17 @@ ADR); otherwise paraphrase the procedure and drop the brand.
 A plugin that ships vault authoring rules declares every variation point
 in one policy file, `skill-content/<skill>/data/vault-policy.json` (subtrees,
 map notes, machine dirs, banned basenames, the vetted community-plugin
-set, the graph search filter and ordered color-group queries, the hubs
+set, the graph search filter and ordered named color groups, the hubs
 ladder, tag namespaces, nav peer range, decision-tree grammars,
 generated views, property types). The `vault_policy_shape` rule
 validates the shape (including the graph-query grammar: no pipe-OR, no
-tag wildcards) and holds the policy, the `templates/vault/` seeds and
-the committed graph config in parity: a policy subtree or extra map
+tag wildcards). Each graph color record binds one unique semantic id,
+query and RGB value; parallel positional color lists are not allowed.
+The rule holds the policy, the `templates/vault/` seeds and the committed
+graph config in parity: a policy subtree or extra map
 without a map seed, a stray seed the policy does not name, or a
-`graph.json` whose colorGroups or search drift from the policy is an
-error. The home seed is minimal and DYNAMIC: it links
+`graph.json` whose colorGroups, RGB defaults or search drift from the
+policy is an error. The home seed is minimal and DYNAMIC: it links
 nothing at seed and must NOT link any subtree map; subtree
 map lines are added in the consuming project by the entry that births
 each tree. The enable list `community-plugins.json` must equal the

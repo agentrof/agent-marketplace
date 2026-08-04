@@ -58,7 +58,8 @@ Upgrade the installed marketplace contract without overwriting user-owned projec
   database integrity failure, stale plan, downgrade, or incomplete prior run
   blocks mutation.
 - Database changes run through ordered, checksummed migrations against a
-  candidate copy. The original is replaced only after integrity and foreign-key
+  candidate copy while a writer lock protects the source. The live migration
+  commits as one transaction only after candidate integrity and foreign-key
   checks pass. Project changes use recorded before-images and rollback on error.
 - Skipped releases are valid only when the installed migration catalog contains
   a complete ordered chain from the recorded version to the target version.

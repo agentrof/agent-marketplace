@@ -53,6 +53,14 @@ def content_fingerprint(con: sqlite3.Connection) -> str:
     return digest.hexdigest()
 
 
+def stamp_integrity(con: sqlite3.Connection) -> None:
+    con.execute(
+        "INSERT INTO meta(key, value) VALUES ('fingerprint', ?)"
+        " ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+        (content_fingerprint(con),),
+    )
+
+
 class UpgradeLifecycleTests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
@@ -113,11 +121,7 @@ class UpgradeLifecycleTests(unittest.TestCase):
         con.execute("ALTER TABLE projects DROP COLUMN project_uuid")
         con.execute("DELETE FROM meta WHERE key='writer_epoch'")
         con.execute("PRAGMA user_version=3")
-        con.execute(
-            "INSERT INTO meta(key, value) VALUES ('fingerprint', ?)"
-            " ON CONFLICT(key) DO UPDATE SET value=excluded.value",
-            (content_fingerprint(con),),
-        )
+        stamp_integrity(con)
         con.commit()
         con.close()
 
@@ -309,6 +313,23 @@ class UpgradeLifecycleTests(unittest.TestCase):
         )
         self.assertFalse((self.project / ".agentrof" / "project.json").exists())
 
+    def test_database_content_change_invalidates_the_plan(self):
+        plan = json.loads(self.cli(
+            "upgrade", "plan", "--project-root", str(self.project)
+        ).stdout)
+        con = sqlite3.connect(self.home / "agentrof.db")
+        con.execute("UPDATE projects SET name='changed-after-plan' WHERE project_key='shop'")
+        stamp_integrity(con)
+        con.commit()
+        con.close()
+
+        result = self.cli(
+            "upgrade", "apply", "--plan-id", plan["plan_id"], check=False
+        )
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("fingerprint changed", result.stderr)
+        self.assertFalse((self.project / ".agentrof" / "project.json").exists())
+
     def test_unmanaged_instruction_collision_blocks_plan(self):
         (self.project / "CLAUDE.md").write_text(
             "# User instructions\n\nNever replace this.\n", encoding="utf-8"
@@ -339,10 +360,9 @@ class UpgradeLifecycleTests(unittest.TestCase):
     def test_competing_sessions_block_plan_without_mutation(self):
         sessions = self.home / "sessions"
         sessions.mkdir()
-        for index in range(2):
-            (sessions / f"session-{index}.json").write_text(json.dumps({
-                "session_id": f"session-{index}", "pmo_ready": True,
-            }), encoding="utf-8")
+        (sessions / "other-session.json").write_text(json.dumps({
+            "session_id": "other-session", "pmo_ready": True,
+        }), encoding="utf-8")
         result, status = self.status()
         self.assertEqual(result.returncode, 1)
         self.assertIn("CLOSE_OTHER_SESSIONS_REQUIRED:1", status["blockers"])
@@ -351,6 +371,101 @@ class UpgradeLifecycleTests(unittest.TestCase):
         )
         self.assertEqual(planned.returncode, 1)
         self.assertFalse((self.project / ".agentrof" / "project.json").exists())
+
+    def test_database_upgrade_blocks_active_work_in_another_project(self):
+        con = sqlite3.connect(self.home / "agentrof.db")
+        stamp = "2026-01-01T00:00:00+00:00"
+        other_id = con.execute(
+            "INSERT INTO projects(project_key, name, created_at)"
+            " VALUES ('other', 'Other', ?)",
+            (stamp,),
+        ).lastrowid
+        con.execute(
+            "INSERT INTO work_orders(project_id, story_id, work_order_key,"
+            " request, status, current_step, worktree_path, bindings_json,"
+            " created_at, updated_at) VALUES (?, NULL, 'other-active', 'work',"
+            " 'running', '0', '/other', '{}', ?, ?)",
+            (other_id, stamp, stamp),
+        )
+        stamp_integrity(con)
+        con.commit()
+        con.close()
+
+        result, status = self.status()
+        self.assertEqual(result.returncode, 1)
+        self.assertEqual(status["status"], "AGENTROF_UPGRADE_REQUIRED_BLOCKED")
+        self.assertIn("ACTIVE_WORK_ORDER:other-active", status["blockers"])
+
+    def test_writer_lock_denies_a_concurrent_source_mutation(self):
+        plan = json.loads(self.cli(
+            "upgrade", "plan", "--project-root", str(self.project)
+        ).stdout)
+        original = UPGRADE.migrate_database_candidate
+        race = {"result": "not-attempted"}
+
+        def migrate_and_attempt_write(candidate, target_schema, payload):
+            original(candidate, target_schema, payload)
+            con = sqlite3.connect(
+                self.home / "agentrof.db", timeout=0.05, isolation_level=None
+            )
+            try:
+                con.execute(
+                    "UPDATE projects SET name='concurrent-write'"
+                    " WHERE project_key='shop'"
+                )
+                race["result"] = "write-succeeded"
+            except sqlite3.OperationalError as exc:
+                race["result"] = str(exc)
+            finally:
+                con.close()
+
+        with mock.patch.object(
+            UPGRADE, "migrate_database_candidate",
+            side_effect=migrate_and_attempt_write,
+        ):
+            UPGRADE.apply(
+                self.home, self.home / "agentrof.db", 4, plan["plan_id"]
+            )
+
+        self.assertIn("locked", race["result"])
+        con = sqlite3.connect(self.home / "agentrof.db")
+        name = con.execute(
+            "SELECT name FROM projects WHERE project_key='shop'"
+        ).fetchone()[0]
+        con.close()
+        self.assertNotEqual(name, "concurrent-write")
+
+    def test_database_change_before_writer_lock_aborts_without_migration(self):
+        plan = json.loads(self.cli(
+            "upgrade", "plan", "--project-root", str(self.project)
+        ).stdout)
+        original = UPGRADE.lock_database_for_upgrade
+
+        def mutate_then_lock(database):
+            con = sqlite3.connect(database)
+            con.execute(
+                "UPDATE projects SET name='lock-race' WHERE project_key='shop'"
+            )
+            stamp_integrity(con)
+            con.commit()
+            con.close()
+            return original(database)
+
+        with mock.patch.object(
+            UPGRADE, "lock_database_for_upgrade", side_effect=mutate_then_lock,
+        ):
+            with self.assertRaisesRegex(
+                UPGRADE.UpgradeError, "before the writer lock"
+            ):
+                UPGRADE.apply(
+                    self.home, self.home / "agentrof.db", 4, plan["plan_id"]
+                )
+
+        self.assertEqual(
+            UPGRADE.database_version(self.home / "agentrof.db"), 3
+        )
+        self.assertFalse((self.project / ".agentrof" / "project.json").exists())
+        self.assertFalse((self.home / "maintenance.json").exists())
 
     def test_package_tamper_and_dual_host_version_drift_fail_closed(self):
         registry = self.registry()
@@ -382,7 +497,7 @@ class UpgradeLifecycleTests(unittest.TestCase):
             status["blockers"],
         )
 
-    def test_interrupted_post_swap_run_recovers_from_journal(self):
+    def test_interrupted_post_database_commit_recovers_from_journal(self):
         plan = json.loads(self.cli(
             "upgrade", "plan", "--project-root", str(self.project)
         ).stdout)

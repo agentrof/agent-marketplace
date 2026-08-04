@@ -47,7 +47,8 @@ database integrity error, stale plan, or downgrade also blocks apply.
 
 The upgrader may write only:
 
-- the PMO database through an ordered migration candidate and atomic swap;
+- the PMO database through a writer-locked candidate validation and
+  transactional live migration;
 - the global host-aware plugin registry, locks, plans, journals, and backups;
 - `.agentrof/project.json` in the consuming project;
 - declared machine-owned fields in the team config;
@@ -68,16 +69,17 @@ workflow. Normal work resumes only from the merged revision in a fresh session.
 
 ## Database safety and recovery
 
-The engine takes an online backup and a separate candidate. Each migration step
-has an immutable id, source and target schema, checksum, component version, and
-source fingerprint. The candidate must pass its full chain, foreign-key check,
-integrity check, PMO content stamp, and writer-epoch installation before the
-original is replaced. The schema migration ledger is exactly-once evidence, not
-a reason to skip checksum validation.
+The engine acquires the database writer lock before taking an online backup and
+separate candidate. Each migration step has an immutable id, source and target
+schema, checksum, component version, and source fingerprint. The candidate must
+pass its full chain, foreign-key check, integrity check, PMO content stamp, and
+writer-epoch installation before the same migration commits to the live database
+as one transaction. The schema migration ledger is exactly-once evidence, not a
+reason to skip checksum validation.
 
-The journal advances by durable phases. Failure before database swap rolls back
-without entering recovery. Failure after swap preserves maintenance mode,
-backup, before-images, and run id. The recovery command resumes only that
+The journal advances by durable phases. Failure before database commit rolls
+back without entering recovery. Failure after commit preserves maintenance
+mode, backup, before-images, and run id. The recovery command resumes only that
 recorded plan. It does not invent a new chain or delete evidence.
 
 ## If plugins were updated but upgrade was not run

@@ -241,6 +241,18 @@ def database_health(db_file: Path) -> list[str]:
         con.close()
 
 
+def database_file_fingerprint(db_file: Path) -> str:
+    if not db_file.is_file() or database_version(db_file) == 0:
+        return ""
+    con = sqlite3.connect(db_file)
+    try:
+        return database_content_fingerprint(con)
+    except sqlite3.DatabaseError as exc:
+        raise UpgradeError(f"database fingerprint failed: {exc}") from exc
+    finally:
+        con.close()
+
+
 def active_database_work(db_file: Path, project_key: str = "") -> list[str]:
     if not db_file.is_file() or database_version(db_file) == 0:
         return []
@@ -587,6 +599,11 @@ def status(
         blockers.append(f"PLUGIN_INVENTORY_INVALID:{exc}")
     db_version = database_version(db_file)
     blockers.extend(database_health(db_file))
+    try:
+        db_fingerprint = database_file_fingerprint(db_file)
+    except UpgradeError as exc:
+        db_fingerprint = "unavailable"
+        blockers.append(f"DATABASE_FINGERPRINT_FAILED:{exc}")
     if db_version > target_schema:
         blockers.append(f"DOWNGRADE_REFUSED:{db_version}>{target_schema}")
     elif db_version not in (0, target_schema):
@@ -659,8 +676,12 @@ def status(
                     if drift:
                         blockers.append("PROJECT_CONTRACT_DRIFT:" + ",".join(drift))
             project_key = str(config.get("project_key", "")) if isinstance(config, dict) else ""
+            database_upgrade = any(
+                value.startswith("DATABASE_SCHEMA:") for value in reasons
+            )
             if managed_project and reasons:
-                blockers.extend(active_database_work(db_file, project_key))
+                if not database_upgrade:
+                    blockers.extend(active_database_work(db_file, project_key))
                 work_orders = root / workspace / "work-orders"
                 blockers.extend(active_freezes(db_file, work_orders))
                 if include_git:
@@ -686,17 +707,16 @@ def status(
         except UpgradeError as exc:
             blockers.append(f"PROJECT_PREFLIGHT_FAILED:{exc}")
 
-    if any(value.startswith("DATABASE_SCHEMA:") for value in reasons) \
-            and not project_info:
+    if any(value.startswith("DATABASE_SCHEMA:") for value in reasons):
         blockers.extend(active_database_work(db_file))
     if reasons:
         blockers.extend(disk_space_blockers(data_root, db_file, root))
 
     sessions = live_sessions(data_root)
-    # One live session is the dedicated session evaluating and applying the
-    # upgrade. Any additional session is a competing writer and must close.
-    if reasons and len(sessions) > 1:
-        blockers.append(f"CLOSE_OTHER_SESSIONS_REQUIRED:{len(sessions) - 1}")
+    # The dedicated upgrade session is recorded with pmo_ready=false. Every
+    # ready session found here is therefore a competing pre-upgrade session.
+    if reasons and sessions:
+        blockers.append(f"CLOSE_OTHER_SESSIONS_REQUIRED:{len(sessions)}")
     recovery = sorted((data_root / UPGRADES_DIR).glob("*/journal.json")) \
         if (data_root / UPGRADES_DIR).is_dir() else []
     incomplete = []
@@ -712,6 +732,7 @@ def status(
     maintenance = load_json(data_root / MAINTENANCE_NAME, {})
     fingerprint_payload = {
         "db_schema": db_version,
+        "db_content": db_fingerprint,
         "installed": installed["components"],
         "project": project_info.get("fingerprint", {}),
         "maintenance": maintenance,
@@ -742,6 +763,7 @@ def status(
         "status": code,
         "fingerprint": fingerprint,
         "database_schema": db_version,
+        "database_fingerprint": db_fingerprint,
         "target_database_schema": target_schema,
         "installed": installed["components"],
         "reasons": sorted(set(reasons)),
@@ -804,6 +826,7 @@ def plan(
             current["project"].get("state", {}).get("project_id") or uuid.uuid4()
         ) if current["project"] else "",
     }
+    plan_payload["database"]["fingerprint"] = current["database_fingerprint"]
     preview_payload = dict(plan_payload)
     preview_payload["data_root"] = str(data_root)
     preview, _prepared = project_changes(preview_payload)
@@ -812,7 +835,10 @@ def plan(
         safe_relative(preview_root, path) for path in preview
     ) if preview_root is not None else []
     plan_payload["backup_policy"] = {
-        "database": "online backup before candidate migration and atomic swap",
+        "database": (
+            "online backup and candidate verification under a database writer"
+            " lock before transactional migration commit"
+        ),
         "project": "durable before-image for every managed file",
         "retention": "recovery evidence is retained until explicit maintenance",
     }
@@ -962,12 +988,14 @@ def execute_migration_step(
     return result
 
 
-def migrate_database_candidate(
-    candidate: Path,
+def migrate_database_connection(
+    con: sqlite3.Connection,
     target_schema: int,
     plan_payload: dict,
+    *,
+    begin_transaction: bool,
 ) -> None:
-    con = sqlite3.connect(candidate)
+    transaction_started = False
     try:
         con.execute("PRAGMA foreign_keys=ON")
         try:
@@ -988,7 +1016,9 @@ def migrate_database_candidate(
             version, target_schema,
         )
         if chain:
-            con.execute("BEGIN EXCLUSIVE")
+            if begin_transaction:
+                con.execute("BEGIN EXCLUSIVE")
+                transaction_started = True
             events = []
             for step in chain:
                 stamp = utc_now()
@@ -1023,7 +1053,6 @@ def migrate_database_candidate(
                     })),
                 )
             stamp_database_integrity(con)
-            con.execute("COMMIT")
             install_writer_guards(con)
             version = int(con.execute("PRAGMA user_version").fetchone()[0])
         if version != target_schema:
@@ -1032,18 +1061,48 @@ def migrate_database_candidate(
             )
         foreign = con.execute("PRAGMA foreign_key_check").fetchone()
         if foreign is not None:
-            raise UpgradeError(f"candidate foreign key failure: {tuple(foreign)}")
+            raise UpgradeError(f"migration foreign key failure: {tuple(foreign)}")
         integrity = con.execute("PRAGMA integrity_check").fetchone()[0]
         if integrity != "ok":
-            raise UpgradeError(f"candidate integrity failure: {integrity}")
+            raise UpgradeError(f"migration integrity failure: {integrity}")
+        if transaction_started:
+            con.execute("COMMIT")
     except Exception:
-        try:
-            con.execute("ROLLBACK")
-        except sqlite3.DatabaseError:
-            pass
+        if transaction_started:
+            try:
+                con.execute("ROLLBACK")
+            except sqlite3.DatabaseError:
+                pass
         raise
+
+
+def migrate_database_candidate(
+    candidate: Path,
+    target_schema: int,
+    plan_payload: dict,
+) -> None:
+    con = sqlite3.connect(candidate, isolation_level=None)
+    try:
+        migrate_database_connection(
+            con, target_schema, plan_payload, begin_transaction=True
+        )
     finally:
         con.close()
+
+
+def lock_database_for_upgrade(db_file: Path) -> sqlite3.Connection:
+    con = sqlite3.connect(db_file, timeout=5, isolation_level=None)
+    con.create_function(
+        "agentrof_writer_epoch", 0, lambda: WRITER_EPOCH, deterministic=True
+    )
+    con.execute("PRAGMA foreign_keys=ON")
+    con.execute("PRAGMA busy_timeout=5000")
+    try:
+        con.execute("BEGIN IMMEDIATE")
+    except sqlite3.DatabaseError as exc:
+        con.close()
+        raise UpgradeError(f"database writer lock unavailable: {exc}") from exc
+    return con
 
 
 def online_backup(source: Path, destination: Path) -> None:
@@ -1358,26 +1417,48 @@ def apply(
     }
     run_root.mkdir(parents=True, exist_ok=False)
     atomic_json(journal_path, journal)
-    db_swapped = False
+    db_committed = False
     with DirectoryLock(data_root, "upgrade.lock"):
         atomic_json(data_root / MAINTENANCE_NAME, {
             "run_id": run_id, "plan_id": plan_id, "started_at": utc_now(),
         })
         try:
             if plan_payload["database"]["from"] != target_schema:
-                online_backup(db_file, backup)
-                online_backup(db_file, candidate)
-                journal["phase"] = "database_candidate"
-                atomic_json(journal_path, journal)
-                migrate_database_candidate(candidate, target_schema, plan_payload)
-                if database_version(db_file) != plan_payload["database"]["from"]:
-                    raise UpgradeError("database changed while the candidate was prepared")
-                for suffix in ("-wal", "-shm"):
-                    sidecar = Path(str(db_file) + suffix)
-                    if sidecar.exists():
-                        sidecar.unlink()
-                os.replace(candidate, db_file)
-                db_swapped = True
+                source = lock_database_for_upgrade(db_file)
+                try:
+                    source_version = int(
+                        source.execute("PRAGMA user_version").fetchone()[0]
+                    )
+                    source_fingerprint = database_content_fingerprint(source)
+                    if source_version != plan_payload["database"]["from"] or \
+                            source_fingerprint != \
+                            plan_payload["database"].get("fingerprint"):
+                        raise UpgradeError(
+                            "database changed before the writer lock was acquired;"
+                            " prepare a new plan"
+                        )
+                    online_backup(db_file, backup)
+                    online_backup(db_file, candidate)
+                    journal["phase"] = "database_candidate"
+                    atomic_json(journal_path, journal)
+                    migrate_database_candidate(
+                        candidate, target_schema, plan_payload
+                    )
+                    migrate_database_connection(
+                        source, target_schema, plan_payload,
+                        begin_transaction=False,
+                    )
+                    source.execute("COMMIT")
+                    db_committed = True
+                except BaseException:
+                    if not db_committed:
+                        try:
+                            source.execute("ROLLBACK")
+                        except sqlite3.DatabaseError:
+                            pass
+                    raise
+                finally:
+                    source.close()
                 journal["phase"] = "database_complete"
                 atomic_json(journal_path, journal)
             else:
@@ -1401,10 +1482,10 @@ def apply(
                 if plan_payload.get("project") else "",
             }
         except BaseException:
-            journal["phase"] = "recovery_required" if db_swapped else "rolled_back"
+            journal["phase"] = "recovery_required" if db_committed else "rolled_back"
             journal["failed_at"] = utc_now()
             atomic_json(journal_path, journal)
-            if not db_swapped:
+            if not db_committed:
                 (data_root / MAINTENANCE_NAME).unlink(missing_ok=True)
             raise
 

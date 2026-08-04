@@ -4,9 +4,6 @@ on:
   workflow_dispatch:
   schedule:
     - cron: "17 4 * * 1"
-  push:
-    tags:
-      - "v*"
 
 permissions:
   contents: read
@@ -29,5 +26,5 @@ jobs:
         run: |
           claude --version
           codex --version
-      - name: Run deterministic and real-host gates
-        run: make release-check
+      - name: Run deterministic and public stable lifecycle gates
+        run: make public-release-check

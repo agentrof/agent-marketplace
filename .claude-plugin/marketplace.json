@@ -6,21 +6,31 @@
   },
   "metadata": {
     "description": "A catalog of curated, end-to-end agent teams for Claude Code and Codex. Install a complete team and run at the goal.",
-    "version": "9.2.0"
+    "version": "0.0.1"
   },
   "plugins": [
     {
       "name": "project-management-office",
-      "source": "./dist/claude/project-management-office",
+      "source": {
+        "source": "git-subdir",
+        "url": "https://github.com/agentrof/agent-marketplace.git",
+        "path": "dist/claude/project-management-office",
+        "ref": "stable"
+      },
       "description": "Project Management Office: the shared operations backbone for every team plugin. One central database for projects, epics, stories, tasks with attempt history, dependencies, DoD records, work orders, findings and audit events, written only through its CLI, recorded deterministically via hooks, and viewed through a read-only web dashboard.",
-      "version": "2.1.0",
+      "version": "0.0.1",
       "license": "MIT"
     },
     {
       "name": "software-engineering-team",
-      "source": "./dist/claude/software-engineering-team",
+      "source": {
+        "source": "git-subdir",
+        "url": "https://github.com/agentrof/agent-marketplace.git",
+        "path": "dist/claude/software-engineering-team",
+        "ref": "stable"
+      },
       "description": "Software Engineering Team: a complete, orchestrated software and product development team for analysis, planning, architecture, design, implementation, review and verification.",
-      "version": "9.2.0",
+      "version": "0.0.1",
       "license": "MIT"
     }
   ]

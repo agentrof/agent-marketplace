@@ -53,6 +53,7 @@ class DistributionContractTests(unittest.TestCase):
             self.assertEqual(registry, {"schema_version": 1, "plugins": teams})
 
     def test_marketplace_manifest_versions_policies_and_skill_visibility(self):
+        versions = json.loads((REPO / "versions.json").read_text(encoding="utf-8"))
         marketplace = json.loads(
             (REPO / ".agents" / "plugins" / "marketplace.json").read_text(
                 encoding="utf-8"))
@@ -80,7 +81,10 @@ class DistributionContractTests(unittest.TestCase):
                 json.loads((codex_archive / ".codex-plugin"
                             / "plugin.json").read_text()),
             ]
-            self.assertEqual({m["version"] for m in manifests}, {manifests[0]["version"]})
+            self.assertEqual(
+                {m["version"] for m in manifests},
+                {versions["plugins"][name]},
+            )
             self.assertEqual({m["name"] for m in manifests}, {name})
             interface = manifests[1]["interface"]
             self.assertEqual(

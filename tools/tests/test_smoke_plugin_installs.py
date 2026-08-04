@@ -78,6 +78,8 @@ class FakeHostCli:
                 self.installed[team] = True
                 self.installed[smoke.PMO] = True
                 return ""
+            if action == "update":
+                return ""
             if action == "list":
                 return self.claude_inventory()
             if action == "disable":
@@ -91,6 +93,8 @@ class FakeHostCli:
                 return ""
         if command[0] == "codex":
             if command[2:4] == ["marketplace", "add"]:
+                return "{}"
+            if command[2:4] == ["marketplace", "upgrade"]:
                 return "{}"
             action = command[2]
             if action == "list":
@@ -114,6 +118,21 @@ def entry_skills() -> list[dict]:
 
 
 class SmokeWorkflowSimulationTests(unittest.TestCase):
+    def test_checkout_catalog_rewrites_stable_sources_to_local_dist(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            target = smoke.checkout_marketplace(REPO, Path(tmp) / "catalog")
+            claude = json.loads((target / ".claude-plugin" / "marketplace.json").read_text())
+            codex = json.loads((target / ".agents" / "plugins" / "marketplace.json").read_text())
+            self.assertTrue(all(
+                entry["source"].startswith("./dist/claude/")
+                for entry in claude["plugins"]
+            ))
+            self.assertTrue(all(
+                entry["source"]["source"] == "local"
+                and entry["source"]["path"].startswith("./dist/codex/")
+                for entry in codex["plugins"]
+            ))
+
     def test_claude_lifecycle_simulation_proves_native_dependency(self):
         with tempfile.TemporaryDirectory() as tmp:
             fake = FakeHostCli(Path(tmp))
@@ -147,7 +166,7 @@ class SmokeWorkflowSimulationTests(unittest.TestCase):
                     mock.patch.object(smoke, "assert_team_gate") as gate, \
                     mock.patch.object(smoke, "mark_pmo_ready") as ready, \
                     mock.patch.object(smoke, "codex_skills", side_effect=skills):
-                smoke.smoke_codex(REPO, [TEAM])
+                smoke.smoke_codex(REPO, [TEAM], smoke.PUBLIC_MARKETPLACE)
             self.assertEqual(fake.installed, {TEAM: True, smoke.PMO: True})
             self.assertEqual(fake.generator_runs, 2)
             self.assertEqual([call.args[-1] for call in gate.call_args_list], [2, 0])
@@ -159,6 +178,11 @@ class SmokeWorkflowSimulationTests(unittest.TestCase):
             self.assertEqual(
                 [command[3].split("@", 1)[0] for command in add_commands[:2]],
                 [TEAM, smoke.PMO],
+            )
+            self.assertIn(
+                ("codex", "plugin", "marketplace", "upgrade",
+                 smoke.MARKETPLACE, "--json"),
+                fake.commands,
             )
 
     def test_claude_smoke_rejects_missing_native_dependency(self):

@@ -1,0 +1,80 @@
+name: Prepare stable release
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: stable-release
+  cancel-in-progress: false
+
+jobs:
+  prepare:
+    runs-on: macos-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: Install current host CLIs
+        run: npm install --global @anthropic-ai/claude-code @openai/codex
+      - name: Configure release author
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+      - name: Prepare bootstrap or release pull request
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          git fetch origin --prune --tags
+          stable_sha="$(git ls-remote --heads origin refs/heads/stable | awk '{print $1}')"
+          if [ -z "$stable_sha" ]; then
+            if git ls-remote --tags origin 'refs/tags/v*' | grep -q .; then
+              echo "Bootstrap refused: SemVer tags exist without a stable branch." >&2
+              exit 1
+            fi
+            python3 tools/release.py verify-bootstrap
+            make release-check
+            python3 tools/release.py release-notes --version 0.0.1 --output release-notes.md
+            git tag -a v0.0.1 -m "Agent Marketplace v0.0.1"
+            git push --atomic origin HEAD:refs/heads/stable refs/tags/v0.0.1
+            if ! make public-release-check; then
+              remote_stable="$(git ls-remote --heads origin refs/heads/stable | awk '{print $1}')"
+              remote_tag="$(git ls-remote --tags origin refs/tags/v0.0.1 | awk '{print $1}')"
+              test "$remote_stable" = "$(git rev-parse HEAD)"
+              test -n "$remote_tag"
+              git push --atomic origin :refs/heads/stable :refs/tags/v0.0.1
+              exit 1
+            fi
+            gh release create v0.0.1 --verify-tag --title "Agent Marketplace v0.0.1" --notes-file release-notes.md
+            exit 0
+          fi
+
+          if git ls-remote --exit-code --heads origin refs/heads/release/stable >/dev/null 2>&1; then
+            echo "release/stable already exists; finish or close the existing release PR." >&2
+            exit 1
+          fi
+          main_sha="$(git rev-parse HEAD)"
+          python3 tools/release.py prepare --stable-sha "$stable_sha" --main-sha "$main_sha"
+          python3 tools/build_distributions.py
+          make release-check
+          version="$(python3 -c 'import json; print(json.load(open("versions.json"))["marketplace"])')"
+          git switch -c release/stable
+          git add --all
+          git commit -m "chore: prepare stable v${version}"
+          git push origin HEAD:refs/heads/release/stable
+          gh pr create \
+            --base main \
+            --head release/stable \
+            --title "chore: prepare stable v${version}" \
+            --body "Stable release candidate v${version}. This PR is never merged automatically."

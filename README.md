@@ -148,6 +148,8 @@ for the first topic, `solution-design` for the system foundations,
 - `platforms/{claude,codex,shared}/`: host manifests, contracts and runtime overlays.
 - `.agents/plugins/marketplace.json`: native Codex marketplace policy.
 - `.claude-plugin/marketplace.json`: Claude marketplace catalog.
+- `versions.json`: the single stable version registry for the marketplace and plugins.
+- `.changes/`: one release-impact declaration for every normal pull request.
 - `dist/{claude,codex}/`: generated, self-contained distributions; never edit them.
 - `tools/`: validator, distribution builder, counts injector, scaffolder, tests.
 
@@ -160,6 +162,31 @@ make check
 runs the validator, Claude/Codex package drift gates, the counts drift gate
 and the test suite. CI runs the same command on every push and pull request;
 a single finding is red.
+
+## Release channels
+
+The marketplace catalog is read from `main`, while every Claude and Codex
+plugin source resolves from the `stable` branch. Normal merges do not change a
+SemVer value. CI identifies each main build as
+`main.<first-parent-count>.g<sha7>` and stores both generated host packages as
+an artifact.
+
+Stable SemVer is authored only through `versions.json`. A plugin has one
+platform-independent version, so its Claude and Codex packages always publish
+together at the same number. Every normal pull request adds a JSON changeset
+under `.changes/`; `patch`, `minor`, and `major` impacts are combined per
+component and the highest pending impact advances the marketplace version.
+Release-free documentation, test, and CI work uses an empty components object.
+
+Maintainers start the `Prepare stable release` workflow manually. It either
+bootstraps the first stable channel or opens an unmerged `release/stable` pull
+request. The workflow uses the repository `GITHUB_TOKEN`, dispatches validation
+events, and never auto-merges it. GitHub holds the automated PR's CI for
+maintainer approval. Merging that exact PR runs all deterministic
+and real-host gates again, verifies the prior
+stable commit, creates the annotated `vX.Y.Z` tag and GitHub Release, and moves
+`stable` forward. `make release-check` tests the current checkout packages;
+`make public-release-check` tests the published stable channel.
 
 ## Contributing
 

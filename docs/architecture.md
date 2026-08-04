@@ -112,6 +112,8 @@ the dependency contract.
 
 - `.claude-plugin/marketplace.json`: the Claude catalog registry.
 - `.agents/plugins/marketplace.json`: the Codex catalog and install policy.
+- `versions.json`: the single cross-host stable version registry.
+- `.changes/`: pending release-impact declarations, one per normal pull request.
 - `plugins/<team>/`: host-neutral canonical content. Full skills live in
   `skill-content/`; agent frontmatter uses neutral exposure and reasoning enums.
 - `platforms/<host>/<team>/`: host manifest, contract and overlay source;
@@ -120,6 +122,8 @@ the dependency contract.
   same PMO guard and Codex project-agent generator without copied source.
 - `dist/<host>/<team>/`: generated self-contained distributions; never edit
   them by hand.
+- `.release/stable.json`: generated release-PR provenance used to reject stale
+  or mismatched publication attempts.
 - `plugins/project-management-office/`: the operations backbone (central
   database CLI, hooks, the Control Tower launcher entry and its read-only
   web dashboard); a dependency of every team plugin, never a team itself.

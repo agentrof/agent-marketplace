@@ -283,20 +283,37 @@ by omission.
 
 ## Releases
 
-A release bumps both platform manifests, both generated manifests and the
-Claude marketplace entry in one commit. The validator errors on identity or
-version drift; the Codex marketplace carries policy, not a second version
-field. `make check` is hermetic: it opens no network sockets, needs no host CLI
-and includes deterministic simulations of the complete Claude and Codex
-lifecycle. CI runs it on the primary environment plus the supported Python and
-operating-system compatibility matrix.
+`versions.json` is the only authored stable version registry. A plugin has one
+version shared by Claude and Codex. Platform-specific version fields or bumps
+are forbidden. The distribution builder applies that version to both generated
+packages, and the validator rejects drift in either platform manifest, either
+distribution manifest, the Claude marketplace entry, or the public PMO runtime
+version.
 
-Before release, run `make release-check` on a machine carrying both host CLIs.
-The real-host gate gives every team isolated state and verifies dependency or
-explicit recovery, PMO session readiness, disable/enable, remove/reinstall,
-Codex entry-skill discovery, internal-skill hiding and setup idempotency. The
-`release-hosts` workflow repeats this gate on version tags, a weekly schedule
-and explicit maintainer dispatch against current host CLIs.
+Every normal pull request adds `.changes/<kebab-slug>.json` with a summary and a
+`components` object. Valid components are `agent-marketplace` and every plugin
+registered in `versions.json`; valid impacts are `patch`, `minor`, and `major`.
+Use an empty components object for work with no stable release effect. If
+several changesets affect one component, the highest impact wins. The
+marketplace advances by the highest pending impact, while only affected plugin
+versions advance. Scaffolding a plugin registers its initial `0.0.1` version
+and both stable host sources in the same transaction.
+
+Normal main commits retain the current stable SemVer and receive the build id
+`main.<first-parent-count>.g<sha7>`. The `Prepare stable release` workflow is a
+manual, PAT-free operation. After bootstrap it consumes pending changesets,
+updates all version surfaces, rebuilds both distributions, and opens the
+`release/stable` pull request without merging it. A maintainer approves its CI
+run, reviews it, and merges it. The publish workflow then verifies the exact merge commit,
+prior stable SHA, tag and release uniqueness, and cross-host equality before
+moving `stable` forward and creating `vX.Y.Z` plus the GitHub Release.
+
+`make check` is hermetic: it opens no network sockets, needs no host CLI and
+includes deterministic simulations of the complete Claude and Codex lifecycle.
+`make release-check` adds real-host lifecycle tests against the current checkout
+packages. `make public-release-check` runs the same lifecycle through the public
+stable channel. The `release-hosts` workflow repeats the public gate weekly and
+on explicit maintainer dispatch against current host CLIs.
 
 Validator fixture lockstep is the minimum, not the whole test contract.
 Cross-host packaging and PMO dependency branches use named adversarial cases.

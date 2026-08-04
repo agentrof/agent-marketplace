@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Exercise the documented local marketplace install flow on real host CLIs."""
+"""Exercise checkout or public-stable installs on real host CLIs."""
 
 from __future__ import annotations
 
@@ -18,6 +18,7 @@ from pathlib import Path
 
 PMO = "project-management-office"
 MARKETPLACE = "agent-marketplace"
+PUBLIC_MARKETPLACE = "agentrof/agent-marketplace"
 
 
 class SmokeFailure(RuntimeError):
@@ -210,7 +211,9 @@ def codex_skills(env: dict[str, str], project: Path) -> list[dict]:
             process.kill()
 
 
-def smoke_claude(root: Path, teams: list[str]) -> None:
+def smoke_claude(
+    root: Path, teams: list[str], marketplace_source: str | Path | None = None
+) -> None:
     require_cli("claude")
     version = run(["claude", "--version"], os.environ.copy()).strip()
     for team in teams:
@@ -227,12 +230,18 @@ def smoke_claude(root: Path, teams: list[str]) -> None:
             (project / "workspace" / "config.json").write_text(
                 json.dumps({"managed_by": team}), encoding="utf-8"
             )
-            run(["claude", "plugin", "marketplace", "add", str(root)], env)
+            run([
+                "claude", "plugin", "marketplace", "add",
+                str(marketplace_source or root),
+            ], env)
             run(["claude", "plugin", "install", f"{team}@{MARKETPLACE}"], env)
             installed = json.loads(run(
                 ["claude", "plugin", "list", "--json"], env
             ))
             assert_enabled(installed, {PMO, team}, "claude")
+            run([
+                "claude", "plugin", "update", f"{team}@{MARKETPLACE}",
+            ], env)
             team_root = plugin_install_path(installed, team, "claude")
             pmo_root = plugin_install_path(installed, PMO, "claude")
             assert_team_gate(env, team_root, project, "missing-pmo", 2)
@@ -259,7 +268,9 @@ def smoke_claude(root: Path, teams: list[str]) -> None:
     print(f"plugin-smoke: Claude lifecycle passed for every team ({version})")
 
 
-def smoke_codex(root: Path, teams: list[str]) -> None:
+def smoke_codex(
+    root: Path, teams: list[str], marketplace_source: str | Path | None = None
+) -> None:
     require_cli("codex")
     version = run(["codex", "--version"], os.environ.copy()).strip()
     for team in teams:
@@ -279,7 +290,8 @@ def smoke_codex(root: Path, teams: list[str]) -> None:
                 json.dumps({"managed_by": team}), encoding="utf-8"
             )
             run([
-                "codex", "plugin", "marketplace", "add", str(root), "--json",
+                "codex", "plugin", "marketplace", "add",
+                str(marketplace_source or root), "--json",
             ], env)
             available = json.loads(run([
                 "codex", "plugin", "list", "--available", "--json",
@@ -290,6 +302,11 @@ def smoke_codex(root: Path, teams: list[str]) -> None:
             run([
                 "codex", "plugin", "add", f"{team}@{MARKETPLACE}", "--json",
             ], env)
+            if marketplace_source == PUBLIC_MARKETPLACE:
+                run([
+                    "codex", "plugin", "marketplace", "upgrade",
+                    MARKETPLACE, "--json",
+                ], env)
             inventory = json.loads(run([
                 "codex", "plugin", "list", "--json",
             ], env))
@@ -366,21 +383,57 @@ def smoke_codex(root: Path, teams: list[str]) -> None:
     print(f"plugin-smoke: Codex lifecycle passed for every team ({version})")
 
 
+def checkout_marketplace(root: Path, target: Path) -> Path:
+    """Create a local-only catalog that installs the current generated dist."""
+    shutil.copytree(root / "dist", target / "dist")
+    claude = json.loads((root / ".claude-plugin" / "marketplace.json").read_text(
+        encoding="utf-8"
+    ))
+    for entry in claude.get("plugins", []):
+        entry["source"] = f"./dist/claude/{entry['name']}"
+    claude_path = target / ".claude-plugin" / "marketplace.json"
+    claude_path.parent.mkdir(parents=True)
+    claude_path.write_text(json.dumps(claude, indent=2) + "\n", encoding="utf-8")
+    codex = json.loads((root / ".agents" / "plugins" / "marketplace.json").read_text(
+        encoding="utf-8"
+    ))
+    for entry in codex.get("plugins", []):
+        entry["source"] = {
+            "source": "local",
+            "path": f"./dist/codex/{entry['name']}",
+        }
+    codex_path = target / ".agents" / "plugins" / "marketplace.json"
+    codex_path.parent.mkdir(parents=True)
+    codex_path.write_text(json.dumps(codex, indent=2) + "\n", encoding="utf-8")
+    return target
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--host", choices=("all", "claude", "codex"),
                         default="all")
     parser.add_argument("--root", type=Path,
                         default=Path(__file__).resolve().parent.parent)
+    parser.add_argument("--channel", choices=("checkout", "public"),
+                        default="checkout")
     args = parser.parse_args()
     root = args.root.resolve()
     teams = team_names(root)
     if not teams:
         raise SmokeFailure("marketplace contains no team plugins")
-    if args.host in ("all", "claude"):
-        smoke_claude(root, teams)
-    if args.host in ("all", "codex"):
-        smoke_codex(root, teams)
+    if args.channel == "public":
+        source: str | Path = PUBLIC_MARKETPLACE
+        if args.host in ("all", "claude"):
+            smoke_claude(root, teams, source)
+        if args.host in ("all", "codex"):
+            smoke_codex(root, teams, source)
+    else:
+        with tempfile.TemporaryDirectory(prefix="agentrof-checkout-marketplace.") as tmp:
+            source = checkout_marketplace(root, Path(tmp))
+            if args.host in ("all", "claude"):
+                smoke_claude(root, teams, source)
+            if args.host in ("all", "codex"):
+                smoke_codex(root, teams, source)
     return 0
 
 

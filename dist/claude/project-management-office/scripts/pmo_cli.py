@@ -27,7 +27,7 @@ import tempfile
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
-PMO_VERSION = "1.4.0"
+PMO_VERSION = "0.0.1"
 SCHEMA_VERSION = 3
 DB_NAME = "agentrof.db"
 

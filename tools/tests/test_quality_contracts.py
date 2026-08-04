@@ -245,13 +245,13 @@ CONTRACT_CASES = {
     "codex_mutation_hook_surface": (
         remove_codex_hook_surface, "team_pmo_contract", "apply_patch"),
     "claude_platform_version": (
-        drift_version("claude", False), "version_sync", "do not all match"),
+        drift_version("claude", False), "version_sync", "version drift"),
     "codex_platform_version": (
-        drift_version("codex", False), "version_sync", "do not all match"),
+        drift_version("codex", False), "version_sync", "version drift"),
     "claude_distribution_version": (
-        drift_version("claude", True), "version_sync", "do not all match"),
+        drift_version("claude", True), "version_sync", "version drift"),
     "codex_distribution_version": (
-        drift_version("codex", True), "version_sync", "do not all match"),
+        drift_version("codex", True), "version_sync", "version drift"),
 }
 
 

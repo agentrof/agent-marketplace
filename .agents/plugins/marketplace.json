@@ -7,8 +7,10 @@
     {
       "name": "project-management-office",
       "source": {
-        "source": "local",
-        "path": "./dist/codex/project-management-office"
+        "source": "git-subdir",
+        "url": "https://github.com/agentrof/agent-marketplace.git",
+        "path": "dist/codex/project-management-office",
+        "ref": "stable"
       },
       "policy": {
         "installation": "INSTALLED_BY_DEFAULT",
@@ -19,8 +21,10 @@
     {
       "name": "software-engineering-team",
       "source": {
-        "source": "local",
-        "path": "./dist/codex/software-engineering-team"
+        "source": "git-subdir",
+        "url": "https://github.com/agentrof/agent-marketplace.git",
+        "path": "dist/codex/software-engineering-team",
+        "ref": "stable"
       },
       "policy": {
         "installation": "AVAILABLE",

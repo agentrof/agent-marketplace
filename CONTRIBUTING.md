@@ -22,7 +22,12 @@ Before opening a PR:
 make check
 ```
 
-If it is green locally, it is green in CI.
+Before running the gate, add `.changes/<short-kebab-summary>.json`. It must contain
+a non-empty `summary` and a `components` object. Use `patch`, `minor`, or
+`major` for every affected plugin or `agent-marketplace`; use an empty object
+for documentation, test, and CI changes with no stable release effect. Do not
+edit `versions.json` in a normal pull request. If the check is green locally,
+it is green in CI.
 
 ## Component model
 

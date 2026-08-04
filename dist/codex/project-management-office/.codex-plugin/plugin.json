@@ -1,6 +1,6 @@
 {
   "name": "project-management-office",
-  "version": "2.1.0",
+  "version": "0.0.1",
   "description": "Project Management Office: the shared operations backbone for Agentrof team plugins, with deterministic state, hooks, and a read-only dashboard.",
   "author": {
     "name": "Agentrof",

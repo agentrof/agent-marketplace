@@ -95,13 +95,20 @@ class ScaffoldTests(unittest.TestCase):
     def test_new_plugin_rolls_back_every_surface_on_build_failure(self):
         claude_market = self.root / ".claude-plugin" / "marketplace.json"
         codex_market = self.root / ".agents" / "plugins" / "marketplace.json"
-        before = (claude_market.read_bytes(), codex_market.read_bytes())
+        versions = self.root / "versions.json"
+        before = (
+            claude_market.read_bytes(), codex_market.read_bytes(),
+            versions.read_bytes(),
+        )
         with mock.patch.object(
                 scaffold, "sync_distributions", side_effect=RuntimeError("build failed")):
             with self.assertRaisesRegex(RuntimeError, "build failed"):
                 scaffold.new_plugin(self.root, "demo-team")
         self.assertEqual(
-            (claude_market.read_bytes(), codex_market.read_bytes()), before
+            (
+                claude_market.read_bytes(), codex_market.read_bytes(),
+                versions.read_bytes(),
+            ), before
         )
         for path in (
             self.root / "plugins" / "demo-team",
@@ -144,7 +151,7 @@ class ScaffoldTests(unittest.TestCase):
             root = Path(tmp)
             fixtures.write(root / ".claude-plugin" / "marketplace.json", json.dumps({
                 "name": "agent-marketplace", "owner": {"name": "Agentrof"},
-                "metadata": {"description": "native", "version": "0.1.0"},
+                "metadata": {"description": "native", "version": "0.0.1"},
                 "plugins": [],
             }))
             fixtures.write(root / ".agents" / "plugins" / "marketplace.json",
@@ -153,6 +160,15 @@ class ScaffoldTests(unittest.TestCase):
                                "interface": {"displayName": "Agent Marketplace"},
                                "plugins": [],
                            }))
+            fixtures.write(root / "versions.json", json.dumps({
+                "schema_version": 1,
+                "marketplace": "0.0.1",
+                "plugins": {},
+            }))
+            fixtures.write(root / ".changes" / "fixture.json", json.dumps({
+                "summary": "Exercise native plugin scaffolding.",
+                "components": {},
+            }))
             (root / "plugins").mkdir()
             shutil.copytree(
                 fixtures.REAL_REPOSITORY / "platforms" / "shared" / "_team",

@@ -21,6 +21,7 @@ import shutil
 from pathlib import Path
 
 import build_distributions
+import release as release_tool
 
 KEBAB_RE = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
 PMO_PLUGIN = "project-management-office"
@@ -142,7 +143,7 @@ One-line statement of the knowledge this skill carries.
 
 PLUGIN_JSON_TEMPLATE = {
     "name": "",
-    "version": "0.1.0",
+    "version": "0.0.1",
     "description": "",
     "author": {"name": "Agentrof", "url": "https://github.com/agentrof"},
     "license": "MIT",
@@ -155,7 +156,7 @@ def codex_manifest(name: str, description: str) -> dict:
         long_description = f"Requires Project Management Office. {description}"
     return {
         "name": name,
-        "version": "0.1.0",
+        "version": "0.0.1",
         "description": description,
         "author": {"name": "Agentrof", "url": "https://github.com/agentrof"},
         "homepage": "https://github.com/agentrof/agent-marketplace",
@@ -220,15 +221,18 @@ def new_plugin(root: Path, name: str) -> None:
         raise SystemExit(f"scaffold: plugin '{name}' already exists")
     marketplace_path = root / ".claude-plugin" / "marketplace.json"
     codex_marketplace_path = root / ".agents" / "plugins" / "marketplace.json"
+    versions_path = root / "versions.json"
     try:
         marketplace = json.loads(marketplace_path.read_text(encoding="utf-8"))
         codex_marketplace = json.loads(
             codex_marketplace_path.read_text(encoding="utf-8")
         )
+        versions = json.loads(versions_path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as exc:
         raise SystemExit(f"scaffold: marketplace registry is unreadable: {exc}") from exc
     marketplace_before = marketplace_path.read_bytes()
     codex_marketplace_before = codex_marketplace_path.read_bytes()
+    versions_before = versions_path.read_bytes()
     claude_platform = root / "platforms" / "claude" / name
     codex_platform = root / "platforms" / "codex" / name
     created = [plugin, claude_platform, codex_platform]
@@ -260,7 +264,7 @@ def new_plugin(root: Path, name: str) -> None:
             )
         marketplace.setdefault("plugins", []).append({
             "name": name,
-            "source": f"./dist/claude/{name}",
+            "source": release_tool.stable_source("claude", name),
             "description": manifest["description"],
             "version": manifest["version"],
             "license": "MIT",
@@ -293,17 +297,25 @@ def new_plugin(root: Path, name: str) -> None:
             )
         codex_marketplace.setdefault("plugins", []).append({
             "name": name,
-            "source": {"source": "local", "path": f"./dist/codex/{name}"},
+            "source": release_tool.stable_source("codex", name),
             "policy": {"installation": "AVAILABLE", "authentication": "ON_INSTALL"},
             "category": "Engineering",
         })
         codex_marketplace_path.write_text(
             json.dumps(codex_marketplace, indent=2) + "\n", encoding="utf-8"
         )
+        plugin_versions = versions.setdefault("plugins", {})
+        if name in plugin_versions:
+            raise RuntimeError(f"versions.json already registers {name}")
+        plugin_versions[name] = manifest["version"]
+        versions_path.write_text(
+            json.dumps(versions, indent=2) + "\n", encoding="utf-8"
+        )
         sync_distributions(root)
     except BaseException:
         marketplace_path.write_bytes(marketplace_before)
         codex_marketplace_path.write_bytes(codex_marketplace_before)
+        versions_path.write_bytes(versions_before)
         rollback_created(root, created)
         raise
     print(f"scaffold: created plugins/{name}, both platform adapters,"

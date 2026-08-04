@@ -72,7 +72,8 @@ class ValidatorFixtureTests(unittest.TestCase):
             marketplace = json.loads(marketplace_path.read_text(encoding="utf-8"))
             marketplace["plugins"].append({
                 "name": "second-team",
-                "source": "./dist/claude/second-team",
+                "source": fixtures.build_distributions_source(
+                    "claude", "second-team"),
                 "description": "fixture plugin",
                 "version": "0.0.1",
                 "license": "MIT",
@@ -137,13 +138,17 @@ class ValidatorFixtureTests(unittest.TestCase):
             codex = json.loads(codex_path.read_text(encoding="utf-8"))
             codex["plugins"].append({
                 "name": "second-team",
-                "source": {"source": "local",
-                           "path": "./dist/codex/second-team"},
+                "source": fixtures.build_distributions_source(
+                    "codex", "second-team"),
                 "policy": {"installation": "AVAILABLE",
                            "authentication": "ON_INSTALL"},
                 "category": "Engineering",
             })
             write(codex_path, json.dumps(codex, indent=2))
+            versions_path = root / "versions.json"
+            versions = json.loads(versions_path.read_text(encoding="utf-8"))
+            versions["plugins"]["second-team"] = "0.0.1"
+            write(versions_path, json.dumps(versions, indent=2))
             fixtures.build_distributions.replace_generated(root, root / "dist")
 
         findings = self.run_on(extra=add_second_plugin)

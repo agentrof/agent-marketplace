@@ -63,11 +63,13 @@ CANONICAL_COMPONENTS = {
     "templates",
 }
 REPOSITORY_DIRECTORIES = {
+    ".changes",
     ".agents",
     ".claude",
     ".claude-plugin",
     ".git",
     ".github",
+    ".release",
     "assets",
     "dist",
     "docs",
@@ -282,7 +284,29 @@ def normalize_generated_text(root: Path) -> None:
             path.write_text(normalized, encoding="utf-8")
 
 
-def build_plugin(root: Path, source: Path, host: str, target: Path) -> None:
+def load_plugin_versions(root: Path) -> dict[str, str]:
+    path = root / "versions.json"
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise ValueError(f"{path}: missing or invalid canonical version registry") from exc
+    plugins = data.get("plugins") if isinstance(data, dict) else None
+    if not isinstance(plugins, dict):
+        raise ValueError(f"{path}: plugins must be an object")
+    expected = {
+        source.name for source in (root / "plugins").iterdir() if source.is_dir()
+    }
+    if set(plugins) != expected:
+        raise ValueError(
+            f"{path}: plugin registry differs from plugins/: "
+            f"registered={sorted(plugins)}, actual={sorted(expected)}"
+        )
+    return plugins
+
+
+def build_plugin(
+    root: Path, source: Path, host: str, target: Path, version: str
+) -> None:
     platform = root / "platforms" / host / source.name
     shared = root / "platforms" / "shared" / source.name
     manifest = platform / "manifest.json"
@@ -300,7 +324,14 @@ def build_plugin(root: Path, source: Path, host: str, target: Path) -> None:
     shutil.copy2(contract, target / "host-contract.md")
     manifest_dir = target / f".{host}-plugin"
     manifest_dir.mkdir()
-    shutil.copy2(manifest, manifest_dir / "plugin.json")
+    try:
+        manifest_data = json.loads(manifest.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"{manifest}: invalid JSON") from exc
+    manifest_data["version"] = version
+    (manifest_dir / "plugin.json").write_text(
+        json.dumps(manifest_data, indent=2) + "\n", encoding="utf-8"
+    )
     generate_skills(source, target, host)
     generate_agents(source, target, host)
     if source.name == "project-management-office":
@@ -374,11 +405,14 @@ def validate_canonical(root: Path) -> None:
 
 def build(root: Path, output: Path) -> None:
     validate_canonical(root)
+    versions = load_plugin_versions(root)
     for host in HOSTS:
         host_root = output / host
         host_root.mkdir(parents=True)
         for source in sorted(path for path in (root / "plugins").iterdir() if path.is_dir()):
-            build_plugin(root, source, host, host_root / source.name)
+            build_plugin(
+                root, source, host, host_root / source.name, versions[source.name]
+            )
 
 
 def generated_tree_owned(output: Path) -> bool:

@@ -1,11 +1,25 @@
 name: validate
 
 on:
+  workflow_dispatch:
   push:
     branches: [main]
   pull_request:
 
 jobs:
+  changeset:
+    if: github.event_name == 'pull_request' && github.head_ref != 'release/stable'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Require a release-impact declaration
+        run: >-
+          python3 tools/release.py check-pr
+          --base origin/${{ github.base_ref }}
+          --allow-bootstrap
+
   check:
     runs-on: ubuntu-latest
     steps:
@@ -15,6 +29,28 @@ jobs:
           python-version: "3.x"
       - name: Run all gates
         run: make check
+
+  build-metadata:
+    if: github.event_name == 'push'
+    needs: [check, compatibility]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Create immutable main build identity
+        id: build
+        run: |
+          python3 tools/release.py build-info --output build-info.json
+          echo "id=$(python3 -c 'import json; print(json.load(open("build-info.json"))["build_id"])')" >> "$GITHUB_OUTPUT"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.build.outputs.id }}
+          path: |
+            build-info.json
+            dist/claude
+            dist/codex
+          if-no-files-found: error
 
   compatibility:
     name: compatibility (${{ matrix.os }}, Python ${{ matrix.python }})

@@ -142,11 +142,20 @@ def make_valid_root(root: Path) -> None:
         "metadata": {"description": "fixture", "version": "0.0.1"},
         "plugins": [{
             "name": PLUGIN,
-            "source": f"./dist/claude/{PLUGIN}",
+            "source": build_distributions_source("claude", PLUGIN),
             "description": "fixture plugin",
             "version": "0.0.1",
             "license": "MIT",
         }],
+    }, indent=2))
+    write(root / "versions.json", json.dumps({
+        "schema_version": 1,
+        "marketplace": "0.0.1",
+        "plugins": {PLUGIN: "0.0.1"},
+    }, indent=2))
+    write(root / ".changes" / "fixture.json", json.dumps({
+        "summary": "Exercise the repository validator fixture.",
+        "components": {},
     }, indent=2))
     claude_manifest = {
         "name": PLUGIN,
@@ -197,7 +206,7 @@ def make_valid_root(root: Path) -> None:
         "interface": {"displayName": "Agent Marketplace"},
         "plugins": [{
             "name": PLUGIN,
-            "source": {"source": "local", "path": f"./dist/codex/{PLUGIN}"},
+            "source": build_distributions_source("codex", PLUGIN),
             "policy": {"installation": "AVAILABLE", "authentication": "ON_INSTALL"},
             "category": "Engineering",
         }],
@@ -276,6 +285,15 @@ def make_valid_root(root: Path) -> None:
     shutil.copyfile(REAL_LIMITS_CONFIG,
                     write_path(root / "tools" / "data" / "limits.json"))
     build_distributions.replace_generated(root, root / "dist")
+
+
+def build_distributions_source(host: str, plugin: str) -> dict:
+    return {
+        "source": "git-subdir",
+        "url": "https://github.com/agentrof/agent-marketplace.git",
+        "path": f"dist/{host}/{plugin}",
+        "ref": "stable",
+    }
 
 
 def write_path(path: Path) -> Path:
@@ -366,7 +384,7 @@ Field notes knowledge.
 def break_registration(root: Path) -> None:
     marketplace_path = root / ".claude-plugin" / "marketplace.json"
     marketplace = json.loads(marketplace_path.read_text(encoding="utf-8"))
-    marketplace["plugins"][0]["source"] = "./dist/claude/missing-team"
+    marketplace["plugins"][0]["source"]["path"] = "./dist/claude/missing-team"
     write(marketplace_path, json.dumps(marketplace, indent=2))
 
 

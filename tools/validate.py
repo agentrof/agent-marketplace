@@ -23,6 +23,8 @@ import unicodedata
 from dataclasses import dataclass, field
 from pathlib import Path
 
+import release as release_tool
+
 # ---------------------------------------------------------------------------
 # Constants and policy tables
 # ---------------------------------------------------------------------------
@@ -762,7 +764,7 @@ def check_reference_triggers(tree: Tree, findings: list[Finding]) -> None:
 
 
 def check_registration(tree: Tree, findings: list[Finding]) -> None:
-    registered: dict[str, str] = {}
+    registered: dict[str, object] = {}
     if tree.marketplace.is_file():
         try:
             data = json.loads(read_text(tree.marketplace))
@@ -779,13 +781,13 @@ def check_registration(tree: Tree, findings: list[Finding]) -> None:
                 f"plugin directory '{plugin.name}' is not registered in marketplace.json",
                 "add a plugins[] entry with source ./dist/claude/" + plugin.name,
             ))
-        expected = f"./dist/claude/{plugin.name}"
+        expected = release_tool.stable_source("claude", plugin.name)
         if plugin.name in registered and registered.get(plugin.name) != expected:
             findings.append(Finding(
                 "error", rel(tree, tree.marketplace), 1, "registration",
                 f"plugin '{plugin.name}' Claude source is"
-                f" {registered.get(plugin.name)!r}, expected {expected!r}",
-                "point the Claude marketplace at the generated distribution",
+                f" {registered.get(plugin.name)!r}, expected the stable git-subdir source",
+                "point the Claude marketplace at dist/claude on the stable branch",
             ))
         for host in ("claude", "codex"):
             manifest = tree.root / "platforms" / host / plugin.name / "manifest.json"
@@ -834,12 +836,11 @@ def check_distribution_packaging(tree: Tree, findings: list[Finding]) -> None:
                   "add a policy-complete Codex marketplace entry")
             continue
         source = entry.get("source")
-        path_value = source.get("path", "") if isinstance(source, dict) else ""
-        expected_path = f"./dist/codex/{plugin.name}"
-        if path_value != expected_path:
+        expected_source = release_tool.stable_source("codex", plugin.name)
+        if source != expected_source:
             error(tree.codex_marketplace,
-                  f"{plugin.name} Codex source is {path_value!r}, expected {expected_path!r}",
-                  "point the Codex marketplace at the generated distribution")
+                  f"{plugin.name} Codex source does not target the stable distribution",
+                  "point the Codex marketplace at dist/codex on the stable branch")
         policy = entry.get("policy") or {}
         expected_install = (
             "INSTALLED_BY_DEFAULT"
@@ -1529,45 +1530,16 @@ def check_wikilink_ban(tree: Tree, findings: list[Finding]) -> None:
 
 
 def check_version_sync(tree: Tree, findings: list[Finding]) -> None:
-    """A registered plugin's marketplace entry and its plugin.json declare
-    the same version: a release bumps both in one commit, and drift ships a
-    catalog that lies about what installs."""
-    if not tree.marketplace.is_file():
-        return
-    try:
-        data = json.loads(read_text(tree.marketplace))
-    except json.JSONDecodeError:
-        return  # json_hygiene reports the parse failure
-    for entry in data.get("plugins", []):
-        entry_version = entry.get("version", "")
-        name = entry.get("name", "")
-        manifests = (
-            tree.root / "platforms" / "claude" / name / "manifest.json",
-            tree.root / "platforms" / "codex" / name / "manifest.json",
-            tree.root / "dist" / "claude" / name / ".claude-plugin" / "plugin.json",
-            tree.root / "dist" / "codex" / name / ".codex-plugin" / "plugin.json",
-        )
-        versions: dict[str, str] = {}
-        for manifest in manifests:
-            try:
-                versions[rel(tree, manifest)] = json.loads(
-                    read_text(manifest)
-                ).get("version", "")
-            except (OSError, json.JSONDecodeError):
-                continue  # registration/packaging reports missing manifests
-        expected = {entry_version} if entry_version else set()
-        actual = {version for version in versions.values() if version}
-        if expected and actual != expected:
-            details = "; ".join(
-                f"{path}='{version}'" for path, version in sorted(versions.items())
-            )
-            findings.append(Finding(
-                "error", rel(tree, manifests[0]), 1, "version_sync",
-                f"plugin versions do not all match marketplace"
-                f" '{entry_version}': {details}",
-                "a release bumps both platform manifests, both distributions,"
-                " and the marketplace entry together",
-            ))
+    """One canonical plugin version drives both hosts and runtime output."""
+    problems = [
+        problem for problem in release_tool.validate_version_surfaces(tree.root)
+        if "marketplace source must target stable" not in problem
+    ]
+    for problem in problems:
+        findings.append(Finding(
+            "error", "versions.json", 1, "version_sync", problem,
+            "update versions.json once, run the release sync and rebuild both hosts",
+        ))
 
 
 def check_vault_wiring(tree: Tree, findings: list[Finding]) -> None:

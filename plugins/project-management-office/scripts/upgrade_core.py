@@ -29,20 +29,20 @@ PROJECT_STATE_SCHEMA = 1
 PROJECT_CONTRACT_VERSION = 1
 REGISTRY_SCHEMA = 2
 WRITER_EPOCH = 1
-STATE_RELATIVE = Path(".agentrof") / "project.json"
+STATE_RELATIVE = Path(".agentrof") / "agent-marketplace" / "project.json"
 MAINTENANCE_NAME = "maintenance.json"
 UPGRADES_DIR = "upgrades"
 LOCKS_DIR = "locks"
 PRIOR_OWNER_SUFFIX = " plugin; change only through the configure entry"
 ACTIVE_ORDER_STATUSES = ("running", "waiting_gate")
-STATUS_CURRENT = "AGENTROF_CURRENT"
-STATUS_READY = "AGENTROF_UPGRADE_REQUIRED_READY"
-STATUS_BLOCKED = "AGENTROF_UPGRADE_REQUIRED_BLOCKED"
-STATUS_APPLY_READY = "AGENTROF_UPGRADE_APPLY_READY"
-STATUS_UPGRADING = "AGENTROF_UPGRADING"
-STATUS_RECOVERY = "AGENTROF_UPGRADE_RECOVERY_REQUIRED"
-STATUS_RESTART = "AGENTROF_UPGRADE_COMPLETE_RESTART_REQUIRED"
-STATUS_PROJECT_PR = "PROJECT_UPGRADE_PR_PENDING"
+STATUS_CURRENT = "AGENT_MARKETPLACE_CURRENT"
+STATUS_READY = "AGENT_MARKETPLACE_UPGRADE_REQUIRED_READY"
+STATUS_BLOCKED = "AGENT_MARKETPLACE_UPGRADE_REQUIRED_BLOCKED"
+STATUS_APPLY_READY = "AGENT_MARKETPLACE_UPGRADE_APPLY_READY"
+STATUS_UPGRADING = "AGENT_MARKETPLACE_UPGRADING"
+STATUS_RECOVERY = "AGENT_MARKETPLACE_UPGRADE_RECOVERY_REQUIRED"
+STATUS_RESTART = "AGENT_MARKETPLACE_UPGRADE_COMPLETE_RESTART_REQUIRED"
+STATUS_PROJECT_PR = "AGENT_MARKETPLACE_PROJECT_UPGRADE_PR_PENDING"
 
 
 class UpgradeError(Exception):
@@ -372,7 +372,7 @@ def package_manifest(root: Path) -> tuple[Path, dict]:
 
 
 def verify_package_provenance(root: Path, host: str, manifest: dict) -> str:
-    path = root / ".agentrof-package.json"
+    path = root / ".agent-marketplace-package.json"
     data = load_json(path, None)
     if not isinstance(data, dict) or data.get("schema_version") != 1:
         raise UpgradeError(f"package provenance missing or invalid: {root}")
@@ -516,7 +516,7 @@ def managed_surface_hashes(root: Path, config_path: Path | None) -> dict[str, st
     if config_path is not None and config_path.is_file():
         config = load_json(config_path, {})
         if isinstance(config, dict):
-            surfaces[safe_relative(root, config_path) + "#agentrof"] = (
+            surfaces[safe_relative(root, config_path) + "#agent-marketplace"] = (
                 config_owned_digest(config)
             )
     return surfaces
@@ -870,12 +870,12 @@ def install_writer_guards(con: sqlite3.Connection) -> None:
         if not table.replace("_", "").isalnum():
             raise UpgradeError(f"unsafe table name in writer guard: {table}")
         for operation in ("INSERT", "UPDATE", "DELETE"):
-            trigger = f"agentrof_writer_{table}_{operation.lower()}"
+            trigger = f"agent_marketplace_writer_{table}_{operation.lower()}"
             con.execute(
                 f"CREATE TRIGGER IF NOT EXISTS {trigger} BEFORE {operation} ON {table} "
-                "BEGIN SELECT CASE WHEN agentrof_writer_epoch() != "
+                "BEGIN SELECT CASE WHEN agent_marketplace_writer_epoch() != "
                 "CAST((SELECT value FROM meta WHERE key='writer_epoch') AS INTEGER) "
-                "THEN RAISE(ABORT, 'AGENTROF_STALE_WRITER') END; END"
+                "THEN RAISE(ABORT, 'AGENT_MARKETPLACE_STALE_WRITER') END; END"
             )
 
 
@@ -1007,7 +1007,7 @@ def migrate_database_connection(
             source_epoch = WRITER_EPOCH
         migration_epoch = {"value": source_epoch}
         con.create_function(
-            "agentrof_writer_epoch", 0, lambda: migration_epoch["value"],
+            "agent_marketplace_writer_epoch", 0, lambda: migration_epoch["value"],
             deterministic=True,
         )
         version = int(con.execute("PRAGMA user_version").fetchone()[0])
@@ -1093,7 +1093,7 @@ def migrate_database_candidate(
 def lock_database_for_upgrade(db_file: Path) -> sqlite3.Connection:
     con = sqlite3.connect(db_file, timeout=5, isolation_level=None)
     con.create_function(
-        "agentrof_writer_epoch", 0, lambda: WRITER_EPOCH, deterministic=True
+        "agent_marketplace_writer_epoch", 0, lambda: WRITER_EPOCH, deterministic=True
     )
     con.execute("PRAGMA foreign_keys=ON")
     con.execute("PRAGMA busy_timeout=5000")
@@ -1191,7 +1191,7 @@ def project_changes(plan_payload: dict) -> tuple[dict[Path, bytes | None], dict]
             safe_relative(root, path)
             changes.setdefault(path, path.read_bytes() if path.is_file() else None)
     target_surfaces = {
-        safe_relative(root, config_path) + "#agentrof": config_owned_digest(config),
+        safe_relative(root, config_path) + "#agent-marketplace": config_owned_digest(config),
     }
     for package_root, preview in adapter_previews:
         host = detect_package_host(package_root)
@@ -1235,7 +1235,7 @@ def validate_recovery_surfaces(
     target_config = json.loads(prepared["config"])
     if not isinstance(current_config, dict) or not isinstance(target_config, dict):
         raise UpgradeError("project config is invalid during recovery")
-    config_key = safe_relative(root, config_path) + "#agentrof"
+    config_key = safe_relative(root, config_path) + "#agent-marketplace"
     original_config = project_data.get("managed_surfaces", {}).get(config_key, "")
     if config_owned_digest(current_config) not in {
         original_config, config_owned_digest(target_config),
@@ -1337,7 +1337,7 @@ def sync_project_identity(db_file: Path, plan_payload: dict) -> None:
         return
     con = sqlite3.connect(db_file, isolation_level=None)
     con.create_function(
-        "agentrof_writer_epoch", 0, lambda: WRITER_EPOCH, deterministic=True
+        "agent_marketplace_writer_epoch", 0, lambda: WRITER_EPOCH, deterministic=True
     )
     try:
         con.execute("PRAGMA foreign_keys=ON")

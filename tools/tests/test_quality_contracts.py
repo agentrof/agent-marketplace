@@ -91,7 +91,7 @@ def set_codex_category(root: Path) -> None:
 
 def set_codex_display_name(root: Path) -> None:
     path, data = manifest(root, "codex")
-    data["interface"]["displayName"] = "Agentrof Sample Team"
+    data["interface"]["displayName"] = "Incorrect Sample Team"
     write_json(path, data)
 
 

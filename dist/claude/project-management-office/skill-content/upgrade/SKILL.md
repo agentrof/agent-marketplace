@@ -11,14 +11,14 @@ Upgrade the installed marketplace contract without overwriting user-owned projec
 ## When to Use
 
 - After updating one or more Agent Marketplace plugins.
-- When a session reports an `AGENTROF_UPGRADE_*` status.
+- When a session reports an `AGENT_MARKETPLACE_UPGRADE_*` status.
 - To resume a run that reports recovery required.
 
 ## Procedure
 
 1. Apply the active host contract. Work only from a newly started session at
    the project git root. Resolve the PMO launcher at
-   `${AGENTROF_HOME:-$HOME/.agentrof}/bin/pmo_cli.py`; missing launcher means
+   `${AGENT_MARKETPLACE_HOME:-${AGENTROF_HOME:-$HOME/.agentrof}/agent-marketplace}/bin/pmo_cli.py`; missing launcher means
    stop and repair the PMO installation without touching the project.
 2. Run `upgrade status --project-root <git-root> --json`. Read its status,
    reasons, blockers, guidance, installed component versions, and fingerprint.
@@ -41,10 +41,10 @@ Upgrade the installed marketplace contract without overwriting user-owned projec
 6. If apply reports recovery required, run only `upgrade recover --run-id
    <run-id>` after owner approval. Preserve the journal and backup evidence.
 7. On success, report the run id, backup location, changed managed surfaces,
-   and `AGENTROF_UPGRADE_COMPLETE_RESTART_REQUIRED`. Review `git diff --stat`,
+   and `AGENT_MARKETPLACE_UPGRADE_COMPLETE_RESTART_REQUIRED`. Review `git diff --stat`,
    stage only the plan's `project_files` with `git add -- <exact paths>`, and
    commit exactly `chore: apply Agent Marketplace upgrade`. Report
-   `PROJECT_UPGRADE_PR_PENDING`, open the project upgrade pull request when the
+   `AGENT_MARKETPLACE_PROJECT_UPGRADE_PR_PENDING`, open the project upgrade pull request when the
    repository has a configured remote, and do not begin another workflow in
    the same session. After merge, start a fresh session from the merged revision.
 

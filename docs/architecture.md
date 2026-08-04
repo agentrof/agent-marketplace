@@ -63,7 +63,8 @@ the dependency contract.
    stories, tasks with attempt history, dependency edges, DoD records,
    work orders, findings, audit events) lives in the project-management-office plugin's central
    database in the user-level data directory, written ONLY through the
-   project-management-office CLI. Spawned agents never touch it; project-management-office's hooks record spawn/stop
+   project-management-office CLI. Agentrof owns the vendor home and Agent Marketplace owns
+   its nested product home. Spawned agents never touch it; project-management-office's hooks record spawn/stop
    mechanics through the same CLI and a guard hook denies direct file
    writes. What must be reviewable in git is rendered from the database
    as generated views, never hand-written. The web dashboard is a READER:
@@ -122,6 +123,7 @@ the dependency contract.
 - `.claude-plugin/marketplace.json`: the Claude catalog registry.
 - `.agents/plugins/marketplace.json`: the Codex catalog and install policy.
 - `versions.json`: the single cross-host stable version registry.
+- `product.json`: the vendor and product namespace, home and host-cache registry.
 - `.changes/`: pending release-impact declarations, one per normal pull request.
 - `plugins/<team>/`: host-neutral canonical content. Full skills live in
   `skill-content/`; ordered compatibility contracts live in `migrations/`;

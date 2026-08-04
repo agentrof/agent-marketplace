@@ -10,7 +10,7 @@ adapters change only the native question and project-instruction surfaces.
 1. Update the installed marketplace plugins with the host's normal plugin
    update mechanism.
 2. Finish or release active work orders and task attempts. Close other
-   Agentrof sessions and leave the project checkout clean.
+   Agent Marketplace sessions and leave the project checkout clean.
 3. Start a new session at the project git root.
 4. Invoke `/project-management-office:upgrade` on Claude or
    `$project-management-office:upgrade` on Codex.
@@ -28,14 +28,14 @@ downgrades fail closed.
 
 | Status | Meaning | Mutation policy |
 |---|---|---|
-| `AGENTROF_CURRENT` | Runtime, database, and project agree. | Normal work allowed. |
-| `AGENTROF_UPGRADE_REQUIRED_READY` | Change is required and preflight is clear. | Upgrade commands only. |
-| `AGENTROF_UPGRADE_REQUIRED_BLOCKED` | A safety condition prevents apply. | No mutation; clear blockers first. |
-| `AGENTROF_UPGRADE_APPLY_READY` | A fingerprint-bound plan awaits approval. | Exact plan apply or stop. |
-| `AGENTROF_UPGRADING` | The maintenance lock has an owner. | No competing mutation. |
-| `AGENTROF_UPGRADE_RECOVERY_REQUIRED` | A durable journal is incomplete. | Recorded recovery only. |
-| `AGENTROF_UPGRADE_COMPLETE_RESTART_REQUIRED` | Apply completed against pre-upgrade session context. | Fresh session required. |
-| `PROJECT_UPGRADE_PR_PENDING` | Managed project changes await a review commit and pull request. | Exact planned git paths only. |
+| `AGENT_MARKETPLACE_CURRENT` | Runtime, database, and project agree. | Normal work allowed. |
+| `AGENT_MARKETPLACE_UPGRADE_REQUIRED_READY` | Change is required and preflight is clear. | Upgrade commands only. |
+| `AGENT_MARKETPLACE_UPGRADE_REQUIRED_BLOCKED` | A safety condition prevents apply. | No mutation; clear blockers first. |
+| `AGENT_MARKETPLACE_UPGRADE_APPLY_READY` | A fingerprint-bound plan awaits approval. | Exact plan apply or stop. |
+| `AGENT_MARKETPLACE_UPGRADING` | The maintenance lock has an owner. | No competing mutation. |
+| `AGENT_MARKETPLACE_UPGRADE_RECOVERY_REQUIRED` | A durable journal is incomplete. | Recorded recovery only. |
+| `AGENT_MARKETPLACE_UPGRADE_COMPLETE_RESTART_REQUIRED` | Apply completed against pre-upgrade session context. | Fresh session required. |
+| `AGENT_MARKETPLACE_PROJECT_UPGRADE_PR_PENDING` | Managed project changes await a review commit and pull request. | Exact planned git paths only. |
 
 `PROJECT_CONTRACT_DRIFT` identifies a marker-owned field or block changed
 outside its owner. It is never repaired silently. A dirty checkout, active or
@@ -50,10 +50,10 @@ The upgrader may write only:
 - the PMO database through a writer-locked candidate validation and
   transactional live migration;
 - the global host-aware plugin registry, locks, plans, journals, and backups;
-- `.agentrof/project.json` in the consuming project;
+- `.agentrof/agent-marketplace/project.json` in the consuming project;
 - declared machine-owned fields in the team config;
-- Agentrof marker blocks in host instruction files;
-- Agentrof-owned native project-agent files.
+- Agent Marketplace marker blocks in host instruction files;
+- Agent Marketplace-owned native project-agent files.
 
 It never overwrites user code, authored documentation, memory, demos, sketches,
 secrets, environment files, custom CI, unmarked instruction text, or an
@@ -61,8 +61,13 @@ unmanaged file collision. Config updates preserve unknown and user-owned keys.
 Instruction adapters replace only their exact marker block. Project files have
 before-images in the journal and are restored if their phase fails.
 
+All global runtime state is rooted at `AGENT_MARKETPLACE_HOME` when set,
+otherwise at `${AGENTROF_HOME:-$HOME/.agentrof}/agent-marketplace`. The PMO
+database is `pmo.db`; logs, sessions, locks, plugin roots, plans, journals and
+backups remain inside that product root.
+
 After apply, the guard admits only read-only diff inspection, exact planned-file
-staging, and the fixed upgrade commit while `PROJECT_UPGRADE_PR_PENDING` is
+staging, and the fixed upgrade commit while `AGENT_MARKETPLACE_PROJECT_UPGRADE_PR_PENDING` is
 active. Other marketplace mutations remain locked. Once that commit changes the
 project revision, the upgrade pull request can be opened through the normal host
 workflow. Normal work resumes only from the merged revision in a fresh session.

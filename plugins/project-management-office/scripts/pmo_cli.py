@@ -7,8 +7,7 @@ coverage, budgets and the quality ledger. Nothing else ever writes the
 database; agents and hooks go through this CLI, and every mutation appends
 an audit event.
 
-The database lives in the user-level data directory: AGENTROF_HOME when set,
-otherwise .agentrof under the user's home. Stdlib only.
+The database lives in the Agent Marketplace product directory. Stdlib only.
 
 Exit codes: 0 success, 1 rule violation, 2 usage or input error.
 """
@@ -31,11 +30,12 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 if str(SCRIPT_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPT_DIR))
 
+import marketplace_paths
 import upgrade_core
 
 PMO_VERSION = "0.0.1"
 SCHEMA_VERSION = 4
-DB_NAME = "agentrof.db"
+DB_NAME = "pmo.db"
 
 WO_STATUSES = {"running", "waiting_gate", "blocked", "escalated", "complete"}
 ACTIVE_WO_STATUSES = ("running", "waiting_gate")
@@ -308,8 +308,7 @@ def fail(msg: str, code: int = 1) -> int:
 
 
 def data_dir() -> Path:
-    override = os.environ.get("AGENTROF_HOME", "").strip()
-    return Path(override) if override else Path.home() / ".agentrof"
+    return marketplace_paths.marketplace_home()
 
 
 def db_path() -> Path:
@@ -321,7 +320,7 @@ def connect(*, allow_upgrade_schema: bool = False) -> sqlite3.Connection:
     con = sqlite3.connect(db_path(), timeout=30, isolation_level=None)
     con.row_factory = sqlite3.Row
     con.create_function(
-        "agentrof_writer_epoch", 0, lambda: upgrade_core.WRITER_EPOCH,
+        "agent_marketplace_writer_epoch", 0, lambda: upgrade_core.WRITER_EPOCH,
         deterministic=True,
     )
     con.execute("PRAGMA journal_mode=WAL")
@@ -331,7 +330,7 @@ def connect(*, allow_upgrade_schema: bool = False) -> sqlite3.Connection:
     if not allow_upgrade_schema and version not in (0, SCHEMA_VERSION):
         con.close()
         raise Rule(
-            f"AGENTROF_UPGRADE_REQUIRED: database schema {version} must be"
+            f"AGENT_MARKETPLACE_UPGRADE_REQUIRED: database schema {version} must be"
             f" upgraded to {SCHEMA_VERSION}; run the Agent Marketplace Upgrade entry"
         )
     return con
@@ -756,7 +755,7 @@ def cmd_init_db(args) -> int:
     if version not in (0, SCHEMA_VERSION):
         con.close()
         raise Rule(
-            f"AGENTROF_UPGRADE_REQUIRED: database schema {version} must be"
+            f"AGENT_MARKETPLACE_UPGRADE_REQUIRED: database schema {version} must be"
             f" upgraded to {SCHEMA_VERSION}; run the Agent Marketplace Upgrade entry"
         )
     con.executescript(DDL)  # commits itself; keep it outside the transaction
@@ -2395,7 +2394,7 @@ def cmd_load(args) -> int:
         return fail(f"cannot read database dump: {exc}", 2)
     data_dir().mkdir(parents=True, exist_ok=True)
     with tempfile.NamedTemporaryFile(
-        dir=data_dir(), prefix=".agentrof-load.", suffix=".db", delete=False,
+        dir=data_dir(), prefix=".agent-marketplace-load.", suffix=".db", delete=False,
     ) as handle:
         candidate = Path(handle.name)
     con = None
@@ -2511,7 +2510,7 @@ def cmd_ensure(args) -> int:
     version = upgrade_core.database_version(db_path())
     if version not in (0, SCHEMA_VERSION):
         return fail(
-            f"AGENTROF_UPGRADE_REQUIRED: database schema {version} must be"
+            f"AGENT_MARKETPLACE_UPGRADE_REQUIRED: database schema {version} must be"
             f" upgraded to {SCHEMA_VERSION}; run the Agent Marketplace Upgrade entry"
         )
     code = cmd_init_db(args)
@@ -2551,7 +2550,7 @@ def cmd_sync_launcher(args) -> int:
     # The dispatcher travels with the launcher: every "$RUN" invocation
     # in shipped content resolves through it.
     for extra in (
-        "agentrof_run.py", "file_issue.py", "upgrade_core.py",
+        "marketplace_run.py", "marketplace_paths.py", "file_issue.py", "upgrade_core.py",
         "upgrade_guidance.json",
     ):
         extra_src = source.parent / extra

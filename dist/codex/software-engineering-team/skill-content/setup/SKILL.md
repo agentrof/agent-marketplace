@@ -25,8 +25,8 @@ and restart rules. `{{workspace}}` means the chosen workspace directory name.
    No repository: offer to initialize one; the team cannot work without
    git (every story ends in a pull request). Then resolve the
    backbone: the launcher
-   PMO="${AGENTROF_HOME:-$HOME/.agentrof}/bin/pmo_cli.py" and the
-   dispatcher RUN="${AGENTROF_HOME:-$HOME/.agentrof}/bin/agentrof_run.py"
+   PMO="${AGENT_MARKETPLACE_HOME:-${AGENTROF_HOME:-$HOME/.agentrof}/agent-marketplace}/bin/pmo_cli.py" and the
+   dispatcher RUN="${AGENT_MARKETPLACE_HOME:-${AGENTROF_HOME:-$HOME/.agentrof}/agent-marketplace}/bin/marketplace_run.py"
    with TEAM=software-engineering-team. Launcher missing: bootstrap per
    the control-tower entry's launcher discovery, run `ensure` once,
    and register both plugin roots when the hooks have not ("$RUN"

@@ -33,6 +33,38 @@ generate = load_generator()
 
 
 class DistributionContractTests(unittest.TestCase):
+    def test_product_contract_drives_package_names_and_runtime_resolvers(self):
+        contract = build_distributions.load_product_contract(REPO)
+        marker, provenance = build_distributions.packaging_names(REPO)
+        self.assertEqual(marker, ".agent-marketplace-generated-distribution")
+        self.assertEqual(provenance, ".agent-marketplace-package.json")
+        expected_resolver = build_distributions.marketplace_paths_source(contract)
+        for plugin in sorted(path for path in (REPO / "plugins").iterdir()
+                             if path.is_dir()):
+            source = plugin / "scripts" / "marketplace_paths.py"
+            self.assertEqual(source.read_text(encoding="utf-8"), expected_resolver)
+            for host in build_distributions.HOSTS:
+                package = REPO / "dist" / host / plugin.name
+                self.assertTrue((package / marker).is_file())
+                self.assertTrue((package / provenance).is_file())
+                self.assertEqual(
+                    (package / "scripts" / "marketplace_paths.py").read_text(
+                        encoding="utf-8"
+                    ),
+                    expected_resolver,
+                )
+
+    def test_product_contract_drift_fails_closed(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            contract = json.loads((REPO / "product.json").read_text(encoding="utf-8"))
+            contract["product"]["home_subdir"] = "incorrect"
+            (root / "product.json").write_text(
+                json.dumps(contract), encoding="utf-8"
+            )
+            with self.assertRaisesRegex(ValueError, "differs from"):
+                build_distributions.load_product_contract(root)
+
     def test_every_team_receives_shared_runtime_and_pmo_registry(self):
         teams = sorted(
             path.name for path in (REPO / "plugins").iterdir()
@@ -366,11 +398,11 @@ class CodexProjectGeneratorTests(unittest.TestCase):
 
     def test_incomplete_agents_block_aborts_before_any_write(self):
         (self.project / "AGENTS.md").write_text(
-            "# User\n\n<!-- agentrof:sample-team:codex:start -->\nbroken\n",
+            "# User\n\n<!-- agent-marketplace:sample-team:codex:start -->\nbroken\n",
             encoding="utf-8",
         )
         before = self.snapshot()
-        with self.assertRaisesRegex(ValueError, "incomplete Agentrof managed block"):
+        with self.assertRaisesRegex(ValueError, "incomplete Agent Marketplace managed block"):
             generate.materialize(self.project, self.plugin, "workspace")
         self.assertEqual(self.snapshot(), before)
 

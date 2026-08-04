@@ -311,10 +311,10 @@ def guard_bash(tool_input: dict, cwd: str) -> int:
 def main() -> int:
     payload = hook_common.normalize_payload(hook_common.read_payload())
     upgrade_status = session_upgrade_status(payload)
-    if upgrade_status and upgrade_status != "AGENTROF_CURRENT":
+    if upgrade_status and upgrade_status != "AGENT_MARKETPLACE_CURRENT":
         if is_upgrade_cli_command(payload):
             pass
-        elif upgrade_status == "PROJECT_UPGRADE_PR_PENDING" \
+        elif upgrade_status == "AGENT_MARKETPLACE_PROJECT_UPGRADE_PR_PENDING" \
                 and payload.get("tool_name") == "Bash":
             # The team guard performs exact planned-path git validation.
             pass

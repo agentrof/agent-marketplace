@@ -126,14 +126,14 @@ def main() -> int:
         hook_common.log(f"session_start reconcile failed: {exc}")
 
     lines = [
-        "AGENTROF_HOOKS_ACTIVE: project-management-office",
+        "AGENT_MARKETPLACE_HOOKS_ACTIVE: project-management-office",
         clock_line(),
     ]
     if bootstrap_ready:
-        lines.append("AGENTROF_PMO_READY: project-management-office")
+        lines.append("AGENT_MARKETPLACE_PMO_READY: project-management-office")
     else:
         upgrade_code = str(upgrade.get("status", ""))
-        if upgrade_code.startswith("AGENTROF_UPGRADE"):
+        if upgrade_code.startswith("AGENT_MARKETPLACE_UPGRADE"):
             lines.append(
                 f"{upgrade_code}: normal marketplace work is locked. Invoke the"
                 " Agent Marketplace Upgrade entry for readiness, blocker, and"
@@ -141,7 +141,7 @@ def main() -> int:
             )
         else:
             lines.append(
-                "AGENTROF_PMO_UNAVAILABLE: bootstrap failed; no team workflow may"
+                "AGENT_MARKETPLACE_PMO_UNAVAILABLE: bootstrap failed; no team workflow may"
                 " mutate state. Inspect the PMO hook log and retry in a new session."
             )
     try:

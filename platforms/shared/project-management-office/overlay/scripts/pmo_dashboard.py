@@ -57,7 +57,7 @@ def open_ro() -> sqlite3.Connection:
         raise ApiError(503, "db_unavailable", f"cannot open the database: {exc}")
     con.row_factory = sqlite3.Row
     con.create_function(
-        "agentrof_writer_epoch", 0,
+        "agent_marketplace_writer_epoch", 0,
         lambda: pmo_cli.upgrade_core.WRITER_EPOCH,
         deterministic=True,
     )
@@ -91,12 +91,12 @@ def one_param(params: dict, name: str) -> str:
 
 
 def plugins_dir() -> Path:
-    override = os.environ.get("AGENTROF_PLUGINS_DIR", "").strip()
+    override = os.environ.get("AGENT_MARKETPLACE_CLAUDE_PLUGINS_DIR", "").strip()
     return Path(override) if override else Path.home() / ".claude" / "plugins"
 
 
 def codex_plugins_dir() -> Path:
-    override = os.environ.get("AGENTROF_CODEX_PLUGINS_DIR", "").strip()
+    override = os.environ.get("AGENT_MARKETPLACE_CODEX_PLUGINS_DIR", "").strip()
     return Path(override) if override else Path.home() / ".codex" / "plugins" / "cache"
 
 
@@ -159,7 +159,7 @@ def scan_install(install_path: Path) -> dict:
 
 
 def scan_codex_cache(teams: dict, errors: list) -> None:
-    """Discover Agentrof installs before their SessionStart hook registers."""
+    """Discover Agent Marketplace installs before their SessionStart hook registers."""
     cache = codex_plugins_dir()
     if not cache.is_dir():
         return
@@ -201,7 +201,7 @@ def scan_codex_cache(teams: dict, errors: list) -> None:
 
 def scan_plugin_roots(teams: dict, errors: list) -> None:
     """Local install records: the plugin_roots registry that hooks and
-    the setup entry maintain (the same file the agentrof_run dispatcher
+    the setup entry maintain (the same file the marketplace_run dispatcher
     resolves from). Registry membership itself is the team marker: only
     this marketplace's own plugins register there."""
     registry_file = pmo_cli.data_dir() / "plugin_roots.json"
@@ -252,7 +252,7 @@ def scan_plugin_roots(teams: dict, errors: list) -> None:
 
 
 def scan_catalog() -> dict:
-    """Agentrof plugins from Claude, Codex, and the shared root registry."""
+    """Agent Marketplace plugins from Claude, Codex, and the shared root registry."""
     registry_path = plugins_dir() / "installed_plugins.json"
     registry = {}
     if registry_path.is_file():

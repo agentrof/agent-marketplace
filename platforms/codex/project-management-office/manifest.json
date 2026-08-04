@@ -1,7 +1,7 @@
 {
   "name": "project-management-office",
   "version": "0.0.1",
-  "description": "Project Management Office: the shared operations backbone for Agentrof team plugins, with deterministic state, hooks, and a read-only dashboard.",
+  "description": "Project Management Office: the shared operations backbone for Agent Marketplace team plugins, with deterministic state, hooks, and a read-only dashboard.",
   "author": {
     "name": "Agentrof",
     "url": "https://github.com/agentrof"

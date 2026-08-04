@@ -29,13 +29,14 @@ import time
 from datetime import datetime, timezone
 from pathlib import Path
 
+import marketplace_paths
+
 PLUGIN_ROOTS_NAME = "plugin_roots.json"
 PLUGIN_ROOTS_LOCK = ".plugin_roots.lock"
 
 
 def data_dir() -> Path:
-    override = os.environ.get("AGENTROF_HOME", "").strip()
-    return Path(override) if override else Path.home() / ".agentrof"
+    return marketplace_paths.marketplace_home()
 
 
 def registry_path() -> Path:
@@ -101,7 +102,7 @@ def update_registry(mutator) -> dict:
 
 
 def fail(message: str) -> int:
-    print(f"agentrof: {message}", file=sys.stderr)
+    print(f"agent-marketplace: {message}", file=sys.stderr)
     return 1
 
 
@@ -245,7 +246,7 @@ def cmd_register(args) -> int:
         update_registry(register)
     except (OSError, TimeoutError, ValueError) as exc:
         return fail(f"could not update plugin registry: {exc}")
-    print(f"agentrof: registered {args.plugin} at {root}")
+    print(f"agent-marketplace: registered {args.plugin} at {root}")
     return 0
 
 

@@ -26,7 +26,7 @@ def owned_surfaces(root: Path, team: str) -> dict[str, str]:
         left, right = text.find(start), text.find(end)
         if left >= 0 and right >= left:
             right += len(end)
-            result["AGENTS.md#agentrof"] = digest(text[left:right])
+            result["AGENTS.md#agent-marketplace"] = digest(text[left:right])
     agents = root / ".codex" / "agents"
     if agents.is_dir():
         owner = generate_codex_project.owner(team)
@@ -54,7 +54,7 @@ def preview(project: Path, plugin_root: Path, workspace: str) -> dict:
             raise ValueError(f"managed project target is a symbolic link: {target}")
     team = generate_codex_project.plugin_name(plugin_root)
     current = owned_surfaces(project, team)
-    with tempfile.TemporaryDirectory(prefix="agentrof-project-adapter-") as tmp:
+    with tempfile.TemporaryDirectory(prefix="agent-marketplace-project-adapter-") as tmp:
         candidate = Path(tmp)
         (candidate / ".git").mkdir()
         copy_if_present(project / "AGENTS.md", candidate / "AGENTS.md")

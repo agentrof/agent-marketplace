@@ -134,11 +134,48 @@ def parser_leaf_commands(parser, prefix=()) -> list[str]:
                 leaves.extend(parser_leaf_commands(child, (*prefix, name)))
     return leaves or [" ".join(prefix)]
 
+
+class MarketplacePathContractTests(unittest.TestCase):
+    def test_environment_precedence(self):
+        resolver = pmo_cli.marketplace_paths
+        cases = (
+            ({}, "/users/example/.agentrof", "/users/example/.agentrof/agent-marketplace"),
+            ({"AGENTROF_HOME": "/vendor"}, "/vendor", "/vendor/agent-marketplace"),
+            ({"AGENT_MARKETPLACE_HOME": "/product"},
+             "/users/example/.agentrof", "/product"),
+            ({"AGENTROF_HOME": "/vendor", "AGENT_MARKETPLACE_HOME": "/product"},
+             "/vendor", "/product"),
+        )
+        for environment, expected_vendor, expected_marketplace in cases:
+            with self.subTest(environment=environment):
+                self.assertEqual(
+                    resolver.vendor_home(environment, "/users/example"),
+                    Path(expected_vendor),
+                )
+                self.assertEqual(
+                    resolver.marketplace_home(environment, "/users/example"),
+                    Path(expected_marketplace),
+                )
+
+    def test_vendor_override_keeps_all_runtime_files_in_product_home(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            vendor = Path(tmp) / "vendor"
+            with mock.patch.dict(
+                os.environ,
+                {"AGENTROF_HOME": str(vendor), "AGENT_MARKETPLACE_HOME": ""},
+            ):
+                code, _, err = run(["init-db"])
+                self.assertEqual(code, 0, err)
+                product = vendor / "agent-marketplace"
+                self.assertEqual(pmo_cli.data_dir(), product)
+                self.assertTrue((product / "pmo.db").is_file())
+                self.assertFalse((vendor / "pmo.db").exists())
+
 class PmoCliTests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
-        self._old_home = os.environ.get("AGENTROF_HOME")
-        os.environ["AGENTROF_HOME"] = str(Path(self.tmp.name) / "agentrof")
+        self._old_home = os.environ.get("AGENT_MARKETPLACE_HOME")
+        os.environ["AGENT_MARKETPLACE_HOME"] = str(Path(self.tmp.name) / "agentrof")
         # The worktree-binding guard compares the caller's cwd against each
         # order's claimed worktree, so tests run from real directories.
         self.wt_main = Path(self.tmp.name) / "wt-main"
@@ -156,13 +193,13 @@ class PmoCliTests(unittest.TestCase):
     def tearDown(self):
         os.chdir(self._old_cwd)
         if self._old_home is None:
-            os.environ.pop("AGENTROF_HOME", None)
+            os.environ.pop("AGENT_MARKETPLACE_HOME", None)
         else:
-            os.environ["AGENTROF_HOME"] = self._old_home
+            os.environ["AGENT_MARKETPLACE_HOME"] = self._old_home
         self.tmp.cleanup()
 
     def db(self):
-        con = sqlite3.connect(Path(os.environ["AGENTROF_HOME"]) / "agentrof.db")
+        con = sqlite3.connect(Path(os.environ["AGENT_MARKETPLACE_HOME"]) / "pmo.db")
         con.row_factory = sqlite3.Row
         return con
 
@@ -199,7 +236,7 @@ class PmoCliTests(unittest.TestCase):
         code, out, err = run(["upgrade", "status", "--json"])
         self.assertEqual(code, 1)
         result = json.loads(out)
-        self.assertEqual(result["status"], "AGENTROF_UPGRADE_REQUIRED_BLOCKED")
+        self.assertEqual(result["status"], "AGENT_MARKETPLACE_UPGRADE_REQUIRED_BLOCKED")
         self.assertTrue(any("REQUIRED_COMPONENT_MISSING" in value
                             for value in result["blockers"]))
 
@@ -251,7 +288,7 @@ class PmoCliTests(unittest.TestCase):
     def test_sync_launcher_is_idempotent(self):
         code, _, err = run(["sync-launcher"])
         self.assertEqual(code, 0, err)
-        first = (Path(os.environ["AGENTROF_HOME"]) / "bin" / "pmo_cli.py")
+        first = (Path(os.environ["AGENT_MARKETPLACE_HOME"]) / "bin" / "pmo_cli.py")
         self.assertTrue(first.is_file())
         before = first.read_bytes()
         code, out, err = run(["sync-launcher"])
@@ -268,7 +305,7 @@ class PmoCliTests(unittest.TestCase):
         code, out, err = run(["ensure"])
         self.assertEqual(code, 0, err)
         self.assertIn("ensure complete", out)
-        self.assertTrue((Path(os.environ["AGENTROF_HOME"]) / "bin"
+        self.assertTrue((Path(os.environ["AGENT_MARKETPLACE_HOME"]) / "bin"
                          / "pmo_cli.py").is_file())
 
     def test_session_reconcile_is_idempotent(self):
@@ -319,7 +356,7 @@ class PmoCliTests(unittest.TestCase):
         self.assertEqual((code1, code2), (0, 0))
 
     def test_uninitialized_db_fails_cleanly(self):
-        os.environ["AGENTROF_HOME"] = str(Path(self.tmp.name) / "fresh")
+        os.environ["AGENT_MARKETPLACE_HOME"] = str(Path(self.tmp.name) / "fresh")
         code, _, err = run(["resume-info", "--project-key", "shop"])
         self.assertEqual(code, 1)
         self.assertIn("init-db", err)
@@ -342,15 +379,15 @@ class PmoCliTests(unittest.TestCase):
         con.close()
         code, _, err = run(["init-db"])
         self.assertEqual(code, 1)
-        self.assertIn("AGENTROF_UPGRADE_REQUIRED", err)
+        self.assertIn("AGENT_MARKETPLACE_UPGRADE_REQUIRED", err)
 
     def test_dump_load_round_trip_into_fresh_home(self):
         dump = Path(self.tmp.name) / "backup.sql"
         code, _, err = run(["dump", "--out", str(dump)])
         self.assertEqual(code, 0, err)
-        original_home = os.environ["AGENTROF_HOME"]
+        original_home = os.environ["AGENT_MARKETPLACE_HOME"]
         try:
-            os.environ["AGENTROF_HOME"] = str(Path(self.tmp.name) / "restored")
+            os.environ["AGENT_MARKETPLACE_HOME"] = str(Path(self.tmp.name) / "restored")
             code, _, err = run(["load", "--infile", str(dump)])
             self.assertEqual(code, 0, err)
             code, out, err = run(["project", "list", "--json"])
@@ -359,7 +396,7 @@ class PmoCliTests(unittest.TestCase):
             code, _, err = run(["verify"])
             self.assertEqual(code, 0, err)
         finally:
-            os.environ["AGENTROF_HOME"] = original_home
+            os.environ["AGENT_MARKETPLACE_HOME"] = original_home
 
     def test_dump_replace_failure_removes_temporary_file(self):
         dump = Path(self.tmp.name) / "backup.sql"
@@ -420,15 +457,15 @@ class PmoCliTests(unittest.TestCase):
     def test_load_missing_dump_is_clean_input_error(self):
         missing = Path(self.tmp.name) / "missing.sql"
         fresh_home = str(Path(self.tmp.name) / "empty-home")
-        original_home = os.environ["AGENTROF_HOME"]
+        original_home = os.environ["AGENT_MARKETPLACE_HOME"]
         try:
-            os.environ["AGENTROF_HOME"] = fresh_home
+            os.environ["AGENT_MARKETPLACE_HOME"] = fresh_home
             code, _, err = run(["load", "--infile", str(missing)])
             self.assertEqual(code, 2)
             self.assertIn("cannot read database dump", err)
             self.assertFalse(Path(fresh_home, pmo_cli.DB_NAME).exists())
         finally:
-            os.environ["AGENTROF_HOME"] = original_home
+            os.environ["AGENT_MARKETPLACE_HOME"] = original_home
 
     # -- issue candidates ------------------------------------------------------
 

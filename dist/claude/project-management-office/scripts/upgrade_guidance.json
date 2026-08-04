@@ -3,42 +3,42 @@
   "display_name": "Agent Marketplace Upgrade",
   "statuses": [
     {
-      "code": "AGENTROF_CURRENT",
+      "code": "AGENT_MARKETPLACE_CURRENT",
       "summary": "The installed marketplace and project contract are current.",
       "actions": ["No upgrade action is required."]
     },
     {
-      "code": "AGENTROF_UPGRADE_REQUIRED_READY",
+      "code": "AGENT_MARKETPLACE_UPGRADE_REQUIRED_READY",
       "summary": "An upgrade is required and all preflight checks passed.",
       "actions": ["Review and approve a deterministic upgrade plan."]
     },
     {
-      "code": "AGENTROF_UPGRADE_REQUIRED_BLOCKED",
+      "code": "AGENT_MARKETPLACE_UPGRADE_REQUIRED_BLOCKED",
       "summary": "An upgrade is required but one or more safety checks block mutation.",
       "actions": ["Resolve every reported blocker.", "Run status again from a new session."]
     },
     {
-      "code": "AGENTROF_UPGRADE_APPLY_READY",
+      "code": "AGENT_MARKETPLACE_UPGRADE_APPLY_READY",
       "summary": "A fingerprint-bound plan is ready for final approval.",
       "actions": ["Review the plan id and exact changes.", "Approve or stop without mutation."]
     },
     {
-      "code": "AGENTROF_UPGRADING",
+      "code": "AGENT_MARKETPLACE_UPGRADING",
       "summary": "An upgrade owns the maintenance lock.",
       "actions": ["Do not start normal marketplace work.", "Wait for completion or follow recovery guidance."]
     },
     {
-      "code": "AGENTROF_UPGRADE_RECOVERY_REQUIRED",
+      "code": "AGENT_MARKETPLACE_UPGRADE_RECOVERY_REQUIRED",
       "summary": "A durable journal records an incomplete upgrade.",
       "actions": ["Run the recorded recovery path before any other marketplace mutation."]
     },
     {
-      "code": "AGENTROF_UPGRADE_COMPLETE_RESTART_REQUIRED",
+      "code": "AGENT_MARKETPLACE_UPGRADE_COMPLETE_RESTART_REQUIRED",
       "summary": "The upgrade completed, but the current session still holds pre-upgrade runtime context.",
       "actions": ["Close this session.", "Start a fresh session before normal work."]
     },
     {
-      "code": "PROJECT_UPGRADE_PR_PENDING",
+      "code": "AGENT_MARKETPLACE_PROJECT_UPGRADE_PR_PENDING",
       "summary": "Managed project upgrade files are applied but not yet committed for review.",
       "actions": ["Review the exact managed-file diff.", "Commit only the planned files.", "Open and merge the project upgrade pull request.", "Start a fresh session from the merged revision."]
     }

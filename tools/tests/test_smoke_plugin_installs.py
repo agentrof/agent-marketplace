@@ -66,7 +66,7 @@ class FakeHostCli:
         if command[:2] == ["codex", "--version"]:
             return "codex-simulated\n"
         if command[0] == sys.executable and command[1].endswith(
-                ("pmo_cli.py", "agentrof_run.py")):
+                ("pmo_cli.py", "marketplace_run.py")):
             return "pmo: project 'smoke' registered\n"
         if command[0] == sys.executable and command[1].endswith(
                 "generate_claude_project.py"):

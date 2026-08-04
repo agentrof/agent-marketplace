@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """File one approved issue candidate to the marketplace's own tracker.
 
-This script exists for exactly one purpose: opening issues about the Agentrof
-agent marketplace on its own repository. The target is locked to a single
+This script exists for exactly one purpose: opening issues about Agent
+Marketplace on its own repository. The target is locked to a single
 repository and cannot be redirected: there is no argument to change it, and if
 a reachable marketplace manifest declares a different repository the script
 refuses rather than file elsewhere.
@@ -116,7 +116,7 @@ def file_via_api(repo: str, title: str, body: str, token: str) -> str:
         headers={
             "Authorization": f"Bearer {token}",
             "Accept": "application/vnd.github+json",
-            "User-Agent": "agentrof-issue-desk",
+            "User-Agent": "agent-marketplace-issue-desk",
             "Content-Type": "application/json",
         })
     try:

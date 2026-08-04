@@ -14,6 +14,7 @@ import tempfile
 import unittest
 import re
 from pathlib import Path
+from unittest import mock
 
 REPO = Path(__file__).resolve().parents[2]
 PMO_SCRIPTS = REPO / "dist" / "claude" / "project-management-office" / "scripts"
@@ -32,7 +33,7 @@ def load_vault_hook():
     if str(SET_SCRIPTS) not in sys.path:
         sys.path.append(str(SET_SCRIPTS))
     spec = importlib.util.spec_from_file_location(
-        "agentrof_vault_hook", SET_SCRIPTS / "vault_hook.py"
+        "agent_marketplace_vault_hook", SET_SCRIPTS / "vault_hook.py"
     )
     module = importlib.util.module_from_spec(spec)
     assert spec.loader is not None
@@ -183,7 +184,7 @@ class DbGuardTests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.home = Path(self.tmp.name) / "agentrof"
-        self.env = {"AGENTROF_HOME": str(self.home)}
+        self.env = {"AGENT_MARKETPLACE_HOME": str(self.home)}
         run_cli(["init-db"], self.env)
 
     def tearDown(self):
@@ -193,7 +194,7 @@ class DbGuardTests(unittest.TestCase):
         code, _, err = run_script(PMO_SCRIPTS / "hook_guard_db.py", {
             "hook_event_name": "PreToolUse", "tool_name": "Write",
             "cwd": self.tmp.name,
-            "tool_input": {"file_path": str(self.home / "agentrof.db"),
+            "tool_input": {"file_path": str(self.home / "pmo.db"),
                            "content": "x"},
         }, self.env)
         self.assertEqual(code, 2)
@@ -204,7 +205,7 @@ class DbGuardTests(unittest.TestCase):
             "hook_event_name": "PreToolUse", "tool_name": "Bash",
             "cwd": self.tmp.name,
             "tool_input": {"command":
-                           f"sqlite3 {self.home}/agentrof.db"
+                           f"sqlite3 {self.home}/pmo.db"
                            " 'DELETE FROM events'"},
         }, self.env)
         self.assertEqual(code, 2)
@@ -219,7 +220,7 @@ class DbGuardTests(unittest.TestCase):
         self.assertEqual(code, 0)
 
     def test_apply_patch_db_write_and_unparseable_patch_fail_closed(self):
-        db = self.home / "agentrof.db"
+        db = self.home / "pmo.db"
         valid = "\n".join([
             "*** Begin Patch", f"*** Update File: {db}", "@@", "-old",
             "+new", "*** End Patch",
@@ -233,10 +234,21 @@ class DbGuardTests(unittest.TestCase):
             self.assertIn(expected, err)
 
 
+class RuntimePathBoundaryTests(unittest.TestCase):
+    def test_hook_log_is_nested_under_product_logs(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            product = Path(tmp) / "product"
+            with mock.patch.dict(
+                os.environ, {"AGENT_MARKETPLACE_HOME": str(product)}
+            ):
+                hook_common.log("namespace probe")
+            self.assertTrue((product / "logs" / "hooks.log").is_file())
+            self.assertFalse((product / "hooks.log").exists())
+
 class VaultHookCodexTests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
-        self.env = {"AGENTROF_HOME": str(Path(self.tmp.name) / "agentrof")}
+        self.env = {"AGENT_MARKETPLACE_HOME": str(Path(self.tmp.name) / "agentrof")}
 
     def tearDown(self):
         self.tmp.cleanup()
@@ -247,7 +259,7 @@ class VaultHookCodexTests(unittest.TestCase):
             {"hook_event_name": "SessionStart"}, self.env, ["register"])
         self.assertEqual(code, 0, err)
         context = json.loads(out)["hookSpecificOutput"]["additionalContext"]
-        self.assertIn("AGENTROF_HOOKS_ACTIVE: software-engineering-team", context)
+        self.assertIn("AGENT_MARKETPLACE_HOOKS_ACTIVE: software-engineering-team", context)
 
     def test_apply_patch_multifile_vault_violation_is_denied(self):
         project = Path(self.tmp.name) / "project"
@@ -282,7 +294,7 @@ class TeamPreflightTests(unittest.TestCase):
         self.project = root / "project"
         (self.project / ".git").mkdir(parents=True)
         (self.project / "workspace").mkdir()
-        self.env = {"AGENTROF_HOME": str(self.home)}
+        self.env = {"AGENT_MARKETPLACE_HOME": str(self.home)}
 
     def tearDown(self):
         self.tmp.cleanup()
@@ -313,7 +325,7 @@ class TeamPreflightTests(unittest.TestCase):
             self.env,
         )
         self.assertEqual(code, 0, err)
-        self.assertIn("AGENTROF_PMO_READY", out)
+        self.assertIn("AGENT_MARKETPLACE_PMO_READY", out)
 
     def test_missing_pmo_state_denies_every_local_mutation_surface(self):
         before = {
@@ -354,7 +366,7 @@ class TeamPreflightTests(unittest.TestCase):
             "codex plugin list --json && touch change.txt",
             "codex plugin list --json > inventory.json",
             "codex plugin list --available --json",
-            "AGENTROF_HOME=/tmp/example codex plugin list --json",
+            "AGENT_MARKETPLACE_HOME=/tmp/example codex plugin list --json",
             "codex plugin add project-management-office@agent-marketplace",
         ):
             with self.subTest(command=command):
@@ -438,7 +450,7 @@ class IntegrityTripwireTests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.home = Path(self.tmp.name) / "agentrof"
-        self.env = {"AGENTROF_HOME": str(self.home)}
+        self.env = {"AGENT_MARKETPLACE_HOME": str(self.home)}
         run_cli(["init-db"], self.env)
         run_cli(["project", "register", "--key", "shop"], self.env)
 
@@ -450,9 +462,9 @@ class IntegrityTripwireTests(unittest.TestCase):
         self.assertEqual(code, 0, out)
 
     def test_foreign_write_detected_by_verify_and_wo_validate(self):
-        con = sqlite3.connect(self.home / "agentrof.db")
+        con = sqlite3.connect(self.home / "pmo.db")
         with self.assertRaisesRegex(sqlite3.OperationalError,
-                                    "agentrof_writer_epoch"):
+                                    "agent_marketplace_writer_epoch"):
             con.execute("UPDATE projects SET name = 'tampered'")
         con.close()
         code, _, _ = run_cli(["verify"], self.env)
@@ -468,7 +480,7 @@ class IntegrityTripwireTests(unittest.TestCase):
         self.assertEqual(code, 0, out)
         self.assertIn("ensure complete", out)
         self.assertTrue((self.home / "bin" / "pmo_cli.py").is_file())
-        self.assertTrue((self.home / "bin" / "agentrof_run.py").is_file())
+        self.assertTrue((self.home / "bin" / "marketplace_run.py").is_file())
 
 
 class LifecycleInferenceTests(unittest.TestCase):
@@ -476,7 +488,7 @@ class LifecycleInferenceTests(unittest.TestCase):
         self.tmp = tempfile.TemporaryDirectory()
         root = Path(self.tmp.name)
         self.home = root / "agentrof"
-        self.env = {"AGENTROF_HOME": str(self.home)}
+        self.env = {"AGENT_MARKETPLACE_HOME": str(self.home)}
         self.project_root = root / "proj"
         (self.project_root / "workspace").mkdir(parents=True)
         (self.project_root / "workspace" / "config.json").write_text(
@@ -510,7 +522,7 @@ class LifecycleInferenceTests(unittest.TestCase):
         return proc.returncode, proc.stdout, proc.stderr
 
     def attempts(self):
-        con = sqlite3.connect(self.home / "agentrof.db")
+        con = sqlite3.connect(self.home / "pmo.db")
         con.row_factory = sqlite3.Row
         rows = [dict(r) for r in con.execute(
             "SELECT * FROM task_attempts ORDER BY id")]
@@ -550,7 +562,7 @@ class DispatcherTests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.home = Path(self.tmp.name) / "agentrof"
-        self.env = {"AGENTROF_HOME": str(self.home)}
+        self.env = {"AGENT_MARKETPLACE_HOME": str(self.home)}
         self.plugin_root = Path(self.tmp.name) / "install" / "sample-team"
         (self.plugin_root / ".claude-plugin").mkdir(parents=True)
         (self.plugin_root / ".claude-plugin" / "plugin.json").write_text(
@@ -564,7 +576,7 @@ class DispatcherTests(unittest.TestCase):
         self.tmp.cleanup()
 
     def dispatch(self, argv):
-        return run_script(PMO_SCRIPTS / "agentrof_run.py", None, self.env,
+        return run_script(PMO_SCRIPTS / "marketplace_run.py", None, self.env,
                           argv)
 
     def test_register_path_run(self):
@@ -648,7 +660,7 @@ class DispatcherTests(unittest.TestCase):
         processes = []
         for index in range(20):
             processes.append(subprocess.Popen(
-                [sys.executable, str(PMO_SCRIPTS / "agentrof_run.py"),
+                [sys.executable, str(PMO_SCRIPTS / "marketplace_run.py"),
                  "register", "--plugin", f"team-{index}",
                  "--root", str(self.plugin_root)],
                 stdout=subprocess.PIPE,
@@ -694,8 +706,8 @@ class DashboardCatalogTests(unittest.TestCase):
                     "root": str(install), "version": "1.2.0",
                     "registered_at": "2026-07-18T00:00:00+00:00"}},
             }), encoding="utf-8")
-            env = {**os.environ, "AGENTROF_HOME": str(home),
-                   "AGENTROF_PLUGINS_DIR": str(Path(tmp) / "no-claude")}
+            env = {**os.environ, "AGENT_MARKETPLACE_HOME": str(home),
+                   "AGENT_MARKETPLACE_CLAUDE_PLUGINS_DIR": str(Path(tmp) / "no-claude")}
             proc = subprocess.run(
                 [sys.executable, "-c",
                  "import sys, json;"
@@ -724,9 +736,9 @@ class DashboardCatalogTests(unittest.TestCase):
             (install / "skills" / "setup").mkdir(parents=True)
             (install / "skills" / "setup" / "SKILL.md").write_text(
                 "---\nname: setup\ndescription: Setup.\n---\n", encoding="utf-8")
-            env = {**os.environ, "AGENTROF_HOME": str(home),
-                   "AGENTROF_PLUGINS_DIR": str(Path(tmp) / "no-claude"),
-                   "AGENTROF_CODEX_PLUGINS_DIR": str(cache)}
+            env = {**os.environ, "AGENT_MARKETPLACE_HOME": str(home),
+                   "AGENT_MARKETPLACE_CLAUDE_PLUGINS_DIR": str(Path(tmp) / "no-claude"),
+                   "AGENT_MARKETPLACE_CODEX_PLUGINS_DIR": str(cache)}
             proc = subprocess.run(
                 [sys.executable, "-c",
                  "import sys,json;"
@@ -766,9 +778,9 @@ class DashboardCatalogTests(unittest.TestCase):
                     "scope": "user", "lastUpdated": "2026-08-03T00:00:00Z",
                 }]},
             }), encoding="utf-8")
-            env = {**os.environ, "AGENTROF_HOME": str(home),
-                   "AGENTROF_PLUGINS_DIR": str(plugins),
-                   "AGENTROF_CODEX_PLUGINS_DIR": str(root / "no-codex")}
+            env = {**os.environ, "AGENT_MARKETPLACE_HOME": str(home),
+                   "AGENT_MARKETPLACE_CLAUDE_PLUGINS_DIR": str(plugins),
+                   "AGENT_MARKETPLACE_CODEX_PLUGINS_DIR": str(root / "no-codex")}
             proc = subprocess.run(
                 [sys.executable, "-c",
                  "import sys,json;"

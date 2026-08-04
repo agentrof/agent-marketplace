@@ -16,7 +16,7 @@ Two moments, one law (the obsidian-vault skill):
   writing session immediately, so link and metadata duties are repaired
   in-session instead of at a distant gate. Gates stay the hard barrier.
 - register (SessionStart): record this plugin's install root in the
-  shared plugin_roots registry the agentrof_run dispatcher resolves
+  shared plugin_roots registry the marketplace_run dispatcher resolves
   from; env-free (the root comes from this file's own location).
 
 The normalize shim gives both moments one payload shape (canonical tool
@@ -172,8 +172,7 @@ def normalize(payload: dict) -> dict:
 
 
 def data_dir() -> Path:
-    override = os.environ.get("AGENTROF_HOME", "").strip()
-    return Path(override) if override else Path.home() / ".agentrof"
+    return team_guard.data_dir()
 
 
 def register() -> int:
@@ -447,7 +446,7 @@ def main() -> int:
             "hookSpecificOutput": {
                 "hookEventName": "SessionStart",
                 "additionalContext": (
-                    "AGENTROF_HOOKS_ACTIVE: software-engineering-team"
+                    "AGENT_MARKETPLACE_HOOKS_ACTIVE: software-engineering-team"
                 ),
             }
         }))

@@ -91,7 +91,7 @@ Start a new task/session, open `/hooks`, inspect and trust Project Management
 Office and Software Engineering Team, and start another task if Codex asks for
 a reload. Then select
 `software-engineering-team:setup` in the App skill picker or CLI `/skills`
-picker (or invoke `$software-engineering-team:setup`). Setup generates the managed Agentrof block in
+picker (or invoke `$software-engineering-team:setup`). Setup generates the managed Agent Marketplace block in
 the project's `AGENTS.md` and native `.codex/agents/*.toml` role definitions.
 Those agents become discoverable at the next task/session boundary.
 
@@ -143,7 +143,7 @@ for the first topic, `solution-design` for the system foundations,
 ## Upgrading an existing project
 
 > [!IMPORTANT]
-> Update the installed plugins first, close existing Agentrof sessions, then
+> Update the installed plugins first, close existing Agent Marketplace sessions, then
 > start a new session and invoke Agent Marketplace Upgrade. Normal marketplace
 > mutations remain locked while an upgrade or recovery is required.
 
@@ -154,12 +154,19 @@ blocker gate, writes a fingerprint-bound plan only after approval, and asks
 again before apply. A successful run requires another fresh session so both
 hosts load the new hooks, skills, and project agents.
 
-The upgrader owns only PMO data, `.agentrof/project.json`, Agentrof-marked
-project instruction blocks, Agentrof-owned project agent files, and declared
+The upgrader owns only PMO data, `.agentrof/agent-marketplace/project.json`, Agent Marketplace-marked
+project instruction blocks, Agent Marketplace-owned project agent files, and declared
 machine-owned config fields. It does not overwrite user code, authored docs,
 memory, demos, sketches, secrets, environment files, custom CI, or unmanaged
 instruction content. See [Upgrade protocol](docs/upgrade-protocol.md) for the
 complete safety and recovery contract.
+
+Agentrof owns the vendor root, while Agent Marketplace owns a product directory
+inside it. The default runtime path is `.agentrof/agent-marketplace` under the
+user's home directory.
+`AGENTROF_HOME` overrides the vendor root and `AGENT_MARKETPLACE_HOME` overrides
+the complete product path. PMO data is stored in `pmo.db`; project compatibility
+state is stored in `.agentrof/agent-marketplace/project.json`.
 
 ## Repository map
 
@@ -173,6 +180,7 @@ complete safety and recovery contract.
 - `.agents/plugins/marketplace.json`: native Codex marketplace policy.
 - `.claude-plugin/marketplace.json`: Claude marketplace catalog.
 - `versions.json`: the single stable version registry for the marketplace and plugins.
+- `product.json`: the machine-readable vendor, product, home and host-cache namespace contract.
 - `.changes/`: one release-impact declaration for every normal pull request.
 - `dist/{claude,codex}/`: generated, self-contained distributions; never edit them.
 - `tools/`: validator, distribution builder, counts injector, scaffolder, tests.

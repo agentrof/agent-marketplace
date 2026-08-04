@@ -14,7 +14,7 @@ from pathlib import Path
 
 TEAM_RE = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
 BLOCK_START_RE = re.compile(
-    r"<!-- agentrof:([a-z0-9]+(?:-[a-z0-9]+)*):claude:start -->"
+    r"<!-- agent-marketplace:([a-z0-9]+(?:-[a-z0-9]+)*):claude:start -->"
 )
 
 
@@ -31,8 +31,8 @@ def plugin_name(plugin_root: Path) -> str:
 
 def block_markers(team: str) -> tuple[str, str]:
     return (
-        f"<!-- agentrof:{team}:claude:start -->",
-        f"<!-- agentrof:{team}:claude:end -->",
+        f"<!-- agent-marketplace:{team}:claude:start -->",
+        f"<!-- agent-marketplace:{team}:claude:end -->",
     )
 
 
@@ -47,14 +47,14 @@ def merge(existing: str, block: str, team: str) -> str:
     foreign = {match.group(1) for match in BLOCK_START_RE.finditer(existing)} - {team}
     if foreign:
         raise ValueError(
-            "project already carries another Agentrof team block: "
+            "project already carries another Agent Marketplace team block: "
             + ", ".join(sorted(foreign))
         )
     managed = f"{start_marker}\n{block}\n{end_marker}"
     start, end = existing.find(start_marker), existing.find(end_marker)
     if start >= 0 or end >= 0:
         if start < 0 or end < start:
-            raise ValueError("CLAUDE.md has an incomplete Agentrof managed block")
+            raise ValueError("CLAUDE.md has an incomplete Agent Marketplace managed block")
         end += len(end_marker)
         return existing[:start] + managed + existing[end:]
     if not existing.strip():
@@ -64,7 +64,7 @@ def merge(existing: str, block: str, team: str) -> str:
         return existing.replace(block, managed, 1)
     raise ValueError(
         "unmanaged CLAUDE.md collision; preserve user instructions and add the"
-        " Agentrof managed block explicitly before retrying"
+        " Agent Marketplace managed block explicitly before retrying"
     )
 
 
@@ -105,7 +105,7 @@ def owned_surfaces(project_root: Path, team: str) -> dict[str, str]:
         return {}
     right += len(end)
     return {
-        "CLAUDE.md#agentrof": hashlib.sha256(
+        "CLAUDE.md#agent-marketplace": hashlib.sha256(
             text[left:right].encode()
         ).hexdigest()
     }
@@ -134,7 +134,7 @@ def main() -> int:
         if left >= 0 and right >= left:
             right += len(marker_end)
             result["target_surfaces"] = {
-                "CLAUDE.md#agentrof": hashlib.sha256(
+                "CLAUDE.md#agent-marketplace": hashlib.sha256(
                     target[left:right].encode()
                 ).hexdigest()
             }

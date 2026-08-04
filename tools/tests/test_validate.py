@@ -106,7 +106,7 @@ class ValidatorFixtureTests(unittest.TestCase):
                       / "host-contract.md", (
                           "# Host Contract\n\n"
                           "- `team_guard.py` requires"
-                          " `AGENTROF_PMO_READY: project-management-office`;"
+                          " `AGENT_MARKETPLACE_PMO_READY: project-management-office`;"
                           + (" run `claude plugin list --json` and recover with"
                              " `/plugin install project-management-office@agent-marketplace`"
                              " or `/plugin enable project-management-office@agent-marketplace`."
@@ -132,6 +132,13 @@ class ValidatorFixtureTests(unittest.TestCase):
                       }))
             write(root / "plugins" / "second-team" / "agents" / "planner.md",
                   VALID_AGENT)
+            write(
+                root / "plugins" / "second-team" / "scripts"
+                / "marketplace_paths.py",
+                fixtures.build_distributions.marketplace_paths_source(
+                    json.loads((root / "product.json").read_text(encoding="utf-8"))
+                ),
+            )
             write(root / "plugins" / "second-team" / "skill-content" / "notes"
                   / "SKILL.md", VALID_SKILL)
             write(root / "plugins" / "second-team" / "migrations"

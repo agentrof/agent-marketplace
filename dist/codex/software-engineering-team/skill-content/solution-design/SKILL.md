@@ -112,7 +112,7 @@ per topic, an adversarial challenge round before every gate, and a decision log 
 6. Process pulses: at each round and gate close, append an event via
    the PMO CLI (event append) naming the engagement, round and finding
    counts; the CLI is the launcher at
-   "${AGENTROF_HOME:-$HOME/.agentrof}/bin/pmo_cli.py" (develop flow's
+   "${AGENT_MARKETPLACE_HOME:-${AGENTROF_HOME:-$HOME/.agentrof}/agent-marketplace}/bin/pmo_cli.py" (develop flow's
    state contract). Content stays in files; the database pulses.
 7. HARD SCOPE LIMIT: writes only under workspace/docs/solution-design/,
    plus home, its own map note and vault payload (per-file, where

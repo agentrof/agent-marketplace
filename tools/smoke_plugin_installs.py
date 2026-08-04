@@ -25,6 +25,14 @@ class SmokeFailure(RuntimeError):
     pass
 
 
+def marketplace_home(env: dict[str, str]) -> Path:
+    override = env.get("AGENT_MARKETPLACE_HOME", "").strip()
+    if override:
+        return Path(override)
+    vendor = env.get("AGENTROF_HOME", "").strip()
+    return (Path(vendor) if vendor else Path.home() / ".agentrof") / MARKETPLACE
+
+
 def run(command: list[str], env: dict[str, str], input_text: str = "") -> str:
     completed = subprocess.run(
         command, input=input_text, capture_output=True, text=True, env=env,
@@ -112,10 +120,10 @@ def initialize_project(project: Path, team: str, env: dict[str, str]) -> None:
         encoding="utf-8",
     )
     run(["git", "init", "--initial-branch=main", str(project)], env)
-    run(["git", "-C", str(project), "config", "user.name", "Agentrof Smoke"], env)
+    run(["git", "-C", str(project), "config", "user.name", "Agent Marketplace Smoke"], env)
     run([
         "git", "-C", str(project), "config", "user.email",
-        "agentrof-smoke@example.invalid",
+        "agent-marketplace-smoke@example.invalid",
     ], env)
     run(["git", "-C", str(project), "add", "--", "workspace/config.json"], env)
     run([
@@ -129,7 +137,7 @@ def register_project_contract(
 ) -> None:
     run([
         sys.executable,
-        str(Path(env["AGENTROF_HOME"]) / "bin" / "agentrof_run.py"),
+        str(marketplace_home(env) / "bin" / "marketplace_run.py"),
         "register", "--plugin", team, "--root", str(team_root),
     ], env)
     run([
@@ -156,7 +164,7 @@ def assert_team_gate(
     )
     if completed.returncode != expected:
         diagnostic = ""
-        launcher = Path(env.get("AGENTROF_HOME", "")) / "bin" / "pmo_cli.py"
+        launcher = marketplace_home(env) / "bin" / "pmo_cli.py"
         if launcher.is_file():
             inspected = subprocess.run(
                 [sys.executable, str(launcher), "upgrade", "status",
@@ -181,7 +189,7 @@ def mark_pmo_ready(
         env,
         hook_payload(session_id, project, "SessionStart"),
     )
-    if "AGENTROF_PMO_READY: project-management-office" not in output:
+    if "AGENT_MARKETPLACE_PMO_READY: project-management-office" not in output:
         raise SmokeFailure("PMO SessionStart did not mark the smoke session ready")
 
 
@@ -232,7 +240,7 @@ def codex_skills(env: dict[str, str], project: Path) -> list[dict]:
         send({
             "method": "initialize", "id": 1,
             "params": {"clientInfo": {
-                "name": "agentrof_smoke", "title": "Agentrof Smoke",
+                "name": "agent_marketplace_smoke", "title": "Agent Marketplace Smoke",
                 "version": "1.0.0",
             }},
         })
@@ -266,7 +274,7 @@ def smoke_claude(
     require_cli("claude")
     version = run(["claude", "--version"], os.environ.copy()).strip()
     for team in teams:
-        with tempfile.TemporaryDirectory(prefix="agentrof-claude-smoke.") as state:
+        with tempfile.TemporaryDirectory(prefix="agent-marketplace-claude-smoke.") as state:
             state_root = Path(state)
             env = {
                 **os.environ,
@@ -336,14 +344,14 @@ def smoke_codex(
     require_cli("codex")
     version = run(["codex", "--version"], os.environ.copy()).strip()
     for team in teams:
-        with tempfile.TemporaryDirectory(prefix="agentrof-codex-smoke.") as state:
+        with tempfile.TemporaryDirectory(prefix="agent-marketplace-codex-smoke.") as state:
             state_root = Path(state)
             codex_home = state_root / "codex"
             codex_home.mkdir()
             env = {
                 **os.environ,
                 "CODEX_HOME": str(codex_home),
-                "AGENTROF_HOME": str(state_root / "agentrof"),
+                "AGENT_MARKETPLACE_HOME": str(state_root / "marketplace"),
             }
             project = state_root / "project"
             initialize_project(project, team, env)
@@ -487,7 +495,7 @@ def main() -> int:
         if args.host in ("all", "codex"):
             smoke_codex(root, teams, source)
     else:
-        with tempfile.TemporaryDirectory(prefix="agentrof-checkout-marketplace.") as tmp:
+        with tempfile.TemporaryDirectory(prefix="agent-marketplace-checkout.") as tmp:
             source = checkout_marketplace(root, Path(tmp))
             if args.host in ("all", "claude"):
                 smoke_claude(root, teams, source)

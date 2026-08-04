@@ -34,7 +34,7 @@ You MUST follow these rules exactly. Violating any of them is a failure.
 ## State contract
 
 CLI resolution as in the develop flow: the launcher at
-"${AGENTROF_HOME:-$HOME/.agentrof}/bin/pmo_cli.py"; run the idempotent
+"${AGENT_MARKETPLACE_HOME:-${AGENTROF_HOME:-$HOME/.agentrof}/agent-marketplace}/bin/pmo_cli.py"; run the idempotent
 init-db subcommand before first use. project_key comes from
 workspace/config.json.
 

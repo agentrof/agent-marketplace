@@ -39,6 +39,17 @@ class ScaffoldTests(unittest.TestCase):
 
     def test_new_plugin_passes_validation(self):
         scaffold.new_plugin(self.root, "demo-team")
+        migration = json.loads((
+            self.root / "plugins" / "demo-team" / "migrations" / "manifest.json"
+        ).read_text(encoding="utf-8"))
+        self.assertEqual(migration["component"], "demo-team")
+        self.assertEqual(migration["project_contract"], {
+            "baseline": 1, "current": 1, "steps": [],
+        })
+        for host in ("claude", "codex"):
+            self.assertTrue((
+                self.root / "dist" / host / "demo-team" / ".agentrof-package.json"
+            ).is_file())
         findings = validate.run(self.root)
         self.assertEqual(findings, [], f"scaffolded plugin must be clean: {findings}")
 

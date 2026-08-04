@@ -24,7 +24,7 @@ and replies with the running URL.
 <!-- counts:start -->
 | Plugins | Agents | Entry skills | Knowledge skills |
 |---|---|---|---|
-| 2 | 12 | 12 | 14 |
+| 2 | 12 | 13 | 14 |
 <!-- counts:end -->
 
 Counts above are injected by `tools/counts.py`; they are never written by
@@ -134,16 +134,40 @@ entry names through its skill picker and `$` invocation.
 | `/software-engineering-team:organize-docs` | On-demand reorganization of the whole docs vault: full audit, owner-gated renames, deterministic migration, curated maps and titles. |
 | `/project-management-office:control-tower` | Starts Control Tower, the read-only web dashboard over the central database, and replies with the clickable URL. |
 | `/project-management-office:issue-desk` | Reviews and files issues captured by marketplace safety hooks. |
+| `/project-management-office:upgrade` | Inspects, plans, applies, or recovers a safe marketplace upgrade. Codex: `$project-management-office:upgrade`. |
 
 A first session usually looks like: `setup`, then `business-analysis`
 for the first topic, `solution-design` for the system foundations,
 `design-system` before any screen work, then `deliver`.
+
+## Upgrading an existing project
+
+> [!IMPORTANT]
+> Update the installed plugins first, close existing Agentrof sessions, then
+> start a new session and invoke Agent Marketplace Upgrade. Normal marketplace
+> mutations remain locked while an upgrade or recovery is required.
+
+Claude users invoke `/project-management-office:upgrade`; Codex users select
+`project-management-office:upgrade` or invoke `$project-management-office:upgrade`.
+The entry first performs a read-only status check, shows one readiness or
+blocker gate, writes a fingerprint-bound plan only after approval, and asks
+again before apply. A successful run requires another fresh session so both
+hosts load the new hooks, skills, and project agents.
+
+The upgrader owns only PMO data, `.agentrof/project.json`, Agentrof-marked
+project instruction blocks, Agentrof-owned project agent files, and declared
+machine-owned config fields. It does not overwrite user code, authored docs,
+memory, demos, sketches, secrets, environment files, custom CI, or unmanaged
+instruction content. See [Upgrade protocol](docs/upgrade-protocol.md) for the
+complete safety and recovery contract.
 
 ## Repository map
 
 - [docs/architecture.md](docs/architecture.md): the invariants.
 - [docs/authoring.md](docs/authoring.md): component templates and rules.
 - [docs/orchestration.md](docs/orchestration.md): the flow contract.
+- [docs/upgrade-protocol.md](docs/upgrade-protocol.md): user and runtime upgrade contract.
+- [docs/migration-authoring.md](docs/migration-authoring.md): ordered migration discipline.
 - `plugins/`: host-neutral canonical roles, workflows, skills, scripts and templates.
 - `platforms/{claude,codex,shared}/`: host manifests, contracts and runtime overlays.
 - `.agents/plugins/marketplace.json`: native Codex marketplace policy.

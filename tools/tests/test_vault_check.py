@@ -1277,6 +1277,32 @@ class HookTests(unittest.TestCase):
                            "content": "[a](b.md)"}})
         self.assertEqual(code, 0)
 
+    def test_alternative_workspace_is_guarded_as_the_vault_root(self):
+        vault = self.project / "knowledge" / "docs"
+        make_valid_vault(vault)
+        payload = {
+            "tool_name": "Write",
+            "tool_input": {
+                "file_path": str(vault / "solution-design" / "new.md"),
+                "content": "See [the landscape](../landscape.md).",
+            },
+        }
+        code, err = self.hook(vh.pre, payload)
+        self.assertEqual(code, 2)
+        self.assertIn("wikilink", err)
+        config = vault.parent / "config.json"
+        content = json.loads(config.read_text(encoding="utf-8"))
+        content["doc_type_designations"]["decision"] = "ruling"
+        code, err = self.hook(vh.pre, {
+            "tool_name": "Write",
+            "tool_input": {
+                "file_path": str(config),
+                "content": json.dumps(content),
+            },
+        })
+        self.assertEqual(code, 2)
+        self.assertIn("single writer", err)
+
     def test_post_surfaces_findings_for_the_changed_file(self):
         target = self.vault / SD / "landscape.md"
         edit(target, "The components and their owning decisions.",

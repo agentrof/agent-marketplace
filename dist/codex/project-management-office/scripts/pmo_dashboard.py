@@ -56,6 +56,11 @@ def open_ro() -> sqlite3.Connection:
     except sqlite3.OperationalError as exc:
         raise ApiError(503, "db_unavailable", f"cannot open the database: {exc}")
     con.row_factory = sqlite3.Row
+    con.create_function(
+        "agentrof_writer_epoch", 0,
+        lambda: pmo_cli.upgrade_core.WRITER_EPOCH,
+        deterministic=True,
+    )
     return con
 
 
@@ -208,35 +213,42 @@ def scan_plugin_roots(teams: dict, errors: list) -> None:
         errors.append(f"plugin_roots.json unreadable: {registry_file}")
         return
     for plugin_name, entry in sorted((registry.get("plugins") or {}).items()):
-        if plugin_name in teams:
-            continue  # the Claude registry record is richer; keep it
-        install_path = Path(entry.get("root", ""))
-        if not install_path.is_dir():
-            errors.append(
-                f"{plugin_name}: registered root missing: {install_path}")
-            continue
-        detail = scan_install(install_path)
-        manifest = detail["manifest"]
-        is_backbone = plugin_name == "project-management-office"
-        teams[plugin_name] = {
-            "plugin_name": plugin_name,
-            "marketplace": "",
-            "display_name": plugin_name.replace("-", " ").title(),
-            "description": manifest.get("description", ""),
-            "kind": "backbone" if is_backbone else "team",
-            "installed": True,
-            "in_use": False,
-            "installs": [{
-                "version": entry.get("version", ""),
-                "scope": "local",
+        hosts = entry.get("hosts") if isinstance(entry, dict) else None
+        records = hosts.items() if isinstance(hosts, dict) else [("local", entry)]
+        for host, host_entry in sorted(records):
+            if not isinstance(host_entry, dict):
+                errors.append(f"{plugin_name}/{host}: invalid registry entry")
+                continue
+            install_path = Path(host_entry.get("root", ""))
+            if not install_path.is_dir():
+                errors.append(
+                    f"{plugin_name}/{host}: registered root missing: {install_path}")
+                continue
+            detail = scan_install(install_path)
+            manifest = detail["manifest"]
+            is_backbone = plugin_name == "project-management-office"
+            team = teams.setdefault(plugin_name, {
+                "plugin_name": plugin_name,
+                "marketplace": "",
+                "display_name": plugin_name.replace("-", " ").title(),
+                "description": manifest.get("description", ""),
+                "kind": "backbone" if is_backbone else "team",
+                "installed": True,
+                "in_use": False,
+                "installs": [],
+                "agents": detail["agents"],
+                "skills": detail["skills"],
+                "commands": detail["commands"],
+                "flows": detail["flows"],
+            })
+            record = {
+                "version": host_entry.get("version", ""),
+                "scope": str(host),
                 "project_path": "",
-                "last_updated": entry.get("registered_at", ""),
-            }],
-            "agents": detail["agents"],
-            "skills": detail["skills"],
-            "commands": detail["commands"],
-            "flows": detail["flows"],
-        }
+                "last_updated": host_entry.get("registered_at", ""),
+            }
+            if record not in team["installs"]:
+                team["installs"].append(record)
 
 
 def scan_catalog() -> dict:

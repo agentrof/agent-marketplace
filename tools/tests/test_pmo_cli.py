@@ -78,6 +78,10 @@ COMMAND_CONTRACTS = {
     "session-reconcile": "test_session_reconcile_is_idempotent",
     "ensure": "test_ensure_bootstraps_launcher",
     "dashboard": "test_dashboard_command_delegates_to_read_only_server",
+    "upgrade status": "test_upgrade_status_current_without_project",
+    "upgrade plan": "test_upgrade_status_current_without_project",
+    "upgrade apply": "test_upgrade_status_current_without_project",
+    "upgrade recover": "test_upgrade_status_current_without_project",
     "project register": "test_project_register_and_list",
     "project list": "test_project_register_and_list",
     "resume-info": "test_resume_info_reports_work_order_shape",
@@ -190,6 +194,14 @@ class PmoCliTests(unittest.TestCase):
         code, out, err = run(["version"])
         self.assertEqual(code, 0, err)
         self.assertEqual(out.strip(), pmo_cli.PMO_VERSION)
+
+    def test_upgrade_status_current_without_project(self):
+        code, out, err = run(["upgrade", "status", "--json"])
+        self.assertEqual(code, 1)
+        result = json.loads(out)
+        self.assertEqual(result["status"], "AGENTROF_UPGRADE_REQUIRED_BLOCKED")
+        self.assertTrue(any("REQUIRED_COMPONENT_MISSING" in value
+                            for value in result["blockers"]))
 
     def test_now_prints_iso_utc(self):
         from datetime import datetime
@@ -330,7 +342,7 @@ class PmoCliTests(unittest.TestCase):
         con.close()
         code, _, err = run(["init-db"])
         self.assertEqual(code, 1)
-        self.assertIn("does not match this CLI", err)
+        self.assertIn("AGENTROF_UPGRADE_REQUIRED", err)
 
     def test_dump_load_round_trip_into_fresh_home(self):
         dump = Path(self.tmp.name) / "backup.sql"

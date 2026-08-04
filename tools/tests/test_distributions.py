@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import concurrent.futures
+import hashlib
 import importlib.util
 import json
 import sys
@@ -123,6 +124,26 @@ class DistributionContractTests(unittest.TestCase):
             [],
         )
 
+    def test_every_package_has_complete_deterministic_provenance(self):
+        for host in build_distributions.HOSTS:
+            for component in json.loads(
+                (REPO / "versions.json").read_text(encoding="utf-8")
+            )["plugins"]:
+                package = REPO / "dist" / host / component
+                provenance = json.loads((
+                    package / build_distributions.PROVENANCE
+                ).read_text(encoding="utf-8"))
+                self.assertEqual(provenance["component"], component)
+                self.assertEqual(provenance["host"], host)
+                self.assertIn(f".{host}-plugin/plugin.json", provenance["files"])
+                for relative, digest in provenance["files"].items():
+                    self.assertEqual(
+                        hashlib.sha256(
+                            (package / relative).read_bytes()
+                        ).hexdigest(),
+                        digest,
+                    )
+
     def test_python_runtime_caches_never_enter_or_dirty_distributions(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -158,6 +179,20 @@ class DistributionContractTests(unittest.TestCase):
             (plugin / "unexpected-surface").mkdir()
             with self.assertRaisesRegex(
                     ValueError, "unsupported canonical top-level entry"):
+                build_distributions.validate_canonical(root)
+
+    def test_migration_runner_checksum_drift_is_rejected(self):
+        import shutil
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            source = REPO / "plugins" / "project-management-office"
+            target = root / "plugins" / "project-management-office"
+            target.parent.mkdir(parents=True)
+            shutil.copytree(source, target)
+            runner = target / "migrations" / "database" / "3-4.py"
+            runner.write_text(runner.read_text(encoding="utf-8") + "\n# drift\n",
+                              encoding="utf-8")
+            with self.assertRaisesRegex(ValueError, "runner checksum drift"):
                 build_distributions.validate_canonical(root)
 
     def test_repository_rejects_unknown_top_level_directory(self):
@@ -365,6 +400,23 @@ class CodexProjectGeneratorTests(unittest.TestCase):
         before = self.snapshot()
         with self.assertRaisesRegex(ValueError, "another-team"):
             generate.materialize(self.project, self.plugin, "workspace")
+        self.assertEqual(self.snapshot(), before)
+
+    def test_alternative_workspace_controls_ownership_and_rendering(self):
+        workspace = self.project / "knowledge"
+        workspace.mkdir()
+        (workspace / "config.json").write_text(
+            json.dumps({"team_id": "sample-team"}), encoding="utf-8"
+        )
+        generate.materialize(self.project, self.plugin, "knowledge")
+        agents_md = (self.project / "AGENTS.md").read_text(encoding="utf-8")
+        self.assertIn("Read knowledge/memory/me.md", agents_md)
+        (workspace / "config.json").write_text(
+            json.dumps({"team_id": "another-team"}), encoding="utf-8"
+        )
+        before = self.snapshot()
+        with self.assertRaisesRegex(ValueError, "another-team"):
+            generate.materialize(self.project, self.plugin, "knowledge")
         self.assertEqual(self.snapshot(), before)
 
     def test_concurrent_identical_setup_converges_without_partial_files(self):

@@ -40,6 +40,7 @@ from __future__ import annotations
 
 import json
 import re
+import shlex
 import sys
 from pathlib import Path
 
@@ -85,6 +86,50 @@ def deny(message: str) -> int:
     return 2
 
 
+def session_upgrade_status(payload: dict) -> str:
+    session_id = str(payload.get("session_id", ""))
+    if not session_id:
+        return ""
+    try:
+        value = json.loads(
+            hook_common.session_state_path(session_id).read_text(encoding="utf-8")
+        )
+        return str(value.get("upgrade_status", "")) \
+            if value.get("session_id") == session_id else ""
+    except Exception:
+        return ""
+
+
+def is_upgrade_cli_command(payload: dict) -> bool:
+    if payload.get("tool_name") != "Bash":
+        return False
+    tool_input = payload.get("tool_input", {})
+    command = tool_input.get("command", tool_input.get("cmd", "")) \
+        if isinstance(tool_input, dict) else ""
+    try:
+        argv = shlex.split(command, posix=True)
+    except (TypeError, ValueError):
+        return False
+    if any(token in {";", "|", "||", "&&", ">", ">>", "<"} for token in argv):
+        return False
+    launcher = (hook_common.pmo_cli.data_dir() / "bin" / "pmo_cli.py").resolve()
+    offset = 0
+    if argv:
+        try:
+            if Path(argv[0]).expanduser().resolve(strict=False) == launcher:
+                offset = 1
+            elif len(argv) > 1 \
+                    and re.fullmatch(r"python(?:3(?:\.\d+)?)?", Path(argv[0]).name) \
+                    and Path(argv[1]).expanduser().resolve(strict=False) == launcher:
+                offset = 2
+        except OSError:
+            return False
+    if offset == 0:
+        return False
+    return len(argv) > offset + 1 and argv[offset] == "upgrade" \
+        and argv[offset + 1] in {"status", "plan", "apply", "recover"}
+
+
 def frontmatter_locked(target: Path) -> bool:
     """True when the file opens with a YAML frontmatter block carrying
     'locked: true'."""
@@ -114,7 +159,10 @@ def frozen_by_work_order(target: Path, cwd: str) -> str | None:
     if resolved is None:
         return None
     project_key, project_root = resolved
-    orders_dir = Path(project_root) / "workspace" / "work-orders"
+    orders_dir = (
+        Path(project_root) / hook_common.project_workspace(Path(project_root))
+        / "work-orders"
+    )
     if not orders_dir.is_dir():
         return None
     manifests = sorted(orders_dir.glob("*/freeze.json"))
@@ -199,9 +247,10 @@ def terminology_language(cwd: str) -> str:
         if resolved is None:
             return "english"
         _, project_root = resolved
-        config = json.loads(
-            (Path(project_root) / "workspace" / "config.json")
-            .read_text(encoding="utf-8"))
+        config_path = hook_common.project_config(Path(project_root))
+        if config_path is None:
+            return "english"
+        config = json.loads(config_path.read_text(encoding="utf-8"))
         value = config.get("terminology_language")
         if isinstance(value, str) and value.strip():
             return value.strip().lower()
@@ -261,6 +310,20 @@ def guard_bash(tool_input: dict, cwd: str) -> int:
 
 def main() -> int:
     payload = hook_common.normalize_payload(hook_common.read_payload())
+    upgrade_status = session_upgrade_status(payload)
+    if upgrade_status and upgrade_status != "AGENTROF_CURRENT":
+        if is_upgrade_cli_command(payload):
+            pass
+        elif upgrade_status == "PROJECT_UPGRADE_PR_PENDING" \
+                and payload.get("tool_name") == "Bash":
+            # The team guard performs exact planned-path git validation.
+            pass
+        else:
+            return deny(
+                f"{upgrade_status}: normal marketplace mutations are locked;"
+                " use Agent Marketplace Upgrade guidance. No files or project"
+                " state were changed."
+            )
     if payload.get("raw_tool_name") == "apply_patch" \
             and payload.get("patch_parse_error"):
         return deny(
@@ -348,7 +411,10 @@ def guard_file(written: dict, payload: dict) -> int:
         rel = project_relative(target, str(payload.get("cwd", "")))
     except Exception:
         rel = None
-    if rel is None or "workspace" not in rel.parts:
+    resolved = hook_common.resolve_project(cwd)
+    workspace = hook_common.project_workspace(Path(resolved[1])) \
+        if resolved is not None else ""
+    if rel is None or not rel.parts or rel.parts[0] != workspace:
         return 0
     if not str(rel).isascii():
         return deny(

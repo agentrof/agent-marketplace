@@ -59,10 +59,21 @@ class FakeHostCli:
     def __call__(self, command: list[str], env: dict, input_text: str = "") -> str:
         del env, input_text
         self.commands.append(tuple(command))
+        if command[0] == "git":
+            return ""
         if command[:2] == ["claude", "--version"]:
             return "claude-simulated\n"
         if command[:2] == ["codex", "--version"]:
             return "codex-simulated\n"
+        if command[0] == sys.executable and command[1].endswith(
+                ("pmo_cli.py", "agentrof_run.py")):
+            return "pmo: project 'smoke' registered\n"
+        if command[0] == sys.executable and command[1].endswith(
+                "generate_claude_project.py"):
+            self.generator_runs += 1
+            return json.dumps({
+                "changes": ["CLAUDE.md"] if self.generator_runs == 1 else [],
+            })
         if command[0] == sys.executable and command[1].endswith(
                 "generate_codex_project.py"):
             self.generator_runs += 1
@@ -142,6 +153,7 @@ class SmokeWorkflowSimulationTests(unittest.TestCase):
                     mock.patch.object(smoke, "mark_pmo_ready") as ready:
                 smoke.smoke_claude(REPO, [TEAM])
             self.assertEqual(fake.installed, {TEAM: True, smoke.PMO: True})
+            self.assertEqual(fake.generator_runs, 2)
             self.assertEqual([call.args[-1] for call in gate.call_args_list], [2, 0, 2])
             ready.assert_called_once()
             install_index = next(

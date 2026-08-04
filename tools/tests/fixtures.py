@@ -215,6 +215,13 @@ def make_valid_root(root: Path) -> None:
     write(root / "plugins" / PLUGIN / "agents" / "planner.md", VALID_AGENT)
     write(root / "plugins" / PLUGIN / "skill-content" / "notes" / "SKILL.md",
           VALID_SKILL)
+    write(root / "plugins" / PLUGIN / "migrations" / "manifest.json",
+          json.dumps({
+              "schema_version": 1,
+              "component": PLUGIN,
+              "database": None,
+              "project_contract": {"baseline": 1, "current": 1, "steps": []},
+          }, indent=2))
     # Hook event names are the host platform's PascalCase schema and are
     # exempt from the snake_case law at exactly $.hooks in hooks/hooks.json.
     write(root / "platforms" / "claude" / PLUGIN / "overlay" / "hooks"

@@ -107,6 +107,15 @@ the dependency contract.
    one team. A second team stops before mutation. This preserves bare native
    agent ids across hosts without collisions in Codex's project-wide
    .codex/agents namespace.
+15. **One upgrade protocol across hosts.** Plugin updates may change runtime
+   compatibility, but normal work never guesses whether the project is ready.
+   PMO derives status from package provenance, cross-host versions, database
+   schema, project UUID, component versions, and managed-surface hashes. A
+   required upgrade locks normal marketplace mutation on both hosts. Ordered
+   checksummed migrations operate on a candidate database and marker-owned
+   project surfaces only; plans are fingerprint-bound, journaled, recoverable,
+   and require a fresh session after success. User-owned code and content are
+   outside the writer set.
 
 ## Repository layout
 
@@ -115,7 +124,8 @@ the dependency contract.
 - `versions.json`: the single cross-host stable version registry.
 - `.changes/`: pending release-impact declarations, one per normal pull request.
 - `plugins/<team>/`: host-neutral canonical content. Full skills live in
-  `skill-content/`; agent frontmatter uses neutral exposure and reasoning enums.
+  `skill-content/`; ordered compatibility contracts live in `migrations/`;
+  agent frontmatter uses neutral exposure and reasoning enums.
 - `platforms/<host>/<team>/`: host manifest, contract and overlay source;
   `platforms/shared/` contains runtime adapters used by both hosts. `_team`
   overlays are generated into every non-PMO plugin, so new teams inherit the

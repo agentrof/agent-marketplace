@@ -31,6 +31,7 @@ CLAUDE_TEAM_CONTRACT = f"""# Host Contract
 
 - The shared `team_guard.py` PreToolUse hook mechanically requires the PMO session-ready record before Write, Edit, or Bash. Keep the exact context check `{PMO_READY}` as the user-facing diagnostic. If it is absent, run `claude plugin list --json` as a read-only diagnostic and stop. If PMO is missing, ask the user to run `/plugin install project-management-office@agent-marketplace`; if it is disabled, ask for `/plugin enable project-management-office@agent-marketplace`; if it is installed and enabled, ask for a Claude Code restart and PMO hook-log inspection. State that no files or project state were changed.
 - One delivery team owns a project. Stop without mutation when workspace/config.json or Agentrof-owned project agents name another team.
+- Insert `--host claude` immediately after every canonical dispatcher `run` or `path` verb.
 - Preserve every canonical workflow gate and artifact.
 """
 
@@ -38,6 +39,7 @@ CODEX_TEAM_CONTRACT = f"""# Host Contract
 
 - The shared `team_guard.py` PreToolUse hook mechanically requires the PMO session-ready record before Write, Edit, apply_patch, or Bash. Keep the exact context check `{PMO_READY}` as the user-facing diagnostic. If it is absent, run `codex plugin list --json` as a read-only diagnostic and stop. If PMO is missing, show `codex plugin add project-management-office@agent-marketplace`; if it is disabled, ask the user to enable it in Plugins; if it is installed and enabled, ask the user to inspect and trust Project Management Office and this team plugin through `/hooks`, then start a new task. State that no files or project state were changed.
 - One delivery team owns a project. Stop without mutation when workspace/config.json or Agentrof-owned project agents name another team.
+- Insert `--host codex` immediately after every canonical dispatcher `run` or `path` verb.
 - During setup, run the generated `scripts/generate_codex_project.py`; it owns only this team's marked AGENTS.md block and Agentrof-owned project agents.
 - Preserve every canonical workflow gate and artifact.
 """
@@ -239,6 +241,16 @@ def new_plugin(root: Path, name: str) -> None:
     try:
         (plugin / "agents").mkdir(parents=True)
         (plugin / "skill-content").mkdir()
+        (plugin / "migrations").mkdir()
+        (plugin / "migrations" / "manifest.json").write_text(
+            json.dumps({
+                "schema_version": 1,
+                "component": name,
+                "database": None,
+                "project_contract": {"baseline": 1, "current": 1, "steps": []},
+            }, indent=2) + "\n",
+            encoding="utf-8",
+        )
         claude_platform.mkdir(parents=True)
         codex_platform.mkdir(parents=True)
         manifest = dict(PLUGIN_JSON_TEMPLATE)
@@ -293,6 +305,14 @@ def new_plugin(root: Path, name: str) -> None:
                 f"# {title_of(name)}\n\n"
                 "- Read {{workspace}}/memory/me.md before team work when it exists.\n"
                 "- Use only this team's setup-generated project agents.\n",
+                encoding="utf-8",
+            )
+            claude_template = claude_platform / "overlay" / "templates" / "CLAUDE.md"
+            claude_template.parent.mkdir(parents=True)
+            claude_template.write_text(
+                f"# {title_of(name)}\n\n"
+                "Read and follow `{{workspace}}/memory/me.md` when it exists.\n"
+                "Use this team's entry skills for managed work.\n",
                 encoding="utf-8",
             )
         codex_marketplace.setdefault("plugins", []).append({

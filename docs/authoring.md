@@ -18,6 +18,9 @@ A plugin ships four component kinds:
   entry skills delegate to. Not user-facing, not skills.
 - **Templates** (`templates/`): files the setup entry materializes into a
   consuming project. Scanned by the validator like any shipped content.
+- **Migrations** (`migrations/manifest.json`): the ordered, checksummed database
+  and project-contract compatibility chain. Runners stay in canonical scripts;
+  host surface rendering stays in platform adapters.
 
 ## Naming
 
@@ -331,6 +334,12 @@ Use `tools/scaffold.py` to create components; its output passes
 way. Canonical edits are followed by
 `python3 tools/build_distributions.py`; `make check` verifies both generated
 trees are current.
+
+Every scaffolded plugin starts with a project-contract baseline and inherits
+the shared upgrade adapter protocol. A new schema, managed field, generated
+surface, team, or persistence feature updates its migration manifest and the
+upgrade tests in the same pull request. See
+[migration-authoring.md](migration-authoring.md) for the admission rules.
 
 ## Depending on the operations backbone
 

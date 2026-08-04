@@ -1,0 +1,7 @@
+{
+  "summary": "Add a cross-host, fail-closed marketplace upgrade and migration protocol.",
+  "components": {
+    "project-management-office": "minor",
+    "software-engineering-team": "minor"
+  }
+}

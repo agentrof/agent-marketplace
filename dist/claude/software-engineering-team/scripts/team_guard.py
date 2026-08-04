@@ -10,6 +10,7 @@ import re
 import shlex
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 
@@ -21,6 +22,14 @@ MUTATION_TOOLS = {"Write", "Edit", "MultiEdit", "apply_patch", "Bash",
 READ_ONLY_DIAGNOSTICS = {
     ("claude", "plugin", "list", "--json"),
     ("codex", "plugin", "list", "--json"),
+}
+UPGRADE_STATUSES = {
+    "AGENTROF_UPGRADE_REQUIRED_READY",
+    "AGENTROF_UPGRADE_REQUIRED_BLOCKED",
+    "AGENTROF_UPGRADE_RECOVERY_REQUIRED",
+    "AGENTROF_UPGRADE_COMPLETE_RESTART_REQUIRED",
+    "AGENTROF_UPGRADING",
+    "PROJECT_UPGRADE_PR_PENDING",
 }
 
 
@@ -69,7 +78,7 @@ def project_root(cwd: str) -> Path | None:
     except Exception:
         return None
     for candidate in (current, *current.parents):
-        if (candidate / ".git").exists() or (candidate / "workspace").is_dir():
+        if (candidate / ".git").exists():
             return candidate
     return None
 
@@ -78,9 +87,25 @@ def conflicting_team(cwd: str, current_team: str) -> str:
     root = project_root(cwd)
     if root is None:
         return ""
-    config = root / "workspace" / "config.json"
+    state_path = root / ".agentrof" / "project.json"
+    workspace = "workspace"
     try:
-        owner = json.loads(config.read_text(encoding="utf-8")).get("managed_by", "")
+        workspace = str(json.loads(
+            state_path.read_text(encoding="utf-8")
+        ).get("workspace") or workspace)
+    except Exception:
+        pass
+    config = root / workspace / "config.json"
+    if not config.is_file():
+        candidates = sorted(root.glob("*/config.json"))
+        if len(candidates) == 1:
+            config = candidates[0]
+    try:
+        data = json.loads(config.read_text(encoding="utf-8"))
+        owner = data.get("team_id") or data.get("managed_by", "")
+        suffix = " plugin; change only through the configure entry"
+        if isinstance(owner, str) and owner.endswith(suffix):
+            owner = owner[:-len(suffix)]
         if owner and owner != current_team:
             return str(owner)
     except FileNotFoundError:
@@ -115,6 +140,155 @@ def register(team: str) -> None:
     )
 
 
+def upgrade_status(cwd: str) -> dict:
+    launcher = data_dir() / "bin" / "pmo_cli.py"
+    root = project_root(cwd)
+    if not launcher.is_file() or root is None:
+        return {}
+    completed = subprocess.run(
+        [sys.executable, str(launcher), "upgrade", "status",
+         "--project-root", str(root), "--json"],
+        capture_output=True, text=True, check=False, timeout=60,
+    )
+    try:
+        value = json.loads(completed.stdout)
+    except (json.JSONDecodeError, TypeError):
+        value = None
+    if not isinstance(value, dict) or not value.get("status"):
+        return {
+            "status": "AGENTROF_UPGRADE_REQUIRED_BLOCKED",
+            "blockers": ["UPGRADE_STATUS_UNAVAILABLE"],
+        }
+    return value
+
+
+def refresh_session_readiness(session_id: str, status: str) -> bool:
+    if not session_id or not status:
+        return False
+    path = session_state_path(session_id)
+    try:
+        state = json.loads(path.read_text(encoding="utf-8"))
+        if state.get("session_id") != session_id:
+            return False
+        state["pmo_ready"] = status == "AGENTROF_CURRENT"
+        state["upgrade_status"] = status
+        fd, temporary = tempfile.mkstemp(dir=str(path.parent), prefix=f".{path.name}.")
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            handle.write(json.dumps(state, sort_keys=True) + "\n")
+        os.replace(temporary, path)
+        return state["pmo_ready"]
+    except Exception:
+        return False
+
+
+def is_upgrade_command(payload: dict) -> bool:
+    if str(payload.get("tool_name", "")) not in {"Bash", "exec_command", "shell"}:
+        return False
+    tool_input = payload.get("tool_input", {})
+    command = tool_input.get("command", tool_input.get("cmd", "")) \
+        if isinstance(tool_input, dict) else ""
+    if not isinstance(command, str):
+        return False
+    try:
+        argv = shlex.split(command, posix=True)
+    except ValueError:
+        return False
+    if any(token in {";", "|", "||", "&&", ">", ">>", "<"} for token in argv):
+        return False
+    launcher = (data_dir() / "bin" / "pmo_cli.py").resolve()
+    offset = 0
+    if argv:
+        try:
+            if Path(argv[0]).expanduser().resolve(strict=False) == launcher:
+                offset = 1
+            elif len(argv) > 1 \
+                    and re.fullmatch(r"python(?:3(?:\.\d+)?)?", Path(argv[0]).name) \
+                    and Path(argv[1]).expanduser().resolve(strict=False) == launcher:
+                offset = 2
+        except OSError:
+            return False
+    if offset == 0:
+        return False
+    return len(argv) > offset + 1 and argv[offset] == "upgrade" \
+        and argv[offset + 1] in {"status", "plan", "apply", "recover"}
+
+
+def latest_plan_files(cwd: str) -> set[str]:
+    root = project_root(cwd)
+    plans = data_dir() / "upgrades" / "plans"
+    if root is None or not plans.is_dir():
+        return set()
+    matches = []
+    for path in plans.glob("*.json"):
+        try:
+            value = json.loads(path.read_text(encoding="utf-8"))
+            if Path(value.get("project", {}).get("root", "")).resolve() == root:
+                matches.append((path.stat().st_mtime_ns, value))
+        except Exception:
+            continue
+    if not matches:
+        return set()
+    return {str(value) for value in max(matches, key=lambda item: item[0])[1]
+            .get("project_files", [])}
+
+
+def git_changed_files(
+    root: Path, *, cached: bool, paths: set[str] | None = None,
+) -> set[str] | None:
+    command = ["git", "diff", "--name-only", "-z"]
+    if cached:
+        command.append("--cached")
+    if paths:
+        command.extend(["--", *sorted(paths)])
+    completed = subprocess.run(
+        command, cwd=root, capture_output=True, check=False, timeout=30,
+    )
+    if completed.returncode != 0:
+        return None
+    return {
+        value.decode("utf-8", errors="surrogateescape")
+        for value in completed.stdout.split(b"\0") if value
+    }
+
+
+def is_project_upgrade_git_command(payload: dict, cwd: str) -> bool:
+    if str(payload.get("tool_name", "")) not in {"Bash", "exec_command", "shell"}:
+        return False
+    tool_input = payload.get("tool_input", {})
+    command = tool_input.get("command", tool_input.get("cmd", "")) \
+        if isinstance(tool_input, dict) else ""
+    try:
+        argv = shlex.split(command, posix=True)
+    except (TypeError, ValueError):
+        return False
+    if any(token in {";", "|", "||", "&&", ">", ">>", "<"} for token in argv):
+        return False
+    root = project_root(cwd)
+    planned = latest_plan_files(cwd)
+    if root is None or not planned:
+        return False
+    if argv in (
+        ["git", "status", "--short"],
+        ["git", "diff", "--stat"],
+        ["git", "diff", "--cached", "--stat"],
+    ):
+        return True
+    if len(argv) > 3 and argv[:3] == ["git", "diff", "--"]:
+        return set(argv[3:]) <= planned
+    if len(argv) > 4 and argv[:4] == ["git", "diff", "--cached", "--"]:
+        return set(argv[4:]) <= planned
+    if len(argv) > 3 and argv[:3] == ["git", "add", "--"]:
+        return set(argv[3:]) <= planned
+    if argv not in (
+        ["git", "commit", "-m", "chore: apply Agent Marketplace upgrade"],
+        ["git", "commit", "--message", "chore: apply Agent Marketplace upgrade"],
+    ):
+        return False
+    staged = git_changed_files(root, cached=True)
+    unstaged = git_changed_files(root, cached=False, paths=planned)
+    return staged == planned and unstaged == set()
+
+
 def deny(message: str) -> int:
     print(f"agentrof team gate: {message}", file=sys.stderr)
     return 2
@@ -147,10 +321,35 @@ def preflight(payload: dict) -> int:
         return 0
     if is_read_only_diagnostic(payload):
         return 0
+    if is_upgrade_command(payload):
+        return 0
     if str(payload.get("permission_mode", "")) == "plan":
         return deny(
             "state-changing team workflows cannot run in Plan mode. Switch to"
             " Code or Default mode; no files or project state were changed."
+        )
+    team = plugin_name()
+    register(team)
+    conflict = conflicting_team(str(payload.get("cwd", "")), team)
+    if conflict:
+        return deny(
+            f"this project is already managed by team '{conflict}'; only one"
+            " delivery team may own a project. No files or project state were changed."
+        )
+    current_upgrade = upgrade_status(str(payload.get("cwd", "")))
+    upgrade_code = str(current_upgrade.get("status", ""))
+    if upgrade_code in UPGRADE_STATUSES:
+        if upgrade_code == "PROJECT_UPGRADE_PR_PENDING" \
+                and is_project_upgrade_git_command(
+                    payload, str(payload.get("cwd", ""))
+                ):
+            return 0
+        blockers = current_upgrade.get("blockers", [])
+        detail = "; ".join(str(value) for value in blockers) if blockers else "none"
+        return deny(
+            f"{upgrade_code}: normal marketplace mutations are locked until"
+            " Agent Marketplace Upgrade completes. Invoke the PMO upgrade entry;"
+            f" current blockers: {detail}. No files or project state were changed."
         )
     session_id = str(payload.get("session_id", ""))
     if not session_ready(session_id):
@@ -170,14 +369,6 @@ def preflight(payload: dict) -> int:
             + recovery
             + ". No files or project state were changed."
         )
-    team = plugin_name()
-    conflict = conflicting_team(str(payload.get("cwd", "")), team)
-    if conflict:
-        return deny(
-            f"this project is already managed by team '{conflict}'; only one"
-            " delivery team may own a project. No files or project state were changed."
-        )
-    register(team)
     return 0
 
 
@@ -190,10 +381,21 @@ def main() -> int:
     team = plugin_name()
     if mode == "register":
         register(team)
+        current_upgrade = upgrade_status(str(payload.get("cwd", "")))
+        status = str(current_upgrade.get("status", ""))
+        context = f"AGENTROF_HOOKS_ACTIVE: {team}"
+        if refresh_session_readiness(str(payload.get("session_id", "")), status):
+            context += "\nAGENTROF_PMO_READY: project-management-office"
+        if status in UPGRADE_STATUSES:
+            context += (
+                f"\n{status}: normal marketplace work is locked. Start the"
+                " Agent Marketplace Upgrade entry in this session. It will show"
+                " readiness, blockers, and recovery guidance before any mutation."
+            )
         print(json.dumps({
             "hookSpecificOutput": {
                 "hookEventName": "SessionStart",
-                "additionalContext": f"AGENTROF_HOOKS_ACTIVE: {team}",
+                "additionalContext": context,
             }
         }))
         return 0

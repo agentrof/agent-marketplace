@@ -134,6 +134,15 @@ class ValidatorFixtureTests(unittest.TestCase):
                   VALID_AGENT)
             write(root / "plugins" / "second-team" / "skill-content" / "notes"
                   / "SKILL.md", VALID_SKILL)
+            write(root / "plugins" / "second-team" / "migrations"
+                  / "manifest.json", json.dumps({
+                      "schema_version": 1,
+                      "component": "second-team",
+                      "database": None,
+                      "project_contract": {
+                          "baseline": 1, "current": 1, "steps": [],
+                      },
+                  }, indent=2))
             codex_path = root / ".agents" / "plugins" / "marketplace.json"
             codex = json.loads(codex_path.read_text(encoding="utf-8"))
             codex["plugins"].append({

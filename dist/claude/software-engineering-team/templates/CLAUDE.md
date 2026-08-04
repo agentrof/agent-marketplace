@@ -1,14 +1,14 @@
 # Load
 
-@workspace/memory/me.md
+@{{workspace}}/memory/me.md
 
 ## Rules
 
-workspace/memory/me.md. Read and follow.
+{{workspace}}/memory/me.md. Read and follow.
 
 ## House rules
 
-- Two language axes live in workspace/config.json, both defaulting to
+- Two language axes live in {{workspace}}/config.json, both defaulting to
   English: output_language governs .md body prose; terminology_language
   governs names, technical terms, code and comments, commit messages
   and PR bodies. The machine layer (file names, branches, keys, ids,
@@ -23,13 +23,13 @@ workspace/memory/me.md. Read and follow.
 ## Team workspace
 
 This project is driven by the software-engineering-team plugin. Everything the team
-produces lives under `workspace/`:
+produces lives under `{{workspace}}/`:
 
-- `workspace/config.json`: project declaration; machine-managed, never
+- `{{workspace}}/config.json`: project declaration; machine-managed, never
   hand-edited. Change it through the configure entry.
-- `workspace/docs/`: the team's knowledge base (business-analysis,
+- `{{workspace}}/docs/`: the team's knowledge base (business-analysis,
   solution-design, system-architecture, design-system), maintained as
-  one vault: open `workspace/docs/` as the vault root (never the repo
+  one vault: open `{{workspace}}/docs/` as the vault root (never the repo
   root); on first open the vault app asks ONCE to trust the vendored
   community plugins (that click enables the title-based labels, each
   ending in its type designation from config.json's machine-managed
@@ -42,13 +42,13 @@ produces lives under `workspace/`:
   skill and vault_check.py own the law. Files opening with a
   generated-by marker (each tree's `decision-log.md`) are GENERATED
   views: re-rendered by their owning verbs, never hand-edited.
-- `workspace/apps/`: application code, one folder per application.
-- `workspace/environment/`: the containerized environment (definition,
+- `{{workspace}}/apps/`: application code, one folder per application.
+- `{{workspace}}/environment/`: the containerized environment (definition,
   build recipes, seed scenarios, contract document); devops-owned, one
   command brings the whole system up.
-- `workspace/demos/` and `workspace/sketches/`: outward demo packages and
+- `{{workspace}}/demos/` and `{{workspace}}/sketches/`: outward demo packages and
   design exploration previews.
-- `workspace/work-orders/`: work-order snapshots (brief, config,
+- `{{workspace}}/work-orders/`: work-order snapshots (brief, config,
   constitution); gitignored. Delivery state (work orders, the backlog
   of stories and its ordering, tasks, findings, the quality ledger)
   lives in the central PMO database, read through the PMO CLI.

@@ -104,6 +104,43 @@ def hook_payload(session_id: str, project: Path, event: str, tool: str = "") -> 
     return json.dumps(payload)
 
 
+def initialize_project(project: Path, team: str, env: dict[str, str]) -> None:
+    workspace = project / "workspace"
+    workspace.mkdir(parents=True)
+    (workspace / "config.json").write_text(
+        json.dumps({"team_id": team, "project_key": "smoke"}),
+        encoding="utf-8",
+    )
+    run(["git", "init", "--initial-branch=main", str(project)], env)
+    run(["git", "-C", str(project), "config", "user.name", "Agentrof Smoke"], env)
+    run([
+        "git", "-C", str(project), "config", "user.email",
+        "agentrof-smoke@example.invalid",
+    ], env)
+    run(["git", "-C", str(project), "add", "--", "workspace/config.json"], env)
+    run([
+        "git", "-C", str(project), "commit", "--no-gpg-sign", "-m",
+        "test: initialize smoke project",
+    ], env)
+
+
+def register_project_contract(
+    env: dict[str, str], pmo_root: Path, team_root: Path, project: Path, team: str,
+) -> None:
+    run([
+        sys.executable,
+        str(Path(env["AGENTROF_HOME"]) / "bin" / "agentrof_run.py"),
+        "register", "--plugin", team, "--root", str(team_root),
+    ], env)
+    run([
+        sys.executable, str(pmo_root / "scripts" / "pmo_cli.py"),
+        "project", "register", "--key", "smoke", "--name", "Smoke",
+        "--team", team,
+        "--stamp-config", str(project / "workspace" / "config.json"),
+        "--project-root", str(project), "--workspace", "workspace",
+    ], env)
+
+
 def assert_team_gate(
     env: dict[str, str], team_root: Path, project: Path, session_id: str,
     expected: int,
@@ -118,9 +155,21 @@ def assert_team_gate(
         timeout=30,
     )
     if completed.returncode != expected:
+        diagnostic = ""
+        launcher = Path(env.get("AGENTROF_HOME", "")) / "bin" / "pmo_cli.py"
+        if launcher.is_file():
+            inspected = subprocess.run(
+                [sys.executable, str(launcher), "upgrade", "status",
+                 "--project-root", str(project), "--json"],
+                capture_output=True, text=True, env=env, check=False, timeout=30,
+            )
+            diagnostic = (
+                f"\nupgrade status ({inspected.returncode}):\n"
+                f"{inspected.stdout}{inspected.stderr}"
+            )
         raise SmokeFailure(
             f"team preflight returned {completed.returncode}, expected {expected}:\n"
-            f"{completed.stderr}"
+            f"{completed.stderr}{diagnostic}"
         )
 
 
@@ -225,11 +274,7 @@ def smoke_claude(
                 "AGENTROF_HOME": str(state_root / "agentrof"),
             }
             project = state_root / "project"
-            (project / ".git").mkdir(parents=True)
-            (project / "workspace").mkdir()
-            (project / "workspace" / "config.json").write_text(
-                json.dumps({"managed_by": team}), encoding="utf-8"
-            )
+            initialize_project(project, team, env)
             run([
                 "claude", "plugin", "marketplace", "add",
                 str(marketplace_source or root),
@@ -245,7 +290,24 @@ def smoke_claude(
             team_root = plugin_install_path(installed, team, "claude")
             pmo_root = plugin_install_path(installed, PMO, "claude")
             assert_team_gate(env, team_root, project, "missing-pmo", 2)
+            first_setup = json.loads(run([
+                sys.executable,
+                str(team_root / "scripts" / "generate_claude_project.py"),
+                "apply", "--project-root", str(project),
+                "--workspace", "workspace",
+            ], env))
+            if not first_setup.get("changes"):
+                raise SmokeFailure("Claude project generator wrote no managed surface")
+            second_setup = json.loads(run([
+                sys.executable,
+                str(team_root / "scripts" / "generate_claude_project.py"),
+                "apply", "--project-root", str(project),
+                "--workspace", "workspace",
+            ], env))
+            if second_setup.get("changes") != []:
+                raise SmokeFailure("Claude project generator is not idempotent")
             mark_pmo_ready(env, pmo_root, project, "ready-pmo")
+            register_project_contract(env, pmo_root, team_root, project, team)
             assert_team_gate(env, team_root, project, "ready-pmo", 0)
             run(["claude", "plugin", "disable", f"{team}@{MARKETPLACE}"], env)
             run(["claude", "plugin", "disable", f"{PMO}@{MARKETPLACE}"], env)
@@ -284,11 +346,7 @@ def smoke_codex(
                 "AGENTROF_HOME": str(state_root / "agentrof"),
             }
             project = state_root / "project"
-            (project / ".git").mkdir(parents=True)
-            (project / "workspace").mkdir()
-            (project / "workspace" / "config.json").write_text(
-                json.dumps({"managed_by": team}), encoding="utf-8"
-            )
+            initialize_project(project, team, env)
             run([
                 "codex", "plugin", "marketplace", "add",
                 str(marketplace_source or root), "--json",
@@ -321,8 +379,6 @@ def smoke_codex(
             ], env))
             assert_enabled(inventory, {PMO, team}, "codex")
             pmo_root = plugin_install_path(inventory, PMO, "codex")
-            mark_pmo_ready(env, pmo_root, project, "ready-pmo")
-            assert_team_gate(env, team_root, project, "ready-pmo", 0)
             first_setup = json.loads(run([
                 sys.executable,
                 str(team_root / "scripts" / "generate_codex_project.py"),
@@ -337,6 +393,9 @@ def smoke_codex(
             ], env))
             if second_setup.get("written") != []:
                 raise SmokeFailure("Codex project generator is not idempotent")
+            mark_pmo_ready(env, pmo_root, project, "ready-pmo")
+            register_project_contract(env, pmo_root, team_root, project, team)
+            assert_team_gate(env, team_root, project, "ready-pmo", 0)
             skills = codex_skills(env, project)
             names = {entry.get("name", "") for entry in skills}
             expected_entries = {

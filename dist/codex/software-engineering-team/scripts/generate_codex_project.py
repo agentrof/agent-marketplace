@@ -146,15 +146,18 @@ def merge_agents_md(existing: str, block: str, team: str) -> str:
     return existing[:start] + managed + existing[end:]
 
 
-def configured_team(project_root: Path) -> str:
-    config = project_root / "workspace" / "config.json"
+def configured_team(project_root: Path, workspace: str) -> str:
+    config = project_root / workspace / "config.json"
     try:
-        value = json.loads(config.read_text(encoding="utf-8")).get("managed_by", "")
-        return str(value)
+        data = json.loads(config.read_text(encoding="utf-8"))
+        value = data.get("team_id") or data.get("managed_by", "")
+        value = str(value)
+        suffix = " plugin; change only through the configure entry"
+        return value[:-len(suffix)] if value.endswith(suffix) else value
     except FileNotFoundError:
         return ""
     except Exception as exc:
-        raise ValueError(f"workspace/config.json is unreadable: {exc}") from exc
+        raise ValueError(f"{workspace}/config.json is unreadable: {exc}") from exc
 
 
 def materialize(
@@ -164,7 +167,7 @@ def materialize(
     writer: Callable[[Path, str], None] = atomic_write,
 ) -> list[Path]:
     team = plugin_name(plugin_root)
-    configured = configured_team(project_root)
+    configured = configured_team(project_root, workspace)
     if configured and configured != team:
         raise ValueError(
             f"project is managed by team {configured!r}; only one delivery team may own it"
@@ -175,6 +178,8 @@ def materialize(
     collisions: list[Path] = []
     if agents_dir.is_dir():
         for target in sorted(agents_dir.glob("*.toml")):
+            if target.is_symlink():
+                raise ValueError(f"managed Codex agent target is a symbolic link: {target}")
             try:
                 first = target.read_text(
                     encoding="utf-8", errors="replace"

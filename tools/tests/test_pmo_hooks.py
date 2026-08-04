@@ -5,6 +5,7 @@ PreToolUse as emitted by the host)."""
 from __future__ import annotations
 
 import json
+import hashlib
 import os
 import sqlite3
 import subprocess
@@ -199,7 +200,7 @@ class PmoHookTests(unittest.TestCase):
         self.assertEqual(code, 0, err)
         context = json.loads(out)["hookSpecificOutput"]["additionalContext"]
         self.assertIn("AGENTROF_HOOKS_ACTIVE: project-management-office", context)
-        self.assertIn("AGENTROF_PMO_UNAVAILABLE", context)
+        self.assertIn("AGENTROF_UPGRADE_REQUIRED_BLOCKED", context)
         self.assertNotIn("AGENTROF_PMO_READY", context)
 
     def test_session_start_clock_only_outside_projects(self):
@@ -328,6 +329,42 @@ class PmoHookTests(unittest.TestCase):
                         "content": "x"},
         ), self.env)
         self.assertEqual(code, 0)
+
+    def test_guard_locks_normal_pmo_commands_when_upgrade_is_required(self):
+        sessions = Path(self.env["AGENTROF_HOME"]) / "sessions"
+        sessions.mkdir(parents=True, exist_ok=True)
+        state = sessions / (hashlib.sha256(b"s1").hexdigest() + ".json")
+        state.write_text(json.dumps({
+            "session_id": "s1",
+            "pmo_ready": False,
+            "upgrade_status": "AGENTROF_UPGRADE_REQUIRED_READY",
+        }), encoding="utf-8")
+        code, _, err = run_hook("hook_guard_db.py", self.payload(
+            hook_event_name="PreToolUse", tool_name="Bash",
+            tool_input={"command": "pmo_cli.py issue list"},
+        ), self.env)
+        self.assertEqual(code, 2)
+        self.assertIn("AGENTROF_UPGRADE_REQUIRED_READY", err)
+        launcher = Path(self.env["AGENTROF_HOME"]) / "bin" / "pmo_cli.py"
+        code, _, err = run_hook("hook_guard_db.py", self.payload(
+            hook_event_name="PreToolUse", tool_name="Bash",
+            tool_input={"command": f"{launcher} upgrade status --json"},
+        ), self.env)
+        self.assertEqual(code, 0, err)
+        for command in (
+            "touch upgrade status",
+            "/tmp/pmo_cli.py upgrade status",
+            f"{launcher} issue upgrade status",
+            f"{launcher} upgrade unknown",
+            f"{launcher} upgrade status && touch change.txt",
+        ):
+            with self.subTest(command=command):
+                code, _, err = run_hook("hook_guard_db.py", self.payload(
+                    hook_event_name="PreToolUse", tool_name="Bash",
+                    tool_input={"command": command},
+                ), self.env)
+                self.assertEqual(code, 2)
+                self.assertIn("AGENTROF_UPGRADE_REQUIRED_READY", err)
 
     def guard(self, path: Path, tool="Write"):
         return run_hook("hook_guard_db.py", self.payload(
@@ -584,6 +621,20 @@ class PmoHookTests(unittest.TestCase):
         self.write_config(terminology_language="Turkish")
         code, _, err = run_hook("hook_guard_db.py", self.payload(
             hook_event_name="PreToolUse", tool_name="Bash", tool_use_id="b7",
+            tool_input={"command": 'git commit -m "müşteri modülü"'},
+        ), self.env)
+        self.assertEqual(code, 0, err)
+
+    def test_guard_discovers_alternative_workspace(self):
+        workspace = self.project_root / "workspace"
+        alternative = self.project_root / "knowledge"
+        workspace.rename(alternative)
+        config = alternative / "config.json"
+        value = json.loads(config.read_text(encoding="utf-8"))
+        value["terminology_language"] = "Turkish"
+        config.write_text(json.dumps(value), encoding="utf-8")
+        code, _, err = run_hook("hook_guard_db.py", self.payload(
+            hook_event_name="PreToolUse", tool_name="Bash", tool_use_id="b7a",
             tool_input={"command": 'git commit -m "müşteri modülü"'},
         ), self.env)
         self.assertEqual(code, 0, err)

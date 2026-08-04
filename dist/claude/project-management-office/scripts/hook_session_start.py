@@ -12,6 +12,7 @@ from pathlib import Path
 
 import hook_common
 import pmo_cli
+import upgrade_core
 
 
 def clock_line() -> str:
@@ -84,22 +85,30 @@ def resume_lines(payload) -> list[str]:
 def main() -> int:
     payload = hook_common.normalize_payload(hook_common.read_payload())
     bootstrap_ready = False
-    try:
-        initialized = hook_common.run_cli(["init-db"])
-        synced = hook_common.run_cli(["sync-launcher"])
-        bootstrap_ready = initialized == 0 and synced == 0
-    except Exception as exc:
-        hook_common.log(f"session_start bootstrap failed: {exc}")
+    upgrade = {"status": upgrade_core.STATUS_BLOCKED, "blockers": []}
     try:
         hook_common.register_plugin_root(
             "project-management-office",
             Path(__file__).resolve().parents[1],
         )
+        synced = hook_common.run_cli(["sync-launcher", "--force"])
+        version = upgrade_core.database_version(pmo_cli.db_path())
+        initialized = hook_common.run_cli(["init-db"]) \
+            if version in (0, pmo_cli.SCHEMA_VERSION) else 1
+        upgrade = upgrade_core.status(
+            pmo_cli.data_dir(), pmo_cli.db_path(), pmo_cli.SCHEMA_VERSION,
+            None,
+        )
+        bootstrap_ready = (
+            initialized == 0 and synced == 0
+            and upgrade["status"] == upgrade_core.STATUS_CURRENT
+        )
     except Exception as exc:
-        hook_common.log(f"session_start registration failed: {exc}")
+        hook_common.log(f"session_start bootstrap failed: {exc}")
     try:
         hook_common.write_session_readiness(
-            str(payload.get("session_id", "")), bootstrap_ready
+            str(payload.get("session_id", "")), bootstrap_ready,
+            str(upgrade.get("status", "")),
         )
     except Exception as exc:
         bootstrap_ready = False
@@ -123,12 +132,21 @@ def main() -> int:
     if bootstrap_ready:
         lines.append("AGENTROF_PMO_READY: project-management-office")
     else:
-        lines.append(
-            "AGENTROF_PMO_UNAVAILABLE: bootstrap failed; no team workflow may"
-            " mutate state. Inspect the PMO hook log and retry in a new session."
-        )
+        upgrade_code = str(upgrade.get("status", ""))
+        if upgrade_code.startswith("AGENTROF_UPGRADE"):
+            lines.append(
+                f"{upgrade_code}: normal marketplace work is locked. Invoke the"
+                " Agent Marketplace Upgrade entry for readiness, blocker, and"
+                " recovery guidance. No project mutation was performed."
+            )
+        else:
+            lines.append(
+                "AGENTROF_PMO_UNAVAILABLE: bootstrap failed; no team workflow may"
+                " mutate state. Inspect the PMO hook log and retry in a new session."
+            )
     try:
-        lines.extend(resume_lines(payload))
+        if bootstrap_ready:
+            lines.extend(resume_lines(payload))
     except Exception as exc:
         hook_common.log(f"session_start resume-info failed: {exc}")
     print(json.dumps({

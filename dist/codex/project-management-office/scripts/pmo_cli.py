@@ -2610,6 +2610,7 @@ def cmd_upgrade_status(args) -> int:
         result = upgrade_core.status(
             data_dir(), db_path(), SCHEMA_VERSION,
             upgrade_project_root(args) or None,
+            exclude_session_id=args.exclude_session_id,
         )
     except upgrade_core.UpgradeError as exc:
         raise Rule(str(exc)) from exc
@@ -2654,6 +2655,17 @@ def cmd_upgrade_recover(args) -> int:
     try:
         result = upgrade_core.recover(
             data_dir(), db_path(), SCHEMA_VERSION, args.run_id,
+        )
+    except upgrade_core.UpgradeError as exc:
+        raise Rule(str(exc)) from exc
+    print(json.dumps(result, indent=2, sort_keys=True))
+    return 0
+
+
+def cmd_upgrade_session_release(args) -> int:
+    try:
+        result = upgrade_core.release_session(
+            data_dir(), args.session_id, args.confirm_closed,
         )
     except upgrade_core.UpgradeError as exc:
         raise Rule(str(exc)) from exc
@@ -2709,6 +2721,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p = upgrade.add_parser("status")
     p.add_argument("--project-root", default="")
+    p.add_argument("--exclude-session-id", default="")
     p.add_argument("--json", action="store_true")
     p.set_defaults(func=cmd_upgrade_status)
     p = upgrade.add_parser("plan")
@@ -2720,6 +2733,10 @@ def build_parser() -> argparse.ArgumentParser:
     p = upgrade.add_parser("recover")
     p.add_argument("--run-id", required=True)
     p.set_defaults(func=cmd_upgrade_recover)
+    p = upgrade.add_parser("session-release")
+    p.add_argument("--session-id", required=True)
+    p.add_argument("--confirm-closed", action="store_true")
+    p.set_defaults(func=cmd_upgrade_session_release)
 
     project = sub.add_parser("project").add_subparsers(dest="subcommand", required=True)
     p = project.add_parser("register")

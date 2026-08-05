@@ -33,6 +33,9 @@ UPGRADE_STATUSES = {
     "AGENT_MARKETPLACE_UPGRADING",
     "AGENT_MARKETPLACE_PROJECT_UPGRADE_PR_PENDING",
 }
+UPGRADE_BRANCH_RE = re.compile(
+    r"^agent-marketplace/upgrade-[a-z0-9][a-z0-9._-]*$"
+)
 
 
 def data_dir() -> Path:
@@ -141,14 +144,17 @@ def register(team: str) -> None:
     )
 
 
-def upgrade_status(cwd: str) -> dict:
+def upgrade_status(cwd: str, session_id: str = "") -> dict:
     launcher = data_dir() / "bin" / "pmo_cli.py"
     root = project_root(cwd)
     if not launcher.is_file() or root is None:
         return {}
+    command = [sys.executable, str(launcher), "upgrade", "status",
+               "--project-root", str(root), "--json"]
+    if session_id:
+        command.extend(["--exclude-session-id", session_id])
     completed = subprocess.run(
-        [sys.executable, str(launcher), "upgrade", "status",
-         "--project-root", str(root), "--json"],
+        command,
         capture_output=True, text=True, check=False, timeout=60,
     )
     try:
@@ -211,7 +217,53 @@ def is_upgrade_command(payload: dict) -> bool:
     if offset == 0:
         return False
     return len(argv) > offset + 1 and argv[offset] == "upgrade" \
-        and argv[offset + 1] in {"status", "plan", "apply", "recover"}
+        and argv[offset + 1] in {
+            "status", "plan", "apply", "recover", "session-release",
+        }
+
+
+def is_upgrade_branch_command(payload: dict, cwd: str, status: dict) -> bool:
+    blockers = {str(value) for value in status.get("blockers", [])}
+    branch_blockers = {
+        value for value in blockers if value.startswith("UPGRADE_BRANCH_REQUIRED:")
+    }
+    if not branch_blockers or blockers != branch_blockers:
+        return False
+    if str(payload.get("tool_name", "")) not in {"Bash", "exec_command", "shell"}:
+        return False
+    tool_input = payload.get("tool_input", {})
+    command = tool_input.get("command", tool_input.get("cmd", "")) \
+        if isinstance(tool_input, dict) else ""
+    try:
+        argv = shlex.split(command, posix=True)
+    except (TypeError, ValueError):
+        return False
+    if len(argv) != 4 or argv[:3] not in (
+        ["git", "switch", "-c"], ["git", "checkout", "-b"],
+    ):
+        return False
+    return bool(UPGRADE_BRANCH_RE.fullmatch(argv[3])) and project_root(cwd) is not None
+
+
+def is_upgrade_target_command(payload: dict, cwd: str, status: dict) -> bool:
+    blockers = {str(value) for value in status.get("blockers", [])}
+    target_blockers = {
+        value for value in blockers if value.startswith("UPGRADE_TARGET_REQUIRED:")
+    }
+    if len(target_blockers) != 1 or blockers != target_blockers:
+        return False
+    if str(payload.get("tool_name", "")) not in {"Bash", "exec_command", "shell"}:
+        return False
+    tool_input = payload.get("tool_input", {})
+    command = tool_input.get("command", tool_input.get("cmd", "")) \
+        if isinstance(tool_input, dict) else ""
+    try:
+        argv = shlex.split(command, posix=True)
+    except (TypeError, ValueError):
+        return False
+    target = next(iter(target_blockers)).split(":", 1)[1]
+    return argv in (["git", "switch", target], ["git", "checkout", target]) \
+        and project_root(cwd) is not None
 
 
 def latest_plan_files(cwd: str) -> set[str]:
@@ -273,6 +325,17 @@ def is_project_upgrade_git_command(payload: dict, cwd: str) -> bool:
         ["git", "diff", "--stat"],
         ["git", "diff", "--cached", "--stat"],
     ):
+        return True
+    branch = subprocess.run(
+        ["git", "symbolic-ref", "--short", "-q", "HEAD"], cwd=root,
+        capture_output=True, text=True, check=False, timeout=30,
+    ).stdout.strip()
+    if argv in (
+        ["git", "push", "-u", "origin", branch],
+        ["git", "push", "--set-upstream", "origin", branch],
+    ):
+        return bool(branch and UPGRADE_BRANCH_RE.fullmatch(branch))
+    if len(argv) >= 3 and argv[:3] == ["gh", "pr", "create"]:
         return True
     if len(argv) > 3 and argv[:3] == ["git", "diff", "--"]:
         return set(argv[3:]) <= planned
@@ -337,9 +400,16 @@ def preflight(payload: dict) -> int:
             f"this project is already managed by team '{conflict}'; only one"
             " delivery team may own a project. No files or project state were changed."
         )
-    current_upgrade = upgrade_status(str(payload.get("cwd", "")))
+    session_id = str(payload.get("session_id", ""))
+    current_upgrade = upgrade_status(str(payload.get("cwd", "")), session_id)
     upgrade_code = str(current_upgrade.get("status", ""))
     if upgrade_code in UPGRADE_STATUSES:
+        if is_upgrade_branch_command(
+            payload, str(payload.get("cwd", "")), current_upgrade
+        ) or is_upgrade_target_command(
+            payload, str(payload.get("cwd", "")), current_upgrade
+        ):
+            return 0
         if upgrade_code == "AGENT_MARKETPLACE_PROJECT_UPGRADE_PR_PENDING" \
                 and is_project_upgrade_git_command(
                     payload, str(payload.get("cwd", ""))
@@ -352,7 +422,6 @@ def preflight(payload: dict) -> int:
             " Agent Marketplace Upgrade completes. Invoke the PMO upgrade entry;"
             f" current blockers: {detail}. No files or project state were changed."
         )
-    session_id = str(payload.get("session_id", ""))
     if not session_ready(session_id):
         root = plugin_root()
         if (root / ".codex-plugin" / "plugin.json").is_file():
@@ -382,7 +451,9 @@ def main() -> int:
     team = plugin_name()
     if mode == "register":
         register(team)
-        current_upgrade = upgrade_status(str(payload.get("cwd", "")))
+        current_upgrade = upgrade_status(
+            str(payload.get("cwd", "")), str(payload.get("session_id", ""))
+        )
         status = str(current_upgrade.get("status", ""))
         context = f"AGENT_MARKETPLACE_HOOKS_ACTIVE: {team}"
         if refresh_session_readiness(str(payload.get("session_id", "")), status):

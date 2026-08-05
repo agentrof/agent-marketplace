@@ -79,6 +79,9 @@ BRANCH_NAME_RES = (
     re.compile(r"\bgit\b[^|&;]*\bbranch\s+([^\s|&;]+)"),
     re.compile(r"\bgit\b[^|&;]*\bworktree\s+add\b[^|&;]*\s-b\s+([^\s|&;]+)"),
 )
+UPGRADE_BRANCH_RE = re.compile(
+    r"^agent-marketplace/upgrade-[a-z0-9][a-z0-9._-]*$"
+)
 
 
 def deny(message: str) -> int:
@@ -127,7 +130,64 @@ def is_upgrade_cli_command(payload: dict) -> bool:
     if offset == 0:
         return False
     return len(argv) > offset + 1 and argv[offset] == "upgrade" \
-        and argv[offset + 1] in {"status", "plan", "apply", "recover"}
+        and argv[offset + 1] in {
+            "status", "plan", "apply", "recover", "session-release",
+        }
+
+
+def fresh_upgrade_status(payload: dict) -> dict:
+    resolved = hook_common.resolve_project(str(payload.get("cwd", "")))
+    project = resolved[1] if resolved is not None else None
+    try:
+        return hook_common.pmo_cli.upgrade_core.status(
+            hook_common.pmo_cli.data_dir(), hook_common.pmo_cli.db_path(),
+            hook_common.pmo_cli.SCHEMA_VERSION, project,
+            exclude_session_id=str(payload.get("session_id", "")),
+        )
+    except Exception as exc:
+        return {
+            "status": "AGENT_MARKETPLACE_UPGRADE_REQUIRED_BLOCKED",
+            "blockers": [f"UPGRADE_STATUS_UNAVAILABLE:{exc}"],
+        }
+
+
+def is_upgrade_branch_command(payload: dict, status: dict) -> bool:
+    blockers = {str(value) for value in status.get("blockers", [])}
+    branch_blockers = {
+        value for value in blockers if value.startswith("UPGRADE_BRANCH_REQUIRED:")
+    }
+    if not branch_blockers or blockers != branch_blockers \
+            or payload.get("tool_name") != "Bash":
+        return False
+    tool_input = payload.get("tool_input", {})
+    command = tool_input.get("command", "") if isinstance(tool_input, dict) else ""
+    try:
+        argv = shlex.split(command, posix=True)
+    except (TypeError, ValueError):
+        return False
+    return bool(
+        len(argv) == 4
+        and argv[:3] in (["git", "switch", "-c"], ["git", "checkout", "-b"])
+        and UPGRADE_BRANCH_RE.fullmatch(argv[3])
+    )
+
+
+def is_upgrade_target_command(payload: dict, status: dict) -> bool:
+    blockers = {str(value) for value in status.get("blockers", [])}
+    target_blockers = {
+        value for value in blockers if value.startswith("UPGRADE_TARGET_REQUIRED:")
+    }
+    if len(target_blockers) != 1 or blockers != target_blockers \
+            or payload.get("tool_name") != "Bash":
+        return False
+    tool_input = payload.get("tool_input", {})
+    command = tool_input.get("command", "") if isinstance(tool_input, dict) else ""
+    try:
+        argv = shlex.split(command, posix=True)
+    except (TypeError, ValueError):
+        return False
+    target = next(iter(target_blockers)).split(":", 1)[1]
+    return argv in (["git", "switch", target], ["git", "checkout", target])
 
 
 def frontmatter_locked(target: Path) -> bool:
@@ -310,10 +370,22 @@ def guard_bash(tool_input: dict, cwd: str) -> int:
 
 def main() -> int:
     payload = hook_common.normalize_payload(hook_common.read_payload())
-    upgrade_status = session_upgrade_status(payload)
+    cached_upgrade = session_upgrade_status(payload)
+    current_upgrade = fresh_upgrade_status(payload) if cached_upgrade else {}
+    upgrade_status = (
+        str(current_upgrade.get("status", ""))
+        if cached_upgrade == "AGENT_MARKETPLACE_CURRENT" else cached_upgrade
+    )
     if upgrade_status and upgrade_status != "AGENT_MARKETPLACE_CURRENT":
         if is_upgrade_cli_command(payload):
-            pass
+            hook_common.write_session_readiness(
+                str(payload.get("session_id", "")), False, upgrade_status,
+            )
+        elif is_upgrade_branch_command(payload, current_upgrade) \
+                or is_upgrade_target_command(payload, current_upgrade):
+            hook_common.write_session_readiness(
+                str(payload.get("session_id", "")), False, upgrade_status,
+            )
         elif upgrade_status == "AGENT_MARKETPLACE_PROJECT_UPGRADE_PR_PENDING" \
                 and payload.get("tool_name") == "Bash":
             # The team guard performs exact planned-path git validation.
@@ -365,6 +437,18 @@ def guard_file(written: dict, payload: dict) -> int:
             "the PMO database is written only through the PMO CLI;"
             " direct file writes are not allowed. Use the CLI subcommands."
         )
+    resolved = hook_common.resolve_project(cwd)
+    if resolved is not None:
+        project_state = (
+            Path(resolved[1]).resolve() / ".agentrof"
+            / "agent-marketplace" / "project.json"
+        )
+        if target == project_state:
+            return deny(
+                "the Agent Marketplace project state is machine-owned and"
+                " written only through PMO setup or upgrade commands; direct"
+                " file writes are not allowed."
+            )
     if "_generated" in target.parts:
         return deny(
             "this path is inside a _generated directory, which is"
@@ -411,7 +495,6 @@ def guard_file(written: dict, payload: dict) -> int:
         rel = project_relative(target, str(payload.get("cwd", "")))
     except Exception:
         rel = None
-    resolved = hook_common.resolve_project(cwd)
     workspace = hook_common.project_workspace(Path(resolved[1])) \
         if resolved is not None else ""
     if rel is None or not rel.parts or rel.parts[0] != workspace:

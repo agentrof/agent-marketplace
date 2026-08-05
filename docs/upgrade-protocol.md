@@ -11,13 +11,19 @@ adapters change only the native question and project-instruction surfaces.
    update mechanism.
 2. Finish or release active work orders and task attempts. Close other
    Agent Marketplace sessions and leave the project checkout clean.
-3. Start a new session at the project git root.
-4. Invoke `/project-management-office:upgrade` on Claude or
+3. When the repository has an origin remote, work from an
+   `agent-marketplace/upgrade-*` branch created from the configured target.
+   Status first requires a clean return to the target when necessary, then
+   blocks apply there until the dedicated upgrade branch is created.
+4. Start a new session at the project git root.
+5. Invoke `/project-management-office:upgrade` on Claude or
    `$project-management-office:upgrade` on Codex.
-5. Review status. If ready, approve plan creation, inspect the exact plan, and
+6. Review status. If ready, approve plan creation, inspect the exact plan, and
    approve apply separately.
-6. After success, close the session and start another fresh session before
-   normal marketplace work.
+7. After apply, close the session. In a fresh session on the same branch,
+   review, commit and push only the planned files, then open the upgrade pull
+   request. Normal marketplace work remains locked until the target branch
+   contains that revision and a fresh session starts there.
 
 Skipping stable releases is supported when the installed migration catalogs
 contain a continuous step-by-step chain from the recorded contract to the
@@ -35,13 +41,19 @@ downgrades fail closed.
 | `AGENT_MARKETPLACE_UPGRADING` | The maintenance lock has an owner. | No competing mutation. |
 | `AGENT_MARKETPLACE_UPGRADE_RECOVERY_REQUIRED` | A durable journal is incomplete. | Recorded recovery only. |
 | `AGENT_MARKETPLACE_UPGRADE_COMPLETE_RESTART_REQUIRED` | Apply completed against pre-upgrade session context. | Fresh session required. |
-| `AGENT_MARKETPLACE_PROJECT_UPGRADE_PR_PENDING` | Managed project changes await a review commit and pull request. | Exact planned git paths only. |
+| `AGENT_MARKETPLACE_PROJECT_UPGRADE_PR_PENDING` | Managed changes are not yet on the configured target branch. | Exact review, commit, push and PR operations only. |
 
 `PROJECT_CONTRACT_DRIFT` identifies a marker-owned field or block changed
 outside its owner. It is never repaired silently. A dirty checkout, active or
 frozen work, competing session, path collision, symbolic link, missing adapter,
 package provenance failure, cross-host version mismatch, insufficient disk,
 database integrity error, stale plan, or downgrade also blocks apply.
+
+Session blockers include their exact session id and last readiness timestamp.
+If a host crashed before SessionEnd, the owner first verifies that session is
+closed, approves the guidance gate, then uses `upgrade session-release
+--session-id <id> --confirm-closed`. The command cannot release an unnamed
+session and refuses without the explicit confirmation flag.
 
 ## Writer boundary
 
@@ -66,11 +78,14 @@ otherwise at `${AGENTROF_HOME:-$HOME/.agentrof}/agent-marketplace`. The PMO
 database is `pmo.db`; logs, sessions, locks, plugin roots, plans, journals and
 backups remain inside that product root.
 
-After apply, the guard admits only read-only diff inspection, exact planned-file
-staging, and the fixed upgrade commit while `AGENT_MARKETPLACE_PROJECT_UPGRADE_PR_PENDING` is
-active. Other marketplace mutations remain locked. Once that commit changes the
-project revision, the upgrade pull request can be opened through the normal host
-workflow. Normal work resumes only from the merged revision in a fresh session.
+After apply, the pre-upgrade session admits no finalization work. A fresh
+session on the same upgrade branch admits only read-only diff inspection, exact
+planned-file staging, the fixed upgrade commit, its branch push and pull-request
+creation while `AGENT_MARKETPLACE_PROJECT_UPGRADE_PR_PENDING` is active. Other
+marketplace mutations remain locked. A feature-branch commit does not clear the
+status. Normal work resumes only when the configured target branch's project
+state contains the exact managed upgrade identity. Descendant work branches then
+remain current instead of re-entering PR-pending state.
 
 ## Database safety and recovery
 
@@ -82,10 +97,19 @@ writer-epoch installation before the same migration commits to the live database
 as one transaction. The schema migration ledger is exactly-once evidence, not a
 reason to skip checksum validation.
 
-The journal advances by durable phases. Failure before database commit rolls
-back without entering recovery. Failure after commit preserves maintenance
-mode, backup, before-images, and run id. The recovery command resumes only that
-recorded plan. It does not invent a new chain or delete evidence.
+The journal advances by durable phases. Failure before database commit or
+project application rolls back without entering recovery. Once project
+application begins, any failure enters recovery even when the adapter restores
+its before-images or no database schema migration was needed. This conservative
+boundary covers partial adapter writes and the following identity sync. Failure
+after that boundary preserves maintenance mode, backup, before-images, and run id.
+The recovery command resumes only that recorded plan. It does not invent a new
+chain or delete evidence.
+
+The upgrade lock records its host and process id. Recovery reclaims it only
+when the owner belongs to the same host and the operating system proves that
+process no longer exists. A live, foreign-host or unreadable owner remains
+fail-closed.
 
 ## If plugins were updated but upgrade was not run
 

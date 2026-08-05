@@ -147,6 +147,15 @@ for the first topic, `solution-design` for the system foundations,
 > start a new session and invoke Agent Marketplace Upgrade. Normal marketplace
 > mutations remain locked while an upgrade or recovery is required.
 
+Repositories with an origin remote return cleanly to their configured target,
+then apply upgrades from an `agent-marketplace/upgrade-*` branch created there.
+Apply requires a fresh session afterward;
+that session owns the exact managed-file commit, push and pull request. A branch
+commit alone does not unlock the marketplace. Normal work resumes only from the
+updated target branch in another fresh session. If a host crashed before its
+SessionEnd hook, the upgrade entry shows the blocking session id and offers the
+owner-confirmed `session-release` recovery step.
+
 Claude users invoke `/project-management-office:upgrade`; Codex users select
 `project-management-office:upgrade` or invoke `$project-management-office:upgrade`.
 The entry first performs a read-only status check, shows one readiness or

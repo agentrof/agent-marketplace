@@ -99,6 +99,7 @@ and restart rules. `{{workspace}}` means the chosen workspace directory name.
    verb (one --set per type): the designation keys and their history
    ledger are hook-guarded with the verb as sole writer. An unsupported
    stack is refused honestly: tested stacks only.
+   During first setup, `project_key` stays absent: only the matching-team, no-state, no-key window is bootstrap; step 6 closes it, while a keyed config without a contract fails closed into Agent Marketplace Upgrade.
 6. PMO backbone: with the CLI resolved in step 1, register the
    project: project register --key <kebab project name> --name "<name>"
    --team software-engineering-team --stamp-config workspace/config.json
@@ -116,5 +117,4 @@ and restart rules. `{{workspace}}` means the chosen workspace directory name.
    routed to the organize-docs entry, the on-demand full-vault
    reorganization (scoped stewardship at each docs gate still repairs
    its own subtree). Then the pointers: business-analysis first,
-   solution-design for foundations, design-system before screen work,
-   then deliver.
+   solution-design for foundations, design-system before screen work, then deliver.

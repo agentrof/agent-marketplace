@@ -6,6 +6,7 @@ import hashlib
 import importlib.util
 import json
 import os
+import socket
 import sqlite3
 import subprocess
 import sys
@@ -176,6 +177,34 @@ class UpgradeLifecycleTests(unittest.TestCase):
             "version": version,
             "files": files,
         }, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+    def complete_upgrade_and_commit(self):
+        plan = json.loads(self.cli(
+            "upgrade", "plan", "--project-root", str(self.project)
+        ).stdout)
+        UPGRADE.apply(self.home, self.home / "pmo.db", 4, plan["plan_id"])
+        run(["git", "add", "."], cwd=self.project)
+        committed = run([
+            "git", "commit", "-qm", "chore: apply Agent Marketplace upgrade"
+        ], cwd=self.project)
+        self.assertEqual(committed.returncode, 0, committed.stderr)
+        return plan
+
+    def install_team_version(self, version: str):
+        registry = self.registry()
+        for host in ("claude", "codex"):
+            package = self.copy_package(host, TEAM)
+            manifest_path = package / f".{host}-plugin" / "plugin.json"
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            manifest["version"] = version
+            manifest_path.write_text(
+                json.dumps(manifest, indent=2) + "\n", encoding="utf-8"
+            )
+            self.rewrite_provenance(package, host, TEAM, version)
+            registry["plugins"][TEAM]["hosts"][host].update({
+                "root": str(package), "version": version,
+            })
+        self.save_registry(registry)
 
     def status(self):
         result = self.cli(
@@ -563,6 +592,267 @@ class UpgradeLifecycleTests(unittest.TestCase):
         after = json.loads(journal_path.read_text())["project_snapshots"]
         self.assertEqual(after, before)
         self.assertIn("# User recovery note", claude.read_text(encoding="utf-8"))
+
+    def test_project_only_failure_enters_recovery_instead_of_false_rollback(self):
+        self.complete_upgrade_and_commit()
+        self.install_team_version("99.0.0")
+        plan = json.loads(self.cli(
+            "upgrade", "plan", "--project-root", str(self.project)
+        ).stdout)
+        self.assertEqual(plan["database_schema"], 4)
+        state_path = (
+            self.project / ".agentrof" / "agent-marketplace" / "project.json"
+        )
+
+        with mock.patch.object(
+            UPGRADE, "sync_project_identity",
+            side_effect=UPGRADE.UpgradeError("injected identity failure"),
+        ):
+            with self.assertRaisesRegex(UPGRADE.UpgradeError, "identity"):
+                UPGRADE.apply(
+                    self.home, self.home / "pmo.db", 4, plan["plan_id"]
+                )
+
+        maintenance = json.loads((self.home / "maintenance.json").read_text())
+        run_id = maintenance["run_id"]
+        journal = json.loads((
+            self.home / "upgrades" / run_id / "journal.json"
+        ).read_text())
+        self.assertEqual(journal["phase"], "recovery_required")
+        recovered = UPGRADE.recover(
+            self.home, self.home / "pmo.db", 4, run_id
+        )
+        self.assertEqual(
+            recovered["status"],
+            "AGENT_MARKETPLACE_UPGRADE_COMPLETE_RESTART_REQUIRED",
+        )
+        self.assertTrue(state_path.is_file())
+
+    def test_project_only_mid_apply_failure_also_requires_recovery(self):
+        self.complete_upgrade_and_commit()
+        self.install_team_version("99.0.0")
+        plan = json.loads(self.cli(
+            "upgrade", "plan", "--project-root", str(self.project)
+        ).stdout)
+        original = UPGRADE.run_adapter
+
+        def fail_apply(root, action, project, workspace):
+            if action == "apply":
+                raise UPGRADE.UpgradeError("injected project apply failure")
+            return original(root, action, project, workspace)
+
+        with mock.patch.object(UPGRADE, "run_adapter", side_effect=fail_apply):
+            with self.assertRaisesRegex(UPGRADE.UpgradeError, "project apply"):
+                UPGRADE.apply(
+                    self.home, self.home / "pmo.db", 4, plan["plan_id"]
+                )
+        maintenance = json.loads((self.home / "maintenance.json").read_text())
+        journal = json.loads((
+            self.home / "upgrades" / maintenance["run_id"] / "journal.json"
+        ).read_text())
+        self.assertEqual(journal["phase"], "recovery_required")
+
+    def test_recovery_reclaims_only_a_proven_dead_upgrade_lock(self):
+        plan = json.loads(self.cli(
+            "upgrade", "plan", "--project-root", str(self.project)
+        ).stdout)
+        original = UPGRADE.run_adapter
+
+        def fail_apply(root, action, project, workspace):
+            if action == "apply":
+                raise UPGRADE.UpgradeError("injected adapter failure")
+            return original(root, action, project, workspace)
+
+        with mock.patch.object(UPGRADE, "run_adapter", side_effect=fail_apply):
+            with self.assertRaises(UPGRADE.UpgradeError):
+                UPGRADE.apply(
+                    self.home, self.home / "pmo.db", 4, plan["plan_id"]
+                )
+        maintenance = json.loads((self.home / "maintenance.json").read_text())
+        lock = self.home / "locks" / "upgrade.lock"
+        lock.mkdir(parents=True)
+        (lock / "owner.json").write_text(json.dumps({
+            "pid": 99999999,
+            "host": socket.gethostname(),
+            "started_at": "2026-01-01T00:00:00+00:00",
+        }), encoding="utf-8")
+        recovered = UPGRADE.recover(
+            self.home, self.home / "pmo.db", 4, maintenance["run_id"]
+        )
+        self.assertEqual(
+            recovered["status"],
+            "AGENT_MARKETPLACE_UPGRADE_COMPLETE_RESTART_REQUIRED",
+        )
+        self.assertFalse(lock.exists())
+
+    def test_recovery_never_reclaims_a_live_upgrade_lock(self):
+        lock = self.home / "locks" / "upgrade.lock"
+        lock.mkdir(parents=True)
+        (lock / "owner.json").write_text(json.dumps({
+            "pid": os.getpid(),
+            "host": socket.gethostname(),
+            "started_at": "2026-01-01T00:00:00+00:00",
+        }), encoding="utf-8")
+        with self.assertRaisesRegex(UPGRADE.UpgradeError, "already held"):
+            with UPGRADE.DirectoryLock(
+                self.home, "upgrade.lock", reclaim_dead=True
+            ):
+                self.fail("a live lock must never be reclaimed")
+
+    def test_recovery_never_steals_a_corrupt_empty_upgrade_lock(self):
+        lock = self.home / "locks" / "upgrade.lock"
+        lock.mkdir(parents=True)
+        with self.assertRaisesRegex(UPGRADE.UpgradeError, "already held"):
+            with UPGRADE.DirectoryLock(self.home, "upgrade.lock"):
+                self.fail("an ownerless lock must remain fail-closed")
+        self.assertTrue(lock.is_dir())
+
+    def test_current_project_does_not_require_remote_default_discovery(self):
+        self.complete_upgrade_and_commit()
+        remote = Path(self.tmp.name) / "uninitialized-remote.git"
+        self.assertEqual(
+            run(["git", "init", "--bare", "-q", str(remote)]).returncode, 0
+        )
+        self.assertEqual(run([
+            "git", "remote", "add", "origin", str(remote),
+        ], cwd=self.project).returncode, 0)
+        result, current = self.status()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(current["status"], "AGENT_MARKETPLACE_CURRENT")
+
+    def test_precommit_recovery_also_clears_a_proven_dead_lock(self):
+        plan = json.loads(self.cli(
+            "upgrade", "plan", "--project-root", str(self.project)
+        ).stdout)
+        with mock.patch.object(
+            UPGRADE, "lock_database_for_upgrade",
+            side_effect=UPGRADE.UpgradeError("injected precommit failure"),
+        ):
+            with self.assertRaisesRegex(UPGRADE.UpgradeError, "precommit"):
+                UPGRADE.apply(
+                    self.home, self.home / "pmo.db", 4, plan["plan_id"]
+                )
+        journal_path = sorted((self.home / "upgrades").glob("*/journal.json"))[-1]
+        run_id = journal_path.parent.name
+        lock = self.home / "locks" / "upgrade.lock"
+        lock.mkdir(parents=True)
+        (lock / "owner.json").write_text(json.dumps({
+            "pid": 99999999,
+            "host": socket.gethostname(),
+            "started_at": "2026-01-01T00:00:00+00:00",
+        }), encoding="utf-8")
+        recovered = UPGRADE.recover(
+            self.home, self.home / "pmo.db", 4, run_id
+        )
+        self.assertEqual(
+            recovered["status"], "AGENT_MARKETPLACE_UPGRADE_REQUIRED_READY"
+        )
+        self.assertFalse(lock.exists())
+
+    def test_owner_confirmed_session_release_clears_orphan_blocker(self):
+        sessions = self.home / "sessions"
+        sessions.mkdir()
+        session_id = "closed-host-session"
+        path = sessions / f"{hashlib.sha256(session_id.encode()).hexdigest()}.json"
+        path.write_text(json.dumps({
+            "session_id": session_id,
+            "pmo_ready": True,
+            "recorded_at": "2026-01-01T00:00:00+00:00",
+        }), encoding="utf-8")
+        _, blocked = self.status()
+        self.assertIn("CLOSE_OTHER_SESSIONS_REQUIRED:1", blocked["blockers"])
+        self.assertEqual(blocked["blocking_sessions"][0]["session_id"], session_id)
+        refused = self.cli(
+            "upgrade", "session-release", "--session-id", session_id,
+            check=False,
+        )
+        self.assertEqual(refused.returncode, 1)
+        self.assertIn("confirm-closed", refused.stderr)
+        released = self.cli(
+            "upgrade", "session-release", "--session-id", session_id,
+            "--confirm-closed",
+        )
+        self.assertEqual(
+            json.loads(released.stdout)["status"],
+            "AGENT_MARKETPLACE_SESSION_RELEASED",
+        )
+        self.assertFalse(path.exists())
+
+    def test_remote_upgrade_stays_pending_until_target_branch_contains_it(self):
+        target = run(
+            ["git", "symbolic-ref", "--short", "HEAD"], cwd=self.project
+        ).stdout.strip()
+        remote = Path(self.tmp.name) / "remote.git"
+        self.assertEqual(run(["git", "init", "--bare", "-q", str(remote)]).returncode, 0)
+        self.assertEqual(run([
+            "git", "remote", "add", "origin", str(remote)
+        ], cwd=self.project).returncode, 0)
+        self.assertEqual(run([
+            "git", "push", "-u", "origin", target
+        ], cwd=self.project).returncode, 0)
+        self.assertEqual(run([
+            "git", "remote", "set-head", "origin", target
+        ], cwd=self.project).returncode, 0)
+
+        self.assertEqual(run([
+            "git", "switch", "-c", "feature/unrelated",
+        ], cwd=self.project).returncode, 0)
+        _, wrong_branch = self.status()
+        self.assertIn(
+            f"UPGRADE_TARGET_REQUIRED:{target}", wrong_branch["blockers"]
+        )
+        chained_return = self.team_guard("Bash", {
+            "command": f"git switch {target} && touch user-code.txt",
+        })
+        self.assertEqual(chained_return.returncode, 2)
+        return_to_target = self.team_guard("Bash", {
+            "command": f"git switch {target}",
+        })
+        self.assertEqual(
+            return_to_target.returncode, 0, return_to_target.stderr
+        )
+        self.assertEqual(run([
+            "git", "switch", target,
+        ], cwd=self.project).returncode, 0)
+        _, blocked = self.status()
+        self.assertIn(f"UPGRADE_BRANCH_REQUIRED:{target}", blocked["blockers"])
+        feature = "agent-marketplace/upgrade-test"
+        admitted = self.team_guard("Bash", {
+            "command": f"git switch -c {feature}",
+        })
+        self.assertEqual(admitted.returncode, 0, admitted.stderr)
+        self.assertEqual(run([
+            "git", "switch", "-c", feature
+        ], cwd=self.project).returncode, 0)
+        self.complete_upgrade_and_commit()
+        _, pending = self.status()
+        self.assertEqual(
+            pending["status"], "AGENT_MARKETPLACE_PROJECT_UPGRADE_PR_PENDING"
+        )
+        push = self.team_guard("Bash", {
+            "command": f"git push -u origin {feature}",
+        })
+        self.assertEqual(push.returncode, 0, push.stderr)
+        pr = self.team_guard("Bash", {
+            "command": "gh pr create --title 'Apply marketplace upgrade'",
+        })
+        self.assertEqual(pr.returncode, 0, pr.stderr)
+
+        self.assertEqual(run([
+            "git", "switch", target
+        ], cwd=self.project).returncode, 0)
+        self.assertEqual(run([
+            "git", "merge", "--ff-only", feature
+        ], cwd=self.project).returncode, 0)
+        _, current = self.status()
+        self.assertEqual(current["status"], "AGENT_MARKETPLACE_CURRENT")
+        self.assertEqual(run([
+            "git", "switch", "-c", "feature/after-upgrade",
+        ], cwd=self.project).returncode, 0)
+        _, feature_current = self.status()
+        self.assertEqual(
+            feature_current["status"], "AGENT_MARKETPLACE_CURRENT"
+        )
 
     def test_skipped_release_chain_requires_every_step_and_host_parity(self):
         registry = self.registry()

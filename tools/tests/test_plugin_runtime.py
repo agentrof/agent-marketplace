@@ -381,6 +381,7 @@ class TeamPreflightTests(unittest.TestCase):
         for command in (
             f"{launcher} upgrade status --project-root {self.project} --json",
             f"python3 {launcher} upgrade plan --project-root {self.project}",
+            f"{launcher} upgrade session-release --session-id old --confirm-closed",
         ):
             with self.subTest(command=command):
                 payload = self.payload("Bash")
@@ -409,6 +410,33 @@ class TeamPreflightTests(unittest.TestCase):
             (self.home / "plugin_roots.json").read_text(encoding="utf-8")
         )
         self.assertIn("software-engineering-team", registry["plugins"])
+
+    def test_first_setup_config_window_does_not_self_lock(self):
+        self.mark_ready()
+        config = self.project / "workspace" / "config.json"
+        config.write_text(json.dumps({
+            "team_id": "software-engineering-team",
+            "output_language": "english",
+        }), encoding="utf-8")
+        (self.project / "app").mkdir()
+        (self.project / "app" / "config.json").write_text(
+            json.dumps({"framework": "user-owned"}), encoding="utf-8"
+        )
+        code, _, err = self.guard(self.payload())
+        self.assertEqual(code, 0, err)
+        code, out, err = run_cli([
+            "upgrade", "status", "--project-root", str(self.project), "--json",
+        ], self.env)
+        self.assertEqual(code, 0, err)
+        self.assertEqual(json.loads(out)["status"], "AGENT_MARKETPLACE_CURRENT")
+
+        config.write_text(json.dumps({
+            "team_id": "software-engineering-team",
+            "project_key": "registered-without-contract",
+        }), encoding="utf-8")
+        code, _, err = self.guard(self.payload())
+        self.assertEqual(code, 2)
+        self.assertIn("AGENT_MARKETPLACE_UPGRADE_REQUIRED_BLOCKED", err)
 
     def test_unreadable_upgrade_status_fails_closed(self):
         self.mark_ready()

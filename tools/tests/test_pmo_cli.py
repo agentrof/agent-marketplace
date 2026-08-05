@@ -82,6 +82,7 @@ COMMAND_CONTRACTS = {
     "upgrade plan": "test_upgrade_status_current_without_project",
     "upgrade apply": "test_upgrade_status_current_without_project",
     "upgrade recover": "test_upgrade_status_current_without_project",
+    "upgrade session-release": "test_upgrade_status_current_without_project",
     "project register": "test_project_register_and_list",
     "project list": "test_project_register_and_list",
     "resume-info": "test_resume_info_reports_work_order_shape",

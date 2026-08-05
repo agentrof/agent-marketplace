@@ -341,6 +341,14 @@ surface, team, or persistence feature updates its migration manifest and the
 upgrade tests in the same pull request. See
 [migration-authoring.md](migration-authoring.md) for the admission rules.
 
+First setup has one bounded bootstrap state: the matching team config exists,
+its `project_key` is absent, and no Agent Marketplace project contract exists.
+The PMO project-register command is the sole operation that stamps the key and
+closes that state. A keyed config without a contract is never treated as new
+setup; it routes to upgrade. Remote-backed upgrades prepare and apply on an
+`agent-marketplace/upgrade-*` branch and stay locked until the target branch
+contains the managed revision.
+
 ## Depending on the operations backbone
 
 Every team plugin records its process state (runs, stories, tasks,

@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import json
 import hashlib
+import importlib.util
 import os
 import sqlite3
 import subprocess
@@ -16,6 +17,20 @@ from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[2]
 SCRIPTS = REPO / "dist" / "claude" / "project-management-office" / "scripts"
+
+
+def load_guard_module():
+    sys.path.insert(0, str(SCRIPTS))
+    spec = importlib.util.spec_from_file_location(
+        "agent_marketplace_hook_guard", SCRIPTS / "hook_guard_db.py"
+    )
+    module = importlib.util.module_from_spec(spec)
+    assert spec.loader is not None
+    spec.loader.exec_module(module)
+    return module
+
+
+HOOK_GUARD = load_guard_module()
 
 
 def utc_today() -> str:
@@ -351,6 +366,14 @@ class PmoHookTests(unittest.TestCase):
             tool_input={"command": f"{launcher} upgrade status --json"},
         ), self.env)
         self.assertEqual(code, 0, err)
+        code, _, err = run_hook("hook_guard_db.py", self.payload(
+            hook_event_name="PreToolUse", tool_name="Bash",
+            tool_input={
+                "command": f"{launcher} upgrade session-release"
+                           " --session-id old --confirm-closed"
+            },
+        ), self.env)
+        self.assertEqual(code, 0, err)
         for command in (
             "touch upgrade status",
             "/tmp/pmo_cli.py upgrade status",
@@ -365,6 +388,24 @@ class PmoHookTests(unittest.TestCase):
                 ), self.env)
                 self.assertEqual(code, 2)
                 self.assertIn("AGENT_MARKETPLACE_UPGRADE_REQUIRED_READY", err)
+
+    def test_upgrade_git_navigation_allowlist_is_exact(self):
+        target_status = {"blockers": ["UPGRADE_TARGET_REQUIRED:main"]}
+        branch_status = {"blockers": ["UPGRADE_BRANCH_REQUIRED:main"]}
+        payload = self.payload(
+            hook_event_name="PreToolUse", tool_name="Bash",
+            tool_input={"command": "git switch main"},
+        )
+        self.assertTrue(HOOK_GUARD.is_upgrade_target_command(payload, target_status))
+        payload["tool_input"]["command"] = "git switch main && touch owned.txt"
+        self.assertFalse(HOOK_GUARD.is_upgrade_target_command(payload, target_status))
+        payload["tool_input"]["command"] = (
+            "git switch -c agent-marketplace/upgrade-contract"
+        )
+        self.assertTrue(HOOK_GUARD.is_upgrade_branch_command(payload, branch_status))
+        self.assertFalse(HOOK_GUARD.is_upgrade_branch_command(
+            payload, {"blockers": [*branch_status["blockers"], "DIRTY_WORKTREE"]}
+        ))
 
     def guard(self, path: Path, tool="Write"):
         return run_hook("hook_guard_db.py", self.payload(
@@ -719,6 +760,21 @@ class PmoHookTests(unittest.TestCase):
                         "old_string": "Notes", "new_string": "Team notes"},
         ), self.env)
         self.assertEqual(code, 0)
+
+    def test_guard_denies_direct_project_state_writes(self):
+        state = (
+            self.project_root / ".agentrof" / "agent-marketplace" / "project.json"
+        )
+        state.parent.mkdir(parents=True, exist_ok=True)
+        state.write_text("{}\n", encoding="utf-8")
+        code, _, err = run_hook("hook_guard_db.py", self.payload(
+            hook_event_name="PreToolUse", tool_name="Write",
+            tool_use_id="project-state", tool_input={
+                "file_path": str(state), "content": '{"forged": true}\n',
+            },
+        ), self.env)
+        self.assertEqual(code, 2)
+        self.assertIn("project state is machine-owned", err)
 
 
 if __name__ == "__main__":

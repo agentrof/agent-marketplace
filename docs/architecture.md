@@ -115,8 +115,12 @@ the dependency contract.
    required upgrade locks normal marketplace mutation on both hosts. Ordered
    checksummed migrations operate on a candidate database and marker-owned
    project surfaces only; plans are fingerprint-bound, journaled, recoverable,
-   and require a fresh session after success. User-owned code and content are
-   outside the writer set.
+   and require a fresh session after success. Remote-backed projects remain
+   locked on their upgrade branch until the configured target branch contains
+   the exact managed upgrade identity. Dead locks are reclaimed only from
+   a same-host process proven absent; orphan sessions require explicit
+   owner-confirmed release.
+   User-owned code and content are outside the writer set.
 
 ## Repository layout
 

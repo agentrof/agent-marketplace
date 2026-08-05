@@ -13,6 +13,8 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
+import socket
 import shutil
 import sqlite3
 import subprocess
@@ -43,6 +45,9 @@ STATUS_UPGRADING = "AGENT_MARKETPLACE_UPGRADING"
 STATUS_RECOVERY = "AGENT_MARKETPLACE_UPGRADE_RECOVERY_REQUIRED"
 STATUS_RESTART = "AGENT_MARKETPLACE_UPGRADE_COMPLETE_RESTART_REQUIRED"
 STATUS_PROJECT_PR = "AGENT_MARKETPLACE_PROJECT_UPGRADE_PR_PENDING"
+UPGRADE_BRANCH_RE = re.compile(
+    r"^agent-marketplace/upgrade-[a-z0-9][a-z0-9._-]*$"
+)
 
 
 class UpgradeError(Exception):
@@ -321,16 +326,45 @@ def active_freezes(db_file: Path, work_orders: Path) -> list[str]:
         con.close()
 
 
-def live_sessions(data_root: Path) -> list[str]:
-    result: list[str] = []
+def live_session_records(data_root: Path) -> list[dict]:
+    result: list[dict] = []
     sessions = data_root / "sessions"
     if not sessions.is_dir():
         return result
     for path in sorted(sessions.glob("*.json")):
         value = load_json(path, {})
         if isinstance(value, dict) and value.get("pmo_ready") is True:
-            result.append(path.stem)
+            session_id = str(value.get("session_id", ""))
+            if session_id:
+                result.append({
+                    "session_id": session_id,
+                    "recorded_at": str(value.get("recorded_at", "")),
+                })
     return result
+
+
+def release_session(data_root: Path, session_id: str, confirm_closed: bool) -> dict:
+    if not confirm_closed:
+        raise UpgradeError(
+            "session release requires --confirm-closed after the owner verifies"
+            " that the named host session is no longer running"
+        )
+    if not session_id:
+        raise UpgradeError("session release requires a session id")
+    path = data_root / "sessions" / f"{sha256_bytes(session_id.encode())}.json"
+    value = load_json(path, None)
+    if not isinstance(value, dict) or value.get("session_id") != session_id:
+        raise UpgradeError(f"unknown marketplace session: {session_id}")
+    if value.get("pmo_ready") is not True:
+        raise UpgradeError(
+            f"session is not a blocking ready session: {session_id}"
+        )
+    path.unlink()
+    return {
+        "status": "AGENT_MARKETPLACE_SESSION_RELEASED",
+        "session_id": session_id,
+        "mutation_performed": True,
+    }
 
 
 def disk_space_blockers(data_root: Path, db_file: Path, root: Path | None) -> list[str]:
@@ -581,12 +615,59 @@ def repository_fingerprint(root: Path) -> str:
     return sha256_bytes(identity.encode())
 
 
+def repository_delivery(root: Path) -> dict:
+    branch = run_git(root, "symbolic-ref", "--short", "-q", "HEAD").strip()
+    remote = run_git_optional(root, "config", "--get", "remote.origin.url").strip()
+    if not remote:
+        return {
+            "requires_pull_request": False,
+            "target_branch": branch,
+        }
+    remote_head = run_git_optional(
+        root, "symbolic-ref", "--short", "refs/remotes/origin/HEAD"
+    ).strip()
+    if remote_head.startswith("origin/"):
+        target = remote_head.split("/", 1)[1]
+    else:
+        target = next((
+            candidate for candidate in ("main", "master")
+            if run_git_optional(
+                root, "show-ref", "--verify", f"refs/remotes/origin/{candidate}"
+            ).strip()
+        ), "")
+    if not target:
+        raise UpgradeError(
+            "origin default branch is unresolved; set refs/remotes/origin/HEAD"
+            " before preparing an upgrade"
+        )
+    return {
+        "requires_pull_request": True,
+        "target_branch": target,
+    }
+
+
+def target_contains_project_upgrade(root: Path, target: str, upgrade_id: str) -> bool:
+    if not target or not upgrade_id:
+        return False
+    content = run_git_optional(
+        root, "show", f"refs/heads/{target}:{STATE_RELATIVE.as_posix()}"
+    )
+    if not content:
+        return False
+    try:
+        state = json.loads(content)
+    except json.JSONDecodeError:
+        return False
+    return isinstance(state, dict) and state.get("upgrade_id") == upgrade_id
+
+
 def status(
     data_root: Path,
     db_file: Path,
     target_schema: int,
     project_path: str | Path | None = None,
     include_git: bool = True,
+    exclude_session_id: str = "",
 ) -> dict:
     blockers: list[str] = []
     reasons: list[str] = []
@@ -621,6 +702,8 @@ def status(
             state = load_json(state_path, None)
             config = load_json(config_path, {}) if config_path is not None else {}
             team_id = team_from_config(config) if isinstance(config, dict) else ""
+            project_key = str(config.get("project_key", "")) \
+                if isinstance(config, dict) else ""
             current_surfaces = managed_surface_hashes(root, config_path)
             if team_id:
                 host_surfaces, _ = adapter_surfaces(
@@ -628,8 +711,14 @@ def status(
                 )
                 current_surfaces.update(host_surfaces)
             footprint = bool(config_path)
-            managed_project = footprint or state is not None
-            if state is None and footprint:
+            bootstrap_project = bool(
+                state is None and footprint and not project_key
+                and team_id in installed["components"]
+                and team_id != "project-management-office"
+            )
+            managed_project = (footprint or state is not None) \
+                and not bootstrap_project
+            if state is None and footprint and not bootstrap_project:
                 reasons.append("PROJECT_CONTRACT:unversioned->1")
                 state = {}
             elif state is not None:
@@ -675,17 +764,30 @@ def status(
                     )
                     if drift:
                         blockers.append("PROJECT_CONTRACT_DRIFT:" + ",".join(drift))
-            project_key = str(config.get("project_key", "")) if isinstance(config, dict) else ""
             database_upgrade = any(
                 value.startswith("DATABASE_SCHEMA:") for value in reasons
             )
+            delivery = state.get("delivery", {}) \
+                if isinstance(state, dict) else {}
+            if not isinstance(delivery, dict):
+                delivery = {}
             if managed_project and reasons:
+                delivery = repository_delivery(root)
                 if not database_upgrade:
                     blockers.extend(active_database_work(db_file, project_key))
                 work_orders = root / workspace / "work-orders"
                 blockers.extend(active_freezes(db_file, work_orders))
                 if include_git:
                     blockers.extend(git_preflight(root))
+                    branch = run_git(
+                        root, "symbolic-ref", "--short", "-q", "HEAD"
+                    ).strip()
+                    if delivery["requires_pull_request"]:
+                        target = str(delivery["target_branch"])
+                        if branch == target:
+                            blockers.append("UPGRADE_BRANCH_REQUIRED:" + target)
+                        elif not UPGRADE_BRANCH_RE.fullmatch(branch):
+                            blockers.append("UPGRADE_TARGET_REQUIRED:" + target)
                     collisions = normalized_path_collisions(root)
                     if collisions:
                         blockers.append(
@@ -698,6 +800,7 @@ def status(
                     "project_key": project_key,
                     "team_id": team_id,
                     "repository_fingerprint": repository_fingerprint(root),
+                    "delivery": delivery,
                     "state": state or {},
                     "managed_surfaces": current_surfaces,
                     "fingerprint": project_fingerprint(
@@ -712,7 +815,10 @@ def status(
     if reasons:
         blockers.extend(disk_space_blockers(data_root, db_file, root))
 
-    sessions = live_sessions(data_root)
+    sessions = [
+        value for value in live_session_records(data_root)
+        if value["session_id"] != exclude_session_id
+    ]
     # The dedicated upgrade session is recorded with pmo_ready=false. Every
     # ready session found here is therefore a competing pre-upgrade session.
     if reasons and sessions:
@@ -744,9 +850,26 @@ def status(
         pending_project_pr = bool(
             isinstance(state, dict)
             and state.get("upgrade_base_head")
-            and state.get("upgrade_base_head")
-            == project_info.get("fingerprint", {}).get("head")
         )
+        if pending_project_pr:
+            base_head = str(state.get("upgrade_base_head", ""))
+            project_revision = project_info.get("fingerprint", {})
+            head = str(project_revision.get("head", ""))
+            delivery = state.get("delivery", {})
+            requires_pr = bool(
+                isinstance(delivery, dict)
+                and delivery.get("requires_pull_request")
+            )
+            target = str(delivery.get("target_branch", "")) \
+                if isinstance(delivery, dict) else ""
+            if requires_pr:
+                pending_project_pr = not (
+                    root is not None and target_contains_project_upgrade(
+                        root, target, str(state.get("upgrade_id", ""))
+                    )
+                )
+            else:
+                pending_project_pr = base_head == head
     if incomplete:
         code = STATUS_RECOVERY
     elif isinstance(maintenance, dict) and maintenance.get("run_id"):
@@ -768,27 +891,68 @@ def status(
         "installed": installed["components"],
         "reasons": sorted(set(reasons)),
         "blockers": sorted(set(blockers)),
+        "blocking_sessions": sessions,
         "project": project_info,
         "mutation_performed": False,
         "guidance": guidance_for(code),
     }
 
 
+def process_alive(pid: int) -> bool:
+    if pid <= 0:
+        return True
+    try:
+        os.kill(pid, 0)
+        return True
+    except ProcessLookupError:
+        return False
+    except (PermissionError, OSError):
+        return True
+
+
 class DirectoryLock:
     """Portable fail-closed lock. Upgrade locks are never stolen by age."""
 
-    def __init__(self, data_root: Path, name: str):
+    def __init__(self, data_root: Path, name: str, *, reclaim_dead: bool = False):
         self.path = data_root / LOCKS_DIR / name
+        self.reclaim_dead = reclaim_dead
 
     def __enter__(self):
         self.path.parent.mkdir(parents=True, exist_ok=True)
+        lock_exists = self.path.exists() or self.path.is_symlink()
+        if lock_exists and self.reclaim_dead:
+            owner = load_json(self.path / "owner.json", None)
+            host = str(owner.get("host", "")) if isinstance(owner, dict) else ""
+            pid = int(owner.get("pid", 0)) if isinstance(owner, dict) else 0
+            if host == socket.gethostname() and pid > 0 and not process_alive(pid):
+                (self.path / "owner.json").unlink(missing_ok=True)
+                try:
+                    self.path.rmdir()
+                except OSError as exc:
+                    raise UpgradeError(
+                        f"dead upgrade lock could not be reclaimed: {self.path}"
+                    ) from exc
+        if self.path.exists() or self.path.is_symlink():
+            raise UpgradeError(f"upgrade lock is already held: {self.path}")
+        candidate = self.path.parent / f".{self.path.name}.{uuid.uuid4().hex}"
+        candidate.mkdir()
         try:
-            self.path.mkdir()
-        except FileExistsError as exc:
+            atomic_json(candidate / "owner.json", {
+                "pid": os.getpid(), "host": socket.gethostname(),
+                "started_at": utc_now(),
+            })
+        except Exception:
+            try:
+                candidate.rmdir()
+            except OSError:
+                pass
+            raise
+        try:
+            candidate.rename(self.path)
+        except OSError as exc:
+            (candidate / "owner.json").unlink(missing_ok=True)
+            candidate.rmdir()
             raise UpgradeError(f"upgrade lock is already held: {self.path}") from exc
-        atomic_json(self.path / "owner.json", {
-            "pid": os.getpid(), "started_at": utc_now(),
-        })
         return self
 
     def __exit__(self, exc_type, exc, tb):
@@ -827,6 +991,9 @@ def plan(
         ) if current["project"] else "",
     }
     plan_payload["database"]["fingerprint"] = current["database_fingerprint"]
+    plan_payload["upgrade_id"] = sha256_bytes(
+        canonical_json(plan_payload).encode()
+    )[:24]
     preview_payload = dict(plan_payload)
     preview_payload["data_root"] = str(data_root)
     preview, _prepared = project_changes(preview_payload)
@@ -1202,6 +1369,7 @@ def project_changes(plan_payload: dict) -> tuple[dict[Path, bytes | None], dict]
         "project_id": plan_payload["project_id"],
         "project_key": project_data.get("project_key", ""),
         "repository_fingerprint": project_data.get("repository_fingerprint", ""),
+        "delivery": project_data.get("delivery", {}),
         "team_id": team_id,
         "workspace": workspace,
         "contract_version": PROJECT_CONTRACT_VERSION,
@@ -1214,6 +1382,7 @@ def project_changes(plan_payload: dict) -> tuple[dict[Path, bytes | None], dict]
         },
         "managed_surfaces": target_surfaces,
         "applied_at": plan_payload["created_at"],
+        "upgrade_id": plan_payload["upgrade_id"],
         "upgrade_base_head": project_data.get("fingerprint", {}).get("head", ""),
     }
     state_path = root / STATE_RELATIVE
@@ -1418,6 +1587,7 @@ def apply(
     run_root.mkdir(parents=True, exist_ok=False)
     atomic_json(journal_path, journal)
     db_committed = False
+    project_started = False
     with DirectoryLock(data_root, "upgrade.lock"):
         atomic_json(data_root / MAINTENANCE_NAME, {
             "run_id": run_id, "plan_id": plan_id, "started_at": utc_now(),
@@ -1464,6 +1634,7 @@ def apply(
             else:
                 journal["phase"] = "database_complete"
                 atomic_json(journal_path, journal)
+            project_started = bool(plan_payload.get("project"))
             apply_project(plan_payload, journal, journal_path)
             sync_project_identity(db_file, plan_payload)
             journal["phase"] = "complete"
@@ -1482,10 +1653,13 @@ def apply(
                 if plan_payload.get("project") else "",
             }
         except BaseException:
-            journal["phase"] = "recovery_required" if db_committed else "rolled_back"
+            journal["phase"] = (
+                "recovery_required"
+                if db_committed or project_started else "rolled_back"
+            )
             journal["failed_at"] = utc_now()
             atomic_json(journal_path, journal)
-            if not db_committed:
+            if not db_committed and not project_started:
                 (data_root / MAINTENANCE_NAME).unlink(missing_ok=True)
             raise
 
@@ -1505,13 +1679,13 @@ def recover(data_root: Path, db_file: Path, target_schema: int, run_id: str) -> 
     if not isinstance(plan_payload, dict):
         raise UpgradeError(f"recovery plan is missing for run: {run_id}")
     plan_payload["data_root"] = str(data_root)
-    if database_version(db_file) != target_schema:
-        journal["phase"] = "rolled_back"
-        atomic_json(journal_path, journal)
-        (data_root / MAINTENANCE_NAME).unlink(missing_ok=True)
-        return {"status": STATUS_READY, "run_id": run_id,
-                "mutation_performed": False}
-    with DirectoryLock(data_root, "upgrade.lock"):
+    with DirectoryLock(data_root, "upgrade.lock", reclaim_dead=True):
+        if database_version(db_file) != target_schema:
+            journal["phase"] = "rolled_back"
+            atomic_json(journal_path, journal)
+            (data_root / MAINTENANCE_NAME).unlink(missing_ok=True)
+            return {"status": STATUS_READY, "run_id": run_id,
+                    "mutation_performed": False}
         apply_project(plan_payload, journal, journal_path)
         sync_project_identity(db_file, plan_payload)
         journal["phase"] = "complete"
@@ -1551,6 +1725,7 @@ def initialize_project_contract(
         "project_id": str(uuid.uuid4()),
         "project_key": "",
         "repository_fingerprint": repository_fingerprint(root),
+        "delivery": repository_delivery(root),
         "team_id": team_id,
         "workspace": workspace,
         "contract_version": PROJECT_CONTRACT_VERSION,

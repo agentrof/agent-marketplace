@@ -15,7 +15,7 @@
     {
       "code": "AGENT_MARKETPLACE_UPGRADE_REQUIRED_BLOCKED",
       "summary": "An upgrade is required but one or more safety checks block mutation.",
-      "actions": ["Resolve every reported blocker.", "Run status again from a new session."]
+      "actions": ["Resolve every reported blocker.", "Close every named blocking session; release its record only after owner confirmation.", "Return a clean checkout to the configured target branch, then create the named upgrade branch when reported.", "Run status again from a new session."]
     },
     {
       "code": "AGENT_MARKETPLACE_UPGRADE_APPLY_READY",
@@ -35,12 +35,12 @@
     {
       "code": "AGENT_MARKETPLACE_UPGRADE_COMPLETE_RESTART_REQUIRED",
       "summary": "The upgrade completed, but the current session still holds pre-upgrade runtime context.",
-      "actions": ["Close this session.", "Start a fresh session before normal work."]
+      "actions": ["Close this session before staging.", "Start a fresh session on the same upgrade branch.", "Finish the exact managed-file commit and pull request there."]
     },
     {
       "code": "AGENT_MARKETPLACE_PROJECT_UPGRADE_PR_PENDING",
-      "summary": "Managed project upgrade files are applied but not yet committed for review.",
-      "actions": ["Review the exact managed-file diff.", "Commit only the planned files.", "Open and merge the project upgrade pull request.", "Start a fresh session from the merged revision."]
+      "summary": "Managed project upgrade files are not yet present on the configured target branch.",
+      "actions": ["Review the exact managed-file diff.", "Commit only the planned files.", "Push and merge the project upgrade pull request.", "Update the target branch and start a fresh session from the merged revision."]
     }
   ]
 }

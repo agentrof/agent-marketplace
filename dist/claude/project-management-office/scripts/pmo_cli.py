@@ -7,8 +7,7 @@ coverage, budgets and the quality ledger. Nothing else ever writes the
 database; agents and hooks go through this CLI, and every mutation appends
 an audit event.
 
-The database lives in the user-level data directory: AGENTROF_HOME when set,
-otherwise .agentrof under the user's home. Stdlib only.
+The database lives in the Agent Marketplace product directory. Stdlib only.
 
 Exit codes: 0 success, 1 rule violation, 2 usage or input error.
 """
@@ -27,9 +26,16 @@ import tempfile
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
+SCRIPT_DIR = Path(__file__).resolve().parent
+if str(SCRIPT_DIR) not in sys.path:
+    sys.path.insert(0, str(SCRIPT_DIR))
+
+import marketplace_paths
+import upgrade_core
+
 PMO_VERSION = "0.0.1"
-SCHEMA_VERSION = 3
-DB_NAME = "agentrof.db"
+SCHEMA_VERSION = 4
+DB_NAME = "pmo.db"
 
 WO_STATUSES = {"running", "waiting_gate", "blocked", "escalated", "complete"}
 ACTIVE_WO_STATUSES = ("running", "waiting_gate")
@@ -63,7 +69,9 @@ CREATE TABLE IF NOT EXISTS projects (
   id INTEGER PRIMARY KEY,
   project_key TEXT NOT NULL UNIQUE,
   name TEXT NOT NULL,
-  created_at TEXT NOT NULL
+  created_at TEXT NOT NULL,
+  project_uuid TEXT NOT NULL DEFAULT '',
+  repository_fingerprint TEXT NOT NULL DEFAULT ''
 );
 CREATE TABLE IF NOT EXISTS teams (
   id INTEGER PRIMARY KEY,
@@ -268,6 +276,19 @@ CREATE TABLE IF NOT EXISTS meta (
   key TEXT PRIMARY KEY,
   value TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS schema_migrations (
+  migration_id TEXT PRIMARY KEY,
+  from_version INTEGER NOT NULL,
+  to_version INTEGER NOT NULL,
+  checksum TEXT NOT NULL,
+  plugin_version TEXT NOT NULL,
+  started_at TEXT NOT NULL,
+  finished_at TEXT NOT NULL,
+  source_fingerprint TEXT NOT NULL,
+  result_json TEXT NOT NULL DEFAULT '{}'
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_projects_uuid
+  ON projects(project_uuid) WHERE project_uuid != '';
 CREATE INDEX IF NOT EXISTS idx_work_item_deps_reverse ON work_item_deps(depends_on_id);
 CREATE INDEX IF NOT EXISTS idx_task_attempts_task ON task_attempts(task_id);
 CREATE INDEX IF NOT EXISTS idx_events_project ON events(project_id, id);
@@ -287,21 +308,31 @@ def fail(msg: str, code: int = 1) -> int:
 
 
 def data_dir() -> Path:
-    override = os.environ.get("AGENTROF_HOME", "").strip()
-    return Path(override) if override else Path.home() / ".agentrof"
+    return marketplace_paths.marketplace_home()
 
 
 def db_path() -> Path:
     return data_dir() / DB_NAME
 
 
-def connect() -> sqlite3.Connection:
+def connect(*, allow_upgrade_schema: bool = False) -> sqlite3.Connection:
     data_dir().mkdir(parents=True, exist_ok=True)
     con = sqlite3.connect(db_path(), timeout=30, isolation_level=None)
     con.row_factory = sqlite3.Row
+    con.create_function(
+        "agent_marketplace_writer_epoch", 0, lambda: upgrade_core.WRITER_EPOCH,
+        deterministic=True,
+    )
     con.execute("PRAGMA journal_mode=WAL")
     con.execute("PRAGMA foreign_keys=ON")
     con.execute("PRAGMA busy_timeout=30000")
+    version = int(con.execute("PRAGMA user_version").fetchone()[0])
+    if not allow_upgrade_schema and version not in (0, SCHEMA_VERSION):
+        con.close()
+        raise Rule(
+            f"AGENT_MARKETPLACE_UPGRADE_REQUIRED: database schema {version} must be"
+            f" upgraded to {SCHEMA_VERSION}; run the Agent Marketplace Upgrade entry"
+        )
     return con
 
 
@@ -719,19 +750,25 @@ def open_attempt(con, task_id: int, role: str, agent_name: str,
 
 
 def cmd_init_db(args) -> int:
-    con = connect()
+    con = connect(allow_upgrade_schema=True)
     version = con.execute("PRAGMA user_version").fetchone()[0]
     if version not in (0, SCHEMA_VERSION):
         con.close()
         raise Rule(
-            f"database schema version {version} does not match this CLI"
-            f" ({SCHEMA_VERSION}); start with a database created by this version"
+            f"AGENT_MARKETPLACE_UPGRADE_REQUIRED: database schema {version} must be"
+            f" upgraded to {SCHEMA_VERSION}; run the Agent Marketplace Upgrade entry"
         )
     con.executescript(DDL)  # commits itself; keep it outside the transaction
     with mutate(con):
         if con.execute("PRAGMA user_version").fetchone()[0] == 0:
             con.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
+        con.execute(
+            "INSERT INTO meta(key, value) VALUES ('writer_epoch', ?)"
+            " ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+            (str(upgrade_core.WRITER_EPOCH),),
+        )
         record(con, "init_db", payload={"schema_version": SCHEMA_VERSION})
+    upgrade_core.install_writer_guards(con)
     print(f"pmo: database ready at {db_path()} (schema {SCHEMA_VERSION})")
     return 0
 
@@ -771,6 +808,30 @@ def cmd_project_register(args) -> int:
             config = json.loads(config_path.read_text(encoding="utf-8"))
         config["project_key"] = args.key
         config_path.write_text(json.dumps(config, indent=2) + "\n", encoding="utf-8")
+    if args.project_root:
+        if not args.team:
+            raise Rule("project contract initialization requires --team")
+        try:
+            state = upgrade_core.initialize_project_contract(
+                data_dir(), args.project_root, args.team, args.workspace,
+            )
+        except upgrade_core.UpgradeError as exc:
+            raise Rule(str(exc)) from exc
+        state["project_key"] = args.key
+        state_path = Path(args.project_root).resolve() / upgrade_core.STATE_RELATIVE
+        upgrade_core.atomic_json(state_path, state, 0o644)
+        with mutate(con):
+            con.execute(
+                "UPDATE projects SET project_uuid = ?, repository_fingerprint = ?"
+                " WHERE id = ?",
+                (state["project_id"], state.get("repository_fingerprint", ""),
+                 project["id"]),
+            )
+            record(
+                con, "project_contract_initialized", project_id=project["id"],
+                payload={"project_uuid": state["project_id"],
+                         "contract_version": state["contract_version"]},
+            )
     print(f"pmo: project '{args.key}' registered")
     return 0
 
@@ -2333,7 +2394,7 @@ def cmd_load(args) -> int:
         return fail(f"cannot read database dump: {exc}", 2)
     data_dir().mkdir(parents=True, exist_ok=True)
     with tempfile.NamedTemporaryFile(
-        dir=data_dir(), prefix=".agentrof-load.", suffix=".db", delete=False,
+        dir=data_dir(), prefix=".agent-marketplace-load.", suffix=".db", delete=False,
     ) as handle:
         candidate = Path(handle.name)
     con = None
@@ -2444,11 +2505,17 @@ def cmd_ensure(args) -> int:
     are accelerators and never the only path to a working backbone.
     Bootstrap must not brick a session: an integrity problem is reported
     loudly but exits 0; gates fail on it via work-order validate."""
+    sync_args = argparse.Namespace(force=False)
+    cmd_sync_launcher(sync_args)
+    version = upgrade_core.database_version(db_path())
+    if version not in (0, SCHEMA_VERSION):
+        return fail(
+            f"AGENT_MARKETPLACE_UPGRADE_REQUIRED: database schema {version} must be"
+            f" upgraded to {SCHEMA_VERSION}; run the Agent Marketplace Upgrade entry"
+        )
     code = cmd_init_db(args)
     if code != 0:
         return code
-    sync_args = argparse.Namespace(force=False)
-    cmd_sync_launcher(sync_args)
     con = connect()
     problem = verify_integrity(con)
     if problem:
@@ -2482,7 +2549,10 @@ def cmd_sync_launcher(args) -> int:
         shutil.copyfile(module_src, bin_dir / "pmo_dashboard.py")
     # The dispatcher travels with the launcher: every "$RUN" invocation
     # in shipped content resolves through it.
-    for extra in ("agentrof_run.py", "file_issue.py"):
+    for extra in (
+        "marketplace_run.py", "marketplace_paths.py", "file_issue.py", "upgrade_core.py",
+        "upgrade_guidance.json",
+    ):
         extra_src = source.parent / extra
         extra_dst = bin_dir / extra
         if extra_src.is_file() and extra_src != extra_dst:
@@ -2531,6 +2601,78 @@ def cmd_now(args) -> int:
     return 0
 
 
+def upgrade_project_root(args) -> str:
+    return str(Path(args.project_root).resolve()) if args.project_root else ""
+
+
+def cmd_upgrade_status(args) -> int:
+    try:
+        result = upgrade_core.status(
+            data_dir(), db_path(), SCHEMA_VERSION,
+            upgrade_project_root(args) or None,
+            exclude_session_id=args.exclude_session_id,
+        )
+    except upgrade_core.UpgradeError as exc:
+        raise Rule(str(exc)) from exc
+    if args.json:
+        print(json.dumps(result, indent=2, sort_keys=True))
+    else:
+        print(f"pmo: {result['status']}")
+        for value in result["reasons"]:
+            print(f"pmo: reason: {value}")
+        for value in result["blockers"]:
+            print(f"pmo: blocker: {value}")
+    return 0 if result["status"] in {
+        upgrade_core.STATUS_CURRENT, upgrade_core.STATUS_READY,
+        upgrade_core.STATUS_RESTART, upgrade_core.STATUS_PROJECT_PR,
+    } else 1
+
+
+def cmd_upgrade_plan(args) -> int:
+    try:
+        result = upgrade_core.plan(
+            data_dir(), db_path(), SCHEMA_VERSION,
+            upgrade_project_root(args) or None,
+        )
+    except upgrade_core.UpgradeError as exc:
+        raise Rule(str(exc)) from exc
+    print(json.dumps(result, indent=2, sort_keys=True))
+    return 0
+
+
+def cmd_upgrade_apply(args) -> int:
+    try:
+        result = upgrade_core.apply(
+            data_dir(), db_path(), SCHEMA_VERSION, args.plan_id,
+        )
+    except upgrade_core.UpgradeError as exc:
+        raise Rule(str(exc)) from exc
+    print(json.dumps(result, indent=2, sort_keys=True))
+    return 0
+
+
+def cmd_upgrade_recover(args) -> int:
+    try:
+        result = upgrade_core.recover(
+            data_dir(), db_path(), SCHEMA_VERSION, args.run_id,
+        )
+    except upgrade_core.UpgradeError as exc:
+        raise Rule(str(exc)) from exc
+    print(json.dumps(result, indent=2, sort_keys=True))
+    return 0
+
+
+def cmd_upgrade_session_release(args) -> int:
+    try:
+        result = upgrade_core.release_session(
+            data_dir(), args.session_id, args.confirm_closed,
+        )
+    except upgrade_core.UpgradeError as exc:
+        raise Rule(str(exc)) from exc
+    print(json.dumps(result, indent=2, sort_keys=True))
+    return 0
+
+
 # ---------------------------------------------------------------------------
 # Argument parsing
 # ---------------------------------------------------------------------------
@@ -2574,12 +2716,36 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--no-browser", action="store_true")
     p.set_defaults(func=cmd_dashboard)
 
+    upgrade = sub.add_parser("upgrade").add_subparsers(
+        dest="subcommand", required=True
+    )
+    p = upgrade.add_parser("status")
+    p.add_argument("--project-root", default="")
+    p.add_argument("--exclude-session-id", default="")
+    p.add_argument("--json", action="store_true")
+    p.set_defaults(func=cmd_upgrade_status)
+    p = upgrade.add_parser("plan")
+    p.add_argument("--project-root", default="")
+    p.set_defaults(func=cmd_upgrade_plan)
+    p = upgrade.add_parser("apply")
+    p.add_argument("--plan-id", required=True)
+    p.set_defaults(func=cmd_upgrade_apply)
+    p = upgrade.add_parser("recover")
+    p.add_argument("--run-id", required=True)
+    p.set_defaults(func=cmd_upgrade_recover)
+    p = upgrade.add_parser("session-release")
+    p.add_argument("--session-id", required=True)
+    p.add_argument("--confirm-closed", action="store_true")
+    p.set_defaults(func=cmd_upgrade_session_release)
+
     project = sub.add_parser("project").add_subparsers(dest="subcommand", required=True)
     p = project.add_parser("register")
     p.add_argument("--key", required=True)
     p.add_argument("--name", default="")
     p.add_argument("--team", default="")
     p.add_argument("--stamp-config", default="")
+    p.add_argument("--project-root", default="")
+    p.add_argument("--workspace", default="workspace")
     p.set_defaults(func=cmd_project_register)
     p = project.add_parser("list")
     p.add_argument("--json", action="store_true")

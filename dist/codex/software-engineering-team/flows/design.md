@@ -22,7 +22,7 @@ You MUST follow these rules exactly. Violating any of them is a failure.
 ## Preconditions
 
 - Dispatcher, as in the develop flow's state contract:
-  RUN="${AGENTROF_HOME:-$HOME/.agentrof}/bin/agentrof_run.py" with
+  RUN="${AGENT_MARKETPLACE_HOME:-${AGENTROF_HOME:-$HOME/.agentrof}/agent-marketplace}/bin/marketplace_run.py" with
   TEAM=software-engineering-team; plugin files are reached only through it.
 - The topic's analysis space passes its approval gate for the touched
   scope: run "$RUN" run "$TEAM" scripts/ba_compile.py check --space

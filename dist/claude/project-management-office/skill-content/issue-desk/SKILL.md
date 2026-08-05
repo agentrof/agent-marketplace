@@ -8,8 +8,8 @@ exposure: entry
 
 Issue candidates (marketplace defects and improvements surfaced while the
 team works) rest in the central database until the owner reviews them here
-and approves filing. Filing targets one repository only: the Agentrof agent
-marketplace's own tracker. Nothing is ever posted without explicit
+and approves filing. Filing targets one repository only: the Agent Marketplace
+tracker. Nothing is ever posted without explicit
 per-candidate owner approval; the candidate list is the default resting state.
 
 ## Capturing candidates
@@ -32,7 +32,7 @@ surfaced. Recorded candidates wait here until the owner reviews and files.
 ## Procedure
 
 1. Resolve the CLI: prefer the synced launcher
-   `PMO="${AGENTROF_HOME:-$HOME/.agentrof}/bin/pmo_cli.py"`. If it is missing,
+   `PMO="${AGENT_MARKETPLACE_HOME:-${AGENTROF_HOME:-$HOME/.agentrof}/agent-marketplace}/bin/pmo_cli.py"`. If it is missing,
    find this plugin's installed scripts/pmo_cli.py and run its `ensure`
    subcommand once (it syncs the launcher and file_issue.py beside it), then
    use `"$PMO"`.
@@ -46,7 +46,7 @@ surfaced. Recorded candidates wait here until the owner reviews and files.
    - Approve for filing: continue to step 4.
    Never batch-approve; the owner approves each candidate individually.
 4. File an approved candidate. Resolve the filer beside the launcher,
-   `FILE="${AGENTROF_HOME:-$HOME/.agentrof}/bin/file_issue.py"` (or this
+   `FILE="${AGENT_MARKETPLACE_HOME:-${AGENTROF_HOME:-$HOME/.agentrof}/agent-marketplace}/bin/file_issue.py"` (or this
    plugin's scripts/file_issue.py). Write the approved body to a temp file
    and run `"$FILE" --title "<title>" --body-file <path>`. The target
    repository is locked inside file_issue.py and cannot be redirected; it

@@ -1,0 +1,6 @@
+interface:
+  display_name: "Agent Marketplace Upgrade"
+  short_description: "Start the Agent Marketplace Upgrade guided workflow"
+  default_prompt: "Use $project-management-office:upgrade to start this workflow."
+policy:
+  allow_implicit_invocation: false

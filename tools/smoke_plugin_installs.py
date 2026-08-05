@@ -25,6 +25,14 @@ class SmokeFailure(RuntimeError):
     pass
 
 
+def marketplace_home(env: dict[str, str]) -> Path:
+    override = env.get("AGENT_MARKETPLACE_HOME", "").strip()
+    if override:
+        return Path(override)
+    vendor = env.get("AGENTROF_HOME", "").strip()
+    return (Path(vendor) if vendor else Path.home() / ".agentrof") / MARKETPLACE
+
+
 def run(command: list[str], env: dict[str, str], input_text: str = "") -> str:
     completed = subprocess.run(
         command, input=input_text, capture_output=True, text=True, env=env,
@@ -104,6 +112,43 @@ def hook_payload(session_id: str, project: Path, event: str, tool: str = "") -> 
     return json.dumps(payload)
 
 
+def initialize_project(project: Path, team: str, env: dict[str, str]) -> None:
+    workspace = project / "workspace"
+    workspace.mkdir(parents=True)
+    (workspace / "config.json").write_text(
+        json.dumps({"team_id": team, "project_key": "smoke"}),
+        encoding="utf-8",
+    )
+    run(["git", "init", "--initial-branch=main", str(project)], env)
+    run(["git", "-C", str(project), "config", "user.name", "Agent Marketplace Smoke"], env)
+    run([
+        "git", "-C", str(project), "config", "user.email",
+        "agent-marketplace-smoke@example.invalid",
+    ], env)
+    run(["git", "-C", str(project), "add", "--", "workspace/config.json"], env)
+    run([
+        "git", "-C", str(project), "commit", "--no-gpg-sign", "-m",
+        "test: initialize smoke project",
+    ], env)
+
+
+def register_project_contract(
+    env: dict[str, str], pmo_root: Path, team_root: Path, project: Path, team: str,
+) -> None:
+    run([
+        sys.executable,
+        str(marketplace_home(env) / "bin" / "marketplace_run.py"),
+        "register", "--plugin", team, "--root", str(team_root),
+    ], env)
+    run([
+        sys.executable, str(pmo_root / "scripts" / "pmo_cli.py"),
+        "project", "register", "--key", "smoke", "--name", "Smoke",
+        "--team", team,
+        "--stamp-config", str(project / "workspace" / "config.json"),
+        "--project-root", str(project), "--workspace", "workspace",
+    ], env)
+
+
 def assert_team_gate(
     env: dict[str, str], team_root: Path, project: Path, session_id: str,
     expected: int,
@@ -118,9 +163,21 @@ def assert_team_gate(
         timeout=30,
     )
     if completed.returncode != expected:
+        diagnostic = ""
+        launcher = marketplace_home(env) / "bin" / "pmo_cli.py"
+        if launcher.is_file():
+            inspected = subprocess.run(
+                [sys.executable, str(launcher), "upgrade", "status",
+                 "--project-root", str(project), "--json"],
+                capture_output=True, text=True, env=env, check=False, timeout=30,
+            )
+            diagnostic = (
+                f"\nupgrade status ({inspected.returncode}):\n"
+                f"{inspected.stdout}{inspected.stderr}"
+            )
         raise SmokeFailure(
             f"team preflight returned {completed.returncode}, expected {expected}:\n"
-            f"{completed.stderr}"
+            f"{completed.stderr}{diagnostic}"
         )
 
 
@@ -132,7 +189,7 @@ def mark_pmo_ready(
         env,
         hook_payload(session_id, project, "SessionStart"),
     )
-    if "AGENTROF_PMO_READY: project-management-office" not in output:
+    if "AGENT_MARKETPLACE_PMO_READY: project-management-office" not in output:
         raise SmokeFailure("PMO SessionStart did not mark the smoke session ready")
 
 
@@ -183,7 +240,7 @@ def codex_skills(env: dict[str, str], project: Path) -> list[dict]:
         send({
             "method": "initialize", "id": 1,
             "params": {"clientInfo": {
-                "name": "agentrof_smoke", "title": "Agentrof Smoke",
+                "name": "agent_marketplace_smoke", "title": "Agent Marketplace Smoke",
                 "version": "1.0.0",
             }},
         })
@@ -217,7 +274,7 @@ def smoke_claude(
     require_cli("claude")
     version = run(["claude", "--version"], os.environ.copy()).strip()
     for team in teams:
-        with tempfile.TemporaryDirectory(prefix="agentrof-claude-smoke.") as state:
+        with tempfile.TemporaryDirectory(prefix="agent-marketplace-claude-smoke.") as state:
             state_root = Path(state)
             env = {
                 **os.environ,
@@ -225,11 +282,7 @@ def smoke_claude(
                 "AGENTROF_HOME": str(state_root / "agentrof"),
             }
             project = state_root / "project"
-            (project / ".git").mkdir(parents=True)
-            (project / "workspace").mkdir()
-            (project / "workspace" / "config.json").write_text(
-                json.dumps({"managed_by": team}), encoding="utf-8"
-            )
+            initialize_project(project, team, env)
             run([
                 "claude", "plugin", "marketplace", "add",
                 str(marketplace_source or root),
@@ -245,7 +298,24 @@ def smoke_claude(
             team_root = plugin_install_path(installed, team, "claude")
             pmo_root = plugin_install_path(installed, PMO, "claude")
             assert_team_gate(env, team_root, project, "missing-pmo", 2)
+            first_setup = json.loads(run([
+                sys.executable,
+                str(team_root / "scripts" / "generate_claude_project.py"),
+                "apply", "--project-root", str(project),
+                "--workspace", "workspace",
+            ], env))
+            if not first_setup.get("changes"):
+                raise SmokeFailure("Claude project generator wrote no managed surface")
+            second_setup = json.loads(run([
+                sys.executable,
+                str(team_root / "scripts" / "generate_claude_project.py"),
+                "apply", "--project-root", str(project),
+                "--workspace", "workspace",
+            ], env))
+            if second_setup.get("changes") != []:
+                raise SmokeFailure("Claude project generator is not idempotent")
             mark_pmo_ready(env, pmo_root, project, "ready-pmo")
+            register_project_contract(env, pmo_root, team_root, project, team)
             assert_team_gate(env, team_root, project, "ready-pmo", 0)
             run(["claude", "plugin", "disable", f"{team}@{MARKETPLACE}"], env)
             run(["claude", "plugin", "disable", f"{PMO}@{MARKETPLACE}"], env)
@@ -274,21 +344,17 @@ def smoke_codex(
     require_cli("codex")
     version = run(["codex", "--version"], os.environ.copy()).strip()
     for team in teams:
-        with tempfile.TemporaryDirectory(prefix="agentrof-codex-smoke.") as state:
+        with tempfile.TemporaryDirectory(prefix="agent-marketplace-codex-smoke.") as state:
             state_root = Path(state)
             codex_home = state_root / "codex"
             codex_home.mkdir()
             env = {
                 **os.environ,
                 "CODEX_HOME": str(codex_home),
-                "AGENTROF_HOME": str(state_root / "agentrof"),
+                "AGENT_MARKETPLACE_HOME": str(state_root / "marketplace"),
             }
             project = state_root / "project"
-            (project / ".git").mkdir(parents=True)
-            (project / "workspace").mkdir()
-            (project / "workspace" / "config.json").write_text(
-                json.dumps({"managed_by": team}), encoding="utf-8"
-            )
+            initialize_project(project, team, env)
             run([
                 "codex", "plugin", "marketplace", "add",
                 str(marketplace_source or root), "--json",
@@ -321,8 +387,6 @@ def smoke_codex(
             ], env))
             assert_enabled(inventory, {PMO, team}, "codex")
             pmo_root = plugin_install_path(inventory, PMO, "codex")
-            mark_pmo_ready(env, pmo_root, project, "ready-pmo")
-            assert_team_gate(env, team_root, project, "ready-pmo", 0)
             first_setup = json.loads(run([
                 sys.executable,
                 str(team_root / "scripts" / "generate_codex_project.py"),
@@ -337,6 +401,9 @@ def smoke_codex(
             ], env))
             if second_setup.get("written") != []:
                 raise SmokeFailure("Codex project generator is not idempotent")
+            mark_pmo_ready(env, pmo_root, project, "ready-pmo")
+            register_project_contract(env, pmo_root, team_root, project, team)
+            assert_team_gate(env, team_root, project, "ready-pmo", 0)
             skills = codex_skills(env, project)
             names = {entry.get("name", "") for entry in skills}
             expected_entries = {
@@ -428,7 +495,7 @@ def main() -> int:
         if args.host in ("all", "codex"):
             smoke_codex(root, teams, source)
     else:
-        with tempfile.TemporaryDirectory(prefix="agentrof-checkout-marketplace.") as tmp:
+        with tempfile.TemporaryDirectory(prefix="agent-marketplace-checkout.") as tmp:
             source = checkout_marketplace(root, Path(tmp))
             if args.host in ("all", "claude"):
                 smoke_claude(root, teams, source)

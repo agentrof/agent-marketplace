@@ -19,6 +19,7 @@ of running the wrong copy. Stdlib only.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import subprocess
@@ -28,13 +29,14 @@ import time
 from datetime import datetime, timezone
 from pathlib import Path
 
+import marketplace_paths
+
 PLUGIN_ROOTS_NAME = "plugin_roots.json"
 PLUGIN_ROOTS_LOCK = ".plugin_roots.lock"
 
 
 def data_dir() -> Path:
-    override = os.environ.get("AGENTROF_HOME", "").strip()
-    return Path(override) if override else Path.home() / ".agentrof"
+    return marketplace_paths.marketplace_home()
 
 
 def registry_path() -> Path:
@@ -100,26 +102,25 @@ def update_registry(mutator) -> dict:
 
 
 def fail(message: str) -> int:
-    print(f"agentrof: {message}", file=sys.stderr)
+    print(f"agent-marketplace: {message}", file=sys.stderr)
     return 1
 
 
-def manifest_version(root: Path) -> str:
-    for manifest in (
-        root / ".codex-plugin" / "plugin.json",
-        root / ".claude-plugin" / "plugin.json",
-    ):
+def package_manifest(root: Path) -> tuple[str, Path, str] | None:
+    candidates = []
+    for manifest in sorted(root.glob(".*-plugin/plugin.json")):
+        name = manifest.parent.name
+        if not (name.startswith(".") and name.endswith("-plugin")):
+            continue
         try:
-            if manifest.is_file():
-                return json.loads(
-                    manifest.read_text(encoding="utf-8")
-                ).get("version", "")
+            version = json.loads(manifest.read_text(encoding="utf-8")).get("version", "")
         except Exception:
             continue
-    return ""
+        candidates.append((name[1:-7], manifest, str(version)))
+    return candidates[0] if len(candidates) == 1 else None
 
 
-def resolve_root(plugin: str) -> Path | None:
+def resolve_root(plugin: str, host: str = "", relpath: str = "") -> Path | None:
     """The registered install root, staleness-checked. A moved or removed
     root (plugin updates relocate the install) is an error, never a
     silent run of the wrong copy; a version drift against the on-disk
@@ -128,20 +129,41 @@ def resolve_root(plugin: str) -> Path | None:
     entry = (registry.get("plugins") or {}).get(plugin)
     if not entry:
         return None
+    hosts = entry.get("hosts") if isinstance(entry, dict) else None
+    if isinstance(hosts, dict):
+        if host:
+            entry = hosts.get(host)
+        elif len(hosts) == 1:
+            entry = next(iter(hosts.values()))
+        else:
+            candidates = []
+            for value in hosts.values():
+                root = Path(value.get("root", "")) if isinstance(value, dict) else Path()
+                target = root / relpath if relpath else root
+                if root.is_dir() and target.is_file():
+                    candidates.append((root, hashlib.sha256(target.read_bytes()).hexdigest()))
+            if candidates and len({digest for _, digest in candidates}) == 1:
+                return sorted(root for root, _ in candidates)[0]
+            return None
+    if not isinstance(entry, dict):
+        return None
     root = Path(entry.get("root", ""))
     if not root.is_dir():
         return None
-    on_disk = manifest_version(root)
+    manifest_info = package_manifest(root)
+    on_disk = manifest_info[2] if manifest_info else ""
     if on_disk and on_disk != entry.get("version", ""):
         try:
             def refresh(current):
                 latest = (current.get("plugins") or {}).get(plugin)
                 if not isinstance(latest, dict):
                     return
-                latest["version"] = on_disk
-                latest["registered_at"] = datetime.now(timezone.utc).isoformat(
-                    timespec="seconds")
-                current["plugins"][plugin] = latest
+                latest_hosts = latest.get("hosts")
+                selected = latest_hosts.get(host) if isinstance(latest_hosts, dict) else latest
+                if not isinstance(selected, dict):
+                    return
+                selected["version"] = on_disk
+                selected["registered_at"] = datetime.now(timezone.utc).isoformat(timespec="seconds")
             update_registry(refresh)
         except Exception:
             pass
@@ -157,7 +179,7 @@ STALE_HINT = (
 
 
 def cmd_run(args) -> int:
-    root = resolve_root(args.plugin)
+    root = resolve_root(args.plugin, args.host, args.relpath)
     if root is None:
         return fail(STALE_HINT.format(plugin=args.plugin))
     target = root / args.relpath
@@ -173,7 +195,7 @@ def cmd_run(args) -> int:
 
 
 def cmd_path(args) -> int:
-    root = resolve_root(args.plugin)
+    root = resolve_root(args.plugin, args.host, args.relpath)
     if root is None:
         return fail(STALE_HINT.format(plugin=args.plugin))
     target = root / args.relpath
@@ -192,19 +214,39 @@ def cmd_register(args) -> int:
     if not root.is_dir():
         return fail(f"root is not a directory: {root}")
     def register(registry):
-        registry.setdefault("schema_version", 1)
+        registry["schema_version"] = 2
         plugins = registry.setdefault("plugins", {})
-        plugins[args.plugin] = {
+        manifest = package_manifest(root)
+        if manifest is None:
+            raise ValueError(f"root has no unambiguous host manifest: {root}")
+        host, _manifest_path, version = manifest
+        entry = plugins.get(args.plugin, {})
+        if not isinstance(entry, dict):
+            entry = {}
+        hosts = entry.get("hosts", {})
+        if not isinstance(hosts, dict):
+            hosts = {}
+        v1_root = Path(str(entry.get("root", "")))
+        v1_manifest = package_manifest(v1_root) if v1_root.is_dir() else None
+        if v1_manifest is not None:
+            v1_host, _v1_path, v1_version = v1_manifest
+            hosts.setdefault(v1_host, {
+                "root": str(v1_root.resolve()),
+                "version": v1_version,
+                "registered_at": str(entry.get("registered_at", "")),
+            })
+        hosts[host] = {
             "root": str(root),
-            "version": manifest_version(root),
+            "version": version,
             "registered_at": datetime.now(timezone.utc).isoformat(
                 timespec="seconds"),
         }
+        plugins[args.plugin] = {"hosts": hosts}
     try:
         update_registry(register)
-    except (OSError, TimeoutError) as exc:
+    except (OSError, TimeoutError, ValueError) as exc:
         return fail(f"could not update plugin registry: {exc}")
-    print(f"agentrof: registered {args.plugin} at {root}")
+    print(f"agent-marketplace: registered {args.plugin} at {root}")
     return 0
 
 
@@ -215,12 +257,14 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("run")
     p.add_argument("plugin")
     p.add_argument("relpath")
+    p.add_argument("--host", default="")
     p.add_argument("args", nargs=argparse.REMAINDER)
     p.set_defaults(func=cmd_run)
 
     p = sub.add_parser("path")
     p.add_argument("plugin")
     p.add_argument("relpath")
+    p.add_argument("--host", default="")
     p.set_defaults(func=cmd_path)
 
     p = sub.add_parser("register")

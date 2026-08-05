@@ -18,6 +18,9 @@ A plugin ships four component kinds:
   entry skills delegate to. Not user-facing, not skills.
 - **Templates** (`templates/`): files the setup entry materializes into a
   consuming project. Scanned by the validator like any shipped content.
+- **Migrations** (`migrations/manifest.json`): the ordered, checksummed database
+  and project-contract compatibility chain. Runners stay in canonical scripts;
+  host surface rendering stays in platform adapters.
 
 ## Naming
 
@@ -332,6 +335,20 @@ way. Canonical edits are followed by
 `python3 tools/build_distributions.py`; `make check` verifies both generated
 trees are current.
 
+Every scaffolded plugin starts with a project-contract baseline and inherits
+the shared upgrade adapter protocol. A new schema, managed field, generated
+surface, team, or persistence feature updates its migration manifest and the
+upgrade tests in the same pull request. See
+[migration-authoring.md](migration-authoring.md) for the admission rules.
+
+First setup has one bounded bootstrap state: the matching team config exists,
+its `project_key` is absent, and no Agent Marketplace project contract exists.
+The PMO project-register command is the sole operation that stamps the key and
+closes that state. A keyed config without a contract is never treated as new
+setup; it routes to upgrade. Remote-backed upgrades prepare and apply on an
+`agent-marketplace/upgrade-*` branch and stay locked until the target branch
+contains the managed revision.
+
 ## Depending on the operations backbone
 
 Every team plugin records its process state (runs, stories, tasks,
@@ -341,7 +358,7 @@ findings) through the project-management-office plugin, never in its own files:
   dependency field, so every Codex install surface lists PMO before the team.
   Keep PMO `INSTALLED_BY_DEFAULT` in the marketplace as an advisory policy,
   never as the install guarantee.
-- Require the exact `AGENTROF_PMO_READY: project-management-office` session
+- Require the exact `AGENT_MARKETPLACE_PMO_READY: project-management-office` session
   signal before either host mutates team state. On absence, run the host's
   read-only plugin inventory, stop without writes, and distinguish missing,
   disabled and hook/bootstrap failures in the recovery message.
@@ -359,7 +376,7 @@ findings) through the project-management-office plugin, never in its own files:
   stable location.
 - The distribution builder generates PMO's team namespace registry from all
   non-PMO plugin directories. Bare Codex spawns count only when the matching
-  project TOML has that team's Agentrof ownership marker, so a user's
+  project TOML has that team's Agent Marketplace ownership marker, so a user's
   same-named local agent is never attributed to the team.
 - The single-writer rule is absolute: flows call the CLI; spawned agents
   never do; anything the owner must review in git is rendered from the

@@ -44,10 +44,10 @@ class PmoDashboardTests(unittest.TestCase):
         cls.tmp = tempfile.TemporaryDirectory()
         root = Path(cls.tmp.name)
         cls.home = str(root / "agentrof")
-        cls._old_home = os.environ.get("AGENTROF_HOME")
-        cls._old_plugins = os.environ.get("AGENTROF_PLUGINS_DIR")
-        os.environ["AGENTROF_HOME"] = cls.home
-        env = {"AGENTROF_HOME": cls.home}
+        cls._old_home = os.environ.get("AGENT_MARKETPLACE_HOME")
+        cls._old_plugins = os.environ.get("AGENT_MARKETPLACE_CLAUDE_PLUGINS_DIR")
+        os.environ["AGENT_MARKETPLACE_HOME"] = cls.home
+        env = {"AGENT_MARKETPLACE_HOME": cls.home}
 
         code, _, err = cli(["init-db"], env)
         assert code == 0, err
@@ -118,14 +118,14 @@ class PmoDashboardTests(unittest.TestCase):
                      "lastUpdated": "2026-07-11T00:00:00Z"}],
             },
         }))
-        os.environ["AGENTROF_PLUGINS_DIR"] = str(plugins)
+        os.environ["AGENT_MARKETPLACE_CLAUDE_PLUGINS_DIR"] = str(plugins)
 
         cls.dashboard = load("pmo_dashboard")
 
     @classmethod
     def tearDownClass(cls):
-        for key, value in (("AGENTROF_HOME", cls._old_home),
-                           ("AGENTROF_PLUGINS_DIR", cls._old_plugins)):
+        for key, value in (("AGENT_MARKETPLACE_HOME", cls._old_home),
+                           ("AGENT_MARKETPLACE_CLAUDE_PLUGINS_DIR", cls._old_plugins)):
             if value is None:
                 os.environ.pop(key, None)
             else:
@@ -148,7 +148,7 @@ class PmoDashboardTests(unittest.TestCase):
         self.assertEqual(head["schema_version"],
                          self.dashboard.pmo_cli.SCHEMA_VERSION)
         # status-skill parity: the head carries the system facts
-        self.assertEqual(head["db_path"], str(Path(self.home) / "agentrof.db"))
+        self.assertEqual(head["db_path"], str(Path(self.home) / "pmo.db"))
         self.assertTrue(head["cli_version"])
 
     def test_overview(self):
@@ -166,7 +166,7 @@ class PmoDashboardTests(unittest.TestCase):
     def test_dangling_flag_follows_last_event(self):
         """A session-ended event as the order's LAST event flips dangling on;
         any later activity flips it back off."""
-        env = {"AGENTROF_HOME": self.home}
+        env = {"AGENT_MARKETPLACE_HOME": self.home}
         cli(["event", "append", "--project-key", "shop",
              "--action", "session_ended_with_active_work_order",
              "--actor", "hook", "--work-order-key", "wo1"], env)
@@ -240,7 +240,7 @@ class PmoDashboardTests(unittest.TestCase):
         self.assertTrue(all(e["id"] > last_id for e in rest["events"]))
 
     def test_issue_candidates_endpoint(self):
-        env = {"AGENTROF_HOME": self.home}
+        env = {"AGENT_MARKETPLACE_HOME": self.home}
         code, _, err = cli(["issue", "open", "--title", "dash candidate",
                             "--kind", "improvement"], env)
         self.assertEqual(code, 0, err)
@@ -254,7 +254,7 @@ class PmoDashboardTests(unittest.TestCase):
                             for c in filtered["issue_candidates"]))
 
     def test_overview_reports_open_candidates(self):
-        env = {"AGENTROF_HOME": self.home}
+        env = {"AGENT_MARKETPLACE_HOME": self.home}
         cli(["issue", "open", "--title", "shown in overview",
              "--kind", "defect"], env)
         status, data = self.get("/api/overview")
@@ -264,7 +264,7 @@ class PmoDashboardTests(unittest.TestCase):
                       [c["title"] for c in data["issue_candidates"]])
 
     def test_dashboard_reads_remain_available_during_concurrent_writes(self):
-        env = {"AGENTROF_HOME": self.home}
+        env = {"AGENT_MARKETPLACE_HOME": self.home}
 
         def append_event(index):
             return cli([
@@ -360,7 +360,7 @@ class PmoDashboardTests(unittest.TestCase):
 
     def test_missing_db_and_noncurrent_schema_responses(self):
         try:
-            os.environ["AGENTROF_HOME"] = self.tmp.name + "/nowhere"
+            os.environ["AGENT_MARKETPLACE_HOME"] = self.tmp.name + "/nowhere"
             status, head = self.get("/api/head")
             self.assertEqual(status, 200)
             self.assertFalse(head["db_present"])
@@ -371,8 +371,8 @@ class PmoDashboardTests(unittest.TestCase):
             self.assertEqual(status, 503)
             self.assertEqual(body["error"], "db_missing")
         finally:
-            os.environ["AGENTROF_HOME"] = self.home
-        connection = sqlite3.connect(Path(self.home) / "agentrof.db")
+            os.environ["AGENT_MARKETPLACE_HOME"] = self.home
+        connection = sqlite3.connect(Path(self.home) / "pmo.db")
         try:
             connection.execute("PRAGMA user_version = 99")
             connection.commit()
@@ -386,7 +386,7 @@ class PmoDashboardTests(unittest.TestCase):
             self.assertEqual(status, 200)
             self.assertEqual(head["schema_version"], 99)
         finally:
-            connection = sqlite3.connect(Path(self.home) / "agentrof.db")
+            connection = sqlite3.connect(Path(self.home) / "pmo.db")
             connection.execute(f"PRAGMA user_version = {self.dashboard.pmo_cli.SCHEMA_VERSION}")
             connection.commit()
             connection.close()

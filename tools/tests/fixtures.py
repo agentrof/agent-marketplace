@@ -129,6 +129,10 @@ def write(path: Path, text: str) -> None:
 
 
 def make_valid_root(root: Path) -> None:
+    shutil.copyfile(
+        REAL_REPOSITORY / "product.json",
+        write_path(root / "product.json"),
+    )
     shutil.copytree(
         REAL_REPOSITORY / "platforms" / "shared" / "_team",
         root / "platforms" / "shared" / "_team",
@@ -171,7 +175,7 @@ def make_valid_root(root: Path) -> None:
     write(root / "platforms" / "claude" / PLUGIN / "host-contract.md",
           "# Host Contract\n\n"
           "- `team_guard.py` mechanically requires"
-          " `AGENTROF_PMO_READY: project-management-office`; run"
+          " `AGENT_MARKETPLACE_PMO_READY: project-management-office`; run"
           " `claude plugin list --json` and recover with"
           " `/plugin install project-management-office@agent-marketplace`"
           " or `/plugin enable project-management-office@agent-marketplace`."
@@ -195,7 +199,7 @@ def make_valid_root(root: Path) -> None:
     write(root / "platforms" / "codex" / PLUGIN / "host-contract.md",
           "# Host Contract\n\n"
           "- `team_guard.py` mechanically requires"
-          " `AGENTROF_PMO_READY: project-management-office`; run"
+          " `AGENT_MARKETPLACE_PMO_READY: project-management-office`; run"
           " `codex plugin list --json`, recover with"
           " `codex plugin add project-management-office@agent-marketplace`,"
           " enable it in Plugins when disabled, then inspect `/hooks`."
@@ -213,8 +217,20 @@ def make_valid_root(root: Path) -> None:
         }],
     }, indent=2))
     write(root / "plugins" / PLUGIN / "agents" / "planner.md", VALID_AGENT)
+    shutil.copyfile(
+        REAL_REPOSITORY / "plugins" / "project-management-office"
+        / "scripts" / "marketplace_paths.py",
+        write_path(root / "plugins" / PLUGIN / "scripts" / "marketplace_paths.py"),
+    )
     write(root / "plugins" / PLUGIN / "skill-content" / "notes" / "SKILL.md",
           VALID_SKILL)
+    write(root / "plugins" / PLUGIN / "migrations" / "manifest.json",
+          json.dumps({
+              "schema_version": 1,
+              "component": PLUGIN,
+              "database": None,
+              "project_contract": {"baseline": 1, "current": 1, "steps": []},
+          }, indent=2))
     # Hook event names are the host platform's PascalCase schema and are
     # exempt from the snake_case law at exactly $.hooks in hooks/hooks.json.
     write(root / "platforms" / "claude" / PLUGIN / "overlay" / "hooks"
@@ -538,6 +554,11 @@ def break_limits_config_shape(root: Path) -> None:
     config_path.write_text(json.dumps(config, indent=2), encoding="utf-8")
 
 
+def break_product_namespace(root: Path) -> None:
+    old_signal = "AGENT" + "ROF_PMO_READY"
+    write(root / "namespace-defect.txt", old_signal + "\n")
+
+
 BUILDERS = {
     "frontmatter_shape": break_frontmatter_shape,
     "agent_name": break_agent_name,
@@ -568,6 +589,7 @@ BUILDERS = {
     "vault_wiring": break_vault_wiring,
     "model_config_shape": break_model_config_shape,
     "limits_config_shape": break_limits_config_shape,
+    "product_namespace": break_product_namespace,
 }
 
 

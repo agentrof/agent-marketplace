@@ -17,7 +17,7 @@ zero code.
 
 1. Pre-flight: read workspace/config.json (missing: route to the setup
    entry and stop). Dispatcher for plugin files:
-   RUN="${AGENTROF_HOME:-$HOME/.agentrof}/bin/agentrof_run.py" and
+   RUN="${AGENT_MARKETPLACE_HOME:-${AGENTROF_HOME:-$HOME/.agentrof}/agent-marketplace}/bin/marketplace_run.py" and
    TEAM=software-engineering-team.
 2. Preconditions, in order:
    a. Approved brief for the topic; missing: run the business-analysis

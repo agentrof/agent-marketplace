@@ -18,7 +18,7 @@ Config changes go through this gate, never through hand edits.
    An active work order reported by the PMO CLI's resume-info --project-key
    <key> (running or waiting_gate): REFUSE the change and point at the work
    order; it reads its config snapshot, so a mid-order change would fork the spec.
-   When present, remind the user the file is machine-managed (its managed_by
+   When present, remind the user the file is machine-managed (its team_id
    note says so) and this gate is its only supported writer; hand edits are
    unsupported and carry no guarantee of surviving later gate writes.
 2. Interpret the requested change into concrete key changes.

@@ -24,6 +24,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 import release as release_tool
+import build_distributions
 
 # ---------------------------------------------------------------------------
 # Constants and policy tables
@@ -33,6 +34,7 @@ EM_DASH = "—"
 
 MODEL_CONFIG_RELPATH = "tools/data/models.json"
 LIMITS_CONFIG_RELPATH = "tools/data/limits.json"
+PRODUCT_CONFIG_RELPATH = "product.json"
 
 AGENT_REQUIRED_KEYS = {"name", "description", "reasoning", "output_contract"}
 AGENT_REASONING_ENUM = {"high", "medium", "low", "inherit"}
@@ -139,7 +141,7 @@ COUNTS_END = "<!-- counts:end -->"
 
 CONSTITUTION_PLACEHOLDER = "{{constitution}}"
 PMO_PLUGIN = "project-management-office"
-PMO_READY = "AGENTROF_PMO_READY: project-management-office"
+PMO_READY = "AGENT_MARKETPLACE_PMO_READY: project-management-office"
 
 AGENT_ROLE_SUFFIX_RE_TPL = r"\b{plugin}-([a-z0-9]+(?:-[a-z0-9]+)*)\b"
 
@@ -166,6 +168,7 @@ class Tree:
     codex_marketplace: Path
     config: dict | None = None  # tools/data/models.json, None when unloadable
     limits: dict | None = None  # tools/data/limits.json, None when unloadable
+    product: dict | None = None  # product.json, None when unloadable
     md_files: list[Path] = field(default_factory=list)
     json_files: list[Path] = field(default_factory=list)
 
@@ -828,6 +831,7 @@ def check_distribution_packaging(tree: Tree, findings: list[Finding]) -> None:
         for entry in marketplace.get("plugins", [])
         if isinstance(entry, dict)
     }
+    marker_name, _ = build_distributions.packaging_names(tree.root)
     for plugin in plugin_dirs(tree):
         entry = entries.get(plugin.name)
         if entry is None:
@@ -892,7 +896,7 @@ def check_distribution_packaging(tree: Tree, findings: list[Finding]) -> None:
                       "derive the public title from the technical plugin id"
                       " without a publisher prefix")
         for archive in (claude_archive, codex_archive):
-            if not (archive / ".agentrof-generated-distribution").is_file():
+            if not (archive / marker_name).is_file():
                 error(archive, "distribution lacks its generated ownership marker",
                       "rebuild with tools/build_distributions.py")
 
@@ -1188,6 +1192,11 @@ def check_stdlib_only(tree: Tree, findings: list[Finding]) -> None:
         canonical = tree.plugins_dir / owner / "scripts"
         if canonical.is_dir():
             owner_dirs.append(canonical)
+        if owner == "_team":
+            owner_dirs.extend(
+                plugin / "scripts" for plugin in plugin_dirs(tree)
+                if (plugin / "scripts").is_dir()
+            )
         local = {
             path.stem for directory in owner_dirs for path in directory.glob("*.py")
         }
@@ -2013,6 +2022,101 @@ def check_limits_config_shape(tree: Tree, findings: list[Finding]) -> None:
         ))
 
 
+def check_product_namespace(tree: Tree, findings: list[Finding]) -> None:
+    """The vendor identity and product runtime namespace stay distinct."""
+    if tree.product is None:
+        findings.append(Finding(
+            "error", PRODUCT_CONFIG_RELPATH, 1, "product_namespace",
+            "product contract is missing or not valid JSON",
+            "restore product.json; packaging and scaffolding read it",
+        ))
+        return
+    try:
+        build_distributions.load_product_contract(tree.root)
+    except ValueError as exc:
+        findings.append(Finding(
+            "error", PRODUCT_CONFIG_RELPATH, 1, "product_namespace", str(exc),
+            "restore the supported Agentrof vendor and Agent Marketplace product contract",
+        ))
+        return
+
+    helpers = []
+    expected_helper = build_distributions.marketplace_paths_source(
+        tree.product
+    ).encode()
+    for plugin in sorted(path for path in tree.plugins_dir.iterdir() if path.is_dir()):
+        helper = plugin / "scripts" / "marketplace_paths.py"
+        if not helper.is_file():
+            findings.append(Finding(
+                "error", rel(tree, helper), 1, "product_namespace",
+                f"{plugin.name} has no Agent Marketplace path resolver",
+                "create plugins through tools/scaffold.py and keep the resolver in parity",
+            ))
+            continue
+        helpers.append(helper)
+    for helper in helpers:
+        if helper.read_bytes() != expected_helper:
+            findings.append(Finding(
+                "error", rel(tree, helper), 1, "product_namespace",
+                "plugin path resolver drifts from product.json",
+                "regenerate it from the canonical product contract",
+            ))
+
+    old_prefix = "AGENT" + "ROF_"
+    allowed_vendor_home = old_prefix + "HOME"
+    old_project_status_value = "PROJECT_" + "UPGRADE_PR_PENDING"
+    forbidden_literals = (
+        "agent" + "rof.db",
+        "agent" + "rof_run.py",
+        ".agent" + "rof-package.json",
+        ".agent" + "rof-generated-distribution",
+        ".agent" + "rof/project.json",
+        "#agent" + "rof",
+        "<!-- agent" + "rof:",
+        "Generated by Agent" + "rof",
+        "agent" + "rof_writer",
+        "agent" + "rof team gate",
+        "agent" + "rof-issue-desk",
+        "agent" + "rof_smoke",
+        "agent" + "rof_vault_hook",
+        "agent" + "rof-dist-build",
+        "agent" + "rof-project-adapter",
+        "agent" + "rof-claude-smoke",
+        "agent" + "rof-codex-smoke",
+        "agent" + "rof-checkout-marketplace",
+    )
+    old_env = re.compile(rf"{old_prefix}(?!HOME\b)[A-Z0-9_]+")
+    old_project_status = re.compile(
+        rf"(?<!AGENT_MARKETPLACE_){old_project_status_value}\b"
+    )
+    old_shell_home = "${" + allowed_vendor_home + ":-$HOME/.agentrof}/bin"
+    direct_vendor_bin = re.compile(
+        rf"Path\([^\n]*{allowed_vendor_home}[^\n]*\)\s*/\s*[\"']bin[\"']"
+    )
+    for path in sorted(candidate for candidate in tree.root.rglob("*") if candidate.is_file()):
+        if any(part in {".git", "memory", "__pycache__"} for part in path.parts) \
+                or path.suffix in {".pyc", ".pyo"}:
+            continue
+        try:
+            text = path.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError):
+            continue
+        match = old_env.search(text)
+        project_match = old_project_status.search(text)
+        token = match.group(0) if match else (
+            project_match.group(0) if project_match else next(
+                (value for value in forbidden_literals if value in text), ""
+            )
+        )
+        if not token and (old_shell_home in text or direct_vendor_bin.search(text)):
+            token = "direct vendor-home bin path"
+        if token:
+            line = text[:text.find(token)].count("\n") + 1 if token in text else 1
+            findings.append(Finding(
+                "error", rel(tree, path), line, "product_namespace",
+                f"legacy product namespace remains: {token}",
+                "use Agent Marketplace runtime names; reserve Agentrof for vendor identity",
+            ))
 CHECKS = {
     "frontmatter_shape": check_frontmatter_shape,
     "agent_name": check_agent_name,
@@ -2043,6 +2147,7 @@ CHECKS = {
     "vault_wiring": check_vault_wiring,
     "model_config_shape": check_model_config_shape,
     "limits_config_shape": check_limits_config_shape,
+    "product_namespace": check_product_namespace,
 }
 
 
@@ -2069,6 +2174,7 @@ def build_tree(root: Path) -> Tree:
         codex_marketplace=root / ".agents" / "plugins" / "marketplace.json",
         config=load_policy_json(root, MODEL_CONFIG_RELPATH),
         limits=load_policy_json(root, LIMITS_CONFIG_RELPATH),
+        product=load_policy_json(root, PRODUCT_CONFIG_RELPATH),
     )
 
 

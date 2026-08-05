@@ -1,0 +1,8 @@
+{
+  "summary": "Add a cross-host upgrade protocol and separate the Agent Marketplace runtime namespace from the Agentrof vendor root.",
+  "components": {
+    "agent-marketplace": "minor",
+    "project-management-office": "minor",
+    "software-engineering-team": "minor"
+  }
+}

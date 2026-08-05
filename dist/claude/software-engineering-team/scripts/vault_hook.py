@@ -16,7 +16,7 @@ Two moments, one law (the obsidian-vault skill):
   writing session immediately, so link and metadata duties are repaired
   in-session instead of at a distant gate. Gates stay the hard barrier.
 - register (SessionStart): record this plugin's install root in the
-  shared plugin_roots registry the agentrof_run dispatcher resolves
+  shared plugin_roots registry the marketplace_run dispatcher resolves
   from; env-free (the root comes from this file's own location).
 
 The normalize shim gives both moments one payload shape (canonical tool
@@ -172,8 +172,7 @@ def normalize(payload: dict) -> dict:
 
 
 def data_dir() -> Path:
-    override = os.environ.get("AGENTROF_HOME", "").strip()
-    return Path(override) if override else Path.home() / ".agentrof"
+    return team_guard.data_dir()
 
 
 def register() -> int:
@@ -200,14 +199,30 @@ def normalize_posix(path: str) -> str:
     return ("/" if path.startswith("/") else "") + "/".join(parts)
 
 
-def vault_relative(file_path: str) -> str | None:
-    """Vault-relative posix path when file_path sits under workspace/docs/."""
-    parts = Path(file_path).as_posix().split("/")
+def vault_root(file_path: str) -> Path | None:
+    path = Path(file_path)
+    for parent in (path.parent, *path.parents):
+        if parent.name == "docs" and (parent.parent / "config.json").is_file():
+            return parent
+    parts = path.as_posix().split("/")
     for i in range(len(parts) - len(VAULT_SEGMENTS)):
         if tuple(parts[i:i + 2]) == VAULT_SEGMENTS:
-            inner = "/".join(parts[i + 2:])
-            return inner or None
+            return Path("/".join(parts[:i + 2]))
     return None
+
+
+def vault_relative(file_path: str) -> str | None:
+    """Vault-relative path under the configured workspace docs tree."""
+    root = vault_root(file_path)
+    if root is None:
+        return None
+    try:
+        inner = Path(file_path).relative_to(root).as_posix()
+    except ValueError:
+        parts = Path(file_path).as_posix().split("/")
+        marker = root.as_posix().split("/")
+        inner = "/".join(parts[len(marker):])
+    return inner or None
 
 
 def written_content(tool_input: dict) -> str:
@@ -228,9 +243,24 @@ def outside_fences(text: str) -> list[tuple[int, str]]:
     return lines
 
 
-def is_workspace_config(file_path: str) -> bool:
-    parts = Path(file_path).as_posix().split("/")
-    return parts[-2:] == ["workspace", "config.json"]
+def is_workspace_config(file_path: str, written: dict) -> bool:
+    path = Path(file_path)
+    if path.name != "config.json":
+        return False
+    candidates = []
+    try:
+        candidates.append(json.loads(path.read_text(encoding="utf-8")))
+    except Exception:
+        pass
+    if "content" in written:
+        try:
+            candidates.append(json.loads(str(written.get("content") or "")))
+        except Exception:
+            pass
+    managed = {"team_id", "project_key", *CONFIG_GUARD_KEYS}
+    return path.parent.name == "workspace" or any(
+        isinstance(value, dict) and managed & set(value) for value in candidates
+    )
 
 
 def guarded_spans(text: str) -> list[tuple[int, int]]:
@@ -337,7 +367,7 @@ def pre(payload: dict) -> int:
 
 def pre_target(written: dict) -> int:
     file_path = str(written.get("file_path", ""))
-    if is_workspace_config(file_path):
+    if is_workspace_config(file_path, written):
         try:
             return config_guard(written, file_path)
         except Exception:
@@ -357,7 +387,7 @@ def pre_target(written: dict) -> int:
                 continue
             resolved = normalize_posix(
                 (Path(file_path).parent / target).as_posix())
-            if f"/{VAULT_SEGMENTS[0]}/{VAULT_SEGMENTS[1]}/" in f"/{resolved}":
+            if vault_relative(resolved) is not None:
                 return deny(
                     f"relative markdown link '{match.group(1)}' targets vault"
                     " content; cite it as a vault-absolute wikilink with an"
@@ -388,17 +418,13 @@ def post_target(file_path: str) -> int:
     rel = vault_relative(file_path)
     if rel is None or not rel.endswith(".md"):
         return 0
-    parts = Path(file_path).as_posix().split("/")
-    for i in range(len(parts) - 1):
-        if tuple(parts[i:i + 2]) == VAULT_SEGMENTS:
-            vault_dir = "/".join(parts[:i + 2])
-            break
-    else:
+    root = vault_root(file_path)
+    if root is None:
         return 0
     buffer = io.StringIO()
     with contextlib.redirect_stdout(buffer):
         code = vault_check.main([
-            "check", "--vault", vault_dir, "--changed", rel,
+            "check", "--vault", str(root), "--changed", rel,
         ])
     if code == 1:
         sys.stderr.write(buffer.getvalue())
@@ -420,7 +446,7 @@ def main() -> int:
             "hookSpecificOutput": {
                 "hookEventName": "SessionStart",
                 "additionalContext": (
-                    "AGENTROF_HOOKS_ACTIVE: software-engineering-team"
+                    "AGENT_MARKETPLACE_HOOKS_ACTIVE: software-engineering-team"
                 ),
             }
         }))

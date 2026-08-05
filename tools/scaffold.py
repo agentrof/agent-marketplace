@@ -25,20 +25,21 @@ import release as release_tool
 
 KEBAB_RE = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
 PMO_PLUGIN = "project-management-office"
-PMO_READY = "AGENTROF_PMO_READY: project-management-office"
 
-CLAUDE_TEAM_CONTRACT = f"""# Host Contract
+CLAUDE_TEAM_CONTRACT = """# Host Contract
 
-- The shared `team_guard.py` PreToolUse hook mechanically requires the PMO session-ready record before Write, Edit, or Bash. Keep the exact context check `{PMO_READY}` as the user-facing diagnostic. If it is absent, run `claude plugin list --json` as a read-only diagnostic and stop. If PMO is missing, ask the user to run `/plugin install project-management-office@agent-marketplace`; if it is disabled, ask for `/plugin enable project-management-office@agent-marketplace`; if it is installed and enabled, ask for a Claude Code restart and PMO hook-log inspection. State that no files or project state were changed.
-- One delivery team owns a project. Stop without mutation when workspace/config.json or Agentrof-owned project agents name another team.
+- The shared `team_guard.py` PreToolUse hook mechanically requires the PMO session-ready record before Write, Edit, or Bash. Keep the exact context check `{pmo_ready}` as the user-facing diagnostic. If it is absent, run `claude plugin list --json` as a read-only diagnostic and stop. If PMO is missing, ask the user to run `/plugin install project-management-office@agent-marketplace`; if it is disabled, ask for `/plugin enable project-management-office@agent-marketplace`; if it is installed and enabled, ask for a Claude Code restart and PMO hook-log inspection. State that no files or project state were changed.
+- One delivery team owns a project. Stop without mutation when workspace/config.json or Agent Marketplace-owned project agents name another team.
+- Insert `--host claude` immediately after every canonical dispatcher `run` or `path` verb.
 - Preserve every canonical workflow gate and artifact.
 """
 
-CODEX_TEAM_CONTRACT = f"""# Host Contract
+CODEX_TEAM_CONTRACT = """# Host Contract
 
-- The shared `team_guard.py` PreToolUse hook mechanically requires the PMO session-ready record before Write, Edit, apply_patch, or Bash. Keep the exact context check `{PMO_READY}` as the user-facing diagnostic. If it is absent, run `codex plugin list --json` as a read-only diagnostic and stop. If PMO is missing, show `codex plugin add project-management-office@agent-marketplace`; if it is disabled, ask the user to enable it in Plugins; if it is installed and enabled, ask the user to inspect and trust Project Management Office and this team plugin through `/hooks`, then start a new task. State that no files or project state were changed.
-- One delivery team owns a project. Stop without mutation when workspace/config.json or Agentrof-owned project agents name another team.
-- During setup, run the generated `scripts/generate_codex_project.py`; it owns only this team's marked AGENTS.md block and Agentrof-owned project agents.
+- The shared `team_guard.py` PreToolUse hook mechanically requires the PMO session-ready record before Write, Edit, apply_patch, or Bash. Keep the exact context check `{pmo_ready}` as the user-facing diagnostic. If it is absent, run `codex plugin list --json` as a read-only diagnostic and stop. If PMO is missing, show `codex plugin add project-management-office@agent-marketplace`; if it is disabled, ask the user to enable it in Plugins; if it is installed and enabled, ask the user to inspect and trust Project Management Office and this team plugin through `/hooks`, then start a new task. State that no files or project state were changed.
+- One delivery team owns a project. Stop without mutation when workspace/config.json or Agent Marketplace-owned project agents name another team.
+- Insert `--host codex` immediately after every canonical dispatcher `run` or `path` verb.
+- During setup, run the generated `scripts/generate_codex_project.py`; it owns only this team's marked AGENTS.md block and Agent Marketplace-owned project agents.
 - Preserve every canonical workflow gate and artifact.
 """
 
@@ -141,16 +142,15 @@ One-line statement of the knowledge this skill carries.
 - State prescriptive DO/DON'T rules; keep depth in references/.
 """
 
-PLUGIN_JSON_TEMPLATE = {
-    "name": "",
-    "version": "0.0.1",
-    "description": "",
-    "author": {"name": "Agentrof", "url": "https://github.com/agentrof"},
-    "license": "MIT",
-}
+def pmo_ready_signal(product_contract: dict) -> str:
+    prefix = product_contract["product"]["id"].replace("-", "_").upper()
+    return f"{prefix}_PMO_READY: {PMO_PLUGIN}"
 
 
-def codex_manifest(name: str, description: str) -> dict:
+def codex_manifest(name: str, description: str, product_contract: dict) -> dict:
+    vendor = product_contract["vendor"]
+    product = product_contract["product"]
+    repository = f"https://github.com/{vendor['id']}/{product['id']}"
     long_description = description
     if name != PMO_PLUGIN:
         long_description = f"Requires Project Management Office. {description}"
@@ -158,19 +158,22 @@ def codex_manifest(name: str, description: str) -> dict:
         "name": name,
         "version": "0.0.1",
         "description": description,
-        "author": {"name": "Agentrof", "url": "https://github.com/agentrof"},
-        "homepage": "https://github.com/agentrof/agent-marketplace",
-        "repository": "https://github.com/agentrof/agent-marketplace",
+        "author": {
+            "name": vendor["display_name"],
+            "url": f"https://github.com/{vendor['id']}",
+        },
+        "homepage": repository,
+        "repository": repository,
         "license": "MIT",
         "skills": "./skills/",
         "interface": {
             "displayName": title_of(name),
             "shortDescription": description,
             "longDescription": long_description,
-            "developerName": "Agentrof",
+            "developerName": vendor["display_name"],
             "category": "Engineering",
             "capabilities": ["Read", "Write", "Interactive"],
-            "websiteURL": "https://github.com/agentrof/agent-marketplace",
+            "websiteURL": repository,
         },
     }
 
@@ -216,6 +219,7 @@ def require_kebab(value: str, what: str) -> str:
 
 def new_plugin(root: Path, name: str) -> None:
     require_kebab(name, "plugin name")
+    product_contract = build_distributions.load_product_contract(root)
     plugin = root / "plugins" / name
     if plugin.exists():
         raise SystemExit(f"scaffold: plugin '{name}' already exists")
@@ -239,19 +243,44 @@ def new_plugin(root: Path, name: str) -> None:
     try:
         (plugin / "agents").mkdir(parents=True)
         (plugin / "skill-content").mkdir()
+        (plugin / "scripts").mkdir()
+        (plugin / "scripts" / "marketplace_paths.py").write_text(
+            build_distributions.marketplace_paths_source(product_contract),
+            encoding="utf-8",
+        )
+        (plugin / "migrations").mkdir()
+        (plugin / "migrations" / "manifest.json").write_text(
+            json.dumps({
+                "schema_version": 1,
+                "component": name,
+                "database": None,
+                "project_contract": {"baseline": 1, "current": 1, "steps": []},
+            }, indent=2) + "\n",
+            encoding="utf-8",
+        )
         claude_platform.mkdir(parents=True)
         codex_platform.mkdir(parents=True)
-        manifest = dict(PLUGIN_JSON_TEMPLATE)
-        manifest["name"] = name
-        manifest["description"] = f"{title_of(name)} plugin."
-        manifest["skills"] = "./skills/"
+        vendor = product_contract["vendor"]
+        manifest = {
+            "name": name,
+            "version": "0.0.1",
+            "description": f"{title_of(name)} plugin.",
+            "author": {
+                "name": vendor["display_name"],
+                "url": f"https://github.com/{vendor['id']}",
+            },
+            "license": "MIT",
+            "skills": "./skills/",
+        }
         if name != PMO_PLUGIN:
             manifest["dependencies"] = [PMO_PLUGIN]
         (claude_platform / "manifest.json").write_text(
             json.dumps(manifest, indent=2) + "\n", encoding="utf-8"
         )
         claude_contract = (
-            CLAUDE_TEAM_CONTRACT if name != PMO_PLUGIN
+            CLAUDE_TEAM_CONTRACT.format(
+                pmo_ready=pmo_ready_signal(product_contract)
+            ) if name != PMO_PLUGIN
             else "# Host Contract\n\n- Preserve every canonical workflow gate and artifact.\n"
         )
         (claude_platform / "host-contract.md").write_text(
@@ -272,11 +301,16 @@ def new_plugin(root: Path, name: str) -> None:
         marketplace_path.write_text(
             json.dumps(marketplace, indent=2) + "\n", encoding="utf-8")
         (codex_platform / "manifest.json").write_text(
-            json.dumps(codex_manifest(name, manifest["description"]), indent=2) + "\n",
+            json.dumps(
+                codex_manifest(name, manifest["description"], product_contract),
+                indent=2,
+            ) + "\n",
             encoding="utf-8",
         )
         codex_contract = (
-            CODEX_TEAM_CONTRACT if name != PMO_PLUGIN
+            CODEX_TEAM_CONTRACT.format(
+                pmo_ready=pmo_ready_signal(product_contract)
+            ) if name != PMO_PLUGIN
             else "# Host Contract\n\n- Preserve every canonical workflow gate and artifact.\n"
         )
         (codex_platform / "host-contract.md").write_text(
@@ -293,6 +327,14 @@ def new_plugin(root: Path, name: str) -> None:
                 f"# {title_of(name)}\n\n"
                 "- Read {{workspace}}/memory/me.md before team work when it exists.\n"
                 "- Use only this team's setup-generated project agents.\n",
+                encoding="utf-8",
+            )
+            claude_template = claude_platform / "overlay" / "templates" / "CLAUDE.md"
+            claude_template.parent.mkdir(parents=True)
+            claude_template.write_text(
+                f"# {title_of(name)}\n\n"
+                "Read and follow `{{workspace}}/memory/me.md` when it exists.\n"
+                "Use this team's entry skills for managed work.\n",
                 encoding="utf-8",
             )
         codex_marketplace.setdefault("plugins", []).append({
@@ -389,6 +431,10 @@ def main() -> int:
 
     args = parser.parse_args()
     root = args.root.resolve()
+    try:
+        build_distributions.load_product_contract(root)
+    except ValueError as exc:
+        raise SystemExit(f"scaffold: {exc}") from exc
 
     if args.command == "new-plugin":
         new_plugin(root, args.name)

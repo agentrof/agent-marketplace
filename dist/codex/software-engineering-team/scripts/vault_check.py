@@ -44,6 +44,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 import ba_compile
+import marketplace_paths
 from ba_compile import (
     BARE_ID_RE,
     DATE_RE,
@@ -2997,9 +2998,11 @@ def rerender_spaces(root: Path, vault: Vault) -> list[str]:
 
 
 def pmo_launcher_path(override: str | None) -> Path:
-    home = Path(os.environ.get("AGENTROF_HOME",
-                               str(Path.home() / ".agentrof")))
-    return Path(override) if override else home / "bin" / "pmo_cli.py"
+    return (
+        Path(override)
+        if override
+        else marketplace_paths.marketplace_home() / "bin" / "pmo_cli.py"
+    )
 
 
 def append_relabel_events(launcher: Path, project_key: str, actor: str,

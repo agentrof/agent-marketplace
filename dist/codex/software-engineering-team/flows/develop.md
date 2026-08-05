@@ -25,11 +25,11 @@ the main conversation, through the PMO CLI only. Agents never touch it;
 hooks record spawn/stop mechanics; a guard blocks direct file writes.
 
 CLI resolution, once per work order (re-read this paragraph after any
-compaction): PMO="${AGENTROF_HOME:-$HOME/.agentrof}/bin/pmo_cli.py";
+compaction): PMO="${AGENT_MARKETPLACE_HOME:-${AGENTROF_HOME:-$HOME/.agentrof}/agent-marketplace}/bin/pmo_cli.py";
 missing means run the project-management-office control-tower entry once
 to bootstrap it (project-management-office absent entirely: STOP,
 reinstall this plugin). Run the idempotent ensure before first use. The
-dispatcher lives beside it, RUN="${AGENTROF_HOME:-$HOME/.agentrof}/bin/agentrof_run.py"
+dispatcher lives beside it, RUN="${AGENT_MARKETPLACE_HOME:-${AGENTROF_HOME:-$HOME/.agentrof}/agent-marketplace}/bin/marketplace_run.py"
 with TEAM=software-engineering-team: `"$RUN" run "$TEAM" scripts/<x>.py`
 executes a plugin script, `"$RUN" path "$TEAM" <relpath>` prints a
 plugin file to read; plugin files are reached only through it.

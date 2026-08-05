@@ -24,7 +24,7 @@ and replies with the running URL.
 <!-- counts:start -->
 | Plugins | Agents | Entry skills | Knowledge skills |
 |---|---|---|---|
-| 2 | 12 | 12 | 14 |
+| 2 | 12 | 13 | 14 |
 <!-- counts:end -->
 
 Counts above are injected by `tools/counts.py`; they are never written by
@@ -91,7 +91,7 @@ Start a new task/session, open `/hooks`, inspect and trust Project Management
 Office and Software Engineering Team, and start another task if Codex asks for
 a reload. Then select
 `software-engineering-team:setup` in the App skill picker or CLI `/skills`
-picker (or invoke `$software-engineering-team:setup`). Setup generates the managed Agentrof block in
+picker (or invoke `$software-engineering-team:setup`). Setup generates the managed Agent Marketplace block in
 the project's `AGENTS.md` and native `.codex/agents/*.toml` role definitions.
 Those agents become discoverable at the next task/session boundary.
 
@@ -134,21 +134,62 @@ entry names through its skill picker and `$` invocation.
 | `/software-engineering-team:organize-docs` | On-demand reorganization of the whole docs vault: full audit, owner-gated renames, deterministic migration, curated maps and titles. |
 | `/project-management-office:control-tower` | Starts Control Tower, the read-only web dashboard over the central database, and replies with the clickable URL. |
 | `/project-management-office:issue-desk` | Reviews and files issues captured by marketplace safety hooks. |
+| `/project-management-office:upgrade` | Inspects, plans, applies, or recovers a safe marketplace upgrade. Codex: `$project-management-office:upgrade`. |
 
 A first session usually looks like: `setup`, then `business-analysis`
 for the first topic, `solution-design` for the system foundations,
 `design-system` before any screen work, then `deliver`.
+
+## Upgrading an existing project
+
+> [!IMPORTANT]
+> Update the installed plugins first, close existing Agent Marketplace sessions, then
+> start a new session and invoke Agent Marketplace Upgrade. Normal marketplace
+> mutations remain locked while an upgrade or recovery is required.
+
+Repositories with an origin remote return cleanly to their configured target,
+then apply upgrades from an `agent-marketplace/upgrade-*` branch created there.
+Apply requires a fresh session afterward;
+that session owns the exact managed-file commit, push and pull request. A branch
+commit alone does not unlock the marketplace. Normal work resumes only from the
+updated target branch in another fresh session. If a host crashed before its
+SessionEnd hook, the upgrade entry shows the blocking session id and offers the
+owner-confirmed `session-release` recovery step.
+
+Claude users invoke `/project-management-office:upgrade`; Codex users select
+`project-management-office:upgrade` or invoke `$project-management-office:upgrade`.
+The entry first performs a read-only status check, shows one readiness or
+blocker gate, writes a fingerprint-bound plan only after approval, and asks
+again before apply. A successful run requires another fresh session so both
+hosts load the new hooks, skills, and project agents.
+
+The upgrader owns only PMO data, `.agentrof/agent-marketplace/project.json`, Agent Marketplace-marked
+project instruction blocks, Agent Marketplace-owned project agent files, and declared
+machine-owned config fields. It does not overwrite user code, authored docs,
+memory, demos, sketches, secrets, environment files, custom CI, or unmanaged
+instruction content. See [Upgrade protocol](docs/upgrade-protocol.md) for the
+complete safety and recovery contract.
+
+Agentrof owns the vendor root, while Agent Marketplace owns a product directory
+inside it. The default runtime path is `.agentrof/agent-marketplace` under the
+user's home directory.
+`AGENTROF_HOME` overrides the vendor root and `AGENT_MARKETPLACE_HOME` overrides
+the complete product path. PMO data is stored in `pmo.db`; project compatibility
+state is stored in `.agentrof/agent-marketplace/project.json`.
 
 ## Repository map
 
 - [docs/architecture.md](docs/architecture.md): the invariants.
 - [docs/authoring.md](docs/authoring.md): component templates and rules.
 - [docs/orchestration.md](docs/orchestration.md): the flow contract.
+- [docs/upgrade-protocol.md](docs/upgrade-protocol.md): user and runtime upgrade contract.
+- [docs/migration-authoring.md](docs/migration-authoring.md): ordered migration discipline.
 - `plugins/`: host-neutral canonical roles, workflows, skills, scripts and templates.
 - `platforms/{claude,codex,shared}/`: host manifests, contracts and runtime overlays.
 - `.agents/plugins/marketplace.json`: native Codex marketplace policy.
 - `.claude-plugin/marketplace.json`: Claude marketplace catalog.
 - `versions.json`: the single stable version registry for the marketplace and plugins.
+- `product.json`: the machine-readable vendor, product, home and host-cache namespace contract.
 - `.changes/`: one release-impact declaration for every normal pull request.
 - `dist/{claude,codex}/`: generated, self-contained distributions; never edit them.
 - `tools/`: validator, distribution builder, counts injector, scaffolder, tests.

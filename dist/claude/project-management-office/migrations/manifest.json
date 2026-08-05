@@ -1,0 +1,22 @@
+{
+  "schema_version": 1,
+  "component": "project-management-office",
+  "database": {
+    "baseline": 3,
+    "current": 4,
+    "steps": [
+      {
+        "id": "project-management-office.database.3-4",
+        "from": 3,
+        "to": 4,
+        "checksum": "sha256:b4d6e5f597c8d980bc4f59a4f0f848f83fcbd29e06d929e4c6baa11fd2e48334",
+        "runner": "migrations/database/3-4.py"
+      }
+    ]
+  },
+  "project_contract": {
+    "baseline": 1,
+    "current": 1,
+    "steps": []
+  }
+}

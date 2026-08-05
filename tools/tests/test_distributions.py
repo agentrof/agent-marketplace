@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import concurrent.futures
+import hashlib
 import importlib.util
 import json
 import sys
@@ -32,6 +33,38 @@ generate = load_generator()
 
 
 class DistributionContractTests(unittest.TestCase):
+    def test_product_contract_drives_package_names_and_runtime_resolvers(self):
+        contract = build_distributions.load_product_contract(REPO)
+        marker, provenance = build_distributions.packaging_names(REPO)
+        self.assertEqual(marker, ".agent-marketplace-generated-distribution")
+        self.assertEqual(provenance, ".agent-marketplace-package.json")
+        expected_resolver = build_distributions.marketplace_paths_source(contract)
+        for plugin in sorted(path for path in (REPO / "plugins").iterdir()
+                             if path.is_dir()):
+            source = plugin / "scripts" / "marketplace_paths.py"
+            self.assertEqual(source.read_text(encoding="utf-8"), expected_resolver)
+            for host in build_distributions.HOSTS:
+                package = REPO / "dist" / host / plugin.name
+                self.assertTrue((package / marker).is_file())
+                self.assertTrue((package / provenance).is_file())
+                self.assertEqual(
+                    (package / "scripts" / "marketplace_paths.py").read_text(
+                        encoding="utf-8"
+                    ),
+                    expected_resolver,
+                )
+
+    def test_product_contract_drift_fails_closed(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            contract = json.loads((REPO / "product.json").read_text(encoding="utf-8"))
+            contract["product"]["home_subdir"] = "incorrect"
+            (root / "product.json").write_text(
+                json.dumps(contract), encoding="utf-8"
+            )
+            with self.assertRaisesRegex(ValueError, "differs from"):
+                build_distributions.load_product_contract(root)
+
     def test_every_team_receives_shared_runtime_and_pmo_registry(self):
         teams = sorted(
             path.name for path in (REPO / "plugins").iterdir()
@@ -123,6 +156,26 @@ class DistributionContractTests(unittest.TestCase):
             [],
         )
 
+    def test_every_package_has_complete_deterministic_provenance(self):
+        for host in build_distributions.HOSTS:
+            for component in json.loads(
+                (REPO / "versions.json").read_text(encoding="utf-8")
+            )["plugins"]:
+                package = REPO / "dist" / host / component
+                provenance = json.loads((
+                    package / build_distributions.PROVENANCE
+                ).read_text(encoding="utf-8"))
+                self.assertEqual(provenance["component"], component)
+                self.assertEqual(provenance["host"], host)
+                self.assertIn(f".{host}-plugin/plugin.json", provenance["files"])
+                for relative, digest in provenance["files"].items():
+                    self.assertEqual(
+                        hashlib.sha256(
+                            (package / relative).read_bytes()
+                        ).hexdigest(),
+                        digest,
+                    )
+
     def test_python_runtime_caches_never_enter_or_dirty_distributions(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -158,6 +211,20 @@ class DistributionContractTests(unittest.TestCase):
             (plugin / "unexpected-surface").mkdir()
             with self.assertRaisesRegex(
                     ValueError, "unsupported canonical top-level entry"):
+                build_distributions.validate_canonical(root)
+
+    def test_migration_runner_checksum_drift_is_rejected(self):
+        import shutil
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            source = REPO / "plugins" / "project-management-office"
+            target = root / "plugins" / "project-management-office"
+            target.parent.mkdir(parents=True)
+            shutil.copytree(source, target)
+            runner = target / "migrations" / "database" / "3-4.py"
+            runner.write_text(runner.read_text(encoding="utf-8") + "\n# drift\n",
+                              encoding="utf-8")
+            with self.assertRaisesRegex(ValueError, "runner checksum drift"):
                 build_distributions.validate_canonical(root)
 
     def test_repository_rejects_unknown_top_level_directory(self):
@@ -331,11 +398,11 @@ class CodexProjectGeneratorTests(unittest.TestCase):
 
     def test_incomplete_agents_block_aborts_before_any_write(self):
         (self.project / "AGENTS.md").write_text(
-            "# User\n\n<!-- agentrof:sample-team:codex:start -->\nbroken\n",
+            "# User\n\n<!-- agent-marketplace:sample-team:codex:start -->\nbroken\n",
             encoding="utf-8",
         )
         before = self.snapshot()
-        with self.assertRaisesRegex(ValueError, "incomplete Agentrof managed block"):
+        with self.assertRaisesRegex(ValueError, "incomplete Agent Marketplace managed block"):
             generate.materialize(self.project, self.plugin, "workspace")
         self.assertEqual(self.snapshot(), before)
 
@@ -365,6 +432,23 @@ class CodexProjectGeneratorTests(unittest.TestCase):
         before = self.snapshot()
         with self.assertRaisesRegex(ValueError, "another-team"):
             generate.materialize(self.project, self.plugin, "workspace")
+        self.assertEqual(self.snapshot(), before)
+
+    def test_alternative_workspace_controls_ownership_and_rendering(self):
+        workspace = self.project / "knowledge"
+        workspace.mkdir()
+        (workspace / "config.json").write_text(
+            json.dumps({"team_id": "sample-team"}), encoding="utf-8"
+        )
+        generate.materialize(self.project, self.plugin, "knowledge")
+        agents_md = (self.project / "AGENTS.md").read_text(encoding="utf-8")
+        self.assertIn("Read knowledge/memory/me.md", agents_md)
+        (workspace / "config.json").write_text(
+            json.dumps({"team_id": "another-team"}), encoding="utf-8"
+        )
+        before = self.snapshot()
+        with self.assertRaisesRegex(ValueError, "another-team"):
+            generate.materialize(self.project, self.plugin, "knowledge")
         self.assertEqual(self.snapshot(), before)
 
     def test_concurrent_identical_setup_converges_without_partial_files(self):

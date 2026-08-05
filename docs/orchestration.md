@@ -115,16 +115,18 @@ Claude declares project-management-office as a dependency. Codex installs PMO
 explicitly before every team; marketplace default policy is never treated as
 a dependency. Both hosts require the PMO-ready session signal before mutation
 and stop without writes when installation, enablement, hook trust or bootstrap
-is incomplete. PMO owns the user-level data
-directory (default: .agentrof under the user's home; AGENTROF_HOME
-overrides) holding one central SQLite database for every project and
+is incomplete. Agentrof owns the user-level vendor directory, which defaults
+to `.agentrof` under the user's home and is overridden by `AGENTROF_HOME`.
+PMO owns the `agent-marketplace` product directory inside it;
+`AGENT_MARKETPLACE_HOME` overrides that complete product path. The product
+directory holds one central `pmo.db` SQLite database for every project and
 every future team: projects, epics, stories, machine-generated tasks with their attempt
 history, dependency edges with reasons, DoD records, work orders with
 step state and gates, findings, coverage rows, budget verdicts, the
 quality ledger and an append-only audit event per mutation.
 
 The database has exactly ONE writer: the PMO CLI. Flows call the synced
-launcher (bin/pmo_cli.py under the data directory; project-management-office's SessionStart
+launcher (`bin/pmo_cli.py` under the product directory; project-management-office's SessionStart
 hook keeps it current). Spawned agents never touch the database; a
 PreToolUse guard hook denies direct file writes to it.
 
@@ -175,7 +177,7 @@ contract checker enforce identifier positions as ASCII machine-safe
 shapes regardless of the configured axes.
 
 Hooks carry the mechanics, flows carry the semantics. SessionStart emits the
-`AGENTROF_HOOKS_ACTIVE` sentinel; Codex setup refuses writes until the user has
+`AGENT_MARKETPLACE_HOOKS_ACTIVE` sentinel; Codex setup refuses writes until the user has
 inspected and trusted the plugin hooks. The shared write normalizer maps
 Claude edits and Codex `apply_patch` file operations into the same fail-closed
 guards. project-management-office's

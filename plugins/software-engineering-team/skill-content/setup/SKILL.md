@@ -25,8 +25,8 @@ and restart rules. `{{workspace}}` means the chosen workspace directory name.
    No repository: offer to initialize one; the team cannot work without
    git (every story ends in a pull request). Then resolve the
    backbone: the launcher
-   PMO="${AGENTROF_HOME:-$HOME/.agentrof}/bin/pmo_cli.py" and the
-   dispatcher RUN="${AGENTROF_HOME:-$HOME/.agentrof}/bin/agentrof_run.py"
+   PMO="${AGENT_MARKETPLACE_HOME:-${AGENTROF_HOME:-$HOME/.agentrof}/agent-marketplace}/bin/pmo_cli.py" and the
+   dispatcher RUN="${AGENT_MARKETPLACE_HOME:-${AGENTROF_HOME:-$HOME/.agentrof}/agent-marketplace}/bin/marketplace_run.py"
    with TEAM=software-engineering-team. Launcher missing: bootstrap per
    the control-tower entry's launcher discovery, run `ensure` once,
    and register both plugin roots when the hooks have not ("$RUN"
@@ -35,7 +35,7 @@ and restart rules. `{{workspace}}` means the chosen workspace directory name.
    ask for an alternative name and use it consistently, substituting
    it in every materialized template content and skeleton path (the
    .gitignore work-orders rule, host instructions, source_dirs).
-   The team's layout is recognized by config.json's managed_by note or
+   The team's layout is recognized by config.json's team_id or
    the docs/ plus memory/ pair; anything else is foreign. Record the
    chosen name through the active host contract once step 3 materializes
    project instructions.
@@ -64,14 +64,8 @@ and restart rules. `{{workspace}}` means the chosen workspace directory name.
    folder created (work-orders/ is gitignored and needs none). Topic
    analysis spaces inside workspace/docs/business-analysis/ are created
    by the business-analysis entry, never by setup.
-5. PMO backbone: with the CLI resolved in step 1, register the
-   project: project register --key <kebab project name> --name "<name>"
-   --team software-engineering-team --stamp-config workspace/config.json (stamps
-   project_key into the config; idempotent). Every flow resolves the
-   project by that key.
-6. Build workspace/config.json interactively; first key always
-   "managed_by": "software-engineering-team plugin; change only through
-   the configure entry". An existing config.json is never re-interviewed:
+5. Build workspace/config.json interactively; first key always
+   "team_id": "software-engineering-team". An existing config.json is never re-interviewed:
    missing keys are asked and added. Detect from manifests first
    (pyproject.toml or requirements.txt: the python backend; a package.json
    depending on react: the typescript frontend), ask only the gaps:
@@ -105,6 +99,14 @@ and restart rules. `{{workspace}}` means the chosen workspace directory name.
    verb (one --set per type): the designation keys and their history
    ledger are hook-guarded with the verb as sole writer. An unsupported
    stack is refused honestly: tested stacks only.
+   During first setup, `project_key` stays absent: only the matching-team, no-state, no-key window is bootstrap; step 6 closes it, while a keyed config without a contract fails closed into Agent Marketplace Upgrade.
+6. PMO backbone: with the CLI resolved in step 1, register the
+   project: project register --key <kebab project name> --name "<name>"
+   --team software-engineering-team --stamp-config workspace/config.json
+   --project-root <git-root> --workspace <chosen-workspace-name> (stamps
+   project_key into the config, creates the project UUID, and records the
+   complete managed-surface baseline; idempotent). Every flow resolves the
+   project by that key.
 7. Continuous integration: follow `references/ci-bootstrap.md`. Materialize
    the CI template only after replacing `{{test_command}}`,
    `{{audit_command}}`, and `{{env_command}}`; never ship a dead placeholder.
@@ -115,5 +117,4 @@ and restart rules. `{{workspace}}` means the chosen workspace directory name.
    routed to the organize-docs entry, the on-demand full-vault
    reorganization (scoped stewardship at each docs gate still repairs
    its own subtree). Then the pointers: business-analysis first,
-   solution-design for foundations, design-system before screen work,
-   then deliver.
+   solution-design for foundations, design-system before screen work, then deliver.

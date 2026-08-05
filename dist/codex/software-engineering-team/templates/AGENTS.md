@@ -4,7 +4,7 @@ Read and follow `{{workspace}}/memory/me.md` before team work.
 
 ## Host rules
 
-- Run mutating Agentrof workflows in Codex Code or Default mode, never Plan mode.
+- Run mutating Agent Marketplace workflows in Codex Code or Default mode, never Plan mode.
 - Use the matching project-scoped custom agent by its bare canonical role id. Open the PMO task before spawning and close it only after validating the role output.
 - Dispatch independent read-only roles in parallel; avoid overlapping parallel writers.
 - Ask one concise, option-preserving question at each owner gate and resume from PMO/workspace state on the next turn.
@@ -18,4 +18,4 @@ Read and follow `{{workspace}}/memory/me.md` before team work.
 - `{{workspace}}/environment/`: runnable containerized environment.
 - `{{workspace}}/work-orders/`: gitignored work-order snapshots; durable delivery state lives in PMO.
 
-Start work through the Agentrof entry skills, not free-form state changes.
+Start work through the Agent Marketplace entry skills, not free-form state changes.

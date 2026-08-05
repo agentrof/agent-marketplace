@@ -21,11 +21,11 @@ starts it and hands back the URL.
 ## Procedure
 
 1. Resolve the CLI: prefer the synced launcher
-   `PMO="${AGENTROF_HOME:-$HOME/.agentrof}/bin/pmo_cli.py"`. If that file
+   `PMO="${AGENT_MARKETPLACE_HOME:-${AGENTROF_HOME:-$HOME/.agentrof}/agent-marketplace}/bin/pmo_cli.py"`. If that file
    does not exist, find this plugin's installed copy of scripts/pmo_cli.py.
    Resolve it from the active host's installed-plugin registry; the
    session-start hook also records it in
-   `${AGENTROF_HOME:-$HOME/.agentrof}/plugin_roots.json`. Run its `ensure`
+   `${AGENT_MARKETPLACE_HOME:-${AGENTROF_HOME:-$HOME/.agentrof}/agent-marketplace}/plugin_roots.json`. Run its `ensure`
    subcommand once (it syncs the launcher). Then use `"$PMO"` and run the
    idempotent `ensure`.
 2. Start the server as a BACKGROUND process: `"$PMO" dashboard

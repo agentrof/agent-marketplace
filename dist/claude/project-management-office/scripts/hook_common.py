@@ -1,7 +1,7 @@
 """Shared plumbing for the PMO hook scripts.
 
 Hooks must never break a session: every entry point reads stdin defensively,
-logs failures to hooks.log in the data directory, and exits 0 unless the
+logs failures to logs/hooks.log in the data directory, and exits 0 unless the
 hook's whole purpose is to block (the database write guard).
 
 normalize_payload gives every hook one canonical payload shape (canonical
@@ -182,7 +182,9 @@ def session_state_path(session_id: str) -> Path:
     return pmo_cli.data_dir() / SESSION_STATE_DIR / f"{digest}.json"
 
 
-def write_session_readiness(session_id: str, ready: bool) -> None:
+def write_session_readiness(
+    session_id: str, ready: bool, upgrade_status: str = ""
+) -> None:
     if not session_id:
         return
     path = session_state_path(session_id)
@@ -190,6 +192,7 @@ def write_session_readiness(session_id: str, ready: bool) -> None:
     payload = {
         "session_id": session_id,
         "pmo_ready": bool(ready),
+        "upgrade_status": upgrade_status,
         "recorded_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
     }
     fd, tmp = tempfile.mkstemp(dir=str(path.parent), prefix=f".{path.name}.")
@@ -239,21 +242,19 @@ class RegistryLock:
         return False
 
 
-def plugin_manifest(root: Path) -> Path | None:
-    """Return the active host manifest, preferring the native Codex one."""
-    for relative in (
-        Path(".codex-plugin") / "plugin.json",
-        Path(".claude-plugin") / "plugin.json",
-    ):
-        candidate = root / relative
-        if candidate.is_file():
-            return candidate
-    return None
+def plugin_manifest(root: Path) -> tuple[str, Path] | None:
+    """Return the one native host manifest carried by an install root."""
+    candidates = []
+    for candidate in sorted(root.glob(".*-plugin/plugin.json")):
+        name = candidate.parent.name
+        if name.startswith(".") and name.endswith("-plugin"):
+            candidates.append((name[1:-7], candidate))
+    return candidates[0] if len(candidates) == 1 else None
 
 
 def register_plugin_root(plugin_name: str, root: Path) -> None:
     """Record a plugin's install root in the shared registry the
-    agentrof_run dispatcher resolves from."""
+    marketplace_run dispatcher resolves from."""
     try:
         registry_path = plugin_roots_path()
         registry_path.parent.mkdir(parents=True, exist_ok=True)
@@ -264,22 +265,52 @@ def register_plugin_root(plugin_name: str, root: Path) -> None:
                 registry = {}
             if not isinstance(registry, dict):
                 registry = {}
-            registry.setdefault("schema_version", 1)
+            registry["schema_version"] = 2
             version = ""
-            manifest = plugin_manifest(root)
+            manifest_info = plugin_manifest(root)
+            host = ""
             try:
-                if manifest is not None:
+                if manifest_info is not None:
+                    host, manifest = manifest_info
                     version = json.loads(
                         manifest.read_text(encoding="utf-8")).get("version", "")
             except Exception:
                 pass
+            if not host:
+                raise ValueError(f"unambiguous host manifest missing at {root}")
             plugins = registry.setdefault("plugins", {})
-            plugins[plugin_name] = {
+            existing = plugins.get(plugin_name, {})
+            if not isinstance(existing, dict):
+                existing = {}
+            hosts = existing.get("hosts", {})
+            if not isinstance(hosts, dict):
+                hosts = {}
+            v1_root = Path(str(existing.get("root", "")))
+            v1_info = plugin_manifest(v1_root) if v1_root.is_dir() else None
+            if v1_info is not None:
+                v1_host, v1_manifest = v1_info
+                try:
+                    v1_version = json.loads(
+                        v1_manifest.read_text(encoding="utf-8")
+                    ).get("version", "")
+                except Exception:
+                    v1_version = ""
+                hosts.setdefault(v1_host, {
+                    "root": str(v1_root.resolve()),
+                    "version": v1_version,
+                    "manifest_sha256": hashlib.sha256(
+                        v1_manifest.read_bytes()
+                    ).hexdigest(),
+                    "registered_at": str(existing.get("registered_at", "")),
+                })
+            hosts[host] = {
                 "root": str(root),
                 "version": version,
+                "manifest_sha256": hashlib.sha256(manifest.read_bytes()).hexdigest(),
                 "registered_at": datetime.now(timezone.utc).isoformat(
                     timespec="seconds"),
             }
+            plugins[plugin_name] = {"hosts": hosts}
             fd, tmp = tempfile.mkstemp(dir=str(registry_path.parent),
                                        prefix=".plugin_roots.")
             with os.fdopen(fd, "w", encoding="utf-8") as fh:
@@ -291,7 +322,7 @@ def register_plugin_root(plugin_name: str, root: Path) -> None:
 
 def log(message: str) -> None:
     try:
-        target = pmo_cli.data_dir() / "hooks.log"
+        target = pmo_cli.data_dir() / "logs" / "hooks.log"
         target.parent.mkdir(parents=True, exist_ok=True)
         stamp = datetime.now(timezone.utc).isoformat(timespec="seconds")
         with target.open("a", encoding="utf-8") as fh:
@@ -318,16 +349,44 @@ def run_cli(argv: list[str]) -> int:
     return code
 
 
+def project_config(root: Path) -> Path | None:
+    state = root / ".agentrof" / "agent-marketplace" / "project.json"
+    try:
+        workspace = str(json.loads(state.read_text(encoding="utf-8")).get("workspace", ""))
+        configured = root / workspace / "config.json"
+        if workspace and configured.is_file():
+            return configured
+    except Exception:
+        pass
+    conventional = root / "workspace" / "config.json"
+    if conventional.is_file():
+        return conventional
+    candidates = sorted(root.glob("*/config.json"))
+    recognized = []
+    for path in candidates:
+        try:
+            value = json.loads(path.read_text(encoding="utf-8"))
+        except Exception:
+            continue
+        if isinstance(value, dict) and value.get("project_key"):
+            recognized.append(path)
+    return recognized[0] if len(recognized) == 1 else None
+
+
+def project_workspace(root: Path) -> str:
+    config = project_config(root)
+    return config.parent.name if config is not None else "workspace"
+
+
 def resolve_project(cwd: str) -> tuple[str, str] | None:
-    """Walk up from cwd to a directory holding workspace/config.json with a
-    project_key. Returns (project_key, project_root) or None."""
+    """Walk up to one unambiguous managed config with a project key."""
     try:
         current = Path(cwd).resolve()
     except Exception:
         return None
     for candidate in [current, *current.parents][:6]:
-        config = candidate / "workspace" / "config.json"
-        if config.is_file():
+        config = project_config(candidate)
+        if config is not None:
             try:
                 data = json.loads(config.read_text(encoding="utf-8"))
             except Exception:
@@ -343,7 +402,7 @@ def team_agent(agent_type: str, project_root: str) -> tuple[str, str] | None:
     """Return (canonical agent name, snake_case PMO role) for team agents.
 
     Claude identities are '<plugin>:<bare-agent>'. Codex identities are bare
-    and count only when the matching project TOML carries the Agentrof owner
+    and count only when the matching project TOML carries the Agent Marketplace owner
     marker."""
     namespaces = team_agent_namespaces()
     if ":" in agent_type:
@@ -365,7 +424,7 @@ def team_agent(agent_type: str, project_root: str) -> tuple[str, str] | None:
         return None
     for namespace in namespaces:
         if first_line == (
-            f"# Generated by Agentrof {namespace}; do not edit by hand."
+            f"# Generated by Agent Marketplace {namespace}; do not edit by hand."
         ):
             return agent_type, agent_type.replace("-", "_")
     return None

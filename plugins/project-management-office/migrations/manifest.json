@@ -3,7 +3,7 @@
   "component": "project-management-office",
   "database": {
     "baseline": 3,
-    "current": 4,
+    "current": 5,
     "steps": [
       {
         "id": "project-management-office.database.3-4",
@@ -11,6 +11,13 @@
         "to": 4,
         "checksum": "sha256:b4d6e5f597c8d980bc4f59a4f0f848f83fcbd29e06d929e4c6baa11fd2e48334",
         "runner": "migrations/database/3-4.py"
+      },
+      {
+        "id": "project-management-office.database.4-5",
+        "from": 4,
+        "to": 5,
+        "checksum": "sha256:8a39d462d87990f0bb3b4b91cf9060f8cdd5fad073c712de0a22cd222f8e2996",
+        "runner": "migrations/database/4-5.py"
       }
     ]
   },

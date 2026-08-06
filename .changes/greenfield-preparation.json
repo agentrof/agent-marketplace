@@ -1,0 +1,8 @@
+{
+  "summary": "Add deterministically enforced greenfield preparation, release Experience Design, approved backlog planning, setup origin classification and schema-safe upgrades.",
+  "components": {
+    "agent-marketplace": "minor",
+    "project-management-office": "minor",
+    "software-engineering-team": "minor"
+  }
+}

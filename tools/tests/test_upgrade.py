@@ -85,6 +85,9 @@ class UpgradeLifecycleTests(unittest.TestCase):
             "custom_user_key": "preserve-me",
         }, indent=2) + "\n", encoding="utf-8")
         (self.project / "user-code.txt").write_text("user-owned\n", encoding="utf-8")
+        (self.project / ".gitignore").write_text(
+            "custom-user-rule/\nworkspace/work-orders/\n", encoding="utf-8"
+        )
         run(["git", "add", "."], cwd=self.project)
         result = run(["git", "commit", "-qm", "baseline"], cwd=self.project)
         self.assertEqual(result.returncode, 0, result.stderr)
@@ -182,7 +185,7 @@ class UpgradeLifecycleTests(unittest.TestCase):
         plan = json.loads(self.cli(
             "upgrade", "plan", "--project-root", str(self.project)
         ).stdout)
-        UPGRADE.apply(self.home, self.home / "pmo.db", 4, plan["plan_id"])
+        UPGRADE.apply(self.home, self.home / "pmo.db", 5, plan["plan_id"])
         run(["git", "add", "."], cwd=self.project)
         committed = run([
             "git", "commit", "-qm", "chore: apply Agent Marketplace upgrade"
@@ -234,8 +237,8 @@ class UpgradeLifecycleTests(unittest.TestCase):
         result, status = self.status()
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(status["status"], "AGENT_MARKETPLACE_UPGRADE_REQUIRED_READY")
-        self.assertIn("DATABASE_SCHEMA:3->4", status["reasons"])
-        self.assertIn("PROJECT_CONTRACT:unversioned->1", status["reasons"])
+        self.assertIn("DATABASE_SCHEMA:3->5", status["reasons"])
+        self.assertIn("PROJECT_CONTRACT:unversioned->2", status["reasons"])
 
         planned = self.cli(
             "upgrade", "plan", "--project-root", str(self.project)
@@ -261,8 +264,14 @@ class UpgradeLifecycleTests(unittest.TestCase):
             self.project / "workspace" / "config.json"
         ).read_text(encoding="utf-8"))
         self.assertEqual(config["team_id"], TEAM)
+        self.assertEqual(config["project_origin"], "unclassified")
         self.assertEqual(config["custom_user_key"], "preserve-me")
         self.assertNotIn("managed_by", config)
+        ignore = (self.project / ".gitignore").read_text(encoding="utf-8")
+        self.assertIn("custom-user-rule/", ignore)
+        self.assertGreaterEqual(ignore.count("workspace/work-orders/"), 2)
+        self.assertIn("agent-marketplace:software-engineering-team:gitignore:start", ignore)
+        self.assertIn("workspace/experience-design-work/", ignore)
         state = json.loads((
             self.project / ".agentrof" / "agent-marketplace" / "project.json"
         ).read_text(encoding="utf-8"))
@@ -276,14 +285,15 @@ class UpgradeLifecycleTests(unittest.TestCase):
                             for key in state["managed_surfaces"]))
 
         con = sqlite3.connect(self.home / "pmo.db")
-        self.assertEqual(con.execute("PRAGMA user_version").fetchone()[0], 4)
-        migration = con.execute(
+        self.assertEqual(con.execute("PRAGMA user_version").fetchone()[0], 5)
+        migrations = con.execute(
             "SELECT migration_id, from_version, to_version"
-            " FROM schema_migrations"
-        ).fetchone()
-        self.assertEqual(migration, (
-            "project-management-office.database.3-4", 3, 4,
-        ))
+            " FROM schema_migrations ORDER BY from_version"
+        ).fetchall()
+        self.assertEqual(migrations, [
+            ("project-management-office.database.3-4", 3, 4),
+            ("project-management-office.database.4-5", 4, 5),
+        ])
         identity = con.execute(
             "SELECT project_uuid, repository_fingerprint FROM projects"
             " WHERE project_key='shop'"
@@ -453,7 +463,7 @@ class UpgradeLifecycleTests(unittest.TestCase):
             side_effect=migrate_and_attempt_write,
         ):
             UPGRADE.apply(
-                self.home, self.home / "pmo.db", 4, plan["plan_id"]
+                self.home, self.home / "pmo.db", 5, plan["plan_id"]
             )
 
         self.assertIn("locked", race["result"])
@@ -487,7 +497,7 @@ class UpgradeLifecycleTests(unittest.TestCase):
                 UPGRADE.UpgradeError, "before the writer lock"
             ):
                 UPGRADE.apply(
-                    self.home, self.home / "pmo.db", 4, plan["plan_id"]
+                    self.home, self.home / "pmo.db", 5, plan["plan_id"]
                 )
 
         self.assertEqual(
@@ -540,7 +550,7 @@ class UpgradeLifecycleTests(unittest.TestCase):
         with mock.patch.object(UPGRADE, "run_adapter", side_effect=fail_apply):
             with self.assertRaisesRegex(UPGRADE.UpgradeError, "injected"):
                 UPGRADE.apply(
-                    self.home, self.home / "pmo.db", 4, plan["plan_id"]
+                    self.home, self.home / "pmo.db", 5, plan["plan_id"]
                 )
         maintenance = json.loads((self.home / "maintenance.json").read_text())
         run_id = maintenance["run_id"]
@@ -549,7 +559,7 @@ class UpgradeLifecycleTests(unittest.TestCase):
         ).read_text())
         self.assertEqual(journal["phase"], "recovery_required")
         recovered = UPGRADE.recover(
-            self.home, self.home / "pmo.db", 4, run_id
+            self.home, self.home / "pmo.db", 5, run_id
         )
         self.assertEqual(
             recovered["status"], "AGENT_MARKETPLACE_UPGRADE_COMPLETE_RESTART_REQUIRED"
@@ -571,7 +581,7 @@ class UpgradeLifecycleTests(unittest.TestCase):
         ):
             with self.assertRaisesRegex(UPGRADE.UpgradeError, "identity"):
                 UPGRADE.apply(
-                    self.home, self.home / "pmo.db", 4, plan["plan_id"]
+                    self.home, self.home / "pmo.db", 5, plan["plan_id"]
                 )
         maintenance = json.loads((self.home / "maintenance.json").read_text())
         run_id = maintenance["run_id"]
@@ -584,7 +594,7 @@ class UpgradeLifecycleTests(unittest.TestCase):
         )
         with mock.patch.object(UPGRADE, "sync_project_identity", side_effect=original):
             recovered = UPGRADE.recover(
-                self.home, self.home / "pmo.db", 4, run_id
+                self.home, self.home / "pmo.db", 5, run_id
             )
         self.assertEqual(
             recovered["status"], "AGENT_MARKETPLACE_UPGRADE_COMPLETE_RESTART_REQUIRED"
@@ -599,7 +609,7 @@ class UpgradeLifecycleTests(unittest.TestCase):
         plan = json.loads(self.cli(
             "upgrade", "plan", "--project-root", str(self.project)
         ).stdout)
-        self.assertEqual(plan["database_schema"], 4)
+        self.assertEqual(plan["database_schema"], 5)
         state_path = (
             self.project / ".agentrof" / "agent-marketplace" / "project.json"
         )
@@ -610,7 +620,7 @@ class UpgradeLifecycleTests(unittest.TestCase):
         ):
             with self.assertRaisesRegex(UPGRADE.UpgradeError, "identity"):
                 UPGRADE.apply(
-                    self.home, self.home / "pmo.db", 4, plan["plan_id"]
+                    self.home, self.home / "pmo.db", 5, plan["plan_id"]
                 )
 
         maintenance = json.loads((self.home / "maintenance.json").read_text())
@@ -620,7 +630,7 @@ class UpgradeLifecycleTests(unittest.TestCase):
         ).read_text())
         self.assertEqual(journal["phase"], "recovery_required")
         recovered = UPGRADE.recover(
-            self.home, self.home / "pmo.db", 4, run_id
+            self.home, self.home / "pmo.db", 5, run_id
         )
         self.assertEqual(
             recovered["status"],
@@ -644,7 +654,7 @@ class UpgradeLifecycleTests(unittest.TestCase):
         with mock.patch.object(UPGRADE, "run_adapter", side_effect=fail_apply):
             with self.assertRaisesRegex(UPGRADE.UpgradeError, "project apply"):
                 UPGRADE.apply(
-                    self.home, self.home / "pmo.db", 4, plan["plan_id"]
+                    self.home, self.home / "pmo.db", 5, plan["plan_id"]
                 )
         maintenance = json.loads((self.home / "maintenance.json").read_text())
         journal = json.loads((
@@ -666,7 +676,7 @@ class UpgradeLifecycleTests(unittest.TestCase):
         with mock.patch.object(UPGRADE, "run_adapter", side_effect=fail_apply):
             with self.assertRaises(UPGRADE.UpgradeError):
                 UPGRADE.apply(
-                    self.home, self.home / "pmo.db", 4, plan["plan_id"]
+                    self.home, self.home / "pmo.db", 5, plan["plan_id"]
                 )
         maintenance = json.loads((self.home / "maintenance.json").read_text())
         lock = self.home / "locks" / "upgrade.lock"
@@ -677,7 +687,7 @@ class UpgradeLifecycleTests(unittest.TestCase):
             "started_at": "2026-01-01T00:00:00+00:00",
         }), encoding="utf-8")
         recovered = UPGRADE.recover(
-            self.home, self.home / "pmo.db", 4, maintenance["run_id"]
+            self.home, self.home / "pmo.db", 5, maintenance["run_id"]
         )
         self.assertEqual(
             recovered["status"],
@@ -730,7 +740,7 @@ class UpgradeLifecycleTests(unittest.TestCase):
         ):
             with self.assertRaisesRegex(UPGRADE.UpgradeError, "precommit"):
                 UPGRADE.apply(
-                    self.home, self.home / "pmo.db", 4, plan["plan_id"]
+                    self.home, self.home / "pmo.db", 5, plan["plan_id"]
                 )
         journal_path = sorted((self.home / "upgrades").glob("*/journal.json"))[-1]
         run_id = journal_path.parent.name
@@ -742,7 +752,7 @@ class UpgradeLifecycleTests(unittest.TestCase):
             "started_at": "2026-01-01T00:00:00+00:00",
         }), encoding="utf-8")
         recovered = UPGRADE.recover(
-            self.home, self.home / "pmo.db", 4, run_id
+            self.home, self.home / "pmo.db", 5, run_id
         )
         self.assertEqual(
             recovered["status"], "AGENT_MARKETPLACE_UPGRADE_REQUIRED_READY"
@@ -869,7 +879,7 @@ class UpgradeLifecycleTests(unittest.TestCase):
             )
             catalog["database"] = {
                 "baseline": 2,
-                "current": 4,
+                "current": 5,
                 "steps": [{
                     "id": step_id,
                     "from": 2,
@@ -892,9 +902,9 @@ class UpgradeLifecycleTests(unittest.TestCase):
         self.save_registry(registry)
         chain = UPGRADE.migration_chain(
             {"data_root": str(self.home)}, "project-management-office",
-            "database", 2, 4,
+            "database", 2, 5,
         )
-        self.assertEqual([step["from"] for step in chain], [2, 3])
+        self.assertEqual([step["from"] for step in chain], [2, 3, 4])
 
         package, catalog = catalogs[-1]
         catalog["database"]["steps"] = catalog["database"]["steps"][1:]
@@ -908,7 +918,7 @@ class UpgradeLifecycleTests(unittest.TestCase):
         with self.assertRaisesRegex(UPGRADE.UpgradeError, "catalog mismatch"):
             UPGRADE.migration_chain(
                 {"data_root": str(self.home)}, "project-management-office",
-                "database", 2, 4,
+                "database", 2, 5,
             )
 
     def test_adding_second_host_upgrades_the_same_project_contract(self):

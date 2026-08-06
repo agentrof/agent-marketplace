@@ -24,7 +24,7 @@ and replies with the running URL.
 <!-- counts:start -->
 | Plugins | Agents | Entry skills | Knowledge skills |
 |---|---|---|---|
-| 2 | 12 | 13 | 14 |
+| 2 | 14 | 15 | 15 |
 <!-- counts:end -->
 
 Counts above are injected by `tools/counts.py`; they are never written by
@@ -46,10 +46,12 @@ role in snake_case:
 |---|---|---|---|
 | Analysis Challenger | `analysis-challenger` | `software-engineering-team:analysis-challenger` | `analysis_challenger` |
 | Backend Developer | `backend-developer` | `software-engineering-team:backend-developer` | `backend_developer` |
+| Backlog Reviewer | `backlog-reviewer` | `software-engineering-team:backlog-reviewer` | `backlog_reviewer` |
 | Business Analyst | `business-analyst` | `software-engineering-team:business-analyst` | `business_analyst` |
 | Code Reviewer | `code-reviewer` | `software-engineering-team:code-reviewer` | `code_reviewer` |
 | DevOps Engineer | `devops-engineer` | `software-engineering-team:devops-engineer` | `devops_engineer` |
 | Domain Expert | `domain-expert` | `software-engineering-team:domain-expert` | `domain_expert` |
+| Experience Reviewer | `experience-reviewer` | `software-engineering-team:experience-reviewer` | `experience_reviewer` |
 | Frontend Developer | `frontend-developer` | `software-engineering-team:frontend-developer` | `frontend_developer` |
 | Product Owner | `product-owner` | `software-engineering-team:product-owner` | `product_owner` |
 | QA Engineer | `qa-engineer` | `software-engineering-team:qa-engineer` | `qa_engineer` |
@@ -126,6 +128,8 @@ entry names through its skill picker and `$` invocation.
 | `/software-engineering-team:business-analysis` | Interactive analysis; produces the approved brief every flow stands on. |
 | `/software-engineering-team:solution-design` | Interactive solution architecture: landscape, technology and topology decisions as living documents the team plans and designs against. |
 | `/software-engineering-team:design-system` | Creates or updates the design master from picked candidates. |
+| `/software-engineering-team:experience-design` | Models and gates release journeys, flows, screens, states, transitions and approved previews. |
+| `/software-engineering-team:backlog-plan` | Compiles and atomically applies the approved program/release backlog, then stops before activation. |
 | `/software-engineering-team:sketch` | Design exploration: divergent single-file previews, no code. |
 | `/software-engineering-team:demo` | Pre-sales package: a navigable single-file demo, no code. |
 | `/software-engineering-team:deliver` | Real work. Atomic asks ship as a small PR; everything else runs the backlog path with gates. |
@@ -136,9 +140,12 @@ entry names through its skill picker and `$` invocation.
 | `/project-management-office:issue-desk` | Reviews and files issues captured by marketplace safety hooks. |
 | `/project-management-office:upgrade` | Inspects, plans, applies, or recovers a safe marketplace upgrade. Codex: `$project-management-office:upgrade`. |
 
-A first session usually looks like: `setup`, then `business-analysis`
-for the first topic, `solution-design` for the system foundations,
-`design-system` before any screen work, then `deliver`.
+A greenfield project deliberately runs `setup`, `business-analysis`,
+`solution-design`, `design-system`, `experience-design`, then `backlog-plan`.
+That final entry stops. Start `deliver` or `delivery-lanes` explicitly after
+approving the baseline. Existing-project feature work starts with `deliver`,
+which runs the same preparation stages in scoped mode. See
+[Greenfield preparation](docs/greenfield-preparation.md).
 
 ## Upgrading an existing project
 
@@ -182,6 +189,8 @@ state is stored in `.agentrof/agent-marketplace/project.json`.
 - [docs/architecture.md](docs/architecture.md): the invariants.
 - [docs/authoring.md](docs/authoring.md): component templates and rules.
 - [docs/orchestration.md](docs/orchestration.md): the flow contract.
+- [docs/greenfield-preparation.md](docs/greenfield-preparation.md): greenfield
+  stages, feature-mode differences and deterministic gates.
 - [docs/upgrade-protocol.md](docs/upgrade-protocol.md): user and runtime upgrade contract.
 - [docs/migration-authoring.md](docs/migration-authoring.md): ordered migration discipline.
 - `plugins/`: host-neutral canonical roles, workflows, skills, scripts and templates.

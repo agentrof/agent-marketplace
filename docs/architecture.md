@@ -121,6 +121,12 @@ the dependency contract.
    a same-host process proven absent; orphan sessions require explicit
    owner-confirmed release.
    User-owned code and content are outside the writer set.
+16. **Preparation is distinct from activation.** Greenfield work closes
+   analysis, solution, design system, release experience and baseline backlog
+   as separate owner-gated stages. Deterministic preparation routing names the
+   next entry. An approved backlog is applied atomically but does not activate
+   delivery. Existing-project features reuse the same stages in scoped mode and
+   execute only the approved feature set and owner-approved prerequisites.
 
 ## Repository layout
 
@@ -143,7 +149,8 @@ the dependency contract.
 - `plugins/project-management-office/`: the operations backbone (central
   database CLI, hooks, the Control Tower launcher entry and its read-only
   web dashboard); a dependency of every team plugin, never a team itself.
-- `docs/`: this map, the authoring guide, the orchestration spec.
+- `docs/`: this map, the authoring guide, orchestration spec and greenfield
+  preparation contract.
 - `tools/`: validator, host-surface generators, counts injector, scaffolder
   and their tests;
   `tools/data/models.json` (reasoning levels) and `tools/data/limits.json`

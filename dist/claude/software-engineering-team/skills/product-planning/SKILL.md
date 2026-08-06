@@ -1,6 +1,6 @@
 ---
 name: product-planning
-description: Product planning knowledge for the team's product-owner role. Loaded by software-engineering-team flows; not user-facing.
+description: Program, release and feature backlog planning knowledge for the team's product-owner role. Loaded by software-engineering-team flows; not user-facing.
 user-invocable: false
 ---
 

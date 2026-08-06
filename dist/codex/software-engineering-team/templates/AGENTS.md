@@ -14,8 +14,14 @@ Read and follow `{{workspace}}/memory/me.md` before team work.
 
 - `{{workspace}}/config.json`: project declaration, changed only through the configure entry.
 - `{{workspace}}/docs/`: governed knowledge vault.
+- `{{workspace}}/docs/experience-design/`: approved program and release
+  experience graphs; sketches are not baselines.
 - `{{workspace}}/apps/`: application code.
 - `{{workspace}}/environment/`: runnable containerized environment.
 - `{{workspace}}/work-orders/`: gitignored work-order snapshots; durable delivery state lives in PMO.
+- `{{workspace}}/experience-design-work/` and `{{workspace}}/planning/`:
+  gitignored candidates and plan drafts.
 
 Start work through the Agent Marketplace entry skills, not free-form state changes.
+For greenfield use setup, business-analysis, solution-design, design-system,
+experience-design and backlog-plan, then stop before explicit delivery.

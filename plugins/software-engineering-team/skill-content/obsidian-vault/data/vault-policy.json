@@ -1,5 +1,5 @@
 {
-  "schema_version": 3,
+  "schema_version": 4,
   "vault_root_dirname": "docs",
   "home_file": "home.md",
   "maps_dir": "maps",
@@ -7,7 +7,8 @@
     "business-analysis",
     "solution-design",
     "system-architecture",
-    "design-system"
+    "design-system",
+    "experience-design"
   ],
   "extra_maps": [],
   "machine_dirs": [
@@ -107,6 +108,21 @@
       "rgb": 13538264
     },
     {
+      "id": "experience",
+      "query": "tag:#doc/experience OR tag:#doc/program OR tag:#doc/release",
+      "rgb": 3108513
+    },
+    {
+      "id": "journey",
+      "query": "tag:#doc/journey OR tag:#doc/flow-set",
+      "rgb": 16747520
+    },
+    {
+      "id": "screen",
+      "query": "tag:#doc/screen",
+      "rgb": 5592575
+    },
+    {
       "id": "navigation",
       "query": "tag:#doc/moc OR tag:#doc/home",
       "rgb": 9741240
@@ -204,7 +220,36 @@
     "round": "number",
     "locked": "checkbox",
     "tags": "list",
-    "aliases": "list"
+    "aliases": "list",
+    "program_id": "text",
+    "release_id": "text",
+    "analysis_scopes": "list",
+    "criterion_refs": "list",
+    "revision": "number",
+    "registry_hash": "text"
+  },
+  "lazy_fragments": {
+    "base": ["type", "title", "status", "tags", "aliases"],
+    "business_analysis": ["code", "scope", "round"],
+    "solution_design": ["engagement", "territory", "revisit_trigger"],
+    "system_architecture": ["story", "governs", "verifies"],
+    "design_system": ["locked"],
+    "experience_design": [
+      "program_id",
+      "release_id",
+      "analysis_scopes",
+      "criterion_refs",
+      "revision",
+      "registry_hash"
+    ]
+  },
+  "fragment_graph_groups": {
+    "base": ["navigation"],
+    "business_analysis": ["space", "domain", "glossary", "actor-roster", "budget-set", "entity", "process", "rule-set", "acceptance-set", "decision", "integration", "challenge-record"],
+    "solution_design": ["landscape", "engagement", "decision"],
+    "system_architecture": ["decision"],
+    "design_system": ["design-master", "page-override"],
+    "experience_design": ["experience", "journey", "screen"]
   },
   "extra_doc_types": [
     "moc",
@@ -212,6 +257,12 @@
     "landscape",
     "engagement",
     "design-master",
-    "page-override"
+    "page-override",
+    "experience",
+    "program",
+    "release",
+    "journey",
+    "flow-set",
+    "screen"
   ]
 }

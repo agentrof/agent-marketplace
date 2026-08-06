@@ -1,0 +1,6 @@
+interface:
+  display_name: "Experience Design"
+  short_description: "Start the Experience Design guided workflow"
+  default_prompt: "Use $software-engineering-team:experience-design to start this workflow."
+policy:
+  allow_implicit_invocation: false

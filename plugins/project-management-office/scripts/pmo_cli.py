@@ -34,7 +34,7 @@ import marketplace_paths
 import upgrade_core
 
 PMO_VERSION = "0.0.1"
-SCHEMA_VERSION = 4
+SCHEMA_VERSION = 5
 DB_NAME = "pmo.db"
 
 WO_STATUSES = {"running", "waiting_gate", "blocked", "escalated", "complete"}
@@ -272,6 +272,159 @@ CREATE TABLE IF NOT EXISTS issue_candidates (
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS programs (
+  id INTEGER PRIMARY KEY,
+  project_id INTEGER NOT NULL REFERENCES projects(id),
+  program_key TEXT NOT NULL,
+  title TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'draft'
+    CHECK (status IN ('draft', 'baselined', 'complete', 'cancelled')),
+  baseline_hash TEXT NOT NULL DEFAULT '',
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  UNIQUE (project_id, program_key)
+);
+CREATE TABLE IF NOT EXISTS releases (
+  id INTEGER PRIMARY KEY,
+  program_id INTEGER NOT NULL REFERENCES programs(id),
+  release_key TEXT NOT NULL,
+  title TEXT NOT NULL,
+  sequence INTEGER NOT NULL,
+  status TEXT NOT NULL DEFAULT 'draft'
+    CHECK (status IN ('draft', 'baselined', 'active', 'complete', 'cancelled')),
+  experience_registry_hash TEXT NOT NULL DEFAULT '',
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  UNIQUE (program_id, release_key),
+  UNIQUE (program_id, sequence)
+);
+CREATE TABLE IF NOT EXISTS work_item_releases (
+  item_id INTEGER PRIMARY KEY REFERENCES work_items(id),
+  release_id INTEGER NOT NULL REFERENCES releases(id),
+  provenance TEXT NOT NULL DEFAULT 'approved_plan'
+);
+CREATE TABLE IF NOT EXISTS readiness_items (
+  id INTEGER PRIMARY KEY,
+  item_id INTEGER NOT NULL REFERENCES work_items(id),
+  statement TEXT NOT NULL,
+  satisfied INTEGER NOT NULL DEFAULT 0,
+  UNIQUE (item_id, statement)
+);
+CREATE TABLE IF NOT EXISTS work_item_refs (
+  id INTEGER PRIMARY KEY,
+  item_id INTEGER NOT NULL REFERENCES work_items(id),
+  ref_kind TEXT NOT NULL CHECK (ref_kind IN ('requirement','solution','budget','ux')),
+  ref_value TEXT NOT NULL,
+  UNIQUE (item_id, ref_kind, ref_value)
+);
+CREATE TABLE IF NOT EXISTS work_item_owners (
+  id INTEGER PRIMARY KEY,
+  item_id INTEGER NOT NULL REFERENCES work_items(id),
+  role TEXT NOT NULL,
+  relationship TEXT NOT NULL CHECK (relationship IN ('owner','supporting')),
+  UNIQUE (item_id, role, relationship)
+);
+CREATE TABLE IF NOT EXISTS work_item_shares (
+  id INTEGER PRIMARY KEY,
+  project_id INTEGER NOT NULL REFERENCES projects(id),
+  left_item_id INTEGER NOT NULL REFERENCES work_items(id),
+  right_item_id INTEGER NOT NULL REFERENCES work_items(id),
+  subject TEXT NOT NULL,
+  UNIQUE (left_item_id, right_item_id, subject)
+);
+CREATE TABLE IF NOT EXISTS experience_runs (
+  id INTEGER PRIMARY KEY,
+  project_id INTEGER NOT NULL REFERENCES projects(id),
+  run_key TEXT NOT NULL,
+  program_key TEXT NOT NULL,
+  release_key TEXT NOT NULL DEFAULT '',
+  session_id TEXT NOT NULL DEFAULT '',
+  status TEXT NOT NULL DEFAULT 'active'
+    CHECK (status IN ('active', 'released')),
+  created_at TEXT NOT NULL,
+  released_at TEXT NOT NULL DEFAULT '',
+  UNIQUE (project_id, run_key)
+);
+CREATE TABLE IF NOT EXISTS experience_node_claims (
+  run_id INTEGER NOT NULL REFERENCES experience_runs(id),
+  node_ref TEXT NOT NULL,
+  claimed_at TEXT NOT NULL,
+  PRIMARY KEY (run_id, node_ref)
+);
+CREATE TABLE IF NOT EXISTS experience_gates (
+  id INTEGER PRIMARY KEY,
+  run_id INTEGER NOT NULL REFERENCES experience_runs(id),
+  gate_name TEXT NOT NULL,
+  decision TEXT NOT NULL,
+  revision_hash TEXT NOT NULL,
+  decided_by TEXT NOT NULL DEFAULT 'owner',
+  decided_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS backlog_plans (
+  id INTEGER PRIMARY KEY,
+  project_id INTEGER NOT NULL REFERENCES projects(id),
+  plan_key TEXT NOT NULL,
+  program_key TEXT NOT NULL,
+  mode TEXT NOT NULL CHECK (mode IN ('baseline','replan','feature')),
+  status TEXT NOT NULL DEFAULT 'draft'
+    CHECK (status IN ('draft','verified','applied','abandoned')),
+  plan_json TEXT NOT NULL,
+  draft_hash TEXT NOT NULL,
+  compiler_hash TEXT NOT NULL DEFAULT '',
+  approved_hash TEXT NOT NULL DEFAULT '',
+  gate_revision INTEGER NOT NULL DEFAULT 0,
+  session_id TEXT NOT NULL DEFAULT '',
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  UNIQUE (project_id, plan_key)
+);
+CREATE TABLE IF NOT EXISTS backlog_plan_revisions (
+  id INTEGER PRIMARY KEY,
+  plan_id INTEGER NOT NULL REFERENCES backlog_plans(id),
+  revision INTEGER NOT NULL,
+  plan_hash TEXT NOT NULL,
+  plan_json TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  UNIQUE (plan_id, revision),
+  UNIQUE (plan_id, plan_hash)
+);
+CREATE TABLE IF NOT EXISTS planning_findings (
+  id INTEGER PRIMARY KEY,
+  plan_id INTEGER NOT NULL REFERENCES backlog_plans(id),
+  external_id TEXT NOT NULL,
+  finding_kind TEXT NOT NULL DEFAULT 'semantic'
+    CHECK (finding_kind IN ('mechanical','semantic')),
+  severity TEXT NOT NULL CHECK (severity IN ('blocker','non-blocking')),
+  summary TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'open'
+    CHECK (status IN ('open','resolved','rejected','accepted-risk')),
+  reason TEXT NOT NULL DEFAULT '',
+  owner TEXT NOT NULL DEFAULT '',
+  revisit TEXT NOT NULL DEFAULT '',
+  review_rounds INTEGER NOT NULL DEFAULT 1,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  UNIQUE (plan_id, external_id)
+);
+CREATE TABLE IF NOT EXISTS planning_gates (
+  id INTEGER PRIMARY KEY,
+  plan_id INTEGER NOT NULL REFERENCES backlog_plans(id),
+  gate_name TEXT NOT NULL,
+  decision TEXT NOT NULL,
+  plan_hash TEXT NOT NULL,
+  revision INTEGER NOT NULL,
+  decided_by TEXT NOT NULL DEFAULT 'owner',
+  decided_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS id_reservations (
+  id INTEGER PRIMARY KEY,
+  plan_id INTEGER NOT NULL REFERENCES backlog_plans(id),
+  prefix TEXT NOT NULL,
+  first_value INTEGER NOT NULL,
+  last_value INTEGER NOT NULL,
+  created_at TEXT NOT NULL,
+  UNIQUE (plan_id, prefix, first_value)
+);
 CREATE TABLE IF NOT EXISTS meta (
   key TEXT PRIMARY KEY,
   value TEXT NOT NULL
@@ -295,6 +448,9 @@ CREATE INDEX IF NOT EXISTS idx_events_project ON events(project_id, id);
 CREATE INDEX IF NOT EXISTS idx_work_items_pks ON work_items(project_id, kind, status);
 CREATE INDEX IF NOT EXISTS idx_findings_wo_status ON findings(work_order_id, status);
 CREATE INDEX IF NOT EXISTS idx_issue_candidates_status ON issue_candidates(status);
+CREATE INDEX IF NOT EXISTS idx_releases_status ON releases(program_id, status);
+CREATE INDEX IF NOT EXISTS idx_backlog_plans_status ON backlog_plans(project_id, status);
+CREATE INDEX IF NOT EXISTS idx_experience_runs_status ON experience_runs(project_id, status);
 """
 
 
@@ -449,6 +605,12 @@ def get_item(con, project_id: int, external_id: str) -> sqlite3.Row | None:
         "SELECT * FROM work_items WHERE project_id = ? AND external_id = ?",
         (project_id, external_id),
     ).fetchone()
+
+
+def item_is_managed(con, item_id: int) -> bool:
+    return con.execute(
+        "SELECT 1 FROM work_item_releases WHERE item_id = ?", (item_id,)
+    ).fetchone() is not None
 
 
 def active_work_orders(con, project_id: int) -> list[sqlite3.Row]:
@@ -774,6 +936,15 @@ def cmd_init_db(args) -> int:
 
 
 def cmd_project_register(args) -> int:
+    stamped_config = None
+    if args.stamp_config:
+        config_path = Path(args.stamp_config)
+        try:
+            stamped_config = json.loads(config_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            raise Rule(f"project config is unreadable: {exc}") from exc
+        if not isinstance(stamped_config, dict) or stamped_config.get("project_origin") not in {"greenfield", "existing"}:
+            raise Rule("fresh setup requires explicit project_origin greenfield or existing")
     con = connect()
     with mutate(con):
         existing = con.execute(
@@ -803,9 +974,7 @@ def cmd_project_register(args) -> int:
             )
     if args.stamp_config:
         config_path = Path(args.stamp_config)
-        config = {}
-        if config_path.is_file():
-            config = json.loads(config_path.read_text(encoding="utf-8"))
+        config = stamped_config or {}
         config["project_key"] = args.key
         config_path.write_text(json.dumps(config, indent=2) + "\n", encoding="utf-8")
     if args.project_root:
@@ -846,6 +1015,106 @@ def cmd_project_list(args) -> int:
             print(f"pmo: {row['project_key']}  {row['name']}")
         if not rows:
             print("pmo: no projects registered")
+    return 0
+
+
+def cmd_project_classify_origin(args) -> int:
+    """Classify project origin while keeping the contract fingerprint aligned.
+
+    Fresh setup writes the origin before project registration.  Once a project
+    contract exists this command is the only supported writer: it validates
+    PMO state, updates config and contract state as one compensated mutation,
+    and records the decision in the append-only event ledger.
+    """
+    root = Path(args.project_root).resolve()
+    config_path = Path(args.config).resolve() if args.config else (
+        root / args.workspace / "config.json"
+    )
+    try:
+        config_relative = upgrade_core.safe_relative(root, config_path)
+    except upgrade_core.UpgradeError as exc:
+        raise Rule(str(exc)) from exc
+    state_path = root / upgrade_core.STATE_RELATIVE
+    if not config_path.is_file() or not state_path.is_file():
+        raise Rule("origin classification requires config and project contract state")
+    try:
+        config = upgrade_core.load_json(config_path, {})
+        state = upgrade_core.load_json(state_path, {})
+    except upgrade_core.UpgradeError as exc:
+        raise Rule(str(exc)) from exc
+    if not isinstance(config, dict) or not isinstance(state, dict):
+        raise Rule("project config and contract state must be JSON objects")
+    if config.get("project_key") != args.project_key:
+        raise Rule("project config key does not match --project-key")
+    if state.get("project_key") != args.project_key:
+        raise Rule("project contract key does not match --project-key")
+    if state.get("contract_version") != upgrade_core.PROJECT_CONTRACT_VERSION:
+        raise Rule("project contract must be upgraded before origin classification")
+    current = str(config.get("project_origin", ""))
+    if current not in {"unclassified", "greenfield", "existing"}:
+        raise Rule("current project_origin is invalid")
+
+    surface_key = config_relative + "#agent-marketplace"
+    expected_digest = state.get("managed_surfaces", {}).get(surface_key, "")
+    actual_digest = upgrade_core.config_owned_digest(config)
+    if expected_digest and expected_digest != actual_digest:
+        raise Rule("managed config drift must be resolved before origin classification")
+
+    con = connect()
+    project = get_project(con, args.project_key)
+    if current not in {"unclassified", args.origin}:
+        counts = {
+            "programs": con.execute(
+                "SELECT COUNT(*) FROM programs WHERE project_id = ?", (project["id"],)
+            ).fetchone()[0],
+            "work_items": con.execute(
+                "SELECT COUNT(*) FROM work_items WHERE project_id = ?", (project["id"],)
+            ).fetchone()[0],
+            "work_orders": con.execute(
+                "SELECT COUNT(*) FROM work_orders WHERE project_id = ?", (project["id"],)
+            ).fetchone()[0],
+            "experience_runs": con.execute(
+                "SELECT COUNT(*) FROM experience_runs WHERE project_id = ?", (project["id"],)
+            ).fetchone()[0],
+            "backlog_plans": con.execute(
+                "SELECT COUNT(*) FROM backlog_plans WHERE project_id = ?", (project["id"],)
+            ).fetchone()[0],
+        }
+        populated = sorted(key for key, value in counts.items() if value)
+        if populated:
+            raise Rule(
+                "project_origin is immutable after program, backlog or delivery state: "
+                + ", ".join(populated)
+            )
+
+    if current == args.origin:
+        print(f"pmo: project_origin already {args.origin}")
+        return 0
+
+    original_config = config_path.read_bytes()
+    original_state = state_path.read_bytes()
+    candidate_config = dict(config)
+    candidate_config["project_origin"] = args.origin
+    candidate_state = dict(state)
+    candidate_state["project_origin"] = args.origin
+    candidate_surfaces = dict(state.get("managed_surfaces", {}))
+    candidate_surfaces[surface_key] = upgrade_core.config_owned_digest(candidate_config)
+    candidate_state["managed_surfaces"] = candidate_surfaces
+    try:
+        with mutate(con):
+            upgrade_core.atomic_json(config_path, candidate_config, 0o644)
+            upgrade_core.atomic_json(state_path, candidate_state, 0o644)
+            record(
+                con,
+                "project_origin_classified",
+                project_id=project["id"],
+                payload={"from": current, "to": args.origin},
+            )
+    except Exception:
+        upgrade_core.atomic_bytes(config_path, original_config, 0o644)
+        upgrade_core.atomic_bytes(state_path, original_state, 0o644)
+        raise
+    print(f"pmo: project_origin={args.origin}")
     return 0
 
 
@@ -892,6 +1161,15 @@ def cmd_wo_init(args) -> int:
             story = get_item(con, project["id"], args.story)
             if story is None or story["kind"] != "story":
                 raise Rule(f"story '{args.story}' is not in the backlog; import it first")
+            membership = con.execute(
+                "SELECT r.status FROM work_item_releases m"
+                " JOIN releases r ON r.id = m.release_id WHERE m.item_id = ?",
+                (story["id"],),
+            ).fetchone()
+            if membership is not None and membership["status"] != "active":
+                raise Rule("managed story belongs to a release that is not active")
+            if membership is not None and story["status"] != "ready":
+                raise Rule("managed story must be ready before a work order can claim it")
             claimed = con.execute(
                 "SELECT work_order_key FROM work_orders WHERE story_id = ?"
                 " AND status IN (?, ?)",
@@ -1371,6 +1649,8 @@ def cmd_item_import(args) -> int:
     con = connect()
     with mutate(con):
         project = get_project(con, args.project_key)
+        if con.execute("SELECT 1 FROM programs WHERE project_id = ? LIMIT 1", (project["id"],)).fetchone():
+            raise Rule("managed program structure changes only through backlog-plan apply")
         data = load_import_file(args.json_file)
         epics = data.get("epics", [])
         stories = data.get("stories", [])
@@ -1524,6 +1804,13 @@ def cmd_item_update(args) -> int:
             check_priority(updates["priority"], args.external_id)
         if args.deployed_verified is not None:
             updates["deployed_verified"] = 1 if args.deployed_verified == "true" else 0
+        if item_is_managed(con, item["id"]):
+            forbidden = sorted(set(updates) - {"status", "deployed_verified"})
+            if forbidden:
+                raise Rule(
+                    "managed story structural fields change only through"
+                    " backlog-plan apply: " + ", ".join(forbidden)
+                )
         if not updates:
             raise Rule("nothing to update; pass at least one field flag")
         assignments = ", ".join(f"{col} = ?" for col in updates)
@@ -1574,6 +1861,8 @@ def cmd_item_add_dep(args) -> int:
             raise Rule(f"no work item '{args.item}' in project")
         if target is None:
             raise Rule(f"no work item '{args.depends_on}' in project")
+        if item_is_managed(con, item["id"]) or item_is_managed(con, target["id"]):
+            raise Rule("managed dependencies change only through backlog-plan apply")
         if item["kind"] == "epic" or target["kind"] == "epic":
             raise Rule("epics never carry dependency edges; they are groupings")
         if item["kind"] != target["kind"]:
@@ -1611,6 +1900,8 @@ def cmd_item_remove_dep(args) -> int:
         target = get_item(con, project["id"], args.depends_on)
         if item is None or target is None:
             raise Rule("both items must exist in the project")
+        if item_is_managed(con, item["id"]) or item_is_managed(con, target["id"]):
+            raise Rule("managed dependencies change only through backlog-plan apply")
         gone = con.execute(
             "DELETE FROM work_item_deps WHERE item_id = ? AND depends_on_id = ?",
             (item["id"], target["id"]),
@@ -1663,6 +1954,8 @@ def cmd_item_add_dod(args) -> int:
         item = get_item(con, project["id"], args.item)
         if item is None:
             raise Rule(f"no work item '{args.item}' in project")
+        if item_is_managed(con, item["id"]):
+            raise Rule("managed DoD structure changes only through backlog-plan apply")
         con.execute(
             "INSERT INTO dod_items (item_id, statement, created_at, updated_at)"
             " VALUES (?, ?, ?, ?)"
@@ -1768,7 +2061,10 @@ def cmd_item_ready(args) -> int:
     stories = {
         row["external_id"]: row
         for row in con.execute(
-            "SELECT * FROM work_items WHERE project_id = ? AND kind = 'story'",
+            "SELECT i.*, r.status AS release_status FROM work_items i"
+            " LEFT JOIN work_item_releases m ON m.item_id = i.id"
+            " LEFT JOIN releases r ON r.id = m.release_id"
+            " WHERE i.project_id = ? AND i.kind = 'story'",
             (project["id"],),
         )
     }
@@ -1795,6 +2091,8 @@ def cmd_item_ready(args) -> int:
               "claimed": [], "stale_in_development": [], "cycles": cycles}
     for eid in sorted(stories, key=lambda e: topo_pos.get(e, 10 ** 6)):
         story = stories[eid]
+        if story["release_status"] is not None and story["release_status"] != "active":
+            continue
         active = claims.get(story["id"])
         if active is not None:
             result["claimed"].append({
@@ -2674,6 +2972,687 @@ def cmd_upgrade_session_release(args) -> int:
 
 
 # ---------------------------------------------------------------------------
+# Program, release, Experience Design and approved backlog planning
+# ---------------------------------------------------------------------------
+
+
+def canonical_backlog_plan(value: dict) -> bytes:
+    transient = {"approved_hash", "compiler_hash", "verified_at", "applied_at"}
+    stable = {key: item for key, item in value.items() if key not in transient}
+    return (json.dumps(stable, sort_keys=True, separators=(",", ":"),
+                       ensure_ascii=False) + "\n").encode()
+
+
+def backlog_plan_hash(value: dict) -> str:
+    import hashlib
+    return "sha256:" + hashlib.sha256(canonical_backlog_plan(value)).hexdigest()
+
+
+def read_object(path: str) -> dict:
+    try:
+        value = json.loads(Path(path).read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise Rule(f"cannot read JSON object {path}: {exc}") from exc
+    if not isinstance(value, dict):
+        raise Rule(f"JSON object required: {path}")
+    return value
+
+
+def get_program(con, project_id: int, key: str) -> sqlite3.Row:
+    row = con.execute(
+        "SELECT * FROM programs WHERE project_id = ? AND program_key = ?",
+        (project_id, key),
+    ).fetchone()
+    if row is None:
+        raise Rule(f"unknown program '{key}'")
+    return row
+
+
+def get_release(con, program_id: int, key: str) -> sqlite3.Row:
+    row = con.execute(
+        "SELECT * FROM releases WHERE program_id = ? AND release_key = ?",
+        (program_id, key),
+    ).fetchone()
+    if row is None:
+        raise Rule(f"unknown release '{key}'")
+    return row
+
+
+def get_backlog_plan(con, key: str) -> sqlite3.Row:
+    row = con.execute("SELECT * FROM backlog_plans WHERE plan_key = ?", (key,)).fetchone()
+    if row is None:
+        raise Rule(f"unknown backlog plan '{key}'")
+    return row
+
+
+def cmd_program_list(args) -> int:
+    con = connect(); project = get_project(con, args.project_key)
+    rows = con.execute("SELECT * FROM programs WHERE project_id = ? ORDER BY program_key", (project["id"],)).fetchall()
+    if args.json:
+        print(json.dumps([dict(row) for row in rows], indent=2))
+    else:
+        for row in rows:
+            print(f"{row['program_key']}  {row['status']}  {row['title']}")
+    return 0
+
+
+def cmd_program_show(args) -> int:
+    con = connect(); project = get_project(con, args.project_key)
+    program = get_program(con, project["id"], args.program)
+    releases = [dict(row) for row in con.execute("SELECT * FROM releases WHERE program_id = ? ORDER BY sequence", (program["id"],))]
+    print(json.dumps({**dict(program), "releases": releases}, indent=2))
+    return 0
+
+
+def cmd_program_status(args) -> int:
+    return cmd_program_show(args)
+
+
+def cmd_program_baseline(args) -> int:
+    con = connect()
+    with mutate(con):
+        project = get_project(con, args.project_key); program = get_program(con, project["id"], args.program)
+        plan = con.execute("SELECT * FROM backlog_plans WHERE project_id = ? AND program_key = ? AND status = 'applied' AND approved_hash = ? ORDER BY id DESC LIMIT 1", (project["id"], args.program, args.baseline_hash)).fetchone()
+        if plan is None:
+            raise Rule("program baseline requires an applied backlog plan at the exact hash")
+        con.execute("UPDATE programs SET status = 'baselined', baseline_hash = ?, updated_at = ? WHERE id = ?", (args.baseline_hash, now(), program["id"]))
+        con.execute("UPDATE releases SET status = 'baselined', updated_at = ? WHERE program_id = ? AND status = 'draft'", (now(), program["id"]))
+        record(con, "program_baselined", project_id=project["id"], payload={"program": args.program, "hash": args.baseline_hash})
+    print(f"pmo: program {args.program} baselined")
+    return 0
+
+
+def cmd_program_complete(args) -> int:
+    con = connect()
+    with mutate(con):
+        project = get_project(con, args.project_key); program = get_program(con, project["id"], args.program)
+        open_count = con.execute("SELECT COUNT(*) FROM releases WHERE program_id = ? AND status NOT IN ('complete','cancelled')", (program["id"],)).fetchone()[0]
+        if open_count:
+            raise Rule("all releases must be complete or cancelled")
+        con.execute("UPDATE programs SET status = 'complete', updated_at = ? WHERE id = ?", (now(), program["id"]))
+        record(con, "program_completed", project_id=project["id"], payload={"program": args.program})
+    return 0
+
+
+def cmd_program_cancel(args) -> int:
+    con = connect()
+    with mutate(con):
+        project = get_project(con, args.project_key); program = get_program(con, project["id"], args.program)
+        active = con.execute("SELECT COUNT(*) FROM releases WHERE program_id = ? AND status = 'active'", (program["id"],)).fetchone()[0]
+        if active:
+            raise Rule("an active release prevents program cancellation")
+        con.execute("UPDATE programs SET status = 'cancelled', updated_at = ? WHERE id = ?", (now(), program["id"]))
+        record(con, "program_cancelled", project_id=project["id"], payload={"program": args.program, "reason": args.reason})
+    return 0
+
+
+def release_context(con, args):
+    project = get_project(con, args.project_key)
+    program = get_program(con, project["id"], args.program)
+    release = get_release(con, program["id"], args.release) if getattr(args, "release", "") else None
+    return project, program, release
+
+
+def cmd_release_list(args) -> int:
+    con = connect(); project = get_project(con, args.project_key); program = get_program(con, project["id"], args.program)
+    rows = con.execute("SELECT * FROM releases WHERE program_id = ? ORDER BY sequence", (program["id"],)).fetchall()
+    if args.json:
+        print(json.dumps([dict(row) for row in rows], indent=2))
+    else:
+        for row in rows:
+            print(f"{row['release_key']}  {row['status']}  {row['title']}")
+    return 0
+
+
+def cmd_release_show(args) -> int:
+    con = connect(); _, _, release = release_context(con, args)
+    rows = con.execute("SELECT i.external_id, i.status FROM work_item_releases m JOIN work_items i ON i.id = m.item_id WHERE m.release_id = ? ORDER BY i.external_id", (release["id"],)).fetchall()
+    print(json.dumps({**dict(release), "items": [dict(row) for row in rows]}, indent=2))
+    return 0
+
+
+def cmd_release_activate(args) -> int:
+    con = connect()
+    with mutate(con):
+        project, program, release = release_context(con, args)
+        if program["status"] != "baselined" or release["status"] != "baselined":
+            raise Rule("only a baselined program release can activate")
+        if not release["experience_registry_hash"] and release["release_key"] != "REL-LEGACY":
+            raise Rule("release activation requires an Experience Design registry hash")
+        prior = con.execute("SELECT COUNT(*) FROM releases WHERE program_id = ? AND sequence < ? AND status NOT IN ('complete','cancelled')", (program["id"], release["sequence"])).fetchone()[0]
+        if prior:
+            raise Rule("earlier releases must be complete or cancelled")
+        other = con.execute("SELECT release_key FROM releases WHERE program_id = ? AND status = 'active'", (program["id"],)).fetchone()
+        if other:
+            raise Rule(f"release {other['release_key']} is already active")
+        con.execute("UPDATE releases SET status = 'active', updated_at = ? WHERE id = ?", (now(), release["id"]))
+        record(con, "release_activated", project_id=project["id"], payload={"program": args.program, "release": args.release})
+    return 0
+
+
+def cmd_release_refresh_ready(args) -> int:
+    con = connect()
+    with mutate(con):
+        project, _, release = release_context(con, args)
+        if release["status"] != "active":
+            raise Rule("release must be active before readiness refresh")
+        stories = con.execute("SELECT i.* FROM work_item_releases m JOIN work_items i ON i.id = m.item_id WHERE m.release_id = ? AND i.kind = 'story' AND i.status = 'planned' ORDER BY i.external_id", (release["id"],)).fetchall()
+        ready = []
+        for story in stories:
+            blockers = con.execute("SELECT COUNT(*) FROM work_item_deps d JOIN work_items dep ON dep.id = d.depends_on_id WHERE d.item_id = ? AND dep.status != 'done'", (story["id"],)).fetchone()[0]
+            dor = con.execute("SELECT COUNT(*) FROM readiness_items WHERE item_id = ? AND satisfied = 0", (story["id"],)).fetchone()[0]
+            if not blockers and not dor:
+                con.execute("UPDATE work_items SET status = 'ready', updated_at = ? WHERE id = ?", (now(), story["id"]))
+                ready.append(story["external_id"])
+        record(con, "release_readiness_refreshed", project_id=project["id"], payload={"release": args.release, "ready": ready})
+    print(json.dumps({"ready": ready}, indent=2))
+    return 0
+
+
+def cmd_release_complete(args) -> int:
+    con = connect()
+    with mutate(con):
+        project, _, release = release_context(con, args)
+        open_count = con.execute("SELECT COUNT(*) FROM work_item_releases m JOIN work_items i ON i.id = m.item_id WHERE m.release_id = ? AND i.kind = 'story' AND i.status NOT IN ('done','deferred')", (release["id"],)).fetchone()[0]
+        if open_count:
+            raise Rule("all release stories must be done or deferred")
+        con.execute("UPDATE releases SET status = 'complete', updated_at = ? WHERE id = ?", (now(), release["id"]))
+        record(con, "release_completed", project_id=project["id"], payload={"release": args.release})
+    return 0
+
+
+def cmd_release_cancel(args) -> int:
+    con = connect()
+    with mutate(con):
+        project, _, release = release_context(con, args)
+        active = con.execute("SELECT COUNT(*) FROM work_item_releases m JOIN work_items i ON i.id = m.item_id WHERE m.release_id = ? AND i.status = 'in_development'", (release["id"],)).fetchone()[0]
+        if active:
+            raise Rule("in-development stories prevent release cancellation")
+        con.execute("UPDATE releases SET status = 'cancelled', updated_at = ? WHERE id = ?", (now(), release["id"]))
+        record(con, "release_cancelled", project_id=project["id"], payload={"release": args.release, "reason": args.reason})
+    return 0
+
+
+def cmd_experience_run_init(args) -> int:
+    con = connect()
+    with mutate(con):
+        project = get_project(con, args.project_key)
+        existing = con.execute("SELECT run_key FROM experience_runs WHERE project_id = ? AND status = 'active'", (project["id"],)).fetchone()
+        if existing:
+            raise Rule(f"active experience run already exists: {existing['run_key']}")
+        con.execute("INSERT INTO experience_runs (project_id, run_key, program_key, release_key, session_id, created_at) VALUES (?, ?, ?, ?, ?, ?)", (project["id"], args.run_key, args.program, args.release, args.session_id, now()))
+        run = con.execute("SELECT * FROM experience_runs WHERE project_id = ? AND run_key = ?", (project["id"], args.run_key)).fetchone()
+        for node in args.node:
+            claimed = con.execute("SELECT r.run_key FROM experience_node_claims c JOIN experience_runs r ON r.id = c.run_id WHERE r.project_id = ? AND r.status = 'active' AND c.node_ref = ?", (project["id"], node)).fetchone()
+            if claimed:
+                raise Rule(f"experience node {node} is claimed by {claimed['run_key']}")
+            con.execute("INSERT INTO experience_node_claims (run_id, node_ref, claimed_at) VALUES (?, ?, ?)", (run["id"], node, now()))
+        record(con, "experience_run_initialized", project_id=project["id"], payload={"run": args.run_key, "nodes": args.node})
+    return 0
+
+
+def cmd_experience_run_status(args) -> int:
+    con = connect(); project = get_project(con, args.project_key)
+    params = [project["id"]]; where = "project_id = ?"
+    if args.run_key:
+        where += " AND run_key = ?"; params.append(args.run_key)
+    rows = con.execute(f"SELECT * FROM experience_runs WHERE {where} ORDER BY id", params).fetchall()
+    print(json.dumps([dict(row) for row in rows], indent=2))
+    return 0
+
+
+def cmd_experience_run_gate(args) -> int:
+    con = connect()
+    with mutate(con):
+        run = con.execute("SELECT * FROM experience_runs WHERE run_key = ?", (args.run_key,)).fetchone()
+        if run is None or run["status"] != "active":
+            raise Rule("experience run is not active")
+        con.execute("INSERT INTO experience_gates (run_id, gate_name, decision, revision_hash, decided_by, decided_at) VALUES (?, ?, ?, ?, ?, ?)", (run["id"], args.gate, args.decision, args.revision_hash, args.decided_by, now()))
+        record(con, "experience_gate_recorded", project_id=run["project_id"], payload={"run": args.run_key, "gate": args.gate, "decision": args.decision, "revision_hash": args.revision_hash})
+    return 0
+
+
+def cmd_experience_run_release(args) -> int:
+    con = connect()
+    with mutate(con):
+        run = con.execute("SELECT * FROM experience_runs WHERE run_key = ?", (args.run_key,)).fetchone()
+        if run is None:
+            raise Rule("unknown experience run")
+        if run["status"] != "active":
+            raise Rule("experience run is not active")
+        claims = [
+            row["node_ref"] for row in con.execute(
+                "SELECT node_ref FROM experience_node_claims WHERE run_id = ? ORDER BY node_ref",
+                (run["id"],),
+            )
+        ]
+        if not claims:
+            raise Rule("experience run cannot close without claimed analysis nodes")
+        latest = {
+            row["gate_name"]: row["decision"] for row in con.execute(
+                "SELECT gate_name, decision FROM experience_gates WHERE run_id = ? ORDER BY id",
+                (run["id"],),
+            )
+        }
+        expected = {
+            ("domain:" if "#domains/" in node else "space:") + node
+            for node in claims
+        } | {"release", "program"}
+        spaces = {node.partition("#")[0] for node in claims}
+        if len(claims) > 1:
+            expected.add("reconciliation")
+        if len(spaces) > 1:
+            expected.add("multi-space")
+        missing = sorted(gate for gate in expected if latest.get(gate) != "approved")
+        if missing:
+            raise Rule("experience run gates are incomplete: " + ", ".join(missing))
+        con.execute("UPDATE experience_runs SET status = 'released', released_at = ? WHERE id = ?", (now(), run["id"]))
+        record(con, "experience_run_released", project_id=run["project_id"], payload={"run": args.run_key})
+    return 0
+
+
+def cmd_backlog_plan_init(args) -> int:
+    data = read_object(args.plan_file); draft_hash = backlog_plan_hash(data)
+    if data.get("mode") != args.mode or data.get("program_id") != args.program:
+        raise Rule("plan identity does not match --mode and --program")
+    con = connect()
+    with mutate(con):
+        project = get_project(con, args.project_key)
+        active = con.execute("SELECT * FROM backlog_plans WHERE project_id = ? AND status IN ('draft','verified')", (project["id"],)).fetchone()
+        if active and active["plan_key"] != args.plan_key:
+            raise Rule(f"active backlog plan already exists: {active['plan_key']}")
+        stamp = now()
+        serialized = json.dumps(data, sort_keys=True)
+        if active is None:
+            con.execute("INSERT INTO backlog_plans (project_id, plan_key, program_key, mode, plan_json, draft_hash, session_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)", (project["id"], args.plan_key, args.program, args.mode, serialized, draft_hash, args.session_id, stamp, stamp))
+            plan = get_backlog_plan(con, args.plan_key)
+            revision = 1
+            action = "backlog_plan_initialized"
+        else:
+            if active["program_key"] != args.program or active["mode"] != args.mode:
+                raise Rule("an active plan revision cannot change program or mode")
+            if active["session_id"] and args.session_id and active["session_id"] != args.session_id:
+                raise Rule("active backlog plan belongs to another session")
+            if active["draft_hash"] == draft_hash:
+                print(draft_hash)
+                return 0
+            revision = con.execute(
+                "SELECT COALESCE(MAX(revision), 0) + 1 FROM backlog_plan_revisions WHERE plan_id = ?",
+                (active["id"],),
+            ).fetchone()[0]
+            con.execute(
+                "UPDATE backlog_plans SET status = 'draft', plan_json = ?, draft_hash = ?, "
+                "compiler_hash = '', approved_hash = '', updated_at = ? WHERE id = ?",
+                (serialized, draft_hash, stamp, active["id"]),
+            )
+            plan = get_backlog_plan(con, args.plan_key)
+            action = "backlog_plan_revised"
+        con.execute("INSERT INTO backlog_plan_revisions (plan_id, revision, plan_hash, plan_json, created_at) VALUES (?, ?, ?, ?, ?)", (plan["id"], revision, draft_hash, serialized, stamp))
+        record(con, action, project_id=project["id"], payload={"plan": args.plan_key, "hash": draft_hash, "mode": args.mode, "revision": revision})
+    print(draft_hash)
+    return 0
+
+
+def cmd_backlog_plan_status(args) -> int:
+    con = connect()
+    if args.plan_key:
+        plan = get_backlog_plan(con, args.plan_key); rows = [plan]
+    else:
+        project = get_project(con, args.project_key); rows = con.execute("SELECT * FROM backlog_plans WHERE project_id = ? ORDER BY id", (project["id"],)).fetchall()
+    payload = []
+    for row in rows:
+        item = dict(row); item.pop("plan_json", None)
+        item["findings"] = [dict(value) for value in con.execute("SELECT * FROM planning_findings WHERE plan_id = ? ORDER BY id", (row["id"],))]
+        item["gates"] = [dict(value) for value in con.execute("SELECT * FROM planning_gates WHERE plan_id = ? ORDER BY id", (row["id"],))]
+        payload.append(item)
+    print(json.dumps(payload[0] if args.plan_key else payload, indent=2))
+    return 0
+
+
+def cmd_backlog_plan_reserve(args) -> int:
+    con = connect()
+    with mutate(con):
+        plan = get_backlog_plan(con, args.plan_key)
+        if plan["status"] not in {"draft", "verified"}:
+            raise Rule("ids can be reserved only for an active plan")
+        values = []
+        for row in con.execute("SELECT external_id FROM work_items WHERE project_id = ? AND external_id LIKE ?", (plan["project_id"], f"{args.prefix}-%")):
+            tail = row["external_id"].rsplit("-", 1)[-1]
+            if tail.isdigit(): values.append(int(tail))
+        for row in con.execute("SELECT last_value FROM id_reservations WHERE prefix = ?", (args.prefix,)):
+            values.append(int(row["last_value"]))
+        first = max(values, default=0) + 1; last = first + args.count - 1
+        con.execute("INSERT INTO id_reservations (plan_id, prefix, first_value, last_value, created_at) VALUES (?, ?, ?, ?, ?)", (plan["id"], args.prefix, first, last, now()))
+        record(con, "backlog_ids_reserved", project_id=plan["project_id"], payload={"plan": args.plan_key, "prefix": args.prefix, "first": first, "last": last})
+    print(json.dumps([f"{args.prefix}-{value:03d}" for value in range(first, last + 1)]))
+    return 0
+
+
+def cmd_backlog_plan_finding(args) -> int:
+    con = connect()
+    with mutate(con):
+        plan = get_backlog_plan(con, args.plan_key); stamp = now()
+        existing = con.execute(
+            "SELECT * FROM planning_findings WHERE plan_id = ? AND external_id = ?",
+            (plan["id"], args.finding),
+        ).fetchone()
+        if existing is None:
+            round_number = 1
+            con.execute(
+                "INSERT INTO planning_findings "
+                "(plan_id, external_id, finding_kind, severity, summary, created_at, updated_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (plan["id"], args.finding, args.kind, args.severity,
+                 args.summary, stamp, stamp),
+            )
+        else:
+            if existing["finding_kind"] != args.kind or existing["severity"] != args.severity:
+                raise Rule("a finding identity cannot change kind or severity")
+            round_number = existing["review_rounds"] + 1
+            if args.kind == "semantic" and args.severity == "blocker" and round_number > 3:
+                raise Rule("semantic blocker exceeded three review rounds; fix or reject it with rationale")
+            con.execute(
+                "UPDATE planning_findings SET summary = ?, status = 'open', reason = '', "
+                "owner = '', revisit = '', review_rounds = ?, updated_at = ? WHERE id = ?",
+                (args.summary, round_number, stamp, existing["id"]),
+            )
+        record(con, "planning_finding_recorded", project_id=plan["project_id"], payload={"plan": args.plan_key, "finding": args.finding, "kind": args.kind, "severity": args.severity, "round": round_number})
+    return 0
+
+
+def cmd_backlog_plan_resolve(args) -> int:
+    if args.status == "accepted-risk" and not (args.owner and args.revisit):
+        raise Rule("accepted risk requires --owner and --revisit")
+    con = connect()
+    with mutate(con):
+        plan = get_backlog_plan(con, args.plan_key)
+        finding = con.execute("SELECT * FROM planning_findings WHERE plan_id = ? AND external_id = ?", (plan["id"], args.finding)).fetchone()
+        if finding is None: raise Rule("unknown planning finding")
+        if finding["finding_kind"] == "mechanical" and args.status != "resolved":
+            raise Rule("mechanical findings can only be resolved, never rejected or accepted")
+        if finding["severity"] == "blocker" and args.status == "accepted-risk":
+            raise Rule("blocking findings cannot be accepted as risk")
+        con.execute("UPDATE planning_findings SET status = ?, reason = ?, owner = ?, revisit = ?, updated_at = ? WHERE id = ?", (args.status, args.reason, args.owner, args.revisit, now(), finding["id"]))
+        record(con, "planning_finding_resolved", project_id=plan["project_id"], payload={"plan": args.plan_key, "finding": args.finding, "status": args.status})
+    return 0
+
+
+def cmd_backlog_plan_gate(args) -> int:
+    con = connect()
+    with mutate(con):
+        plan = get_backlog_plan(con, args.plan_key)
+        if args.plan_hash != plan["draft_hash"]:
+            raise Rule("gate hash does not match the current draft")
+        revision = plan["gate_revision"] + 1
+        con.execute("INSERT INTO planning_gates (plan_id, gate_name, decision, plan_hash, revision, decided_by, decided_at) VALUES (?, ?, ?, ?, ?, ?, ?)", (plan["id"], args.gate, args.decision, args.plan_hash, revision, args.decided_by, now()))
+        approved = args.plan_hash if args.gate == "program" and args.decision == "approved" else plan["approved_hash"]
+        con.execute("UPDATE backlog_plans SET gate_revision = ?, approved_hash = ?, updated_at = ? WHERE id = ?", (revision, approved, now(), plan["id"]))
+        record(con, "backlog_gate_recorded", project_id=plan["project_id"], payload={"plan": args.plan_key, "gate": args.gate, "decision": args.decision, "revision": revision, "hash": args.plan_hash})
+    print(revision)
+    return 0
+
+
+def cmd_backlog_plan_verify(args) -> int:
+    data = read_object(args.plan_file)
+    supplied_hash = backlog_plan_hash(data)
+    completed = subprocess.run(
+        [sys.executable, args.compiler, "check", "--plan", args.plan_file,
+         "--mode", str(data.get("mode", "")), "--json"],
+        capture_output=True, text=True, check=False, timeout=120,
+    )
+    try:
+        compiler_report = json.loads(completed.stdout)
+    except json.JSONDecodeError as exc:
+        raise Rule("backlog compiler returned invalid verification JSON") from exc
+    if completed.returncode != 0 or not compiler_report.get("ok"):
+        raise Rule("backlog compiler verification failed: "
+                   + "; ".join(compiler_report.get("findings", [])))
+    if compiler_report.get("plan_hash") != supplied_hash:
+        raise Rule("backlog compiler report hash mismatch")
+    con = connect()
+    with mutate(con):
+        plan = get_backlog_plan(con, args.plan_key)
+        if supplied_hash != plan["draft_hash"]:
+            raise Rule("compiler hash does not match the current draft")
+        blockers = con.execute("SELECT COUNT(*) FROM planning_findings WHERE plan_id = ? AND severity = 'blocker' AND status != 'resolved'", (plan["id"],)).fetchone()[0]
+        if blockers: raise Rule(f"{blockers} unresolved blocker(s)")
+        gates = {row["gate_name"]: row["decision"] for row in con.execute("SELECT gate_name, decision FROM planning_gates WHERE plan_id = ? ORDER BY id", (plan["id"],))}
+        plan_data = json.loads(plan["plan_json"])
+        expected_domains = plan_data.get("gates", {}).get("domains", [])
+        missing_domains = [
+            domain for domain in expected_domains
+            if gates.get(f"domain:{domain}") != "approved"
+        ]
+        if gates.get("reviewer") != "approved" \
+                or gates.get("reconciliation") != "approved" \
+                or gates.get("program") != "approved" or missing_domains:
+            raise Rule("reviewer, every domain, reconciliation and program approvals are required")
+        if plan["approved_hash"] != plan["draft_hash"]:
+            raise Rule("program approval is not tied to the current draft")
+        con.execute("UPDATE backlog_plans SET status = 'verified', compiler_hash = ?, updated_at = ? WHERE id = ?", (supplied_hash, now(), plan["id"]))
+        record(con, "backlog_plan_verified", project_id=plan["project_id"], payload={"plan": args.plan_key, "hash": supplied_hash})
+    return 0
+
+
+def sync_plan_items(con, project: sqlite3.Row, plan_row: sqlite3.Row, data: dict) -> None:
+    program_key = str(data["program_id"]); stamp = now()
+    program = con.execute("SELECT * FROM programs WHERE project_id = ? AND program_key = ?", (project["id"], program_key)).fetchone()
+    if program is None:
+        con.execute("INSERT INTO programs (project_id, program_key, title, created_at, updated_at) VALUES (?, ?, ?, ?, ?)", (project["id"], program_key, data.get("title", program_key), stamp, stamp))
+        program = get_program(con, project["id"], program_key)
+    elif program["status"] in {"complete", "cancelled"}:
+        raise Rule("closed program cannot be structurally replanned")
+    releases: dict[str, sqlite3.Row] = {}
+    for sequence, item in enumerate(data.get("releases", []), 1):
+        key = str(item["release_id"])
+        row = con.execute("SELECT * FROM releases WHERE program_id = ? AND release_key = ?", (program["id"], key)).fetchone()
+        registry_hash = str(item.get("experience_registry_hash", ""))
+        if row is None:
+            con.execute("INSERT INTO releases (program_id, release_key, title, sequence, experience_registry_hash, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)", (program["id"], key, item.get("title", key), sequence, registry_hash, stamp, stamp))
+        else:
+            if row["status"] == "active" and (
+                row["title"] != item.get("title", key)
+                or row["sequence"] != sequence
+                or row["experience_registry_hash"] != registry_hash
+            ):
+                raise Rule(f"active release contract is frozen: {key}")
+            con.execute("UPDATE releases SET title = ?, sequence = ?, experience_registry_hash = ?, updated_at = ? WHERE id = ?", (item.get("title", key), sequence, registry_hash, stamp, row["id"]))
+        releases[key] = get_release(con, program["id"], key)
+    epics = {str(item.get("external_id")): item for item in data.get("epics", [])}
+    for story in data.get("stories", []):
+        if story.get("epic") and story["epic"] not in epics:
+            epics[story["epic"]] = {"external_id": story["epic"], "title": story["epic"]}
+    for key, epic in sorted(epics.items()):
+        existing = get_item(con, project["id"], key)
+        if existing is None:
+            con.execute("INSERT INTO work_items (project_id, kind, external_id, title, status, scope, created_at, updated_at) VALUES (?, 'epic', ?, ?, 'open', ?, ?, ?)", (project["id"], key, epic.get("title", key), epic.get("goal", ""), stamp, stamp))
+    touched = set()
+    for story in data.get("stories", []):
+        ident = str(story["external_id"]); touched.add(ident)
+        existing = get_item(con, project["id"], ident)
+        parent = get_item(con, project["id"], str(story.get("epic", "")))
+        dor = json.dumps(story.get("dor", []), ensure_ascii=False)
+        dod = json.dumps(story.get("dod", []), ensure_ascii=False)
+        values = (story["title"], story.get("status", "planned"), story.get("type", "feature"), story.get("priority", "medium: approved plan"), story["scope"], story["excludes"], dor, dod, parent["id"] if parent else None)
+        release = releases.get(str(story["release_id"]))
+        if release is None: raise Rule(f"story {ident} has unknown release")
+        protected = existing is not None and existing["status"] in {"in_development", "done"}
+        if protected:
+            immutable = (
+                existing["title"], existing["item_type"], existing["priority"],
+                existing["scope"], existing["excludes"], existing["dor"],
+                existing["dod"], existing["parent_id"],
+            )
+            incoming = (
+                story["title"], story.get("type", "feature"),
+                story.get("priority", "medium: approved plan"), story["scope"],
+                story["excludes"], dor, dod, parent["id"] if parent else None,
+            )
+            current_release = con.execute(
+                "SELECT release_id FROM work_item_releases WHERE item_id = ?",
+                (existing["id"],),
+            ).fetchone()
+            planned_refs = {
+                (kind, str(ref))
+                for kind, field in (("requirement", "criteria"),
+                                    ("solution", "solution_refs"),
+                                    ("budget", "budget_refs"), ("ux", "ux_refs"))
+                for ref in story.get(field, [])
+            }
+            current_refs = {
+                (row["ref_kind"], row["ref_value"])
+                for row in con.execute(
+                    "SELECT ref_kind, ref_value FROM work_item_refs WHERE item_id = ?",
+                    (existing["id"],),
+                )
+            }
+            owners = story.get("delivery_owners", {})
+            planned_owners = {("owner", str(owners.get("owner", "")))} | {
+                ("supporting", str(role)) for role in owners.get("supporting", [])
+            }
+            current_owners = {
+                (row["relationship"], row["role"])
+                for row in con.execute(
+                    "SELECT relationship, role FROM work_item_owners WHERE item_id = ?",
+                    (existing["id"],),
+                )
+            }
+            if immutable != incoming or current_release is None \
+                    or current_release["release_id"] != release["id"] \
+                    or current_refs != planned_refs \
+                    or current_owners != planned_owners:
+                raise Rule(f"protected story contract changed: {ident}")
+        if existing is None:
+            con.execute("INSERT INTO work_items (project_id, kind, external_id, title, status, item_type, priority, scope, excludes, dor, dod, parent_id, created_at, updated_at) VALUES (?, 'story', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", (project["id"], ident, *values, stamp, stamp))
+        elif existing["status"] not in {"in_development", "done"}:
+            con.execute("UPDATE work_items SET title = ?, status = ?, item_type = ?, priority = ?, scope = ?, excludes = ?, dor = ?, dod = ?, parent_id = ?, updated_at = ? WHERE id = ?", (*values, stamp, existing["id"]))
+        row = get_item(con, project["id"], ident)
+        if protected:
+            continue
+        con.execute("INSERT INTO work_item_releases (item_id, release_id, provenance) VALUES (?, ?, 'approved_plan') ON CONFLICT(item_id) DO UPDATE SET release_id = excluded.release_id, provenance = excluded.provenance", (row["id"], release["id"]))
+        con.execute("DELETE FROM readiness_items WHERE item_id = ?", (row["id"],))
+        con.execute("DELETE FROM dod_items WHERE item_id = ? AND status = 'pending'", (row["id"],))
+        for statement in story.get("dor", []):
+            con.execute("INSERT INTO readiness_items (item_id, statement, satisfied) VALUES (?, ?, 1)", (row["id"], statement))
+        for statement in story.get("dod", []):
+            con.execute("INSERT OR IGNORE INTO dod_items (item_id, statement, created_at, updated_at) VALUES (?, ?, ?, ?)", (row["id"], statement, stamp, stamp))
+        con.execute("DELETE FROM work_item_refs WHERE item_id = ?", (row["id"],))
+        for kind, field in (("requirement", "criteria"), ("solution", "solution_refs"), ("budget", "budget_refs"), ("ux", "ux_refs")):
+            for ref in story.get(field, []):
+                con.execute("INSERT INTO work_item_refs (item_id, ref_kind, ref_value) VALUES (?, ?, ?)", (row["id"], kind, str(ref)))
+        con.execute("DELETE FROM work_item_owners WHERE item_id = ?", (row["id"],))
+        owners = story.get("delivery_owners", {})
+        con.execute(
+            "INSERT INTO work_item_owners (item_id, role, relationship) VALUES (?, ?, 'owner')",
+            (row["id"], str(owners.get("owner", ""))),
+        )
+        for role in owners.get("supporting", []):
+            con.execute(
+                "INSERT INTO work_item_owners (item_id, role, relationship) VALUES (?, ?, 'supporting')",
+                (row["id"], str(role)),
+            )
+        for criterion in story.get("criteria", []):
+            con.execute("INSERT INTO story_criteria (project_id, criterion_id, story_id, disposition, reason) VALUES (?, ?, ?, 'covered', '') ON CONFLICT(project_id, criterion_id) DO UPDATE SET story_id = excluded.story_id, disposition = 'covered', reason = ''", (project["id"], str(criterion), row["id"]))
+    for story in data.get("stories", []):
+        row = get_item(con, project["id"], str(story["external_id"]))
+        planned_deps = {
+            (str(dep.get("item", "")), str(dep.get("reason", "")))
+            for dep in story.get("depends_on", []) if isinstance(dep, dict)
+        }
+        if row["status"] in {"in_development", "done"}:
+            current_deps = {
+                (dep["external_id"], edge["reason"])
+                for edge in con.execute(
+                    "SELECT depends_on_id, reason FROM work_item_deps WHERE item_id = ?",
+                    (row["id"],),
+                )
+                for dep in [con.execute(
+                    "SELECT external_id FROM work_items WHERE id = ?",
+                    (edge["depends_on_id"],),
+                ).fetchone()]
+            }
+            if current_deps != planned_deps:
+                raise Rule(f"protected story dependencies changed: {story['external_id']}")
+            continue
+        con.execute("DELETE FROM work_item_deps WHERE item_id = ?", (row["id"],))
+        for dep in story.get("depends_on", []):
+            dep_id = str(dep.get("item") if isinstance(dep, dict) else dep); target = get_item(con, project["id"], dep_id)
+            if target is None: raise Rule(f"unknown dependency {dep_id}")
+            con.execute("INSERT INTO work_item_deps (project_id, item_id, depends_on_id, reason, created_at) VALUES (?, ?, ?, ?, ?)", (project["id"], row["id"], target["id"], dep.get("reason", "") if isinstance(dep, dict) else "", stamp))
+    planned_shares = {
+        (str(share.get("left", "")), str(share.get("right", "")),
+         str(share.get("subject", "")))
+        for share in data.get("shares", [])
+    }
+    current_shares = {
+        (left["external_id"], right["external_id"], share["subject"])
+        for share in con.execute(
+            "SELECT left_item_id, right_item_id, subject FROM work_item_shares WHERE project_id = ?",
+            (project["id"],),
+        )
+        for left in [con.execute("SELECT external_id, status FROM work_items WHERE id = ?", (share["left_item_id"],)).fetchone()]
+        for right in [con.execute("SELECT external_id, status FROM work_items WHERE id = ?", (share["right_item_id"],)).fetchone()]
+    }
+    protected_ids = {
+        row["external_id"] for row in con.execute(
+            "SELECT external_id FROM work_items WHERE project_id = ? AND status IN ('in_development','done')",
+            (project["id"],),
+        )
+    }
+    for ident in protected_ids:
+        old = {value for value in current_shares if ident in value[:2]}
+        new = {value for value in planned_shares if ident in value[:2]}
+        if old != new:
+            raise Rule(f"protected story SHARES changed: {ident}")
+    con.execute("DELETE FROM work_item_shares WHERE project_id = ?", (project["id"],))
+    for share in data.get("shares", []):
+        left = get_item(con, project["id"], str(share.get("left", ""))); right = get_item(con, project["id"], str(share.get("right", "")))
+        if left is None or right is None: raise Rule("SHARES references unknown story")
+        con.execute("INSERT INTO work_item_shares (project_id, left_item_id, right_item_id, subject) VALUES (?, ?, ?, ?)", (project["id"], left["id"], right["id"], str(share.get("subject", ""))))
+
+
+def cmd_backlog_plan_apply(args) -> int:
+    data = read_object(args.plan_file); actual_hash = backlog_plan_hash(data)
+    con = connect()
+    with mutate(con):
+        plan = get_backlog_plan(con, args.plan_key)
+        if plan["status"] != "verified": raise Rule("backlog plan must be verified before apply")
+        if actual_hash != args.approved_hash or plan["approved_hash"] != args.approved_hash or plan["compiler_hash"] != args.approved_hash:
+            raise Rule("apply requires the exact approved and compiler-verified hash")
+        if plan["gate_revision"] != args.gate_revision: raise Rule("gate revision changed before apply")
+        latest = con.execute("SELECT * FROM planning_gates WHERE plan_id = ? ORDER BY id DESC LIMIT 1", (plan["id"],)).fetchone()
+        if latest is None or latest["gate_name"] != "program" or latest["decision"] != "approved" or latest["plan_hash"] != args.approved_hash or latest["revision"] != args.gate_revision:
+            raise Rule("latest gate is not the exact program approval")
+        project = con.execute("SELECT * FROM projects WHERE id = ?", (plan["project_id"],)).fetchone()
+        sync_plan_items(con, project, plan, data)
+        if plan["mode"] in {"baseline", "replan"}:
+            program = get_program(con, project["id"], plan["program_key"])
+            con.execute(
+                "UPDATE programs SET status = 'baselined', baseline_hash = ?, updated_at = ? WHERE id = ?",
+                (actual_hash, now(), program["id"]),
+            )
+            con.execute(
+                "UPDATE releases SET status = 'baselined', updated_at = ? "
+                "WHERE program_id = ? AND status = 'draft'",
+                (now(), program["id"]),
+            )
+        con.execute("UPDATE backlog_plans SET status = 'applied', updated_at = ? WHERE id = ?", (now(), plan["id"]))
+        record(con, "backlog_plan_applied", project_id=plan["project_id"], payload={"plan": args.plan_key, "hash": actual_hash, "gate_revision": args.gate_revision})
+    print(f"pmo: backlog plan {args.plan_key} applied atomically")
+    return 0
+
+
+def cmd_backlog_plan_abandon(args) -> int:
+    con = connect()
+    with mutate(con):
+        plan = get_backlog_plan(con, args.plan_key)
+        if plan["status"] == "applied": raise Rule("an applied plan cannot be abandoned")
+        con.execute("UPDATE backlog_plans SET status = 'abandoned', updated_at = ? WHERE id = ?", (now(), plan["id"]))
+        record(con, "backlog_plan_abandoned", project_id=plan["project_id"], payload={"plan": args.plan_key, "reason": args.reason})
+    return 0
+
+
+# ---------------------------------------------------------------------------
 # Argument parsing
 # ---------------------------------------------------------------------------
 
@@ -2750,6 +3729,45 @@ def build_parser() -> argparse.ArgumentParser:
     p = project.add_parser("list")
     p.add_argument("--json", action="store_true")
     p.set_defaults(func=cmd_project_list)
+    p = project.add_parser("classify-origin")
+    p.add_argument("--project-key", required=True)
+    p.add_argument("--project-root", required=True)
+    p.add_argument("--config", default="")
+    p.add_argument("--workspace", default="workspace")
+    p.add_argument("--origin", required=True, choices=["greenfield", "existing"])
+    p.set_defaults(func=cmd_project_classify_origin)
+
+    program = sub.add_parser("program").add_subparsers(dest="subcommand", required=True)
+    p = program.add_parser("list"); p.add_argument("--project-key", required=True); p.add_argument("--json", action="store_true"); p.set_defaults(func=cmd_program_list)
+    for name, handler in (("show", cmd_program_show), ("status", cmd_program_status)):
+        p = program.add_parser(name); p.add_argument("--project-key", required=True); p.add_argument("--program", required=True); p.set_defaults(func=handler)
+    p = program.add_parser("baseline"); p.add_argument("--project-key", required=True); p.add_argument("--program", required=True); p.add_argument("--baseline-hash", required=True); p.set_defaults(func=cmd_program_baseline)
+    p = program.add_parser("complete"); p.add_argument("--project-key", required=True); p.add_argument("--program", required=True); p.set_defaults(func=cmd_program_complete)
+    p = program.add_parser("cancel"); p.add_argument("--project-key", required=True); p.add_argument("--program", required=True); p.add_argument("--reason", required=True); p.set_defaults(func=cmd_program_cancel)
+
+    release = sub.add_parser("release").add_subparsers(dest="subcommand", required=True)
+    p = release.add_parser("list"); p.add_argument("--project-key", required=True); p.add_argument("--program", required=True); p.add_argument("--json", action="store_true"); p.set_defaults(func=cmd_release_list)
+    p = release.add_parser("show"); p.add_argument("--project-key", required=True); p.add_argument("--program", required=True); p.add_argument("--release", required=True); p.set_defaults(func=cmd_release_show)
+    for name, handler in (("activate", cmd_release_activate), ("refresh-ready", cmd_release_refresh_ready), ("complete", cmd_release_complete)):
+        p = release.add_parser(name); p.add_argument("--project-key", required=True); p.add_argument("--program", required=True); p.add_argument("--release", required=True); p.set_defaults(func=handler)
+    p = release.add_parser("cancel"); p.add_argument("--project-key", required=True); p.add_argument("--program", required=True); p.add_argument("--release", required=True); p.add_argument("--reason", required=True); p.set_defaults(func=cmd_release_cancel)
+
+    experience = sub.add_parser("experience-run").add_subparsers(dest="subcommand", required=True)
+    p = experience.add_parser("init"); p.add_argument("--project-key", required=True); p.add_argument("--run-key", required=True); p.add_argument("--program", required=True); p.add_argument("--release", default=""); p.add_argument("--session-id", default=""); p.add_argument("--node", action="append", default=[]); p.set_defaults(func=cmd_experience_run_init)
+    p = experience.add_parser("status"); p.add_argument("--project-key", required=True); p.add_argument("--run-key", default=""); p.set_defaults(func=cmd_experience_run_status)
+    p = experience.add_parser("record-gate"); p.add_argument("--run-key", required=True); p.add_argument("--gate", required=True); p.add_argument("--decision", required=True, choices=["approved", "rejected"]); p.add_argument("--revision-hash", required=True); p.add_argument("--decided-by", default="owner"); p.set_defaults(func=cmd_experience_run_gate)
+    p = experience.add_parser("release"); p.add_argument("--run-key", required=True); p.set_defaults(func=cmd_experience_run_release)
+
+    backlog = sub.add_parser("backlog-plan").add_subparsers(dest="subcommand", required=True)
+    p = backlog.add_parser("init"); p.add_argument("--project-key", required=True); p.add_argument("--plan-key", required=True); p.add_argument("--program", required=True); p.add_argument("--mode", required=True, choices=["baseline", "replan", "feature"]); p.add_argument("--plan-file", required=True); p.add_argument("--session-id", default=""); p.set_defaults(func=cmd_backlog_plan_init)
+    p = backlog.add_parser("status"); p.add_argument("--project-key", default=""); p.add_argument("--plan-key", default=""); p.set_defaults(func=cmd_backlog_plan_status)
+    p = backlog.add_parser("reserve-ids"); p.add_argument("--plan-key", required=True); p.add_argument("--prefix", required=True); p.add_argument("--count", type=int, required=True); p.set_defaults(func=cmd_backlog_plan_reserve)
+    p = backlog.add_parser("record-finding"); p.add_argument("--plan-key", required=True); p.add_argument("--finding", required=True); p.add_argument("--kind", default="semantic", choices=["mechanical", "semantic"]); p.add_argument("--severity", required=True, choices=["blocker", "non-blocking"]); p.add_argument("--summary", required=True); p.set_defaults(func=cmd_backlog_plan_finding)
+    p = backlog.add_parser("resolve-finding"); p.add_argument("--plan-key", required=True); p.add_argument("--finding", required=True); p.add_argument("--status", required=True, choices=["resolved", "rejected", "accepted-risk"]); p.add_argument("--reason", required=True); p.add_argument("--owner", default=""); p.add_argument("--revisit", default=""); p.set_defaults(func=cmd_backlog_plan_resolve)
+    p = backlog.add_parser("record-gate"); p.add_argument("--plan-key", required=True); p.add_argument("--gate", required=True); p.add_argument("--decision", required=True, choices=["approved", "rejected"]); p.add_argument("--plan-hash", required=True); p.add_argument("--decided-by", default="owner"); p.set_defaults(func=cmd_backlog_plan_gate)
+    p = backlog.add_parser("verify"); p.add_argument("--plan-key", required=True); p.add_argument("--plan-file", required=True); p.add_argument("--compiler", required=True); p.set_defaults(func=cmd_backlog_plan_verify)
+    p = backlog.add_parser("apply"); p.add_argument("--plan-key", required=True); p.add_argument("--plan-file", required=True); p.add_argument("--approved-hash", required=True); p.add_argument("--gate-revision", type=int, required=True); p.set_defaults(func=cmd_backlog_plan_apply)
+    p = backlog.add_parser("abandon"); p.add_argument("--plan-key", required=True); p.add_argument("--reason", required=True); p.set_defaults(func=cmd_backlog_plan_abandon)
 
     p = sub.add_parser("resume-info")
     p.add_argument("--project-key", required=True)

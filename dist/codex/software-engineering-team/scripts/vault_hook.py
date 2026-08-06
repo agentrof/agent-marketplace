@@ -37,6 +37,10 @@ from pathlib import Path
 
 import team_guard
 import vault_check
+try:
+    import experience_compile
+except ImportError:  # source-tree tests may load only the shared overlay
+    experience_compile = None
 
 VAULT_SEGMENTS = ("workspace", "docs")
 
@@ -53,13 +57,17 @@ PATCH_HEADER_RE = re.compile(r"^\*\*\* (Add|Update|Delete) File: (.+)$")
 # vault_check.py reconcile-designations verb). The verb writes via
 # subprocess and never traverses PreToolUse, so the deny below needs no
 # handshake: no Write/Edit call ever changes these keys legitimately.
-CONFIG_GUARD_KEYS = ("doc_type_designations", "doc_type_designation_history")
+CONFIG_GUARD_KEYS = (
+    "project_origin", "doc_type_designations", "doc_type_designation_history",
+)
 
 CONFIG_GUARD_MESSAGE = (
-    "doc_type_designations and its history ledger are machine-managed;"
-    " their single writer is vault_check.py reconcile-designations, driven"
-    " by the configure entry (organize-docs and setup mint through the"
-    " same verb). Hand edits desynchronize every vault title.")
+    "project_origin, doc_type_designations and its history ledger are"
+    " machine-managed; their single writers are setup project_config.py, PMO"
+    " project classify-origin and"
+    " vault_check.py reconcile-designations, driven by setup/configure."
+    " Setup and organize-docs mint through the same verb."
+    " Direct edits desynchronize the project contract.")
 
 # A relative markdown link that is not http(s)/mailto/anchor/root form.
 MD_LINK_RE = re.compile(
@@ -67,6 +75,17 @@ MD_LINK_RE = re.compile(
     r"(?:\s+\"[^\"]*\")?\)")
 INLINE_FLOW_LIST_RE = re.compile(r"^\s*(tags|aliases):\s*\[", re.MULTILINE)
 FENCE_RE = re.compile(r"^\s*```")
+EXPERIENCE_MACHINE_FIELD_RE = re.compile(
+    r"(?m)^\s*(approved_at|approval_revision|registry_hash|source_hash|"
+    r"stamped_at):")
+EXPERIENCE_PATHS = (
+    re.compile(r"^experience-design/experience\.md$"),
+    re.compile(r"^experience-design/programs/prg-[0-9]+/program\.md$"),
+    re.compile(r"^experience-design/programs/prg-[0-9]+/releases/rel-[0-9]+/release\.md$"),
+    re.compile(r"^experience-design/programs/prg-[0-9]+/releases/rel-[0-9]+/(?:spaces/[a-z0-9-]+/)?space\.md$"),
+    re.compile(r"^experience-design/programs/prg-[0-9]+/releases/rel-[0-9]+/(?:spaces/[a-z0-9-]+/)?(?:domains/[a-z0-9-]+/)+domain\.md$"),
+    re.compile(r"^experience-design/programs/prg-[0-9]+/releases/rel-[0-9]+/(?:spaces/[a-z0-9-]+/(?:domains/[a-z0-9-]+/)*)?(?:journeys/[a-z0-9-]+-journey|screens/[a-z0-9-]+-screen|flows/[a-z0-9-]+-flows|reviews/[a-z0-9-]+-review)\.md$"),
+)
 
 
 def read_payload() -> dict:
@@ -373,7 +392,31 @@ def pre_target(written: dict) -> int:
         except Exception:
             return 0  # a guard never takes the session down
     rel = vault_relative(file_path)
-    if rel is None or not rel.endswith(".md"):
+    if rel is None:
+        return 0
+    if rel.startswith("experience-design/"):
+        if "/_generated/" in f"/{rel}":
+            return deny("Experience Design _generated files are compiler-owned; run experience_compile.py render")
+        if "/artifacts/" in rel and rel.endswith(".html"):
+            return deny("approved Experience Design artifacts are immutable through Write/Edit; promote a new package through experience_compile.py")
+        if rel.endswith(".md") and not any(pattern.fullmatch(rel) for pattern in EXPERIENCE_PATHS):
+            return deny(f"invalid Experience Design filename or path '{rel}'; use compiler init/stub commands")
+        content = written_content(written) + "\n" + str(written.get("old_string") or "")
+        if EXPERIENCE_MACHINE_FIELD_RE.search(content):
+            return deny("Experience Design approval, revision hash and timestamp fields are machine-managed; use render/stamp")
+        claims = Path(file_path).resolve().parents
+        workspace = next((value for value in claims if value.name == "workspace"), None)
+        if workspace is not None:
+            claim_file = workspace / "experience-design-work" / "node-claims.json"
+            try:
+                claim_map = json.loads(claim_file.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError):
+                claim_map = {}
+            current = os.environ.get("CODEX_SESSION_ID") or os.environ.get("CLAUDE_SESSION_ID") or ""
+            owner = claim_map.get(rel) if isinstance(claim_map, dict) else None
+            if owner and owner != current:
+                return deny(f"Experience Design node is claimed by another session: {rel}")
+    if not rel.endswith(".md"):
         return 0
     content = written_content(written)
     if INLINE_FLOW_LIST_RE.search(content):
@@ -434,6 +477,23 @@ def post_target(file_path: str) -> int:
             " re-rendered, never edited.",
             file=sys.stderr)
         return 2
+    if rel.startswith("experience-design/") and experience_compile is not None:
+        parts = rel.split("/")
+        try:
+            release_index = parts.index("releases")
+            release_root = root.joinpath(*parts[:release_index + 2])
+        except (ValueError, IndexError):
+            release_root = None
+        if release_root is not None and (release_root / "release.md").is_file():
+            buffer = io.StringIO()
+            with contextlib.redirect_stdout(buffer):
+                code = experience_compile.main([
+                    "check", "--release-root", str(release_root), "--changed",
+                ])
+            if code == 1:
+                sys.stderr.write(buffer.getvalue())
+                print("vault law: Experience Design compiler found a scoped violation; repair it before continuing", file=sys.stderr)
+                return 2
     return 0
 
 

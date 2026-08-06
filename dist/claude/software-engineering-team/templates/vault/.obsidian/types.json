@@ -23,6 +23,12 @@
     "round": "number",
     "locked": "checkbox",
     "tags": "list",
-    "aliases": "list"
+    "aliases": "list",
+    "program_id": "text",
+    "release_id": "text",
+    "analysis_scopes": "list",
+    "criterion_refs": "list",
+    "revision": "number",
+    "registry_hash": "text"
   }
 }

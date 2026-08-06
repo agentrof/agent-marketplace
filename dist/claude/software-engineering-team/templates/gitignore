@@ -9,11 +9,12 @@
 .env.*
 !.env.example
 
-# Team work-order state (transient; durable knowledge lives in docs/ and git)
+# agent-marketplace:software-engineering-team:gitignore:start
 workspace/work-orders/
-
-# Suite artifacts (regenerated on every run)
+workspace/planning/
+workspace/experience-design-work/
 workspace/junit-*.xml
+# agent-marketplace:software-engineering-team:gitignore:end
 
 # Vault app local state; the committed payload below stays tracked
 workspace/docs/.obsidian/*

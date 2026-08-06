@@ -129,6 +129,20 @@ def entry_skills() -> list[dict]:
 
 
 class SmokeWorkflowSimulationTests(unittest.TestCase):
+    def test_packaged_greenfield_preparation_payload_routes_deterministically(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            project = Path(tmp) / "project"
+            workspace = project / "workspace"
+            workspace.mkdir(parents=True)
+            (workspace / "config.json").write_text(json.dumps({
+                "team_id": TEAM,
+                "project_key": "smoke",
+                "project_origin": "greenfield",
+            }), encoding="utf-8")
+            smoke.assert_preparation_payload(
+                {}, REPO / "dist" / "codex" / TEAM, project, TEAM,
+            )
+
     def test_checkout_catalog_rewrites_stable_sources_to_local_dist(self):
         with tempfile.TemporaryDirectory() as tmp:
             target = smoke.checkout_marketplace(REPO, Path(tmp) / "catalog")

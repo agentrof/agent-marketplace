@@ -285,6 +285,42 @@ class VaultHookCodexTests(unittest.TestCase):
         self.assertEqual(code, 2)
         self.assertIn("fails closed", err)
 
+    def experience_write(self, relative, content="safe"):
+        project = Path(self.tmp.name) / "project"
+        docs = project / "workspace" / "docs"
+        docs.mkdir(parents=True, exist_ok=True)
+        (project / "workspace" / "config.json").write_text(
+            json.dumps({"team_id": "software-engineering-team"}),
+            encoding="utf-8",
+        )
+        return run_script(SET_SCRIPTS / "vault_hook.py", {
+            "hook_event_name": "PreToolUse", "tool_name": "Write",
+            "cwd": str(project),
+            "tool_input": {"file_path": str(docs / relative),
+                           "content": content},
+        }, self.env, ["pre"])
+
+    def test_experience_generated_artifact_and_machine_fields_are_denied(self):
+        cases = (
+            ("experience-design/programs/prg-001/releases/rel-001/_generated/status.md", "safe", "compiler-owned"),
+            ("experience-design/programs/prg-001/releases/rel-001/artifacts/catalog-preview.html", "safe", "immutable"),
+            ("experience-design/programs/prg-001/releases/rel-001/release.md", "registry_hash: sha256:x", "machine-managed"),
+            ("experience-design/programs/prg-001/releases/rel-001/journeys/wrong.md", "safe", "invalid Experience Design"),
+        )
+        for relative, content, expected in cases:
+            with self.subTest(relative=relative):
+                code, _, err = self.experience_write(relative, content)
+                self.assertEqual(code, 2)
+                self.assertIn(expected, err)
+
+    def test_valid_experience_path_passes_pre_write(self):
+        code, _, err = self.experience_write(
+            "experience-design/programs/prg-001/releases/rel-001/"
+            "spaces/marketplace/domains/catalog/screens/catalog-screen.md",
+            "---\ntype: screen\n---\n",
+        )
+        self.assertEqual(code, 0, err)
+
 
 class TeamPreflightTests(unittest.TestCase):
     def setUp(self):

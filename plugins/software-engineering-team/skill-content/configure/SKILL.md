@@ -10,7 +10,7 @@ Config changes go through this gate, never through hand edits.
 
 ## When to Use
 - The project's stack set, test, mutation or environment command, source
-  directories, output language or terminology language must change (for example: "add a document store to the databases set").
+  directories, origin, scale limits, output language or terminology language must change.
 
 ## Procedure
 
@@ -22,7 +22,14 @@ Config changes go through this gate, never through hand edits.
    note says so) and this gate is its only supported writer; hand edits are
    unsupported and carry no guarantee of surviving later gate writes.
 2. Interpret the requested change into concrete key changes.
-3. Validate. Enum keys: backend_stack python-fastapi; frontend_stack
+3. Validate. `project_origin` is `greenfield` or `existing`. It may change
+   only before program, backlog or delivery state exists; a migrated
+   `unclassified` project may be classified exactly once. Before registration,
+   apply it with `project_config.py set-origin`. After a project contract exists,
+   use PMO `project classify-origin --project-key <key> --project-root <root>
+   --origin <choice>` so config, fingerprint and audit state move together.
+   Never edit the config directly. Enum keys:
+   backend_stack python-fastapi; frontend_stack
    react-typescript; environment_stack docker-compose; databases a set
    drawn from sql and nosql, one or both, never empty. A value outside
    the enums is refused honestly with the reason: this team ships tested
@@ -53,6 +60,8 @@ Config changes go through this gate, never through hand edits.
    space_bytes_warn, nesting_warn_depth, nesting_fail_depth,
    challenge_max_rounds, summary_max_lines_space,
    summary_max_lines_default, nav_peer_min, nav_peer_max; every value
+   plus experience_flows_per_set, experience_transitions_per_set and
+   experience_screens_per_leaf_domain; every value
    a positive integer; validate the EFFECTIVE pair after precedence
    (limits beats scale beats shipped default): nesting_warn_depth
    strictly below nesting_fail_depth, nav_peer_min at most

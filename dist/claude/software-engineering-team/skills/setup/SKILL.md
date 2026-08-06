@@ -1,6 +1,6 @@
 ---
 name: setup
-description: Idempotent project bootstrap for the software-engineering-team. Creates the workspace skeleton, materializes templates, and builds the machine-managed config interactively. Safe to re-run; never breaks what exists.
+description: Fresh, idempotent project bootstrap for the software-engineering-team. Creates the workspace and machine-managed contract only when no project key or prior contract exists; keyed projects use Agent Marketplace Upgrade.
 disable-model-invocation: true
 ---
 

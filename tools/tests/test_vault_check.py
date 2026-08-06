@@ -107,6 +107,12 @@ DESIGNATIONS = {
     "engagement": "engagement",
     "design-master": "design master",
     "page-override": "page override",
+    "experience": "experience",
+    "program": "program",
+    "release": "release",
+    "journey": "journey",
+    "flow-set": "flow set",
+    "screen": "screen",
 }
 
 
@@ -1123,6 +1129,30 @@ See [the landscape](landscape.md).
             self.assertEqual(code, 0, out)
             preserved = json.loads(graph_path.read_text(encoding="utf-8"))
             self.assertEqual(preserved["colorGroups"][0]["color"]["rgb"], 7)
+
+    def test_lazy_experience_fragment_adds_missing_and_stops_on_collision(self):
+        types_path = self.root / ".obsidian" / "types.json"
+        types = json.loads(types_path.read_text(encoding="utf-8"))
+        types["types"].pop("registry_hash", None)
+        types_path.write_text(json.dumps(types), encoding="utf-8")
+        code, out, err = run([
+            "reconcile-payload-fragment", "--vault", str(self.root),
+            "--fragment", "experience-design",
+        ])
+        self.assertEqual(code, 0, err)
+        self.assertEqual(
+            json.loads(types_path.read_text(encoding="utf-8"))["types"]["registry_hash"],
+            "text",
+        )
+        types = json.loads(types_path.read_text(encoding="utf-8"))
+        types["types"]["registry_hash"] = "number"
+        types_path.write_text(json.dumps(types), encoding="utf-8")
+        code, _, err = run([
+            "reconcile-payload-fragment", "--vault", str(self.root),
+            "--fragment", "experience-design",
+        ])
+        self.assertEqual(code, 1)
+        self.assertIn("named property collision", err)
 
     def test_migrate_preserves_user_colors_and_defaults_new_groups(self):
         graph_path = self.root / ".obsidian" / "graph.json"

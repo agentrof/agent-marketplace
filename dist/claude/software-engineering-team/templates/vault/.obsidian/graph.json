@@ -120,6 +120,27 @@
       }
     },
     {
+      "query": "tag:#doc/experience OR tag:#doc/program OR tag:#doc/release",
+      "color": {
+        "a": 1,
+        "rgb": 3108513
+      }
+    },
+    {
+      "query": "tag:#doc/journey OR tag:#doc/flow-set",
+      "color": {
+        "a": 1,
+        "rgb": 16747520
+      }
+    },
+    {
+      "query": "tag:#doc/screen",
+      "color": {
+        "a": 1,
+        "rgb": 5592575
+      }
+    },
+    {
       "query": "tag:#doc/moc OR tag:#doc/home",
       "color": {
         "a": 1,

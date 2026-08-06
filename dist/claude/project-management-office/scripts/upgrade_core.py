@@ -28,7 +28,7 @@ from pathlib import Path
 
 
 PROJECT_STATE_SCHEMA = 1
-PROJECT_CONTRACT_VERSION = 1
+PROJECT_CONTRACT_VERSION = 2
 REGISTRY_SCHEMA = 2
 WRITER_EPOCH = 1
 STATE_RELATIVE = Path(".agentrof") / "agent-marketplace" / "project.json"
@@ -36,6 +36,8 @@ MAINTENANCE_NAME = "maintenance.json"
 UPGRADES_DIR = "upgrades"
 LOCKS_DIR = "locks"
 PRIOR_OWNER_SUFFIX = " plugin; change only through the configure entry"
+GITIGNORE_START = "# agent-marketplace:software-engineering-team:gitignore:start"
+GITIGNORE_END = "# agent-marketplace:software-engineering-team:gitignore:end"
 ACTIVE_ORDER_STATUSES = ("running", "waiting_gate")
 STATUS_CURRENT = "AGENT_MARKETPLACE_CURRENT"
 STATUS_READY = "AGENT_MARKETPLACE_UPGRADE_REQUIRED_READY"
@@ -292,6 +294,23 @@ def active_database_work(db_file: Path, project_key: str = "") -> list[str]:
         result = [f"ACTIVE_WORK_ORDER:{row['work_order_key']}" for row in orders]
         if attempts:
             result.append(f"RUNNING_TASK_ATTEMPTS:{attempts}")
+        if "experience_runs" in tables:
+            count = con.execute(
+                "SELECT COUNT(*) FROM experience_runs r JOIN projects p"
+                " ON p.id = r.project_id WHERE r.status = 'active'" + project_filter,
+                args,
+            ).fetchone()[0]
+            if count:
+                result.append(f"ACTIVE_EXPERIENCE_RUNS:{count}")
+        if "backlog_plans" in tables:
+            count = con.execute(
+                "SELECT COUNT(*) FROM backlog_plans b JOIN projects p"
+                " ON p.id = b.project_id WHERE b.status IN ('draft','verified')"
+                + project_filter,
+                args,
+            ).fetchone()[0]
+            if count:
+                result.append(f"ACTIVE_BACKLOG_PLANS:{count}")
         return result
     except sqlite3.DatabaseError as exc:
         return [f"DATABASE_ACTIVITY_CHECK_FAILED:{exc}"]
@@ -539,10 +558,43 @@ def team_from_config(config: dict) -> str:
 def config_owned_digest(config: dict) -> str:
     owned = {
         key: config[key] for key in (
-            "team_id", "managed_by", "project_key",
+            "team_id", "managed_by", "project_key", "project_origin",
         ) if key in config
     }
     return sha256_bytes(canonical_json(owned).encode())
+
+
+def managed_gitignore_block(workspace: str) -> str:
+    return "\n".join((
+        GITIGNORE_START,
+        f"{workspace}/work-orders/",
+        f"{workspace}/planning/",
+        f"{workspace}/experience-design-work/",
+        f"{workspace}/junit-*.xml",
+        GITIGNORE_END,
+    ))
+
+
+def reconcile_gitignore(content: str, workspace: str) -> str:
+    starts, ends = content.count(GITIGNORE_START), content.count(GITIGNORE_END)
+    if starts != ends or starts > 1:
+        raise UpgradeError("managed .gitignore marker is missing or duplicated")
+    block = managed_gitignore_block(workspace)
+    if starts == 1:
+        begin = content.index(GITIGNORE_START)
+        finish = content.index(GITIGNORE_END, begin) + len(GITIGNORE_END)
+        result = content[:begin] + block + content[finish:]
+    else:
+        result = content.rstrip() + ("\n\n" if content.strip() else "") + block + "\n"
+    return result if result.endswith("\n") else result + "\n"
+
+
+def gitignore_owned_digest(content: str) -> str:
+    if content.count(GITIGNORE_START) != 1 or content.count(GITIGNORE_END) != 1:
+        return ""
+    begin = content.index(GITIGNORE_START)
+    finish = content.index(GITIGNORE_END, begin) + len(GITIGNORE_END)
+    return sha256_bytes(content[begin:finish].encode())
 
 
 def managed_surface_hashes(root: Path, config_path: Path | None) -> dict[str, str]:
@@ -553,6 +605,11 @@ def managed_surface_hashes(root: Path, config_path: Path | None) -> dict[str, st
             surfaces[safe_relative(root, config_path) + "#agent-marketplace"] = (
                 config_owned_digest(config)
             )
+    ignore = root / ".gitignore"
+    if ignore.is_file():
+        digest = gitignore_owned_digest(ignore.read_text(encoding="utf-8"))
+        if digest:
+            surfaces[".gitignore#agent-marketplace:software-engineering-team"] = digest
     return surfaces
 
 
@@ -699,6 +756,12 @@ def status(
             workspace, config_path = find_workspace(root)
             state_path = root / STATE_RELATIVE
             safe_relative(root, state_path)
+            for managed_target in (state_path, root / ".gitignore",
+                                   config_path if config_path is not None else root / workspace / "config.json"):
+                if managed_target.is_symlink():
+                    blockers.append(
+                        "SYMLINKED_MANAGED_TARGET:" + safe_relative(root, managed_target)
+                    )
             state = load_json(state_path, None)
             config = load_json(config_path, {}) if config_path is not None else {}
             team_id = team_from_config(config) if isinstance(config, dict) else ""
@@ -719,7 +782,9 @@ def status(
             managed_project = (footprint or state is not None) \
                 and not bootstrap_project
             if state is None and footprint and not bootstrap_project:
-                reasons.append("PROJECT_CONTRACT:unversioned->1")
+                reasons.append(
+                    f"PROJECT_CONTRACT:unversioned->{PROJECT_CONTRACT_VERSION}"
+                )
                 state = {}
             elif state is not None:
                 if not isinstance(state, dict):
@@ -1344,10 +1409,19 @@ def project_changes(plan_payload: dict) -> tuple[dict[Path, bytes | None], dict]
         raise UpgradeError(f"project config has an unknown owner: {prior_owner}")
     config["team_id"] = team_id
     config.pop("managed_by", None)
+    config.setdefault("project_origin", "unclassified")
     config_bytes = (json.dumps(config, indent=2) + "\n").encode()
     changes: dict[Path, bytes | None] = {}
     if config_path.read_bytes() != config_bytes:
         changes[config_path] = config_path.read_bytes()
+    gitignore_path = root / ".gitignore"
+    gitignore_current = gitignore_path.read_text(encoding="utf-8") \
+        if gitignore_path.is_file() else ""
+    gitignore_text = reconcile_gitignore(gitignore_current, workspace)
+    gitignore_bytes = gitignore_text.encode()
+    if not gitignore_path.is_file() or gitignore_path.read_bytes() != gitignore_bytes:
+        changes[gitignore_path] = gitignore_path.read_bytes() \
+            if gitignore_path.is_file() else None
     adapter_previews: list[tuple[Path, dict]] = []
     plan_payload["data_root"] = str(plan_payload["data_root"])
     for package_root in adapter_roots(plan_payload, team_id):
@@ -1359,6 +1433,8 @@ def project_changes(plan_payload: dict) -> tuple[dict[Path, bytes | None], dict]
             changes.setdefault(path, path.read_bytes() if path.is_file() else None)
     target_surfaces = {
         safe_relative(root, config_path) + "#agent-marketplace": config_owned_digest(config),
+        ".gitignore#agent-marketplace:software-engineering-team":
+            gitignore_owned_digest(gitignore_text),
     }
     for package_root, preview in adapter_previews:
         host = detect_package_host(package_root)
@@ -1381,13 +1457,19 @@ def project_changes(plan_payload: dict) -> tuple[dict[Path, bytes | None], dict]
             ).items())
         },
         "managed_surfaces": target_surfaces,
+        "identities": {
+            "preparation": "preparation_check.py",
+            "experience": "experience-design",
+            "backlog": "backlog-plan",
+        },
         "applied_at": plan_payload["created_at"],
         "upgrade_id": plan_payload["upgrade_id"],
         "upgrade_base_head": project_data.get("fingerprint", {}).get("head", ""),
     }
     state_path = root / STATE_RELATIVE
     changes.setdefault(state_path, state_path.read_bytes() if state_path.is_file() else None)
-    return changes, {"state": state, "adapters": adapter_previews, "config": config_bytes}
+    return changes, {"state": state, "adapters": adapter_previews,
+                     "config": config_bytes, "gitignore": gitignore_bytes}
 
 
 def snapshot_content(snapshot: dict) -> bytes | None:
@@ -1410,6 +1492,11 @@ def validate_recovery_surfaces(
         original_config, config_owned_digest(target_config),
     }:
         raise UpgradeError("managed project config drifted during recovery")
+    ignore_path = root / ".gitignore"
+    current_ignore = ignore_path.read_bytes() if ignore_path.is_file() else None
+    original_ignore = snapshot_content(durable.get(".gitignore", {}))
+    if current_ignore not in {original_ignore, prepared["gitignore"]}:
+        raise UpgradeError("managed .gitignore drifted during recovery")
 
     state_path = root / STATE_RELATIVE
     state_relative = safe_relative(root, state_path)
@@ -1475,6 +1562,11 @@ def apply_project(plan_payload: dict, journal: dict, journal_path: Path) -> None
         if config_path.read_bytes() != prepared["config"]:
             atomic_bytes(config_path, prepared["config"],
                          config_path.stat().st_mode & 0o777)
+        gitignore_path = root / ".gitignore"
+        if not gitignore_path.is_file() or gitignore_path.read_bytes() != prepared["gitignore"]:
+            atomic_bytes(gitignore_path, prepared["gitignore"],
+                         gitignore_path.stat().st_mode & 0o777
+                         if gitignore_path.exists() else 0o644)
         for package_root, _preview in prepared["adapters"]:
             run_adapter(package_root, "apply", root, project_data["workspace"])
         state = prepared["state"]
@@ -1737,6 +1829,11 @@ def initialize_project_contract(
             ).items())
         },
         "managed_surfaces": surfaces,
+        "identities": {
+            "preparation": "preparation_check.py",
+            "experience": "experience-design",
+            "backlog": "backlog-plan",
+        },
         "applied_at": utc_now(),
     }
     atomic_json(state_path, state, 0o644)

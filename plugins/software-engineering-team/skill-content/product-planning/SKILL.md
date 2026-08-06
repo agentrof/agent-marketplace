@@ -1,6 +1,6 @@
 ---
 name: product-planning
-description: Product planning knowledge for the team's product-owner role. Loaded by software-engineering-team flows; not user-facing.
+description: Program, release and feature backlog planning knowledge for the team's product-owner role. Loaded by software-engineering-team flows; not user-facing.
 exposure: internal
 ---
 
@@ -12,19 +12,28 @@ this skill says how to cut one and where it goes in the queue.
 
 ## When to Use
 
-Loaded when producing the backlog import (epics and stories in the PMO
-database, the single source of delivery state, read back through the
-CLI's item verbs) from an approved analysis space (its registry is the
-criteria source), or reconciling at a merge checkpoint. An existing
+Loaded by `flows/backlog-planning.md` in baseline, replan or feature mode.
+The product-owner authors a transient JSON plan; only an approved, exact-hash
+`backlog-plan apply` may create or change durable program, release, epic and
+story structure in PMO. Approved analysis registries are the criteria source. An existing
 solution-design tree (workspace/docs/solution-design/, vault law per
 the obsidian-vault skill) is read first: build-buy-integrate
-verdicts shape what is sliced versus bought; Transition ordering
-constrains story order. Not for analysis (analyst work), not for
-technical choices (architect work).
+verdicts shape what is sliced versus bought; exact Experience Design release
+registries constrain behavior and ordering. Not for analysis, architecture or
+release activation.
+
+Read `references/program-release-contract.md` before authoring or reviewing any
+baseline, replan or feature plan.
 
 ## Hierarchy and Sizing
 
-Three levels, only two authored:
+Four authored planning levels and one runtime level:
+- Program: the approved outcome and full product planning boundary. A large
+  greenfield effort has one program with multiple ordered releases, not one
+  unbounded release.
+- Release: an activatable slice with one exact effective Experience Design
+  registry hash. Every story belongs to exactly one release. A later release
+  may depend on an earlier one; the reverse is invalid.
 - Epic: a business goal with a one-line goal statement ("customers
   manage their own accounts"); groups stories for reporting, nothing is
   built from an epic directly. Few and broad beats many and thin; a
@@ -66,22 +75,6 @@ Three levels, only two authored:
   (AC or BR): too small (merge it) or invented scope (raise it in open
   questions).
 
-## Dependency Authoring
-
-- Each dependency is an {item, reason} edge, real only when the story
-  CONSUMES the target's output; the reason names that need, never the
-  ordering. Cycles are rejected at import.
-- Edges are the parallelization contract: an unnecessary edge serializes
-  concurrent work orders, a missing one starts a story too early. A
-  shared contract is not a dependency; mark SHARES with its name.
-
-## DoD Items
-
-- The dod field summarizes; dod_items is its checkable decomposition:
-  ONE verifiable property per item, pass/fail without interpretation,
-  each tracing to an analysis criterion; exempt from brevity, as many
-  items as the story has properties.
-
 ## Ordering Method
 
 Two passes; the second never overrides the first.
@@ -114,6 +107,7 @@ Two passes; the second never overrides the first.
 
 ## References
 
+- [program-release-contract](references/program-release-contract.md): mandatory JSON plan identities, qualified refs, ownership, release allocation, feature execution-set and gate contract. Read when starting any planning run.
 - [slicing-patterns](references/slicing-patterns.md): each split pattern with a worked before/after, the size tests, merge rules, anti-pattern gallery. Read when a story fails a size test or resists vertical slicing.
 - [structured-records](references/structured-records.md): dependency-edge rules with reasons, the SHARES definition with a worked example, DoD item authoring rules, both anti-pattern galleries. Read when authoring depends_on or dod_items.
 - [prioritization](references/prioritization.md): risk-adjusted sequencing step by step, one worked value/risk/size weighing, deferral discipline. Read when ordering the backlog or defending the order at the gate.

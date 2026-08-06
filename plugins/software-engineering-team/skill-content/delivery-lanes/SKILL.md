@@ -23,6 +23,8 @@ session's entry.
 1. Pre-flight: read workspace/config.json (missing, or without a
    project_key: route to the setup entry and stop). Resolve the PMO CLI
    per the develop flow's state contract and run the idempotent init-db.
+   Run `preparation_check.py route --project-root <root> --intent deliver
+   --json`; stop at the exact preparation entry it names when not ready.
    Verify this session sits on the PRIMARY checkout: the current branch
    is the default branch AND `git rev-parse --git-dir` equals
    `git rev-parse --git-common-dir`. A linked worktree fails that test:

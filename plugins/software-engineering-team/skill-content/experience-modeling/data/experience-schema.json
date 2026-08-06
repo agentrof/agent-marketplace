@@ -1,0 +1,56 @@
+{
+  "schema_version": 1,
+  "program_pattern": "^PRG-[0-9]{3,}$",
+  "release_pattern": "^REL-[0-9]{3,}$",
+  "scope_pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*(?:#domains/[a-z0-9]+(?:-[a-z0-9]+)*(?:/domains/[a-z0-9]+(?:-[a-z0-9]+)*)*)?$",
+  "exact_ref_pattern": "^PRG-[0-9]{3,}:(?:JRN|FLW|SCR|STA|TRN)-[0-9]{3,}@r[1-9][0-9]*$",
+  "id_patterns": {
+    "journey": "^JRN-[0-9]{3,}$",
+    "flow_set": "^FLW-[0-9]{3,}$",
+    "screen": "^SCR-[0-9]{3,}$",
+    "state": "^STA-[0-9]{3,}$",
+    "transition": "^TRN-[0-9]{3,}$"
+  },
+  "doc_types": {
+    "experience": {"filename": "experience.md"},
+    "program": {"filename": "program.md"},
+    "release": {"filename": "release.md"},
+    "space": {"filename": "space.md"},
+    "domain": {"filename": "domain.md"},
+    "journey": {"suffix": "-journey.md", "directory": "journeys"},
+    "flow_set": {"suffix": "-flows.md", "directory": "flows"},
+    "screen": {"suffix": "-screen.md", "directory": "screens"}
+  },
+  "limits": {
+    "flows_per_set": 100,
+    "transitions_per_set": 250,
+    "screens_per_leaf_domain": 100
+  },
+  "scale_multipliers": {
+    "small": 1,
+    "medium": 3,
+    "large": 9,
+    "x_large": 45,
+    "xx_large": 225,
+    "enterprise": 1125
+  },
+  "generated_files": [
+    "effective-registry.json",
+    "scope-map.json",
+    "coverage.md",
+    "status.md"
+  ],
+  "program_generated_files": [
+    "program-registry.json",
+    "release-matrix.md",
+    "coverage.md",
+    "status.md"
+  ],
+  "machine_fields": [
+    "approved_at",
+    "approval_revision",
+    "registry_hash",
+    "source_hash",
+    "stamped_at"
+  ]
+}

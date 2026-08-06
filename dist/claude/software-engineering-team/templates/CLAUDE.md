@@ -28,7 +28,7 @@ produces lives under `{{workspace}}/`:
 - `{{workspace}}/config.json`: project declaration; machine-managed, never
   hand-edited. Change it through the configure entry.
 - `{{workspace}}/docs/`: the team's knowledge base (business-analysis,
-  solution-design, system-architecture, design-system), maintained as
+  solution-design, system-architecture, design-system, experience-design), maintained as
   one vault: open `{{workspace}}/docs/` as the vault root (never the repo
   root); on first open the vault app asks ONCE to trust the vendored
   community plugins (that click enables the title-based labels, each
@@ -48,11 +48,15 @@ produces lives under `{{workspace}}/`:
   command brings the whole system up.
 - `{{workspace}}/demos/` and `{{workspace}}/sketches/`: outward demo packages and
   design exploration previews.
+- `{{workspace}}/experience-design-work/` and `{{workspace}}/planning/`:
+  gitignored candidate and plan-draft areas. Approved experience lives only
+  under docs; durable backlog state lives only in PMO.
 - `{{workspace}}/work-orders/`: work-order snapshots (brief, config,
   constitution); gitignored. Delivery state (work orders, the backlog
   of stories and its ordering, tasks, findings, the quality ledger)
   lives in the central PMO database, read through the PMO CLI.
 
-Start work with the team's entry skills: setup, business-analysis,
-solution-design, design-system, sketch, demo, deliver, delivery-lanes,
-configure.
+Greenfield preparation is setup, business-analysis, solution-design,
+design-system, experience-design, backlog-plan, then STOP. Start deliver or
+delivery-lanes explicitly afterward. Existing projects start feature work with
+deliver. Other entries include sketch, demo, configure and organize-docs.

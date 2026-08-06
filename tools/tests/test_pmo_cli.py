@@ -85,6 +85,32 @@ COMMAND_CONTRACTS = {
     "upgrade session-release": "test_upgrade_status_current_without_project",
     "project register": "test_project_register_and_list",
     "project list": "test_project_register_and_list",
+    "project classify-origin": "test_project_origin_classification_is_guarded",
+    "program list": "test_program_experience_backlog_lifecycle",
+    "program show": "test_program_experience_backlog_lifecycle",
+    "program status": "test_program_experience_backlog_lifecycle",
+    "program baseline": "test_program_experience_backlog_lifecycle",
+    "program complete": "test_program_experience_backlog_lifecycle",
+    "program cancel": "test_program_experience_backlog_lifecycle",
+    "release list": "test_program_experience_backlog_lifecycle",
+    "release show": "test_program_experience_backlog_lifecycle",
+    "release activate": "test_program_experience_backlog_lifecycle",
+    "release refresh-ready": "test_program_experience_backlog_lifecycle",
+    "release complete": "test_program_experience_backlog_lifecycle",
+    "release cancel": "test_program_experience_backlog_lifecycle",
+    "experience-run init": "test_program_experience_backlog_lifecycle",
+    "experience-run status": "test_program_experience_backlog_lifecycle",
+    "experience-run record-gate": "test_program_experience_backlog_lifecycle",
+    "experience-run release": "test_program_experience_backlog_lifecycle",
+    "backlog-plan init": "test_program_experience_backlog_lifecycle",
+    "backlog-plan status": "test_program_experience_backlog_lifecycle",
+    "backlog-plan reserve-ids": "test_program_experience_backlog_lifecycle",
+    "backlog-plan record-finding": "test_program_experience_backlog_lifecycle",
+    "backlog-plan resolve-finding": "test_program_experience_backlog_lifecycle",
+    "backlog-plan record-gate": "test_program_experience_backlog_lifecycle",
+    "backlog-plan verify": "test_program_experience_backlog_lifecycle",
+    "backlog-plan apply": "test_program_experience_backlog_lifecycle",
+    "backlog-plan abandon": "test_program_experience_backlog_lifecycle",
     "resume-info": "test_resume_info_reports_work_order_shape",
     "work-order init": "test_story_claim_marks_in_development",
     "work-order set-step": "test_transition_guard",
@@ -218,6 +244,285 @@ class PmoCliTests(unittest.TestCase):
         if story:
             argv += ["--story", story]
         return run(argv)
+
+    def test_program_experience_backlog_lifecycle(self):
+        code, _, err = run([
+            "experience-run", "init", "--project-key", "shop",
+            "--run-key", "ux-1", "--program", "PRG-001",
+            "--release", "REL-001", "--node", "marketplace",
+        ])
+        self.assertEqual(code, 0, err)
+
+        code, out, err = run([
+            "experience-run", "status", "--project-key", "shop",
+            "--run-key", "ux-1",
+        ])
+        self.assertEqual(code, 0, err)
+        self.assertEqual(json.loads(out)[0]["status"], "active")
+        for gate in ("space:marketplace", "release", "program"):
+            code, _, err = run([
+                "experience-run", "record-gate", "--run-key", "ux-1",
+                "--gate", gate, "--decision", "approved",
+                "--revision-hash", "sha256:experience",
+            ])
+            self.assertEqual(code, 0, err)
+        code, _, err = run(["experience-run", "release", "--run-key", "ux-1"])
+        self.assertEqual(code, 0, err)
+
+        plan = {
+            "mode": "baseline",
+            "program_id": "PRG-001",
+            "title": "Marketplace",
+            "releases": [{
+                "release_id": "REL-001", "title": "First release",
+                "experience_registry_hash": "sha256:experience",
+                "experience_registry": "registry.json",
+            }],
+            "epics": [{"external_id": "EP-01", "title": "Core",
+                       "goal": "Customers browse the core catalog."}],
+            "stories": [{
+                "external_id": "WP-01", "epic": "EP-01",
+                "release_id": "REL-001", "title": "Browse catalog",
+                "type": "feature", "priority": "high: walking skeleton",
+                "scope": "Browse approved catalog.", "excludes": "Checkout.",
+                "dor": ["Approved inputs are linked."],
+                "dod": ["Catalog is verified."],
+                "criteria": ["marketplace:AC-CAT-001"],
+                "solution_refs": ["SD-001"], "budget_refs": ["BUD-001"],
+                "ux_refs": ["PRG-001:SCR-001@r1"], "ui": True,
+                "delivery_owners": {"owner": "frontend_developer", "supporting": []},
+            }],
+            "shares": [],
+            "gates": {"reviewer": "approved", "domains": ["marketplace"],
+                      "program": "approved"},
+            "findings": [],
+        }
+        path = Path(self.tmp.name) / "plan.json"
+        (Path(self.tmp.name) / "registry.json").write_text(json.dumps({
+            "program_id": "PRG-001", "release_id": "REL-001",
+            "registry_hash": "sha256:experience",
+            "records": [{"id": "SCR-001", "revision": 1}],
+        }), encoding="utf-8")
+        path.write_text(json.dumps(plan), encoding="utf-8")
+        expected_hash = pmo_cli.backlog_plan_hash(plan)
+        code, out, err = run([
+            "backlog-plan", "init", "--project-key", "shop",
+            "--plan-key", "plan-1", "--program", "PRG-001",
+            "--mode", "baseline", "--plan-file", str(path),
+        ])
+        self.assertEqual(code, 0, err)
+        self.assertEqual(out.strip(), expected_hash)
+        code, out, err = run([
+            "backlog-plan", "reserve-ids", "--plan-key", "plan-1",
+            "--prefix", "WP", "--count", "2",
+        ])
+        self.assertEqual(code, 0, err)
+        self.assertEqual(json.loads(out), ["WP-001", "WP-002"])
+        code, _, err = run([
+            "backlog-plan", "record-finding", "--plan-key", "plan-1",
+            "--finding", "BF-001", "--severity", "non-blocking",
+            "--summary", "Watch capacity",
+        ])
+        self.assertEqual(code, 0, err)
+        code, _, err = run([
+            "backlog-plan", "resolve-finding", "--plan-key", "plan-1",
+            "--finding", "BF-001", "--status", "accepted-risk",
+            "--reason", "Bounded", "--owner", "product-owner",
+            "--revisit", "before activation",
+        ])
+        self.assertEqual(code, 0, err)
+        revision = 0
+        for gate in ("reviewer", "domain:marketplace", "reconciliation", "program"):
+            code, out, err = run([
+                "backlog-plan", "record-gate", "--plan-key", "plan-1",
+                "--gate", gate, "--decision", "approved",
+                "--plan-hash", expected_hash,
+            ])
+            self.assertEqual(code, 0, err)
+            revision = int(out.strip())
+        code, _, err = run([
+            "backlog-plan", "verify", "--plan-key", "plan-1",
+            "--plan-file", str(path), "--compiler",
+            str(REPO / "plugins" / "software-engineering-team" / "scripts"
+                / "backlog_compile.py"),
+        ])
+        self.assertEqual(code, 0, err)
+        code, _, err = run([
+            "backlog-plan", "apply", "--plan-key", "plan-1",
+            "--plan-file", str(path), "--approved-hash", expected_hash,
+            "--gate-revision", str(revision),
+        ])
+        self.assertEqual(code, 0, err)
+        code, out, err = run(["backlog-plan", "status", "--plan-key", "plan-1"])
+        self.assertEqual(code, 0, err)
+        self.assertEqual(json.loads(out)["status"], "applied")
+        with self.db() as con:
+            self.assertEqual(
+                con.execute("SELECT status FROM programs WHERE program_key = 'PRG-001'").fetchone()[0],
+                "baselined",
+            )
+            self.assertEqual(
+                con.execute("SELECT role FROM work_item_owners WHERE relationship = 'owner'").fetchone()[0],
+                "frontend_developer",
+            )
+
+        code, _, err = run([
+            "program", "baseline", "--project-key", "shop",
+            "--program", "PRG-001", "--baseline-hash", expected_hash,
+        ])
+        self.assertEqual(code, 0, err)
+        for command in ("list",):
+            code, _, err = run(["program", command, "--project-key", "shop"])
+            self.assertEqual(code, 0, err)
+        for command in ("show", "status"):
+            code, _, err = run(["program", command, "--project-key", "shop",
+                                "--program", "PRG-001"])
+            self.assertEqual(code, 0, err)
+        code, _, err = run(["release", "list", "--project-key", "shop",
+                            "--program", "PRG-001"])
+        self.assertEqual(code, 0, err)
+        code, _, err = run(["release", "activate", "--project-key", "shop",
+                            "--program", "PRG-001", "--release", "REL-001"])
+        self.assertEqual(code, 0, err)
+        code, out, err = run(["release", "refresh-ready", "--project-key", "shop",
+                              "--program", "PRG-001", "--release", "REL-001"])
+        self.assertEqual(code, 0, err)
+        self.assertEqual(json.loads(out)["ready"], ["WP-01"])
+        code, _, err = run(["item", "update", "--project-key", "shop",
+                            "--external-id", "WP-01", "--status", "in_development"])
+        self.assertEqual(code, 0, err)
+        protected_change = json.loads(json.dumps(plan))
+        protected_change["stories"][0]["ux_refs"] = ["PRG-001:SCR-999@r1"]
+        with pmo_cli.connect() as con:
+            project = pmo_cli.get_project(con, "shop")
+            plan_row = pmo_cli.get_backlog_plan(con, "plan-1")
+            with self.assertRaisesRegex(pmo_cli.Rule, "protected story contract"):
+                with pmo_cli.mutate(con):
+                    pmo_cli.sync_plan_items(con, project, plan_row, protected_change)
+        code, _, err = run(["release", "show", "--project-key", "shop",
+                            "--program", "PRG-001", "--release", "REL-001"])
+        self.assertEqual(code, 0, err)
+        code, _, err = run(["item", "update", "--project-key", "shop",
+                            "--external-id", "WP-01", "--status", "done"])
+        self.assertEqual(code, 0, err)
+        code, _, err = run(["release", "complete", "--project-key", "shop",
+                            "--program", "PRG-001", "--release", "REL-001"])
+        self.assertEqual(code, 0, err)
+        code, _, err = run(["program", "complete", "--project-key", "shop",
+                            "--program", "PRG-001"])
+        self.assertEqual(code, 0, err)
+
+        abandoned = dict(plan)
+        abandoned["mode"] = "replan"
+        abandoned["program_id"] = "PRG-002"
+        abandoned_path = Path(self.tmp.name) / "abandoned.json"
+        abandoned_path.write_text(json.dumps(abandoned), encoding="utf-8")
+        code, _, err = run([
+            "backlog-plan", "init", "--project-key", "shop",
+            "--plan-key", "plan-2", "--program", "PRG-002",
+            "--mode", "replan", "--plan-file", str(abandoned_path),
+        ])
+        self.assertEqual(code, 0, err)
+        code, _, err = run(["backlog-plan", "abandon", "--plan-key", "plan-2",
+                            "--reason", "superseded"])
+        self.assertEqual(code, 0, err)
+
+    def test_project_origin_classification_is_guarded(self):
+        workspace = self.wt_main / "workspace"
+        workspace.mkdir()
+        config_path = workspace / "config.json"
+        config = {
+            "team_id": "software-engineering-team",
+            "project_key": "shop",
+            "project_origin": "unclassified",
+            "user_setting": "preserved",
+        }
+        config_path.write_text(json.dumps(config), encoding="utf-8")
+        state_path = self.wt_main / pmo_cli.upgrade_core.STATE_RELATIVE
+        state_path.parent.mkdir(parents=True)
+        surface = "workspace/config.json#agent-marketplace"
+        state = {
+            "contract_version": pmo_cli.upgrade_core.PROJECT_CONTRACT_VERSION,
+            "project_key": "shop",
+            "managed_surfaces": {
+                surface: pmo_cli.upgrade_core.config_owned_digest(config),
+            },
+        }
+        state_path.write_text(json.dumps(state), encoding="utf-8")
+
+        code, out, err = run([
+            "project", "classify-origin", "--project-key", "shop",
+            "--project-root", str(self.wt_main), "--origin", "existing",
+        ])
+        self.assertEqual(code, 0, err)
+        self.assertIn("project_origin=existing", out)
+        classified = json.loads(config_path.read_text(encoding="utf-8"))
+        contract = json.loads(state_path.read_text(encoding="utf-8"))
+        self.assertEqual(classified["project_origin"], "existing")
+        self.assertEqual(classified["user_setting"], "preserved")
+        self.assertEqual(
+            contract["managed_surfaces"][surface],
+            pmo_cli.upgrade_core.config_owned_digest(classified),
+        )
+
+        code, _, err = self.import_backlog()
+        self.assertEqual(code, 0, err)
+        code, _, err = run([
+            "project", "classify-origin", "--project-key", "shop",
+            "--project-root", str(self.wt_main), "--origin", "greenfield",
+        ])
+        self.assertEqual(code, 1)
+        self.assertIn("immutable", err)
+
+    def test_backlog_plan_revisions_and_finding_round_guards(self):
+        path = Path(self.tmp.name) / "revision-plan.json"
+        plan = {"mode": "baseline", "program_id": "PRG-009", "stories": []}
+        path.write_text(json.dumps(plan), encoding="utf-8")
+        code, first_hash, err = run([
+            "backlog-plan", "init", "--project-key", "shop",
+            "--plan-key", "revision-plan", "--program", "PRG-009",
+            "--mode", "baseline", "--plan-file", str(path),
+            "--session-id", "session-a",
+        ])
+        self.assertEqual(code, 0, err)
+        plan["title"] = "Revised"
+        path.write_text(json.dumps(plan), encoding="utf-8")
+        code, second_hash, err = run([
+            "backlog-plan", "init", "--project-key", "shop",
+            "--plan-key", "revision-plan", "--program", "PRG-009",
+            "--mode", "baseline", "--plan-file", str(path),
+            "--session-id", "session-a",
+        ])
+        self.assertEqual(code, 0, err)
+        self.assertNotEqual(first_hash, second_hash)
+        with self.db() as con:
+            self.assertEqual(
+                con.execute("SELECT COUNT(*) FROM backlog_plan_revisions").fetchone()[0],
+                2,
+            )
+
+        code, _, err = run([
+            "backlog-plan", "record-finding", "--plan-key", "revision-plan",
+            "--finding", "MECH-1", "--kind", "mechanical",
+            "--severity", "blocker", "--summary", "Compiler failure",
+        ])
+        self.assertEqual(code, 0, err)
+        code, _, err = run([
+            "backlog-plan", "resolve-finding", "--plan-key", "revision-plan",
+            "--finding", "MECH-1", "--status", "rejected",
+            "--reason", "Not applicable",
+        ])
+        self.assertEqual(code, 1)
+        self.assertIn("mechanical findings", err)
+
+        for round_number in range(1, 5):
+            code, _, err = run([
+                "backlog-plan", "record-finding", "--plan-key", "revision-plan",
+                "--finding", "SEM-1", "--kind", "semantic",
+                "--severity", "blocker", "--summary", f"Round {round_number}",
+            ])
+            self.assertEqual(code, 0 if round_number <= 3 else 1)
+        self.assertIn("three review rounds", err)
 
     # -- clock ------------------------------------------------------------------
 

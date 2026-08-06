@@ -612,9 +612,16 @@ def check_vault_layout(vault: Vault, findings: list[Finding]) -> None:
                     "error", rel, 1, "vault_layout",
                     "attachment is not referenced by any embed",
                     "reference it with an embed wikilink or delete it"))
-        elif not rel.endswith(".md") and top not in {
+        elif (not rel.endswith(".md")
+              and not (top == "experience-design"
+                       and re.fullmatch(
+                           r"experience-design/programs/prg-[0-9]+/releases/"
+                           r"rel-[0-9]+/(?:spaces/[^/]+/(?:domains/[^/]+/)*)?"
+                           r"artifacts/[a-z0-9]+(?:-[a-z0-9]+)*-preview\.html",
+                           rel))
+              and top not in {
                 p.rstrip("/").split("/")[0]
-                for p in policy.get("generated_subtrees", [])}:
+                for p in policy.get("generated_subtrees", [])}):
             findings.append(Finding(
                 "error", rel, 1, "vault_layout",
                 f"non-markdown file '{rel}' inside a note subtree",
@@ -1199,6 +1206,8 @@ def check_nav_footer(vault: Vault, findings: list[Finding]) -> None:
                 " peers after"))
             continue
         peers = [t for (_, t) in links[1:] if f"{t}.md" in vault.index]
+        if note.subtree == "experience-design":
+            continue  # the experience compiler owns graph closure and map reachability
         floor = min(peer_min, max(subtree_counts.get(note.subtree, 1) - 1, 0))
         if not floor <= len(peers) <= peer_max:
             overridden = policy.get("_limit_provenance") or {}
@@ -2443,6 +2452,78 @@ def payload_reconcile(root: Path, policy: dict,
     return changed
 
 
+def reconcile_payload_fragment(root: Path, policy: dict, fragment: str) -> int:
+    """Add only missing managed properties and graph groups for one tree.
+
+    Existing user values are never overwritten. A managed-name collision is
+    explicit and stops tree birth so the owner can choose the resolution.
+    """
+    fragment = fragment.replace("-", "_")
+    fragments = policy.get("lazy_fragments", {})
+    graph_fragments = policy.get("fragment_graph_groups", {})
+    if fragment not in fragments or fragment not in graph_fragments:
+        raise ValueError(f"unknown vault payload fragment: {fragment}")
+    obsidian = root / ".obsidian"
+    types_path = obsidian / "types.json"
+    graph_path = obsidian / "graph.json"
+    if not types_path.is_file() or not graph_path.is_file():
+        raise ValueError("base vault payload must be materialized first")
+    try:
+        types_doc = json.loads(types_path.read_text(encoding="utf-8"))
+        graph_doc = json.loads(graph_path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"vault payload JSON collision: {exc}") from exc
+    types = dict(types_doc.get("types") or {})
+    changed_types = False
+    for key in fragments[fragment]:
+        expected = policy.get("property_types", {}).get(key)
+        if expected is None:
+            raise ValueError(f"fragment {fragment} names unknown property {key}")
+        if key in types and types[key] != expected:
+            raise ValueError(
+                f"named property collision: {key} is {types[key]!r},"
+                f" managed fragment requires {expected!r}")
+        if key not in types:
+            types[key] = expected
+            changed_types = True
+    specs = {str(item.get("id")): item for item in graph_group_specs(policy)}
+    groups = list(graph_doc.get("colorGroups") or [])
+    by_query = {str(item.get("query")): item for item in groups
+                if isinstance(item, dict)}
+    changed_graph = False
+    for group_id in graph_fragments[fragment]:
+        spec = specs.get(group_id)
+        if spec is None:
+            raise ValueError(f"fragment {fragment} names unknown graph group {group_id}")
+        query = str(spec["query"])
+        expected = {"query": query, "color": group_color(policy, query)}
+        if query in by_query and by_query[query] != expected:
+            raise ValueError(f"named graph group collision: {group_id}")
+        if query not in by_query:
+            groups.append(expected)
+            by_query[query] = expected
+            changed_graph = True
+    if changed_types:
+        types_doc["types"] = types
+        types_path.write_text(json.dumps(types_doc, indent=2) + "\n", encoding="utf-8")
+    if changed_graph:
+        graph_doc["colorGroups"] = groups
+        graph_path.write_text(json.dumps(graph_doc, indent=2) + "\n", encoding="utf-8")
+    return int(changed_types) + int(changed_graph)
+
+
+def cmd_reconcile_payload_fragment(args, policy: dict) -> int:
+    try:
+        changed = reconcile_payload_fragment(args.vault.resolve(), policy,
+                                             args.fragment)
+    except ValueError as exc:
+        print(f"vault_check: {exc}", file=sys.stderr)
+        return 1
+    print(f"vault_check: fragment {args.fragment} reconciled;"
+          f" {changed} payload file(s) changed")
+    return 0
+
+
 def cmd_materialize_payload(args, policy: dict) -> int:
     root = args.vault.resolve()
     try:
@@ -3242,6 +3323,11 @@ def main(argv: list[str] | None = None) -> int:
     p = sub.add_parser("standardize-graph-colors")
     p.add_argument("--vault", type=Path, required=True)
     p.set_defaults(func=cmd_standardize_graph_colors)
+
+    p = sub.add_parser("reconcile-payload-fragment")
+    p.add_argument("--vault", type=Path, required=True)
+    p.add_argument("--fragment", required=True)
+    p.set_defaults(func=cmd_reconcile_payload_fragment)
 
     p = sub.add_parser("render-decisions")
     p.add_argument("--vault", type=Path, required=True)

@@ -116,7 +116,11 @@ def initialize_project(project: Path, team: str, env: dict[str, str]) -> None:
     workspace = project / "workspace"
     workspace.mkdir(parents=True)
     (workspace / "config.json").write_text(
-        json.dumps({"team_id": team, "project_key": "smoke"}),
+        json.dumps({
+            "team_id": team,
+            "project_key": "smoke",
+            "project_origin": "greenfield",
+        }),
         encoding="utf-8",
     )
     run(["git", "init", "--initial-branch=main", str(project)], env)
@@ -147,6 +151,41 @@ def register_project_contract(
         "--stamp-config", str(project / "workspace" / "config.json"),
         "--project-root", str(project), "--workspace", "workspace",
     ], env)
+
+
+def assert_preparation_payload(
+    env: dict[str, str], team_root: Path, project: Path, team: str,
+) -> None:
+    script = team_root / "scripts" / "preparation_check.py"
+    if team != "software-engineering-team" or not team_root.exists():
+        return  # deterministic host simulations use synthetic install paths
+    required = (
+        script,
+        team_root / "scripts" / "experience_compile.py",
+        team_root / "scripts" / "backlog_compile.py",
+        team_root / "skill-content" / "experience-design" / "SKILL.md",
+        team_root / "skill-content" / "backlog-plan" / "SKILL.md",
+        team_root / "agents" / "experience-reviewer.md",
+        team_root / "agents" / "backlog-reviewer.md",
+        team_root / "flows" / "experience-design.md",
+        team_root / "flows" / "backlog-planning.md",
+    )
+    missing = [str(path.relative_to(team_root)) for path in required if not path.is_file()]
+    if missing:
+        raise SmokeFailure("greenfield preparation payload is incomplete: " + ", ".join(missing))
+    if (team_root / "skill-content" / "plan-backlog").exists():
+        raise SmokeFailure("removed plan-backlog alias is still packaged")
+    completed = subprocess.run(
+        [sys.executable, str(script), "route", "--project-root", str(project),
+         "--intent", "deliver", "--json"],
+        capture_output=True, text=True, env=env, check=False, timeout=30,
+    )
+    try:
+        payload = json.loads(completed.stdout)
+    except json.JSONDecodeError as exc:
+        raise SmokeFailure("preparation route returned invalid JSON") from exc
+    if completed.returncode != 1 or payload.get("next_entry") != "business-analysis":
+        raise SmokeFailure("fresh greenfield route did not stop at business-analysis")
 
 
 def assert_team_gate(
@@ -297,6 +336,7 @@ def smoke_claude(
             ], env)
             team_root = plugin_install_path(installed, team, "claude")
             pmo_root = plugin_install_path(installed, PMO, "claude")
+            assert_preparation_payload(env, team_root, project, team)
             assert_team_gate(env, team_root, project, "missing-pmo", 2)
             first_setup = json.loads(run([
                 sys.executable,
@@ -378,6 +418,7 @@ def smoke_codex(
             ], env))
             assert_enabled(inventory, {team}, "codex")
             team_root = plugin_install_path(inventory, team, "codex")
+            assert_preparation_payload(env, team_root, project, team)
             assert_team_gate(env, team_root, project, "missing-pmo", 2)
             run([
                 "codex", "plugin", "add", f"{PMO}@{MARKETPLACE}", "--json",

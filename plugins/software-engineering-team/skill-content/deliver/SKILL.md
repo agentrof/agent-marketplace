@@ -27,6 +27,11 @@ Front door for real work: classify, confirm, deliver.
    work order's state (resume-info), and continue from the first step
    that is not done, under the full state contract; never redo done
    steps and never work outside the flow.
+   Run `preparation_check.py route --project-root <root> --intent deliver
+   --json`. A greenfield project with an incomplete preparation stage must
+   stop at the exact entry named by the result; do not guess or compress the
+   sequence. An unclassified upgraded project routes to configure. Existing
+   projects continue through the scoped preparation below.
    Story fast path: an ask naming an existing backlog story ("deliver:
    deliver WP-03"; verify the row with item list) is LARGE by
    construction and was already sliced and approved at the backlog gate:
@@ -57,31 +62,22 @@ Front door for real work: classify, confirm, deliver.
    environment's service or store set, stop and re-enter this procedure
    as LARGE.
 4. LARGE route:
-   a. Brief precondition, mechanical: run
-      "$RUN" run "$TEAM" scripts/ba_compile.py check --space
-      workspace/docs/business-analysis/<slug> --gate approval (scoped
-      with --node for a single-domain ask). Nonzero or no space: the
-      business-analysis entry flow runs first, here, in this
-      conversation.
-   b. Spawn product-owner with its bound planning
-      knowledge skill to produce or extend the backlog as an
-      epics-and-stories JSON import file (the agent's output contract).
-      Read-fully inputs: the space's _generated/registry.md (the
-      complete BR/AC inventory), the root overview, and the in-scope
-      rule and acceptance docs; the rest summary-only via
-      _generated/index.md. Use the develop flow's spawn template.
-   c. BACKLOG GATE: present the epic and story summary with the coverage
-      map; Approve / Request changes / Pause, asked through the
-      choice gate. On approve, first verify the import
-      against the space (ba_compile.py verify-import --space
-      <space> --json-file <file>; nonzero blocks the approve action with
-      the named ids), then load it into the PMO database (item import
-      --project-key <key> --json-file <file>; the CLI rejects stories
-      with empty scope, exclusions, DoR or DoD). The database is the
-      single source of delivery state, read back through the CLI; no
-      backlog view is rendered into the docs vault (its law is the
-      obsidian-vault skill's).
-   d. Story loop: for each ready story in order, execute the flow
+   a. Scope the request against the existing project. Run a scoped Business
+      Analysis check, then a solution-impact pass over the approved landscape.
+      Re-enter solution-design only for a landscape decision; per-story
+      architecture remains in develop. Run an Experience Design delta when UI
+      behavior or an existing journey, flow or screen contract changes. Every
+      omitted stage is justified by a clean mechanical impact result.
+   b. Load `flows/backlog-planning.md` in `feature` mode. The product-owner,
+      compiler and backlog-reviewer produce and gate the bounded feature plan.
+      The execution set contains only feature stories and user-approved
+      unfinished transitive prerequisites. Active and completed contracts are
+      frozen.
+   c. Apply through PMO `backlog-plan apply`, then explicitly activate the
+      target release. Backlog approval alone is not activation. Read back the
+      approved execution set from PMO; legacy `item import` is not a structural
+      writer for managed programs.
+   d. Story loop: for each story in that approved execution set and order, execute the flow
       printed by "$RUN" path "$TEAM" flows/develop.md end to end. After each
       story's merge checkpoint (which updates the database on the main
       line), ask through a choice gate whether to continue

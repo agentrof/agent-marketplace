@@ -1,5 +1,5 @@
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "program_pattern": "^PRG-[0-9]{3,}$",
   "release_pattern": "^REL-[0-9]{3,}$",
   "scope_pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*(?:#domains/[a-z0-9]+(?:-[a-z0-9]+)*(?:/domains/[a-z0-9]+(?:-[a-z0-9]+)*)*)?$",
@@ -15,11 +15,13 @@
     "experience": {"filename": "experience.md"},
     "program": {"filename": "program.md"},
     "release": {"filename": "release.md"},
-    "space": {"filename": "space.md"},
-    "domain": {"filename": "domain.md"},
+    "experience_space": {"filename": "space.md"},
+    "experience_domain": {"filename": "domain.md"},
     "journey": {"suffix": "-journey.md", "directory": "journeys"},
     "flow_set": {"suffix": "-flows.md", "directory": "flows"},
-    "screen": {"suffix": "-screen.md", "directory": "screens"}
+    "screen": {"suffix": "-screen.md", "directory": "screens"},
+    "challenge_record": {"suffix": "-review.md", "directory": "reviews"},
+    "artifact_manifest": {"suffix": "-artifact.md", "directory": "artifacts"}
   },
   "limits": {
     "flows_per_set": 100,
@@ -47,7 +49,7 @@
     "status.md"
   ],
   "machine_fields": [
-    "approved_at",
+    "approved_at_utc",
     "approval_revision",
     "registry_hash",
     "source_hash",

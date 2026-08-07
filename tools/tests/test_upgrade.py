@@ -238,7 +238,7 @@ class UpgradeLifecycleTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(status["status"], "AGENT_MARKETPLACE_UPGRADE_REQUIRED_READY")
         self.assertIn("DATABASE_SCHEMA:3->5", status["reasons"])
-        self.assertIn("PROJECT_CONTRACT:unversioned->2", status["reasons"])
+        self.assertIn("PROJECT_CONTRACT:unversioned->3", status["reasons"])
 
         planned = self.cli(
             "upgrade", "plan", "--project-root", str(self.project)
@@ -272,10 +272,13 @@ class UpgradeLifecycleTests(unittest.TestCase):
         self.assertGreaterEqual(ignore.count("workspace/work-orders/"), 2)
         self.assertIn("agent-marketplace:software-engineering-team:gitignore:start", ignore)
         self.assertIn("workspace/experience-design-work/", ignore)
+        self.assertIn("workspace/design-system-work/", ignore)
         state = json.loads((
             self.project / ".agentrof" / "agent-marketplace" / "project.json"
         ).read_text(encoding="utf-8"))
         self.assertEqual(state["hosts"], ["claude", "codex"])
+        self.assertEqual(state["contract_version"], 3)
+        self.assertEqual(state["vault"]["policy_version"], 5)
         self.assertEqual(set(state["components"]), {
             "project-management-office", TEAM,
         })

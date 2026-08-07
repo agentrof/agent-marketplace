@@ -1613,10 +1613,26 @@ def render_views(space: Space, warnings: list[Finding]) -> dict[str, str]:
                              f" {status} | {info['doc']} |")
     registry_md = "\n".join(lines) + "\n"
 
+    def semantic_hash(doc: Document) -> str:
+        text = doc.abs_path.read_text(encoding="utf-8")
+        for start, end in (
+            ("## Related knowledge <!-- sec: relations:generated:start -->",
+             "<!-- sec: relations:generated:end -->"),
+            ("## Contents <!-- sec: structural:generated:start -->",
+             "<!-- sec: structural:generated:end -->"),
+        ):
+            text = re.sub(r"\n*" + re.escape(start) + r".*?"
+                          + re.escape(end) + r"\n*", "\n", text,
+                          flags=re.DOTALL)
+        return "sha256:" + hashlib.sha256(text.encode("utf-8")).hexdigest()
+
     registry = {"schema_version": space.schema["schema_version"],
                 "codes": {space.nodes[n]: (n or "(root)")
                           for n in space.nodes if space.nodes[n]},
-                "ids": {}}
+                "ids": {},
+                "source_hashes": {
+                    rel: semantic_hash(space.docs[rel]) for rel in docs_sorted
+                }}
     for i in sorted(space.ids, key=id_sort_key):
         info = space.ids[i]
         statement = statement_of(space, i)
@@ -1773,7 +1789,7 @@ def emit(findings: list[Finding], as_json: bool) -> int:
 
 def load_schema(path: Path) -> dict:
     schema = json.loads(path.read_text(encoding="utf-8"))
-    if schema.get("schema_version") != 2:
+    if schema.get("schema_version") != 3:
         raise SystemExit(f"ba_compile: unknown schema_version in {path}")
     return schema
 

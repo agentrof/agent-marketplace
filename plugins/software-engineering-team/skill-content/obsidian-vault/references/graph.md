@@ -6,6 +6,12 @@ property types, same brand. Setup materializes it from `templates/vault/`
 per-file, only where missing; the vault check asserts the
 contract-bearing keys.
 
+The whole `workspace/docs/` directory is the vault. Every subtree participates
+in the same global graph, backlinks index and local graph. A Solution decision
+can cite Business Analysis, an Experience screen can cite that decision and
+Design System, and an ADR can cite the screen. Folder boundaries do not limit
+Obsidian link resolution.
+
 ## Committed files and their sentinels
 
 - `app.json`: `useMarkdownLinks: false`, `newLinkFormat: "absolute"`,
@@ -28,7 +34,9 @@ contract-bearing keys.
   move a color to another document type.
   `showOrphans: true` and `hideUnresolved: false` stay on: a defect the
   graph hides is a defect the team ships.
-- `types.json`: derived from the policy's `property_types`; the check
+- `types.json`: derived from the policy's closed `property_types` using
+  Obsidian-native `text`, `multitext`, `number`, `checkbox`, `date`,
+  `datetime`, `tags` and `aliases`; the check
   restores drift, so property types never fork per machine.
 - `snippets/brand.css` (enabled via `appearance.json`): house accent,
   heading and callout colors and graph variables, in light AND dark
@@ -93,11 +101,12 @@ payload ever ships.
 
 ## The global filter
 
-The committed search (`-path:_generated`) hides compiler output from
-the GLOBAL graph only: registries and generated boards are machine
-surfaces, not knowledge. The filter never touches the local graph,
-which keeps its own per-pane settings. Review records stay visible;
-they are authored knowledge.
+The committed search (`-path:_generated`) hides disposable registries and
+status boards from the GLOBAL graph only. Machine-owned relation and large
+navigation catalogs under `maps/_relations` and `maps/_navigation` remain
+graph-visible because they carry bounded real edges. The filter never touches
+the local graph. Review records stay visible because they are authored
+knowledge.
 
 ## What stays user-local
 

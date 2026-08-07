@@ -143,6 +143,14 @@ governs:
   parser reads `key: ""` as a list opener and the property panel shows
   noise.
 
+The cross-subtree traceability vocabulary is `derives_from`, `satisfies`,
+`constrained_by`, `implements`, `uses_design` and `related_to`. These are
+always block lists of quoted vault-absolute wikilinks. Canonical scope,
+criterion, decision and experience references live in the link alias. Free
+body links remain useful graph edges but do not satisfy coverage. The relation
+renderer owns inverse visibility, so downstream work never mutates approved
+upstream semantic content merely to create a backlink.
+
 ## Status lifecycle
 
 `status` values and their transitions belong to each tree's own

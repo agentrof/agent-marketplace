@@ -134,7 +134,10 @@ INLINE_CODE_RE = re.compile(r"`[^`]*`")
 
 # The vault app's property types; vault-policy.json property_types values
 # must come from this enum.
-OBSIDIAN_PROPERTY_TYPES = {"text", "list", "number", "checkbox", "date", "datetime"}
+OBSIDIAN_PROPERTY_TYPES = {
+    "text", "multitext", "number", "checkbox", "date", "datetime",
+    "tags", "aliases",
+}
 
 COUNTS_START = "<!-- counts:start -->"
 COUNTS_END = "<!-- counts:end -->"
@@ -1603,6 +1606,14 @@ def check_vault_policy_shape(tree: Tree, findings: list[Finding]) -> None:
                 if not (isinstance(value, str) and value):
                     err(f"'{key}' must be a non-empty string",
                         "every structural name is policy-driven, never implied")
+            extensions = policy.get("attachment_extensions")
+            if (not isinstance(extensions, list) or not extensions
+                    or not all(isinstance(value, str)
+                               and re.fullmatch(r"\.[a-z0-9]+", value)
+                               for value in extensions)
+                    or len(extensions) != len(set(extensions))):
+                err("attachment_extensions must be unique lowercase suffixes",
+                    "declare every supported binary attachment format once")
             subtrees = policy.get("subtrees")
             if (not isinstance(subtrees, list) or not subtrees
                     or not all(isinstance(s, str) and KEBAB_RE.match(s)
@@ -1747,9 +1758,9 @@ def check_vault_policy_shape(tree: Tree, findings: list[Finding]) -> None:
             peer_max = policy.get("nav_peer_max")
             if (not isinstance(peer_min, int) or not isinstance(peer_max, int)
                     or isinstance(peer_min, bool) or isinstance(peer_max, bool)
-                    or not 1 <= peer_min <= peer_max):
+                    or not 0 <= peer_min <= peer_max):
                 err("nav_peer_min/nav_peer_max must be integers with"
-                    " 1 <= min <= max",
+                    " 0 <= min <= max",
                     "the nav footer peer range is policy, not prose")
             trees = policy.get("decision_trees")
             if not isinstance(trees, dict):
@@ -1808,6 +1819,104 @@ def check_vault_policy_shape(tree: Tree, findings: list[Finding]) -> None:
                     " design layers) are policy-listed so the graph legend"
                     " can be judged complete")
                 extra_types = []
+            path_patterns = policy.get("type_path_patterns")
+            if not isinstance(path_patterns, dict) or not path_patterns:
+                err("type_path_patterns must be a non-empty object",
+                    "close every non-analysis document type over explicit"
+                    " vault-relative path regexes")
+                path_patterns = {}
+            else:
+                for doc_type, patterns in sorted(path_patterns.items()):
+                    if (not isinstance(doc_type, str)
+                            or not KEBAB_RE.match(doc_type.replace("_", "-"))
+                            or not isinstance(patterns, list) or not patterns
+                            or not all(isinstance(item, str) and item
+                                       for item in patterns)):
+                        err(f"type_path_patterns['{doc_type}'] must be a"
+                            " non-empty regex list",
+                            "each closed type declares one or more exact"
+                            " vault-relative path grammars")
+                        continue
+                    for pattern in patterns:
+                        try:
+                            re.compile(pattern)
+                        except re.error as exc:
+                            err(f"type_path_patterns['{doc_type}'] has invalid"
+                                f" regex '{pattern}': {exc}",
+                                "ship compilable deterministic path regexes")
+            status_values = policy.get("status_values")
+            if not isinstance(status_values, dict):
+                err("status_values must be an object",
+                    "status vocabularies are closed by document type")
+            else:
+                for doc_type, values in sorted(status_values.items()):
+                    if (not isinstance(values, list) or not values
+                            or not all(isinstance(value, str)
+                                       and KEBAB_RE.match(value.replace("_", "-"))
+                                       for value in values)):
+                        err(f"status_values['{doc_type}'] must be a non-empty"
+                            " machine-safe list",
+                            "declare every legal lifecycle value explicitly")
+            relations = policy.get("relation_contract")
+            if not isinstance(relations, dict):
+                err("relation_contract must be an object",
+                    "cross-subtree traceability is policy data")
+            else:
+                keys = relations.get("keys")
+                if not isinstance(keys, dict) or not keys:
+                    err("relation_contract.keys must be a non-empty object",
+                        "declare the typed outgoing relation vocabulary")
+                else:
+                    for name, spec in sorted(keys.items()):
+                        if (not isinstance(name, str)
+                                or not SNAKE_KEY_RE.match(name)
+                                or not isinstance(spec, dict)
+                                or set(spec) != {"targets", "inverse_label"}
+                                or not isinstance(spec.get("targets"), list)
+                                or not spec.get("targets")
+                                or not all(value == "*" or (
+                                    isinstance(value, str)
+                                    and KEBAB_RE.match(value))
+                                    for value in spec.get("targets", []))
+                                or not isinstance(spec.get("inverse_label"), str)
+                                or not spec.get("inverse_label")):
+                            err(f"relation_contract key '{name}' has an"
+                                " invalid target or inverse-label contract",
+                                "each relation owns targets and one stable"
+                                " machine-layer inverse label")
+                for name in ("inverse_inline_max", "catalog_page_size"):
+                    value = relations.get(name)
+                    if (not isinstance(value, int) or isinstance(value, bool)
+                            or value < 1):
+                        err(f"relation_contract.{name} must be a positive"
+                            " integer",
+                            "bound inverse relation surfaces mechanically")
+                catalog_root = relations.get("catalog_root")
+                if not isinstance(catalog_root, str) or not catalog_root:
+                    err("relation_contract.catalog_root must be non-empty",
+                        "name the compiler-owned relation catalog root")
+                cardinalities = relations.get("cardinality_by_type")
+                if not isinstance(cardinalities, dict):
+                    err("relation_contract.cardinality_by_type must be an object",
+                        "declare source-type relation cardinalities")
+                else:
+                    for doc_type, specs in sorted(cardinalities.items()):
+                        if not isinstance(specs, dict):
+                            err(f"relation cardinality for '{doc_type}' must"
+                                " be an object", "map relation keys to min/max")
+                            continue
+                        for relation, limits in sorted(specs.items()):
+                            if (relation not in (keys or {})
+                                    or not isinstance(limits, dict)
+                                    or set(limits) != {"min", "max"}
+                                    or not all(isinstance(limits.get(name), int)
+                                               and not isinstance(limits.get(name), bool)
+                                               for name in ("min", "max"))
+                                    or not 0 <= limits["min"] <= limits["max"]):
+                                err(f"invalid relation cardinality"
+                                    f" '{doc_type}.{relation}'",
+                                    "use integer 0 <= min <= max for a known"
+                                    " relation key")
             # Graph color completeness: every doc type known to the
             # taxonomy (sibling space-schema doc_types, kebab-ized, UNION
             # extra_doc_types) owns a tag:#doc/<type> color group, and

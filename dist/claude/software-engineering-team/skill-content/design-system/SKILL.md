@@ -28,6 +28,10 @@ The only place the design master is born or changed.
      derive MASTER from what the code already declares, never invent over
      it.
    - Neither: CREATION mode.
+   - MASTER records `derives_from` links to the approved actor, terminology,
+     accessibility and product constraints it uses. A page override always
+     carries `uses_design: [[design-system/MASTER|Design System]]` and may
+     relate to the exact Experience screen or journey it specializes.
 2. Gather inputs interactively: industry and product type, brand
    material the user owns, taste preferences and reference likes, target
    audience; preference questions go through a choice gate,
@@ -40,9 +44,9 @@ The only place the design master is born or changed.
    knowledge skill: each candidate is a coherent system dressed onto a
    sample screen, produced with a deliberately different search emphasis,
    presented in one self-contained preview written to
-   workspace/docs/design-system/candidates.html with the axis of
-   difference stated per candidate. The preview is a working artifact:
-   delete it after MASTER is written.
+   `workspace/design-system-work/<run-key>/candidates.html` with the axis of
+   difference stated per candidate. This transient preview never enters the
+   vault and remains gitignored.
 4. DS GATE: the user picks a candidate through a choice gate, one option
    per candidate with its emphasis in the description
    (or requests different emphases; one re-run). The pick is written as
@@ -66,12 +70,14 @@ The only place the design master is born or changed.
    tree's map (dynamic home: the map seed materializes with the tree's
    first content), then run
    "$RUN" run "$TEAM" scripts/vault_check.py check --vault
-   workspace/docs --scope design-system; repair every finding before
+   workspace/docs --scope design-system; run `vault_check.py
+   render-relations --vault workspace/docs`; repair every finding before
    closing (obsidian-vault skill; migrate covers the deterministic
    classes). A leftover candidates.html is a finding, never an
    exemption.
 7. HARD SCOPE LIMIT: this flow writes only under
-   workspace/docs/design-system/, plus home and its own map note
+   workspace/docs/design-system/ and its run-scoped transient
+   workspace/design-system-work/ directory, plus home and its own map note
    repair, and vault payload materialization (per-file, only where
    missing). Requests to design product pages or write code are
    refused and routed to sketch or deliver.

@@ -321,6 +321,71 @@ class VaultHookCodexTests(unittest.TestCase):
         )
         self.assertEqual(code, 0, err)
 
+    def test_multifile_overlay_resolves_targets_added_in_same_patch(self):
+        project = Path(self.tmp.name) / "project"
+        docs = project / "workspace" / "docs"
+        docs.mkdir(parents=True)
+        (project / "workspace" / "config.json").write_text(
+            json.dumps({"team_id": "software-engineering-team"}),
+            encoding="utf-8")
+        landscape = docs / "solution-design" / "landscape.md"
+        engagement = docs / "solution-design" / "engagements" / "search.md"
+        patch = "\n".join([
+            "*** Begin Patch", f"*** Add File: {landscape}",
+            "+---", "+type: landscape", "+title: Search landscape",
+            "+status: draft", "+related_to:",
+            "+  - \"[[solution-design/engagements/search|Search engagement]]\"",
+            "+tags:", "+  - doc/landscape", "+  - status/draft", "+---",
+            "+# Search landscape", f"*** Add File: {engagement}",
+            "+---", "+type: engagement", "+title: Search engagement",
+            "+tags:", "+  - doc/engagement", "+---",
+            "+# Search engagement", "*** End Patch",
+        ])
+        code, _, err = run_script(SET_SCRIPTS / "vault_hook.py", {
+            "hook_event_name": "PreToolUse", "tool_name": "apply_patch",
+            "cwd": str(project), "tool_input": {"patch": patch},
+        }, self.env, ["pre"])
+        self.assertEqual(code, 0, err)
+
+    def test_generated_relation_block_direct_edit_is_denied(self):
+        project = Path(self.tmp.name) / "project"
+        note = project / "workspace" / "docs" / "solution-design" / "landscape.md"
+        note.parent.mkdir(parents=True)
+        (project / "workspace" / "config.json").write_text("{}", encoding="utf-8")
+        note.write_text(
+            "# Landscape\n\n## Related knowledge "
+            "<!-- sec: relations:generated:start -->\n\n- old\n\n"
+            "<!-- sec: relations:generated:end -->\n", encoding="utf-8")
+        code, _, err = run_script(SET_SCRIPTS / "vault_hook.py", {
+            "hook_event_name": "PreToolUse", "tool_name": "Edit",
+            "cwd": str(project), "tool_input": {
+                "file_path": str(note), "old_string": "- old",
+                "new_string": "- changed",
+            },
+        }, self.env, ["pre"])
+        self.assertEqual(code, 2)
+        self.assertIn("machine-owned inverse relation", err)
+
+    def test_bash_merkle_inventory_detects_vault_move_or_delete(self):
+        project = Path(self.tmp.name) / "project"
+        docs = project / "workspace" / "docs"
+        docs.mkdir(parents=True)
+        note = docs / "home.md"
+        note.write_text("# Home\n", encoding="utf-8")
+        payload = {
+            "session_id": "bash-vault", "cwd": str(project),
+            "hook_event_name": "PreToolUse", "tool_name": "Bash",
+            "tool_input": {"command": "mv workspace/docs/home.md x"},
+        }
+        self.assertEqual(run_script(
+            SET_SCRIPTS / "vault_hook.py", payload, self.env, ["pre"])[0], 0)
+        note.rename(docs / "moved.md")
+        payload["hook_event_name"] = "PostToolUse"
+        code, _, err = run_script(
+            SET_SCRIPTS / "vault_hook.py", payload, self.env, ["post"])
+        self.assertEqual(code, 2)
+        self.assertIn("vault inventory", err)
+
 
 class TeamPreflightTests(unittest.TestCase):
     def setUp(self):

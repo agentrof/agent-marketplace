@@ -15,6 +15,30 @@ from urllib.parse import urlparse
 ID_RE = re.compile(r"^(?:JRN|FLW|SCR|STA|TRN)-[0-9]{3,}$")
 
 
+def frontmatter(path: Path) -> dict:
+    lines = path.read_text(encoding="utf-8").splitlines()
+    if not lines or lines[0] != "---":
+        raise ValueError("manifest is missing frontmatter")
+    result: dict = {}
+    current = ""
+    for line in lines[1:]:
+        if line == "---":
+            return result
+        value = line.strip()
+        if not value:
+            continue
+        if value.startswith("- ") and current:
+            result[current].append(value[2:].strip().strip("\"'"))
+            continue
+        if ":" not in value:
+            raise ValueError("manifest frontmatter is not parseable")
+        key, scalar = value.split(":", 1)
+        current = key.strip() if not scalar.strip() else ""
+        result[key.strip()] = ([] if not scalar.strip()
+                               else scalar.strip().strip("\"'"))
+    raise ValueError("manifest frontmatter is unterminated")
+
+
 class Scanner(HTMLParser):
     def __init__(self):
         super().__init__()
@@ -39,6 +63,7 @@ class Scanner(HTMLParser):
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--artifact", required=True)
+    parser.add_argument("--manifest", default="")
     parser.add_argument("--release-root", required=True)
     parser.add_argument("--registry", default="")
     parser.add_argument("--owner", required=True)
@@ -72,7 +97,24 @@ def main(argv=None) -> int:
             findings.append(f"remote request or asset is forbidden: {target}")
         if target.startswith("#") and target[1:] and target[1:] not in scanner.ids:
             findings.append(f"navigation target does not exist: {target}")
+    manifest = (Path(args.manifest).resolve() if args.manifest else
+                artifact.with_name(
+                    artifact.name.removesuffix("-preview.html")
+                    + "-artifact.md"))
+    manifest_fm: dict = {}
+    try:
+        manifest_fm = frontmatter(manifest)
+    except (OSError, ValueError) as exc:
+        findings.append(f"artifact manifest is unreadable: {exc}")
+    if manifest.parent != artifact.parent:
+        findings.append("artifact manifest is not adjacent to the preview")
+    if manifest_fm.get("type") != "artifact-manifest":
+        findings.append("artifact manifest has the wrong document type")
     declared = set(args.declared_id)
+    if not declared:
+        values = manifest_fm.get("declared_ids", [])
+        if isinstance(values, list):
+            declared = {str(value) for value in values}
     findings.extend(f"declared id is absent from HTML: {value}" for value in sorted(declared - scanner.ids))
     findings.extend(f"HTML contains undeclared experience id: {value}" for value in sorted(scanner.ids - declared))
     registry_path = Path(args.registry) if args.registry else release / "_generated" / "effective-registry.json"
@@ -94,9 +136,21 @@ def main(argv=None) -> int:
          if (owner / name).is_file()),
         None,
     )
-    if owner_note is None or f"artifacts/{artifact.name}" not in owner_note.read_text(encoding="utf-8"):
-        findings.append("owning node note does not reference the artifact")
+    manifest_target = manifest.relative_to(release.parents[4]).with_suffix("").as_posix()
+    if (owner_note is None
+            or f"[[{manifest_target}|" not in owner_note.read_text(encoding="utf-8")):
+        findings.append("owning node note does not reference the artifact manifest")
     digest = "sha256:" + hashlib.sha256(content.encode()).hexdigest()
+    if manifest_fm.get("artifact_path") != release_relative:
+        findings.append("artifact path does not match the manifest")
+    if manifest_fm.get("artifact_sha256") != digest:
+        findings.append("artifact SHA-256 does not match the manifest")
+    if manifest_fm.get("registry_hash") != registry.get("registry_hash"):
+        findings.append("artifact registry hash does not match the manifest")
+    if manifest_fm.get("program_id") != registry.get("program_id"):
+        findings.append("artifact program does not match the manifest")
+    if manifest_fm.get("release_id") != registry.get("release_id"):
+        findings.append("artifact release does not match the manifest")
     registered = {
         str(item.get("path", "")): str(item.get("sha256", ""))
         for item in registry.get("artifacts", []) if isinstance(item, dict)

@@ -40,16 +40,28 @@ include tradeoffs. Anchor every path at the resolved git root.
    <workspace>/work-orders/
    <workspace>/planning/
    <workspace>/experience-design-work/
+   <workspace>/design-system-work/
    <workspace>/junit-*.xml
+   <workspace>/docs/.obsidian/*
+   !<workspace>/docs/.obsidian/app.json
+   !<workspace>/docs/.obsidian/appearance.json
+   !<workspace>/docs/.obsidian/core-plugins.json
+   !<workspace>/docs/.obsidian/graph.json
+   !<workspace>/docs/.obsidian/types.json
+   !<workspace>/docs/.obsidian/snippets/
+   !<workspace>/docs/.obsidian/snippets/**
+   <workspace>/docs/.obsidian/workspace.json
+   <workspace>/docs/.obsidian/workspace-mobile.json
+   <workspace>/docs/.trash/
    # agent-marketplace:software-engineering-team:gitignore:end
    ```
 
    A missing half-marker or duplicate marker fails closed.
 5. Create only missing top-level structure: apps; environment; demos; sketches;
-   work-orders; planning; experience-design-work; and docs with maps,
+   work-orders; planning; experience-design-work; design-system-work; and docs with maps,
    business-analysis, solution-design, system-architecture, design-system/pages
    and experience-design. Add `.gitkeep` only to empty tracked directories.
-   Work-orders, planning and experience-design-work are transient. Setup never
+   Work-orders, planning, experience-design-work and design-system-work are transient. Setup never
    creates analysis topics, experience programs or releases. The Experience
    Design map is born with its first program.
 6. Build `<workspace>/config.json` interactively. The first key is
@@ -72,16 +84,23 @@ include tradeoffs. Anchor every path at the resolved git root.
 9. Register PMO with `project register --key <key> --name <name> --team
    software-engineering-team --stamp-config <config> --project-root <root>
    --workspace <name>`. Registration stamps `project_key`, creates the project
-   UUID and project contract version 2, and records managed-surface hashes.
-10. Materialize CI through `references/ci-bootstrap.md`, replacing
+   UUID and project contract version 3, records the vault policy 5 active
+   state, and records managed-surface hashes.
+10. Install the repository-portable gate with `vault_gate.py install
+    --project-root <root>`. The resulting tracked executable is
+    `.agentrof/agent-marketplace/checks/vault-gate.pyz`; both hosts and CI run
+    the exact same gate from that path.
+11. Materialize CI through `references/ci-bootstrap.md`, replacing
     `{{test_command}}`, `{{audit_command}}` and `{{env_command}}` before
     writing.
-11. Close in order: `project_config.py check`; PMO registration; contract
+12. Close in order: `project_config.py check`; PMO registration; contract
     version; host instructions and generated project agents; gitignore markers;
-    `vault_check.py check`; `preparation_check.py status --project-root <root>
+    `vault_check.py render-navigation`; `vault_check.py render-relations`;
+    the portable `vault-gate.pyz check --project-root <root> --json`;
+    `preparation_check.py status --project-root <root>
     --json`; `setup_check.py check`; then rerun the setup preview and require an
     empty diff. Pre-existing vault degradation routes to organize-docs; setup
     authored findings are setup bugs.
-12. For greenfield print `business-analysis -> solution-design -> design-system
+13. For greenfield print `business-analysis -> solution-design -> design-system
     -> experience-design -> backlog-plan`. For existing projects print the
     scoped `deliver` route.

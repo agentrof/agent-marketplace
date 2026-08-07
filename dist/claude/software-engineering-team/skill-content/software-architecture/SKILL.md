@@ -14,6 +14,15 @@ Load for every architecture-delta step: system structure, module boundaries, int
 
 Living-document hygiene: each living document carries a head summary and section index, maintained with every delta; reads are summary-first, full sections only where the delta touches. A head that no longer matches its body is a defect of the delta that changed it.
 
+Vault traceability is typed and cross-subtree. Living docs and ADRs use
+`derives_from`, `implements`, `satisfies` and `constrained_by` to cite the
+owning Solution decision, qualified BA budget/criterion and exact Experience
+journey, screen or transition. API contracts connect the acceptance criterion
+and Experience transition they realize; threat models may connect actors,
+journeys, screens and solution boundaries. PMO story identity remains a raw
+`story` field; vault knowledge references are aliased wikilinks. Run the
+relation renderer after each architecture delta.
+
 ## Style Selection
 
 - The default verdict is a modular monolith: one repo, one backend app, one frontend app, module boundaries enforced inside the codebase. Any departure is a minted decision note, never a preference.

@@ -113,6 +113,13 @@ DESIGNATIONS = {
     "journey": "journey",
     "flow-set": "flow set",
     "screen": "screen",
+    "experience-space": "experience space",
+    "experience-domain": "experience domain",
+    "api-contract": "API contract",
+    "data-model": "data model",
+    "threat-model": "threat model",
+    "environment-reference": "environment reference",
+    "artifact-manifest": "artifact manifest",
 }
 
 
@@ -218,7 +225,7 @@ The pilot covers inventory only, per
 [[maps/business-analysis|Business Analysis]]
 """)
     write(root / BA_SPACE / "_generated" / "registry.json", json.dumps({
-        "schema_version": 2,
+        "schema_version": 3,
         "codes": {"ERP": "(root)"},
         "ids": {
             "BR-ERP-001": {"kind": "BR", "doc": "space.md",
@@ -232,6 +239,8 @@ The pilot covers inventory only, per
 type: landscape
 title: Landscape
 status: approved
+derives_from:
+  - "[[business-analysis/erp/space|erp]]"
 tags:
   - doc/landscape
   - status/approved
@@ -346,6 +355,8 @@ aliases:
     write(obsidian / "snippets" / "brand.css", ".theme-dark {}\n")
     code, out, err = run(["render-decisions", "--vault", str(root)])
     assert code == 0, f"fixture render failed: {out} {err}"
+    code, out, err = run(["render-relations", "--vault", str(root)])
+    assert code == 0, f"relation render failed: {out} {err}"
 
 
 def check_findings(root: Path):
@@ -398,14 +409,14 @@ def break_table_shape(root: Path) -> None:
 
 
 def break_banned_basename(root: Path) -> None:
-    write(root / SD / "notes.md", """---
-type: note
-title: Working Notes
+    write(root / SD / "engagements" / "notes.md", """---
+type: engagement
+title: Working notes engagement
 tags:
-  - doc/note
+  - doc/engagement
 ---
 
-# Working Notes
+# Working notes engagement
 
 Scratch notes under a policy-banned basename.
 
@@ -415,7 +426,7 @@ Scratch notes under a policy-banned basename.
     edit(root / "maps" / "solution-design.md",
          "- [[solution-design/landscape|Landscape]]",
          "- [[solution-design/landscape|Landscape]]\n"
-         "- [[solution-design/notes|Working Notes]]")
+         "- [[solution-design/engagements/notes|Working Notes]]")
 
 
 def break_title_shape(root: Path) -> None:
@@ -435,14 +446,14 @@ def break_alias_ownership(root: Path) -> None:
 
 
 def break_orphans(root: Path) -> None:
-    write(root / SD / "floating.md", """---
-type: note
-title: Floating
+    write(root / SD / "engagements" / "floating.md", """---
+type: engagement
+title: Floating engagement
 tags:
-  - doc/note
+  - doc/engagement
 ---
 
-# Floating
+# Floating engagement
 
 Nothing links here.
 
@@ -453,16 +464,16 @@ Nothing links here.
 
 def break_moc_coverage(root: Path) -> None:
     for name, other in (("loop-a", "loop-b"), ("loop-b", "loop-a")):
-        write(root / SD / f"{name}.md", f"""---
-type: note
-title: Loop {name[-1].upper()}
+        write(root / SD / "engagements" / f"{name}.md", f"""---
+type: engagement
+title: Loop {name[-1].upper()} engagement
 tags:
-  - doc/note
+  - doc/engagement
 ---
 
-# Loop {name[-1].upper()}
+# Loop {name[-1].upper()} engagement
 
-Mutual: [[solution-design/{other}|{other}]].
+Mutual: [[solution-design/engagements/{other}|{other}]].
 
 """ + NAV.format(peers=(
             "[[solution-design/landscape|Landscape]] -\n"
@@ -551,6 +562,7 @@ TOLERATED = {
     "orphans": {"moc_coverage"},        # zero inbound implies unreachable
     # a deleted index is also a stale index and a dead map link
     "generated_views": {"decision_records", "wikilink_resolution"},
+    "designation_drift": {"generated_views"},
 }
 
 
@@ -576,6 +588,52 @@ class ValidVaultTests(unittest.TestCase):
         code, _, _ = run(["render-decisions", "--vault", str(self.root)])
         self.assertEqual(code, 0)
         self.assertEqual(first, index.read_bytes())
+
+    def test_cross_subtree_relation_renders_inverse_and_reports(self):
+        analysis = self.root / BA_SPACE / "space.md"
+        text = analysis.read_text(encoding="utf-8")
+        self.assertIn("## Related knowledge", text)
+        self.assertIn("[[solution-design/landscape|Landscape]]", text)
+        matrix = (self.root / "maps" / "_generated"
+                  / "cross-subtree-matrix.md").read_text(encoding="utf-8")
+        self.assertIn("`derives_from`", matrix)
+        self.assertIn("business-analysis/erp/space", matrix)
+
+    def test_general_cross_subtree_cycle_is_legal(self):
+        path = self.root / BA_SPACE / "space.md"
+        edit(path, "tags:\n", "related_to:\n"
+             "  - \"[[solution-design/landscape|Landscape]]\"\n"
+             "tags:\n")
+        code, _, err = run(["render-relations", "--vault", str(self.root)])
+        self.assertEqual(code, 0, err)
+        code, findings = check_findings(self.root)
+        self.assertEqual(code, 0, findings)
+
+    def test_wrong_relation_target_type_and_identity_alias_fail(self):
+        path = self.root / SD / "landscape.md"
+        edit(path, "tags:\n", "satisfies:\n"
+             "  - \"[[solution-design/landscape|erp:AC-ERP-001]]\"\n"
+             "constrained_by:\n"
+             "  - \"[[solution-design/decisions/order-events-decision|Wrong]]\"\n"
+             "tags:\n")
+        code, _, err = run(["render-relations", "--vault", str(self.root)])
+        self.assertEqual(code, 1)
+        self.assertIn("cannot target type", err)
+        self.assertIn("exact canonical identity", err)
+
+    def test_inverse_relations_shard_at_one_hundred(self):
+        target = "[[business-analysis/erp/space|erp]]"
+        for number in range(101):
+            write(self.root / SD / "engagements" / f"source-{number}.md",
+                  "---\ntype: engagement\ntitle: Source engagement\n"
+                  f"related_to:\n  - \"{target}\"\n"
+                  "tags:\n  - doc/engagement\n---\n# Source engagement\n")
+        code, _, err = run(["render-relations", "--vault", str(self.root)])
+        self.assertEqual(code, 0, err)
+        catalogs = list((self.root / "maps" / "_relations").rglob("*.md"))
+        self.assertEqual(len(catalogs), 2)
+        self.assertTrue(all(text.read_text().count("- Related from:") <= 100
+                            for text in catalogs))
 
     def test_index_carries_marker_and_rows(self):
         text = (self.root / SD / "decision-log.md").read_text(encoding="utf-8")
@@ -767,18 +825,18 @@ aliases:
         self.assertIn("duplicate id number 002", err)
 
     def test_migrate_rewrites_deterministic_classes(self):
-        scratch = self.root / SD / "scratch.md"
+        scratch = self.root / SD / "engagements" / "scratch.md"
         write(scratch, """---
-type: note
-title: Scratch
+type: engagement
+title: Scratch engagement
 tags:
   - doc/wrong
 ---
 
-# Scratch
+# Scratch engagement
 
-See [the landscape](landscape.md) and
-[SD-001](decisions/order-events-decision.md).
+See [the landscape](../landscape.md) and
+[SD-001](../decisions/order-events-decision.md).
 
 """ + NAV.format(peers=(
             "[[solution-design/landscape|Landscape]] -\n"
@@ -786,14 +844,14 @@ See [the landscape](landscape.md) and
         edit(self.root / "maps" / "solution-design.md",
              "- [[solution-design/landscape|Landscape]]",
              "- [[solution-design/landscape|Landscape]]\n"
-             "- [[solution-design/scratch|Scratch]]")
+             "- [[solution-design/engagements/scratch|Scratch]]")
         code, out, _ = run(["migrate", "--vault", str(self.root)])
         self.assertEqual(code, 0)
         text = scratch.read_text(encoding="utf-8")
         self.assertIn("[[solution-design/landscape|the landscape]]", text)
         self.assertIn(
             "[[solution-design/decisions/order-events-decision|SD-001]]", text)
-        self.assertIn("- doc/note", text)
+        self.assertIn("- doc/engagement", text)
         self.assertNotIn("doc/wrong", text)
         code, findings = check_findings(self.root)
         self.assertEqual(code, 0,
@@ -958,17 +1016,17 @@ class RenameVerbTests(unittest.TestCase):
                          sorted(blocked))
 
     def test_migrate_keeps_frozen_note_byte_identical(self):
-        scratch = self.root / SD / "scratch.md"
+        scratch = self.root / SD / "engagements" / "scratch.md"
         write(scratch, """---
-type: note
-title: Frozen Scratch
+type: engagement
+title: Frozen scratch engagement
 tags:
-  - doc/note
+  - doc/engagement
 ---
 
-# Frozen Scratch
+# Frozen scratch engagement
 
-See [the landscape](landscape.md).
+See [the landscape](../landscape.md).
 
 """ + NAV.format(peers=(
             "[[solution-design/landscape|Landscape]] -\n"
@@ -976,30 +1034,33 @@ See [the landscape](landscape.md).
         write(self.root.parent / "work-orders" / "wo-9" / "freeze.json",
               json.dumps({"frozen_paths":
                           ["workspace/docs/solution-design/scratch.md"]}))
+        edit(self.root.parent / "work-orders" / "wo-9" / "freeze.json",
+             "workspace/docs/solution-design/scratch.md",
+             "workspace/docs/solution-design/engagements/scratch.md")
         before = scratch.read_bytes()
         code, out, _ = run(["migrate", "--vault", str(self.root)])
         self.assertEqual(code, 0, out)
         self.assertEqual(scratch.read_bytes(), before)
 
     def test_migrate_exclude_skips_note(self):
-        scratch = self.root / SD / "scratch.md"
+        scratch = self.root / SD / "engagements" / "scratch.md"
         write(scratch, """---
-type: note
-title: Excluded Scratch
+type: engagement
+title: Excluded scratch engagement
 tags:
-  - doc/note
+  - doc/engagement
 ---
 
-# Excluded Scratch
+# Excluded scratch engagement
 
-See [the landscape](landscape.md).
+See [the landscape](../landscape.md).
 
 """ + NAV.format(peers=(
             "[[solution-design/landscape|Landscape]] -\n"
             "[[solution-design/decisions/order-events-decision|SD-001]]")))
         before = scratch.read_bytes()
         code, _, _ = run(["migrate", "--vault", str(self.root),
-                          "--exclude", f"{SD}/scratch.md"])
+                          "--exclude", f"{SD}/engagements/scratch.md"])
         self.assertEqual(code, 0)
         self.assertEqual(scratch.read_bytes(), before)
 

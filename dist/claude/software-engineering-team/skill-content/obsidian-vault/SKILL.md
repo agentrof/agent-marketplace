@@ -6,12 +6,8 @@ exposure: internal
 
 # Obsidian Vault
 
-The consuming project's docs tree (workspace/docs/) is ONE vault: the owner
-opens it in the vault app and reads the knowledge graph; agents author every
-note headlessly. This skill is the single home of the vault law. Every rule
-below is enforced by the checker (vault_check.py, run as `"$RUN" run "$TEAM"
-scripts/vault_check.py`, the dispatcher per the develop flow's state contract)
-and the per-write hook; variation points live in `data/vault-policy.json`, never in prose.
+The consuming project's `workspace/docs/` tree is one vault. This is its
+machine-enforced authoring law; variation lives in `data/vault-policy.json`.
 
 ## When to Use
 
@@ -19,6 +15,11 @@ and the per-write hook; variation points live in `data/vault-policy.json`, never
 
 ## Linking Law
 
+- `workspace/docs/` is one vault and one graph. Business Analysis, Solution
+  Design, System Architecture, Design System and Experience Design are
+  subtrees, not separate vaults. An authored note may link to any authored
+  note in any other subtree. Structural navigation boundaries never restrict
+  semantic links.
 - DO cite vault content as a vault-absolute wikilink with an alias:
   `[[solution-design/decisions/order-events-decision|SD-007]]`. Paths run from the vault root, forward slashes, exact case, no leading slash.
 - DON'T write relative markdown links between vault files (hook-denied);
@@ -28,6 +29,12 @@ and the per-write hook; variation points live in `data/vault-policy.json`, never
   id-citation columns carry these wikilinks too; a bare id is legal
   only where it is minted.
 - Zero unresolved wikilinks and zero orphan notes are gate invariants.
+- Coverage and gates count only typed outgoing relations: `derives_from`,
+  `satisfies`, `constrained_by`, `implements`, `uses_design` and
+  `related_to`. Free prose wikilinks still draw graph edges but are not
+  traceability proof. `render-relations` writes machine-owned inverse blocks,
+  100-edge shards and the cross-subtree matrix. General knowledge links may
+  cycle; only lifecycle, inheritance and dependency graphs are DAGs.
 
 ## Naming and Title Law
 
@@ -54,8 +61,6 @@ and the per-write hook; variation points live in `data/vault-policy.json`, never
 - Alias Law: ids live in frontmatter, never in filenames or titles: a
   note owning an id or node code carries it in `aliases`; an id-shaped
   link alias must decorate a link to the id's owning note, nothing else.
-- The policy lists the vetted community-plugin set (the title display
-  plugin) in the committed payload; else labels fall back to slug names.
 
 ## Metadata Law
 
@@ -63,7 +68,9 @@ and the per-write hook; variation points live in `data/vault-policy.json`, never
   minimum. `tags`/`aliases` are BLOCK lists (one `- item` line each); inline `[a, b]` lists are hook-denied.
 - Tags are exactly the stamped mirror `doc/<type>` plus
   `status/<status>` when a status exists; nothing else, never hand-picked.
-- Doc-referencing keys (supersedes, superseded_by, governs, verifies,
+- The taxonomy and property surface are closed. Unknown document types,
+  paths, filenames, properties, statuses, tags and relation keys fail the
+  gate. Doc-referencing keys (supersedes, superseded_by, governs, verifies,
   engagement) hold quoted vault-absolute wikilinks: they draw the graph
   edges. `governs`/`verifies` are ALWAYS block lists, one item even for
   a single target. Dates are YYYY-MM-DD; one value type per key
@@ -73,16 +80,19 @@ and the per-write hook; variation points live in `data/vault-policy.json`, never
 
 ## Structure Law
 
-- Star topology: home is the single knowledge-base root and DYNAMIC:
+- Hybrid topology: home is the single knowledge-base root and DYNAMIC:
   it links ONLY the content-bearing subtrees' maps (nothing at seed);
   the entry that births a tree materializes its map seed and adds the
   home line. Each map links its subtree's hubs, curated by the
-  producing persona in the same session that creates or retires docs.
+  producing compiler/persona in the same session that creates or retires
+  docs. Maps carry subtree hubs, not unbounded leaf lists. Parent/child and
+  inverse collections shard at 100 links.
 - Nav section: the line `<!-- sec: nav -->` opens it in every tree (the
   heading text above it is free output-language prose); the FIRST
   wikilink is the owning hub per the policy hubs ladder (the deepest
   existing hub covering the note; hubs and uncovered notes point at the
-  subtree map), then 2-5 contextual peers.
+  subtree map), then 0-5 contextual peers. Following links may cross subtree
+  boundaries; only the first owning-hub position is structural.
 - Decision records are atomic notes under their tree's decisions/
   directory (`<slug>-decision.md`; the id lives in the frontmatter
   alias, never the filename, title or H1); where policy renders an
@@ -91,18 +101,18 @@ and the per-write hook; variation points live in `data/vault-policy.json`, never
 
 ## Stewardship
 
-Vault stewardship is a standing duty, cited by every docs-producing
-entry: run `"$RUN" run "$TEAM" scripts/vault_check.py check --vault
-workspace/docs --scope <subtree>`; every finding it names is THIS
-session's repair work before the gate; deterministic classes go through
-the `migrate` verb; repairs to generated files are re-renders; pass the
-active freeze set as repeated `--exclude` flags so frozen docs surface
-as named warnings; a red vault check blocks the gate like a red compile.
+Every docs-producing entry runs `vault_check.py check --vault workspace/docs
+--scope <subtree>`. Repair every finding before its gate; generated files are
+re-rendered and frozen paths are passed as repeated `--exclude` flags.
 
 ## Verbs and Enforcement
 
 - `check` validates; errors block gates, warnings are named, never block.
-- `render-decisions` renders each decision tree's index; `stamp-decision`
+- `render-decisions` renders each decision tree's index;
+  `render-navigation` refreshes structural navigation; `render-relations`
+  refreshes inverse projections and traceability reports; `adoption-plan`
+  inventories legacy content; `activate-adoption` requires the exact green
+  plan hash and contract v3. `stamp-decision`
   stamps status, decided date, tag mirror and the supersede chain in one
   operation; `migrate` applies deterministic format normalization, and
   `migrate --rename` heals naming: it renames per the grammar and
@@ -111,6 +121,8 @@ as named warnings; a red vault check blocks the gate like a red compile.
 - The per-write hook denies non-compliant content before it lands and
   re-checks every landed vault write; shell file moves bypass it and
   surface at the next check.
+- The portable full gate is `.agentrof/agent-marketplace/checks/vault-gate.pyz
+  check --project-root . --json`.
 
 ## References
 

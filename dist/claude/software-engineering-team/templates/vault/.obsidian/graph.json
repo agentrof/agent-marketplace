@@ -78,6 +78,13 @@
       }
     },
     {
+      "query": "tag:#doc/api-contract OR tag:#doc/data-model OR tag:#doc/threat-model OR tag:#doc/environment-reference",
+      "color": {
+        "a": 1,
+        "rgb": 3447003
+      }
+    },
+    {
       "query": "tag:#doc/integration",
       "color": {
         "a": 1,
@@ -120,7 +127,7 @@
       }
     },
     {
-      "query": "tag:#doc/experience OR tag:#doc/program OR tag:#doc/release",
+      "query": "tag:#doc/experience OR tag:#doc/program OR tag:#doc/release OR tag:#doc/experience-space OR tag:#doc/experience-domain",
       "color": {
         "a": 1,
         "rgb": 3108513
@@ -134,7 +141,7 @@
       }
     },
     {
-      "query": "tag:#doc/screen",
+      "query": "tag:#doc/screen OR tag:#doc/artifact-manifest",
       "color": {
         "a": 1,
         "rgb": 5592575

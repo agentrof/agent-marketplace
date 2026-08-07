@@ -148,9 +148,27 @@ def inspect(root: Path, intent: str) -> dict:
     if work is None:
         return {"ok": False, "intent": intent, "next_entry": "setup", "reason": "managed workspace config is missing", "checks": {}}
     origin = str(config.get("project_origin", ""))
-    checks = {"project_origin": origin, "project_key": bool(config.get("project_key"))}
+    state = read_json(
+        root / ".agentrof" / "agent-marketplace" / "project.json")
+    vault_state = state.get("vault", {}) if isinstance(state, dict) else {}
+    vault_active = (not state or state.get("contract_version", 0) < 3
+                    or (isinstance(vault_state, dict)
+                        and vault_state.get("status") == "active"))
+    checks = {
+        "project_origin": origin,
+        "project_key": bool(config.get("project_key")),
+        "vault_active": vault_active,
+    }
     if origin not in {"greenfield", "existing"}:
         return {"ok": False, "intent": intent, "next_entry": "configure", "reason": "project_origin must be classified", "checks": checks}
+    if not vault_active and intent in {
+            "deliver", "delivery-lanes", "backlog-plan"}:
+        return {
+            "ok": False, "intent": intent, "next_entry": "upgrade",
+            "reason": "vault adoption is pending; approve the exact adoption"
+                      " plan and pass the full vault gate",
+            "checks": checks,
+        }
     docs = work / "docs"
     checks.update({
         "business_analysis": any_approved_ba(docs),

@@ -13,10 +13,8 @@
 workspace/work-orders/
 workspace/planning/
 workspace/experience-design-work/
+workspace/design-system-work/
 workspace/junit-*.xml
-# agent-marketplace:software-engineering-team:gitignore:end
-
-# Vault app local state; the committed payload below stays tracked
 workspace/docs/.obsidian/*
 !workspace/docs/.obsidian/app.json
 !workspace/docs/.obsidian/appearance.json
@@ -24,6 +22,8 @@ workspace/docs/.obsidian/*
 !workspace/docs/.obsidian/graph.json
 !workspace/docs/.obsidian/types.json
 !workspace/docs/.obsidian/snippets/
+!workspace/docs/.obsidian/snippets/**
 workspace/docs/.obsidian/workspace.json
 workspace/docs/.obsidian/workspace-mobile.json
 workspace/docs/.trash/
+# agent-marketplace:software-engineering-team:gitignore:end

@@ -9,6 +9,7 @@ import json
 import tempfile
 import unittest
 import sys
+import subprocess
 from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 
@@ -30,6 +31,7 @@ BACKLOG = module("backlog_compile")
 PREPARATION = module("preparation_check")
 PROJECT_CONFIG = module("project_config")
 SETUP_CHECK = module("setup_check")
+VAULT_GATE = module("vault_gate")
 
 
 def call(target, argv):
@@ -53,11 +55,17 @@ class ExperienceCompilerTests(unittest.TestCase):
             "---\nstatus: approved\n---\n# Marketplace\n", encoding="utf-8"
         )
         registry_bytes = (json.dumps({
-            "schema_version": 1,
+            "schema_version": 3,
             "codes": {"CAT": "domains/catalog"},
             "ids": {
-                "AC-CAT-001": {"doc_status": "approved"},
-                "AC-CAT-002": {"doc_status": "approved"},
+                "AC-CAT-001": {
+                    "doc": "domains/catalog/acceptance/catalog-acceptance.md",
+                    "doc_status": "approved",
+                },
+                "AC-CAT-002": {
+                    "doc": "domains/catalog/acceptance/catalog-acceptance.md",
+                    "doc_status": "approved",
+                },
             },
         }, indent=2, sort_keys=True) + "\n").encode()
         (ba / "_generated" / "registry.json").write_bytes(registry_bytes)
@@ -73,12 +81,14 @@ class ExperienceCompilerTests(unittest.TestCase):
         self.tmp.cleanup()
 
     def stub(self, kind, ident, slug, *extra):
+        design = (["--uses-design", "[[design-system/MASTER|Design System]]"]
+                  if kind == "screen" else [])
         return call(EXPERIENCE, [
             "stub", "--release-root", str(self.release), "--kind", kind,
             "--id", ident, "--slug", slug,
             "--scope", "marketplace#domains/catalog",
             "--analysis-hash", self.analysis_hash,
-            "--criterion-set", "marketplace:AC-CAT-001", *extra,
+            "--criterion-set", "marketplace:AC-CAT-001", *design, *extra,
         ])
 
     def test_init_stub_render_and_gate(self):
@@ -179,6 +189,7 @@ class ExperienceCompilerTests(unittest.TestCase):
             "--scope", "marketplace#domains/catalog",
             "--analysis-hash", self.analysis_hash,
             "--supersedes", "PRG-001:SCR-001@r1",
+            "--uses-design", "[[design-system/MASTER|Design System]]",
         ])
         self.assertEqual(code, 0, err)
         self.assertEqual(call(EXPERIENCE, ["render", "--release-root", str(second)])[0], 0)
@@ -314,16 +325,28 @@ class PreparationTests(unittest.TestCase):
             value = json.loads(config.read_text(encoding="utf-8"))
             value["project_key"] = "shop"
             config.write_text(json.dumps(value), encoding="utf-8")
-            for relative in ("docs/experience-design", "experience-design-work",
-                             "planning", "work-orders"):
+            for relative in (
+                "docs/experience-design", "experience-design-work",
+                "design-system-work", "planning", "work-orders",
+            ):
                 (workspace / relative).mkdir(parents=True)
+            payload = workspace / "docs" / ".obsidian"
+            payload.mkdir(parents=True)
+            for name in (
+                "app.json", "appearance.json", "core-plugins.json",
+                "graph.json", "types.json",
+            ):
+                (payload / name).write_text("{}\n", encoding="utf-8")
             state = root / ".agentrof" / "agent-marketplace" / "project.json"
             state.parent.mkdir(parents=True)
             state.write_text(json.dumps({
-                "contract_version": 2,
+                "contract_version": 3,
                 "hosts": ["codex"],
                 "managed_surfaces": {"codex:AGENTS.md": "sha256:test"},
             }), encoding="utf-8")
+            self.assertEqual(call(VAULT_GATE, [
+                "install", "--project-root", str(root),
+            ])[0], 0)
             (root / ".gitignore").write_text(
                 "user-rule\n\n" + SETUP_CHECK.managed_block("workspace") + "\n",
                 encoding="utf-8",
@@ -338,6 +361,27 @@ class PreparationTests(unittest.TestCase):
             ])
             self.assertEqual(code, 1)
             self.assertIn("Upgrade", out)
+
+    def test_portable_vault_gate_install_is_byte_idempotent(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            docs = root / "workspace" / "docs"
+            docs.mkdir(parents=True)
+            (docs / "home.md").write_text("# Home\n", encoding="utf-8")
+            argv = ["install", "--project-root", str(root)]
+            self.assertEqual(call(VAULT_GATE, argv)[0], 0)
+            gate = (root / ".agentrof" / "agent-marketplace" / "checks"
+                    / "vault-gate.pyz")
+            first = gate.read_bytes()
+            self.assertEqual(call(VAULT_GATE, argv)[0], 0)
+            self.assertEqual(first, gate.read_bytes())
+            completed = subprocess.run(
+                [sys.executable, str(gate), "check", "--project-root",
+                 str(root), "--json"], capture_output=True, text=True,
+                check=False,
+            )
+            self.assertEqual(completed.returncode, 1)
+            self.assertIn("closed-vault-schema-and-relations", completed.stdout)
 
 
 if __name__ == "__main__":

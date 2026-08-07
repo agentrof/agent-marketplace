@@ -7,13 +7,13 @@
         "hooks": [{"type": "command", "command": "python3 \"${PLUGIN_ROOT}\"/scripts/team_guard.py pre"}]
       },
       {
-        "matcher": "Write|Edit|apply_patch",
+        "matcher": "Write|Edit|apply_patch|Bash",
         "hooks": [{"type": "command", "command": "python3 \"${PLUGIN_ROOT}\"/scripts/vault_hook.py pre"}]
       }
     ],
     "PostToolUse": [
       {
-        "matcher": "Write|Edit|apply_patch",
+        "matcher": "Write|Edit|apply_patch|Bash",
         "hooks": [{"type": "command", "command": "python3 \"${PLUGIN_ROOT}\"/scripts/vault_hook.py post"}]
       }
     ]

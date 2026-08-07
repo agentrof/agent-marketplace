@@ -86,7 +86,7 @@ VALID_VAULT_POLICY = {
     "maps_dir": "maps",
     "subtrees": ["notes"],
     "extra_maps": [],
-    "machine_dirs": ["_generated"],
+    "machine_dirs": ["_generated", "_relations", "_navigation"],
     "banned_basenames": ["notes.md", "overview.md", "readme.md"],
     "community_plugins": ["sample-title-plugin"],
     "graph_search": "-path:_generated",
@@ -110,9 +110,28 @@ VALID_VAULT_POLICY = {
     "generated_views": ["notes/decision-log.md"],
     "generated_subtrees": ["api/"],
     "attachments_dir": "_attachments",
+    "attachment_extensions": [".png", ".pdf"],
     "property_types": {"type": "text", "title": "text", "status": "text",
-                       "tags": "list", "aliases": "list"},
+                       "tags": "tags", "aliases": "aliases",
+                       "related_to": "multitext"},
     "extra_doc_types": ["note", "moc", "home"],
+    "type_path_patterns": {
+        "home": [r"^home\.md$"],
+        "moc": [r"^maps/[a-z0-9-]+\.md$"],
+        "note": [r"^notes/.+\.md$"],
+    },
+    "status_values": {"note": ["draft", "approved"]},
+    "relation_contract": {
+        "inverse_inline_max": 100,
+        "catalog_page_size": 100,
+        "catalog_root": "maps/_relations",
+        "keys": {
+            "related_to": {"targets": ["*"],
+                           "inverse_label": "Related from"},
+        },
+        "required_by_type_status": {},
+        "cardinality_by_type": {},
+    },
 }
 
 # Dynamic home: links nothing at seed; a subtree's map line is added by

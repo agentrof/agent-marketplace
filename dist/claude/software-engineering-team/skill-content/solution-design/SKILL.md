@@ -60,6 +60,11 @@ per topic, an adversarial challenge round before every gate, and a decision log 
    - One engagement doc per topic: engagements/<slug>.md framing the
      question, the touched components, the cited requirements and
      constraints, then the options matrix and the verdict.
+   - Encode traceability in frontmatter, not only prose. The landscape
+     `derives_from` every approved BA scope it uses. An engagement derives
+     from its landscape and relevant BA nodes. Each decision links its
+     engagement and uses exact `satisfies` or `constrained_by` criterion and
+     budget aliases when applicable. These links may cross any vault subtree.
    - Debate in rounds; every accepted verdict lands as its own decision
      note under decisions/ (landscape-docs contract; supersede via the
      stamp-decision verb, never edit), its title carrying the decision
@@ -106,6 +111,8 @@ per topic, an adversarial challenge round before every gate, and a decision log 
      UTC date; never type it), land deferred questions in the Verdict
      with a revisit note (a recorded row, never silence), fold the
      outcome into landscape.md, re-render the index (render-decisions),
+     render typed inverse projections and the cross-subtree matrix with
+     `vault_check.py render-relations`,
      update the map note, ensure home.md links this tree's map (dynamic
      home: the map seed materializes with the tree's first content) and
      commit the tree.

@@ -28,7 +28,7 @@ from pathlib import Path
 
 
 PROJECT_STATE_SCHEMA = 1
-PROJECT_CONTRACT_VERSION = 2
+PROJECT_CONTRACT_VERSION = 3
 REGISTRY_SCHEMA = 2
 WRITER_EPOCH = 1
 STATE_RELATIVE = Path(".agentrof") / "agent-marketplace" / "project.json"
@@ -570,9 +570,52 @@ def managed_gitignore_block(workspace: str) -> str:
         f"{workspace}/work-orders/",
         f"{workspace}/planning/",
         f"{workspace}/experience-design-work/",
+        f"{workspace}/design-system-work/",
         f"{workspace}/junit-*.xml",
+        f"{workspace}/docs/.obsidian/*",
+        f"!{workspace}/docs/.obsidian/app.json",
+        f"!{workspace}/docs/.obsidian/appearance.json",
+        f"!{workspace}/docs/.obsidian/core-plugins.json",
+        f"!{workspace}/docs/.obsidian/graph.json",
+        f"!{workspace}/docs/.obsidian/types.json",
+        f"!{workspace}/docs/.obsidian/snippets/",
+        f"!{workspace}/docs/.obsidian/snippets/**",
+        f"{workspace}/docs/.obsidian/workspace.json",
+        f"{workspace}/docs/.obsidian/workspace-mobile.json",
+        f"{workspace}/docs/.trash/",
         GITIGNORE_END,
     ))
+
+
+def vault_contract_state(root: Path, workspace: str,
+                         package_roots: list[Path]) -> dict:
+    vault = root / workspace / "docs"
+    base = {"root": f"{workspace}/docs", "policy_version": 5,
+            "status": "active", "adoption_plan_hash": ""}
+    if not vault.is_dir() or not any(vault.rglob("*.md")):
+        return base
+    checker = next((path / "scripts" / "vault_check.py"
+                    for path in package_roots
+                    if (path / "scripts" / "vault_check.py").is_file()), None)
+    if checker is None:
+        return {**base, "status": "pending",
+                "reason": "vault checker is unavailable"}
+    completed = subprocess.run(
+        [sys.executable, str(checker), "adoption-plan", "--vault", str(vault)],
+        capture_output=True, text=True, check=False, timeout=120,
+    )
+    try:
+        plan = json.loads(completed.stdout)
+    except json.JSONDecodeError:
+        return {**base, "status": "pending",
+                "reason": "vault adoption plan is unreadable"}
+    return {
+        **base,
+        "status": "active" if completed.returncode == 0 else "pending",
+        "adoption_plan_hash": str(plan.get("plan_hash", "")),
+        "finding_count": len(plan.get("findings", []))
+        if isinstance(plan.get("findings"), list) else 0,
+    }
 
 
 def reconcile_gitignore(content: str, workspace: str) -> str:
@@ -1424,7 +1467,8 @@ def project_changes(plan_payload: dict) -> tuple[dict[Path, bytes | None], dict]
             if gitignore_path.is_file() else None
     adapter_previews: list[tuple[Path, dict]] = []
     plan_payload["data_root"] = str(plan_payload["data_root"])
-    for package_root in adapter_roots(plan_payload, team_id):
+    package_roots = adapter_roots(plan_payload, team_id)
+    for package_root in package_roots:
         preview = run_adapter(package_root, "check", root, workspace)
         adapter_previews.append((package_root, preview))
         for relative in preview["changes"]:
@@ -1462,6 +1506,7 @@ def project_changes(plan_payload: dict) -> tuple[dict[Path, bytes | None], dict]
             "experience": "experience-design",
             "backlog": "backlog-plan",
         },
+        "vault": vault_contract_state(root, workspace, package_roots),
         "applied_at": plan_payload["created_at"],
         "upgrade_id": plan_payload["upgrade_id"],
         "upgrade_base_head": project_data.get("fingerprint", {}).get("head", ""),
@@ -1833,6 +1878,10 @@ def initialize_project_contract(
             "preparation": "preparation_check.py",
             "experience": "experience-design",
             "backlog": "backlog-plan",
+        },
+        "vault": {
+            "root": f"{workspace}/docs", "policy_version": 5,
+            "status": "active", "adoption_plan_hash": "",
         },
         "applied_at": utc_now(),
     }

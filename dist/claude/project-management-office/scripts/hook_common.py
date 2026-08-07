@@ -88,6 +88,9 @@ def parse_apply_patch(patch: str) -> list[dict]:
         added = "\n".join(line[1:] for line in body if line.startswith("+"))
         removed = "\n".join(line[1:] for line in body if line.startswith("-"))
         target = {"file_path": file_path, "operation": operation.lower()}
+        target["patch_body"] = body
+        if move_to:
+            target["move_to"] = move_to
         if operation == "Add":
             target["content"] = added
         elif operation == "Delete":

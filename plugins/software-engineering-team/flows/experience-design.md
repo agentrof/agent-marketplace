@@ -40,11 +40,19 @@ Close in this order:
 5. Release gate.
 6. Program gate.
 
-At every gate render the registry, scope map, coverage and status; run the experience compiler, artifact checker and scoped vault checker; then record the user decision through PMO. Earlier releases cannot cite a later revision.
+At every gate render the registry, scope map, coverage, structural navigation,
+typed-relation inverse projections and status; run the experience compiler,
+artifact checker and scoped vault checker; then record the user decision
+through PMO. Earlier releases cannot cite a later revision.
 
 ## 4. Artifact promotion
 
-Promote an approved bounded preview only with `experience_compile.py promote-artifact`. Render the release registry, then run `experience_artifact_check.py`; attach its SHA-256 to the owning note and effective registry. Remote assets, undeclared IDs or invalid navigation block promotion.
+Promote an approved bounded preview only with `experience_compile.py
+promote-artifact`. The verb creates a sibling Markdown artifact manifest,
+links the owning note to that manifest, and records its SHA-256, registry hash,
+release/revision and declared IDs. HTML is not a knowledge node and is reached
+only through the manifest. Remote assets, undeclared IDs or invalid navigation
+block promotion.
 
 ## 5. Close
 

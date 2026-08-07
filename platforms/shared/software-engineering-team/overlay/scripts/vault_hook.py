@@ -28,11 +28,14 @@ gate-time vault_check surfaces them. Stdlib only.
 from __future__ import annotations
 
 import contextlib
+import hashlib
 import io
 import json
 import os
 import re
+import shutil
 import sys
+import tempfile
 from pathlib import Path
 
 import team_guard
@@ -76,15 +79,15 @@ MD_LINK_RE = re.compile(
 INLINE_FLOW_LIST_RE = re.compile(r"^\s*(tags|aliases):\s*\[", re.MULTILINE)
 FENCE_RE = re.compile(r"^\s*```")
 EXPERIENCE_MACHINE_FIELD_RE = re.compile(
-    r"(?m)^\s*(approved_at|approval_revision|registry_hash|source_hash|"
-    r"stamped_at):")
+    r"(?m)^\s*(approved_at_utc|approval_revision|revision|registry_hash|"
+    r"source_hash|stamped_at):")
 EXPERIENCE_PATHS = (
     re.compile(r"^experience-design/experience\.md$"),
     re.compile(r"^experience-design/programs/prg-[0-9]+/program\.md$"),
     re.compile(r"^experience-design/programs/prg-[0-9]+/releases/rel-[0-9]+/release\.md$"),
-    re.compile(r"^experience-design/programs/prg-[0-9]+/releases/rel-[0-9]+/(?:spaces/[a-z0-9-]+/)?space\.md$"),
-    re.compile(r"^experience-design/programs/prg-[0-9]+/releases/rel-[0-9]+/(?:spaces/[a-z0-9-]+/)?(?:domains/[a-z0-9-]+/)+domain\.md$"),
-    re.compile(r"^experience-design/programs/prg-[0-9]+/releases/rel-[0-9]+/(?:spaces/[a-z0-9-]+/(?:domains/[a-z0-9-]+/)*)?(?:journeys/[a-z0-9-]+-journey|screens/[a-z0-9-]+-screen|flows/[a-z0-9-]+-flows|reviews/[a-z0-9-]+-review)\.md$"),
+    re.compile(r"^experience-design/programs/prg-[0-9]+/releases/rel-[0-9]+/spaces/[a-z0-9-]+/space\.md$"),
+    re.compile(r"^experience-design/programs/prg-[0-9]+/releases/rel-[0-9]+/spaces/[a-z0-9-]+/(?:domains/[a-z0-9-]+/)+domain\.md$"),
+    re.compile(r"^experience-design/programs/prg-[0-9]+/releases/rel-[0-9]+/(?:spaces/[a-z0-9-]+/(?:domains/[a-z0-9-]+/)*)?(?:journeys/[a-z0-9-]+-journey|screens/[a-z0-9-]+-screen|flows/[a-z0-9-]+-flows|reviews/[a-z0-9-]+-review|artifacts/[a-z0-9-]+-artifact)\.md$"),
 )
 
 
@@ -132,6 +135,9 @@ def parse_apply_patch(patch: str) -> list[dict]:
         added = "\n".join(line[1:] for line in body if line.startswith("+"))
         removed = "\n".join(line[1:] for line in body if line.startswith("-"))
         target = {"file_path": file_path, "operation": operation.lower()}
+        target["patch_body"] = body
+        if move_to:
+            target["move_to"] = move_to
         if operation == "Add":
             target["content"] = added
         elif operation == "Delete":
@@ -374,6 +380,50 @@ def config_guard(tool_input: dict, file_path: str) -> int:
     return 0
 
 
+def relation_projection_guard(written: dict, file_path: str) -> int:
+    try:
+        disk = Path(file_path).read_text(encoding="utf-8")
+    except OSError:
+        disk = ""
+    blocks = (
+        (vault_check.RELATION_START, vault_check.RELATION_END,
+         "inverse relation"),
+        ("## Contents <!-- sec: structural:generated:start -->",
+         "<!-- sec: structural:generated:end -->", "structural navigation"),
+    )
+    if "content" in written:
+        proposed = str(written.get("content") or "")
+        for start, end, label in blocks:
+            pattern = re.compile(
+                re.escape(start) + r".*?" + re.escape(end), re.DOTALL)
+            before = pattern.search(disk)
+            after = pattern.search(proposed)
+            if ((before.group(0) if before else "")
+                    != (after.group(0) if after else "")):
+                return deny(
+                    f"machine-owned {label} blocks are written only by the"
+                    " owning compiler")
+        return 0
+    old = str(written.get("old_string") or "")
+    new = str(written.get("new_string") or "")
+    for start, end, label in blocks:
+        if start in old + new or end in old + new:
+            return deny(
+                f"machine-owned {label} blocks are written only by the"
+                " owning compiler")
+        if start in disk and end in disk and old:
+            block_start = disk.index(start)
+            block_end = disk.index(end, block_start) + len(end)
+            position = disk.find(old)
+            while position != -1:
+                if position < block_end and position + len(old) > block_start:
+                    return deny(
+                        f"the edit overlaps a machine-owned {label} block;"
+                        " run the owning renderer")
+                position = disk.find(old, position + 1)
+    return 0
+
+
 def pre(payload: dict) -> int:
     if "file_targets" not in payload:
         payload = normalize(payload)
@@ -381,6 +431,123 @@ def pre(payload: dict) -> int:
         code = pre_target(written)
         if code:
             return code
+    if payload.get("raw_tool_name") == "apply_patch":
+        return virtual_overlay_check(payload)
+    return 0
+
+
+def apply_patch_body(original: str, body: list[str]) -> str:
+    source = original.splitlines()
+    trailing = original.endswith("\n")
+    hunks: list[list[str]] = []
+    current: list[str] = []
+    for line in body:
+        if line.startswith("@@"):
+            if current:
+                hunks.append(current)
+            current = []
+        elif line.startswith("*** Move to: "):
+            continue
+        else:
+            current.append(line)
+    if current:
+        hunks.append(current)
+    cursor = 0
+    for hunk in hunks:
+        old = [line[1:] for line in hunk
+               if line.startswith((" ", "-"))]
+        new = [line[1:] for line in hunk
+               if line.startswith((" ", "+"))]
+        found = next((index for index in range(cursor, len(source) + 1)
+                      if source[index:index + len(old)] == old), None)
+        if found is None:
+            raise ValueError("patch hunk does not match the current file")
+        source[found:found + len(old)] = new
+        cursor = found + len(new)
+    result = "\n".join(source)
+    return result + ("\n" if trailing or not original else "")
+
+
+def virtual_overlay_check(payload: dict) -> int:
+    cwd = Path(str(payload.get("cwd") or ".")).resolve()
+    groups: dict[Path, list[dict]] = {}
+    for target in payload.get("file_targets", []):
+        path = Path(str(target.get("file_path", "")))
+        path = path if path.is_absolute() else cwd / path
+        path = path.resolve()
+        root = vault_root(str(path))
+        if root is not None:
+            groups.setdefault(root.resolve(), []).append({**target,
+                                                          "resolved": path})
+    for root, targets in groups.items():
+        policy = vault_check.effective_policy(
+            vault_check.load_policy(vault_check.DEFAULT_POLICY), root)
+        baseline = vault_check.build_vault(root, policy)
+        baseline_findings = []
+        for name in ("wikilink_resolution", "link_policy",
+                     "frontmatter_props"):
+            vault_check.CHECKS[name](baseline, baseline_findings)
+        baseline_keys = {
+            (item.path, item.line, item.check, item.message)
+            for item in baseline_findings
+        }
+        with tempfile.TemporaryDirectory(prefix="vault-overlay-") as temporary:
+            overlay = Path(temporary) / "docs"
+            if root.is_dir():
+                shutil.copytree(root, overlay)
+            else:
+                overlay.mkdir(parents=True)
+            touched = set()
+            try:
+                for target in targets:
+                    actual = target["resolved"]
+                    rel = actual.relative_to(root)
+                    path = overlay / rel
+                    touched.add(rel.as_posix())
+                    operation = target.get("operation")
+                    if operation == "add":
+                        path.parent.mkdir(parents=True, exist_ok=True)
+                        path.write_text(str(target.get("content", "")) + "\n",
+                                        encoding="utf-8")
+                    elif operation == "delete":
+                        path.unlink(missing_ok=True)
+                    elif operation == "move-target":
+                        continue
+                    else:
+                        original = path.read_text(encoding="utf-8")
+                        rendered = apply_patch_body(
+                            original, list(target.get("patch_body", [])))
+                        move_to = str(target.get("move_to", ""))
+                        if move_to:
+                            destination = Path(move_to)
+                            destination = (destination if destination.is_absolute()
+                                           else cwd / destination)
+                            dest_rel = destination.relative_to(root)
+                            dest_path = overlay / dest_rel
+                            dest_path.parent.mkdir(parents=True, exist_ok=True)
+                            dest_path.write_text(rendered, encoding="utf-8")
+                            path.unlink(missing_ok=True)
+                            touched.add(dest_rel.as_posix())
+                        else:
+                            path.write_text(rendered, encoding="utf-8")
+            except (OSError, ValueError) as exc:
+                return deny(f"multi-file patch virtual overlay failed: {exc}")
+            overlay_policy = vault_check.effective_policy(
+                vault_check.load_policy(vault_check.DEFAULT_POLICY), overlay)
+            vault = vault_check.build_vault(overlay, overlay_policy)
+            findings = []
+            for name in ("wikilink_resolution", "link_policy",
+                         "frontmatter_props"):
+                vault_check.CHECKS[name](vault, findings)
+            relevant = [finding for finding in findings
+                        if (finding.path, finding.line, finding.check,
+                            finding.message) not in baseline_keys]
+            if relevant:
+                finding = sorted(relevant, key=lambda item: (
+                    item.path, item.line, item.check, item.message))[0]
+                return deny(
+                    "multi-file patch virtual overlay failed "
+                    f"[{finding.check}] {finding.path}: {finding.message}")
     return 0
 
 
@@ -394,11 +561,21 @@ def pre_target(written: dict) -> int:
     rel = vault_relative(file_path)
     if rel is None:
         return 0
+    if rel.startswith(("maps/_relations/", "maps/_navigation/")):
+        return deny(
+            "inverse relation catalogs are compiler-owned; run"
+            " vault_check.py render-relations")
+    if rel.endswith(".md"):
+        relation_code = relation_projection_guard(written, file_path)
+        if relation_code:
+            return relation_code
     if rel.startswith("experience-design/"):
         if "/_generated/" in f"/{rel}":
             return deny("Experience Design _generated files are compiler-owned; run experience_compile.py render")
         if "/artifacts/" in rel and rel.endswith(".html"):
             return deny("approved Experience Design artifacts are immutable through Write/Edit; promote a new package through experience_compile.py")
+        if rel.endswith("-artifact.md") and Path(file_path).is_file():
+            return deny("approved Experience Design artifact manifests are immutable; promote a new package through experience_compile.py")
         if rel.endswith(".md") and not any(pattern.fullmatch(rel) for pattern in EXPERIENCE_PATHS):
             return deny(f"invalid Experience Design filename or path '{rel}'; use compiler init/stub commands")
         content = written_content(written) + "\n" + str(written.get("old_string") or "")
@@ -467,7 +644,7 @@ def post_target(file_path: str) -> int:
     buffer = io.StringIO()
     with contextlib.redirect_stdout(buffer):
         code = vault_check.main([
-            "check", "--vault", str(root), "--changed", rel,
+            "check", "--vault", str(root), "--impact", rel,
         ])
     if code == 1:
         sys.stderr.write(buffer.getvalue())
@@ -497,6 +674,76 @@ def post_target(file_path: str) -> int:
     return 0
 
 
+def shell_vault(payload: dict) -> Path | None:
+    cwd = Path(str(payload.get("cwd") or ".")).resolve()
+    for parent in (cwd, *cwd.parents):
+        candidate = parent / "workspace" / "docs"
+        if candidate.is_dir():
+            return candidate
+    return None
+
+
+def vault_inventory(root: Path) -> dict[str, str]:
+    result = {}
+    for path in sorted(root.rglob("*")):
+        if not path.is_file():
+            continue
+        rel = path.relative_to(root).as_posix()
+        if rel in {".obsidian/workspace.json",
+                   ".obsidian/workspace-mobile.json"} \
+                or rel.startswith(".trash/"):
+            continue
+        result[rel] = hashlib.sha256(path.read_bytes()).hexdigest()
+    return result
+
+
+def inventory_path(payload: dict) -> Path:
+    session = str(payload.get("session_id") or "unknown")
+    safe = re.sub(r"[^A-Za-z0-9_.-]", "_", session)
+    return data_dir() / "vault-inventory" / f"{safe}.json"
+
+
+def shell_snapshot(payload: dict) -> int:
+    root = shell_vault(payload)
+    path = inventory_path(payload)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    value = {"vault": str(root) if root else "",
+             "inventory": vault_inventory(root) if root else {}}
+    path.write_text(json.dumps(value, sort_keys=True), encoding="utf-8")
+    return 0
+
+
+def shell_verify(payload: dict) -> int:
+    path = inventory_path(payload)
+    try:
+        before = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return deny("Bash vault inventory is missing or unreadable")
+    path.unlink(missing_ok=True)
+    root_value = str(before.get("vault", ""))
+    if not root_value:
+        return 0
+    root = Path(root_value)
+    old = before.get("inventory", {})
+    new = vault_inventory(root) if root.is_dir() else {}
+    changed = sorted(key for key in set(old) | set(new)
+                     if old.get(key) != new.get(key))
+    if not changed:
+        return 0
+    argv = ["check", "--vault", str(root)]
+    if len(changed) == 1:
+        argv.extend(("--impact", changed[0]))
+    buffer = io.StringIO()
+    with contextlib.redirect_stdout(buffer):
+        code = vault_check.main(argv)
+    if code:
+        sys.stderr.write(buffer.getvalue())
+        return deny(
+            "Bash changed vault inventory and left the full/impact gate red;"
+            " repair or restore the changed paths")
+    return 0
+
+
 def main() -> int:
     mode = sys.argv[1] if len(sys.argv) > 1 else "pre"
     payload = read_payload()
@@ -519,6 +766,8 @@ def main() -> int:
             + str(payload["patch_parse_error"])
             + "); the vault guard fails closed. Retry with a valid patch."
         )
+    if payload.get("tool_name") == "Bash":
+        return shell_snapshot(payload) if mode == "pre" else shell_verify(payload)
     if payload.get("tool_name") not in ("Write", "Edit"):
         return 0
     return pre(payload) if mode == "pre" else post(payload)

@@ -57,6 +57,16 @@ Upgrade the installed marketplace contract without overwriting user-owned projec
    configured remote. Normal marketplace work stays locked on the upgrade
    branch after commit. After merge, update the target branch and start a fresh
    session from that merged revision; only that revision may report current.
+8. Contract v3 upgrades inspect `workspace/docs/` as one vault. If the new
+   project contract records `vault.status: pending`, install the tracked
+   portable gate with the team `vault_gate.py install` verb, run
+   `vault_check.py adoption-plan --vault workspace/docs`, and show its exact
+   plan hash and every finding. Unknown content is never moved automatically.
+   After the owner-approved repair/migration plan is green, run
+   `render-navigation`, `render-relations`, the portable full gate, then
+   `activate-adoption --project-root <root> --plan-hash <exact-green-hash>`.
+   Until activation, `deliver`, `delivery-lanes` and `backlog-plan` remain
+   mechanically blocked.
 
 ## Safety Contract
 
@@ -69,8 +79,8 @@ Upgrade the installed marketplace contract without overwriting user-owned projec
   blocks mutation.
 - Repositories with an origin remote apply from an `agent-marketplace/upgrade-*`
   branch. The project remains PR-pending until its configured target branch
-  contains the exact managed upgrade identity. A feature-branch commit
-  alone never unlocks normal work.
+   contains the exact managed upgrade identity. A feature-branch commit
+   alone never unlocks normal work.
 - Database changes run through ordered, checksummed migrations against a
   candidate copy while a writer lock protects the source. The live migration
   commits as one transaction only after candidate integrity and foreign-key

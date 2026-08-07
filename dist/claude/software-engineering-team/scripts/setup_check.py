@@ -23,7 +23,19 @@ def managed_block(workspace: str) -> str:
     return "\n".join((START, f"{workspace}/work-orders/",
                       f"{workspace}/planning/",
                       f"{workspace}/experience-design-work/",
-                      f"{workspace}/junit-*.xml", END))
+                      f"{workspace}/design-system-work/",
+                      f"{workspace}/junit-*.xml",
+                      f"{workspace}/docs/.obsidian/*",
+                      f"!{workspace}/docs/.obsidian/app.json",
+                      f"!{workspace}/docs/.obsidian/appearance.json",
+                      f"!{workspace}/docs/.obsidian/core-plugins.json",
+                      f"!{workspace}/docs/.obsidian/graph.json",
+                      f"!{workspace}/docs/.obsidian/types.json",
+                      f"!{workspace}/docs/.obsidian/snippets/",
+                      f"!{workspace}/docs/.obsidian/snippets/**",
+                      f"{workspace}/docs/.obsidian/workspace.json",
+                      f"{workspace}/docs/.obsidian/workspace-mobile.json",
+                      f"{workspace}/docs/.trash/", END))
 
 
 def preflight(root: Path, workspace: str) -> list[str]:
@@ -55,11 +67,11 @@ def closing(root: Path, workspace: str) -> list[str]:
     if not config.get("project_key"):
         findings.append("PMO registration has not stamped project_key")
     state = read(root / ".agentrof" / "agent-marketplace" / "project.json")
-    if not isinstance(state, dict) or state.get("contract_version") != 2:
-        findings.append("project contract version is not 2")
+    if not isinstance(state, dict) or state.get("contract_version") != 3:
+        findings.append("project contract version is not 3")
     required = (
-        "docs/experience-design", "experience-design-work", "planning",
-        "work-orders",
+        "docs/experience-design", "experience-design-work",
+        "design-system-work", "planning", "work-orders",
     )
     for relative in required:
         path = work / relative
@@ -73,6 +85,17 @@ def closing(root: Path, workspace: str) -> list[str]:
         findings.append("managed .gitignore marker is missing or duplicated")
     elif managed_block(workspace) not in text:
         findings.append("managed .gitignore block is stale")
+    for relative in (
+        "docs/.obsidian/app.json", "docs/.obsidian/appearance.json",
+        "docs/.obsidian/core-plugins.json", "docs/.obsidian/graph.json",
+        "docs/.obsidian/types.json",
+    ):
+        if not (work / relative).is_file():
+            findings.append(f"missing managed vault payload: {workspace}/{relative}")
+    portable_gate = (root / ".agentrof" / "agent-marketplace" / "checks"
+                     / "vault-gate.pyz")
+    if not portable_gate.is_file():
+        findings.append("repository-portable vault gate is missing")
     if isinstance(state, dict):
         if not state.get("hosts"):
             findings.append("host project contract is missing")

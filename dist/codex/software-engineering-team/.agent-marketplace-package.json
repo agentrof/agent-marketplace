@@ -217,6 +217,7 @@
     "templates/vault/maps/system-architecture.md": "dbc16b1a75e8375856e9a5bb8ca7d269b904ad26d09eb092e39b9e5c89642315"
   },
   "host": "codex",
+  "runtime_contracts": [],
   "schema_version": 1,
   "version": "0.1.0"
 }

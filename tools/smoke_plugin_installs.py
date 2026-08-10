@@ -229,7 +229,22 @@ def mark_pmo_ready(
         hook_payload(session_id, project, "SessionStart"),
     )
     if "AGENT_MARKETPLACE_PMO_READY: project-management-office" not in output:
-        raise SmokeFailure("PMO SessionStart did not mark the smoke session ready")
+        diagnostic = output.strip()
+        launcher = marketplace_home(env) / "bin" / "pmo_cli.py"
+        if launcher.is_file():
+            inspected = subprocess.run(
+                [sys.executable, str(launcher), "upgrade", "status",
+                 "--project-root", str(project), "--json"],
+                capture_output=True, text=True, env=env, check=False, timeout=30,
+            )
+            diagnostic += (
+                f"\nupgrade status ({inspected.returncode}):\n"
+                f"{inspected.stdout}{inspected.stderr}"
+            )
+        raise SmokeFailure(
+            "PMO SessionStart did not mark the smoke session ready:\n"
+            + diagnostic
+        )
 
 
 def codex_skills(env: dict[str, str], project: Path) -> list[dict]:
@@ -494,6 +509,15 @@ def smoke_codex(
 def checkout_marketplace(root: Path, target: Path) -> Path:
     """Create a local-only catalog that installs the current generated dist."""
     shutil.copytree(root / "dist", target / "dist")
+    for package in sorted((target / "dist" / "claude").iterdir()):
+        if not package.is_dir():
+            continue
+        marker = package / ".in_use" / "4242.tmp.deadbeef"
+        marker.parent.mkdir()
+        marker.write_text(
+            json.dumps({"pid": 4242, "procStart": "release-check fixture"}),
+            encoding="utf-8",
+        )
     claude = json.loads((root / ".claude-plugin" / "marketplace.json").read_text(
         encoding="utf-8"
     ))

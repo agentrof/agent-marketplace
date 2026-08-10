@@ -157,6 +157,45 @@ class SmokeWorkflowSimulationTests(unittest.TestCase):
                 and entry["source"]["path"].startswith("./dist/codex/")
                 for entry in codex["plugins"]
             ))
+            for package in (smoke.PMO, TEAM):
+                marker = (
+                    target / "dist" / "claude" / package / ".in_use"
+                    / "4242.tmp.deadbeef"
+                )
+                self.assertEqual(
+                    json.loads(marker.read_text(encoding="utf-8"))["pid"],
+                    4242,
+                )
+            self.assertFalse((
+                REPO / "dist" / "claude" / smoke.PMO / ".in_use"
+            ).exists())
+
+    def test_pmo_readiness_failure_includes_upgrade_blocker(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            launcher = root / "marketplace" / "bin" / "pmo_cli.py"
+            launcher.parent.mkdir(parents=True)
+            launcher.write_text("# diagnostic fixture\n", encoding="utf-8")
+            inspected = SimpleNamespace(
+                returncode=1,
+                stdout=json.dumps({
+                    "blockers": [
+                        "PLUGIN_INVENTORY_INVALID:package provenance verification failed"
+                    ],
+                }),
+                stderr="",
+            )
+            with mock.patch.object(
+                    smoke, "run", return_value="AGENT_MARKETPLACE_UPGRADE_REQUIRED_BLOCKED"), \
+                    mock.patch.object(
+                        smoke.subprocess, "run", return_value=inspected
+                    ):
+                with self.assertRaisesRegex(
+                        smoke.SmokeFailure, "PLUGIN_INVENTORY_INVALID"):
+                    smoke.mark_pmo_ready(
+                        {"AGENT_MARKETPLACE_HOME": str(root / "marketplace")},
+                        root / "pmo", root / "project", "ready-pmo",
+                    )
 
     def test_claude_lifecycle_simulation_proves_native_dependency(self):
         with tempfile.TemporaryDirectory() as tmp:

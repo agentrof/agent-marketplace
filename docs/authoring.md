@@ -312,6 +312,10 @@ updates all version surfaces, rebuilds both distributions, and opens the
 run, reviews it, and merges it. The publish workflow then verifies the exact merge commit,
 prior stable SHA, tag and release uniqueness, and cross-host equality before
 moving `stable` forward and creating `vX.Y.Z` plus the GitHub Release.
+If organization policy prevents Actions from creating pull requests, prepare
+still exits green after pushing the fully verified `release/stable` branch and
+writes the exact compare URL and title into the job summary. A maintainer opens
+that PR manually; every later gate and publication invariant stays unchanged.
 
 `make check` is hermetic: it opens no network sockets, needs no host CLI and
 includes deterministic simulations of the complete Claude and Codex lifecycle.

@@ -2,7 +2,7 @@
   "component": "project-management-office",
   "files": {
     ".agent-marketplace-generated-distribution": "bc5e5ffd58e656c315fc4230e335b1acaaeba4b3a6871fc57e84144035567474",
-    ".claude-plugin/plugin.json": "4e98564c7a3eeee44b05985be0f769ed6ef737106129b6f7cef43e2fafb7b772",
+    ".claude-plugin/plugin.json": "b1ba99d13dc54f5f122cbe4bb30d75ebca128ce8911b89f65f427b42e47ce61e",
     "dashboard/design/MASTER.md": "69bc42d0a2f60221b6c3b6cffc845f0614fb06ca0d242c9e21824f331e2f38d0",
     "dashboard/index.html": "06557f8d8bc2d3afced183769e1f7254e11f7aaaf1776072e03a70c6a3282b95",
     "hooks/hooks.json": "43bed2bd18ebf1578dd08983ba3681b86b41f454fd268763a4cabdbe66eed9f4",
@@ -18,7 +18,7 @@
     "scripts/hook_subagent.py": "f80a1444d8429cfa027f64b678fb0a84dad5f34ab599e0379b705e3fd0b09ea9",
     "scripts/marketplace_paths.py": "c32da903c8975f911f0fe983f53d0fc527d28fc26e506905c2f25515359c7fde",
     "scripts/marketplace_run.py": "cfc7bc5f36d506bd5503749407a5e54816125441c2e082e5836193f85e151af9",
-    "scripts/pmo_cli.py": "1e0e609fbbccbe6df9ebf51b0cf5efffeb5cb4d6aa181dc24445216051381fe3",
+    "scripts/pmo_cli.py": "42fcc2db91cf3b17e3d1654d7d0a89e3661dce52add36b2973abbd4e04b8947c",
     "scripts/pmo_dashboard.py": "6dd54373f71d7dff1b27f955bc62c74e679674113ce1ace580544065041b1c1c",
     "scripts/upgrade_core.py": "2c9d93c69332f9d4179fa740843bf17d136d2026e76c15a7269c83f0d22ba2d1",
     "scripts/upgrade_guidance.json": "e4ca1161f04270c784f856aeebd79d7fdd740862e53adc29dced04397d0e6adf",
@@ -35,5 +35,5 @@
     "in_use_pid_marker_v1"
   ],
   "schema_version": 1,
-  "version": "0.1.0"
+  "version": "0.1.1"
 }

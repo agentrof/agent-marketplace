@@ -2,7 +2,7 @@
   "component": "software-engineering-team",
   "files": {
     ".agent-marketplace-generated-distribution": "bc5e5ffd58e656c315fc4230e335b1acaaeba4b3a6871fc57e84144035567474",
-    ".claude-plugin/plugin.json": "98c247a33ed82be7dd5d8c9a388373e63b3d43f2c27ee1c73e1621cbb6a62305",
+    ".claude-plugin/plugin.json": "94476c34462e800d4589ada08f12b91bb7e713cc9673197cf38cad0bf4f5ce77",
     "agents/analysis-challenger.md": "f977d743fe88116ad505093c3c3567b5157ca87d6930ed6a0cf898bec9d18c34",
     "agents/backend-developer.md": "06bee28f1bb5631c96c25a5165d978ae204d47491beecb3e27b12be17358276f",
     "agents/backlog-reviewer.md": "87f708ee908e1bc5b9e637e3418189a7eb7ffd977ae919b2b2ec5306af9d254f",
@@ -224,5 +224,5 @@
     "in_use_pid_marker_v1"
   ],
   "schema_version": 1,
-  "version": "0.1.0"
+  "version": "0.1.1"
 }

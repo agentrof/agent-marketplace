@@ -1,6 +1,0 @@
-{
-  "summary": "Require a maintainer-created stable release pull request so GitHub binds required validation to the candidate commit.",
-  "components": {
-    "agent-marketplace": "patch"
-  }
-}

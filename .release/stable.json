@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "version": "0.1.0",
+  "stable_base": "bd31c1f705c2aef267399592a9eee35466a1996b",
+  "main_source": "0611c38fa46772c4518c48242cae2b8a05f84259",
+  "impacts": {
+    "agent-marketplace": "patch",
+    "project-management-office": "patch",
+    "software-engineering-team": "minor"
+  },
+  "summaries": [
+    "Author Design System and Experience Design deliverables in place and move operational project state into a project-local runtime."
+  ]
+}

@@ -1,5 +1,5 @@
 {
-  "summary": "Accept narrowly validated Claude runtime cache markers in package provenance and make stable release preparation resilient to organization PR policy.",
+  "summary": "Accept narrowly validated Claude runtime cache markers in package provenance and require a maintainer-created stable release PR so required validation runs.",
   "components": {
     "agent-marketplace": "patch",
     "project-management-office": "patch",

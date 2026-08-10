@@ -88,10 +88,15 @@ def approved_solution(docs: Path) -> bool:
 
 
 def design_master(docs: Path) -> bool:
-    return (docs / "design-system" / "MASTER.md").is_file() and command_clean([
-        sys.executable, str(SCRIPT_DIR / "vault_check.py"), "check",
-        "--vault", str(docs), "--scope", "design-system",
-    ])
+    master = docs / "design-system" / "MASTER.md"
+    return master.is_file() and fm_status(master) == "approved" \
+        and command_clean([
+            sys.executable, str(SCRIPT_DIR / "design_system_compile.py"),
+            "check", "--root", str(master.parent),
+        ]) and command_clean([
+            sys.executable, str(SCRIPT_DIR / "vault_check.py"), "check",
+            "--vault", str(docs), "--scope", "design-system",
+        ])
 
 
 def approved_experience(docs: Path) -> bool:
@@ -138,7 +143,8 @@ def backlog_state(work: Path, config: dict) -> tuple[bool, bool]:
                         for item in plans if isinstance(item, dict)),
                 )
     # Draft files are only a diagnostic fallback; they never prove apply.
-    plans = sorted((work / "planning").glob("*.json"))
+    plans = sorted((work.parent / ".agentrof" / "agent-marketplace"
+                    / ".runtime" / "plan").glob("*.json"))
     approved = any(read_json(path).get("approved_hash") for path in plans)
     return approved, False
 

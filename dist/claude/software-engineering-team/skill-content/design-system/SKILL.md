@@ -1,6 +1,6 @@
 ---
 name: design-system
-description: Creates and updates the project's design system, the single source of visual truth. Interactive; candidates are generated from curated design data, the user picks, MASTER.md is written. Touches only the design-system folder.
+description: Creates and revises the project's directly-authored design system, the single source of visual truth. Interactive; MASTER.md starts as a draft, changes through conversation, and is compiler-approved in place.
 exposure: entry
 ---
 
@@ -37,27 +37,25 @@ The only place the design master is born or changed.
    audience; preference questions go through a choice gate,
    open taste input stays free-form. The user's own files win over
    generated suggestions.
-3. CREATION mode: spawn ux-designer (spawn template from
-   the flow printed by "$RUN" path "$TEAM" flows/design.md, the
-   dispatcher per its preconditions) to generate the requested
-   number of CANDIDATE systems (default three) using the bound design
-   knowledge skill: each candidate is a coherent system dressed onto a
-   sample screen, produced with a deliberately different search emphasis,
-   presented in one self-contained preview written to
-   `workspace/design-system-work/<run-key>/candidates.html` with the axis of
-   difference stated per candidate. This transient preview never enters the
-   vault and remains gitignored.
-4. DS GATE: the user picks a candidate through a choice gate, one option
-   per candidate with its emphasis in the description
-   (or requests different emphases; one re-run). The pick is written as
-   workspace/docs/design-system/MASTER.md: vault frontmatter and nav
-   section (the persist script emits them), logic header, global rules
+3. CREATION mode: resolve any material style fork through a choice gate,
+   then use the bound design knowledge skill's persist command to write one
+   `workspace/docs/design-system/MASTER.md` draft directly. The persist
+   script emits vault frontmatter, `status: draft` and `revision: 1`; there
+   is no candidate file, run key or promotion step. The draft contains the
+   logic header, global rules
    (semantic palette with light and dark pairs, typography, spacing,
    radius derived from style, shadows, motion tokens, breakpoints, one
    declared icon set), component specs, style guidelines, plain-text
    anti-patterns, pre-delivery checklist.
-5. UPDATE mode: interpret the requested change, show its impact, apply
-   it to MASTER.md or as a page override at
+4. Refine the draft conversationally: interpret each requested change, show
+   its impact and apply it to MASTER.md or as a page override at
+   `workspace/docs/design-system/pages/<page>.md` (deviations only; no
+   deviation, no file).
+5. UPDATE mode: for an approved baseline first run
+   `"$RUN" run "$TEAM" scripts/design_system_compile.py begin-revision
+   --root workspace/docs/design-system`; never overwrite an approved
+   revision. Then apply the requested change to MASTER.md or as a page
+   override at
    workspace/docs/design-system/pages/<page>.md (deviations only; no
    deviation, no file). Silent deviation is a violation. Override
    consolidation is part of UPDATE: when the same deviation recurs
@@ -67,17 +65,15 @@ The only place the design master is born or changed.
    flow's periodic reconciliation requests it).
 6. Close: update maps/design-system.md to match (one wikilink per
    override with its deviation summary), ensure home.md links this
-   tree's map (dynamic home: the map seed materializes with the tree's
-   first content), then run
+   tree's map, then run
    "$RUN" run "$TEAM" scripts/vault_check.py check --vault
    workspace/docs --scope design-system; run `vault_check.py
-   render-relations --vault workspace/docs`; repair every finding before
-   closing (obsidian-vault skill; migrate covers the deterministic
-   classes). A leftover candidates.html is a finding, never an
-   exemption.
+   render-relations --vault workspace/docs`; repair every finding. At the
+   owner gate run `"$RUN" run "$TEAM"
+   scripts/design_system_compile.py approve --root
+   workspace/docs/design-system`, then rerun its `check` verb.
 7. HARD SCOPE LIMIT: this flow writes only under
-   workspace/docs/design-system/ and its run-scoped transient
-   workspace/design-system-work/ directory, plus home and its own map note
-   repair, and vault payload materialization (per-file, only where
-   missing). Requests to design product pages or write code are
+   workspace/docs/design-system/, plus home and its own map note repair, and
+   vault payload materialization (per-file, only where missing). Requests to
+   design product pages or write code are
    refused and routed to sketch or deliver.

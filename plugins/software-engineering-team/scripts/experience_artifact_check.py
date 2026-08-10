@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Verify promoted Experience Design HTML artifacts without network access."""
+"""Verify approved Experience Design HTML artifacts without network access."""
 
 from __future__ import annotations
 

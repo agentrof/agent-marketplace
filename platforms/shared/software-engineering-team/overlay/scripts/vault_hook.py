@@ -81,6 +81,9 @@ FENCE_RE = re.compile(r"^\s*```")
 EXPERIENCE_MACHINE_FIELD_RE = re.compile(
     r"(?m)^\s*(approved_at_utc|approval_revision|revision|registry_hash|"
     r"source_hash|stamped_at):")
+DESIGN_SYSTEM_MACHINE_FIELD_RE = re.compile(
+    r"(?m)^\s*(status|revision|approved_at_utc|baseline_hash|"
+    r"supersedes_hash):")
 EXPERIENCE_PATHS = (
     re.compile(r"^experience-design/experience\.md$"),
     re.compile(r"^experience-design/programs/prg-[0-9]+/program\.md$"),
@@ -89,6 +92,35 @@ EXPERIENCE_PATHS = (
     re.compile(r"^experience-design/programs/prg-[0-9]+/releases/rel-[0-9]+/spaces/[a-z0-9-]+/(?:domains/[a-z0-9-]+/)+domain\.md$"),
     re.compile(r"^experience-design/programs/prg-[0-9]+/releases/rel-[0-9]+/(?:spaces/[a-z0-9-]+/(?:domains/[a-z0-9-]+/)*)?(?:journeys/[a-z0-9-]+-journey|screens/[a-z0-9-]+-screen|flows/[a-z0-9-]+-flows|reviews/[a-z0-9-]+-review|artifacts/[a-z0-9-]+-artifact)\.md$"),
 )
+
+
+def note_status(path: Path) -> str:
+    try:
+        lines = path.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return ""
+    if not lines or lines[0].strip() != "---":
+        return ""
+    for raw in lines[1:]:
+        value = raw.strip()
+        if value == "---":
+            break
+        if value.startswith("status:"):
+            return value.split(":", 1)[1].strip().strip("\"'")
+    return ""
+
+
+def approved_experience_owner(path: Path) -> Path | None:
+    for parent in (path.parent, *path.parents):
+        release = parent / "release.md"
+        if release.is_file() and note_status(release) == "approved":
+            return release
+        program = parent / "program.md"
+        if program.is_file() and note_status(program) == "approved":
+            return program
+        if parent.name == "docs":
+            break
+    return None
 
 
 def read_payload() -> dict:
@@ -569,30 +601,59 @@ def pre_target(written: dict) -> int:
         relation_code = relation_projection_guard(written, file_path)
         if relation_code:
             return relation_code
+    if rel.startswith("design-system/"):
+        path = Path(file_path).resolve()
+        docs = next((value for value in path.parents if value.name == "docs"), None)
+        master = docs / "design-system" / "MASTER.md" if docs else None
+        if master is not None and master.is_file() \
+                and note_status(master) == "approved":
+            return deny(
+                "approved Design System content is immutable through Write/Edit;"
+                " use design_system_compile.py begin-revision first"
+            )
+        content = written_content(written) + "\n" + str(
+            written.get("old_string") or ""
+        )
+        if DESIGN_SYSTEM_MACHINE_FIELD_RE.search(content):
+            return deny(
+                "Design System status, revision, approval timestamp and hashes"
+                " are machine-managed; use design_system_compile.py"
+            )
     if rel.startswith("experience-design/"):
         if "/_generated/" in f"/{rel}":
             return deny("Experience Design _generated files are compiler-owned; run experience_compile.py render")
         if "/artifacts/" in rel and rel.endswith(".html"):
-            return deny("approved Experience Design artifacts are immutable through Write/Edit; promote a new package through experience_compile.py")
-        if rel.endswith("-artifact.md") and Path(file_path).is_file():
-            return deny("approved Experience Design artifact manifests are immutable; promote a new package through experience_compile.py")
+            manifest = Path(file_path).with_name(
+                Path(file_path).name.removesuffix("-preview.html")
+                + "-artifact.md"
+            )
+            if not manifest.is_file():
+                return deny(
+                    "Experience Design HTML must be born through"
+                    " experience_compile.py init-artifact"
+                )
+            if note_status(manifest) == "approved":
+                return deny(
+                    "approved Experience Design artifacts are immutable;"
+                    " create a new draft package"
+                )
+        if rel.endswith("-artifact.md") and Path(file_path).is_file() \
+                and note_status(Path(file_path)) == "approved":
+            return deny(
+                "approved Experience Design artifact manifests are immutable;"
+                " create a new draft package"
+            )
+        approved_owner = approved_experience_owner(Path(file_path).resolve())
+        if approved_owner is not None:
+            return deny(
+                "approved Experience Design release/program content is immutable;"
+                " create the next release through experience_compile.py"
+            )
         if rel.endswith(".md") and not any(pattern.fullmatch(rel) for pattern in EXPERIENCE_PATHS):
             return deny(f"invalid Experience Design filename or path '{rel}'; use compiler init/stub commands")
         content = written_content(written) + "\n" + str(written.get("old_string") or "")
         if EXPERIENCE_MACHINE_FIELD_RE.search(content):
             return deny("Experience Design approval, revision hash and timestamp fields are machine-managed; use render/stamp")
-        claims = Path(file_path).resolve().parents
-        workspace = next((value for value in claims if value.name == "workspace"), None)
-        if workspace is not None:
-            claim_file = workspace / "experience-design-work" / "node-claims.json"
-            try:
-                claim_map = json.loads(claim_file.read_text(encoding="utf-8"))
-            except (OSError, json.JSONDecodeError):
-                claim_map = {}
-            current = os.environ.get("CODEX_SESSION_ID") or os.environ.get("CLAUDE_SESSION_ID") or ""
-            owner = claim_map.get(rel) if isinstance(claim_map, dict) else None
-            if owner and owner != current:
-                return deny(f"Experience Design node is claimed by another session: {rel}")
     if not rel.endswith(".md"):
         return 0
     content = written_content(written)

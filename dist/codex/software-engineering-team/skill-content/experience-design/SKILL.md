@@ -19,5 +19,8 @@ Produce an approved, compiler-backed experience baseline without implementing pr
 2. Load the canonical flow at `flows/experience-design.md`, the
    `experience-modeling` knowledge skill and the `obsidian-vault` law. Follow
    them exactly.
-3. Work only in `workspace/docs/experience-design/` and `workspace/experience-design-work/<run-key>/`, plus the experience map/home reconciliation owned by the vault policy. Never promote a sketch as a baseline.
+3. Work only in `workspace/docs/experience-design/`, plus the experience
+   map/home reconciliation owned by the vault policy. Markdown and HTML start
+   as drafts at their durable release paths and are approved there. Never
+   promote a sketch as a baseline and never create a filesystem run folder.
 4. Stop after the program gate. Name `backlog-plan` as the next entry. Do not activate a release and do not start delivery.

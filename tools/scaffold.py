@@ -31,7 +31,9 @@ CLAUDE_TEAM_CONTRACT = """# Host Contract
 - The shared `team_guard.py` PreToolUse hook mechanically requires the PMO session-ready record before Write, Edit, or Bash. Keep the exact context check `{pmo_ready}` as the user-facing diagnostic. If it is absent, run `claude plugin list --json` as a read-only diagnostic and stop. If PMO is missing, ask the user to run `/plugin install project-management-office@agent-marketplace`; if it is disabled, ask for `/plugin enable project-management-office@agent-marketplace`; if it is installed and enabled, ask for a Claude Code restart and PMO hook-log inspection. State that no files or project state were changed.
 - One delivery team owns a project. Stop without mutation when workspace/config.json or Agent Marketplace-owned project agents name another team.
 - Insert `--host claude` immediately after every canonical dispatcher `run` or `path` verb.
-- Preserve every canonical workflow gate and artifact.
+- Present every canonical choice gate through `AskUserQuestion`, preserving
+  its options, recommendation and tradeoffs.
+- Preserve every canonical workflow artifact.
 """
 
 CODEX_TEAM_CONTRACT = """# Host Contract
@@ -40,7 +42,9 @@ CODEX_TEAM_CONTRACT = """# Host Contract
 - One delivery team owns a project. Stop without mutation when workspace/config.json or Agent Marketplace-owned project agents name another team.
 - Insert `--host codex` immediately after every canonical dispatcher `run` or `path` verb.
 - During setup, run the generated `scripts/generate_codex_project.py`; it owns only this team's marked AGENTS.md block and Agent Marketplace-owned project agents.
-- Preserve every canonical workflow gate and artifact.
+- Present every canonical choice gate through `request_user_input`, preserving
+  its options, recommendation and tradeoffs.
+- Preserve every canonical workflow artifact.
 """
 
 CLAUDE_TEAM_HOOKS = {

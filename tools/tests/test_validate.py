@@ -115,7 +115,10 @@ class ValidatorFixtureTests(unittest.TestCase):
                              " `codex plugin add project-management-office@agent-marketplace`,"
                              " enable it in Plugins when disabled, then inspect `/hooks`.")
                           + " No files or project state were changed."
-                          " One delivery team owns a project."
+                          + (" Present choice gates with AskUserQuestion."
+                             if host == "claude" else
+                             " Present choice gates with request_user_input.")
+                          + " One delivery team owns a project."
                           + ("" if host == "claude" else
                              " Setup runs `generate_codex_project.py`.")
                           + "\n"

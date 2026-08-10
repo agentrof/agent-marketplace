@@ -105,9 +105,10 @@ Routes:
 6. Never enter plan mode; the flow is the plan. Codex stops without writes
    and requests Code/Default mode when Plan mode is active.
 
-Claude gates use AskUserQuestion. Codex gates end the turn with one concise
-question carrying the same options and resume from PMO/workspace state after
-the answer. This is UI adaptation, not a process fork.
+Claude gates use AskUserQuestion. Codex gates use request_user_input at the
+same canonical sites. Both preserve options, recommendation and tradeoffs;
+neither adapter turns ordinary dialogue into a popup sequence. This is UI
+adaptation, not a process fork.
 
 ## Operations backbone (the project-management-office plugin)
 
@@ -238,7 +239,8 @@ denies edits to those paths; the rest of the space stays open for
 parallel analysis, and the configure entry still refuses config edits
 that would fork the running spec.
 
-The order directory (workspace/work-orders/<key>/, gitignored) holds
+The order directory
+(`.agentrof/agent-marketplace/.runtime/work-orders/<key>/`, gitignored) holds
 ONLY the snapshots init copies there (the constitution, the analysis
 space as brief-snapshot/, the config snapshot) plus the freeze
 manifest; the work order reads the snapshots for its

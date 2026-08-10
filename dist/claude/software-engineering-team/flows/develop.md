@@ -53,7 +53,8 @@ per worktree; one per story; ownership path prefixes disjoint across the
 project's active work orders. A refused init means resume the holder
 (resume-info names it), never archive it blind.
 
-The order directory workspace/work-orders/<key>/ (gitignored) holds ONLY
+The order directory `.agentrof/agent-marketplace/.runtime/work-orders/<key>/`
+in the owning worktree (gitignored) holds ONLY
 the snapshots init copied there (constitution.md, brief-snapshot/ with
 the whole analysis space, config.snapshot.json) plus the freeze manifest
 step 0 writes (freeze.json; a guard denies edits to its listed paths
@@ -136,7 +137,7 @@ still read the artifact for semantic sanity before presenting any gate.
 - Initialize the work order: work-order init --project-key <key>
   --work-order-key <id> --request "<request>" --worktree <git root>
   --story <WP-##> --bindings '<json>'
-  --order-dir workspace/work-orders/<key>
+  --order-dir .agentrof/agent-marketplace/.runtime/work-orders/<key>
   --constitution "$("$RUN" path "$TEAM" constitution.md)"
   --brief workspace/docs/business-analysis/<slug> --config
   workspace/config.json. It claims the worktree and the story, marks the
@@ -154,7 +155,8 @@ still read the artifact for semantic sanity before presenting any gate.
   database skill in the databases set, planner to the planning
   skill, analyst to the requirements-analysis skill, reviewer to the
   review skill, verifier to the verification skill.
-- Ensure workspace/work-orders/ is gitignored; append the rule if absent.
+- Ensure `.agentrof/agent-marketplace/.runtime/` is covered by the managed
+  gitignore block; never append an unmanaged duplicate rule.
 - Create the work branch for this story from the main line, named
   wp-<nn>-<kebab-slug> (atomic route: atomic-<kebab-slug>).
 

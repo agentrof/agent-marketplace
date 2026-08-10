@@ -199,6 +199,7 @@ def make_valid_root(root: Path) -> None:
           " `/plugin install project-management-office@agent-marketplace`"
           " or `/plugin enable project-management-office@agent-marketplace`."
           " No files or project state were changed.\n"
+          "- Present choice gates with AskUserQuestion.\n"
           "- One delivery team owns a project.\n")
     codex_manifest = {
         **{key: value for key, value in claude_manifest.items()
@@ -223,6 +224,7 @@ def make_valid_root(root: Path) -> None:
           " `codex plugin add project-management-office@agent-marketplace`,"
           " enable it in Plugins when disabled, then inspect `/hooks`."
           " No files or project state were changed.\n"
+          "- Present choice gates with request_user_input.\n"
           "- One delivery team owns a project; setup runs"
           " `generate_codex_project.py`.\n")
     write(root / ".agents" / "plugins" / "marketplace.json", json.dumps({

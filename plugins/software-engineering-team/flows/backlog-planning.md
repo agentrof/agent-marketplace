@@ -15,7 +15,12 @@ Freeze approved BA revisions and hashes, solution and budget decisions, exact ex
 
 ## 1. Product Owner draft
 
-Spawn `product-owner` with `product-planning`. Produce one JSON plan under `workspace/planning/` containing program and releases, epics and stories, qualified criteria, delivery owner/support mappings, solution/budget/exact UX refs, dependency DAG, SHARES, structured DoR/DoD, deferral metadata and release allocation.
+Spawn `product-owner` with `product-planning`. Lazily create
+`.agentrof/agent-marketplace/.runtime/plan/` in the current git root and
+produce one `<plan-key>.json` there containing program and releases, epics and
+stories, qualified criteria, delivery owner/support mappings,
+solution/budget/exact UX refs, dependency DAG, SHARES, structured DoR/DoD,
+deferral metadata and release allocation.
 
 Feature mode may include only feature stories plus user-approved unfinished transitive prerequisites. Preserve active and completed story contracts.
 

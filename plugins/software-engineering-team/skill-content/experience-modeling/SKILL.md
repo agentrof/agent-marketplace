@@ -22,6 +22,8 @@ Treat experience as a versioned graph projected from approved analysis scopes.
 - Inherit the preceding effective registry. Author only the release delta. Retire records instead of deleting them and never reference a future release revision.
 - Qualify BA criteria as `<space>:<criterion-id>` and retain the approved analysis revision and hash in scope projection notes.
 - Generate files only through `experience_compile.py`; never edit `_generated/`.
-- Keep work candidates in `workspace/experience-design-work/`. Promote only approved, network-free HTML packages with declared IDs and a registry hash.
+- Initialize HTML packages directly under the owning release node's
+  `artifacts/` directory. Edit only draft packages; approve network-free HTML
+  in place with declared IDs and the effective registry hash.
 - Enforce schema and limits from `data/experience-schema.json`. Overrides require the configure gate.
 - Mechanical findings cannot be waived. Semantic findings need fix or reasoned rejection within three review rounds.

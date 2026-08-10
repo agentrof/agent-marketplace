@@ -48,11 +48,11 @@ produces lives under `{{workspace}}/`:
   command brings the whole system up.
 - `{{workspace}}/demos/` and `{{workspace}}/sketches/`: outward demo packages and
   design exploration previews.
-- `{{workspace}}/experience-design-work/` and `{{workspace}}/planning/`:
-  gitignored candidate and plan-draft areas. Approved experience lives only
-  under docs; durable backlog state lives only in PMO.
-- `{{workspace}}/work-orders/`: work-order snapshots (brief, config,
-  constitution); gitignored. Delivery state (work orders, the backlog
+- `.agentrof/agent-marketplace/.runtime/plan/`: gitignored plan drafts.
+  Experience drafts and approved baselines both live under docs.
+- `.agentrof/agent-marketplace/.runtime/work-orders/`: work-order snapshots
+  (brief, config, constitution) owned by this worktree; gitignored. Delivery
+  state (work orders, the backlog
   of stories and its ordering, tasks, findings, the quality ledger)
   lives in the central PMO database, read through the PMO CLI.
 

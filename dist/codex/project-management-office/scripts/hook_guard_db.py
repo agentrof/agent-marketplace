@@ -56,6 +56,8 @@ LOCKED_RE = re.compile(r"^locked:\s*true\s*$")
 # the date itself (docs/authoring.md).
 STAMP_FIELD_PATTERNS = (
     re.compile(r"^approved_at:\s*(\d{4}-\d{2}-\d{2})", re.MULTILINE),
+    re.compile(r"^approved_at_utc:\s*(\d{4}-\d{2}-\d{2})",
+               re.MULTILINE),
     re.compile(r"^Status:\s+(?:approved|parked)\s+(\d{4}-\d{2}-\d{2})",
                re.MULTILINE),
     re.compile(r"^decided_at:\s*(\d{4}-\d{2}-\d{2})", re.MULTILINE),
@@ -211,7 +213,8 @@ def frontmatter_locked(target: Path) -> bool:
 def frozen_by_work_order(target: Path, cwd: str) -> str | None:
     """Return the work-order key freezing this path, or None.
 
-    Freeze manifests live at workspace/work-orders/<key>/freeze.json and
+    Freeze manifests live at
+    .agentrof/agent-marketplace/.runtime/work-orders/<key>/freeze.json and
     hold repo-relative paths (a JSON list, or an object with a
     'frozen_paths' list). A manifest binds only while its work order is
     active; the team flow writes it, pmo only enforces it."""
@@ -219,10 +222,8 @@ def frozen_by_work_order(target: Path, cwd: str) -> str | None:
     if resolved is None:
         return None
     project_key, project_root = resolved
-    orders_dir = (
-        Path(project_root) / hook_common.project_workspace(Path(project_root))
-        / "work-orders"
-    )
+    orders_dir = (Path(project_root) / ".agentrof" / "agent-marketplace"
+                  / ".runtime" / "work-orders")
     if not orders_dir.is_dir():
         return None
     manifests = sorted(orders_dir.glob("*/freeze.json"))

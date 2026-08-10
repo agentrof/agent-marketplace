@@ -959,6 +959,7 @@ def check_team_pmo_contract(tree: Tree, findings: list[Finding]) -> None:
             PMO_READY,
             "team_guard.py",
             "One delivery team",
+            "AskUserQuestion",
             "claude plugin list --json",
             "/plugin install project-management-office@agent-marketplace",
             "/plugin enable project-management-office@agent-marketplace",
@@ -972,6 +973,7 @@ def check_team_pmo_contract(tree: Tree, findings: list[Finding]) -> None:
             PMO_READY,
             "team_guard.py",
             "One delivery team",
+            "request_user_input",
             "generate_codex_project.py",
             "codex plugin list --json",
             "codex plugin add project-management-office@agent-marketplace",
@@ -1122,6 +1124,18 @@ def check_choice_gate(tree: Tree, findings: list[Finding]) -> None:
                     "decision gates use the host-neutral choice-gate contract;"
                     " state it at the gate site",
                 ))
+    for host, token in (
+        ("claude", "AskUserQuestion"),
+        ("codex", "request_user_input"),
+    ):
+        contract = (tree.root / "platforms" / host
+                    / PMO_PLUGIN / "host-contract.md")
+        if contract.is_file() and token not in read_text(contract):
+            findings.append(Finding(
+                "error", rel(tree, contract), 1, "choice_gate",
+                f"{host} PMO host contract lacks {token}",
+                "map the canonical gate to the host-native input tool",
+            ))
 
 
 # Fallback for runtimes that predate sys.stdlib_module_names.

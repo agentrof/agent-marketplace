@@ -86,8 +86,22 @@ class UpgradeLifecycleTests(unittest.TestCase):
         }, indent=2) + "\n", encoding="utf-8")
         (self.project / "user-code.txt").write_text("user-owned\n", encoding="utf-8")
         (self.project / ".gitignore").write_text(
-            "custom-user-rule/\nworkspace/work-orders/\n", encoding="utf-8"
+            "custom-user-rule/\nworkspace/work-orders/\n"
+            "workspace/planning/\nworkspace/experience-design-work/\n"
+            "workspace/design-system-work/\n",
+            encoding="utf-8",
         )
+        (workspace / "planning").mkdir()
+        (workspace / "planning" / "baseline.json").write_text(
+            '{"mode":"baseline"}\n', encoding="utf-8"
+        )
+        legacy_order = workspace / "work-orders" / "legacy-order"
+        legacy_order.mkdir(parents=True)
+        (legacy_order / "config.snapshot.json").write_text(
+            "{}\n", encoding="utf-8"
+        )
+        (workspace / "experience-design-work").mkdir()
+        (workspace / "design-system-work").mkdir()
         run(["git", "add", "."], cwd=self.project)
         result = run(["git", "commit", "-qm", "baseline"], cwd=self.project)
         self.assertEqual(result.returncode, 0, result.stderr)
@@ -238,7 +252,7 @@ class UpgradeLifecycleTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(status["status"], "AGENT_MARKETPLACE_UPGRADE_REQUIRED_READY")
         self.assertIn("DATABASE_SCHEMA:3->5", status["reasons"])
-        self.assertIn("PROJECT_CONTRACT:unversioned->3", status["reasons"])
+        self.assertIn("PROJECT_CONTRACT:unversioned->4", status["reasons"])
 
         planned = self.cli(
             "upgrade", "plan", "--project-root", str(self.project)
@@ -269,15 +283,30 @@ class UpgradeLifecycleTests(unittest.TestCase):
         self.assertNotIn("managed_by", config)
         ignore = (self.project / ".gitignore").read_text(encoding="utf-8")
         self.assertIn("custom-user-rule/", ignore)
-        self.assertGreaterEqual(ignore.count("workspace/work-orders/"), 2)
+        for legacy_rule in (
+            "workspace/work-orders/", "workspace/planning/",
+            "workspace/design-system-work/",
+            "workspace/experience-design-work/",
+        ):
+            self.assertNotIn(legacy_rule, ignore)
         self.assertIn("agent-marketplace:software-engineering-team:gitignore:start", ignore)
-        self.assertIn("workspace/experience-design-work/", ignore)
-        self.assertIn("workspace/design-system-work/", ignore)
+        self.assertIn(".agentrof/agent-marketplace/.runtime/", ignore)
+        runtime = (self.project / ".agentrof" / "agent-marketplace"
+                   / ".runtime")
+        self.assertTrue((runtime / "plan" / "baseline.json").is_file())
+        self.assertTrue((runtime / "work-orders" / "legacy-order"
+                         / "config.snapshot.json").is_file())
+        self.assertFalse((self.project / "workspace" / "planning").exists())
+        self.assertFalse((self.project / "workspace" / "work-orders").exists())
+        self.assertFalse((self.project / "workspace"
+                          / "experience-design-work").exists())
+        self.assertFalse((self.project / "workspace"
+                          / "design-system-work").exists())
         state = json.loads((
             self.project / ".agentrof" / "agent-marketplace" / "project.json"
         ).read_text(encoding="utf-8"))
         self.assertEqual(state["hosts"], ["claude", "codex"])
-        self.assertEqual(state["contract_version"], 3)
+        self.assertEqual(state["contract_version"], 4)
         self.assertEqual(state["vault"]["policy_version"], 5)
         self.assertEqual(set(state["components"]), {
             "project-management-office", TEAM,
@@ -413,6 +442,42 @@ class UpgradeLifecycleTests(unittest.TestCase):
         )
         self.assertEqual(planned.returncode, 1)
         self.assertFalse((self.project / ".agentrof" / "agent-marketplace" / "project.json").exists())
+
+    def test_nonempty_legacy_design_runtime_blocks_upgrade(self):
+        legacy = self.project / "workspace" / "design-system-work"
+        (legacy / "candidate.html").write_text(
+            "<html></html>\n", encoding="utf-8"
+        )
+        result, status = self.status()
+        self.assertEqual(result.returncode, 1)
+        self.assertIn(
+            "LEGACY_TRANSIENT_CONTENT:workspace/design-system-work",
+            status["blockers"],
+        )
+
+    def test_runtime_collision_and_symlink_block_upgrade(self):
+        target = (self.project / ".agentrof" / "agent-marketplace"
+                  / ".runtime" / "plan")
+        target.mkdir(parents=True)
+        (target / "other.json").write_text("{}\n", encoding="utf-8")
+        _result, status = self.status()
+        self.assertTrue(any(
+            value.startswith("RUNTIME_MIGRATION_COLLISION:")
+            for value in status["blockers"]
+        ))
+        target_file = target / "other.json"
+        target_file.unlink()
+        target.rmdir()
+        legacy = self.project / "workspace" / "experience-design-work"
+        legacy.rmdir()
+        symlink_target = self.project / "legacy-experience-target"
+        symlink_target.mkdir()
+        legacy.symlink_to(symlink_target, target_is_directory=True)
+        _result, status = self.status()
+        self.assertIn(
+            "SYMLINKED_RUNTIME_TARGET:workspace/experience-design-work",
+            status["blockers"],
+        )
 
     def test_database_upgrade_blocks_active_work_in_another_project(self):
         con = sqlite3.connect(self.home / "pmo.db")
@@ -662,6 +727,10 @@ class UpgradeLifecycleTests(unittest.TestCase):
             self.home / "upgrades" / run_id / "journal.json"
         ).read_text())
         self.assertEqual(journal["phase"], "recovery_required")
+        self.assertTrue((self.project / "workspace" / "planning"
+                         / "baseline.json").is_file())
+        self.assertFalse((self.project / ".agentrof" / "agent-marketplace"
+                          / ".runtime" / "plan").exists())
         recovered = UPGRADE.recover(
             self.home, self.home / "pmo.db", 5, run_id
         )
@@ -669,6 +738,8 @@ class UpgradeLifecycleTests(unittest.TestCase):
             recovered["status"], "AGENT_MARKETPLACE_UPGRADE_COMPLETE_RESTART_REQUIRED"
         )
         self.assertFalse((self.home / "maintenance.json").exists())
+        self.assertTrue((self.project / ".agentrof" / "agent-marketplace"
+                         / ".runtime" / "plan" / "baseline.json").is_file())
         self.assertEqual(
             (self.project / "user-code.txt").read_text(encoding="utf-8"),
             "user-owned\n",

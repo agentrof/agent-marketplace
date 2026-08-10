@@ -2892,6 +2892,9 @@ def cmd_now(args) -> int:
     full = now()
     if args.date:
         print(full[:10])
+    elif args.compact_time:
+        parsed = datetime.fromisoformat(full)
+        print(parsed.astimezone(timezone.utc).strftime("%Y%m%dT%H%M%SZ"))
     elif args.compact:
         print(full[:10].replace("-", ""))
     else:
@@ -3671,6 +3674,7 @@ def build_parser() -> argparse.ArgumentParser:
     group = p.add_mutually_exclusive_group()
     group.add_argument("--date", action="store_true")
     group.add_argument("--compact", action="store_true")
+    group.add_argument("--compact-time", action="store_true")
     p.set_defaults(func=cmd_now)
 
     p = sub.add_parser("sync-launcher")

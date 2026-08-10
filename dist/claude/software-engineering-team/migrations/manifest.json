@@ -4,7 +4,7 @@
   "database": null,
   "project_contract": {
     "baseline": 1,
-    "current": 3,
+    "current": 4,
     "steps": [
       {
         "id": "software-engineering-team.project-contract.1-2",
@@ -19,6 +19,13 @@
         "to": 3,
         "checksum": "sha256:06139274ba0f75354876621b6b00da9b4d7acf4c2e985a1a85c84c7d8b3ac8f6",
         "runner": "migrations/project/2-3.py"
+      },
+      {
+        "id": "software-engineering-team.project-contract.3-4",
+        "from": 3,
+        "to": 4,
+        "checksum": "sha256:46d5eb29319f7c8a476d23edf064dea1d4b0a644f2f9adb8b746adda03262b81",
+        "runner": "migrations/project/3-4.py"
       }
     ]
   }

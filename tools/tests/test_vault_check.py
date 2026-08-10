@@ -569,7 +569,7 @@ TOLERATED = {
 class ValidVaultTests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
-        self.root = Path(self.tmp.name) / "docs"
+        self.root = Path(self.tmp.name) / "project" / "workspace" / "docs"
         make_valid_vault(self.root)
 
     def tearDown(self):
@@ -718,7 +718,7 @@ class BuilderFixtureTests(unittest.TestCase):
 class VerbTests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
-        self.root = Path(self.tmp.name) / "docs"
+        self.root = Path(self.tmp.name) / "project" / "workspace" / "docs"
         make_valid_vault(self.root)
 
     def tearDown(self):
@@ -878,7 +878,7 @@ def make_nonconforming_names(root: Path) -> None:
 class RenameVerbTests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
-        self.root = Path(self.tmp.name) / "docs"
+        self.root = Path(self.tmp.name) / "project" / "workspace" / "docs"
         make_valid_vault(self.root)
 
     def tearDown(self):
@@ -1001,7 +1001,8 @@ class RenameVerbTests(unittest.TestCase):
 
     def test_rename_vetoes_frozen_referrer(self):
         make_nonconforming_names(self.root)
-        write(self.root.parent / "work-orders" / "wo-7" / "freeze.json",
+        write(self.root.parent.parent / ".agentrof" / "agent-marketplace"
+              / ".runtime" / "work-orders" / "wo-7" / "freeze.json",
               json.dumps({"frozen_paths":
                           ["workspace/docs/maps/business-analysis.md"]}))
         code, out, err = run(["migrate", "--vault", str(self.root),
@@ -1031,10 +1032,12 @@ See [the landscape](../landscape.md).
 """ + NAV.format(peers=(
             "[[solution-design/landscape|Landscape]] -\n"
             "[[solution-design/decisions/order-events-decision|SD-001]]")))
-        write(self.root.parent / "work-orders" / "wo-9" / "freeze.json",
+        write(self.root.parent.parent / ".agentrof" / "agent-marketplace"
+              / ".runtime" / "work-orders" / "wo-9" / "freeze.json",
               json.dumps({"frozen_paths":
                           ["workspace/docs/solution-design/scratch.md"]}))
-        edit(self.root.parent / "work-orders" / "wo-9" / "freeze.json",
+        edit(self.root.parent.parent / ".agentrof" / "agent-marketplace"
+             / ".runtime" / "work-orders" / "wo-9" / "freeze.json",
              "workspace/docs/solution-design/scratch.md",
              "workspace/docs/solution-design/engagements/scratch.md")
         before = scratch.read_bytes()
@@ -1417,7 +1420,7 @@ class DesignationCheckTests(unittest.TestCase):
 
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
-        self.root = Path(self.tmp.name) / "docs"
+        self.root = Path(self.tmp.name) / "project" / "workspace" / "docs"
         make_valid_vault(self.root)
 
     def tearDown(self):
@@ -1603,7 +1606,7 @@ class DesignationDriftTests(unittest.TestCase):
 
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
-        self.root = Path(self.tmp.name) / "docs"
+        self.root = Path(self.tmp.name) / "project" / "workspace" / "docs"
         make_valid_vault(self.root)
 
     def tearDown(self):
@@ -2058,7 +2061,7 @@ class ProjectLimitsVaultTests(unittest.TestCase):
 
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
-        self.root = Path(self.tmp.name) / "docs"
+        self.root = Path(self.tmp.name) / "project" / "workspace" / "docs"
         make_valid_vault(self.root)
 
     def tearDown(self):

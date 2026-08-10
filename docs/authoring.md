@@ -278,8 +278,10 @@ by omission.
   target ships.
 - Every decision gate names the host-neutral choice gate at the gate site
   (`choice_gate`).
-- The Codex host contract maps that gate to one concise, option-preserving
-  turn-ending question. Mutating flows refuse Plan mode. Claude uses named
+- The Codex host contract maps that gate to `request_user_input`, preserving
+  options, recommendation and tradeoffs; Claude maps it to
+  `AskUserQuestion`. No custom popup state machine exists. Mutating flows
+  refuse Plan mode. Claude uses named
   plugin agents; Codex uses the setup-generated project agents, launches
   independent read-only work together, and waits for all results.
 - Hook write normalization covers Claude Write/Edit and Codex `apply_patch`

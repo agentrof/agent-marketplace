@@ -787,13 +787,13 @@ def check_registration(tree: Tree, findings: list[Finding]) -> None:
                 f"plugin directory '{plugin.name}' is not registered in marketplace.json",
                 "add a plugins[] entry with source ./dist/claude/" + plugin.name,
             ))
-        expected = release_tool.stable_source("claude", plugin.name)
+        expected = release_tool.channel_source("claude", plugin.name)
         if plugin.name in registered and registered.get(plugin.name) != expected:
             findings.append(Finding(
                 "error", rel(tree, tree.marketplace), 1, "registration",
                 f"plugin '{plugin.name}' Claude source is"
-                f" {registered.get(plugin.name)!r}, expected the stable git-subdir source",
-                "point the Claude marketplace at dist/claude on the stable branch",
+                f" {registered.get(plugin.name)!r}, expected the channel-relative source",
+                "point the Claude marketplace at its local dist/claude package",
             ))
         for host in ("claude", "codex"):
             manifest = tree.root / "platforms" / host / plugin.name / "manifest.json"
@@ -843,11 +843,11 @@ def check_distribution_packaging(tree: Tree, findings: list[Finding]) -> None:
                   "add a policy-complete Codex marketplace entry")
             continue
         source = entry.get("source")
-        expected_source = release_tool.stable_source("codex", plugin.name)
+        expected_source = release_tool.channel_source("codex", plugin.name)
         if source != expected_source:
             error(tree.codex_marketplace,
-                  f"{plugin.name} Codex source does not target the stable distribution",
-                  "point the Codex marketplace at dist/codex on the stable branch")
+                  f"{plugin.name} Codex source escapes the selected marketplace channel",
+                  "point the Codex marketplace at its local dist/codex package")
         policy = entry.get("policy") or {}
         expected_install = (
             "INSTALLED_BY_DEFAULT"
@@ -1545,7 +1545,7 @@ def check_version_sync(tree: Tree, findings: list[Finding]) -> None:
     """One canonical plugin version drives both hosts and runtime output."""
     problems = [
         problem for problem in release_tool.validate_version_surfaces(tree.root)
-        if "marketplace source must target stable" not in problem
+        if "marketplace source must stay inside the selected channel" not in problem
     ]
     for problem in problems:
         findings.append(Finding(

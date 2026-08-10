@@ -324,13 +324,11 @@ def make_valid_root(root: Path) -> None:
     build_distributions.replace_generated(root, root / "dist")
 
 
-def build_distributions_source(host: str, plugin: str) -> dict:
-    return {
-        "source": "git-subdir",
-        "url": "https://github.com/agentrof/agent-marketplace.git",
-        "path": f"dist/{host}/{plugin}",
-        "ref": "stable",
-    }
+def build_distributions_source(host: str, plugin: str) -> str | dict:
+    path = f"./dist/{host}/{plugin}"
+    if host == "claude":
+        return path
+    return {"source": "local", "path": path}
 
 
 def write_path(path: Path) -> Path:
@@ -421,7 +419,7 @@ Field notes knowledge.
 def break_registration(root: Path) -> None:
     marketplace_path = root / ".claude-plugin" / "marketplace.json"
     marketplace = json.loads(marketplace_path.read_text(encoding="utf-8"))
-    marketplace["plugins"][0]["source"]["path"] = "./dist/claude/missing-team"
+    marketplace["plugins"][0]["source"] = "./dist/claude/missing-team"
     write(marketplace_path, json.dumps(marketplace, indent=2))
 
 

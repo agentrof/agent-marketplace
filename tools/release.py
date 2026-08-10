@@ -19,8 +19,8 @@ MARKETPLACE_COMPONENT = "agent-marketplace"
 IMPACTS = {"patch": 1, "minor": 2, "major": 3}
 SEMVER_RE = re.compile(r"^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$")
 CHANGESET_NAME_RE = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*\.json$")
-REPOSITORY_URL = "https://github.com/agentrof/agent-marketplace.git"
 PMO = "project-management-office"
+BOOTSTRAP_VERSION = "0.0.1"
 
 
 class ReleaseError(RuntimeError):
@@ -157,13 +157,18 @@ def release_plan(versions: dict, changesets: list[Changeset]) -> dict:
     }
 
 
-def stable_source(host: str, plugin: str) -> dict:
-    return {
-        "source": "git-subdir",
-        "url": REPOSITORY_URL,
-        "path": f"dist/{host}/{plugin}",
-        "ref": "stable",
-    }
+def channel_source(host: str, plugin: str) -> str | dict:
+    """Resolve a plugin inside the selected marketplace checkout.
+
+    The marketplace ref is the release-channel boundary. Relative sources keep
+    catalog and package content on that same ref for main, stable, and tags.
+    """
+    path = f"./dist/{host}/{plugin}"
+    if host == "claude":
+        return path
+    if host == "codex":
+        return {"source": "local", "path": path}
+    raise ReleaseError(f"unknown marketplace host: {host!r}")
 
 
 def sync_version_surfaces(root: Path, versions: dict) -> None:
@@ -175,7 +180,7 @@ def sync_version_surfaces(root: Path, versions: dict) -> None:
         raise ReleaseError("Claude marketplace plugin registry differs from versions.json")
     for plugin, version in versions["plugins"].items():
         entries[plugin]["version"] = version
-        entries[plugin]["source"] = stable_source("claude", plugin)
+        entries[plugin]["source"] = channel_source("claude", plugin)
         for host in ("claude", "codex"):
             manifest_path = root / "platforms" / host / plugin / "manifest.json"
             manifest = read_json(manifest_path)
@@ -191,7 +196,7 @@ def sync_version_surfaces(root: Path, versions: dict) -> None:
     if set(codex_entries) != set(versions["plugins"]):
         raise ReleaseError("Codex marketplace plugin registry differs from versions.json")
     for plugin in versions["plugins"]:
-        codex_entries[plugin]["source"] = stable_source("codex", plugin)
+        codex_entries[plugin]["source"] = channel_source("codex", plugin)
     write_json(codex_path, codex)
 
     pmo_path = root / "plugins" / PMO / "scripts" / "pmo_cli.py"
@@ -252,9 +257,11 @@ def validate_version_surfaces(root: Path) -> list[str]:
             ("claude", entry.get("source")),
             ("codex", codex_entries.get(plugin, {}).get("source")),
         ):
-            expected_source = stable_source(host, plugin)
+            expected_source = channel_source(host, plugin)
             if source != expected_source:
-                problems.append(f"{plugin} {host} marketplace source must target stable")
+                problems.append(
+                    f"{plugin} {host} marketplace source must stay inside the selected channel"
+                )
     pmo_path = root / "plugins" / PMO / "scripts" / "pmo_cli.py"
     if pmo_path.is_file():
         match = re.search(r'^PMO_VERSION = "([^"]+)"$', pmo_path.read_text(encoding="utf-8"), re.MULTILINE)
@@ -314,16 +321,31 @@ def check_pr_changeset(root: Path, base: str, allow_bootstrap: bool = False) -> 
             required.add(parts[2])
         if path in {".claude-plugin/marketplace.json", ".agents/plugins/marketplace.json"}:
             required.add(MARKETPLACE_COMPONENT)
+    version_is_bootstrap = (
+        versions["marketplace"] == BOOTSTRAP_VERSION
+        and all(
+            value == BOOTSTRAP_VERSION
+            for value in versions["plugins"].values()
+        )
+    )
+    version_registry_is_bootstrapped = any(
+        status in {"A", "M"} and path == "versions.json"
+        for status, path in changed
+    )
     bootstrap = (
         allow_bootstrap
-        and ("A", "versions.json") in changed
-        and versions["marketplace"] == "0.0.1"
-        and all(value == "0.0.1" for value in versions["plugins"].values())
+        and version_registry_is_bootstrapped
+        and version_is_bootstrap
     )
     protected = {
         path for status, path in changed
         if path in {"versions.json", "CHANGELOG.md", ".release/stable.json"}
-        and not (bootstrap and path in {"versions.json", "CHANGELOG.md"})
+        and not (
+            bootstrap
+            and path in {
+                "versions.json", "CHANGELOG.md", ".release/stable.json"
+            }
+        )
     }
     changed_existing_changesets = {
         path for status, path in changed
@@ -414,10 +436,17 @@ def verify_bootstrap(root: Path) -> dict:
     if problems:
         raise ReleaseError("; ".join(problems))
     versions = load_versions(root)
-    if versions["marketplace"] != "0.0.1" or any(
-        value != "0.0.1" for value in versions["plugins"].values()
+    if versions["marketplace"] != BOOTSTRAP_VERSION or any(
+        value != BOOTSTRAP_VERSION
+        for value in versions["plugins"].values()
     ):
-        raise ReleaseError("the first stable release must use 0.0.1 everywhere")
+        raise ReleaseError(
+            f"the first stable release must use {BOOTSTRAP_VERSION} everywhere"
+        )
+    if (root / ".release" / "stable.json").exists():
+        raise ReleaseError(
+            "the first stable release cannot carry prior stable provenance"
+        )
     return versions
 
 
@@ -427,7 +456,7 @@ def release_notes(root: Path, version: str) -> str:
         metadata = read_json(metadata_path)
         if metadata.get("version") == version:
             return "\n".join(f"- {item}" for item in metadata.get("summaries", [])) + "\n"
-    if version == "0.0.1":
+    if version == BOOTSTRAP_VERSION:
         return "- Establish the first stable Agent Marketplace baseline for Claude and Codex.\n"
     raise ReleaseError(f"release notes unavailable for {version}")
 

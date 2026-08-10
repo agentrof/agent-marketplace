@@ -127,6 +127,11 @@ the dependency contract.
    next entry. An approved backlog is applied atomically but does not activate
    delivery. Existing-project features reuse the same stages in scoped mode and
    execute only the approved feature set and owner-approved prerequisites.
+17. **Marketplace channels are closed snapshots.** A marketplace ref resolves
+   its catalog and both host packages from the same checkout through relative
+   sources. `main` is an explicit development preview, `stable` is the moving
+   released channel, and a `vX.Y.Z` tag is immutable. Public install and smoke
+   paths pin `stable`; a catalog may never redirect packages to another channel.
 
 ## Repository layout
 

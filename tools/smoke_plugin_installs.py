@@ -18,7 +18,10 @@ from pathlib import Path
 
 PMO = "project-management-office"
 MARKETPLACE = "agent-marketplace"
-PUBLIC_MARKETPLACE = "agentrof/agent-marketplace"
+PUBLIC_MARKETPLACES = {
+    "claude": "https://github.com/agentrof/agent-marketplace.git#stable",
+    "codex": "agentrof/agent-marketplace@stable",
+}
 
 
 class SmokeFailure(RuntimeError):
@@ -423,7 +426,7 @@ def smoke_codex(
             run([
                 "codex", "plugin", "add", f"{team}@{MARKETPLACE}", "--json",
             ], env)
-            if marketplace_source == PUBLIC_MARKETPLACE:
+            if marketplace_source == PUBLIC_MARKETPLACES["codex"]:
                 run([
                     "codex", "plugin", "marketplace", "upgrade",
                     MARKETPLACE, "--json",
@@ -507,7 +510,7 @@ def smoke_codex(
 
 
 def checkout_marketplace(root: Path, target: Path) -> Path:
-    """Create a local-only catalog that installs the current generated dist."""
+    """Copy one channel-closed marketplace snapshot for local host tests."""
     shutil.copytree(root / "dist", target / "dist")
     for package in sorted((target / "dist" / "claude").iterdir()):
         if not package.is_dir():
@@ -518,25 +521,8 @@ def checkout_marketplace(root: Path, target: Path) -> Path:
             json.dumps({"pid": 4242, "procStart": "release-check fixture"}),
             encoding="utf-8",
         )
-    claude = json.loads((root / ".claude-plugin" / "marketplace.json").read_text(
-        encoding="utf-8"
-    ))
-    for entry in claude.get("plugins", []):
-        entry["source"] = f"./dist/claude/{entry['name']}"
-    claude_path = target / ".claude-plugin" / "marketplace.json"
-    claude_path.parent.mkdir(parents=True)
-    claude_path.write_text(json.dumps(claude, indent=2) + "\n", encoding="utf-8")
-    codex = json.loads((root / ".agents" / "plugins" / "marketplace.json").read_text(
-        encoding="utf-8"
-    ))
-    for entry in codex.get("plugins", []):
-        entry["source"] = {
-            "source": "local",
-            "path": f"./dist/codex/{entry['name']}",
-        }
-    codex_path = target / ".agents" / "plugins" / "marketplace.json"
-    codex_path.parent.mkdir(parents=True)
-    codex_path.write_text(json.dumps(codex, indent=2) + "\n", encoding="utf-8")
+    shutil.copytree(root / ".claude-plugin", target / ".claude-plugin")
+    shutil.copytree(root / ".agents", target / ".agents")
     return target
 
 
@@ -554,11 +540,10 @@ def main() -> int:
     if not teams:
         raise SmokeFailure("marketplace contains no team plugins")
     if args.channel == "public":
-        source: str | Path = PUBLIC_MARKETPLACE
         if args.host in ("all", "claude"):
-            smoke_claude(root, teams, source)
+            smoke_claude(root, teams, PUBLIC_MARKETPLACES["claude"])
         if args.host in ("all", "codex"):
-            smoke_codex(root, teams, source)
+            smoke_codex(root, teams, PUBLIC_MARKETPLACES["codex"])
     else:
         with tempfile.TemporaryDirectory(prefix="agent-marketplace-checkout.") as tmp:
             source = checkout_marketplace(root, Path(tmp))

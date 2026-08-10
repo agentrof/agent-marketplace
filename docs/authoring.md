@@ -321,7 +321,9 @@ includes deterministic simulations of the complete Claude and Codex lifecycle.
 `make release-check` adds real-host lifecycle tests against the current checkout
 packages. `make public-release-check` runs the same lifecycle through the public
 stable channel. The `release-hosts` workflow repeats the public gate weekly and
-on explicit maintainer dispatch against current host CLIs.
+on explicit maintainer dispatch against current host CLIs. Official workflow
+actions use the repository's enforced Node.js 24 runtime set; release jobs also
+disable package-manager caching because they install only global host CLIs.
 
 Validator fixture lockstep is the minimum, not the whole test contract.
 Cross-host packaging and PMO dependency branches use named adversarial cases.

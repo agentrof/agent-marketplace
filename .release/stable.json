@@ -1,16 +1,14 @@
 {
   "schema_version": 1,
-  "version": "0.1.0",
-  "stable_base": "e80d24753f49910a78e302a40b5d08e4a10b5dcb",
-  "main_source": "0627755d8e5c2694da576813418cd1ca7c5e8206",
+  "version": "0.1.1",
+  "stable_base": "06a2729e02413c504760b87a35d88b703fd7dd58",
+  "main_source": "cd0edc6a9014f85e3f18942ba5e9375a417b3baf",
   "impacts": {
-    "agent-marketplace": "minor",
-    "project-management-office": "minor",
-    "software-engineering-team": "minor"
+    "agent-marketplace": "patch",
+    "project-management-office": "patch",
+    "software-engineering-team": "patch"
   },
   "summaries": [
-    "Add deterministically enforced greenfield preparation, release Experience Design, approved backlog planning, setup origin classification and schema-safe upgrades.",
-    "Add a cross-host upgrade protocol and separate the Agent Marketplace runtime namespace from the Agentrof vendor root.",
-    "Enforce one closed Obsidian vault with cross-subtree typed traceability, bounded inverse projections, portable gates and contract-safe adoption."
+    "Accept narrowly validated Claude runtime cache markers in package provenance and make stable release preparation resilient to organization PR policy."
   ]
 }

@@ -50,8 +50,10 @@ prerequisites. Active and completed story contracts remain frozen.
 
 - `workspace/docs/experience-design/` is tracked product knowledge organized
   by program, release and projected analysis scope.
-- `workspace/experience-design-work/` holds transient candidates.
-- `workspace/planning/` holds transient backlog plan drafts.
+- Experience Design drafts live directly under
+  `workspace/docs/experience-design/` and are approved in place.
+- `.agentrof/agent-marketplace/.runtime/plan/` holds transient backlog plan
+  drafts.
 - `workspace/sketches/` remains exploratory and never becomes a release
   baseline without explicit promotion and compiler verification.
 

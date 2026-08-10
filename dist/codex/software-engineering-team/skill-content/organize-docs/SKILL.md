@@ -34,7 +34,7 @@ judgment work happens in-session under the per-write hook; nothing here ever cha
      unresolvable PMO only skips the event pulses below and
      is named honestly as a residual at close. Freeze truth never
      depends on it: the migrate verb globs
-     workspace/work-orders/*/freeze.json mechanically before any write.
+     `.agentrof/agent-marketplace/.runtime/work-orders/*/freeze.json` mechanically before any write.
    - When the PMO resolves, read resume-info --project-key <key> --json:
      the active work orders explain the frozen docs behind any deferred
      rename when the gate is presented.

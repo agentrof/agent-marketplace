@@ -45,10 +45,11 @@ the dependency contract.
 5. **Derived counts are computed.** `tools/counts.py` injects counts into
    the single README marker block; `--check` is the CI drift gate. Numbers
    next to component nouns anywhere else fail validation.
-6. **Output scoping.** Everything a team produces lands under the consuming
-   project's workspace, anchored at its git root. Home paths, temp paths
-   and absolute paths are banned output targets; plugin directories are
-   read-only product content.
+6. **Output scoping.** Durable team outputs land under the consuming project's
+   workspace. Transient plan and work-order snapshots live only under the
+   owning checkout's `.agentrof/agent-marketplace/.runtime/`, anchored at its
+   git root and ignored. Home paths, temp paths and absolute paths are banned
+   output targets; plugin directories are read-only product content.
 7. **Files over conversation memory.** Durable knowledge exits through git
    channels: code, pull request bodies, analysis spaces with their
    compiler-generated views, living architecture documents, design

@@ -28,10 +28,11 @@ from pathlib import Path
 
 
 PROJECT_STATE_SCHEMA = 1
-PROJECT_CONTRACT_VERSION = 3
+PROJECT_CONTRACT_VERSION = 4
 REGISTRY_SCHEMA = 2
 WRITER_EPOCH = 1
 STATE_RELATIVE = Path(".agentrof") / "agent-marketplace" / "project.json"
+RUNTIME_RELATIVE = (Path(".agentrof") / "agent-marketplace" / ".runtime")
 MAINTENANCE_NAME = "maintenance.json"
 UPGRADES_DIR = "upgrades"
 LOCKS_DIR = "locks"
@@ -349,6 +350,81 @@ def active_freezes(db_file: Path, work_orders: Path) -> list[str]:
         con.close()
 
 
+def project_runtime_paths(root: Path, workspace: str) -> dict[str, Path]:
+    runtime = root / RUNTIME_RELATIVE
+    work = root / workspace
+    return {
+        "legacy_plan": work / "planning",
+        "legacy_work_orders": work / "work-orders",
+        "legacy_design": work / "design-system-work",
+        "legacy_experience": work / "experience-design-work",
+        "plan": runtime / "plan",
+        "work_orders": runtime / "work-orders",
+    }
+
+
+def runtime_migration_blockers(root: Path, workspace: str) -> list[str]:
+    paths = project_runtime_paths(root, workspace)
+    blockers: list[str] = []
+    for name, path in paths.items():
+        if path.is_symlink():
+            blockers.append(
+                "SYMLINKED_RUNTIME_TARGET:"
+                + path.relative_to(root).as_posix()
+            )
+        elif path.exists() and not path.is_dir():
+            blockers.append(
+                "RUNTIME_TARGET_NOT_DIRECTORY:" + safe_relative(root, path)
+            )
+    for source_name, target_name in (
+        ("legacy_plan", "plan"),
+        ("legacy_work_orders", "work_orders"),
+    ):
+        source, target = paths[source_name], paths[target_name]
+        if source.exists() and target.exists() \
+                and not source.is_symlink() and not target.is_symlink():
+            blockers.append(
+                "RUNTIME_MIGRATION_COLLISION:"
+                + safe_relative(root, source) + "->" + safe_relative(root, target)
+            )
+    for name in ("legacy_design", "legacy_experience"):
+        path = paths[name]
+        if path.is_dir() and not path.is_symlink() and any(path.iterdir()):
+            blockers.append(
+                "LEGACY_TRANSIENT_CONTENT:" + safe_relative(root, path)
+            )
+    return blockers
+
+
+def directory_digest(path: Path) -> str:
+    digest = hashlib.sha256()
+    if not path.exists():
+        return "absent"
+    digest.update(b"directory\0")
+    for candidate in sorted(path.rglob("*")):
+        relative = candidate.relative_to(path).as_posix()
+        digest.update(relative.encode())
+        if candidate.is_symlink():
+            digest.update(b"\0symlink\0")
+            digest.update(os.readlink(candidate).encode())
+        elif candidate.is_file():
+            digest.update(b"\0file\0")
+            digest.update(candidate.read_bytes())
+        elif candidate.is_dir():
+            digest.update(b"\0directory\0")
+    return digest.hexdigest()
+
+
+def runtime_migration_fingerprint(root: Path, workspace: str) -> str:
+    digest = hashlib.sha256()
+    for name, path in sorted(project_runtime_paths(root, workspace).items()):
+        digest.update(name.encode())
+        digest.update(b"\0")
+        digest.update(directory_digest(path).encode())
+        digest.update(b"\0")
+    return digest.hexdigest()
+
+
 def live_session_records(data_root: Path) -> list[dict]:
     result: list[dict] = []
     sessions = data_root / "sessions"
@@ -612,10 +688,7 @@ def config_owned_digest(config: dict) -> str:
 def managed_gitignore_block(workspace: str) -> str:
     return "\n".join((
         GITIGNORE_START,
-        f"{workspace}/work-orders/",
-        f"{workspace}/planning/",
-        f"{workspace}/experience-design-work/",
-        f"{workspace}/design-system-work/",
+        ".agentrof/agent-marketplace/.runtime/",
         f"{workspace}/junit-*.xml",
         f"{workspace}/docs/.obsidian/*",
         f"!{workspace}/docs/.obsidian/app.json",
@@ -667,6 +740,15 @@ def reconcile_gitignore(content: str, workspace: str) -> str:
     starts, ends = content.count(GITIGNORE_START), content.count(GITIGNORE_END)
     if starts != ends or starts > 1:
         raise UpgradeError("managed .gitignore marker is missing or duplicated")
+    legacy_rules = {
+        f"{workspace}/planning/",
+        f"{workspace}/work-orders/",
+        f"{workspace}/design-system-work/",
+        f"{workspace}/experience-design-work/",
+    }
+    content = "\n".join(
+        line for line in content.splitlines() if line.strip() not in legacy_rules
+    )
     block = managed_gitignore_block(workspace)
     if starts == 1:
         begin = content.index(GITIGNORE_START)
@@ -743,6 +825,7 @@ def project_fingerprint(
 ) -> dict:
     state_path = root / STATE_RELATIVE
     state_hash = sha256_file(state_path) if state_path.is_file() else ""
+    workspace = config_path.parent.name if config_path is not None else "workspace"
     return {
         "state_sha256": state_hash,
         "managed_surfaces": surfaces or managed_surface_hashes(root, config_path),
@@ -751,6 +834,7 @@ def project_fingerprint(
         "worktree_sha256": sha256_bytes(
             run_git(root, "status", "--porcelain=v1", "--untracked-files=all").encode()
         ),
+        "runtime_sha256": runtime_migration_fingerprint(root, workspace),
     }
 
 
@@ -928,8 +1012,14 @@ def status(
                 delivery = repository_delivery(root)
                 if not database_upgrade:
                     blockers.extend(active_database_work(db_file, project_key))
-                work_orders = root / workspace / "work-orders"
-                blockers.extend(active_freezes(db_file, work_orders))
+                runtime_paths = project_runtime_paths(root, workspace)
+                blockers.extend(active_freezes(
+                    db_file, runtime_paths["legacy_work_orders"]
+                ))
+                blockers.extend(active_freezes(
+                    db_file, runtime_paths["work_orders"]
+                ))
+                blockers.extend(runtime_migration_blockers(root, workspace))
                 if include_git:
                     blockers.extend(git_preflight(root))
                     branch = run_git(
@@ -1618,6 +1708,131 @@ def validate_recovery_surfaces(
                 )
 
 
+def migrate_project_runtime(
+    root: Path, workspace: str, plan_payload: dict,
+    journal: dict, journal_path: Path,
+) -> None:
+    blockers = runtime_migration_blockers(root, workspace)
+    if blockers:
+        raise UpgradeError("runtime migration blocked: " + ", ".join(blockers))
+    paths = project_runtime_paths(root, workspace)
+    migration = journal.get("runtime_migration")
+    if migration is None:
+        moves = []
+        for source_name, target_name in (
+            ("legacy_plan", "plan"),
+            ("legacy_work_orders", "work_orders"),
+        ):
+            source, target = paths[source_name], paths[target_name]
+            moves.append({
+                "source": safe_relative(root, source),
+                "target": safe_relative(root, target),
+                "staging": safe_relative(
+                    root, target.parent /
+                    f".{target.name}.migration-{plan_payload['plan_id']}"
+                ),
+                "source_existed": source.is_dir(),
+                "digest": directory_digest(source),
+            })
+        removed_empty = [
+            safe_relative(root, paths[name])
+            for name in ("legacy_design", "legacy_experience")
+            if paths[name].is_dir()
+        ]
+        migration = {"moves": moves, "removed_empty": removed_empty}
+        journal["runtime_migration"] = migration
+        atomic_json(journal_path, journal)
+    if not isinstance(migration, dict) \
+            or not isinstance(migration.get("moves"), list):
+        raise UpgradeError("runtime migration journal is invalid")
+
+    for entry in migration["moves"]:
+        source = root / str(entry["source"])
+        target = root / str(entry["target"])
+        expected = str(entry["digest"])
+        if not entry.get("source_existed"):
+            continue
+        staging = root / str(entry["staging"])
+        if source.is_dir() and target.is_dir():
+            if directory_digest(source) != expected \
+                    or directory_digest(target) != expected:
+                raise UpgradeError(
+                    f"runtime migration collision changed: {entry['source']}"
+                )
+            shutil.rmtree(source)
+            continue
+        if not source.exists() and target.is_dir():
+            if directory_digest(target) != expected:
+                raise UpgradeError(
+                    f"migrated runtime digest changed: {entry['target']}"
+                )
+            continue
+        if not source.is_dir() or target.exists():
+            raise UpgradeError(
+                f"runtime migration state is inconsistent: {entry['source']}"
+            )
+        target.parent.mkdir(parents=True, exist_ok=True)
+        if staging.exists():
+            if not staging.is_dir() or directory_digest(staging) != expected:
+                raise UpgradeError(
+                    f"runtime migration staging changed: {entry['target']}"
+                )
+        else:
+            shutil.copytree(source, staging)
+        if directory_digest(staging) != expected:
+            raise UpgradeError(
+                f"runtime migration copy verification failed: {entry['source']}"
+            )
+        staging.rename(target)
+        if directory_digest(target) != expected:
+            raise UpgradeError(
+                f"runtime migration rename verification failed: {entry['target']}"
+            )
+        shutil.rmtree(source)
+        atomic_json(journal_path, journal)
+
+    for relative in migration.get("removed_empty", []):
+        path = root / str(relative)
+        if path.is_dir():
+            try:
+                path.rmdir()
+            except OSError as exc:
+                raise UpgradeError(
+                    f"legacy transient directory is no longer empty: {relative}"
+                ) from exc
+
+
+def rollback_project_runtime(root: Path, journal: dict) -> None:
+    migration = journal.get("runtime_migration")
+    if not isinstance(migration, dict):
+        return
+    for entry in reversed(migration.get("moves", [])):
+        if not isinstance(entry, dict) or not entry.get("source_existed"):
+            continue
+        source = root / str(entry["source"])
+        target = root / str(entry["target"])
+        staging = root / str(entry.get("staging", ""))
+        expected = str(entry.get("digest", ""))
+        if source.is_dir() and target.is_dir():
+            if directory_digest(source) == expected \
+                    and directory_digest(target) == expected:
+                shutil.rmtree(target)
+        elif not source.exists() and target.is_dir() \
+                and directory_digest(target) == expected:
+            source.parent.mkdir(parents=True, exist_ok=True)
+            target.rename(source)
+        if staging.is_dir() and directory_digest(staging) == expected:
+            shutil.rmtree(staging)
+    for relative in migration.get("removed_empty", []):
+        (root / str(relative)).mkdir(parents=True, exist_ok=True)
+    runtime = root / RUNTIME_RELATIVE
+    for path in (runtime / "plan", runtime / "work-orders", runtime):
+        try:
+            path.rmdir()
+        except OSError:
+            pass
+
+
 def apply_project(plan_payload: dict, journal: dict, journal_path: Path) -> None:
     project_data = plan_payload.get("project", {})
     if not project_data:
@@ -1648,6 +1863,10 @@ def apply_project(plan_payload: dict, journal: dict, journal_path: Path) -> None
     journal["phase"] = "project_applying"
     atomic_json(journal_path, journal)
     try:
+        migrate_project_runtime(
+            root, project_data["workspace"], plan_payload,
+            journal, journal_path,
+        )
         config_path = root / project_data["workspace"] / "config.json"
         if config_path.read_bytes() != prepared["config"]:
             atomic_bytes(config_path, prepared["config"],
@@ -1678,6 +1897,7 @@ def apply_project(plan_payload: dict, journal: dict, journal_path: Path) -> None
                              snapshot["mode"] or 0o644)
             else:
                 path.unlink(missing_ok=True)
+        rollback_project_runtime(root, journal)
         raise
 
 

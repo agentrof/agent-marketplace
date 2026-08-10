@@ -1,0 +1,8 @@
+{
+  "summary": "Author Design System and Experience Design deliverables in place and move operational project state into a project-local runtime.",
+  "components": {
+    "agent-marketplace": "patch",
+    "project-management-office": "patch",
+    "software-engineering-team": "minor"
+  }
+}

@@ -27,6 +27,7 @@ def module(name):
 
 EXPERIENCE = module("experience_compile")
 ARTIFACT = module("experience_artifact_check")
+DESIGN_SYSTEM = module("design_system_compile")
 BACKLOG = module("backlog_compile")
 PREPARATION = module("preparation_check")
 PROJECT_CONFIG = module("project_config")
@@ -99,32 +100,30 @@ class ExperienceCompilerTests(unittest.TestCase):
         projection = self.release / "spaces" / "marketplace" / "domains" / "catalog" / "domain.md"
         self.assertTrue(projection.is_file())
         self.assertIn("analysis_hash: sha256:", projection.read_text(encoding="utf-8"))
-        projection.write_text(
-            projection.read_text(encoding="utf-8")
-            + "\n[Catalog preview](artifacts/catalog-preview.html)\n",
-            encoding="utf-8",
-        )
         code, out, err = call(EXPERIENCE, ["render", "--release-root", str(self.release)])
         self.assertEqual(code, 0, err)
         registry = json.loads((self.release / "_generated" / "effective-registry.json").read_text())
         self.assertEqual([row["id"] for row in registry["records"]], ["JRN-001", "SCR-001"])
-        candidate = self.project / "catalog-preview.html"
-        candidate.write_text(
-            '<meta name="experience-program" content="PRG-001">'
-            '<meta name="experience-release" content="REL-001">'
-            f'<meta name="experience-registry-hash" content="{registry["registry_hash"]}">'
-            '<div id="SCR-001" data-experience-id="SCR-001"></div>',
-            encoding="utf-8",
-        )
         owner = "spaces/marketplace/domains/catalog"
         code, _, err = call(EXPERIENCE, [
-            "promote-artifact", "--release-root", str(self.release),
-            "--candidate", str(candidate), "--owner", owner,
+            "init-artifact", "--release-root", str(self.release),
+            "--owner", owner,
             "--package", "catalog",
         ])
         self.assertEqual(code, 0, err)
-        self.assertEqual(call(EXPERIENCE, ["render", "--release-root", str(self.release)])[0], 0)
         artifact = self.release / owner / "artifacts" / "catalog-preview.html"
+        artifact.write_text(
+            artifact.read_text(encoding="utf-8").replace(
+                "</body>",
+                '<div id="SCR-001" data-experience-id="SCR-001"></div></body>',
+            ),
+            encoding="utf-8",
+        )
+        code, _, err = call(EXPERIENCE, [
+            "approve-artifact", "--release-root", str(self.release),
+            "--owner", owner, "--package", "catalog",
+        ])
+        self.assertEqual(code, 0, err)
         code, out, _ = call(ARTIFACT, [
             "--artifact", str(artifact), "--release-root", str(self.release),
             "--owner", owner, "--declared-id", "SCR-001", "--json",
@@ -215,6 +214,59 @@ class ExperienceCompilerTests(unittest.TestCase):
         self.assertEqual(code, 1)
         result = json.loads(out)
         self.assertTrue(any("remote" in value for value in result["findings"]))
+
+
+class DesignSystemCompilerTests(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self.tmp.name) / "workspace" / "docs" / "design-system"
+        (self.root / "pages").mkdir(parents=True)
+        (self.root / "MASTER.md").write_text(
+            "---\ntype: design_master\ntitle: Shop design master\n"
+            "status: draft\nrevision: 1\ntags:\n  - doc/design-master\n"
+            "---\n\n# Shop design master\n\nRules.\n",
+            encoding="utf-8",
+        )
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def test_approve_and_begin_revision_preserve_hash_chain(self):
+        code, _, err = call(DESIGN_SYSTEM, [
+            "approve", "--root", str(self.root),
+        ])
+        self.assertEqual(code, 0, err)
+        self.assertEqual(call(DESIGN_SYSTEM, [
+            "check", "--root", str(self.root),
+        ])[0], 0)
+        approved = DESIGN_SYSTEM.parse_frontmatter(
+            self.root / "MASTER.md"
+        )[0]
+        prior_hash = approved["baseline_hash"]
+        code, _, err = call(DESIGN_SYSTEM, [
+            "begin-revision", "--root", str(self.root),
+        ])
+        self.assertEqual(code, 0, err)
+        draft = DESIGN_SYSTEM.parse_frontmatter(self.root / "MASTER.md")[0]
+        self.assertEqual(draft["status"], "draft")
+        self.assertEqual(draft["revision"], 2)
+        self.assertEqual(draft["supersedes_hash"], prior_hash)
+        self.assertNotIn("baseline_hash", draft)
+
+    def test_approved_content_drift_fails_check(self):
+        self.assertEqual(call(DESIGN_SYSTEM, [
+            "approve", "--root", str(self.root),
+        ])[0], 0)
+        master = self.root / "MASTER.md"
+        master.write_text(
+            master.read_text(encoding="utf-8") + "Changed.\n",
+            encoding="utf-8",
+        )
+        code, out, _ = call(DESIGN_SYSTEM, [
+            "check", "--root", str(self.root),
+        ])
+        self.assertEqual(code, 1)
+        self.assertIn("baseline_hash is stale", out)
 
 
 class BacklogCompilerTests(unittest.TestCase):
@@ -326,8 +378,10 @@ class PreparationTests(unittest.TestCase):
             value["project_key"] = "shop"
             config.write_text(json.dumps(value), encoding="utf-8")
             for relative in (
-                "docs/experience-design", "experience-design-work",
-                "design-system-work", "planning", "work-orders",
+                "apps", "environment", "demos", "sketches",
+                "docs/business-analysis", "docs/solution-design",
+                "docs/system-architecture", "docs/design-system/pages",
+                "docs/experience-design",
             ):
                 (workspace / relative).mkdir(parents=True)
             payload = workspace / "docs" / ".obsidian"
@@ -340,7 +394,7 @@ class PreparationTests(unittest.TestCase):
             state = root / ".agentrof" / "agent-marketplace" / "project.json"
             state.parent.mkdir(parents=True)
             state.write_text(json.dumps({
-                "contract_version": 3,
+                "contract_version": 4,
                 "hosts": ["codex"],
                 "managed_surfaces": {"codex:AGENTS.md": "sha256:test"},
             }), encoding="utf-8")

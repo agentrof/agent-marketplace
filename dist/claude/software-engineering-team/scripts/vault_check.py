@@ -2389,8 +2389,8 @@ def cmd_activate_adoption(args, policy: dict) -> int:
         print(f"vault_check: project contract is unreadable: {exc}",
               file=sys.stderr)
         return 2
-    if state.get("contract_version") != 3:
-        print("vault_check: project contract version 3 is required",
+    if state.get("contract_version") != 4:
+        print("vault_check: project contract version 4 is required",
               file=sys.stderr)
         return 2
     workspace = str(state.get("workspace", "workspace"))
@@ -2889,10 +2889,11 @@ def apply_tags(text: str, tags: list[str]) -> str:
 def freeze_skip_set(vault_path: Path) -> set:
     """Vault-relative paths frozen by any work order. MECHANICAL and
     PMO-independent: the workspace root is derived from --vault, the
-    manifests are globbed from work-orders/, and the set is loaded
+    manifests are globbed from project runtime work-orders/, and the set is loaded
     BEFORE any write. PMO absence never voids freeze protection."""
     frozen: set = set()
-    orders = vault_path.resolve().parent / "work-orders"
+    orders = (vault_path.resolve().parent.parent / ".agentrof"
+              / "agent-marketplace" / ".runtime" / "work-orders")
     if not orders.is_dir():
         return frozen
     for manifest in sorted(orders.glob("*/freeze.json")):

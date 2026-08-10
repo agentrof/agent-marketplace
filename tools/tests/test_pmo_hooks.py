@@ -438,7 +438,8 @@ class PmoHookTests(unittest.TestCase):
         frozen = self.project_root / frozen_rel
         frozen.parent.mkdir(parents=True)
         frozen.write_text("# Core\n", encoding="utf-8")
-        orders = self.project_root / "workspace" / "work-orders" / "wo1"
+        orders = (self.project_root / ".agentrof" / "agent-marketplace"
+                  / ".runtime" / "work-orders" / "wo1")
         orders.mkdir(parents=True)
         (orders / "freeze.json").write_text(
             json.dumps({"frozen_paths": [frozen_rel]}), encoding="utf-8")
@@ -487,7 +488,8 @@ class PmoHookTests(unittest.TestCase):
         frozen = self.project_root / frozen_rel
         frozen.parent.mkdir(parents=True)
         frozen.write_text("| BR-ERP-001 |\n", encoding="utf-8")
-        orders = self.project_root / "workspace" / "work-orders"
+        orders = (self.project_root / ".agentrof" / "agent-marketplace"
+                  / ".runtime" / "work-orders")
         (orders / "wo1").mkdir(parents=True)  # wo1 is active from setUp
         (orders / "wo1" / "freeze.json").write_text(
             json.dumps({"frozen_paths": [frozen_rel]}), encoding="utf-8")

@@ -37,10 +37,7 @@ include tradeoffs. Anchor every path at the resolved git root.
 
    ```text
    # agent-marketplace:software-engineering-team:gitignore:start
-   <workspace>/work-orders/
-   <workspace>/planning/
-   <workspace>/experience-design-work/
-   <workspace>/design-system-work/
+   .agentrof/agent-marketplace/.runtime/
    <workspace>/junit-*.xml
    <workspace>/docs/.obsidian/*
    !<workspace>/docs/.obsidian/app.json
@@ -58,10 +55,11 @@ include tradeoffs. Anchor every path at the resolved git root.
 
    A missing half-marker or duplicate marker fails closed.
 5. Create only missing top-level structure: apps; environment; demos; sketches;
-   work-orders; planning; experience-design-work; design-system-work; and docs with maps,
+   and docs with maps,
    business-analysis, solution-design, system-architecture, design-system/pages
    and experience-design. Add `.gitkeep` only to empty tracked directories.
-   Work-orders, planning, experience-design-work and design-system-work are transient. Setup never
+   Setup never creates `.agentrof/agent-marketplace/.runtime/`; backlog-plan
+   and work-order flows create their own runtime paths lazily. Setup never
    creates analysis topics, experience programs or releases. The Experience
    Design map is born with its first program.
 6. Build `<workspace>/config.json` interactively. The first key is
@@ -84,7 +82,7 @@ include tradeoffs. Anchor every path at the resolved git root.
 9. Register PMO with `project register --key <key> --name <name> --team
    software-engineering-team --stamp-config <config> --project-root <root>
    --workspace <name>`. Registration stamps `project_key`, creates the project
-   UUID and project contract version 3, records the vault policy 5 active
+   UUID and project contract version 4, records the vault policy 5 active
    state, and records managed-surface hashes.
 10. Install the repository-portable gate with `vault_gate.py install
     --project-root <root>`. The resulting tracked executable is

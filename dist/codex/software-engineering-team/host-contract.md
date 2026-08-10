@@ -7,7 +7,9 @@
 - After the ready check, resolve the PMO launcher. If it is absent, stop because PMO bootstrap did not complete; never continue against a stale or partial backbone.
 - When the canonical workflow says `spawn`, use the matching project-scoped custom agent from `.codex/agents/`. Open the PMO task before spawning, wait for every required agent, then close the PMO task after validating its output.
 - Dispatch independent roles in parallel and wait for all of them before synthesis. Never allow parallel writers to edit overlapping files.
-- When the canonical workflow reaches a choice gate, end the current turn with one concise question and the same options. Resume from PMO/workspace state after the user's next message.
+- Present every canonical choice gate through `request_user_input`, preserving
+  the options, recommendation and tradeoffs. Use it only at those gate sites;
+  do not turn ordinary conversation into a popup sequence.
 - During setup, apply the same PMO-ready gate before any write. After common templates exist, run `"$RUN" run --host codex "$TEAM" scripts/generate_codex_project.py --project-root <git-root> --workspace <chosen-workspace-name>`. The generator owns only its marked `AGENTS.md` block and Agent Marketplace-marked `.codex/agents/*.toml`; stop on an unmanaged collision. Tell the user to start a fresh task/session so the agents load.
 - For delivery-lane handoffs, open a new App task on the worktree or an interactive CLI session in that worktree.
 - Successful completion means the same durable state, gates, artifacts, and PR outcome as every supported host; host-specific UI is not part of the contract.

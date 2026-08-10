@@ -13,7 +13,6 @@ import argparse
 import hashlib
 import json
 import re
-import shutil
 import subprocess
 import sys
 from dataclasses import dataclass
@@ -151,6 +150,12 @@ def frontmatter_rows(fields: dict) -> list[str]:
             rows.append(f"{key}: {value}")
     rows.append("---")
     return rows
+
+
+def rewrite_note(path: Path, fields: dict, body: str) -> None:
+    rows = frontmatter_rows(fields)
+    rows.extend(["", body.rstrip(), ""])
+    path.write_text("\n".join(rows), encoding="utf-8")
 
 
 def program_dir(root: Path, program: str) -> Path:
@@ -501,16 +506,25 @@ def record_from(path: Path, release: Path, schema: dict) -> tuple[dict | None, l
             findings.append(Finding(rel, "analysis_projection", "approved BA registry is missing or unreadable"))
     if doc_type == "artifact-manifest":
         for key in (
-            "artifact_path", "artifact_sha256", "artifact_owner", "program_id",
-            "release_id", "registry_hash", "declared_ids", "related_to",
+            "artifact_path", "artifact_owner", "program_id", "release_id",
+            "revision", "declared_ids", "related_to", "status",
         ):
             if key not in fm:
                 findings.append(Finding(
                     rel, "artifact_manifest", f"missing {key}"))
-        if fm.get("artifact_sha256") and not re.fullmatch(
-                r"sha256:[0-9a-f]{64}", str(fm["artifact_sha256"])):
+        status = str(fm.get("status", ""))
+        if status not in {"draft", "approved"}:
             findings.append(Finding(
-                rel, "artifact_manifest", "artifact_sha256 must be SHA-256"))
+                rel, "artifact_manifest", "status must be draft or approved"))
+        if status == "approved":
+            for key in ("artifact_sha256", "registry_hash", "approved_at_utc"):
+                if key not in fm:
+                    findings.append(Finding(
+                        rel, "artifact_manifest", f"approved artifact missing {key}"))
+            if fm.get("artifact_sha256") and not re.fullmatch(
+                    r"sha256:[0-9a-f]{64}", str(fm["artifact_sha256"])):
+                findings.append(Finding(
+                    rel, "artifact_manifest", "artifact_sha256 must be SHA-256"))
         artifact_path = str(fm.get("artifact_path", ""))
         if artifact_path != path.with_name(
                 path.name.removesuffix("-artifact.md") + "-preview.html"
@@ -723,6 +737,8 @@ def compile_release(release: Path, schema: dict) -> tuple[dict, list[Finding]]:
                 manifest.relative_to(release).as_posix(),
                 "artifact_ownership",
                 "owning node note does not reference the artifact manifest"))
+        if manifest_fm.get("status") != "approved":
+            continue
         digest = sha(artifact.read_bytes())
         if manifest_fm.get("artifact_sha256") != digest:
             findings.append(Finding(
@@ -904,12 +920,31 @@ def cmd_init_release(args) -> int:
     if not re.fullmatch(schema["program_pattern"], args.program) or not re.fullmatch(schema["release_pattern"], args.release):
         return fail("invalid program or release id", 2)
     root = Path(args.root).resolve()
-    if not (program_dir(root, args.program) / "program.md").is_file():
+    program_note = program_dir(root, args.program) / "program.md"
+    if not program_note.is_file():
         return fail("initialize the program first")
     directory = release_dir(root, args.program, args.release)
     directory.mkdir(parents=True, exist_ok=True)
     note = directory / "release.md"
     if not note.exists():
+        program_fm, program_body = frontmatter(program_note)
+        if program_fm.get("status") == "approved":
+            prior_hash = str(program_fm.get("registry_hash", ""))
+            program_fm["status"] = "draft"
+            if prior_hash:
+                program_fm["supersedes_registry_hash"] = prior_hash
+            for key in (
+                "approved_at_utc", "registry_hash", "challenge_status",
+                "challenge_hash",
+            ):
+                program_fm.pop(key, None)
+            tags = program_fm.get("tags", [])
+            if isinstance(tags, list):
+                program_fm["tags"] = [
+                    value for value in tags
+                    if not str(value).startswith("status/")
+                ] + ["status/draft"]
+            rewrite_note(program_note, program_fm, program_body)
         fields = {"type": "release", "program_id": args.program,
                   "release_id": args.release, "status": "draft", "scale": args.scale}
         if args.inherits:
@@ -1004,6 +1039,12 @@ def artifact_gate_findings(release: Path, registry: dict) -> list[Finding]:
             manifest_fm, _ = frontmatter(manifest)
         except (OSError, ValueError):
             manifest_fm = {}
+        if manifest_fm.get("status") != "approved":
+            findings.append(Finding(
+                artifact.relative_to(release).as_posix(),
+                "artifact_gate", "artifact is still draft",
+            ))
+            continue
         declared = sorted(str(value) for value in
                           manifest_fm.get("declared_ids", [])
                           if isinstance(value, str))
@@ -1205,7 +1246,7 @@ def cmd_stamp(args) -> int:
         return fail("generated registry is stale")
     path = directory / note_name
     fm, body = frontmatter(path)
-    if fm.get("status") == "approved" and not args.force:
+    if fm.get("status") == "approved":
         return fail(f"{'program' if is_program else 'release'} is already approved")
     fm["status"] = "approved"
     if not args.challenge_hash.startswith("sha256:"):
@@ -1220,9 +1261,7 @@ def cmd_stamp(args) -> int:
     fm["registry_hash"] = registry["registry_hash"]
     fm["approved_at_utc"] = datetime.now(timezone.utc).replace(
         microsecond=0).isoformat()
-    rows = frontmatter_rows(fm)
-    rows.extend(["", body.rstrip(), ""])
-    path.write_text("\n".join(rows), encoding="utf-8")
+    rewrite_note(path, fm, body)
     cmd_render(args)
     return 0
 
@@ -1241,7 +1280,7 @@ def add_artifact_reference(owner_note: Path, manifest: Path,
     text = owner_note.read_text(encoding="utf-8")
     if link in text:
         return
-    section = "## Approved artifacts"
+    section = "## Experience artifacts"
     nav = "## Navigation <!-- sec: nav -->"
     row = f"- {link}"
     if section in text:
@@ -1255,14 +1294,11 @@ def add_artifact_reference(owner_note: Path, manifest: Path,
     owner_note.write_text(text, encoding="utf-8")
 
 
-def cmd_promote(args) -> int:
+def artifact_context(args) -> tuple[Path, Path, Path, Path] | int:
     release = release_arg(args)
-    candidate = Path(args.candidate).resolve()
-    if candidate.suffix.lower() != ".html" or not candidate.is_file():
-        return fail("candidate must be an existing HTML file", 2)
     if not SLUG.fullmatch(args.package):
         return fail("package must be a kebab-case slug", 2)
-    owner = release / Path(args.owner)
+    owner = (release / Path(args.owner)).resolve()
     try:
         owner.relative_to(release)
     except ValueError:
@@ -1270,11 +1306,73 @@ def cmd_promote(args) -> int:
     owner_note = owner_note_for(owner)
     if owner_note is None:
         return fail("owner must contain release.md, space.md or domain.md", 2)
-    registry_path = release / GENERATED / "effective-registry.json"
-    registry = load_json(registry_path)
+    artifact = owner / "artifacts" / f"{args.package}-preview.html"
+    manifest = owner / "artifacts" / f"{args.package}-artifact.md"
+    return release, owner_note, artifact, manifest
+
+
+def cmd_init_artifact(args) -> int:
+    context = artifact_context(args)
+    if isinstance(context, int):
+        return context
+    release, owner_note, artifact, manifest = context
+    registry = load_json(release / GENERATED / "effective-registry.json")
     if registry.get("source_hash") != source_hash(release):
-        return fail("effective registry is stale; render before promotion")
-    candidate_text = candidate.read_text(encoding="utf-8")
+        return fail("effective registry is stale; render before artifact init")
+    if artifact.exists() or manifest.exists():
+        return fail("artifact already exists; use a new package name")
+    artifact.parent.mkdir(parents=True, exist_ok=True)
+    artifact.write_text(
+        "<!doctype html>\n<html lang=\"en\">\n<head>\n"
+        "<meta charset=\"utf-8\">\n"
+        f"<meta name=\"experience-program\" content=\"{registry['program_id']}\">\n"
+        f"<meta name=\"experience-release\" content=\"{registry['release_id']}\">\n"
+        f"<meta name=\"experience-registry-hash\" content=\"{registry['registry_hash']}\">\n"
+        f"<title>{args.title or args.package.replace('-', ' ').title()}</title>\n"
+        "</head>\n<body>\n<!-- Author the bounded preview here. -->\n"
+        "</body>\n</html>\n",
+        encoding="utf-8",
+    )
+    owner_target = owner_note.relative_to(
+        docs_root_for_release(release)).with_suffix("").as_posix()
+    owner_fm, _ = frontmatter(owner_note)
+    owner_alias = str(owner_fm.get("title", owner_note.stem))
+    owner_link = f"[[{owner_target}|{owner_alias}]]"
+    title = args.title or f"{args.package.replace('-', ' ').title()} Artifact"
+    write_note(manifest, {
+        "type": "artifact-manifest", "status": "draft",
+        "program_id": registry["program_id"],
+        "release_id": registry["release_id"], "revision": args.revision,
+        "artifact_path": artifact.relative_to(release).as_posix(),
+        "artifact_owner": owner_link, "declared_ids": [],
+        "related_to": [owner_link],
+    }, title, f"[Open draft preview]({artifact.name})")
+    add_artifact_reference(owner_note, manifest, release, title)
+    print(json.dumps({
+        "manifest": manifest.relative_to(release).as_posix(),
+        "path": artifact.relative_to(release).as_posix(),
+        "status": "draft",
+    }, indent=2))
+    return 0
+
+
+def cmd_approve_artifact(args) -> int:
+    context = artifact_context(args)
+    if isinstance(context, int):
+        return context
+    release, _owner_note, artifact, manifest = context
+    if not artifact.is_file() or not manifest.is_file():
+        return fail("initialize the artifact before approval")
+    manifest_fm, manifest_body = frontmatter(manifest)
+    if manifest_fm.get("status") != "draft":
+        return fail("only a draft artifact can be approved")
+    schema = schema_for(args.schema)
+    registry, compile_findings = compile_release(release, schema)
+    hard = [item for item in compile_findings
+            if item.check != "generated_freshness"]
+    if hard:
+        return print_findings(hard, False)
+    candidate_text = artifact.read_text(encoding="utf-8")
     declared = sorted(set(re.findall(
         r'(?:id|data-experience-id)=["\']((?:JRN|FLW|SCR|STA|TRN)-[0-9]{3,})["\']',
         candidate_text,
@@ -1288,7 +1386,7 @@ def cmd_promote(args) -> int:
                          if isinstance(item.get("transitions", []), list))
     unknown = sorted(set(declared) - known)
     if unknown:
-        return fail("candidate declares unknown experience ids: "
+        return fail("artifact declares unknown experience ids: "
                     + ", ".join(unknown))
     for key, expected in {
         "experience-program": registry.get("program_id"),
@@ -1299,38 +1397,36 @@ def cmd_promote(args) -> int:
             rf'<meta\s+name=["\']{re.escape(key)}["\']\s+'
             rf'content=["\']([^"\']+)["\']', candidate_text)
         if not match or match.group(1) != expected:
-            return fail(f"candidate metadata {key} does not match the registry")
+            return fail(f"artifact metadata {key} does not match the registry")
     if re.search(r'(?:href|src)=["\'](?:https?:|ftp:|//)', candidate_text):
-        return fail("candidate contains a remote request or asset")
-    destination = owner / "artifacts" / f"{args.package}-preview.html"
-    manifest = owner / "artifacts" / f"{args.package}-artifact.md"
-    destination.parent.mkdir(parents=True, exist_ok=True)
-    if destination.exists() or manifest.exists():
-        return fail("artifact already exists; retire or revise through a new package")
-    shutil.copyfile(candidate, destination)
-    digest = sha(destination.read_bytes())
-    owner_target = owner_note.relative_to(
-        docs_root_for_release(release)).with_suffix("").as_posix()
-    owner_fm, _ = frontmatter(owner_note)
-    owner_alias = str(owner_fm.get("title", owner_note.stem))
-    owner_link = f"[[{owner_target}|{owner_alias}]]"
-    title = args.title or f"{args.package.replace('-', ' ').title()} Artifact"
-    write_note(manifest, {
-        "type": "artifact-manifest", "status": "approved",
-        "program_id": registry["program_id"],
-        "release_id": registry["release_id"], "revision": args.revision,
-        "registry_hash": registry["registry_hash"],
-        "artifact_path": destination.relative_to(release).as_posix(),
-        "artifact_sha256": digest, "artifact_owner": owner_link,
-        "declared_ids": declared, "related_to": [owner_link],
-    }, title, f"[Open approved preview]({destination.name})")
-    add_artifact_reference(owner_note, manifest, release, title)
+        return fail("artifact contains a remote request or asset")
+    original = manifest.read_bytes()
+    digest = sha(artifact.read_bytes())
+    manifest_fm.update({
+        "status": "approved", "registry_hash": registry["registry_hash"],
+        "artifact_sha256": digest, "declared_ids": declared,
+        "approved_at_utc": datetime.now(timezone.utc).replace(
+            microsecond=0).isoformat(),
+    })
+    rewrite_note(
+        manifest, manifest_fm,
+        manifest_body.replace("Open draft preview", "Open approved preview"),
+    )
     render_code = cmd_render(args)
     if render_code:
+        manifest.write_bytes(original)
+        cmd_render(args)
         return render_code
+    verified = artifact_gate_findings(
+        release, load_json(release / GENERATED / "effective-registry.json")
+    )
+    if verified:
+        manifest.write_bytes(original)
+        cmd_render(args)
+        return print_findings(verified, False)
     print(json.dumps({
         "manifest": manifest.relative_to(release).as_posix(),
-        "path": destination.relative_to(release).as_posix(),
+        "path": artifact.relative_to(release).as_posix(),
         "sha256": digest, "declared_ids": declared,
     }, indent=2))
     return 0
@@ -1379,14 +1475,19 @@ def build_parser() -> argparse.ArgumentParser:
         if name == "resolve":
             p.add_argument("--id", required=True); p.add_argument("--revision", type=int)
         if name == "stamp":
-            p.add_argument("--force", action="store_true")
             p.add_argument("--challenge-hash", required=True)
         p.set_defaults(func=handler)
     p = sub.add_parser("diff"); p.add_argument("--previous", required=True); p.add_argument("--current", required=True); p.set_defaults(func=cmd_diff)
-    p = sub.add_parser("promote-artifact"); add_release_locator(p)
-    p.add_argument("--candidate", required=True); p.add_argument("--owner", required=True); p.add_argument("--package", required=True)
-    p.add_argument("--title", default=""); p.add_argument("--revision", type=int, default=1)
-    p.set_defaults(func=cmd_promote)
+    for name, handler in (
+        ("init-artifact", cmd_init_artifact),
+        ("approve-artifact", cmd_approve_artifact),
+    ):
+        p = sub.add_parser(name); add_release_locator(p)
+        p.add_argument("--owner", required=True)
+        p.add_argument("--package", required=True)
+        p.add_argument("--title", default="")
+        p.add_argument("--revision", type=int, default=1)
+        p.set_defaults(func=handler)
     return parser
 
 

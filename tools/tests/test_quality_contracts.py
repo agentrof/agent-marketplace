@@ -283,7 +283,8 @@ for _name, _case in CONTRACT_CASES.items():
 class CanonicalHostNeutralityCases(unittest.TestCase):
     def test_required_host_token_registry(self):
         self.assertTrue({
-            "Claude", "Codex", "AskUserQuestion", "CLAUDE.md", "AGENTS.md",
+            "Claude", "Codex", "AskUserQuestion", "request_user_input",
+            "CLAUDE.md", "AGENTS.md",
             "CLAUDE_PLUGIN_ROOT", "PLUGIN_ROOT", ".claude", ".codex",
         } <= set(build_distributions.CANONICAL_HOST_TOKENS))
 

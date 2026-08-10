@@ -36,10 +36,12 @@ def atomic(path: Path, value: dict) -> None:
 
 
 def state_exists(workspace: Path) -> bool:
+    runtime = (workspace.parent / ".agentrof" / "agent-marketplace"
+               / ".runtime")
     return any((
         any((workspace / "docs" / "experience-design" / "programs").glob("*")),
-        any((workspace / "planning").glob("*.json")),
-        any((workspace / "work-orders").glob("*")),
+        any((runtime / "plan").glob("*.json")),
+        any((runtime / "work-orders").glob("*")),
     ))
 
 

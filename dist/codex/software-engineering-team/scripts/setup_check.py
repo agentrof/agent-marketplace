@@ -20,10 +20,7 @@ def read(path: Path):
 
 
 def managed_block(workspace: str) -> str:
-    return "\n".join((START, f"{workspace}/work-orders/",
-                      f"{workspace}/planning/",
-                      f"{workspace}/experience-design-work/",
-                      f"{workspace}/design-system-work/",
+    return "\n".join((START, ".agentrof/agent-marketplace/.runtime/",
                       f"{workspace}/junit-*.xml",
                       f"{workspace}/docs/.obsidian/*",
                       f"!{workspace}/docs/.obsidian/app.json",
@@ -67,11 +64,13 @@ def closing(root: Path, workspace: str) -> list[str]:
     if not config.get("project_key"):
         findings.append("PMO registration has not stamped project_key")
     state = read(root / ".agentrof" / "agent-marketplace" / "project.json")
-    if not isinstance(state, dict) or state.get("contract_version") != 3:
-        findings.append("project contract version is not 3")
+    if not isinstance(state, dict) or state.get("contract_version") != 4:
+        findings.append("project contract version is not 4")
     required = (
-        "docs/experience-design", "experience-design-work",
-        "design-system-work", "planning", "work-orders",
+        "apps", "environment", "demos", "sketches",
+        "docs/business-analysis", "docs/solution-design",
+        "docs/system-architecture", "docs/design-system/pages",
+        "docs/experience-design",
     )
     for relative in required:
         path = work / relative

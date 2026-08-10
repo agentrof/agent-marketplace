@@ -303,7 +303,6 @@ class VaultHookCodexTests(unittest.TestCase):
     def test_experience_generated_artifact_and_machine_fields_are_denied(self):
         cases = (
             ("experience-design/programs/prg-001/releases/rel-001/_generated/status.md", "safe", "compiler-owned"),
-            ("experience-design/programs/prg-001/releases/rel-001/artifacts/catalog-preview.html", "safe", "immutable"),
             ("experience-design/programs/prg-001/releases/rel-001/release.md", "registry_hash: sha256:x", "machine-managed"),
             ("experience-design/programs/prg-001/releases/rel-001/journeys/wrong.md", "safe", "invalid Experience Design"),
         )
@@ -312,6 +311,83 @@ class VaultHookCodexTests(unittest.TestCase):
                 code, _, err = self.experience_write(relative, content)
                 self.assertEqual(code, 2)
                 self.assertIn(expected, err)
+
+    def test_design_system_approved_tree_requires_begin_revision(self):
+        project = Path(self.tmp.name) / "project"
+        docs = project / "workspace" / "docs"
+        master = docs / "design-system" / "MASTER.md"
+        master.parent.mkdir(parents=True)
+        master.write_text(
+            "---\ntype: design-master\nstatus: approved\nrevision: 1\n---\n",
+            encoding="utf-8",
+        )
+        code, _, err = self.experience_write(
+            "design-system/pages/buttons.md", "# Buttons\n"
+        )
+        self.assertEqual(code, 2)
+        self.assertIn("begin-revision", err)
+
+    def test_design_system_draft_tree_accepts_authored_pages(self):
+        project = Path(self.tmp.name) / "project"
+        master = (project / "workspace" / "docs" / "design-system"
+                  / "MASTER.md")
+        master.parent.mkdir(parents=True)
+        master.write_text(
+            "---\ntype: design-master\nstatus: draft\nrevision: 2\n---\n",
+            encoding="utf-8",
+        )
+        code, _, err = self.experience_write(
+            "design-system/pages/buttons.md", "# Buttons\n"
+        )
+        self.assertEqual(code, 0, err)
+
+    def test_experience_artifact_is_editable_only_while_manifest_is_draft(self):
+        project = Path(self.tmp.name) / "project"
+        artifacts = (project / "workspace" / "docs" / "experience-design"
+                     / "programs" / "prg-001" / "releases" / "rel-001"
+                     / "artifacts")
+        artifacts.mkdir(parents=True)
+        manifest = artifacts / "catalog-artifact.md"
+        manifest.write_text(
+            "---\ntype: artifact-manifest\nstatus: draft\n---\n",
+            encoding="utf-8",
+        )
+        html = artifacts / "catalog-preview.html"
+        html.write_text("<p>draft</p>\n", encoding="utf-8")
+        code, _, err = self.experience_write(
+            "experience-design/programs/prg-001/releases/rel-001/"
+            "artifacts/catalog-preview.html", "<p>changed</p>\n"
+        )
+        self.assertEqual(code, 0, err)
+
+        manifest.write_text(
+            "---\ntype: artifact-manifest\nstatus: approved\n---\n",
+            encoding="utf-8",
+        )
+        code, _, err = self.experience_write(
+            "experience-design/programs/prg-001/releases/rel-001/"
+            "artifacts/catalog-preview.html", "<p>changed again</p>\n"
+        )
+        self.assertEqual(code, 2)
+        self.assertIn("immutable", err)
+
+    def test_approved_experience_release_denies_authored_content_changes(self):
+        project = Path(self.tmp.name) / "project"
+        release = (project / "workspace" / "docs" / "experience-design"
+                   / "programs" / "prg-001" / "releases" / "rel-001"
+                   / "release.md")
+        release.parent.mkdir(parents=True)
+        release.write_text(
+            "---\ntype: release\nstatus: approved\n---\n",
+            encoding="utf-8",
+        )
+        code, _, err = self.experience_write(
+            "experience-design/programs/prg-001/releases/rel-001/"
+            "spaces/marketplace/domains/catalog/screens/catalog-screen.md",
+            "---\ntype: screen\n---\n",
+        )
+        self.assertEqual(code, 2)
+        self.assertIn("next release", err)
 
     def test_valid_experience_path_passes_pre_write(self):
         code, _, err = self.experience_write(
@@ -836,7 +912,8 @@ class DashboardCatalogTests(unittest.TestCase):
                     "registered_at": "2026-07-18T00:00:00+00:00"}},
             }), encoding="utf-8")
             env = {**os.environ, "AGENT_MARKETPLACE_HOME": str(home),
-                   "AGENT_MARKETPLACE_CLAUDE_PLUGINS_DIR": str(Path(tmp) / "no-claude")}
+                   "AGENT_MARKETPLACE_CLAUDE_PLUGINS_DIR": str(Path(tmp) / "no-claude"),
+                   "AGENT_MARKETPLACE_CODEX_PLUGINS_DIR": str(Path(tmp) / "no-codex")}
             proc = subprocess.run(
                 [sys.executable, "-c",
                  "import sys, json;"

@@ -50,6 +50,7 @@ CANONICAL_HOST_TOKENS = (
     "claude",
     "codex",
     "AskUserQuestion",
+    "request_user_input",
     "CLAUDE.md",
     "AGENTS.md",
     "CLAUDE_PLUGIN_ROOT",

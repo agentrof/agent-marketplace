@@ -10,10 +10,7 @@
 !.env.example
 
 # agent-marketplace:software-engineering-team:gitignore:start
-workspace/work-orders/
-workspace/planning/
-workspace/experience-design-work/
-workspace/design-system-work/
+.agentrof/agent-marketplace/.runtime/
 workspace/junit-*.xml
 workspace/docs/.obsidian/*
 !workspace/docs/.obsidian/app.json

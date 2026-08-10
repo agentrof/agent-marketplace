@@ -561,9 +561,13 @@ class PmoCliTests(unittest.TestCase):
         self.assertEqual((code, out.strip()), (0, today.isoformat()))
         code, out, _ = run(["now", "--compact"])
         self.assertEqual((code, out.strip()), (0, today.strftime("%Y%m%d")))
+        code, out, _ = run(["now", "--compact-time"])
+        self.assertRegex(out.strip(), r"^[0-9]{8}T[0-9]{6}Z$")
 
     def test_now_flags_are_exclusive(self):
         code, _, _ = run(["now", "--date", "--compact"])
+        self.assertEqual(code, 2)
+        code, _, _ = run(["now", "--compact", "--compact-time"])
         self.assertEqual(code, 2)
 
     def test_wo_init_rejects_wrong_date_prefix(self):

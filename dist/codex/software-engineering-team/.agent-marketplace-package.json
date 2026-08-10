@@ -2,7 +2,7 @@
   "component": "software-engineering-team",
   "files": {
     ".agent-marketplace-generated-distribution": "bc5e5ffd58e656c315fc4230e335b1acaaeba4b3a6871fc57e84144035567474",
-    ".codex-plugin/plugin.json": "49e8487c75c31ec28935450822b9ea9259cfd17b2418eb28c4103b2f1f0dc7c3",
+    ".codex-plugin/plugin.json": "d7c751dd531068f3b825fb634b0cbdc1a7e3cc1a231105f2e3ffb3ab6561580a",
     "agents/analysis-challenger.md": "35c04b9ecc47ba4a8f9d168b4f74803d6b342974cc22c8dad048f38ed607e5ee",
     "agents/backend-developer.md": "31fae6ca601479a687a4f1a6b1afc3dff481c804fa78b6b9a83ca108ce64145a",
     "agents/backlog-reviewer.md": "9c24302e625242d26df8feae6ec9f1beccad6c8934ad7ba315c882c299e6766f",
@@ -218,5 +218,5 @@
   },
   "host": "codex",
   "schema_version": 1,
-  "version": "0.0.1"
+  "version": "0.1.0"
 }

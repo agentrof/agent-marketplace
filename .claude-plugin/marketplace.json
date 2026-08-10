@@ -6,7 +6,7 @@
   },
   "metadata": {
     "description": "A catalog of curated, end-to-end agent teams for Claude Code and Codex. Install a complete team and run at the goal.",
-    "version": "0.1.1"
+    "version": "0.1.2"
   },
   "plugins": [
     {

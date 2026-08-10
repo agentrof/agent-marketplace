@@ -1,15 +1,12 @@
 {
   "schema_version": 1,
-  "version": "0.1.1",
-  "stable_base": "06a2729e02413c504760b87a35d88b703fd7dd58",
-  "main_source": "df8a4b6f5b00122f45976b29f2eb77a108cc82ac",
+  "version": "0.1.2",
+  "stable_base": "331169841891068d2165b784c6501b88aed03c7c",
+  "main_source": "3dae8a12d66672096c3112b3072716fdb53b5d4d",
   "impacts": {
-    "agent-marketplace": "patch",
-    "project-management-office": "patch",
-    "software-engineering-team": "patch"
+    "agent-marketplace": "patch"
   },
   "summaries": [
-    "Accept narrowly validated Claude runtime cache markers in package provenance and make stable release preparation resilient to organization PR policy.",
-    "Require a maintainer-created stable release pull request so GitHub binds required validation to the candidate commit."
+    "Run release automation on Node.js 24 compatible official actions and enforce the runtime contract across every workflow."
   ]
 }

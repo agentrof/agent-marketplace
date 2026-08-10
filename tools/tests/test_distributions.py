@@ -167,6 +167,10 @@ class DistributionContractTests(unittest.TestCase):
                 ).read_text(encoding="utf-8"))
                 self.assertEqual(provenance["component"], component)
                 self.assertEqual(provenance["host"], host)
+                self.assertEqual(
+                    provenance["runtime_contracts"],
+                    build_distributions.HOST_RUNTIME_CONTRACTS[host],
+                )
                 self.assertIn(f".{host}-plugin/plugin.json", provenance["files"])
                 for relative, digest in provenance["files"].items():
                     self.assertEqual(

@@ -50,6 +50,10 @@ STATUS_PROJECT_PR = "AGENT_MARKETPLACE_PROJECT_UPGRADE_PR_PENDING"
 UPGRADE_BRANCH_RE = re.compile(
     r"^agent-marketplace/upgrade-[a-z0-9][a-z0-9._-]*$"
 )
+IN_USE_MARKER_RE = re.compile(
+    r"^(?P<pid>[1-9][0-9]*)(?:\.tmp\.[0-9a-f]{8})?$"
+)
+KNOWN_RUNTIME_CONTRACTS = {"in_use_pid_marker_v1"}
 
 
 class UpgradeError(Exception):
@@ -424,6 +428,37 @@ def package_manifest(root: Path) -> tuple[Path, dict]:
     return path, data
 
 
+def is_host_runtime_marker(
+    candidate: Path, relative: Path, runtime_contracts: set[str],
+) -> bool:
+    if "in_use_pid_marker_v1" not in runtime_contracts \
+            or len(relative.parts) != 2 \
+            or relative.parts[0] != ".in_use" or candidate.is_symlink():
+        return False
+    matched = IN_USE_MARKER_RE.fullmatch(relative.name)
+    if matched is None:
+        return False
+    try:
+        raw = candidate.read_bytes()
+    except OSError:
+        return False
+    if not raw:
+        return True
+    if len(raw) > 512:
+        return False
+    try:
+        marker = json.loads(raw.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError):
+        return False
+    return (
+        isinstance(marker, dict)
+        and set(marker) == {"pid", "procStart"}
+        and marker.get("pid") == int(matched.group("pid"))
+        and isinstance(marker.get("procStart"), str)
+        and bool(marker["procStart"].strip())
+    )
+
+
 def verify_package_provenance(root: Path, host: str, manifest: dict) -> str:
     path = root / ".agent-marketplace-package.json"
     data = load_json(path, None)
@@ -436,11 +471,21 @@ def verify_package_provenance(root: Path, host: str, manifest: dict) -> str:
     files = data.get("files")
     if not isinstance(files, dict):
         raise UpgradeError(f"package provenance file map invalid: {root}")
+    declared_contracts = data.get("runtime_contracts", [])
+    if not isinstance(declared_contracts, list) \
+            or any(not isinstance(value, str) for value in declared_contracts) \
+            or len(declared_contracts) != len(set(declared_contracts)) \
+            or not set(declared_contracts) <= KNOWN_RUNTIME_CONTRACTS:
+        raise UpgradeError(f"package provenance runtime contract invalid: {root}")
+    runtime_contracts = set(declared_contracts)
     actual: dict[str, str] = {}
     for candidate in sorted(value for value in root.rglob("*") if value.is_file()):
         relative = candidate.relative_to(root)
         if candidate == path or "__pycache__" in relative.parts \
-                or candidate.suffix in {".pyc", ".pyo"}:
+                or candidate.suffix in {".pyc", ".pyo"} \
+                or is_host_runtime_marker(
+                    candidate, relative, runtime_contracts
+                ):
             continue
         actual[relative.as_posix()] = sha256_file(candidate)
     if actual != files:

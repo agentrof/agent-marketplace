@@ -539,6 +539,107 @@ class UpgradeLifecycleTests(unittest.TestCase):
             status["blockers"],
         )
 
+    def test_claude_host_runtime_markers_preserve_package_provenance(self):
+        package = self.copy_package("claude", TEAM)
+        manifest = json.loads((
+            package / ".claude-plugin" / "plugin.json"
+        ).read_text(encoding="utf-8"))
+        marker_root = package / ".in_use"
+        marker_root.mkdir()
+        (marker_root / "4242").write_bytes(b"")
+        (marker_root / "5151").write_text(json.dumps({
+            "pid": 5151,
+            "procStart": "Mon Aug 10 07:50:50 2026",
+        }), encoding="utf-8")
+        (marker_root / "6262.tmp.deadbeef").write_text(json.dumps({
+            "pid": 6262,
+            "procStart": "Mon Aug 10 07:50:51 2026",
+        }), encoding="utf-8")
+
+        provenance = UPGRADE.verify_package_provenance(
+            package, "claude", manifest
+        )
+        self.assertEqual(len(provenance), 64)
+
+    def test_host_runtime_marker_allowlist_fails_closed(self):
+        valid = json.dumps({
+            "pid": 4242,
+            "procStart": "Mon Aug 10 07:50:50 2026",
+        })
+        invalid = {
+            "unknown-name": (Path(".in_use") / "active", valid),
+            "nested": (Path(".in_use") / "4242" / "nested", valid),
+            "pid-mismatch": (Path(".in_use") / "4242", json.dumps({
+                "pid": 5151, "procStart": "Mon Aug 10 07:50:50 2026",
+            })),
+            "unknown-key": (Path(".in_use") / "4242", json.dumps({
+                "pid": 4242,
+                "procStart": "Mon Aug 10 07:50:50 2026",
+                "extra": True,
+            })),
+            "malformed-json": (Path(".in_use") / "4242", "not-json"),
+            "oversized": (Path(".in_use") / "4242", json.dumps({
+                "pid": 4242, "procStart": "x" * 600,
+            })),
+        }
+        for name, (relative, content) in invalid.items():
+            with self.subTest(name=name):
+                package = Path(self.tmp.name) / "runtime-markers" / name
+                shutil.copytree(REPO / "dist" / "claude" / TEAM, package)
+                manifest = json.loads((
+                    package / ".claude-plugin" / "plugin.json"
+                ).read_text(encoding="utf-8"))
+                marker = package / relative
+                marker.parent.mkdir(parents=True, exist_ok=True)
+                marker.write_text(content, encoding="utf-8")
+                with self.assertRaisesRegex(
+                        UPGRADE.UpgradeError, "provenance verification failed"):
+                    UPGRADE.verify_package_provenance(
+                        package, "claude", manifest
+                    )
+
+        symlinked = Path(self.tmp.name) / "runtime-markers" / "symlinked"
+        shutil.copytree(REPO / "dist" / "claude" / TEAM, symlinked)
+        marker = symlinked / ".in_use" / "4242"
+        marker.parent.mkdir()
+        marker.symlink_to(symlinked / "constitution.md")
+        manifest = json.loads((
+            symlinked / ".claude-plugin" / "plugin.json"
+        ).read_text(encoding="utf-8"))
+        with self.assertRaisesRegex(
+                UPGRADE.UpgradeError, "provenance verification failed"):
+            UPGRADE.verify_package_provenance(
+                symlinked, "claude", manifest
+            )
+
+        codex = self.copy_package("codex", TEAM)
+        marker = codex / ".in_use" / "4242"
+        marker.parent.mkdir()
+        marker.write_text(valid, encoding="utf-8")
+        manifest = json.loads((
+            codex / ".codex-plugin" / "plugin.json"
+        ).read_text(encoding="utf-8"))
+        with self.assertRaisesRegex(
+                UPGRADE.UpgradeError, "provenance verification failed"):
+            UPGRADE.verify_package_provenance(codex, "codex", manifest)
+
+        unknown_contract = self.copy_package("claude", TEAM)
+        provenance_path = unknown_contract / ".agent-marketplace-package.json"
+        provenance = json.loads(provenance_path.read_text(encoding="utf-8"))
+        provenance["runtime_contracts"] = ["unknown_runtime_contract"]
+        provenance_path.write_text(
+            json.dumps(provenance, indent=2, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
+        manifest = json.loads((
+            unknown_contract / ".claude-plugin" / "plugin.json"
+        ).read_text(encoding="utf-8"))
+        with self.assertRaisesRegex(
+                UPGRADE.UpgradeError, "runtime contract invalid"):
+            UPGRADE.verify_package_provenance(
+                unknown_contract, "claude", manifest
+            )
+
     def test_interrupted_post_database_commit_recovers_from_journal(self):
         plan = json.loads(self.cli(
             "upgrade", "plan", "--project-root", str(self.project)

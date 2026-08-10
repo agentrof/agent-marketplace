@@ -49,6 +49,13 @@ frozen work, competing session, path collision, symbolic link, missing adapter,
 package provenance failure, cross-host version mismatch, insufficient disk,
 database integrity error, stale plan, or downgrade also blocks apply.
 
+Package provenance covers authored distribution files exactly. Claude may add
+host-owned `.in_use/<pid>` or `.in_use/<pid>.tmp.<8-hex>` cache markers after
+installation. Only regular, non-symlink marker files with an empty body or the
+matching bounded `pid`/`procStart` JSON shape are excluded. The same path on
+another host, a nested marker, an unknown filename, malformed content, a PID
+mismatch, or any other unlisted file remains a provenance blocker.
+
 Session blockers include their exact session id and last readiness timestamp.
 If a host crashed before SessionEnd, the owner first verifies that session is
 closed, approves the guidance gate, then uses `upgrade session-release

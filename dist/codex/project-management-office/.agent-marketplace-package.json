@@ -20,7 +20,7 @@
     "scripts/marketplace_run.py": "cfc7bc5f36d506bd5503749407a5e54816125441c2e082e5836193f85e151af9",
     "scripts/pmo_cli.py": "1e0e609fbbccbe6df9ebf51b0cf5efffeb5cb4d6aa181dc24445216051381fe3",
     "scripts/pmo_dashboard.py": "6dd54373f71d7dff1b27f955bc62c74e679674113ce1ace580544065041b1c1c",
-    "scripts/upgrade_core.py": "f4d58aa24571bd5f89b7047ed8ee9e971324ac4bde2c6466445c8ee4d2364c14",
+    "scripts/upgrade_core.py": "2c9d93c69332f9d4179fa740843bf17d136d2026e76c15a7269c83f0d22ba2d1",
     "scripts/upgrade_guidance.json": "e4ca1161f04270c784f856aeebd79d7fdd740862e53adc29dced04397d0e6adf",
     "skill-content/control-tower/SKILL.md": "9f263d25b6ccd693420eea630fb5e283119f331ea8a48da16e6d41e9c89a1b0c",
     "skill-content/issue-desk/SKILL.md": "48a5be80d7b7a09181b38586679c7a481dd9a481d12949986fcd87b4cc4c07a4",
@@ -34,6 +34,7 @@
     "team_plugins.json": "d946593cde83ef4c9fab07a7e146bf35fc7bd7136a26c76db72ff522dc7cc551"
   },
   "host": "codex",
+  "runtime_contracts": [],
   "schema_version": 1,
   "version": "0.1.0"
 }

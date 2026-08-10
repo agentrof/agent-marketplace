@@ -21,6 +21,16 @@ class ReleaseWorkflowContracts(unittest.TestCase):
         self.assertNotIn("gh pr merge", text)
         self.assertIn("gh pr create", text)
         self.assertNotIn("gh workflow run validate.yml", text)
+        self.assertIn(
+            "GitHub Actions is not permitted to create or approve pull requests",
+            text,
+        )
+        self.assertIn(
+            "compare/main...release/stable?expand=1", text
+        )
+        self.assertIn("Manual release PR required", text)
+        self.assertLess(text.index("git push origin HEAD:refs/heads/release/stable"),
+                        text.index("gh pr create"))
 
     def test_bootstrap_requires_empty_tag_space_and_uses_atomic_refs(self):
         text = self.text("prepare-stable-release.yml")

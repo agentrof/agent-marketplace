@@ -143,7 +143,7 @@ class SmokeWorkflowSimulationTests(unittest.TestCase):
                 {}, REPO / "dist" / "codex" / TEAM, project, TEAM,
             )
 
-    def test_checkout_catalog_rewrites_stable_sources_to_local_dist(self):
+    def test_checkout_catalog_preserves_channel_relative_sources(self):
         with tempfile.TemporaryDirectory() as tmp:
             target = smoke.checkout_marketplace(REPO, Path(tmp) / "catalog")
             claude = json.loads((target / ".claude-plugin" / "marketplace.json").read_text())
@@ -169,6 +169,32 @@ class SmokeWorkflowSimulationTests(unittest.TestCase):
             self.assertFalse((
                 REPO / "dist" / "claude" / smoke.PMO / ".in_use"
             ).exists())
+
+    def test_public_marketplace_sources_pin_stable_on_both_hosts(self):
+        self.assertEqual(
+            smoke.PUBLIC_MARKETPLACES["claude"],
+            "https://github.com/agentrof/agent-marketplace.git#stable",
+        )
+        self.assertEqual(
+            smoke.PUBLIC_MARKETPLACES["codex"],
+            "agentrof/agent-marketplace@stable",
+        )
+
+    def test_public_channel_routes_each_host_to_its_stable_source(self):
+        with mock.patch.object(
+            sys, "argv", ["smoke_plugin_installs.py", "--channel", "public"]
+        ), mock.patch.object(
+            smoke, "smoke_claude"
+        ) as claude, mock.patch.object(
+            smoke, "smoke_codex"
+        ) as codex:
+            self.assertEqual(smoke.main(), 0)
+        claude.assert_called_once_with(
+            REPO, [TEAM], smoke.PUBLIC_MARKETPLACES["claude"]
+        )
+        codex.assert_called_once_with(
+            REPO, [TEAM], smoke.PUBLIC_MARKETPLACES["codex"]
+        )
 
     def test_pmo_readiness_failure_includes_upgrade_blocker(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -218,6 +244,13 @@ class SmokeWorkflowSimulationTests(unittest.TestCase):
                 if command[:3] == ("claude", "plugin", "list")
             )
             self.assertLess(install_index, first_inventory)
+            self.assertIn(
+                (
+                    "claude", "plugin", "marketplace", "add",
+                    str(REPO),
+                ),
+                fake.commands,
+            )
 
     def test_codex_lifecycle_simulation_proves_explicit_pmo_recovery(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -231,7 +264,9 @@ class SmokeWorkflowSimulationTests(unittest.TestCase):
                     mock.patch.object(smoke, "assert_team_gate") as gate, \
                     mock.patch.object(smoke, "mark_pmo_ready") as ready, \
                     mock.patch.object(smoke, "codex_skills", side_effect=skills):
-                smoke.smoke_codex(REPO, [TEAM], smoke.PUBLIC_MARKETPLACE)
+                smoke.smoke_codex(
+                    REPO, [TEAM], smoke.PUBLIC_MARKETPLACES["codex"]
+                )
             self.assertEqual(fake.installed, {TEAM: True, smoke.PMO: True})
             self.assertEqual(fake.generator_runs, 2)
             self.assertEqual([call.args[-1] for call in gate.call_args_list], [2, 0])
@@ -247,6 +282,13 @@ class SmokeWorkflowSimulationTests(unittest.TestCase):
             self.assertIn(
                 ("codex", "plugin", "marketplace", "upgrade",
                  smoke.MARKETPLACE, "--json"),
+                fake.commands,
+            )
+            self.assertIn(
+                (
+                    "codex", "plugin", "marketplace", "add",
+                    smoke.PUBLIC_MARKETPLACES["codex"], "--json",
+                ),
                 fake.commands,
             )
 

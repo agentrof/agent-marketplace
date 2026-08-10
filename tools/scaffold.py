@@ -293,7 +293,7 @@ def new_plugin(root: Path, name: str) -> None:
             )
         marketplace.setdefault("plugins", []).append({
             "name": name,
-            "source": release_tool.stable_source("claude", name),
+            "source": release_tool.channel_source("claude", name),
             "description": manifest["description"],
             "version": manifest["version"],
             "license": "MIT",
@@ -339,7 +339,7 @@ def new_plugin(root: Path, name: str) -> None:
             )
         codex_marketplace.setdefault("plugins", []).append({
             "name": name,
-            "source": release_tool.stable_source("codex", name),
+            "source": release_tool.channel_source("codex", name),
             "policy": {"installation": "AVAILABLE", "authentication": "ON_INSTALL"},
             "category": "Engineering",
         })

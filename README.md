@@ -62,7 +62,7 @@ role in snake_case:
 ## Install on Claude Code
 
 ```
-/plugin marketplace add agentrof/agent-marketplace
+/plugin marketplace add https://github.com/agentrof/agent-marketplace.git#stable
 /plugin install software-engineering-team
 ```
 
@@ -84,7 +84,7 @@ detect, and points you at the next step.
 ## Install on Codex App or CLI
 
 ```text
-codex plugin marketplace add agentrof/agent-marketplace
+codex plugin marketplace add agentrof/agent-marketplace@stable
 codex plugin add project-management-office@agent-marketplace
 codex plugin add software-engineering-team@agent-marketplace
 ```
@@ -215,9 +215,21 @@ a single finding is red.
 
 ## Release channels
 
-The marketplace catalog is read from `main`, while every Claude and Codex
-plugin source resolves from the `stable` branch. Normal merges do not change a
-SemVer value. CI identifies each main build as
+Marketplace channels are closed snapshots: the selected marketplace ref owns
+both its catalog and the relative plugin packages under `dist/`. Public install
+instructions pin `stable`, so catalog metadata and installed packages come from
+the same released commit. An exact `vX.Y.Z` ref pins an immutable release.
+
+Refs without an explicit release channel resolve through the repository default
+branch, `main`, and are development previews. Preview users must select that
+channel deliberately:
+
+```text
+/plugin marketplace add https://github.com/agentrof/agent-marketplace.git#main
+codex plugin marketplace add agentrof/agent-marketplace@main
+```
+
+Normal merges do not change a SemVer value. CI identifies each main build as
 `main.<first-parent-count>.g<sha7>` and stores both generated host packages as
 an artifact.
 

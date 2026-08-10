@@ -80,6 +80,28 @@ class ReleaseRepositoryTests(unittest.TestCase):
     def test_fixture_has_one_canonical_version_on_every_host_surface(self):
         self.assertEqual(release.validate_version_surfaces(self.root), [])
 
+    def test_marketplace_sources_stay_inside_the_selected_channel(self):
+        claude = release.read_json(
+            self.root / ".claude-plugin" / "marketplace.json"
+        )
+        codex = release.read_json(
+            self.root / ".agents" / "plugins" / "marketplace.json"
+        )
+        self.assertEqual(
+            claude["plugins"][0]["source"],
+            release.channel_source("claude", fixtures.PLUGIN),
+        )
+        self.assertEqual(
+            codex["plugins"][0]["source"],
+            release.channel_source("codex", fixtures.PLUGIN),
+        )
+
+    def test_channel_source_rejects_unknown_host(self):
+        with self.assertRaisesRegex(
+            release.ReleaseError, "unknown marketplace host"
+        ):
+            release.channel_source("other", fixtures.PLUGIN)
+
     def test_claude_only_or_codex_only_drift_fails(self):
         for host in ("claude", "codex"):
             with self.subTest(host=host):
@@ -151,6 +173,31 @@ class ReleaseRepositoryTests(unittest.TestCase):
                 release.check_pr_changeset(
                     self.root, "origin/main", allow_bootstrap=True
                 )
+
+    def test_bootstrap_reset_may_replace_release_owned_state(self):
+        with mock.patch.object(release, "changed_paths", return_value=[
+            ("A", ".changes/fixture.json"),
+            ("M", "versions.json"),
+            ("M", "CHANGELOG.md"),
+            ("D", ".release/stable.json"),
+        ]):
+            release.check_pr_changeset(
+                self.root, "origin/main", allow_bootstrap=True
+            )
+
+    def test_verify_bootstrap_rejects_prior_stable_provenance(self):
+        fixtures.write(
+            self.root / ".release" / "stable.json",
+            json.dumps({"version": "0.1.2"}),
+        )
+        with self.assertRaisesRegex(
+            release.ReleaseError, "prior stable provenance"
+        ):
+            release.verify_bootstrap(self.root)
+        (self.root / ".release" / "stable.json").unlink()
+        self.assertEqual(
+            release.verify_bootstrap(self.root)["marketplace"], "0.0.1"
+        )
 
     def test_normal_pr_cannot_edit_release_owned_state(self):
         self.write_changeset("plugin-patch", {fixtures.PLUGIN: "patch"})

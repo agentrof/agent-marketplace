@@ -293,7 +293,8 @@ version shared by Claude and Codex. Platform-specific version fields or bumps
 are forbidden. The distribution builder applies that version to both generated
 packages, and the validator rejects drift in either platform manifest, either
 distribution manifest, the Claude marketplace entry, or the public PMO runtime
-version.
+version. Both marketplace catalogs use relative package sources, so the
+selected marketplace ref and installed package content cannot cross channels.
 
 Every normal pull request adds `.changes/<kebab-slug>.json` with a summary and a
 `components` object. Valid components are `agent-marketplace` and every plugin
@@ -302,7 +303,7 @@ Use an empty components object for work with no stable release effect. If
 several changesets affect one component, the highest impact wins. The
 marketplace advances by the highest pending impact, while only affected plugin
 versions advance. Scaffolding a plugin registers its initial `0.0.1` version
-and both stable host sources in the same transaction.
+and both channel-relative host sources in the same transaction.
 
 Normal main commits retain the current stable SemVer and receive the build id
 `main.<first-parent-count>.g<sha7>`. The `Prepare stable release` workflow is a
@@ -319,9 +320,10 @@ plus the GitHub Release.
 `make check` is hermetic: it opens no network sockets, needs no host CLI and
 includes deterministic simulations of the complete Claude and Codex lifecycle.
 `make release-check` adds real-host lifecycle tests against the current checkout
-packages. `make public-release-check` runs the same lifecycle through the public
-stable channel. The `release-hosts` workflow repeats the public gate weekly and
-on explicit maintainer dispatch against current host CLIs. Official workflow
+packages. `make public-release-check` runs the same lifecycle through explicitly
+pinned public stable sources on both hosts. The `release-hosts` workflow repeats
+the public gate weekly and on explicit maintainer dispatch against current host
+CLIs. Official workflow
 actions use the repository's enforced Node.js 24 runtime set; release jobs also
 disable package-manager caching because they install only global host CLIs.
 

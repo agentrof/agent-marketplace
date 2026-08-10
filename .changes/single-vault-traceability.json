@@ -1,8 +1,0 @@
-{
-  "summary": "Enforce one closed Obsidian vault with cross-subtree typed traceability, bounded inverse projections, portable gates and contract-safe adoption.",
-  "components": {
-    "agent-marketplace": "minor",
-    "project-management-office": "minor",
-    "software-engineering-team": "minor"
-  }
-}

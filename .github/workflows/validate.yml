@@ -11,7 +11,7 @@ jobs:
     if: github.event_name == 'pull_request' && github.head_ref != 'release/stable'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           fetch-depth: 0
       - name: Require a release-impact declaration
@@ -23,8 +23,8 @@ jobs:
   check:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.x"
       - name: Run all gates
@@ -35,7 +35,7 @@ jobs:
     needs: [check, compatibility]
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           fetch-depth: 0
       - name: Create immutable main build identity
@@ -43,7 +43,7 @@ jobs:
         run: |
           python3 tools/release.py build-info --output build-info.json
           echo "id=$(python3 -c 'import json; print(json.load(open("build-info.json"))["build_id"])')" >> "$GITHUB_OUTPUT"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v6
         with:
           name: ${{ steps.build.outputs.id }}
           path: |
@@ -64,8 +64,8 @@ jobs:
           - os: macos-latest
             python: "3.x"
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: ${{ matrix.python }}
       - name: Run all gates

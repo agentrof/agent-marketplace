@@ -1,0 +1,6 @@
+{
+  "summary": "Run release automation on Node.js 24 compatible official actions and enforce the runtime contract across every workflow.",
+  "components": {
+    "agent-marketplace": "patch"
+  }
+}

@@ -14,3 +14,7 @@
 
 - Accept narrowly validated Claude runtime cache markers in package provenance and make stable release preparation resilient to organization PR policy.
 - Require a maintainer-created stable release pull request so GitHub binds required validation to the candidate commit.
+
+## 0.1.2
+
+- Run release automation on Node.js 24 compatible official actions and enforce the runtime contract across every workflow.

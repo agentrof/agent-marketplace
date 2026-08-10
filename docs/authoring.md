@@ -307,15 +307,14 @@ and both stable host sources in the same transaction.
 Normal main commits retain the current stable SemVer and receive the build id
 `main.<first-parent-count>.g<sha7>`. The `Prepare stable release` workflow is a
 manual, PAT-free operation. After bootstrap it consumes pending changesets,
-updates all version surfaces, rebuilds both distributions, and opens the
-`release/stable` pull request without merging it. A maintainer approves its CI
-run, reviews it, and merges it. The publish workflow then verifies the exact merge commit,
-prior stable SHA, tag and release uniqueness, and cross-host equality before
-moving `stable` forward and creating `vX.Y.Z` plus the GitHub Release.
-If organization policy prevents Actions from creating pull requests, prepare
-still exits green after pushing the fully verified `release/stable` branch and
+updates all version surfaces, rebuilds both distributions, and pushes the
+verified `release/stable` branch without opening or merging a pull request. It
 writes the exact compare URL and title into the job summary. A maintainer opens
-that PR manually; every later gate and publication invariant stays unchanged.
+that PR so GitHub emits the `pull_request` event and binds required validation
+checks to the candidate, then reviews and merges it. The publish workflow
+verifies the exact merge commit, prior stable SHA, tag and release uniqueness,
+and cross-host equality before moving `stable` forward and creating `vX.Y.Z`
+plus the GitHub Release.
 
 `make check` is hermetic: it opens no network sockets, needs no host CLI and
 includes deterministic simulations of the complete Claude and Codex lifecycle.

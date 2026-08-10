@@ -5,7 +5,6 @@ on:
 
 permissions:
   contents: write
-  pull-requests: write
 
 concurrency:
   group: stable-release
@@ -31,7 +30,7 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-      - name: Prepare bootstrap or release pull request
+      - name: Prepare bootstrap or verified release branch
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -73,30 +72,15 @@ jobs:
           git add --all
           git commit -m "chore: prepare stable v${version}"
           git push origin HEAD:refs/heads/release/stable
-          pr_error="$(mktemp)"
-          if pr_url="$(gh pr create \
-              --base main \
-              --head release/stable \
-              --title "chore: prepare stable v${version}" \
-              --body "Stable release candidate v${version}. This PR is never merged automatically." \
-              2>"$pr_error")"; then
-            echo "$pr_url"
-          elif grep -Fq \
-              "GitHub Actions is not permitted to create or approve pull requests" \
-              "$pr_error"; then
-            manual_url="https://github.com/${GITHUB_REPOSITORY}/compare/main...release/stable?expand=1"
-            echo "::warning title=Manual release PR required::$manual_url"
-            {
-              echo "### Manual release PR required"
-              echo
-              echo "Organization policy blocks Actions from creating pull requests."
-              echo "The verified release branch was pushed successfully."
-              echo
-              echo "Open: ${manual_url}"
-              echo
-              echo "Title: chore: prepare stable v${version}"
-            } >> "$GITHUB_STEP_SUMMARY"
-          else
-            cat "$pr_error" >&2
-            exit 1
-          fi
+          manual_url="https://github.com/${GITHUB_REPOSITORY}/compare/main...release/stable?expand=1"
+          echo "::notice title=Maintainer release PR required::$manual_url"
+          {
+            echo "### Maintainer release PR required"
+            echo
+            echo "The verified release branch was pushed successfully."
+            echo "Open the pull request as a maintainer so the pull_request validation event runs."
+            echo
+            echo "Open: ${manual_url}"
+            echo
+            echo "Title: chore: prepare stable v${version}"
+          } >> "$GITHUB_STEP_SUMMARY"

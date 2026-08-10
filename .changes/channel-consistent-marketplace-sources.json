@@ -1,6 +1,0 @@
-{
-  "summary": "Keep marketplace catalogs and plugin packages on the same selected release channel.",
-  "components": {
-    "agent-marketplace": "patch"
-  }
-}

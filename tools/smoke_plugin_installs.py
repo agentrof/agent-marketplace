@@ -154,6 +154,17 @@ def register_project_contract(
         "--stamp-config", str(project / "workspace" / "config.json"),
         "--project-root", str(project), "--workspace", "workspace",
     ], env)
+    config = json.loads(
+        (project / "workspace" / "config.json").read_text(encoding="utf-8")
+    )
+    contract = config.get("agent_marketplace", {})
+    config_surface = "workspace/config.json#agent-marketplace"
+    if isinstance(contract, dict) and config_surface in contract.get(
+        "managed_surfaces", {}
+    ):
+        raise SmokeFailure(
+            "project contract contains its own config as a managed surface"
+        )
 
 
 def assert_preparation_payload(

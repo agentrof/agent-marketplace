@@ -1095,9 +1095,14 @@ def gitignore_owned_digest(content: str) -> str:
     return sha256_bytes(content[begin:finish].encode())
 
 
-def managed_surface_hashes(root: Path, config_path: Path | None) -> dict[str, str]:
+def managed_surface_hashes(
+    root: Path,
+    config_path: Path | None,
+    *,
+    include_legacy_config: bool = True,
+) -> dict[str, str]:
     surfaces: dict[str, str] = {}
-    if config_path is not None and config_path.is_file():
+    if include_legacy_config and config_path is not None and config_path.is_file():
         config = load_json(config_path, {})
         if isinstance(config, dict) and CONTRACT_KEY not in config:
             surfaces[safe_relative(root, config_path) + "#agent-marketplace"] = (
@@ -2878,8 +2883,13 @@ def initialize_project_contract(
     installed, blockers = inventory(data_root)
     if blockers:
         raise UpgradeError(", ".join(blockers))
+    # The nested v5 contract is protected by contract_sha256. Recording the
+    # containing config as one of that contract's managed surfaces would make
+    # the expected digest self-referential and drift immediately after write.
     surfaces = managed_surface_hashes(
-        root, config_path if config_path.is_file() else None
+        root,
+        config_path if config_path.is_file() else None,
+        include_legacy_config=False,
     )
     host_surfaces, _ = adapter_surfaces(
         data_root, team_id, root, workspace, "inspect"

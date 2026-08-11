@@ -41,9 +41,9 @@ class CountsTests(unittest.TestCase):
     def test_compute_counts_from_tree(self):
         root = self.make_root()
         computed = counts.compute(root)
-        self.assertEqual(computed["plugins"], 1)
+        self.assertEqual(computed["plugins"], 2)
         self.assertEqual(computed["agents"], 1)
-        self.assertEqual(computed["entry_skills"], 0)
+        self.assertEqual(computed["entry_skills"], 3)
         self.assertEqual(computed["knowledge_skills"], 1)
 
     def test_inject_rewrites_only_marker_block(self):
@@ -54,7 +54,7 @@ class CountsTests(unittest.TestCase):
         self.assertNotIn("stale", new)
         self.assertIn("Intro text.", new)
         self.assertIn("Outro text.", new)
-        self.assertIn("| 1 | 1 | 0 | 1 |", new)
+        self.assertIn("| 2 | 1 | 3 | 1 |", new)
 
     def test_check_detects_drift(self):
         root = self.make_root()
@@ -65,7 +65,7 @@ class CountsTests(unittest.TestCase):
         _, same = counts.inject(root / "README.md", block)
         self.assertEqual(fresh, same)
         # Hand-edit a number inside the block -> drift.
-        tampered = fresh.replace("| 1 | 1 | 0 | 1 |", "| 9 | 9 | 9 | 9 |")
+        tampered = fresh.replace("| 2 | 1 | 3 | 1 |", "| 9 | 9 | 9 | 9 |")
         (root / "README.md").write_text(tampered, encoding="utf-8")
         old, new = counts.inject(root / "README.md", block)
         self.assertNotEqual(old, new, "hand-edited counts must register as drift")

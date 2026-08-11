@@ -119,7 +119,8 @@ class ValidatorFixtureTests(unittest.TestCase):
                              if host == "claude" else
                              " Present choice gates with request_user_input.")
                           + " One delivery team owns a project."
-                          + ("" if host == "claude" else
+                          + (" Setup runs `generate_claude_project.py`."
+                             if host == "claude" else
                              " Setup runs `generate_codex_project.py`.")
                           + "\n"
                       ))
@@ -127,11 +128,18 @@ class ValidatorFixtureTests(unittest.TestCase):
                     else "Write|Edit|apply_patch|Bash"
                 write(root / "platforms" / host / "second-team" / "overlay"
                       / "hooks" / "hooks.json", json.dumps({
-                          "hooks": {"PreToolUse": [{
-                              "matcher": matcher,
-                              "hooks": [{"type": "command",
-                                         "command": "python3 team_guard.py pre"}],
-                          }]}
+                          "hooks": {
+                              "PreToolUse": [{
+                                  "matcher": matcher,
+                                  "hooks": [{"type": "command",
+                                             "command": "python3 team_guard.py pre"}],
+                              }],
+                              "PostToolUse": [{
+                                  "matcher": matcher,
+                                  "hooks": [{"type": "command",
+                                             "command": "python3 team_guard.py post"}],
+                              }],
+                          }
                       }))
             write(root / "plugins" / "second-team" / "agents" / "planner.md",
                   VALID_AGENT)
@@ -153,6 +161,11 @@ class ValidatorFixtureTests(unittest.TestCase):
                           "baseline": 1, "current": 1, "steps": [],
                       },
                   }, indent=2))
+            write(
+                root / "plugins" / "second-team" / "templates"
+                / "project-instructions" / "team.md",
+                "# Second Team\n",
+            )
             codex_path = root / ".agents" / "plugins" / "marketplace.json"
             codex = json.loads(codex_path.read_text(encoding="utf-8"))
             codex["plugins"].append({
@@ -395,6 +408,10 @@ class ValidatorFixtureTests(unittest.TestCase):
             "constitution_max_lines": validate.CONSTITUTION_MAX_LINES,
             "flow_max_lines": validate.FLOW_MAX_LINES,
             "reference_warn_lines": validate.REFERENCE_WARN_LINES,
+            "project_instruction_max_bytes":
+                validate.PROJECT_INSTRUCTION_MAX_BYTES,
+            "project_instruction_max_lines":
+                validate.PROJECT_INSTRUCTION_MAX_LINES,
         }
         import json
         shipped = json.loads(

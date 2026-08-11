@@ -93,9 +93,13 @@ Start a new task/session, open `/hooks`, inspect and trust Project Management
 Office and Software Engineering Team, and start another task if Codex asks for
 a reload. Then select
 `software-engineering-team:setup` in the App skill picker or CLI `/skills`
-picker (or invoke `$software-engineering-team:setup`). Setup generates the managed Agent Marketplace block in
-the project's `AGENTS.md` and native `.codex/agents/*.toml` role definitions.
-Those agents become discoverable at the next task/session boundary.
+picker (or invoke `$software-engineering-team:setup`). Setup generates the
+complete Agent Marketplace-owned `AGENTS.md`, seeds a user-owned
+`AGENTS.user.md` only when missing, and generates native `.codex/agents/*.toml`
+role definitions. The generated root asks Codex to read the companion on a
+best-effort basis; safety rules remain in the generated file, hooks, and
+validators. Those instructions and agents become discoverable at the next
+task/session boundary.
 
 One delivery team owns a project. PMO is shared infrastructure, but setup
 refuses a second team's workspace or project-agent ownership before changing
@@ -170,12 +174,14 @@ sole blocker, writes a fingerprint-bound plan after approval, and asks again
 before apply. A successful run requires another fresh session so both hosts
 load the new hooks, skills, and project agents.
 
-The upgrader owns only PMO data, `.agentrof/agent-marketplace/project.json`, Agent Marketplace-marked
-project instruction blocks, Agent Marketplace-owned project agent files, and declared
-machine-owned config fields. It does not overwrite user code, authored docs,
-memory, demos, sketches, secrets, environment files, custom CI, or unmanaged
-instruction content. See [Upgrade protocol](docs/upgrade-protocol.md) for the
-complete safety and recovery contract.
+The upgrader owns only PMO data, `.agentrof/agent-marketplace/project.json`, the
+installed hosts' complete generated root instruction files,
+`<workspace>/memory/agent-marketplace.md`, Agent Marketplace-owned project agent
+files, and declared machine-owned config fields. User companions, `me.md`,
+`profile.md`, nested instruction files, `CLAUDE.local.md`, code, authored docs,
+demos, sketches, secrets, environment files, and custom CI remain user-owned.
+See [Upgrade protocol](docs/upgrade-protocol.md) for the complete safety and
+recovery contract.
 
 Agentrof owns the vendor root, while Agent Marketplace owns a product directory
 inside it. The default runtime path is `.agentrof/agent-marketplace` under the

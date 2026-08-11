@@ -41,8 +41,8 @@ downgrades fail closed.
 | `AGENT_MARKETPLACE_UPGRADE_COMPLETE_RESTART_REQUIRED` | Apply completed against pre-upgrade session context. | Fresh session required. |
 | `AGENT_MARKETPLACE_PROJECT_UPGRADE_PR_PENDING` | Managed changes are not yet on the configured target branch. | Exact review, commit, push and PR operations only. |
 
-`PROJECT_CONTRACT_DRIFT` identifies a marker-owned field or block changed
-outside its owner. It is never repaired silently. A dirty checkout, active PMO
+`PROJECT_CONTRACT_DRIFT` identifies a declared managed field or whole-file
+surface changed outside its owner. It is never repaired silently. A dirty checkout, active PMO
 work in any project, frozen work, path collision, symbolic link, missing
 adapter, package provenance failure, cross-host version mismatch, insufficient
 disk, database integrity error, stale plan, or downgrade also blocks apply.
@@ -73,14 +73,26 @@ The upgrader may write only:
 - the global host-aware plugin registry, locks, plans, journals, and backups;
 - `.agentrof/agent-marketplace/project.json` in the consuming project;
 - declared machine-owned fields in the team config;
-- Agent Marketplace marker blocks in host instruction files;
+- the complete generated root instruction file for each installed host;
+- `<workspace>/memory/agent-marketplace.md` and the reserved absence of root
+  `AGENTS.override.md`;
 - Agent Marketplace-owned native project-agent files.
 
-It never overwrites user code, authored documentation, memory, demos, sketches,
-secrets, environment files, custom CI, unmarked instruction text, or an
-unmanaged file collision. Config updates preserve unknown and user-owned keys.
-Instruction adapters replace only their exact marker block. Project files have
-before-images in the journal and are restored if their phase fails.
+It never overwrites user code, authored documentation, the user-owned host
+companions, `me.md`, `profile.md`, nested AGENTS files, nested overrides,
+`CLAUDE.local.md`, demos, sketches, secrets, environment files, custom CI, or an
+unmanaged collision. Config updates preserve unknown and user-owned keys.
+Project files have before-images in the journal and are restored if their phase
+fails.
+
+Legacy marker-owned or unmanaged root instruction content requires an explicit
+`preserve`, `discard`, or `abort` choice before a plan can exist. Preserve moves
+the exact old user content into the matching companion after any existing
+companion content; no semantic merge is attempted. A root
+`AGENTS.override.md` is appended to `AGENTS.user.md` and removed only through
+the same approved preserve migration. Resolved choices are part of the plan
+fingerprint, and apply never asks again. Unsafe legacy workspace names stop
+before mutation with `UNSAFE_WORKSPACE_NAME`; folder renaming is never inferred.
 
 All global runtime state is rooted at `AGENT_MARKETPLACE_HOME` when set,
 otherwise at `${AGENTROF_HOME:-$HOME/.agentrof}/agent-marketplace`. The PMO

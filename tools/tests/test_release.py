@@ -87,12 +87,20 @@ class ReleaseRepositoryTests(unittest.TestCase):
         codex = release.read_json(
             self.root / ".agents" / "plugins" / "marketplace.json"
         )
+        claude_entry = next(
+            entry for entry in claude["plugins"]
+            if entry["name"] == fixtures.PLUGIN
+        )
+        codex_entry = next(
+            entry for entry in codex["plugins"]
+            if entry["name"] == fixtures.PLUGIN
+        )
         self.assertEqual(
-            claude["plugins"][0]["source"],
+            claude_entry["source"],
             release.channel_source("claude", fixtures.PLUGIN),
         )
         self.assertEqual(
-            codex["plugins"][0]["source"],
+            codex_entry["source"],
             release.channel_source("codex", fixtures.PLUGIN),
         )
 

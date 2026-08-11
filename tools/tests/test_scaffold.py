@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import json
 import os
-import shutil
 import subprocess
 import sys
 import tempfile
@@ -160,44 +159,11 @@ class ScaffoldTests(unittest.TestCase):
     def test_native_repository_scaffolds_both_host_packages(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            shutil.copyfile(
-                fixtures.REAL_REPOSITORY / "product.json",
-                fixtures.write_path(root / "product.json"),
-            )
-            fixtures.write(root / ".claude-plugin" / "marketplace.json", json.dumps({
-                "name": "agent-marketplace", "owner": {"name": "Agentrof"},
-                "metadata": {"description": "native", "version": "0.0.1"},
-                "plugins": [],
-            }))
-            fixtures.write(root / ".agents" / "plugins" / "marketplace.json",
-                           json.dumps({
-                               "name": "agent-marketplace",
-                               "interface": {"displayName": "Agent Marketplace"},
-                               "plugins": [],
-                           }))
-            fixtures.write(root / "versions.json", json.dumps({
-                "schema_version": 1,
-                "marketplace": "0.0.1",
-                "plugins": {},
-            }))
-            fixtures.write(root / ".changes" / "fixture.json", json.dumps({
-                "summary": "Exercise native plugin scaffolding.",
-                "components": {},
-            }))
-            (root / "plugins").mkdir()
-            shutil.copytree(
-                fixtures.REAL_REPOSITORY / "platforms" / "shared" / "_team",
-                root / "platforms" / "shared" / "_team",
-            )
-            shutil.copytree(
-                fixtures.REAL_REPOSITORY / "platforms" / "codex" / "_team",
-                root / "platforms" / "codex" / "_team",
-            )
-            (root / "tools" / "data").mkdir(parents=True)
-            shutil.copyfile(fixtures.REAL_MODEL_CONFIG,
-                            root / "tools" / "data" / "models.json")
-            shutil.copyfile(fixtures.REAL_LIMITS_CONFIG,
-                            root / "tools" / "data" / "limits.json")
+            # A native team is scaffolded inside the complete repository
+            # contract. PMO owns the canonical common fragment and both
+            # hosts own one shared delta, so an empty registry is no longer
+            # a buildable marketplace source tree.
+            fixtures.make_valid_root(root)
             scaffold.new_plugin(root, "demo-team")
             scaffold.new_agent(root, "demo-team", "coordinator")
             scaffold.new_skill(root, "demo-team", "start", "entry")

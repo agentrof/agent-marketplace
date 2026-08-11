@@ -6,6 +6,6 @@
 - Present every canonical choice gate through `AskUserQuestion`, preserving the options, recommendation, and tradeoffs.
 - When the canonical workflow says `spawn`, use the `software-engineering-team:<agent-id>` identity. Open the PMO task before spawning, wait for every required agent, then close the task after validating its output.
 - Dispatch independent read-only agents together and wait for all of them. Do not dispatch overlapping writers concurrently.
-- During setup, run `"$RUN" run --host claude "$TEAM" scripts/generate_claude_project.py apply --project-root <git-root> --workspace <chosen-workspace-name>`. The generator owns only its marked block in `CLAUDE.md`, substitutes the chosen workspace name, preserves user content, and stops on an unmanaged collision.
+- During setup, run `"$RUN" run --host claude "$TEAM" scripts/generate_claude_project.py check --project-root <git-root> --workspace <chosen-workspace-name> --seed-user-files`, present every returned migration choice, then run `apply` with the exact approved `--choice <id>=<option>` values and `--seed-user-files`. The generator owns the complete generated `CLAUDE.md` and shared Agent Marketplace memory files. It seeds `CLAUDE.user.md`, `me.md`, and `profile.md` only when missing and never rewrites them later.
 - For delivery-lane handoffs, open a new Claude Code session in the selected worktree.
 - Successful completion means the same durable state, gates, artifacts, and PR outcome as every supported host; host-specific UI is not part of the contract.

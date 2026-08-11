@@ -23,6 +23,16 @@
       "actions": ["Review the plan id and exact changes.", "Approve or stop without mutation."]
     },
     {
+      "code": "AGENT_MARKETPLACE_UPGRADE_CHOICE_REQUIRED",
+      "summary": "Project instruction migration requires explicit owner choices before a plan can be created.",
+      "actions": ["Review every exact content preview.", "Resolve each request with preserve, discard, or abort.", "Run upgrade plan again with the selected choice ids."]
+    },
+    {
+      "code": "AGENT_MARKETPLACE_UPGRADE_CHOICE_ABORTED",
+      "summary": "The owner aborted project instruction migration without creating a plan.",
+      "actions": ["No project or database mutation occurred."]
+    },
+    {
       "code": "AGENT_MARKETPLACE_UPGRADING",
       "summary": "An upgrade owns the maintenance lock.",
       "actions": ["Do not start normal marketplace work.", "Wait for completion or follow recovery guidance."]

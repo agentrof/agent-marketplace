@@ -61,7 +61,10 @@ orchestration model in [docs/orchestration.md](docs/orchestration.md).
 5. Run `make check`, then `make counts` if the README counter table is
    now stale. Never edit counted numbers by hand.
 
-The scaffolder updates both host surfaces and generated distributions.
+The scaffolder creates one host-neutral
+`templates/project-instructions/team.md`, updates both host manifests and
+registries, and rebuilds both distributions. Host-specific project instruction
+behavior belongs only in the shared `_team` host fragments.
 After a manual canonical edit, run
 `python3 tools/build_distributions.py` before `make check`.
 

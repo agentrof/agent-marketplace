@@ -28,8 +28,13 @@ include tradeoffs. Anchor every path at the resolved git root.
    managed-team trace. A keyed config or old contract routes to Agent
    Marketplace Upgrade and stops. A foreign `workspace/` gets an owner-chosen
    alternative name used consistently in paths and templates.
-3. Materialize host instructions and memory templates only where missing.
-   User-supplied `me.md` and `profile.md` are copied verbatim. Materialize the
+3. Preview the active host project generator before any instruction write.
+   Present every returned `choice_requests` item through the choice gate and
+   rerun apply with the exact approved `--choice <id>=<option>` values plus
+   `--seed-user-files`. The generator owns the complete host root instruction
+   file and `agent-marketplace.md`; it seeds the matching user companion,
+   `me.md`, and `profile.md` only when missing. User-supplied companions,
+   `me.md`, and `profile.md` are preserved verbatim. Materialize the
    base vault payload with `vault_check.py materialize-payload --vault
    <workspace>/docs`; existing `.obsidian` values are never overwritten.
 4. Reconcile `.gitignore` by marker ownership. Preserve every user line and

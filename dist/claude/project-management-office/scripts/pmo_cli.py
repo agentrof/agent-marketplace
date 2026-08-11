@@ -33,7 +33,7 @@ if str(SCRIPT_DIR) not in sys.path:
 import marketplace_paths
 import upgrade_core
 
-PMO_VERSION = "0.0.2"
+PMO_VERSION = "0.1.0"
 SCHEMA_VERSION = 6
 DB_NAME = "pmo.db"
 

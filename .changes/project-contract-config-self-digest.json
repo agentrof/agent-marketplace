@@ -1,8 +1,0 @@
-{
-  "summary": "Exclude the v5 contract's containing config from managed surfaces and verify fresh host registration before release.",
-  "components": {
-    "agent-marketplace": "patch",
-    "project-management-office": "patch",
-    "software-engineering-team": "patch"
-  }
-}

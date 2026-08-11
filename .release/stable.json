@@ -1,14 +1,17 @@
 {
   "schema_version": 1,
-  "version": "0.1.0",
-  "stable_base": "bd31c1f705c2aef267399592a9eee35466a1996b",
-  "main_source": "0611c38fa46772c4518c48242cae2b8a05f84259",
+  "version": "0.2.0",
+  "stable_base": "b51672ed64d31e1cb01a952bc658d82a8cd4b898",
+  "main_source": "d14d23dd2d61b5236cf0c81778cb661667447688",
   "impacts": {
-    "agent-marketplace": "patch",
-    "project-management-office": "patch",
+    "agent-marketplace": "minor",
+    "project-management-office": "minor",
     "software-engineering-team": "minor"
   },
   "summaries": [
-    "Author Design System and Experience Design deliverables in place and move operational project state into a project-local runtime."
+    "Exclude the v5 contract's containing config from managed surfaces and verify fresh host registration before release.",
+    "Move machine-local runtime and host projections outside Git, add tracked project contract v5, and reconcile cloned environments with active-work checkpoints.",
+    "Standardize cross-host project instructions around canonical fragments, whole-file managed roots, user-owned companions, and choice-bound legacy migration.",
+    "Remove false upgrade session blockers and prepare remote upgrade branches safely from the default branch."
   ]
 }

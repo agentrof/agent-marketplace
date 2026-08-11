@@ -369,11 +369,18 @@ class PmoHookTests(unittest.TestCase):
         code, _, err = run_hook("hook_guard_db.py", self.payload(
             hook_event_name="PreToolUse", tool_name="Bash",
             tool_input={
-                "command": f"{launcher} upgrade session-release"
-                           " --session-id old --confirm-closed"
+                "command": f"{launcher} upgrade prepare-branch"
+                           f" --project-root {self.project_root}"
             },
         ), self.env)
         self.assertEqual(code, 0, err)
+        code, _, err = run_hook("hook_guard_db.py", self.payload(
+            hook_event_name="PreToolUse", tool_name="Bash",
+            tool_input={
+                "command": "git switch -c agent-marketplace/upgrade-contract"
+            },
+        ), self.env)
+        self.assertEqual(code, 2)
         for command in (
             "touch upgrade status",
             "/tmp/pmo_cli.py upgrade status",
@@ -391,7 +398,6 @@ class PmoHookTests(unittest.TestCase):
 
     def test_upgrade_git_navigation_allowlist_is_exact(self):
         target_status = {"blockers": ["UPGRADE_TARGET_REQUIRED:main"]}
-        branch_status = {"blockers": ["UPGRADE_BRANCH_REQUIRED:main"]}
         payload = self.payload(
             hook_event_name="PreToolUse", tool_name="Bash",
             tool_input={"command": "git switch main"},
@@ -399,13 +405,6 @@ class PmoHookTests(unittest.TestCase):
         self.assertTrue(HOOK_GUARD.is_upgrade_target_command(payload, target_status))
         payload["tool_input"]["command"] = "git switch main && touch owned.txt"
         self.assertFalse(HOOK_GUARD.is_upgrade_target_command(payload, target_status))
-        payload["tool_input"]["command"] = (
-            "git switch -c agent-marketplace/upgrade-contract"
-        )
-        self.assertTrue(HOOK_GUARD.is_upgrade_branch_command(payload, branch_status))
-        self.assertFalse(HOOK_GUARD.is_upgrade_branch_command(
-            payload, {"blockers": [*branch_status["blockers"], "DIRTY_WORKTREE"]}
-        ))
 
     def guard(self, path: Path, tool="Write"):
         return run_hook("hook_guard_db.py", self.payload(

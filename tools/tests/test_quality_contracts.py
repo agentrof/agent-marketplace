@@ -15,6 +15,7 @@ import unittest
 from pathlib import Path
 
 TESTS_DIR = Path(__file__).resolve().parent
+REPO = TESTS_DIR.parents[1]
 sys.path.insert(0, str(TESTS_DIR))
 sys.path.insert(0, str(TESTS_DIR.parent))
 
@@ -287,6 +288,20 @@ class CanonicalHostNeutralityCases(unittest.TestCase):
             "CLAUDE.md", "AGENTS.md",
             "CLAUDE_PLUGIN_ROOT", "PLUGIN_ROOT", ".claude", ".codex",
         } <= set(build_distributions.CANONICAL_HOST_TOKENS))
+
+    def test_upgrade_prerequisite_copy_is_host_neutral(self):
+        text = (REPO / "plugins" / "project-management-office"
+                / "skill-content" / "upgrade" / "SKILL.md").read_text(
+                    encoding="utf-8"
+                )
+        start = text.index("question: `Are the upgrade prerequisites complete?`")
+        end = text.index("3. Run `upgrade status", start)
+        prompt = text[start:end]
+        self.assertIn("`Ready (Recommended)`", prompt)
+        self.assertIn("`Cancel`", prompt)
+        for token in build_distributions.CANONICAL_HOST_TOKENS:
+            with self.subTest(token=token):
+                self.assertNotIn(token, prompt)
 
     def assert_token_rejected(self, token: str) -> None:
         with tempfile.TemporaryDirectory() as tmp:

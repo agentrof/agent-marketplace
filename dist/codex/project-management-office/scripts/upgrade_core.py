@@ -49,7 +49,7 @@ STATUS_RECOVERY = "AGENT_MARKETPLACE_UPGRADE_RECOVERY_REQUIRED"
 STATUS_RESTART = "AGENT_MARKETPLACE_UPGRADE_COMPLETE_RESTART_REQUIRED"
 STATUS_PROJECT_PR = "AGENT_MARKETPLACE_PROJECT_UPGRADE_PR_PENDING"
 UPGRADE_BRANCH_RE = re.compile(
-    r"^agent-marketplace/upgrade-[a-z0-9][a-z0-9._-]*$"
+    r"^agent-marketplace/upgrade-[A-Za-z0-9][A-Za-z0-9._-]*$"
 )
 IN_USE_MARKER_RE = re.compile(
     r"^(?P<pid>[1-9][0-9]*)(?:\.tmp\.[0-9a-f]{8})?$"
@@ -423,47 +423,6 @@ def runtime_migration_fingerprint(root: Path, workspace: str) -> str:
         digest.update(directory_digest(path).encode())
         digest.update(b"\0")
     return digest.hexdigest()
-
-
-def live_session_records(data_root: Path) -> list[dict]:
-    result: list[dict] = []
-    sessions = data_root / "sessions"
-    if not sessions.is_dir():
-        return result
-    for path in sorted(sessions.glob("*.json")):
-        value = load_json(path, {})
-        if isinstance(value, dict) and value.get("pmo_ready") is True:
-            session_id = str(value.get("session_id", ""))
-            if session_id:
-                result.append({
-                    "session_id": session_id,
-                    "recorded_at": str(value.get("recorded_at", "")),
-                })
-    return result
-
-
-def release_session(data_root: Path, session_id: str, confirm_closed: bool) -> dict:
-    if not confirm_closed:
-        raise UpgradeError(
-            "session release requires --confirm-closed after the owner verifies"
-            " that the named host session is no longer running"
-        )
-    if not session_id:
-        raise UpgradeError("session release requires a session id")
-    path = data_root / "sessions" / f"{sha256_bytes(session_id.encode())}.json"
-    value = load_json(path, None)
-    if not isinstance(value, dict) or value.get("session_id") != session_id:
-        raise UpgradeError(f"unknown marketplace session: {session_id}")
-    if value.get("pmo_ready") is not True:
-        raise UpgradeError(
-            f"session is not a blocking ready session: {session_id}"
-        )
-    path.unlink()
-    return {
-        "status": "AGENT_MARKETPLACE_SESSION_RELEASED",
-        "session_id": session_id,
-        "mutation_performed": True,
-    }
 
 
 def disk_space_blockers(data_root: Path, db_file: Path, root: Path | None) -> list[str]:
@@ -896,7 +855,6 @@ def status(
     target_schema: int,
     project_path: str | Path | None = None,
     include_git: bool = True,
-    exclude_session_id: str = "",
 ) -> dict:
     blockers: list[str] = []
     reasons: list[str] = []
@@ -1001,17 +959,12 @@ def status(
                     )
                     if drift:
                         blockers.append("PROJECT_CONTRACT_DRIFT:" + ",".join(drift))
-            database_upgrade = any(
-                value.startswith("DATABASE_SCHEMA:") for value in reasons
-            )
             delivery = state.get("delivery", {}) \
                 if isinstance(state, dict) else {}
             if not isinstance(delivery, dict):
                 delivery = {}
             if managed_project and reasons:
                 delivery = repository_delivery(root)
-                if not database_upgrade:
-                    blockers.extend(active_database_work(db_file, project_key))
                 runtime_paths = project_runtime_paths(root, workspace)
                 blockers.extend(active_freezes(
                     db_file, runtime_paths["legacy_work_orders"]
@@ -1053,19 +1006,9 @@ def status(
         except UpgradeError as exc:
             blockers.append(f"PROJECT_PREFLIGHT_FAILED:{exc}")
 
-    if any(value.startswith("DATABASE_SCHEMA:") for value in reasons):
-        blockers.extend(active_database_work(db_file))
     if reasons:
+        blockers.extend(active_database_work(db_file))
         blockers.extend(disk_space_blockers(data_root, db_file, root))
-
-    sessions = [
-        value for value in live_session_records(data_root)
-        if value["session_id"] != exclude_session_id
-    ]
-    # The dedicated upgrade session is recorded with pmo_ready=false. Every
-    # ready session found here is therefore a competing pre-upgrade session.
-    if reasons and sessions:
-        blockers.append(f"CLOSE_OTHER_SESSIONS_REQUIRED:{len(sessions)}")
     recovery = sorted((data_root / UPGRADES_DIR).glob("*/journal.json")) \
         if (data_root / UPGRADES_DIR).is_dir() else []
     incomplete = []
@@ -1134,10 +1077,70 @@ def status(
         "installed": installed["components"],
         "reasons": sorted(set(reasons)),
         "blockers": sorted(set(blockers)),
-        "blocking_sessions": sessions,
         "project": project_info,
         "mutation_performed": False,
         "guidance": guidance_for(code),
+    }
+
+
+def compact_utc_now() -> str:
+    return datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+
+
+def prepare_branch(
+    data_root: Path,
+    db_file: Path,
+    target_schema: int,
+    project_path: str | Path,
+) -> dict:
+    root = project_root(project_path)
+    current = status(data_root, db_file, target_schema, root)
+    project = current.get("project", {})
+    delivery = project.get("delivery", {}) if isinstance(project, dict) else {}
+    if not isinstance(delivery, dict) or not delivery.get("requires_pull_request"):
+        raise UpgradeError("this repository does not require an upgrade branch")
+    target = str(delivery.get("target_branch", ""))
+    required = f"UPGRADE_BRANCH_REQUIRED:{target}"
+    if current.get("status") != STATUS_BLOCKED \
+            or current.get("blockers") != [required]:
+        blockers = ", ".join(str(value) for value in current.get("blockers", []))
+        raise UpgradeError(
+            "upgrade branch preparation requires the default-branch blocker"
+            f" to be the only blocker; current blockers: {blockers or 'none'}"
+        )
+    branch = run_git(root, "symbolic-ref", "--short", "-q", "HEAD").strip()
+    if branch != target:
+        raise UpgradeError(
+            f"upgrade branch preparation must run from default branch {target}"
+        )
+    base_head = run_git(root, "rev-parse", "HEAD").strip()
+    upgrade_branch = f"agent-marketplace/upgrade-{compact_utc_now()}"
+    if not UPGRADE_BRANCH_RE.fullmatch(upgrade_branch):
+        raise UpgradeError(f"generated upgrade branch is invalid: {upgrade_branch}")
+    if run_git_optional(
+        root, "show-ref", "--verify", f"refs/heads/{upgrade_branch}"
+    ).strip():
+        raise UpgradeError(f"upgrade branch already exists: {upgrade_branch}")
+    run_git(root, "switch", "-c", upgrade_branch)
+    actual_branch = run_git(
+        root, "symbolic-ref", "--short", "-q", "HEAD"
+    ).strip()
+    actual_head = run_git(root, "rev-parse", "HEAD").strip()
+    if actual_branch != upgrade_branch or actual_head != base_head:
+        raise UpgradeError(
+            "upgrade branch verification failed after creation:"
+            f" expected {upgrade_branch}@{base_head},"
+            f" found {actual_branch}@{actual_head}"
+        )
+    next_status = status(data_root, db_file, target_schema, root)
+    return {
+        "status": "AGENT_MARKETPLACE_UPGRADE_BRANCH_PREPARED",
+        "target_branch": target,
+        "upgrade_branch": upgrade_branch,
+        "base_head": base_head,
+        "next_status": next_status["status"],
+        "blockers": next_status["blockers"],
+        "mutation_performed": True,
     }
 
 

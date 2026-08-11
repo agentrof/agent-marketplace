@@ -117,10 +117,10 @@ the dependency contract.
    checksummed migrations operate on a candidate database and marker-owned
    project surfaces only; plans are fingerprint-bound, journaled, recoverable,
    and require a fresh session after success. Remote-backed projects remain
-   locked on their upgrade branch until the configured target branch contains
-   the exact managed upgrade identity. Dead locks are reclaimed only from
-   a same-host process proven absent; orphan sessions require explicit
-   owner-confirmed release.
+   locked on the PMO-prepared upgrade branch until the configured target branch
+   contains the exact managed upgrade identity. Active PMO work in any project
+   blocks preparation. Dead locks are reclaimed only from a same-host process
+   proven absent; session records do not determine upgrade readiness.
    User-owned code and content are outside the writer set.
 16. **Preparation is distinct from activation.** Greenfield work closes
    analysis, solution, design system, release experience and baseline backlog

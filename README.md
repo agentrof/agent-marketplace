@@ -150,25 +150,25 @@ which runs the same preparation stages in scoped mode. See
 ## Upgrading an existing project
 
 > [!IMPORTANT]
-> Update the installed plugins first, close existing Agent Marketplace sessions, then
-> start a new session and invoke Agent Marketplace Upgrade. Normal marketplace
-> mutations remain locked while an upgrade or recovery is required.
+> Update the installed plugins, finish active PMO work across every project,
+> leave the checkout clean on its default branch, then invoke Agent Marketplace
+> Upgrade. Normal marketplace mutations remain locked while an upgrade or
+> recovery is required.
 
 Repositories with an origin remote return cleanly to their configured target,
-then apply upgrades from an `agent-marketplace/upgrade-*` branch created there.
-Apply requires a fresh session afterward;
+then let PMO prepare an `agent-marketplace/upgrade-*` branch from that exact
+revision. Apply requires a fresh session afterward;
 that session owns the exact managed-file commit, push and pull request. A branch
 commit alone does not unlock the marketplace. Normal work resumes only from the
-updated target branch in another fresh session. If a host crashed before its
-SessionEnd hook, the upgrade entry shows the blocking session id and offers the
-owner-confirmed `session-release` recovery step.
+updated target branch in another fresh session.
 
 Claude users invoke `/project-management-office:upgrade`; Codex users select
 `project-management-office:upgrade` or invoke `$project-management-office:upgrade`.
-The entry first performs a read-only status check, shows one readiness or
-blocker gate, writes a fingerprint-bound plan only after approval, and asks
-again before apply. A successful run requires another fresh session so both
-hosts load the new hooks, skills, and project agents.
+The entry first asks for one host-neutral prerequisite confirmation, performs a
+read-only status check, automatically prepares the branch only when that is the
+sole blocker, writes a fingerprint-bound plan after approval, and asks again
+before apply. A successful run requires another fresh session so both hosts
+load the new hooks, skills, and project agents.
 
 The upgrader owns only PMO data, `.agentrof/agent-marketplace/project.json`, Agent Marketplace-marked
 project instruction blocks, Agent Marketplace-owned project agent files, and declared

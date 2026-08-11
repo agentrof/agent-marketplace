@@ -557,8 +557,8 @@ class TeamPreflightTests(unittest.TestCase):
         launcher = self.home / "bin" / "pmo_cli.py"
         for command in (
             f"{launcher} upgrade status --project-root {self.project} --json",
+            f"{launcher} upgrade prepare-branch --project-root {self.project}",
             f"python3 {launcher} upgrade plan --project-root {self.project}",
-            f"{launcher} upgrade session-release --session-id old --confirm-closed",
         ):
             with self.subTest(command=command):
                 payload = self.payload("Bash")

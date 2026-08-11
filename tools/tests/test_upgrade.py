@@ -230,6 +230,66 @@ class UpgradeLifecycleTests(unittest.TestCase):
         )
         return result, json.loads(result.stdout)
 
+    def reset_to_current_database(self):
+        (self.home / "pmo.db").unlink()
+        self.cli("init-db")
+        self.cli("project", "register", "--key", "shop", "--team", TEAM)
+        self.cli("project", "register", "--key", "other", "--team", TEAM)
+
+    def insert_other_project_activity(self, activity: str):
+        database = self.home / "pmo.db"
+        con = sqlite3.connect(database)
+        con.create_function(
+            "agent_marketplace_writer_epoch", 0, lambda: 1, deterministic=True
+        )
+        project_id = con.execute(
+            "SELECT id FROM projects WHERE project_key='other'"
+        ).fetchone()[0]
+        stamp = "2026-01-01T00:00:00+00:00"
+        if activity == "work_order":
+            con.execute(
+                "INSERT INTO work_orders"
+                " (project_id, work_order_key, request, status, worktree_path,"
+                " created_at, updated_at) VALUES (?, 'other-wo', 'build',"
+                " 'running', '/other', ?, ?)",
+                (project_id, stamp, stamp),
+            )
+        elif activity == "task_attempt":
+            task_id = con.execute(
+                "INSERT INTO work_items"
+                " (project_id, kind, external_id, title, status, created_at,"
+                " updated_at) VALUES (?, 'task', 'OTHER-TASK', 'Task', 'todo',"
+                " ?, ?) RETURNING id",
+                (project_id, stamp, stamp),
+            ).fetchone()[0]
+            con.execute(
+                "INSERT INTO task_attempts"
+                " (task_id, attempt, started_at, outcome)"
+                " VALUES (?, 1, ?, 'running')",
+                (task_id, stamp),
+            )
+        elif activity == "experience_run":
+            con.execute(
+                "INSERT INTO experience_runs"
+                " (project_id, run_key, program_key, status, created_at)"
+                " VALUES (?, 'OTHER-EXR', 'OTHER-PROGRAM', 'active', ?)",
+                (project_id, stamp),
+            )
+        elif activity == "backlog_plan":
+            con.execute(
+                "INSERT INTO backlog_plans"
+                " (project_id, plan_key, program_key, mode, status, plan_json,"
+                " draft_hash, created_at, updated_at) VALUES"
+                " (?, 'other-plan', 'OTHER-PROGRAM', 'feature', 'draft', '{}',"
+                " 'sha256:test', ?, ?)",
+                (project_id, stamp, stamp),
+            )
+        else:
+            self.fail(f"unknown activity fixture: {activity}")
+        stamp_integrity(con)
+        con.commit()
+        con.close()
+
     def team_guard(self, tool_name: str, tool_input: dict):
         return subprocess.run(
             [sys.executable, str(
@@ -428,20 +488,159 @@ class UpgradeLifecycleTests(unittest.TestCase):
         self.assertIn("no longer apply-ready", result.stderr)
         self.assertFalse((self.project / ".agentrof" / "agent-marketplace" / "project.json").exists())
 
-    def test_competing_sessions_block_plan_without_mutation(self):
+    def test_session_records_do_not_block_status_or_plan(self):
         sessions = self.home / "sessions"
         sessions.mkdir()
-        (sessions / "other-session.json").write_text(json.dumps({
-            "session_id": "other-session", "pmo_ready": True,
-        }), encoding="utf-8")
+        for name, ready in (("stale-session", True), ("upgrade-session", False)):
+            (sessions / f"{name}.json").write_text(json.dumps({
+                "session_id": name,
+                "pmo_ready": ready,
+                "recorded_at": "2026-01-01T00:00:00+00:00",
+            }), encoding="utf-8")
+        result, status = self.status()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertNotIn("blocking_sessions", status)
+        planned = self.cli(
+            "upgrade", "plan", "--project-root", str(self.project)
+        )
+        self.assertEqual(
+            json.loads(planned.stdout)["status"],
+            "AGENT_MARKETPLACE_UPGRADE_APPLY_READY",
+        )
+        self.assertFalse((self.project / ".agentrof" / "agent-marketplace" / "project.json").exists())
+
+    def assert_other_project_activity_blocks(self, activity: str, blocker: str):
+        self.reset_to_current_database()
+        self.insert_other_project_activity(activity)
         result, status = self.status()
         self.assertEqual(result.returncode, 1)
-        self.assertIn("CLOSE_OTHER_SESSIONS_REQUIRED:1", status["blockers"])
-        planned = self.cli(
-            "upgrade", "plan", "--project-root", str(self.project), check=False
+        self.assertIn(blocker, status["blockers"])
+
+    def test_other_project_work_order_blocks_project_only_upgrade(self):
+        self.assert_other_project_activity_blocks(
+            "work_order", "ACTIVE_WORK_ORDER:other-wo"
         )
-        self.assertEqual(planned.returncode, 1)
-        self.assertFalse((self.project / ".agentrof" / "agent-marketplace" / "project.json").exists())
+
+    def test_other_project_task_attempt_blocks_project_only_upgrade(self):
+        self.assert_other_project_activity_blocks(
+            "task_attempt", "RUNNING_TASK_ATTEMPTS:1"
+        )
+
+    def test_other_project_experience_run_blocks_project_only_upgrade(self):
+        self.assert_other_project_activity_blocks(
+            "experience_run", "ACTIVE_EXPERIENCE_RUNS:1"
+        )
+
+    def test_other_project_backlog_plan_blocks_project_only_upgrade(self):
+        self.assert_other_project_activity_blocks(
+            "backlog_plan", "ACTIVE_BACKLOG_PLANS:1"
+        )
+
+    def test_prepare_branch_refuses_repository_without_origin(self):
+        branch = run(
+            ["git", "symbolic-ref", "--short", "HEAD"], cwd=self.project
+        ).stdout.strip()
+        with self.assertRaisesRegex(
+            UPGRADE.UpgradeError, "does not require an upgrade branch"
+        ):
+            UPGRADE.prepare_branch(
+                self.home, self.home / "pmo.db", 5, self.project
+            )
+        self.assertEqual(
+            run(
+                ["git", "symbolic-ref", "--short", "HEAD"], cwd=self.project
+            ).stdout.strip(),
+            branch,
+        )
+
+    def test_prepare_branch_collision_keeps_default_branch_checked_out(self):
+        target = run(
+            ["git", "symbolic-ref", "--short", "HEAD"], cwd=self.project
+        ).stdout.strip()
+        remote = Path(self.tmp.name) / "collision-remote.git"
+        self.assertEqual(run(["git", "init", "--bare", "-q", str(remote)]).returncode, 0)
+        self.assertEqual(run([
+            "git", "remote", "add", "origin", str(remote)
+        ], cwd=self.project).returncode, 0)
+        self.assertEqual(run([
+            "git", "push", "-u", "origin", target
+        ], cwd=self.project).returncode, 0)
+        self.assertEqual(run([
+            "git", "remote", "set-head", "origin", target
+        ], cwd=self.project).returncode, 0)
+        stamp = "20260811T104530Z"
+        branch = f"agent-marketplace/upgrade-{stamp}"
+        self.assertEqual(run([
+            "git", "branch", branch
+        ], cwd=self.project).returncode, 0)
+        with mock.patch.object(UPGRADE, "compact_utc_now", return_value=stamp):
+            with self.assertRaisesRegex(UPGRADE.UpgradeError, "already exists"):
+                UPGRADE.prepare_branch(
+                    self.home, self.home / "pmo.db", 5, self.project
+                )
+        self.assertEqual(
+            run(
+                ["git", "symbolic-ref", "--short", "HEAD"], cwd=self.project
+            ).stdout.strip(),
+            target,
+        )
+
+    def test_prepare_branch_refuses_dirty_default_branch_without_creating_ref(self):
+        target = run(
+            ["git", "symbolic-ref", "--short", "HEAD"], cwd=self.project
+        ).stdout.strip()
+        remote = Path(self.tmp.name) / "dirty-remote.git"
+        self.assertEqual(run(["git", "init", "--bare", "-q", str(remote)]).returncode, 0)
+        self.assertEqual(run([
+            "git", "remote", "add", "origin", str(remote)
+        ], cwd=self.project).returncode, 0)
+        self.assertEqual(run([
+            "git", "push", "-u", "origin", target
+        ], cwd=self.project).returncode, 0)
+        self.assertEqual(run([
+            "git", "remote", "set-head", "origin", target
+        ], cwd=self.project).returncode, 0)
+        (self.project / "dirty.txt").write_text("dirty\n", encoding="utf-8")
+        with self.assertRaisesRegex(UPGRADE.UpgradeError, "only blocker"):
+            UPGRADE.prepare_branch(
+                self.home, self.home / "pmo.db", 5, self.project
+            )
+        refs = run([
+            "git", "for-each-ref", "--format=%(refname:short)",
+            "refs/heads/agent-marketplace/upgrade-",
+        ], cwd=self.project).stdout.strip()
+        self.assertEqual(refs, "")
+
+    def test_repository_delivery_falls_back_to_main_or_master(self):
+        for target in ("main", "master"):
+            with self.subTest(target=target):
+                root = Path(self.tmp.name) / f"fallback-{target}"
+                remote = Path(self.tmp.name) / f"fallback-{target}.git"
+                root.mkdir()
+                for command in (
+                    ["git", "init", "-q"],
+                    ["git", "config", "user.email", "upgrade@example.test"],
+                    ["git", "config", "user.name", "Upgrade Test"],
+                    ["git", "branch", "-m", target],
+                ):
+                    self.assertEqual(run(command, cwd=root).returncode, 0)
+                (root / "README.md").write_text("fixture\n", encoding="utf-8")
+                self.assertEqual(run(["git", "add", "."], cwd=root).returncode, 0)
+                self.assertEqual(run([
+                    "git", "commit", "-qm", "baseline"
+                ], cwd=root).returncode, 0)
+                self.assertEqual(run([
+                    "git", "init", "--bare", "-q", str(remote)
+                ]).returncode, 0)
+                self.assertEqual(run([
+                    "git", "remote", "add", "origin", str(remote)
+                ], cwd=root).returncode, 0)
+                self.assertEqual(run([
+                    "git", "push", "-u", "origin", target
+                ], cwd=root).returncode, 0)
+                self.assertEqual(
+                    UPGRADE.repository_delivery(root)["target_branch"], target
+                )
 
     def test_nonempty_legacy_design_runtime_blocks_upgrade(self):
         legacy = self.project / "workspace" / "design-system-work"
@@ -934,35 +1133,6 @@ class UpgradeLifecycleTests(unittest.TestCase):
         )
         self.assertFalse(lock.exists())
 
-    def test_owner_confirmed_session_release_clears_orphan_blocker(self):
-        sessions = self.home / "sessions"
-        sessions.mkdir()
-        session_id = "closed-host-session"
-        path = sessions / f"{hashlib.sha256(session_id.encode()).hexdigest()}.json"
-        path.write_text(json.dumps({
-            "session_id": session_id,
-            "pmo_ready": True,
-            "recorded_at": "2026-01-01T00:00:00+00:00",
-        }), encoding="utf-8")
-        _, blocked = self.status()
-        self.assertIn("CLOSE_OTHER_SESSIONS_REQUIRED:1", blocked["blockers"])
-        self.assertEqual(blocked["blocking_sessions"][0]["session_id"], session_id)
-        refused = self.cli(
-            "upgrade", "session-release", "--session-id", session_id,
-            check=False,
-        )
-        self.assertEqual(refused.returncode, 1)
-        self.assertIn("confirm-closed", refused.stderr)
-        released = self.cli(
-            "upgrade", "session-release", "--session-id", session_id,
-            "--confirm-closed",
-        )
-        self.assertEqual(
-            json.loads(released.stdout)["status"],
-            "AGENT_MARKETPLACE_SESSION_RELEASED",
-        )
-        self.assertFalse(path.exists())
-
     def test_remote_upgrade_stays_pending_until_target_branch_contains_it(self):
         target = run(
             ["git", "symbolic-ref", "--short", "HEAD"], cwd=self.project
@@ -986,6 +1156,18 @@ class UpgradeLifecycleTests(unittest.TestCase):
         self.assertIn(
             f"UPGRADE_TARGET_REQUIRED:{target}", wrong_branch["blockers"]
         )
+        refused_prepare = self.cli(
+            "upgrade", "prepare-branch", "--project-root", str(self.project),
+            check=False,
+        )
+        self.assertEqual(refused_prepare.returncode, 1)
+        self.assertIn("only blocker", refused_prepare.stderr)
+        self.assertEqual(
+            run(
+                ["git", "symbolic-ref", "--short", "HEAD"], cwd=self.project
+            ).stdout.strip(),
+            "feature/unrelated",
+        )
         chained_return = self.team_guard("Bash", {
             "command": f"git switch {target} && touch user-code.txt",
         })
@@ -999,16 +1181,36 @@ class UpgradeLifecycleTests(unittest.TestCase):
         self.assertEqual(run([
             "git", "switch", target,
         ], cwd=self.project).returncode, 0)
+        base_head = run(["git", "rev-parse", "HEAD"], cwd=self.project).stdout.strip()
         _, blocked = self.status()
         self.assertIn(f"UPGRADE_BRANCH_REQUIRED:{target}", blocked["blockers"])
-        feature = "agent-marketplace/upgrade-test"
+        raw_branch = self.team_guard("Bash", {
+            "command": "git switch -c agent-marketplace/upgrade-manual",
+        })
+        self.assertEqual(raw_branch.returncode, 2)
+        launcher = self.home / "bin" / "pmo_cli.py"
         admitted = self.team_guard("Bash", {
-            "command": f"git switch -c {feature}",
+            "command": f"{launcher} upgrade prepare-branch"
+                       f" --project-root {self.project}",
         })
         self.assertEqual(admitted.returncode, 0, admitted.stderr)
-        self.assertEqual(run([
-            "git", "switch", "-c", feature
-        ], cwd=self.project).returncode, 0)
+        prepared = json.loads(self.cli(
+            "upgrade", "prepare-branch", "--project-root", str(self.project)
+        ).stdout)
+        feature = prepared["upgrade_branch"]
+        self.assertRegex(
+            feature, r"^agent-marketplace/upgrade-[0-9]{8}T[0-9]{6}Z$"
+        )
+        self.assertEqual(prepared["target_branch"], target)
+        self.assertEqual(prepared["base_head"], base_head)
+        self.assertEqual(
+            prepared["next_status"],
+            "AGENT_MARKETPLACE_UPGRADE_REQUIRED_READY",
+        )
+        self.assertEqual(
+            run(["git", "rev-parse", "HEAD"], cwd=self.project).stdout.strip(),
+            base_head,
+        )
         self.complete_upgrade_and_commit()
         _, pending = self.status()
         self.assertEqual(

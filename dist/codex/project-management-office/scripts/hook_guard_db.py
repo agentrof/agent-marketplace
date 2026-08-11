@@ -81,11 +81,6 @@ BRANCH_NAME_RES = (
     re.compile(r"\bgit\b[^|&;]*\bbranch\s+([^\s|&;]+)"),
     re.compile(r"\bgit\b[^|&;]*\bworktree\s+add\b[^|&;]*\s-b\s+([^\s|&;]+)"),
 )
-UPGRADE_BRANCH_RE = re.compile(
-    r"^agent-marketplace/upgrade-[a-z0-9][a-z0-9._-]*$"
-)
-
-
 def deny(message: str) -> int:
     print(f"pmo guard: {message}", file=sys.stderr)
     return 2
@@ -133,7 +128,7 @@ def is_upgrade_cli_command(payload: dict) -> bool:
         return False
     return len(argv) > offset + 1 and argv[offset] == "upgrade" \
         and argv[offset + 1] in {
-            "status", "plan", "apply", "recover", "session-release",
+            "status", "prepare-branch", "plan", "apply", "recover",
         }
 
 
@@ -144,34 +139,12 @@ def fresh_upgrade_status(payload: dict) -> dict:
         return hook_common.pmo_cli.upgrade_core.status(
             hook_common.pmo_cli.data_dir(), hook_common.pmo_cli.db_path(),
             hook_common.pmo_cli.SCHEMA_VERSION, project,
-            exclude_session_id=str(payload.get("session_id", "")),
         )
     except Exception as exc:
         return {
             "status": "AGENT_MARKETPLACE_UPGRADE_REQUIRED_BLOCKED",
             "blockers": [f"UPGRADE_STATUS_UNAVAILABLE:{exc}"],
         }
-
-
-def is_upgrade_branch_command(payload: dict, status: dict) -> bool:
-    blockers = {str(value) for value in status.get("blockers", [])}
-    branch_blockers = {
-        value for value in blockers if value.startswith("UPGRADE_BRANCH_REQUIRED:")
-    }
-    if not branch_blockers or blockers != branch_blockers \
-            or payload.get("tool_name") != "Bash":
-        return False
-    tool_input = payload.get("tool_input", {})
-    command = tool_input.get("command", "") if isinstance(tool_input, dict) else ""
-    try:
-        argv = shlex.split(command, posix=True)
-    except (TypeError, ValueError):
-        return False
-    return bool(
-        len(argv) == 4
-        and argv[:3] in (["git", "switch", "-c"], ["git", "checkout", "-b"])
-        and UPGRADE_BRANCH_RE.fullmatch(argv[3])
-    )
 
 
 def is_upgrade_target_command(payload: dict, status: dict) -> bool:
@@ -382,8 +355,7 @@ def main() -> int:
             hook_common.write_session_readiness(
                 str(payload.get("session_id", "")), False, upgrade_status,
             )
-        elif is_upgrade_branch_command(payload, current_upgrade) \
-                or is_upgrade_target_command(payload, current_upgrade):
+        elif is_upgrade_target_command(payload, current_upgrade):
             hook_common.write_session_readiness(
                 str(payload.get("session_id", "")), False, upgrade_status,
             )

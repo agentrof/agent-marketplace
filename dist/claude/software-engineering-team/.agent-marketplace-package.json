@@ -1,9 +1,9 @@
 {
-  "build_id": "snapshot.69060c59541739c8231b1e81f007194fd953e82bff301ede010d7979fd8425c6",
+  "build_id": "snapshot.f911f9b5c9ab34dcb17299aabc131032778ff12ca52efbb40f6ae22759910434",
   "component": "software-engineering-team",
   "files": {
     ".agent-marketplace-generated-distribution": "bc5e5ffd58e656c315fc4230e335b1acaaeba4b3a6871fc57e84144035567474",
-    ".claude-plugin/plugin.json": "9451308371919f32064e81fda95336bb3aab77441b38f890f2a6c2e70cc1f598",
+    ".claude-plugin/plugin.json": "3275fc8a032dca3baceaa714e9b646b442000e0e5fb454d4ef4a83aef2b80e3a",
     "agents/analysis-challenger.md": "f977d743fe88116ad505093c3c3567b5157ca87d6930ed6a0cf898bec9d18c34",
     "agents/backend-developer.md": "06bee28f1bb5631c96c25a5165d978ae204d47491beecb3e27b12be17358276f",
     "agents/backlog-reviewer.md": "87f708ee908e1bc5b9e637e3418189a7eb7ffd977ae919b2b2ec5306af9d254f",
@@ -239,6 +239,6 @@
   "schema_version": 2,
   "source_channel": "snapshot",
   "source_commit": "",
-  "source_ref": "snapshot.69060c59541739c8231b1e81f007194fd953e82bff301ede010d7979fd8425c6",
+  "source_ref": "snapshot.f911f9b5c9ab34dcb17299aabc131032778ff12ca52efbb40f6ae22759910434",
   "version": "0.1.0"
 }

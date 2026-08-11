@@ -1,9 +1,9 @@
 {
-  "build_id": "snapshot.69060c59541739c8231b1e81f007194fd953e82bff301ede010d7979fd8425c6",
+  "build_id": "snapshot.f911f9b5c9ab34dcb17299aabc131032778ff12ca52efbb40f6ae22759910434",
   "component": "project-management-office",
   "files": {
     ".agent-marketplace-generated-distribution": "bc5e5ffd58e656c315fc4230e335b1acaaeba4b3a6871fc57e84144035567474",
-    ".codex-plugin/plugin.json": "97efc2e2ff182f469c7f16501b6d5c333f31ca38f75aa7d25a6df3bfd8746ce7",
+    ".codex-plugin/plugin.json": "05d6772cc408a80b4f77ebd9c0d74b9f488b629f02eff831c220a914f8b7c76b",
     "dashboard/design/MASTER.md": "69bc42d0a2f60221b6c3b6cffc845f0614fb06ca0d242c9e21824f331e2f38d0",
     "dashboard/index.html": "06557f8d8bc2d3afced183769e1f7254e11f7aaaf1776072e03a70c6a3282b95",
     "hooks/hooks.json": "9a0ec47e270a37fa54ee1562ebfac332fa23a665f965fa24f86b3bbe0a38df30",
@@ -23,7 +23,7 @@
     "scripts/marketplace_run.py": "53f69a1b51e59567857d028db4886b473546e26209a82dd66c2e79affe1b1bf2",
     "scripts/pmo_cli.py": "64d451f5ec42124ff7c5f02a5439c9a641c25c6392ea45badf06fb975b062f0f",
     "scripts/pmo_dashboard.py": "6dd54373f71d7dff1b27f955bc62c74e679674113ce1ace580544065041b1c1c",
-    "scripts/upgrade_core.py": "45d9c7bfc5e809525b210dcebd8b8a62cdb3130f3d90279d64d7a5e2242af722",
+    "scripts/upgrade_core.py": "dad721a26ad4554a214d85e6383fa8e035269b3a9c070cc7c72b1e62dc907824",
     "scripts/upgrade_guidance.json": "312e3358b94f83b7d688a556486a2bdef506dd02b824c1cdfd93fbd8af825d7c",
     "skill-content/control-tower/SKILL.md": "9f263d25b6ccd693420eea630fb5e283119f331ea8a48da16e6d41e9c89a1b0c",
     "skill-content/issue-desk/SKILL.md": "48a5be80d7b7a09181b38586679c7a481dd9a481d12949986fcd87b4cc4c07a4",
@@ -46,6 +46,6 @@
   "schema_version": 2,
   "source_channel": "snapshot",
   "source_commit": "",
-  "source_ref": "snapshot.69060c59541739c8231b1e81f007194fd953e82bff301ede010d7979fd8425c6",
+  "source_ref": "snapshot.f911f9b5c9ab34dcb17299aabc131032778ff12ca52efbb40f6ae22759910434",
   "version": "0.0.2"
 }

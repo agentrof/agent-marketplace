@@ -1,9 +1,9 @@
 {
-  "build_id": "snapshot.69060c59541739c8231b1e81f007194fd953e82bff301ede010d7979fd8425c6",
+  "build_id": "snapshot.f911f9b5c9ab34dcb17299aabc131032778ff12ca52efbb40f6ae22759910434",
   "component": "software-engineering-team",
   "files": {
     ".agent-marketplace-generated-distribution": "bc5e5ffd58e656c315fc4230e335b1acaaeba4b3a6871fc57e84144035567474",
-    ".codex-plugin/plugin.json": "fc47fef52b4606ec43a4cab410f53f3cef9d149600a9243476079ff2f99d7c8b",
+    ".codex-plugin/plugin.json": "c278a6fc0b0713486c87bd1c2e36bde03666e62397fe823cc8536adcec70a39c",
     "agents/analysis-challenger.md": "35c04b9ecc47ba4a8f9d168b4f74803d6b342974cc22c8dad048f38ed607e5ee",
     "agents/backend-developer.md": "31fae6ca601479a687a4f1a6b1afc3dff481c804fa78b6b9a83ca108ce64145a",
     "agents/backlog-reviewer.md": "9c24302e625242d26df8feae6ec9f1beccad6c8934ad7ba315c882c299e6766f",
@@ -234,6 +234,6 @@
   "schema_version": 2,
   "source_channel": "snapshot",
   "source_commit": "",
-  "source_ref": "snapshot.69060c59541739c8231b1e81f007194fd953e82bff301ede010d7979fd8425c6",
+  "source_ref": "snapshot.f911f9b5c9ab34dcb17299aabc131032778ff12ca52efbb40f6ae22759910434",
   "version": "0.1.0"
 }

@@ -1440,6 +1440,22 @@ class UpgradeLifecycleTests(unittest.TestCase):
             "",
         )
 
+    def test_fresh_contract_does_not_hash_its_containing_config(self):
+        state = UPGRADE.initialize_project_contract(
+            self.home, self.project, TEAM, "workspace"
+        )
+        self.assertNotIn(
+            "workspace/config.json#agent-marketplace",
+            state["managed_surfaces"],
+        )
+        status = UPGRADE.environment_status(
+            self.home, self.home / "pmo.db", 6, self.project
+        )
+        self.assertFalse(any(
+            value.startswith("PROJECT_CONTRACT_DRIFT:")
+            for value in status["blockers"]
+        ))
+
 
 if __name__ == "__main__":
     unittest.main()

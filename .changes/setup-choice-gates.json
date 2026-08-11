@@ -2,6 +2,7 @@
   "summary": "Make fresh setup collect each configuration decision through bounded native choice gates and keep CI deferral separate.",
   "components": {
     "agent-marketplace": "patch",
+    "project-management-office": "patch",
     "software-engineering-team": "patch"
   }
 }

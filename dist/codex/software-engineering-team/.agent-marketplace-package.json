@@ -1,9 +1,9 @@
 {
-  "build_id": "snapshot.71b55a0822025f27c7af0229e73a713af79bb834dc65893c2e6af7d3fa6dcd83",
+  "build_id": "snapshot.1437ab48776bf08cbd7682b1c0d9989fb7a80b8e1aff9db034451e1923196e59",
   "component": "software-engineering-team",
   "files": {
     ".agent-marketplace-generated-distribution": "bc5e5ffd58e656c315fc4230e335b1acaaeba4b3a6871fc57e84144035567474",
-    ".codex-plugin/plugin.json": "c60dc9b0a8717fe2ab7a12c9c24b358bf0d0539af5f5e6c4edec53562d7a899b",
+    ".codex-plugin/plugin.json": "2f7c0cc089f55bb34025dded7e239d503a2e355562b12bfc4635ea4a67b73052",
     "agents/analysis-challenger.md": "35c04b9ecc47ba4a8f9d168b4f74803d6b342974cc22c8dad048f38ed607e5ee",
     "agents/backend-developer.md": "31fae6ca601479a687a4f1a6b1afc3dff481c804fa78b6b9a83ca108ce64145a",
     "agents/backlog-reviewer.md": "9c24302e625242d26df8feae6ec9f1beccad6c8934ad7ba315c882c299e6766f",
@@ -229,11 +229,11 @@
     "templates/vault/maps/system-architecture.md": "dbc16b1a75e8375856e9a5bb8ca7d269b904ad26d09eb092e39b9e5c89642315"
   },
   "host": "codex",
-  "marketplace_release": "0.2.0",
+  "marketplace_release": "0.2.1",
   "runtime_contracts": [],
   "schema_version": 2,
   "source_channel": "snapshot",
   "source_commit": "",
-  "source_ref": "snapshot.71b55a0822025f27c7af0229e73a713af79bb834dc65893c2e6af7d3fa6dcd83",
-  "version": "0.2.0"
+  "source_ref": "snapshot.1437ab48776bf08cbd7682b1c0d9989fb7a80b8e1aff9db034451e1923196e59",
+  "version": "0.2.1"
 }

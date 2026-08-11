@@ -42,6 +42,18 @@ def call(target, argv):
     return code, out.getvalue(), err.getvalue()
 
 
+def complete_designations() -> dict[str, str]:
+    content = REPO / "plugins" / "software-engineering-team" / "skill-content"
+    schema = json.loads((content / "business-analysis" / "data"
+                         / "space-schema.json").read_text(encoding="utf-8"))
+    policy = json.loads((content / "obsidian-vault" / "data"
+                         / "vault-policy.json").read_text(encoding="utf-8"))
+    types = {key.replace("_", "-") for key in schema["doc_types"]}
+    types.update(policy["extra_doc_types"])
+    types.difference_update({"home", "moc"})
+    return {key: f"{key} designation" for key in sorted(types)}
+
+
 class ExperienceCompilerTests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
@@ -432,6 +444,14 @@ class PreparationTests(unittest.TestCase):
                 "user-rule\n\n" + SETUP_CHECK.managed_block("workspace") + "\n",
                 encoding="utf-8",
             )
+            code, out, _ = call(SETUP_CHECK, [
+                "check", "--project-root", str(root), "--json",
+            ])
+            self.assertEqual(code, 1)
+            self.assertIn("type designations are not configured", out)
+            value = json.loads(config.read_text(encoding="utf-8"))
+            value["doc_type_designations"] = complete_designations()
+            config.write_text(json.dumps(value), encoding="utf-8")
             code, out, _ = call(SETUP_CHECK, [
                 "check", "--project-root", str(root), "--json",
             ])

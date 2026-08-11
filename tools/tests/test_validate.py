@@ -99,6 +99,28 @@ class ValidatorFixtureTests(unittest.TestCase):
                     ]
                     self.assertEqual(len(matching), 1, findings)
 
+    def test_setup_designation_contract_rejects_a_skipped_verification(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            fixtures.make_valid_root(root)
+            source = (
+                TESTS_DIR.parents[1] / "plugins" / "software-engineering-team"
+                / "skill-content" / "setup" / "SKILL.md"
+            ).read_text(encoding="utf-8")
+            setup = (root / "plugins" / "software-engineering-team"
+                     / "skill-content" / "setup" / "SKILL.md")
+            fixtures.write(setup, source.replace(
+                "check-designations", "check-vault", 1,
+            ))
+            findings: list[validate.Finding] = []
+            validate.check_choice_gate(validate.build_tree(root), findings)
+            matching = [
+                finding for finding in findings
+                if finding.check == "choice_gate"
+                and "fresh setup designation contract" in finding.message
+            ]
+            self.assertEqual(len(matching), 1, findings)
+
     def test_agent_and_skill_names_are_scoped_per_plugin(self):
         import json
         from fixtures import VALID_AGENT, VALID_SKILL, write
@@ -352,6 +374,28 @@ class ValidatorFixtureTests(unittest.TestCase):
         matches = [f for f in findings if f.check == "vault_policy_shape"]
         self.assertEqual(len(matches), 1, findings)
         self.assertIn("same query, RGB and order", matches[0].message)
+
+    def test_canonical_designation_table_completeness_fires(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            fixtures.make_valid_root(root)
+            metadata = (root / "plugins" / fixtures.PLUGIN / "skill-content"
+                        / "notes" / "references" / "metadata.md")
+            fixtures.write(metadata, """# Metadata
+
+## Type designations
+
+| doc type | designation |
+|---|---|
+""")
+            findings: list[validate.Finding] = []
+            validate.check_vault_policy_shape(
+                validate.build_tree(root), findings,
+            )
+            matches = [f for f in findings if f.check == "vault_policy_shape"]
+            self.assertEqual(len(matches), 1, findings)
+            self.assertIn("designation table omits doc type 'note'",
+                          matches[0].message)
 
     def test_agent_missing_output_contract_fires(self):
         """Dropping the required output_contract key is a single

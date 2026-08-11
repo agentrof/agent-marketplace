@@ -7,6 +7,7 @@ import argparse
 import hashlib
 import json
 import subprocess
+import sys
 from pathlib import Path
 
 START = "# agent-marketplace:software-engineering-team:gitignore:start"
@@ -80,6 +81,36 @@ def preflight(root: Path, workspace: str) -> list[str]:
     return findings
 
 
+def designation_findings(work: Path) -> list[str]:
+    checker = Path(__file__).with_name("vault_check.py")
+    if not checker.is_file():
+        return ["designation contract checker is missing"]
+    result = subprocess.run(
+        [sys.executable, "-B", str(checker), "check-designations",
+         "--vault", str(work / "docs"), "--json"],
+        capture_output=True, text=True, check=False,
+    )
+    if result.returncode == 0:
+        return []
+    if result.returncode == 1:
+        try:
+            payload = json.loads(result.stdout)
+        except json.JSONDecodeError:
+            payload = None
+        issues = payload.get("issues") if isinstance(payload, dict) else None
+        if isinstance(issues, list):
+            messages = [
+                str(issue.get("message", "designation contract is invalid"))
+                for issue in issues if isinstance(issue, dict)
+            ]
+            if messages:
+                return [f"designation contract: {message}"
+                        for message in messages]
+    detail = (result.stderr or result.stdout).strip()
+    return ["designation contract check failed"
+            + (f": {detail}" if detail else "")]
+
+
 def closing(root: Path, workspace: str) -> list[str]:
     work = root / workspace
     config = read(work / "config.json")
@@ -142,6 +173,7 @@ def closing(root: Path, workspace: str) -> list[str]:
     ):
         if not (work / relative).is_file():
             findings.append(f"missing managed vault payload: {workspace}/{relative}")
+    findings.extend(designation_findings(work))
     portable_gate = root / ".github" / "agentrof" / "vault-gate.pyz"
     if not portable_gate.is_file():
         findings.append("repository-portable vault gate is missing")

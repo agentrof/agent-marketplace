@@ -33,6 +33,7 @@ import io
 import json
 import os
 import re
+import shlex
 import shutil
 import sys
 import tempfile
@@ -744,6 +745,69 @@ def shell_vault(payload: dict) -> Path | None:
     return None
 
 
+def registration_guard(payload: dict) -> int:
+    """Registration is the irreversible fresh-setup boundary. Refuse it
+    until the complete designation map already matches the shipped taxonomy."""
+    tool_input = payload.get("tool_input")
+    command = ""
+    if isinstance(tool_input, dict):
+        command = str(tool_input.get("command", tool_input.get("cmd", "")))
+    try:
+        tokens = shlex.split(command, posix=True)
+        if tokens and Path(tokens[0]).name in {"bash", "sh", "zsh"}:
+            command_index = next(
+                (index + 1 for index, token in enumerate(tokens[:-1])
+                 if token in {"-c", "-lc"}),
+                None,
+            )
+            if command_index is not None:
+                tokens = shlex.split(tokens[command_index], posix=True)
+    except ValueError:
+        return deny(
+            "cannot verify setup order for the project registration command;"
+            " use a directly parseable project register invocation")
+    registration_index = next(
+        (index for index in range(len(tokens) - 1)
+         if tokens[index:index + 2] == ["project", "register"]),
+        None,
+    )
+    if registration_index is None:
+        return 0
+    launcher_tokens = tokens[:registration_index]
+    if not any("pmo" in Path(token).name.casefold()
+               for token in launcher_tokens):
+        return 0
+    config_value = ""
+    for index, token in enumerate(tokens):
+        if token == "--stamp-config" and index + 1 < len(tokens):
+            config_value = tokens[index + 1]
+            break
+        if token.startswith("--stamp-config="):
+            config_value = token.split("=", 1)[1]
+            break
+    if not config_value or "$" in config_value or "`" in config_value:
+        return deny(
+            "PMO project registration requires a resolved --stamp-config path"
+            " so setup order can be verified")
+    config_path = Path(config_value)
+    if not config_path.is_absolute():
+        config_path = Path(str(payload.get("cwd") or ".")) / config_path
+    try:
+        config = json.loads(config_path.read_text(encoding="utf-8"))
+        policy = vault_check.load_policy(vault_check.DEFAULT_POLICY)
+    except (OSError, json.JSONDecodeError) as exc:
+        return deny(f"cannot verify designation contract before PMO project"
+                    f" registration: {exc}")
+    issues = vault_check.designation_config_issues(config, policy)
+    if issues:
+        detail = "; ".join(issue["message"] for issue in issues)
+        return deny(
+            "PMO project registration is out of order: mint and verify the"
+            " complete designation map first with reconcile-designations and"
+            f" check-designations. Current detail: {detail}")
+    return 0
+
+
 def vault_inventory(root: Path) -> dict[str, str]:
     result = {}
     for path in sorted(root.rglob("*")):
@@ -828,7 +892,10 @@ def main() -> int:
             + "); the vault guard fails closed. Retry with a valid patch."
         )
     if payload.get("tool_name") == "Bash":
-        return shell_snapshot(payload) if mode == "pre" else shell_verify(payload)
+        if mode == "pre":
+            code = registration_guard(payload)
+            return code if code else shell_snapshot(payload)
+        return shell_verify(payload)
     if payload.get("tool_name") not in ("Write", "Edit"):
         return 0
     return pre(payload) if mode == "pre" else post(payload)

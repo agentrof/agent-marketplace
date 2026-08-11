@@ -22,6 +22,9 @@ Verbs:
                    the single writer of the designation map and its
                    ledger: change (or mint) values and transition every
                    affected title old -> new in one sanctioned operation
+  check-designations
+                   validate that the project map covers the exact shipped
+                   taxonomy with distinct non-empty values
 
 Stdlib only. Findings sorted by (path, line, check). Wikilink resolution
 runs against one posix-keyed file index, never the filesystem, so wrong
@@ -518,6 +521,56 @@ def load_designations(vault_root: Path) -> dict | None:
             if isinstance(v, str) and str(v).strip()}
 
 
+def designation_config_issues(config: dict | None,
+                              policy: dict) -> list[dict[str, str]]:
+    """Validate the complete rendered designation map against the shipped
+    taxonomy. Callers choose whether incompleteness is a warning during vault
+    authoring or a hard error at setup registration."""
+    if not isinstance(config, dict):
+        return [{"code": "config_unreadable",
+                 "message": "workspace config is missing or invalid"}]
+    raw = config.get("doc_type_designations")
+    if not isinstance(raw, dict):
+        return [{"code": "map_missing",
+                 "message": "type designations are not configured"}]
+
+    universe = designation_type_universe(policy)
+    issues: list[dict[str, str]] = []
+    usable: dict[str, str] = {}
+    for key, value in raw.items():
+        if not isinstance(value, str) or not value.strip():
+            issues.append({
+                "code": "invalid_value",
+                "message": (f"designation for doc type '{key}' must be a"
+                            " non-empty string"),
+            })
+            continue
+        usable[str(key)] = value.strip()
+    for missing in sorted(universe - set(usable)):
+        issues.append({
+            "code": "missing_type",
+            "message": (f"doc type '{missing}' has no designation in the"
+                        " configured map"),
+        })
+    for unknown in sorted(set(usable) - universe):
+        issues.append({
+            "code": "unknown_type",
+            "message": (f"designation map key '{unknown}' names no known"
+                        " doc type"),
+        })
+    by_value: dict[str, list[str]] = {}
+    for key in sorted(universe & set(usable)):
+        by_value.setdefault(fold(usable[key]), []).append(key)
+    for keys in by_value.values():
+        if len(keys) > 1:
+            issues.append({
+                "code": "duplicate_value",
+                "message": ("doc types " + ", ".join(f"'{key}'" for key in keys)
+                            + " share one fold-equal designation"),
+            })
+    return issues
+
+
 def load_designation_history(vault_root: Path) -> dict:
     """The consumer's retired-designation ledger from the same config
     file, {kebab type -> [prior values, oldest first]}. Fail-soft: a
@@ -959,25 +1012,16 @@ def check_title_designation(vault: Vault, note: Note, title: str,
 
 
 def check_designation_coverage(vault: Vault, findings: list[Finding]) -> None:
-    """The configured map covers exactly the taxonomy universe. A type with
-    no map entry is a mint-duty WARNING; a map key naming no known type is a
-    dead-entry ERROR. Silent when no map is configured (the per-note
-    warnings already name the duty)."""
-    designations = vault.designations
-    if designations is None:
-        return
-    for missing in sorted(vault.taxonomy_types - set(designations)):
+    """The configured map covers exactly the taxonomy universe."""
+    config = ({"doc_type_designations": vault.designations}
+              if vault.designations is not None else {})
+    for issue in designation_config_issues(config, vault.policy):
+        hard = issue["code"] in {"unknown_type", "duplicate_value"}
         findings.append(Finding(
-            "warning", DESIGNATION_CONFIG_REL, 1, "title_shape",
-            f"doc type '{missing}' has no designation in the configured map",
-            "mint one designation per taxonomy type; run setup/configure or"
-            " organize-docs"))
-    for unknown in sorted(set(designations) - vault.taxonomy_types):
-        findings.append(Finding(
-            "error", DESIGNATION_CONFIG_REL, 1, "title_shape",
-            f"designation map key '{unknown}' names no known doc type",
-            "map keys are kebab taxonomy types; drop the stale key or"
-            " declare the type"))
+            "error" if hard else "warning", DESIGNATION_CONFIG_REL, 1,
+            "title_shape", issue["message"],
+            "mint one distinct designation per taxonomy type through"
+            " reconcile-designations"))
 
 
 def stale_designation_values(vault: Vault, kebab_type: str) -> list[str]:
@@ -3778,6 +3822,16 @@ def cmd_reconcile_designations(args, policy: dict) -> int:
     vault = build_vault(root, policy)
     current_map = config.get("doc_type_designations")
     current_map = dict(current_map) if isinstance(current_map, dict) else {}
+    proposed_config = dict(config)
+    proposed_map = dict(current_map)
+    proposed_map.update({key: values[0] for key, values in sets.items()})
+    proposed_config["doc_type_designations"] = proposed_map
+    issues = designation_config_issues(proposed_config, policy)
+    if issues:
+        for issue in issues:
+            print(f"vault_check: designation contract: {issue['message']}",
+                  file=sys.stderr)
+        return 2
     changes = []
     for kebab_type in sorted(sets):
         new = sets[kebab_type][0]
@@ -3858,6 +3912,26 @@ def cmd_reconcile_designations(args, policy: dict) -> int:
           + (" (dry run: nothing written)" if args.dry_run else
              "; run check to confirm green"))
     return 0
+
+
+def cmd_check_designations(args, policy: dict) -> int:
+    root = args.vault.resolve()
+    config_path = root.parent / "config.json"
+    try:
+        config = json.loads(config_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        config = None
+    issues = designation_config_issues(config, policy)
+    result = {"ok": not issues, "issues": issues}
+    if args.json:
+        print(json.dumps(result, ensure_ascii=False, indent=2,
+                         sort_keys=True))
+    else:
+        for issue in issues:
+            print(f"vault_check: designation contract: {issue['message']}")
+        print("vault_check: designation contract "
+              + ("valid" if not issues else "invalid"))
+    return 1 if issues else 0
 
 
 # ---------------------------------------------------------------------------
@@ -4030,6 +4104,11 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--actor", default="configure")
     p.add_argument("--pmo-launcher", default=None, dest="pmo_launcher")
     p.set_defaults(func=cmd_reconcile_designations)
+
+    p = sub.add_parser("check-designations")
+    p.add_argument("--vault", type=Path, required=True)
+    p.add_argument("--json", action="store_true")
+    p.set_defaults(func=cmd_check_designations)
 
     args = parser.parse_args(argv)
     try:

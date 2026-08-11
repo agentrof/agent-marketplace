@@ -1121,6 +1121,13 @@ SETUP_CHOICE_FIELDS = (
     "`terminology_language`", "`project_key`", "`source_dirs`",
     "`test_command`", "`mutation_command`", "`env_command`",
 )
+SETUP_DESIGNATION_SEQUENCE = (
+    "materialize-payload", "reconcile-designations", "check-designations",
+)
+SETUP_DESIGNATION_CONTRACT = (
+    "Do not run PMO registration before this passes",
+    "write-time hook rejects an out-of-order `project register` command",
+)
 
 
 def check_choice_gate(tree: Tree, findings: list[Finding]) -> None:
@@ -1172,6 +1179,27 @@ def check_choice_gate(tree: Tree, findings: list[Finding]) -> None:
                 f"fresh setup choice contract is incomplete: {detail}",
                 "collect one config field per question in bounded batches and"
                 " keep the CI add-or-defer gate separate",
+            ))
+        step_start = text.find("8. Materialize")
+        step_end = text.find("9. Register PMO")
+        section = text[step_start:step_end] \
+            if 0 <= step_start < step_end else ""
+        sequence = [section.find(token)
+                    for token in SETUP_DESIGNATION_SEQUENCE]
+        missing_designation = [
+            token for token in SETUP_DESIGNATION_CONTRACT
+            if token not in section
+        ]
+        sequence_is_ordered = all(position >= 0 for position in sequence) \
+            and sequence == sorted(sequence)
+        if missing_designation or not sequence_is_ordered:
+            detail = ", ".join(missing_designation) \
+                if missing_designation else "ordered designation commands"
+            findings.append(Finding(
+                "error", rel(tree, setup), 1, "choice_gate",
+                f"fresh setup designation contract is incomplete: {detail}",
+                "materialize, reconcile, and verify the complete designation"
+                " map before PMO registration",
             ))
 
 
@@ -2090,6 +2118,29 @@ def check_vault_policy_shape(tree: Tree, findings: list[Finding]) -> None:
                         " known doc type",
                         "a legend entry without a type is dead; drop the"
                         " group or declare the type in extra_doc_types")
+            metadata = skill / "references" / "metadata.md"
+            if metadata.is_file():
+                rows = re.findall(
+                    r"^\| ([a-z0-9-]+) \| [^|\n]+ \|$",
+                    read_text(metadata), re.MULTILINE,
+                )
+                expected_designations = universe - {"home", "moc"}
+                rendered_designations = set(rows)
+                if len(rows) != len(rendered_designations):
+                    err("canonical designation table repeats a doc type",
+                        "keep exactly one designation row per non-navigation"
+                        " taxonomy type")
+                for name in sorted(expected_designations
+                                   - rendered_designations):
+                    err(f"canonical designation table omits doc type '{name}'",
+                        "add the English designation in the same change as"
+                        " the taxonomy type")
+                for name in sorted(rendered_designations
+                                   - expected_designations):
+                    err(f"canonical designation table names unknown or"
+                        f" navigation doc type '{name}'",
+                        "remove the row or declare a non-navigation taxonomy"
+                        " type")
             # Parity with the shipped seeds: the policy and templates/vault
             # describe one product; they may not drift.
             vault_tpl = plugin / "templates" / "vault"

@@ -44,7 +44,7 @@
     "scripts/project_config.py": "ebd121cea7989c5231d8d9a7a74e5f9bc6906f248c39941277b35cc46b3d4dc0",
     "scripts/project_upgrade_adapter.py": "4da063591fc29bb0472eb2accba50858212e5cec5ebe75125149fb186a0ebbdd",
     "scripts/setup_check.py": "6c6a58517059acc619439af9b212735b56177fa128637cfddac8bce4e3d13154",
-    "scripts/team_guard.py": "1666b02227610f882ef632c6455ac4b258c970850c2510fe403405e55fd0c7fa",
+    "scripts/team_guard.py": "70af28d21f806d5e1d4929ae9331074d87075946452dd65690072d0551c97fa2",
     "scripts/vault_check.py": "353a796fbbca29e00aec944311ace26d14bab982c6cf70a0d9b797a73feee098",
     "scripts/vault_gate.py": "dd974fd51c3fadf39aec2b8cd3cce6665e92ef43822d69fdc5076fc90269ef58",
     "scripts/vault_hook.py": "7a2c9b22579e84c1e300fab349fc06d74a75b711794b6fe297ebe4fe2d529e4f",

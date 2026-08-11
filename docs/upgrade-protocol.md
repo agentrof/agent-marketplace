@@ -9,18 +9,16 @@ adapters change only the native question and project-instruction surfaces.
 
 1. Update the installed marketplace plugins with the host's normal plugin
    update mechanism.
-2. Finish or release active work orders and task attempts. Close other
-   Agent Marketplace sessions and leave the project checkout clean.
-3. When the repository has an origin remote, work from an
-   `agent-marketplace/upgrade-*` branch created from the configured target.
-   Status first requires a clean return to the target when necessary, then
-   blocks apply there until the dedicated upgrade branch is created.
-4. Start a new session at the project git root.
-5. Invoke `/project-management-office:upgrade` on Claude or
+2. Finish or release active PMO work across every project and leave the project
+   checkout clean on its resolved default branch.
+3. Invoke `/project-management-office:upgrade` on Claude or
    `$project-management-office:upgrade` on Codex.
-6. Review status. If ready, approve plan creation, inspect the exact plan, and
+4. Approve the host-neutral prerequisite gate. Status then runs read-only. When
+   the default-branch requirement is its only blocker, PMO creates the
+   `agent-marketplace/upgrade-*` branch and continues in the same session.
+5. Review status. If ready, approve plan creation, inspect the exact plan, and
    approve apply separately.
-7. After apply, close the session. In a fresh session on the same branch,
+6. After apply, close the session. In a fresh session on the same branch,
    review, commit and push only the planned files, then open the upgrade pull
    request. Normal marketplace work remains locked until the target branch
    contains that revision and a fresh session starts there.
@@ -44,10 +42,10 @@ downgrades fail closed.
 | `AGENT_MARKETPLACE_PROJECT_UPGRADE_PR_PENDING` | Managed changes are not yet on the configured target branch. | Exact review, commit, push and PR operations only. |
 
 `PROJECT_CONTRACT_DRIFT` identifies a marker-owned field or block changed
-outside its owner. It is never repaired silently. A dirty checkout, active or
-frozen work, competing session, path collision, symbolic link, missing adapter,
-package provenance failure, cross-host version mismatch, insufficient disk,
-database integrity error, stale plan, or downgrade also blocks apply.
+outside its owner. It is never repaired silently. A dirty checkout, active PMO
+work in any project, frozen work, path collision, symbolic link, missing
+adapter, package provenance failure, cross-host version mismatch, insufficient
+disk, database integrity error, stale plan, or downgrade also blocks apply.
 
 Package provenance covers authored distribution files exactly. Claude may add
 host-owned `.in_use/<pid>` or `.in_use/<pid>.tmp.<8-hex>` cache markers after
@@ -56,11 +54,15 @@ matching bounded `pid`/`procStart` JSON shape are excluded. The same path on
 another host, a nested marker, an unknown filename, malformed content, a PID
 mismatch, or any other unlisted file remains a provenance blocker.
 
-Session blockers include their exact session id and last readiness timestamp.
-If a host crashed before SessionEnd, the owner first verifies that session is
-closed, approves the guidance gate, then uses `upgrade session-release
---session-id <id> --confirm-closed`. The command cannot release an unnamed
-session and refuses without the explicit confirmation flag.
+Session readiness still guards normal marketplace mutations, but session
+records do not participate in upgrade readiness. Upgrade safety derives from
+global PMO work state, repository preflight, migration journals and writer
+locks.
+
+The PMO-owned `upgrade prepare-branch --project-root <git-root>` command runs
+only when `UPGRADE_BRANCH_REQUIRED:<target>` is the sole blocker. It creates a
+UTC-named branch from the resolved default branch, verifies the unchanged base
+HEAD, and recomputes status. Raw branch creation is not an upgrade exception.
 
 ## Writer boundary
 

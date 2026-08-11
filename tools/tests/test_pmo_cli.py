@@ -79,10 +79,10 @@ COMMAND_CONTRACTS = {
     "ensure": "test_ensure_bootstraps_launcher",
     "dashboard": "test_dashboard_command_delegates_to_read_only_server",
     "upgrade status": "test_upgrade_status_current_without_project",
+    "upgrade prepare-branch": "test_upgrade_prepare_branch_delegates",
     "upgrade plan": "test_upgrade_status_current_without_project",
     "upgrade apply": "test_upgrade_status_current_without_project",
     "upgrade recover": "test_upgrade_status_current_without_project",
-    "upgrade session-release": "test_upgrade_status_current_without_project",
     "project register": "test_project_register_and_list",
     "project list": "test_project_register_and_list",
     "project classify-origin": "test_project_origin_classification_is_guarded",
@@ -545,6 +545,30 @@ class PmoCliTests(unittest.TestCase):
         self.assertEqual(result["status"], "AGENT_MARKETPLACE_UPGRADE_REQUIRED_BLOCKED")
         self.assertTrue(any("REQUIRED_COMPONENT_MISSING" in value
                             for value in result["blockers"]))
+
+    def test_upgrade_prepare_branch_delegates(self):
+        expected = {
+            "status": "AGENT_MARKETPLACE_UPGRADE_BRANCH_PREPARED",
+            "upgrade_branch": "agent-marketplace/upgrade-20260811T104530Z",
+        }
+        with mock.patch.object(
+            pmo_cli.upgrade_core, "prepare_branch", return_value=expected
+        ) as prepare:
+            code, out, err = run([
+                "upgrade", "prepare-branch", "--project-root", str(self.wt_main),
+            ])
+        self.assertEqual(code, 0, err)
+        self.assertEqual(json.loads(out), expected)
+        self.assertEqual(prepare.call_args.args[-1], str(self.wt_main.resolve()))
+
+    def test_removed_upgrade_session_interfaces_are_rejected(self):
+        for command in (
+            ["upgrade", "status", "--exclude-session-id", "old"],
+            ["upgrade", "session-release", "--session-id", "old"],
+        ):
+            with self.subTest(command=command):
+                code, _, _ = run(command)
+                self.assertEqual(code, 2)
 
     def test_now_prints_iso_utc(self):
         from datetime import datetime

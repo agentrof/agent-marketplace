@@ -15,7 +15,7 @@
     {
       "code": "AGENT_MARKETPLACE_UPGRADE_REQUIRED_BLOCKED",
       "summary": "An upgrade is required but one or more safety checks block mutation.",
-      "actions": ["Resolve every reported blocker.", "Close every named blocking session; release its record only after owner confirmation.", "Return a clean checkout to the configured target branch, then create the named upgrade branch when reported.", "Run status again from a new session."]
+      "actions": ["Resolve every reported blocker.", "Return a clean checkout to the configured target branch.", "When the default-branch requirement is the only blocker, prepare the upgrade branch through the PMO command and continue in the same session."]
     },
     {
       "code": "AGENT_MARKETPLACE_UPGRADE_APPLY_READY",

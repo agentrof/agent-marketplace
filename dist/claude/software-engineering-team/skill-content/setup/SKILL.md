@@ -56,10 +56,24 @@ include tradeoffs. Anchor every path at the resolved git root.
    and docs with maps, business-analysis, solution-design,
    system-architecture, design-system/pages, and experience-design. Add
    `.gitkeep` only to empty tracked directories. Runtime paths are lazy.
-7. Build `<workspace>/config.json` interactively. Detect stack values before
-   asking for gaps. Require commands, repo-relative source directories,
-   output_language, terminology_language, and scale. Ask `project_origin`
-   explicitly and write it only through `project_config.py set-origin`.
+7. Read [config-contract.md](../configure/references/config-contract.md)
+   completely, then build `<workspace>/config.json` interactively. Detect
+   existing values before asking only for gaps.
+   - Collect one missing field per question through the choice gate, with at
+     most three questions per batch. Never replace these gates with one
+     aggregate "accept defaults or provide corrections" prompt, and never put
+     multiple config fields in one confirmation.
+   - Ask in this order: `project_origin`, `databases`, `scale`;
+     `output_language`, `terminology_language`, `project_key`; `source_dirs`,
+     `test_command`, `mutation_command`; then `env_command`. Explicit values
+     already supplied by the owner count as answers. Every missing value waits
+     for its own answer before use. Keep the approved `project_key` out of the
+     config until `project register` stamps it atomically in step 9.
+   - Present a detected or conventional candidate first with its tradeoff,
+     plus supported alternatives and free-form input where the field permits
+     it. The fixed supported backend, frontend and environment stack values
+     are constraints to report, not owner choices to manufacture.
+   - Write `project_origin` only through `project_config.py set-origin`.
 8. Materialize the base vault payload without overwriting existing Obsidian
    values. Reconcile owner-approved output-language designations through
    `vault_check.py reconcile-designations`.
@@ -70,9 +84,12 @@ include tradeoffs. Anchor every path at the resolved git root.
 10. Install the tracked portable gate with `vault_gate.py install
     --project-root <root>`. The output is
     `.github/agentrof/vault-gate.pyz`.
-11. Materialize CI through `references/ci-bootstrap.md`, replacing
-    `{{test_command}}`, `{{audit_command}}`, and `{{env_command}}`, then close
-    in order: config check; PMO identity; contract hash; host instructions; local
+11. Handle CI through [ci-bootstrap.md](references/ci-bootstrap.md), replacing
+    `{{test_command}}`, `{{audit_command}}`, and `{{env_command}}`. When no
+    PR-triggered workflow exists, ask its add-or-defer decision through a
+    separate choice gate after the command fields are approved. Never infer
+    deferral or fold CI into a config-default approval. Then close in order:
+    config check; PMO identity; contract hash; host instructions; local
     projection; effective ignore and force-add checks; vault renders; portable
     gate; preparation status; setup check; and an empty setup preview.
 12. Run `project attach --project-root <root> --workspace <name> --json` and

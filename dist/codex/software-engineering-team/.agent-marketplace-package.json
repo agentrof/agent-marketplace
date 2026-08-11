@@ -1,9 +1,9 @@
 {
-  "build_id": "snapshot.936298bc929acfb801e8f508dedae8c8cf3b5dfbed05bf7b79411731de944620",
+  "build_id": "snapshot.71b55a0822025f27c7af0229e73a713af79bb834dc65893c2e6af7d3fa6dcd83",
   "component": "software-engineering-team",
   "files": {
     ".agent-marketplace-generated-distribution": "bc5e5ffd58e656c315fc4230e335b1acaaeba4b3a6871fc57e84144035567474",
-    ".codex-plugin/plugin.json": "a69facc235312a7d0e4c9320c4a985c324c58359ed7da47a6824f272d4f9fb70",
+    ".codex-plugin/plugin.json": "c60dc9b0a8717fe2ab7a12c9c24b358bf0d0539af5f5e6c4edec53562d7a899b",
     "agents/analysis-challenger.md": "35c04b9ecc47ba4a8f9d168b4f74803d6b342974cc22c8dad048f38ed607e5ee",
     "agents/backend-developer.md": "31fae6ca601479a687a4f1a6b1afc3dff481c804fa78b6b9a83ca108ce64145a",
     "agents/backlog-reviewer.md": "9c24302e625242d26df8feae6ec9f1beccad6c8934ad7ba315c882c299e6766f",
@@ -129,7 +129,7 @@
     "skill-content/requirements-analysis/references/nfr-elicitation.md": "154730b8b546e3e0e538e6eb3dab21b1304d5a2657148352cda02e19e0c2ecb8",
     "skill-content/requirements-analysis/references/research-methods.md": "fa08b909a2863a7162a9199f21c234c3c58da40afb3cb31e5ad05a109fdc172f",
     "skill-content/requirements-analysis/references/space-standard.md": "6e0caa5f32325cd5648eb0b6d2c113cc033ba58d1320148be7f53fde7c313692",
-    "skill-content/setup/SKILL.md": "85731bac3058c88ea316e4d6d28c405e2df04320051935ade1794f1fafb01ce4",
+    "skill-content/setup/SKILL.md": "ceaa41425618a285bb2dec901a399466980570c3432ed87be5349022c41b3dbc",
     "skill-content/setup/references/ci-bootstrap.md": "6060f3c31a162aea1f53ab479022669fa458d3ea2357cd952219497996880e60",
     "skill-content/sketch/SKILL.md": "efd02455c4ac8ce9eb64ec2872297ab22a5a2322c3cb29a95f0c7ada6105e523",
     "skill-content/software-architecture/SKILL.md": "d4cd6a7d498e92723814bf8d8177cf7e84f47c22d098c2045a2c027cfc948657",
@@ -234,6 +234,6 @@
   "schema_version": 2,
   "source_channel": "snapshot",
   "source_commit": "",
-  "source_ref": "snapshot.936298bc929acfb801e8f508dedae8c8cf3b5dfbed05bf7b79411731de944620",
+  "source_ref": "snapshot.71b55a0822025f27c7af0229e73a713af79bb834dc65893c2e6af7d3fa6dcd83",
   "version": "0.2.0"
 }

@@ -44,6 +44,8 @@ STATUS_CURRENT = "AGENT_MARKETPLACE_CURRENT"
 STATUS_READY = "AGENT_MARKETPLACE_UPGRADE_REQUIRED_READY"
 STATUS_BLOCKED = "AGENT_MARKETPLACE_UPGRADE_REQUIRED_BLOCKED"
 STATUS_APPLY_READY = "AGENT_MARKETPLACE_UPGRADE_APPLY_READY"
+STATUS_CHOICE_REQUIRED = "AGENT_MARKETPLACE_UPGRADE_CHOICE_REQUIRED"
+STATUS_CHOICE_ABORTED = "AGENT_MARKETPLACE_UPGRADE_CHOICE_ABORTED"
 STATUS_UPGRADING = "AGENT_MARKETPLACE_UPGRADING"
 STATUS_RECOVERY = "AGENT_MARKETPLACE_UPGRADE_RECOVERY_REQUIRED"
 STATUS_RESTART = "AGENT_MARKETPLACE_UPGRADE_COMPLETE_RESTART_REQUIRED"
@@ -55,6 +57,8 @@ IN_USE_MARKER_RE = re.compile(
     r"^(?P<pid>[1-9][0-9]*)(?:\.tmp\.[0-9a-f]{8})?$"
 )
 KNOWN_RUNTIME_CONTRACTS = {"in_use_pid_marker_v1"}
+WORKSPACE_RE = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
+UPGRADE_CHOICES = {"preserve", "discard", "abort"}
 
 
 class UpgradeError(Exception):
@@ -67,6 +71,36 @@ def utc_now() -> str:
 
 def canonical_json(value: object) -> str:
     return json.dumps(value, sort_keys=True, separators=(",", ":"))
+
+
+def normalize_upgrade_choices(values: dict[str, str] | None) -> dict[str, str]:
+    result: dict[str, str] = {}
+    for key, selected in (values or {}).items():
+        request_id = str(key).strip()
+        option = str(selected).strip()
+        if not request_id or option not in UPGRADE_CHOICES:
+            raise UpgradeError(
+                f"invalid upgrade choice {key!r}={selected!r}"
+            )
+        result[request_id] = option
+    return result
+
+
+def surface_namespace(host: str, key: str) -> str:
+    return key if key.startswith("shared:") else f"{host}:{key}"
+
+
+def recoverable_instruction_surface(key: str) -> bool:
+    value = key.split(":", 1)[1] if ":" in key else key
+    root_instruction = ":" in key and "/" not in value and (
+        value.endswith(".md")
+        or value.endswith(".md#agent-marketplace")
+        or value.endswith(".md#reserved-absence")
+    )
+    return root_instruction or (
+        key.startswith("shared:")
+        and key.endswith("/memory/agent-marketplace.md")
+    )
 
 
 def sha256_bytes(value: bytes) -> str:
@@ -763,8 +797,13 @@ def adapter_surfaces(
         if not isinstance(current, dict):
             raise UpgradeError(f"project adapter surfaces are invalid for {team_id}/{host}")
         for key, value in sorted(current.items()):
-            namespaced = f"{host}:{key}"
-            surfaces[namespaced] = str(value)
+            namespaced = surface_namespace(host, str(key))
+            rendered = str(value)
+            if namespaced in surfaces and surfaces[namespaced] != rendered:
+                raise UpgradeError(
+                    f"shared project surface mismatch for {team_id}: {namespaced}"
+                )
+            surfaces[namespaced] = rendered
         changes.update(str(value) for value in result["changes"])
     return surfaces, sorted(changes)
 
@@ -884,6 +923,8 @@ def status(
         try:
             root = project_root(project_path)
             workspace, config_path = find_workspace(root)
+            if not WORKSPACE_RE.fullmatch(workspace):
+                blockers.append(f"UNSAFE_WORKSPACE_NAME:{workspace}")
             state_path = root / STATE_RELATIVE
             safe_relative(root, state_path)
             for managed_target in (state_path, root / ".gitignore",
@@ -957,8 +998,20 @@ def status(
                             ":" in key and key.split(":", 1)[0] not in installed_hosts
                         ) and actual.get(key) != value
                     )
-                    if drift:
-                        blockers.append("PROJECT_CONTRACT_DRIFT:" + ",".join(drift))
+                    instruction_drift = [
+                        key for key in drift if recoverable_instruction_surface(key)
+                    ]
+                    contract_drift = [
+                        key for key in drift if key not in instruction_drift
+                    ]
+                    if instruction_drift:
+                        reasons.append(
+                            "PROJECT_INSTRUCTION_DRIFT:" + ",".join(instruction_drift)
+                        )
+                    if contract_drift:
+                        blockers.append(
+                            "PROJECT_CONTRACT_DRIFT:" + ",".join(contract_drift)
+                        )
             delivery = state.get("delivery", {}) \
                 if isinstance(state, dict) else {}
             if not isinstance(delivery, dict):
@@ -1215,7 +1268,9 @@ def plan(
     db_file: Path,
     target_schema: int,
     project_path: str | Path | None,
+    choices: dict[str, str] | None = None,
 ) -> dict:
+    selected_choices = normalize_upgrade_choices(choices)
     current = status(data_root, db_file, target_schema, project_path)
     if current["status"] == STATUS_CURRENT:
         return {**current, "plan_id": "", "changes": []}
@@ -1235,8 +1290,47 @@ def plan(
         "project_id": str(
             current["project"].get("state", {}).get("project_id") or uuid.uuid4()
         ) if current["project"] else "",
+        "choices": {},
+        "upgrade_id": "",
     }
     plan_payload["database"]["fingerprint"] = current["database_fingerprint"]
+    discovery_payload = dict(plan_payload)
+    discovery_payload["data_root"] = str(data_root)
+    _discovery_changes, discovery = project_changes(discovery_payload)
+    requests = discovery.get("choice_requests", []) \
+        if isinstance(discovery, dict) else []
+    required = {
+        str(request["id"]) for request in requests
+        if isinstance(request, dict) and request.get("id")
+    }
+    unexpected = sorted(set(selected_choices) - required)
+    if unexpected:
+        raise UpgradeError(
+            "upgrade choices do not match current migration requests: "
+            + ", ".join(unexpected)
+        )
+    if any(selected_choices.get(request_id) == "abort" for request_id in required):
+        return {
+            **current,
+            "status": STATUS_CHOICE_ABORTED,
+            "plan_id": "",
+            "choice_requests": requests,
+            "resolved_choices": selected_choices,
+            "mutation_performed": False,
+            "guidance": guidance_for(STATUS_CHOICE_ABORTED),
+        }
+    unresolved = sorted(required - set(selected_choices))
+    if unresolved:
+        return {
+            **current,
+            "status": STATUS_CHOICE_REQUIRED,
+            "plan_id": "",
+            "choice_requests": requests,
+            "resolved_choices": selected_choices,
+            "mutation_performed": False,
+            "guidance": guidance_for(STATUS_CHOICE_REQUIRED),
+        }
+    plan_payload["choices"] = selected_choices
     plan_payload["upgrade_id"] = sha256_bytes(
         canonical_json(plan_payload).encode()
     )[:24]
@@ -1265,6 +1359,7 @@ def plan(
         "changes": plan_payload["changes"],
         "project_files": plan_payload["project_files"],
         "backup_policy": plan_payload["backup_policy"],
+        "resolved_choices": selected_choices,
         "plan_path": str(destination),
         "status": STATUS_APPLY_READY,
         "guidance": guidance_for(STATUS_APPLY_READY),
@@ -1549,13 +1644,24 @@ def adapter_roots(plan_payload: dict, team_id: str) -> list[Path]:
     return roots
 
 
-def run_adapter(root: Path, action: str, project: Path, workspace: str) -> dict:
+def run_adapter(
+    root: Path,
+    action: str,
+    project: Path,
+    workspace: str,
+    choices: dict[str, str] | None = None,
+) -> dict:
     script = root / "scripts" / "project_upgrade_adapter.py"
     if not script.is_file():
         raise UpgradeError(f"package lacks project upgrade adapter: {root}")
+    command = [
+        sys.executable, str(script), action, "--project-root", str(project),
+        "--workspace", workspace,
+    ]
+    for request_id, selected in sorted(normalize_upgrade_choices(choices).items()):
+        command.extend(["--choice", f"{request_id}={selected}"])
     completed = subprocess.run(
-        [sys.executable, str(script), action, "--project-root", str(project),
-         "--workspace", workspace],
+        command,
         capture_output=True, text=True, timeout=120, check=False,
     )
     if completed.returncode != 0:
@@ -1567,7 +1673,8 @@ def run_adapter(root: Path, action: str, project: Path, workspace: str) -> dict:
         result = json.loads(completed.stdout)
     except json.JSONDecodeError as exc:
         raise UpgradeError(f"project adapter returned invalid JSON: {root}") from exc
-    if not isinstance(result, dict) or not isinstance(result.get("changes"), list):
+    if not isinstance(result, dict) or not isinstance(result.get("changes"), list) \
+            or not isinstance(result.get("choice_requests", []), list):
         raise UpgradeError(f"project adapter returned invalid shape: {root}")
     return result
 
@@ -1604,15 +1711,36 @@ def project_changes(plan_payload: dict) -> tuple[dict[Path, bytes | None], dict]
         changes[gitignore_path] = gitignore_path.read_bytes() \
             if gitignore_path.is_file() else None
     adapter_previews: list[tuple[Path, dict]] = []
+    choice_requests: dict[str, dict] = {}
     plan_payload["data_root"] = str(plan_payload["data_root"])
     package_roots = adapter_roots(plan_payload, team_id)
+    adapter_choices = normalize_upgrade_choices(plan_payload.get("choices", {}))
     for package_root in package_roots:
-        preview = run_adapter(package_root, "check", root, workspace)
+        preview = run_adapter(
+            package_root, "check", root, workspace, adapter_choices
+        ) if adapter_choices else run_adapter(
+            package_root, "check", root, workspace
+        )
         adapter_previews.append((package_root, preview))
+        for request in preview.get("choice_requests", []):
+            if not isinstance(request, dict) or not str(request.get("id", "")):
+                raise UpgradeError("project adapter returned an invalid choice request")
+            request_id = str(request["id"])
+            prior = choice_requests.get(request_id)
+            if prior is not None and canonical_json(prior) != canonical_json(request):
+                raise UpgradeError(
+                    f"cross-host project choice mismatch: {request_id}"
+                )
+            choice_requests[request_id] = request
         for relative in preview["changes"]:
             path = root / str(relative)
             safe_relative(root, path)
             changes.setdefault(path, path.read_bytes() if path.is_file() else None)
+    if choice_requests:
+        return {}, {
+            "choice_requests": [choice_requests[key] for key in sorted(choice_requests)],
+            "adapters": adapter_previews,
+        }
     target_surfaces = {
         safe_relative(root, config_path) + "#agent-marketplace": config_owned_digest(config),
         ".gitignore#agent-marketplace:software-engineering-team":
@@ -1621,7 +1749,11 @@ def project_changes(plan_payload: dict) -> tuple[dict[Path, bytes | None], dict]
     for package_root, preview in adapter_previews:
         host = detect_package_host(package_root)
         for relative, value in preview.get("target_surfaces", {}).items():
-            target_surfaces[f"{host}:{relative}"] = str(value)
+            key = surface_namespace(host, str(relative))
+            rendered = str(value)
+            if key in target_surfaces and target_surfaces[key] != rendered:
+                raise UpgradeError(f"shared target surface mismatch: {key}")
+            target_surfaces[key] = rendered
     state = {
         "schema_version": PROJECT_STATE_SCHEMA,
         "project_id": plan_payload["project_id"],
@@ -1652,7 +1784,8 @@ def project_changes(plan_payload: dict) -> tuple[dict[Path, bytes | None], dict]
     state_path = root / STATE_RELATIVE
     changes.setdefault(state_path, state_path.read_bytes() if state_path.is_file() else None)
     return changes, {"state": state, "adapters": adapter_previews,
-                     "config": config_bytes, "gitignore": gitignore_bytes}
+                     "config": config_bytes, "gitignore": gitignore_bytes,
+                     "choice_requests": []}
 
 
 def snapshot_content(snapshot: dict) -> bytes | None:
@@ -1700,8 +1833,9 @@ def validate_recovery_surfaces(
             raise UpgradeError(f"project adapter recovery shape is invalid: {host}")
         for relative in set(current) | set(target):
             value = str(current.get(relative, ""))
+            surface_key = surface_namespace(host, str(relative))
             allowed = {
-                str(original_surfaces.get(f"{host}:{relative}", "")),
+                str(original_surfaces.get(surface_key, "")),
                 str(target.get(relative, "")),
             }
             if value not in allowed:
@@ -1844,6 +1978,11 @@ def apply_project(plan_payload: dict, journal: dict, journal_path: Path) -> None
         return
     root = project_root(project_data["root"])
     changes, prepared = project_changes(plan_payload)
+    if prepared.get("choice_requests"):
+        raise UpgradeError(
+            "project instructions changed during upgrade recovery; restore the"
+            " planned managed files before retrying recovery"
+        )
     durable = journal.get("project_snapshots")
     if durable is not None and not isinstance(durable, dict):
         raise UpgradeError("project recovery snapshots are invalid")
@@ -1880,7 +2019,24 @@ def apply_project(plan_payload: dict, journal: dict, journal_path: Path) -> None
                          gitignore_path.stat().st_mode & 0o777
                          if gitignore_path.exists() else 0o644)
         for package_root, _preview in prepared["adapters"]:
-            run_adapter(package_root, "apply", root, project_data["workspace"])
+            adapter_choices = normalize_upgrade_choices(
+                plan_payload.get("choices", {})
+            )
+            if adapter_choices:
+                run_adapter(
+                    package_root,
+                    "apply",
+                    root,
+                    project_data["workspace"],
+                    adapter_choices,
+                )
+            else:
+                run_adapter(
+                    package_root,
+                    "apply",
+                    root,
+                    project_data["workspace"],
+                )
         state = prepared["state"]
         surfaces = managed_surface_hashes(root, config_path)
         host_surfaces, _ = adapter_surfaces(

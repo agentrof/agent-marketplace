@@ -2929,10 +2929,21 @@ def cmd_upgrade_status(args) -> int:
 
 
 def cmd_upgrade_plan(args) -> int:
+    choices: dict[str, str] = {}
+    for value in args.choice:
+        request_id, separator, selected = value.partition("=")
+        if not separator or not request_id:
+            raise Rule(
+                f"invalid --choice {value!r}; expected <id>=preserve|discard|abort"
+            )
+        if request_id in choices and choices[request_id] != selected:
+            raise Rule(f"conflicting choices for {request_id}")
+        choices[request_id] = selected
     try:
         result = upgrade_core.plan(
             data_dir(), db_path(), SCHEMA_VERSION,
             upgrade_project_root(args) or None,
+            choices,
         )
     except upgrade_core.UpgradeError as exc:
         raise Rule(str(exc)) from exc
@@ -3711,6 +3722,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.set_defaults(func=cmd_upgrade_prepare_branch)
     p = upgrade.add_parser("plan")
     p.add_argument("--project-root", default="")
+    p.add_argument("--choice", action="append", default=[])
     p.set_defaults(func=cmd_upgrade_plan)
     p = upgrade.add_parser("apply")
     p.add_argument("--plan-id", required=True)

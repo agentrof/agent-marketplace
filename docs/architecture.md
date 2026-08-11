@@ -55,8 +55,10 @@ the dependency contract.
    compiler-generated views, living architecture documents, design
    system, demo packages, and the generated decision logs; delivery
    state lives in the PMO database, read through its CLI. There are no
-   memory tiers or mind maps; a missing-context problem is
-   a step-contract bug.
+   project-memory tiers or mind maps; a missing-context problem is a
+   step-contract bug. The bounded consumer `memory/` surface carries owner
+   collaboration preferences and the Agent Marketplace memory contract, not
+   delivery truth or project architecture.
 8. **One constitution.** Behavioral law lives in a single constitution file
    per plugin, pasted into every spawn prompt with an order-directory copy
    as fallback. Never per-agent copies, never an on-demand skill.
@@ -93,6 +95,10 @@ the dependency contract.
    Platform manifests, contracts and overlays live under `platforms/`.
    Generated Claude and Codex distributions contain metadata and pointers,
    never forked workflow bodies.
+   Project instructions are composed in a fixed order from PMO
+   `common.md`, the team's `team.md`, and one host `_team` `host.md` delta.
+   No platform may carry a per-team AGENTS or CLAUDE template. The generated
+   common and team sections are identical across hosts.
    Host adapters map gates, native agent spawning, hook payloads and session
    boundaries while preserving the same PMO lifecycle and safety outcome.
 13. **Every team requires a ready PMO.** Claude manifests declare PMO as a
@@ -114,8 +120,9 @@ the dependency contract.
    PMO derives status from package provenance, cross-host versions, database
    schema, project UUID, component versions, and managed-surface hashes. A
    required upgrade locks normal marketplace mutation on both hosts. Ordered
-   checksummed migrations operate on a candidate database and marker-owned
-   project surfaces only; plans are fingerprint-bound, journaled, recoverable,
+   checksummed migrations operate on a candidate database and declared
+   whole-file managed project surfaces only; plans are fingerprint-bound,
+   journaled, recoverable,
    and require a fresh session after success. Remote-backed projects remain
    locked on the PMO-prepared upgrade branch until the configured target branch
    contains the exact managed upgrade identity. Active PMO work in any project
@@ -143,11 +150,16 @@ the dependency contract.
 - `.changes/`: pending release-impact declarations, one per normal pull request.
 - `plugins/<team>/`: host-neutral canonical content. Full skills live in
   `skill-content/`; ordered compatibility contracts live in `migrations/`;
-  agent frontmatter uses neutral exposure and reasoning enums.
+  agent frontmatter uses neutral exposure and reasoning enums. Every team owns
+  exactly one `templates/project-instructions/team.md` fragment.
+- `plugins/project-management-office/templates/project-instructions/common.md`:
+  the canonical project contract shared by all teams and hosts. PMO also owns
+  the managed memory template and the one-time user memory seeds.
 - `platforms/<host>/<team>/`: host manifest, contract and overlay source;
   `platforms/shared/` contains runtime adapters used by both hosts. `_team`
   overlays are generated into every non-PMO plugin, so new teams inherit the
-  same PMO guard and Codex project-agent generator without copied source.
+  same PMO guard and project generators without copied source. Each host's
+  `_team` overlay owns its single project-instruction `host.md` delta.
 - `dist/<host>/<team>/`: generated self-contained distributions; never edit
   them by hand.
 - `.release/stable.json`: generated release-PR provenance used to reject stale

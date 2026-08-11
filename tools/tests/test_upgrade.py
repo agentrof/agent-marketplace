@@ -461,7 +461,7 @@ class UpgradeLifecycleTests(unittest.TestCase):
         self.assertIn("fingerprint changed", result.stderr)
         self.assertFalse((self.project / ".agentrof" / "agent-marketplace" / "project.json").exists())
 
-    def test_unmanaged_instruction_collision_blocks_plan(self):
+    def test_unmanaged_instruction_requires_choice_without_creating_plan(self):
         (self.project / "CLAUDE.md").write_text(
             "# User instructions\n\nNever replace this.\n", encoding="utf-8"
         )
@@ -471,10 +471,74 @@ class UpgradeLifecycleTests(unittest.TestCase):
         result = self.cli(
             "upgrade", "plan", "--project-root", str(self.project), check=False
         )
-        self.assertEqual(result.returncode, 1)
-        self.assertIn("unmanaged CLAUDE.md collision", result.stderr)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        payload = json.loads(result.stdout)
+        self.assertEqual(
+            payload["status"], "AGENT_MARKETPLACE_UPGRADE_CHOICE_REQUIRED"
+        )
+        self.assertEqual(payload["plan_id"], "")
+        self.assertEqual(
+            [request["id"] for request in payload["choice_requests"]],
+            ["claude.root.claude"],
+        )
         self.assertEqual((self.project / "CLAUDE.md").read_bytes(), before)
         self.assertFalse((self.project / ".agentrof" / "agent-marketplace" / "project.json").exists())
+
+        aborted = self.cli(
+            "upgrade", "plan", "--project-root", str(self.project),
+            "--choice", "claude.root.claude=abort",
+        )
+        self.assertEqual(
+            json.loads(aborted.stdout)["status"],
+            "AGENT_MARKETPLACE_UPGRADE_CHOICE_ABORTED",
+        )
+        self.assertFalse((self.home / "upgrades" / "plans").exists())
+
+        planned = self.cli(
+            "upgrade", "plan", "--project-root", str(self.project),
+            "--choice", "claude.root.claude=preserve",
+        )
+        plan = json.loads(planned.stdout)
+        self.assertEqual(
+            plan["status"], "AGENT_MARKETPLACE_UPGRADE_APPLY_READY"
+        )
+        self.assertEqual(
+            plan["resolved_choices"],
+            {"claude.root.claude": "preserve"},
+        )
+        self.assertIn("CLAUDE.user.md", plan["project_files"])
+
+    def test_unsafe_legacy_workspace_blocks_before_project_mutation(self):
+        (self.project / "workspace").rename(self.project / "unsafe workspace")
+        run(["git", "add", "-A"], cwd=self.project)
+        committed = run([
+            "git", "commit", "-qm", "move legacy workspace"
+        ], cwd=self.project)
+        self.assertEqual(committed.returncode, 0, committed.stderr)
+        before = {
+            path.relative_to(self.project).as_posix(): path.read_bytes()
+            for path in self.project.rglob("*")
+            if path.is_file() and ".git" not in path.parts
+        }
+        result, status = self.status()
+        self.assertEqual(result.returncode, 1, result.stderr)
+        self.assertEqual(
+            status["status"], "AGENT_MARKETPLACE_UPGRADE_REQUIRED_BLOCKED"
+        )
+        self.assertIn(
+            "UNSAFE_WORKSPACE_NAME:unsafe workspace", status["blockers"]
+        )
+        planned = self.cli(
+            "upgrade", "plan", "--project-root", str(self.project), check=False
+        )
+        self.assertEqual(planned.returncode, 1)
+        self.assertIn("UNSAFE_WORKSPACE_NAME", planned.stderr)
+        after = {
+            path.relative_to(self.project).as_posix(): path.read_bytes()
+            for path in self.project.rglob("*")
+            if path.is_file() and ".git" not in path.parts
+        }
+        self.assertEqual(after, before)
 
     def test_dirty_checkout_after_plan_is_rejected(self):
         plan = json.loads(self.cli(
@@ -962,20 +1026,26 @@ class UpgradeLifecycleTests(unittest.TestCase):
         journal_path = self.home / "upgrades" / run_id / "journal.json"
         before = json.loads(journal_path.read_text())["project_snapshots"]
         claude = self.project / "CLAUDE.md"
+        planned_claude = claude.read_bytes()
         claude.write_text(
             claude.read_text(encoding="utf-8") + "\n# User recovery note\n",
             encoding="utf-8",
         )
         with mock.patch.object(UPGRADE, "sync_project_identity", side_effect=original):
-            recovered = UPGRADE.recover(
-                self.home, self.home / "pmo.db", 5, run_id
-            )
+            with self.assertRaisesRegex(
+                UPGRADE.UpgradeError, "restore the planned managed files"
+            ):
+                UPGRADE.recover(self.home, self.home / "pmo.db", 5, run_id)
+        self.assertIn("# User recovery note", claude.read_text(encoding="utf-8"))
+        claude.write_bytes(planned_claude)
+        with mock.patch.object(UPGRADE, "sync_project_identity", side_effect=original):
+            recovered = UPGRADE.recover(self.home, self.home / "pmo.db", 5, run_id)
         self.assertEqual(
             recovered["status"], "AGENT_MARKETPLACE_UPGRADE_COMPLETE_RESTART_REQUIRED"
         )
         after = json.loads(journal_path.read_text())["project_snapshots"]
         self.assertEqual(after, before)
-        self.assertIn("# User recovery note", claude.read_text(encoding="utf-8"))
+        self.assertNotIn("# User recovery note", claude.read_text(encoding="utf-8"))
 
     def test_project_only_failure_enters_recovery_instead_of_false_rollback(self):
         self.complete_upgrade_and_commit()
@@ -1324,12 +1394,14 @@ class UpgradeLifecycleTests(unittest.TestCase):
             "upgrade", "plan", "--project-root", str(self.project)
         ).stdout)
         self.assertIn("AGENTS.md", second["project_files"])
+        self.assertIn("AGENTS.user.md", second["project_files"])
         self.cli("upgrade", "apply", "--plan-id", second["plan_id"])
         state = json.loads((
             self.project / ".agentrof" / "agent-marketplace" / "project.json"
         ).read_text(encoding="utf-8"))
         self.assertEqual(state["hosts"], ["claude", "codex"])
         self.assertTrue((self.project / ".codex" / "agents").is_dir())
+        self.assertTrue((self.project / "AGENTS.user.md").is_file())
 
 
 if __name__ == "__main__":

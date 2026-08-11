@@ -40,6 +40,10 @@ def codex_marketplace(root: Path) -> tuple[Path, dict]:
     return path, read_json(path)
 
 
+def codex_marketplace_entry(data: dict) -> dict:
+    return next(entry for entry in data["plugins"] if entry["name"] == PLUGIN)
+
+
 def manifest(root: Path, host: str, distributed: bool = False) -> tuple[Path, dict]:
     if distributed:
         path = root / "dist" / host / PLUGIN / f".{host}-plugin" / "plugin.json"
@@ -68,25 +72,26 @@ def remove_codex_marketplace_plugin(root: Path) -> None:
 
 def set_codex_source_path(root: Path) -> None:
     path, data = codex_marketplace(root)
-    data["plugins"][0]["source"]["path"] = "./dist/codex/ghost-team"
+    codex_marketplace_entry(data)["source"]["path"] = "./dist/codex/ghost-team"
     write_json(path, data)
 
 
 def set_codex_install_policy(root: Path) -> None:
     path, data = codex_marketplace(root)
-    data["plugins"][0]["policy"]["installation"] = "INSTALLED_BY_DEFAULT"
+    codex_marketplace_entry(data)["policy"]["installation"] = \
+        "INSTALLED_BY_DEFAULT"
     write_json(path, data)
 
 
 def set_codex_auth_policy(root: Path) -> None:
     path, data = codex_marketplace(root)
-    data["plugins"][0]["policy"]["authentication"] = "NONE"
+    codex_marketplace_entry(data)["policy"]["authentication"] = "NONE"
     write_json(path, data)
 
 
 def set_codex_category(root: Path) -> None:
     path, data = codex_marketplace(root)
-    data["plugins"][0]["category"] = "Productivity"
+    codex_marketplace_entry(data)["category"] = "Productivity"
     write_json(path, data)
 
 
@@ -189,6 +194,7 @@ def remove_claude_hook_surface(root: Path) -> None:
             / "hooks.json")
     data = read_json(path)
     data["hooks"]["PreToolUse"][0]["matcher"] = "Write|Edit"
+    data["hooks"]["PostToolUse"][0]["matcher"] = "Write|Edit"
     write_json(path, data)
 
 
@@ -197,6 +203,7 @@ def remove_codex_hook_surface(root: Path) -> None:
             / "hooks.json")
     data = read_json(path)
     data["hooks"]["PreToolUse"][0]["matcher"] = "Write|Edit|Bash"
+    data["hooks"]["PostToolUse"][0]["matcher"] = "Write|Edit|Bash"
     write_json(path, data)
 
 

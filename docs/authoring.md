@@ -350,6 +350,40 @@ surface, team, or persistence feature updates its migration manifest and the
 upgrade tests in the same pull request. See
 [migration-authoring.md](migration-authoring.md) for the admission rules.
 
+## Project instructions and consumer ownership
+
+Project instructions have three canonical fragments and one composition order:
+
+```text
+plugins/project-management-office/templates/project-instructions/common.md
++ plugins/<team>/templates/project-instructions/team.md
++ platforms/<host>/_team/overlay/templates/project-instructions/host.md
+= dist/<host>/<team>/templates/<host-root-file>
+```
+
+The host root file is `AGENTS.md` for Codex and `CLAUDE.md` for Claude. Keep
+common and team fragments host-neutral. Put only native loading, agent dispatch,
+mode, and choice-gate behavior in `host.md`. `tools/scaffold.py new-plugin`
+creates only the team fragment; adding a platform-level per-team AGENTS or
+CLAUDE template is a validation error. The builder preserves `{{workspace}}`;
+setup and upgrade replace it only after validating a single lower-kebab path
+segment. Generated root files must stay at or below 24 KiB and 180 lines.
+
+In a consumer repository, the installed host's root instruction file is wholly
+Agent Marketplace-owned and checksummed. It contains no mixed-ownership marker
+block. The matching `AGENTS.user.md` or `CLAUDE.user.md` is seeded once and is
+then wholly user-owned. PMO wholly owns `<workspace>/memory/agent-marketplace.md`;
+`me.md` and `profile.md` are seeded once and are then user-owned. Setup and
+upgrade never rewrite or recreate a missing user-owned seed after first setup.
+Codex reads `AGENTS.user.md` by instruction on a best-effort basis; safety may
+not depend on it. Claude loads its companion and memory through native imports.
+
+Root `AGENTS.override.md` is reserved because it replaces Codex root discovery.
+Its absence is a managed surface. Nested AGENTS files, nested overrides, and
+`CLAUDE.local.md` remain user-owned. The team guard denies direct resolvable
+writes to managed root and memory files, then verifies hashes after mutation so
+unrecognized shell side effects lock subsequent managed work as contract drift.
+
 First setup has one bounded bootstrap state: the matching team config exists,
 its `project_key` is absent, and no Agent Marketplace project contract exists.
 The PMO project-register command is the sole operation that stamps the key and
@@ -373,8 +407,10 @@ findings) through the project-management-office plugin, never in its own files:
   disabled and hook/bootstrap failures in the recovery message.
 - Keep the generated `team_guard.py` hook on Write, Edit and Bash for Claude,
   and on Write, Edit, apply_patch and Bash for Codex. It checks the PMO-owned
-  session readiness record and the one-team-per-project ownership rule before
-  the tool runs. Host instructions explain recovery; the hook enforces denial.
+  session readiness record, one-team-per-project ownership, and managed project
+  surfaces before the tool runs. Keep the same matcher on PostToolUse so hash
+  drift locks later mutations. Host instructions explain recovery; the hook
+  enforces denial.
 - Create every future team with `tools/scaffold.py`; `team_pmo_contract`
   rejects a Claude manifest without the dependency, a Codex visible surface
   without the requirement, or either host contract without the ready gate and

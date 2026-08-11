@@ -160,11 +160,68 @@ def make_valid_root(root: Path) -> None:
         REAL_REPOSITORY / "platforms" / "codex" / "_team",
         root / "platforms" / "codex" / "_team",
     )
+    shutil.copytree(
+        REAL_REPOSITORY / "platforms" / "claude" / "_team",
+        root / "platforms" / "claude" / "_team",
+    )
+    shutil.copytree(
+        REAL_REPOSITORY / "plugins" / "project-management-office",
+        root / "plugins" / "project-management-office",
+    )
+    shutil.copytree(
+        REAL_REPOSITORY / "platforms" / "shared" / "project-management-office",
+        root / "platforms" / "shared" / "project-management-office",
+    )
+    for host in ("claude", "codex"):
+        shutil.copytree(
+            REAL_REPOSITORY / "platforms" / host / "project-management-office",
+            root / "platforms" / host / "project-management-office",
+        )
+    real_versions = json.loads(
+        (REAL_REPOSITORY / "versions.json").read_text(encoding="utf-8")
+    )
+    real_pmo_version = real_versions["plugins"]["project-management-office"]
+    pmo_version = "0.0.1"
+    real_claude_marketplace = json.loads(
+        (REAL_REPOSITORY / ".claude-plugin" / "marketplace.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    pmo_claude_entry = json.loads(json.dumps(next(
+        entry for entry in real_claude_marketplace["plugins"]
+        if entry["name"] == "project-management-office"
+    )))
+    pmo_claude_entry["version"] = pmo_version
+    real_codex_marketplace = json.loads(
+        (REAL_REPOSITORY / ".agents" / "plugins" / "marketplace.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    pmo_codex_entry = json.loads(json.dumps(next(
+        entry for entry in real_codex_marketplace["plugins"]
+        if entry["name"] == "project-management-office"
+    )))
+    for host in ("claude", "codex"):
+        manifest_path = (
+            root / "platforms" / host / "project-management-office"
+            / "manifest.json"
+        )
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        manifest["version"] = pmo_version
+        write(manifest_path, json.dumps(manifest, indent=2))
+    pmo_cli = root / "plugins" / "project-management-office" / "scripts" / "pmo_cli.py"
+    pmo_cli_text = pmo_cli.read_text(encoding="utf-8").replace(
+        f'PMO_VERSION = "{real_pmo_version}"',
+        f'PMO_VERSION = "{pmo_version}"',
+    )
+    write(pmo_cli, pmo_cli_text)
+    write(root / "AGENTS.md", "# Fixture Marketplace\n")
+    write(root / "CLAUDE.md", "# Load\n\n@AGENTS.md\n@memory/me.md\n")
     write(root / ".claude-plugin" / "marketplace.json", json.dumps({
         "name": "fixture-marketplace",
         "owner": {"name": "fixture"},
         "metadata": {"description": "fixture", "version": "0.0.1"},
-        "plugins": [{
+        "plugins": [pmo_claude_entry, {
             "name": PLUGIN,
             "source": build_distributions_source("claude", PLUGIN),
             "description": "fixture plugin",
@@ -175,7 +232,10 @@ def make_valid_root(root: Path) -> None:
     write(root / "versions.json", json.dumps({
         "schema_version": 1,
         "marketplace": "0.0.1",
-        "plugins": {PLUGIN: "0.0.1"},
+        "plugins": {
+            "project-management-office": pmo_version,
+            PLUGIN: "0.0.1",
+        },
     }, indent=2))
     write(root / ".changes" / "fixture.json", json.dumps({
         "summary": "Exercise the repository validator fixture.",
@@ -200,7 +260,8 @@ def make_valid_root(root: Path) -> None:
           " or `/plugin enable project-management-office@agent-marketplace`."
           " No files or project state were changed.\n"
           "- Present choice gates with AskUserQuestion.\n"
-          "- One delivery team owns a project.\n")
+          "- One delivery team owns a project; setup runs"
+          " `generate_claude_project.py`.\n")
     codex_manifest = {
         **{key: value for key, value in claude_manifest.items()
            if key != "dependencies"},
@@ -230,7 +291,7 @@ def make_valid_root(root: Path) -> None:
     write(root / ".agents" / "plugins" / "marketplace.json", json.dumps({
         "name": "agent-marketplace",
         "interface": {"displayName": "Agent Marketplace"},
-        "plugins": [{
+        "plugins": [pmo_codex_entry, {
             "name": PLUGIN,
             "source": build_distributions_source("codex", PLUGIN),
             "policy": {"installation": "AVAILABLE", "authentication": "ON_INSTALL"},
@@ -252,6 +313,11 @@ def make_valid_root(root: Path) -> None:
               "database": None,
               "project_contract": {"baseline": 1, "current": 1, "steps": []},
           }, indent=2))
+    write(
+        root / "plugins" / PLUGIN / "templates" / "project-instructions"
+        / "team.md",
+        "# Sample Team\n\nRead {{workspace}}/memory/me.md before managed work.\n",
+    )
     # Hook event names are the host platform's PascalCase schema and are
     # exempt from the snake_case law at exactly $.hooks in hooks/hooks.json.
     write(root / "platforms" / "claude" / PLUGIN / "overlay" / "hooks"
@@ -261,6 +327,8 @@ def make_valid_root(root: Path) -> None:
                 "command": "python3 team_guard.py register"}]}],
             "PreToolUse": [{"matcher": "Write|Edit|Bash", "hooks": [{
                 "type": "command", "command": "python3 team_guard.py pre"}]}],
+            "PostToolUse": [{"matcher": "Write|Edit|Bash", "hooks": [{
+                "type": "command", "command": "python3 team_guard.py post"}]}],
         },
     }, indent=2))
     write(root / "platforms" / "codex" / PLUGIN / "overlay" / "hooks"
@@ -270,6 +338,8 @@ def make_valid_root(root: Path) -> None:
                 "command": "python3 team_guard.py register"}]}],
             "PreToolUse": [{"matcher": "Write|Edit|apply_patch|Bash", "hooks": [{
                 "type": "command", "command": "python3 team_guard.py pre"}]}],
+            "PostToolUse": [{"matcher": "Write|Edit|apply_patch|Bash", "hooks": [{
+                "type": "command", "command": "python3 team_guard.py post"}]}],
         },
     }, indent=2))
     # Product-vault surface: the policy, the seeds and the payload describe
@@ -578,6 +648,11 @@ def break_product_namespace(root: Path) -> None:
     write(root / "namespace-defect.txt", old_signal + "\n")
 
 
+def break_project_instruction_contract(root: Path) -> None:
+    (root / "plugins" / PLUGIN / "templates" / "project-instructions"
+     / "team.md").unlink()
+
+
 BUILDERS = {
     "frontmatter_shape": break_frontmatter_shape,
     "agent_name": break_agent_name,
@@ -600,6 +675,7 @@ BUILDERS = {
     "naive_clock": break_naive_clock,
     "script_references": break_script_references,
     "template_placeholders": break_template_placeholders,
+    "project_instruction_contract": break_project_instruction_contract,
     "spawn_shape_constitution": break_spawn_shape_constitution,
     "ba_schema_shape": break_ba_schema_shape,
     "wikilink_ban": break_wikilink_ban,

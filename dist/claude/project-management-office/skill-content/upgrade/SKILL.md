@@ -51,9 +51,13 @@ Upgrade the installed marketplace contract without overwriting user-owned projec
      action and show the recorded run id;
    - restart required: tell the user to close this session and start a fresh
      one before normal work.
-5. On approval, run `upgrade plan --project-root <git-root>`. Show the exact
-   database transition, component transitions, managed project files, backup
-   policy, and plan id. A plan performs no project or database mutation.
+5. On approval, run `upgrade plan --project-root <git-root>`. If it reports
+   `AGENT_MARKETPLACE_UPGRADE_CHOICE_REQUIRED`, show every exact preview and
+   present its preserve, discard, and abort options through the choice gate.
+   Abort stops without a plan. Otherwise rerun `upgrade plan` with every exact
+   `--choice <id>=<option>` selection. Show the database transition, component
+   transitions, managed project files, backup policy, resolved choices, and
+   plan id. A plan performs no project or database mutation.
 6. Ask one final apply gate. On approval, run `upgrade apply --plan-id
    <plan-id>`. Never recreate, edit, or bypass the plan manually. If the source
    fingerprint changed, discard the plan and return to step 2.
@@ -83,9 +87,12 @@ Upgrade the installed marketplace contract without overwriting user-owned projec
 
 ## Safety Contract
 
-- User code, authored documentation, memory, demos, sketches, secrets,
-  environment files, custom CI, and unmanaged instruction content are outside
-  upgrade ownership and are never overwritten.
+- User code, authored documentation, host user companions, `me.md`,
+  `profile.md`, nested instruction files, demos, sketches, secrets,
+  environment files, and custom CI are outside upgrade ownership and are never
+  overwritten. Legacy unmanaged root instructions move only through an
+  explicit preserve choice or are dropped only through an explicit discard
+  choice.
 - A dirty checkout, active PMO work in any project, freeze manifest, unmanaged
   collision, symbolic-link target, contract drift, database integrity failure,
   stale plan, downgrade, or incomplete prior run blocks mutation.

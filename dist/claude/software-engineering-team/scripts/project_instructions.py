@@ -91,9 +91,19 @@ def rendered_template(plugin_root: Path, host: str, workspace: str) -> str:
 
 
 def state_surfaces(project_root: Path) -> dict[str, str]:
-    path = project_root / ".agentrof" / "agent-marketplace" / "project.json"
+    for path in sorted(project_root.glob("*/config.json")):
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+            contract = data.get("agent_marketplace", {})
+            values = contract.get("managed_surfaces", {}) \
+                if isinstance(contract, dict) else {}
+            if isinstance(values, dict):
+                return {str(key): str(value) for key, value in values.items()}
+        except Exception:
+            continue
+    legacy = project_root / ".agentrof" / "agent-marketplace" / "project.json"
     try:
-        data = json.loads(path.read_text(encoding="utf-8"))
+        data = json.loads(legacy.read_text(encoding="utf-8"))
         values = data.get("managed_surfaces", {})
         return {str(key): str(value) for key, value in values.items()} \
             if isinstance(values, dict) else {}
@@ -371,6 +381,67 @@ def plan_project_files(
     }
 
 
+def plan_portable_project_files(
+    project_root: Path,
+    plugin_root: Path,
+    workspace: str,
+    *,
+    choices: dict[str, str] | None = None,
+    seed_user_files: bool = False,
+) -> dict:
+    """Plan the tracked contract for every supported host.
+
+    A clone must be usable by either host even when setup is invoked from only
+    one of them. Host-local projections remain outside this portable plan.
+    """
+    changes: dict[Path, str | None] = {}
+    requests: dict[str, dict] = {}
+    current: dict[str, str] = {}
+    target: dict[str, str] = {}
+    override_state = "absent"
+    for host in ("claude", "codex"):
+        result = plan_project_files(
+            project_root, plugin_root, host, workspace,
+            choices=choices, seed_user_files=seed_user_files,
+        )
+        for path, content in result["changes"].items():
+            previous = changes.get(path)
+            if path in changes and previous != content:
+                raise ProjectInstructionError(
+                    f"cross-host project content mismatch: {path}"
+                )
+            changes[path] = content
+        for request in result["choice_requests"]:
+            request_id = str(request.get("id", ""))
+            previous = requests.get(request_id)
+            if previous is not None and previous != request:
+                raise ProjectInstructionError(
+                    f"cross-host project choice mismatch: {request_id}"
+                )
+            requests[request_id] = request
+        for source, destination in (
+            (result["current_surfaces"], current),
+            (result["target_surfaces"], target),
+        ):
+            for key, value in source.items():
+                portable = key if key.startswith("shared:") else f"{host}:{key}"
+                previous = destination.get(portable)
+                if previous is not None and previous != value:
+                    raise ProjectInstructionError(
+                        f"cross-host project surface mismatch: {portable}"
+                    )
+                destination[portable] = value
+        if host == "codex":
+            override_state = result["override_state"]
+    return {
+        "changes": changes,
+        "choice_requests": [requests[key] for key in sorted(requests)],
+        "current_surfaces": current,
+        "target_surfaces": target,
+        "override_state": override_state,
+    }
+
+
 def owned_surfaces(
     project_root: Path, team: str, host: str, workspace: str,
 ) -> dict[str, str]:
@@ -401,6 +472,24 @@ def owned_surfaces(
         "project-management-office", "shared"
     ):
         result[f"shared:{workspace}/memory/agent-marketplace.md"] = sha256_text(value)
+    return result
+
+
+def owned_portable_surfaces(
+    project_root: Path, team: str, workspace: str,
+) -> dict[str, str]:
+    result: dict[str, str] = {}
+    for host in ("claude", "codex"):
+        for key, value in owned_surfaces(
+            project_root, team, host, workspace
+        ).items():
+            portable = key if key.startswith("shared:") else f"{host}:{key}"
+            prior = result.get(portable)
+            if prior is not None and prior != value:
+                raise ProjectInstructionError(
+                    f"cross-host project surface mismatch: {portable}"
+                )
+            result[portable] = value
     return result
 
 

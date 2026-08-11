@@ -1,6 +1,6 @@
 ---
 name: solution-design
-description: Interactive solution design. The solution-architect persona runs a multi-turn working session over the end-to-end landscape and records technology, topology and method decisions the whole team consumes; grounded on the analysis space, challenged per round, gated per engagement.
+description: Interactive end-to-end solution design for technologies, platforms, products, topology, methods, integration, orchestration, and sustainability. Use for landscape-level decisions and debates, never per-story implementation design.
 disable-model-invocation: true
 ---
 
@@ -8,4 +8,4 @@ disable-model-invocation: true
 
 # Solution Design
 
-Read `${CLAUDE_PLUGIN_ROOT}/host-contract.md` and `${CLAUDE_PLUGIN_ROOT}/skill-content/solution-design/SKILL.md` completely. Follow the canonical skill as the authoritative workflow and the host contract as its platform adapter.
+Read `${CLAUDE_PLUGIN_ROOT}/host-contract.md` and `${CLAUDE_PLUGIN_ROOT}/skill-content/solution-design/SKILL.md` completely. Follow the canonical skill as the authoritative workflow and the host contract as its platform adapter. Before any workflow step inside a Git repository, run `project environment-status --project-root <git-root> --json` through the PMO launcher. A non-current environment permits only setup, upgrade, or recovery guidance.

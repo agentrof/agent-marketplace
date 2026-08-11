@@ -23,6 +23,9 @@ invisible; every edge follows one grammar or the graph lies.
   an `alias_ownership` error.
 - Embeds (`![[...]]`) are for attachments and deliberate transclusion
   only; a normal citation is a link, not an embed.
+- Coverage and gates count only typed outgoing relations. Free prose links
+  remain graph edges but are not traceability proof. General knowledge links
+  may cycle; lifecycle, inheritance, and dependency relation graphs are DAGs.
 
 ## Anchors
 

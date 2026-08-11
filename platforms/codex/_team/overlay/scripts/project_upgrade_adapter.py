@@ -12,11 +12,11 @@ import project_instructions
 
 
 def result_payload(project: Path, plugin_root: Path, workspace: str, action: str,
-                   choices: dict[str, str]) -> dict:
+                   choices: dict[str, str], scope: str) -> dict:
     team = generate_codex_project.plugin_name(plugin_root)
-    if action == "inspect":
-        surfaces = project_instructions.owned_surfaces(
-            project, team, "codex", workspace
+    if action == "inspect" and scope == "tracked":
+        surfaces = project_instructions.owned_portable_surfaces(
+            project, team, workspace
         )
         return {
             "changes": [],
@@ -25,7 +25,8 @@ def result_payload(project: Path, plugin_root: Path, workspace: str, action: str
             "target_surfaces": surfaces,
         }
     result = generate_codex_project.preview(
-        project, plugin_root, workspace, choices=choices, seed_user_files=False
+        project, plugin_root, workspace, choices=choices,
+        seed_user_files=False, scope=scope,
     )
     payload = {
         "changes": sorted(
@@ -42,9 +43,12 @@ def result_payload(project: Path, plugin_root: Path, workspace: str, action: str
             workspace,
             choices=choices,
             seed_user_files=False,
+            scope=scope,
         )
-        payload["current_surfaces"] = project_instructions.owned_surfaces(
-            project, team, "codex", workspace
+        payload["current_surfaces"] = (
+            project_instructions.owned_portable_surfaces(
+                project, team, workspace
+            ) if scope == "tracked" else result["target_surfaces"]
         )
         payload["target_surfaces"] = payload["current_surfaces"]
     return payload
@@ -56,13 +60,15 @@ def main() -> int:
     parser.add_argument("--project-root", type=Path, required=True)
     parser.add_argument("--workspace", required=True)
     parser.add_argument("--choice", action="append", default=[])
+    parser.add_argument("--scope", choices=("all", "tracked", "local"), default="tracked")
     args = parser.parse_args()
     project = args.project_root.resolve()
     plugin_root = Path(__file__).resolve().parents[1]
     try:
         choices = project_instructions.parse_choices(args.choice)
         result = result_payload(
-            project, plugin_root, args.workspace, args.action, choices
+            project, plugin_root, args.workspace, args.action, choices,
+            args.scope,
         )
     except ValueError as exc:
         raise SystemExit(f"project-upgrade-adapter: {exc}") from exc

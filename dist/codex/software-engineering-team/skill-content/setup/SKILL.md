@@ -1,18 +1,19 @@
 ---
 name: setup
-description: Fresh, idempotent project bootstrap for the software-engineering-team. Creates the workspace and machine-managed contract only when no project key or prior contract exists; keyed projects use Agent Marketplace Upgrade.
+description: Project bootstrap and environment reconciliation for the software-engineering-team. Attaches a clone to the tracked contract and materializes machine-local runtime and host projections without rewriting user content.
 exposure: entry
 ---
 
 # Setup
 
-Stand up a fresh project contract without overwriting user content. This entry
-is not an upgrade path.
+Use one public entry for a fresh repository, a new clone, or an environment
+that no longer matches the tracked project contract.
 
 ## When to Use
 
 - First run after installing the team in a repository.
-- Rerun inside the still-unkeyed bootstrap window to complete missing setup.
+- First run after clone, pull, host change, or Marketplace component update.
+- Recovery from `AGENT_MARKETPLACE_ENVIRONMENT_RECONCILE_REQUIRED`.
 
 ## Procedure
 
@@ -21,89 +22,62 @@ include tradeoffs. Anchor every path at the resolved git root.
 
 1. Resolve PMO and the marketplace dispatcher through the host contract. A
    repository is required; offer initialization when none exists. Register
-   plugin roots and run the idempotent PMO ensure when launchers are missing.
-2. Run `setup_check.py preflight --project-root <root> --workspace <name>
-   --json` before the first write. Fresh setup requires a matching or absent
-   team config, no `project_key`, no project contract and no foreign
-   managed-team trace. A keyed config or old contract routes to Agent
-   Marketplace Upgrade and stops. A foreign `workspace/` gets an owner-chosen
-   alternative name used consistently in paths and templates.
-3. Preview the active host project generator before any instruction write.
-   Present every returned `choice_requests` item through the choice gate and
-   rerun apply with the exact approved `--choice <id>=<option>` values plus
-   `--seed-user-files`. The generator owns the complete host root instruction
-   file and `agent-marketplace.md`; it seeds the matching user companion,
-   `me.md`, and `profile.md` only when missing. User-supplied companions,
-   `me.md`, and `profile.md` are preserved verbatim. Materialize the
-   base vault payload with `vault_check.py materialize-payload --vault
-   <workspace>/docs`; existing `.obsidian` values are never overwritten.
-4. Reconcile `.gitignore` by marker ownership. Preserve every user line and
-   old unmarked ignore. Create or idempotently replace exactly:
-
-   ```text
-   # agent-marketplace:software-engineering-team:gitignore:start
-   .agentrof/agent-marketplace/.runtime/
-   <workspace>/junit-*.xml
-   <workspace>/docs/.obsidian/*
-   !<workspace>/docs/.obsidian/app.json
-   !<workspace>/docs/.obsidian/appearance.json
-   !<workspace>/docs/.obsidian/core-plugins.json
-   !<workspace>/docs/.obsidian/graph.json
-   !<workspace>/docs/.obsidian/types.json
-   !<workspace>/docs/.obsidian/snippets/
-   !<workspace>/docs/.obsidian/snippets/**
-   <workspace>/docs/.obsidian/workspace.json
-   <workspace>/docs/.obsidian/workspace-mobile.json
-   <workspace>/docs/.trash/
-   # agent-marketplace:software-engineering-team:gitignore:end
-   ```
-
-   A missing half-marker or duplicate marker fails closed.
-5. Create only missing top-level structure: apps; environment; demos; sketches;
-   and docs with maps,
-   business-analysis, solution-design, system-architecture, design-system/pages
-   and experience-design. Add `.gitkeep` only to empty tracked directories.
-   Setup never creates `.agentrof/agent-marketplace/.runtime/`; backlog-plan
-   and work-order flows create their own runtime paths lazily. Setup never
-   creates analysis topics, experience programs or releases. The Experience
-   Design map is born with its first program.
-6. Build `<workspace>/config.json` interactively. The first key is
-   `team_id: software-engineering-team`. Detect stack values before asking for
-   gaps. Supported enums remain python-fastapi, react-typescript, sql/nosql and
-   docker-compose. Require test, mutation and environment commands, repo-relative
-   source directories, output_language, terminology_language and scale.
-   Scale is small, medium, large, x-large, xx-large or enterprise.
-7. Ask `project_origin` explicitly as `greenfield` or `existing`; never infer
-   it. Set it only with `project_config.py set-origin --config <config>
-   --origin <choice>`, because direct edits are hook-denied. Configure may
-   change it before program, backlog or delivery state exists. It is immutable
-   afterward. Upgrade writes `unclassified`, which must be classified before
-   delivery.
-8. Present one output-language designation per vault taxonomy type, including
-   experience, program, release, journey, flow-set and screen. Write the
-   approved map only through `vault_check.py reconcile-designations`; direct
-   config edits are hook-denied. Unsupported stacks or colliding designations
-   stop honestly.
+   plugin roots and run PMO `ensure` before reading environment state.
+2. Run `project environment-status --project-root <root> --json`.
+   - `AGENT_MARKETPLACE_CURRENT`: setup is idempotent; report current.
+   - `AGENT_MARKETPLACE_FRESH_SETUP_REQUIRED`: continue with fresh setup.
+   - `AGENT_MARKETPLACE_ENVIRONMENT_RECONCILE_REQUIRED`: update any named
+     older or missing installed component, start a fresh session, then rerun
+     setup. When only attach or projection drift remains, run `project attach
+     --project-root <root> --workspace <workspace> --json`.
+   - `AGENT_MARKETPLACE_RECONCILE_DEFERRED_ACTIVE_WORK`: list every project,
+     type, key, and worktree. Start no new managed work. Close the named task,
+     plan, or Experience run, or checkpoint the named work order through its
+     owning flow, then rerun setup.
+   - `AGENT_MARKETPLACE_PROJECT_UPGRADE_CHOICE_REQUIRED`: present `Upgrade
+     Project (Recommended)` and `Cancel`. Upgrade uses the existing upgrade
+     entry; setup never silently upgrades or downgrades the project.
+   - Unsupported, corrupt, identity-conflicting, or contract-drift state stops
+     fail-closed.
+3. For fresh setup, run `setup_check.py preflight --project-root <root>
+   --workspace <name> --json` before the first write. A foreign workspace gets
+   an owner-chosen alternative lower-kebab name used consistently.
+4. Materialize both portable host instructions, the active machine-local host
+   projection, and memory templates through the host contract with `--scope
+   all`. User-owned
+   companions, `me.md`, and `profile.md` are seeded only when missing.
+5. Reconcile `.gitignore` by marker ownership. Preserve every user line and
+   write the product contract's runtime and host-projection root ignores,
+   substituting `{{project_local_ignores}}` with one anchored ignore per root,
+   followed by the workspace test and vault rules. A missing
+   half-marker or duplicate marker fails closed. Verify each root with
+   `git check-ignore --no-index` and reject any force-added file below it.
+6. Create only missing top-level structure: apps; environment; demos; sketches;
+   and docs with maps, business-analysis, solution-design,
+   system-architecture, design-system/pages, and experience-design. Add
+   `.gitkeep` only to empty tracked directories. Runtime paths are lazy.
+7. Build `<workspace>/config.json` interactively. Detect stack values before
+   asking for gaps. Require commands, repo-relative source directories,
+   output_language, terminology_language, and scale. Ask `project_origin`
+   explicitly and write it only through `project_config.py set-origin`.
+8. Materialize the base vault payload without overwriting existing Obsidian
+   values. Reconcile owner-approved output-language designations through
+   `vault_check.py reconcile-designations`.
 9. Register PMO with `project register --key <key> --name <name> --team
    software-engineering-team --stamp-config <config> --project-root <root>
-   --workspace <name>`. Registration stamps `project_key`, creates the project
-   UUID and project contract version 4, records the vault policy 5 active
-   state, and records managed-surface hashes.
-10. Install the repository-portable gate with `vault_gate.py install
-    --project-root <root>`. The resulting tracked executable is
-    `.agentrof/agent-marketplace/checks/vault-gate.pyz`; both hosts and CI run
-    the exact same gate from that path.
+   --workspace <name>`. Registration preserves top-level `project_key` and
+   atomically writes nested project contract v5 with its hash.
+10. Install the tracked portable gate with `vault_gate.py install
+    --project-root <root>`. The output is
+    `.github/agentrof/vault-gate.pyz`.
 11. Materialize CI through `references/ci-bootstrap.md`, replacing
-    `{{test_command}}`, `{{audit_command}}` and `{{env_command}}` before
-    writing.
-12. Close in order: `project_config.py check`; PMO registration; contract
-    version; host instructions and generated project agents; gitignore markers;
-    `vault_check.py render-navigation`; `vault_check.py render-relations`;
-    the portable `vault-gate.pyz check --project-root <root> --json`;
-    `preparation_check.py status --project-root <root>
-    --json`; `setup_check.py check`; then rerun the setup preview and require an
-    empty diff. Pre-existing vault degradation routes to organize-docs; setup
-    authored findings are setup bugs.
+    `{{test_command}}`, `{{audit_command}}`, and `{{env_command}}`, then close
+    in order: config check; PMO identity; contract hash; host instructions; local
+    projection; effective ignore and force-add checks; vault renders; portable
+    gate; preparation status; setup check; and an empty setup preview.
+12. Run `project attach --project-root <root> --workspace <name> --json` and
+    require `AGENT_MARKETPLACE_CURRENT`. Start a fresh session so local agents,
+    hooks, instructions, and `contract_sha256_at_start` load together.
 13. For greenfield print `business-analysis -> solution-design -> design-system
     -> experience-design -> backlog-plan`. For existing projects print the
     scoped `deliver` route.

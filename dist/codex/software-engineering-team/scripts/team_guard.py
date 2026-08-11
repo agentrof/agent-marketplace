@@ -32,6 +32,9 @@ UPGRADE_STATUSES = {
     "AGENT_MARKETPLACE_UPGRADE_COMPLETE_RESTART_REQUIRED",
     "AGENT_MARKETPLACE_UPGRADING",
     "AGENT_MARKETPLACE_PROJECT_UPGRADE_PR_PENDING",
+    "AGENT_MARKETPLACE_ENVIRONMENT_RECONCILE_REQUIRED",
+    "AGENT_MARKETPLACE_RECONCILE_DEFERRED_ACTIVE_WORK",
+    "AGENT_MARKETPLACE_PROJECT_UPGRADE_CHOICE_REQUIRED",
 }
 UPGRADE_BRANCH_RE = re.compile(
     r"^agent-marketplace/upgrade-[A-Za-z0-9][A-Za-z0-9._-]*$"
@@ -82,6 +85,17 @@ def session_ready(session_id: str) -> bool:
         return False
 
 
+def session_contract(session_id: str) -> str:
+    if not session_id:
+        return ""
+    try:
+        state = json.loads(session_state_path(session_id).read_text(encoding="utf-8"))
+        return str(state.get("contract_sha256_at_start", "")) \
+            if state.get("session_id") == session_id else ""
+    except Exception:
+        return ""
+
+
 def project_root(cwd: str) -> Path | None:
     try:
         current = Path(cwd).resolve()
@@ -97,14 +111,7 @@ def conflicting_team(cwd: str, current_team: str) -> str:
     root = project_root(cwd)
     if root is None:
         return ""
-    state_path = root / ".agentrof" / "agent-marketplace" / "project.json"
     workspace = "workspace"
-    try:
-        workspace = str(json.loads(
-            state_path.read_text(encoding="utf-8")
-        ).get("workspace") or workspace)
-    except Exception:
-        pass
     config = root / workspace / "config.json"
     if not config.is_file():
         candidates = sorted(root.glob("*/config.json"))
@@ -112,7 +119,9 @@ def conflicting_team(cwd: str, current_team: str) -> str:
             config = candidates[0]
     try:
         data = json.loads(config.read_text(encoding="utf-8"))
-        owner = data.get("team_id") or data.get("managed_by", "")
+        contract = data.get("agent_marketplace", {})
+        owner = contract.get("team_id", "") if isinstance(contract, dict) else ""
+        owner = owner or data.get("team_id") or data.get("managed_by", "")
         suffix = " plugin; change only through the configure entry"
         if isinstance(owner, str) and owner.endswith(suffix):
             owner = owner[:-len(suffix)]
@@ -173,6 +182,26 @@ def upgrade_status(cwd: str) -> dict:
     return value
 
 
+def environment_status(cwd: str) -> dict:
+    launcher = data_dir() / "bin" / "pmo_cli.py"
+    root = project_root(cwd)
+    if not launcher.is_file() or root is None:
+        return {}
+    completed = subprocess.run(
+        [sys.executable, str(launcher), "project", "environment-status",
+         "--project-root", str(root), "--json"],
+        capture_output=True, text=True, check=False, timeout=60,
+    )
+    try:
+        value = json.loads(completed.stdout)
+    except (json.JSONDecodeError, TypeError):
+        value = None
+    return value if isinstance(value, dict) else {
+        "status": "AGENT_MARKETPLACE_UPGRADE_REQUIRED_BLOCKED",
+        "blockers": ["ENVIRONMENT_STATUS_UNAVAILABLE"],
+    }
+
+
 def refresh_session_readiness(session_id: str, status: str) -> bool:
     if not session_id or not status:
         return False
@@ -224,6 +253,58 @@ def is_upgrade_command(payload: dict) -> bool:
         and argv[offset + 1] in {
             "status", "prepare-branch", "plan", "apply", "recover",
         }
+
+
+def is_environment_command(payload: dict) -> bool:
+    if str(payload.get("tool_name", "")) not in {"Bash", "exec_command", "shell"}:
+        return False
+    tool_input = payload.get("tool_input", {})
+    command = tool_input.get("command", tool_input.get("cmd", "")) \
+        if isinstance(tool_input, dict) else ""
+    try:
+        argv = shlex.split(str(command), posix=True)
+    except ValueError:
+        return False
+    launcher = (data_dir() / "bin" / "pmo_cli.py").resolve()
+    offset = 0
+    try:
+        if argv and Path(argv[0]).expanduser().resolve(strict=False) == launcher:
+            offset = 1
+        elif len(argv) > 1 and re.fullmatch(
+            r"python(?:3(?:\.\d+)?)?", Path(argv[0]).name
+        ) and Path(argv[1]).expanduser().resolve(strict=False) == launcher:
+            offset = 2
+    except OSError:
+        return False
+    return argv[offset:offset + 2] in (
+        ["project", "environment-status"], ["project", "attach"],
+    )
+
+
+def active_work_git_change(payload: dict, cwd: str, environment: dict) -> bool:
+    if str(payload.get("tool_name", "")) not in {"Bash", "exec_command", "shell"}:
+        return False
+    root = project_root(cwd)
+    if root is None:
+        return False
+    local_active = any(
+        value.get("type") == "work_order"
+        and Path(str(value.get("worktree", ""))).resolve() == root
+        for value in environment.get("active_work", [])
+        if isinstance(value, dict) and value.get("worktree")
+    )
+    if not local_active:
+        return False
+    tool_input = payload.get("tool_input", {})
+    command = tool_input.get("command", tool_input.get("cmd", "")) \
+        if isinstance(tool_input, dict) else ""
+    try:
+        argv = shlex.split(str(command), posix=True)
+    except ValueError:
+        return False
+    return len(argv) >= 2 and argv[0] == "git" and argv[1] in {
+        "pull", "merge", "rebase",
+    }
 
 
 def is_upgrade_target_command(payload: dict, cwd: str, status: dict) -> bool:
@@ -362,22 +443,30 @@ def is_read_only_diagnostic(payload: dict) -> bool:
 
 def managed_project_paths(root: Path) -> set[Path]:
     paths: set[Path] = set()
-    state_path = root / ".agentrof" / "agent-marketplace" / "project.json"
-    try:
-        state = json.loads(state_path.read_text(encoding="utf-8"))
-        surfaces = state.get("managed_surfaces", {})
-        if isinstance(surfaces, dict):
+    for config_path in sorted(root.glob("*/config.json")):
+        try:
+            config = json.loads(config_path.read_text(encoding="utf-8"))
+            state = config.get("agent_marketplace", {})
+            surfaces = state.get("managed_surfaces", {}) \
+                if isinstance(state, dict) else {}
+            if not isinstance(surfaces, dict):
+                continue
             for key in surfaces:
                 relative = str(key)
-                if ":" in relative and not relative.startswith("shared:"):
-                    relative = relative.split(":", 1)[1]
-                elif relative.startswith("shared:"):
+                if relative.startswith("shared:"):
                     relative = relative[len("shared:"):]
+                elif ":" in relative and (
+                    "#" not in relative
+                    or relative.index(":") < relative.index("#")
+                ):
+                    relative = relative.split(":", 1)[1]
                 relative = relative.split("#", 1)[0]
                 if relative and not Path(relative).is_absolute():
                     paths.add((root / relative).resolve(strict=False))
-    except Exception:
-        pass
+            paths.add(config_path.resolve(strict=False))
+            break
+        except Exception:
+            continue
     for relative in ("AGENTS.md", "CLAUDE.md"):
         path = root / relative
         try:
@@ -461,6 +550,8 @@ def preflight(payload: dict) -> int:
         return 0
     if is_upgrade_command(payload):
         return 0
+    if is_environment_command(payload):
+        return 0
     if str(payload.get("permission_mode", "")) == "plan":
         return deny(
             "state-changing team workflows cannot run in Plan mode. Switch to"
@@ -483,6 +574,23 @@ def preflight(payload: dict) -> int:
             " delivery team may own a project. No files or project state were changed."
         )
     session_id = str(payload.get("session_id", ""))
+    current_environment = environment_status(str(payload.get("cwd", "")))
+    if active_work_git_change(
+        payload, str(payload.get("cwd", "")), current_environment
+    ):
+        return deny(
+            "active worktree contract protection rejects git pull, merge, or"
+            " rebase. Finish to a reconcile checkpoint before moving the contract."
+        )
+    environment_code = str(current_environment.get("status", ""))
+    started_contract = session_contract(session_id)
+    current_contract = str(current_environment.get("contract_sha256", ""))
+    if started_contract and current_contract and started_contract != current_contract:
+        return deny(
+            "AGENT_MARKETPLACE_ENVIRONMENT_RECONCILE_REQUIRED: the tracked project"
+            " contract changed during this session. Start a fresh session, then run"
+            " the setup entry. No files or project state were changed."
+        )
     current_upgrade = upgrade_status(str(payload.get("cwd", "")))
     upgrade_code = str(current_upgrade.get("status", ""))
     if upgrade_code in UPGRADE_STATUSES:
@@ -501,6 +609,15 @@ def preflight(payload: dict) -> int:
             f"{upgrade_code}: normal marketplace mutations are locked until"
             " Agent Marketplace Upgrade completes. Invoke the PMO upgrade entry;"
             f" current blockers: {detail}. No files or project state were changed."
+        )
+    if environment_code in UPGRADE_STATUSES:
+        blockers = current_environment.get("blockers", [])
+        reasons = current_environment.get("reasons", [])
+        detail = "; ".join(str(value) for value in [*blockers, *reasons]) or "none"
+        return deny(
+            f"{environment_code}: normal marketplace mutations are locked; run"
+            f" the setup entry. Current detail: {detail}. No files or project"
+            " state were changed."
         )
     if not session_ready(session_id):
         root = plugin_root()
@@ -525,6 +642,16 @@ def preflight(payload: dict) -> int:
 def postflight(payload: dict) -> int:
     if str(payload.get("tool_name", "")) not in MUTATION_TOOLS:
         return 0
+    environment = environment_status(str(payload.get("cwd", "")))
+    environment_code = str(environment.get("status", ""))
+    started_contract = session_contract(str(payload.get("session_id", "")))
+    current_contract = str(environment.get("contract_sha256", ""))
+    if started_contract and current_contract and started_contract != current_contract:
+        return deny(
+            "AGENT_MARKETPLACE_ENVIRONMENT_RECONCILE_REQUIRED: the tracked project"
+            " contract changed during this session. Start a fresh session and run"
+            " setup before any further marketplace mutation."
+        )
     status = upgrade_status(str(payload.get("cwd", "")))
     code = str(status.get("status", ""))
     reasons = [str(value) for value in status.get("reasons", [])]
@@ -555,6 +682,8 @@ def main() -> int:
         register(team)
         current_upgrade = upgrade_status(str(payload.get("cwd", "")))
         status = str(current_upgrade.get("status", ""))
+        current_environment = environment_status(str(payload.get("cwd", "")))
+        environment_code = str(current_environment.get("status", ""))
         context = f"AGENT_MARKETPLACE_HOOKS_ACTIVE: {team}"
         if refresh_session_readiness(str(payload.get("session_id", "")), status):
             context += "\nAGENT_MARKETPLACE_PMO_READY: project-management-office"
@@ -563,6 +692,11 @@ def main() -> int:
                 f"\n{status}: normal marketplace work is locked. Start the"
                 " Agent Marketplace Upgrade entry in this session. It will show"
                 " readiness, blockers, and recovery guidance before any mutation."
+            )
+        if environment_code in UPGRADE_STATUSES:
+            context += (
+                f"\n{environment_code}: run the setup entry before normal"
+                " marketplace work."
             )
         print(json.dumps({
             "hookSpecificOutput": {

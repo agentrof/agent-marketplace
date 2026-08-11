@@ -4,7 +4,9 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
+import subprocess
 from pathlib import Path
 
 START = "# agent-marketplace:software-engineering-team:gitignore:start"
@@ -19,8 +21,26 @@ def read(path: Path):
         return None
 
 
+def local_roots() -> tuple[str, ...]:
+    for path in (
+        Path(__file__).resolve().parents[1] / "product.json",
+        Path(__file__).resolve().parents[3] / "product.json",
+    ):
+        value = read(path)
+        environment = value.get("project_environment", {}) \
+            if isinstance(value, dict) else {}
+        projections = environment.get("projection_roots", {}) \
+            if isinstance(environment, dict) else {}
+        roots = [str(environment.get("runtime_root", ""))]
+        if isinstance(projections, dict):
+            roots.extend(str(item) for item in projections.values())
+        if roots and all(item.startswith(".") for item in roots):
+            return tuple(dict.fromkeys(roots))
+    raise ValueError("project-local root policy is missing")
+
+
 def managed_block(workspace: str) -> str:
-    return "\n".join((START, ".agentrof/agent-marketplace/.runtime/",
+    return "\n".join((START, *(f"/{value}/" for value in local_roots()),
                       f"{workspace}/junit-*.xml",
                       f"{workspace}/docs/.obsidian/*",
                       f"!{workspace}/docs/.obsidian/app.json",
@@ -40,11 +60,21 @@ def preflight(root: Path, workspace: str) -> list[str]:
     state = read(root / ".agentrof" / "agent-marketplace" / "project.json")
     findings = []
     if isinstance(config, dict):
-        owner = config.get("team_id") or str(config.get("managed_by", "")).split(" plugin", 1)[0]
+        contract = config.get("agent_marketplace", {})
+        owner = contract.get("team_id", "") if isinstance(contract, dict) else ""
+        owner = owner or config.get("team_id") \
+            or str(config.get("managed_by", "")).split(" plugin", 1)[0]
         if owner and owner != TEAM:
             findings.append(f"foreign managed-team trace: {owner}")
-        if config.get("project_key"):
+        if config.get("project_key") and (
+            not isinstance(contract, dict)
+            or contract.get("contract_version") != 5
+        ):
             findings.append("keyed config must use Agent Marketplace Upgrade")
+        elif isinstance(contract, dict) and contract.get("contract_version") == 5:
+            findings.append(
+                "existing project contract must use environment reconciliation"
+            )
     if state is not None:
         findings.append("existing project contract must use Agent Marketplace Upgrade")
     return findings
@@ -57,15 +87,18 @@ def closing(root: Path, workspace: str) -> list[str]:
     if not isinstance(config, dict):
         findings.append("workspace config is missing or invalid")
         config = {}
-    if config.get("team_id") != TEAM:
+    state = config.get("agent_marketplace", {}) if isinstance(config, dict) else {}
+    owner = state.get("team_id", "") if isinstance(state, dict) else ""
+    if owner != TEAM:
         findings.append("config team_id mismatch")
     if config.get("project_origin") not in {"greenfield", "existing"}:
         findings.append("project_origin is not classified")
     if not config.get("project_key"):
         findings.append("PMO registration has not stamped project_key")
-    state = read(root / ".agentrof" / "agent-marketplace" / "project.json")
-    if not isinstance(state, dict) or state.get("contract_version") != 4:
-        findings.append("project contract version is not 4")
+    if not isinstance(state, dict) or state.get("contract_version") != 5:
+        findings.append("project contract version is not 5")
+    elif not state.get("contract_sha256"):
+        findings.append("project contract hash is missing")
     required = (
         "apps", "environment", "demos", "sketches",
         "docs/business-analysis", "docs/solution-design",
@@ -84,6 +117,24 @@ def closing(root: Path, workspace: str) -> list[str]:
         findings.append("managed .gitignore marker is missing or duplicated")
     elif managed_block(workspace) not in text:
         findings.append("managed .gitignore block is stale")
+    for relative in (f"{value}/probe" for value in local_roots()):
+        ignored = subprocess.run(
+            ["git", "check-ignore", "--no-index", "-q", relative],
+            cwd=root, check=False,
+        )
+        if ignored.returncode != 0:
+            findings.append(f"local projection path is not ignored: {relative}")
+    tracked_local = subprocess.run(
+        ["git", "ls-files", "--", *local_roots()],
+        cwd=root, capture_output=True, text=True, check=False,
+    )
+    if tracked_local.returncode != 0:
+        findings.append("tracked local projection check failed")
+    elif tracked_local.stdout.strip():
+        findings.append(
+            "local runtime or projection files are force-added: "
+            + ", ".join(tracked_local.stdout.splitlines())
+        )
     for relative in (
         "docs/.obsidian/app.json", "docs/.obsidian/appearance.json",
         "docs/.obsidian/core-plugins.json", "docs/.obsidian/graph.json",
@@ -91,13 +142,23 @@ def closing(root: Path, workspace: str) -> list[str]:
     ):
         if not (work / relative).is_file():
             findings.append(f"missing managed vault payload: {workspace}/{relative}")
-    portable_gate = (root / ".agentrof" / "agent-marketplace" / "checks"
-                     / "vault-gate.pyz")
+    portable_gate = root / ".github" / "agentrof" / "vault-gate.pyz"
     if not portable_gate.is_file():
         findings.append("repository-portable vault gate is missing")
     if isinstance(state, dict):
-        if not state.get("hosts"):
-            findings.append("host project contract is missing")
+        payload = dict(state)
+        expected_hash = str(payload.pop("contract_sha256", ""))
+        actual_hash = hashlib.sha256(json.dumps(
+            payload, sort_keys=True, separators=(",", ":")
+        ).encode()).hexdigest()
+        if expected_hash != actual_hash:
+            findings.append("project contract hash mismatch")
+        components = state.get("components", {})
+        if not isinstance(components, dict) or not all(
+            isinstance(value, dict) and value.get("version") and value.get("build_id")
+            for value in components.values()
+        ):
+            findings.append("component version and build baselines are missing")
         surfaces = state.get("managed_surfaces", {})
         if not isinstance(surfaces, dict) or not any(":" in key for key in surfaces):
             findings.append("host-managed project surfaces are missing")

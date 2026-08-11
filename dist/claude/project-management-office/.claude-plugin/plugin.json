@@ -7,5 +7,12 @@
     "url": "https://github.com/agentrof"
   },
   "license": "MIT",
-  "skills": "./skills/"
+  "skills": "./skills/",
+  "agent_marketplace": {
+    "build_id": "snapshot.69060c59541739c8231b1e81f007194fd953e82bff301ede010d7979fd8425c6",
+    "marketplace_release": "0.1.0",
+    "source_channel": "snapshot",
+    "source_ref": "snapshot.69060c59541739c8231b1e81f007194fd953e82bff301ede010d7979fd8425c6",
+    "source_commit": ""
+  }
 }

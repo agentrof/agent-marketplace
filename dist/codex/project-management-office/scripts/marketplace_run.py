@@ -106,17 +106,22 @@ def fail(message: str) -> int:
     return 1
 
 
-def package_manifest(root: Path) -> tuple[str, Path, str] | None:
+def package_manifest(root: Path) -> tuple[str, Path, str, dict] | None:
     candidates = []
     for manifest in sorted(root.glob(".*-plugin/plugin.json")):
         name = manifest.parent.name
         if not (name.startswith(".") and name.endswith("-plugin")):
             continue
         try:
-            version = json.loads(manifest.read_text(encoding="utf-8")).get("version", "")
+            data = json.loads(manifest.read_text(encoding="utf-8"))
+            version = data.get("version", "")
+            snapshot = data.get("agent_marketplace", {})
         except Exception:
             continue
-        candidates.append((name[1:-7], manifest, str(version)))
+        candidates.append((
+            name[1:-7], manifest, str(version),
+            snapshot if isinstance(snapshot, dict) else {},
+        ))
     return candidates[0] if len(candidates) == 1 else None
 
 
@@ -152,7 +157,12 @@ def resolve_root(plugin: str, host: str = "", relpath: str = "") -> Path | None:
         return None
     manifest_info = package_manifest(root)
     on_disk = manifest_info[2] if manifest_info else ""
-    if on_disk and on_disk != entry.get("version", ""):
+    on_disk_build = str(manifest_info[3].get("build_id", "")) \
+        if manifest_info else ""
+    if on_disk and (
+        on_disk != entry.get("version", "")
+        or on_disk_build != entry.get("build_id", "")
+    ):
         try:
             def refresh(current):
                 latest = (current.get("plugins") or {}).get(plugin)
@@ -163,6 +173,7 @@ def resolve_root(plugin: str, host: str = "", relpath: str = "") -> Path | None:
                 if not isinstance(selected, dict):
                     return
                 selected["version"] = on_disk
+                selected["build_id"] = on_disk_build
                 selected["registered_at"] = datetime.now(timezone.utc).isoformat(timespec="seconds")
             update_registry(refresh)
         except Exception:
@@ -219,7 +230,7 @@ def cmd_register(args) -> int:
         manifest = package_manifest(root)
         if manifest is None:
             raise ValueError(f"root has no unambiguous host manifest: {root}")
-        host, _manifest_path, version = manifest
+        host, _manifest_path, version, snapshot = manifest
         entry = plugins.get(args.plugin, {})
         if not isinstance(entry, dict):
             entry = {}
@@ -229,15 +240,17 @@ def cmd_register(args) -> int:
         v1_root = Path(str(entry.get("root", "")))
         v1_manifest = package_manifest(v1_root) if v1_root.is_dir() else None
         if v1_manifest is not None:
-            v1_host, _v1_path, v1_version = v1_manifest
+            v1_host, _v1_path, v1_version, v1_snapshot = v1_manifest
             hosts.setdefault(v1_host, {
                 "root": str(v1_root.resolve()),
                 "version": v1_version,
+                "build_id": str(v1_snapshot.get("build_id", "")),
                 "registered_at": str(entry.get("registered_at", "")),
             })
         hosts[host] = {
             "root": str(root),
             "version": version,
+            "build_id": str(snapshot.get("build_id", "")),
             "registered_at": datetime.now(timezone.utc).isoformat(
                 timespec="seconds"),
         }

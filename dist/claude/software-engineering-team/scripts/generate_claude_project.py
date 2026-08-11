@@ -22,11 +22,20 @@ def preview(
     *,
     choices: dict[str, str] | None = None,
     seed_user_files: bool = False,
+    scope: str = "all",
 ) -> dict:
-    return project_instructions.plan_project_files(
+    if scope not in {"all", "tracked", "local"}:
+        raise project_instructions.ProjectInstructionError(
+            f"unsupported project generation scope: {scope}"
+        )
+    if scope == "local":
+        return {
+            "changes": {}, "choice_requests": [],
+            "current_surfaces": {}, "target_surfaces": {},
+        }
+    return project_instructions.plan_portable_project_files(
         project_root,
         plugin_root,
-        "claude",
         workspace,
         choices=choices,
         seed_user_files=seed_user_files,
@@ -40,13 +49,14 @@ def materialize(
     *,
     choices: dict[str, str] | None = None,
     seed_user_files: bool = True,
+    scope: str = "all",
 ) -> list[Path]:
     result = preview(
         project_root,
         plugin_root,
         workspace,
         choices=choices,
-        seed_user_files=seed_user_files,
+        seed_user_files=seed_user_files, scope=scope,
     )
     if result["choice_requests"]:
         raise project_instructions.ProjectInstructionError(
@@ -63,6 +73,7 @@ def main() -> int:
     parser.add_argument("--workspace", required=True)
     parser.add_argument("--choice", action="append", default=[])
     parser.add_argument("--seed-user-files", action="store_true")
+    parser.add_argument("--scope", choices=("all", "tracked", "local"), default="all")
     args = parser.parse_args()
     project = args.project_root.resolve()
     plugin_root = Path(__file__).resolve().parents[1]
@@ -70,8 +81,8 @@ def main() -> int:
         choices = project_instructions.parse_choices(args.choice)
         if args.action == "inspect":
             team = project_instructions.plugin_name(plugin_root)
-            surfaces = project_instructions.owned_surfaces(
-                project, team, "claude", args.workspace
+            surfaces = project_instructions.owned_portable_surfaces(
+                project, team, args.workspace
             )
             result = {
                 "changes": [],
@@ -87,6 +98,7 @@ def main() -> int:
                 args.workspace,
                 choices=choices,
                 seed_user_files=args.seed_user_files,
+                scope=args.scope,
             )
             written = []
             if args.action == "apply" and not result["choice_requests"]:
@@ -96,6 +108,7 @@ def main() -> int:
                     args.workspace,
                     choices=choices,
                     seed_user_files=args.seed_user_files,
+                    scope=args.scope,
                 )
     except ValueError as exc:
         raise SystemExit(f"claude-project: {exc}") from exc

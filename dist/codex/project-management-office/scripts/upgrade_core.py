@@ -28,10 +28,11 @@ from pathlib import Path
 
 
 PROJECT_STATE_SCHEMA = 1
-PROJECT_CONTRACT_VERSION = 4
+PROJECT_CONTRACT_VERSION = 5
 REGISTRY_SCHEMA = 2
 WRITER_EPOCH = 1
-STATE_RELATIVE = Path(".agentrof") / "agent-marketplace" / "project.json"
+LEGACY_STATE_RELATIVE = Path(".agentrof") / "agent-marketplace" / "project.json"
+STATE_RELATIVE = LEGACY_STATE_RELATIVE
 RUNTIME_RELATIVE = (Path(".agentrof") / "agent-marketplace" / ".runtime")
 MAINTENANCE_NAME = "maintenance.json"
 UPGRADES_DIR = "upgrades"
@@ -50,6 +51,9 @@ STATUS_UPGRADING = "AGENT_MARKETPLACE_UPGRADING"
 STATUS_RECOVERY = "AGENT_MARKETPLACE_UPGRADE_RECOVERY_REQUIRED"
 STATUS_RESTART = "AGENT_MARKETPLACE_UPGRADE_COMPLETE_RESTART_REQUIRED"
 STATUS_PROJECT_PR = "AGENT_MARKETPLACE_PROJECT_UPGRADE_PR_PENDING"
+STATUS_RECONCILE = "AGENT_MARKETPLACE_ENVIRONMENT_RECONCILE_REQUIRED"
+STATUS_RECONCILE_DEFERRED = "AGENT_MARKETPLACE_RECONCILE_DEFERRED_ACTIVE_WORK"
+STATUS_PROJECT_CHOICE = "AGENT_MARKETPLACE_PROJECT_UPGRADE_CHOICE_REQUIRED"
 UPGRADE_BRANCH_RE = re.compile(
     r"^agent-marketplace/upgrade-[A-Za-z0-9][A-Za-z0-9._-]*$"
 )
@@ -59,6 +63,7 @@ IN_USE_MARKER_RE = re.compile(
 KNOWN_RUNTIME_CONTRACTS = {"in_use_pid_marker_v1"}
 WORKSPACE_RE = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
 UPGRADE_CHOICES = {"preserve", "discard", "abort"}
+CONTRACT_KEY = "agent_marketplace"
 
 
 class UpgradeError(Exception):
@@ -87,7 +92,9 @@ def normalize_upgrade_choices(values: dict[str, str] | None) -> dict[str, str]:
 
 
 def surface_namespace(host: str, key: str) -> str:
-    return key if key.startswith("shared:") else f"{host}:{key}"
+    prefix = key.partition(":")[0]
+    portable = {"shared", "local", *project_projection_hosts()}
+    return key if ":" in key and prefix in portable else f"{host}:{key}"
 
 
 def recoverable_instruction_surface(key: str) -> bool:
@@ -156,6 +163,89 @@ def load_json(path: Path, default=None):
         raise UpgradeError(f"unreadable JSON file: {path}: {exc}") from exc
 
 
+def project_local_roots() -> tuple[str, ...]:
+    candidates = (
+        Path(__file__).resolve().parents[1] / "product.json",
+        Path(__file__).resolve().parents[3] / "product.json",
+    )
+    for path in candidates:
+        value = load_json(path, {})
+        environment = value.get("project_environment", {}) \
+            if isinstance(value, dict) else {}
+        projections = environment.get("projection_roots", {}) \
+            if isinstance(environment, dict) else {}
+        roots = [str(environment.get("runtime_root", ""))]
+        if isinstance(projections, dict):
+            roots.extend(str(item) for item in projections.values())
+        if roots and all(re.fullmatch(r"\.[a-z0-9-]+", item) for item in roots):
+            return tuple(dict.fromkeys(roots))
+    raise UpgradeError("project-local root policy is missing or invalid")
+
+
+def project_projection_hosts() -> tuple[str, ...]:
+    candidates = (
+        Path(__file__).resolve().parents[1] / "product.json",
+        Path(__file__).resolve().parents[3] / "product.json",
+    )
+    for path in candidates:
+        value = load_json(path, {})
+        environment = value.get("project_environment", {}) \
+            if isinstance(value, dict) else {}
+        projections = environment.get("projection_roots", {}) \
+            if isinstance(environment, dict) else {}
+        if isinstance(projections, dict) and projections:
+            hosts = tuple(sorted(str(item) for item in projections.keys()))
+            if all(re.fullmatch(r"[a-z0-9-]+", item) for item in hosts):
+                return hosts
+    raise UpgradeError("project-local host policy is missing or invalid")
+
+
+def contract_sha256(contract: dict) -> str:
+    payload = dict(contract)
+    payload.pop("contract_sha256", None)
+    return sha256_bytes(canonical_json(payload).encode())
+
+
+def contract_from_config(config: dict, *, verify: bool = True) -> dict | None:
+    contract = config.get(CONTRACT_KEY)
+    if contract is None:
+        return None
+    if not isinstance(contract, dict):
+        raise UpgradeError("agent_marketplace project contract must be an object")
+    version = contract.get("contract_version")
+    if version != PROJECT_CONTRACT_VERSION:
+        raise UpgradeError(
+            f"unsupported project contract version: {version!r}"
+        )
+    if verify:
+        expected = str(contract.get("contract_sha256", ""))
+        actual = contract_sha256(contract)
+        if not expected or expected != actual:
+            raise UpgradeError("project contract hash mismatch")
+    return contract
+
+
+def write_project_contract(config_path: Path, config: dict, contract: dict) -> dict:
+    candidate = dict(config)
+    normalized = dict(contract)
+    normalized["contract_version"] = PROJECT_CONTRACT_VERSION
+    normalized["contract_sha256"] = contract_sha256(normalized)
+    candidate[CONTRACT_KEY] = normalized
+    candidate.pop("team_id", None)
+    candidate.pop("managed_by", None)
+    atomic_json(config_path, candidate, 0o644)
+    return normalized
+
+
+def project_contract(root: Path, config_path: Path | None) -> dict | None:
+    if config_path is not None and config_path.is_file():
+        config = load_json(config_path, {})
+        if isinstance(config, dict) and CONTRACT_KEY in config:
+            return contract_from_config(config)
+    legacy = load_json(root / LEGACY_STATE_RELATIVE, None)
+    return legacy if isinstance(legacy, dict) else None
+
+
 def guidance_for(status_code: str) -> dict:
     catalog = load_json(Path(__file__).with_name("upgrade_guidance.json"), {})
     statuses = catalog.get("statuses", []) if isinstance(catalog, dict) else []
@@ -213,6 +303,110 @@ def run_git_optional(root: Path, *args: str) -> str:
         check=False,
     )
     return completed.stdout if completed.returncode == 0 else ""
+
+
+def tracked_local_projection_migration(
+    root: Path, workspace: str, team_id: str, choices: dict[str, str],
+) -> tuple[list[dict], list[dict]]:
+    local_roots = project_local_roots()
+    raw = subprocess.run(
+        ["git", "ls-files", "-z", "--", *local_roots],
+        cwd=root, capture_output=True, check=False,
+    )
+    if raw.returncode != 0:
+        raise UpgradeError("could not inspect tracked local projection files")
+    paths = [
+        value.decode("utf-8", errors="surrogateescape")
+        for value in raw.stdout.split(b"\0") if value
+    ]
+    actions: list[dict] = []
+    foreign: list[str] = []
+    owner = f"Generated by Agent Marketplace {team_id}"
+    runtime_root = local_roots[0] + "/agent-marketplace/"
+    for relative in paths:
+        path = root / relative
+        if path.is_symlink():
+            raise UpgradeError(f"tracked local projection is a symbolic link: {relative}")
+        owned = relative.startswith(runtime_root)
+        if not owned and path.is_file():
+            first = path.read_text(
+                encoding="utf-8", errors="replace"
+            ).splitlines()[:1]
+            owned = bool(first and owner in first[0])
+        if not owned:
+            foreign.append(relative)
+        actions.append({"path": relative, "owned": owned})
+    if not foreign:
+        return actions, []
+    request_id = "local-projection.foreign"
+    selected = choices.get(request_id, "")
+    if not selected:
+        return [], [{
+            "id": request_id,
+            "surface": "project-local runtime and host projections",
+            "reason": "foreign_tracked_content_inside_local_projection",
+            "files": foreign,
+            "options": ["preserve", "discard", "abort"],
+        }]
+    if selected == "abort":
+        raise UpgradeError("owner aborted local projection migration")
+    for action in actions:
+        if action["path"] not in foreign:
+            continue
+        action["choice"] = selected
+        if selected == "preserve":
+            action["preserve_target"] = (
+                f"{workspace}/environment/agent-marketplace-local-migration/"
+                + action["path"]
+            )
+    return actions, []
+
+
+def apply_local_projection_migration(root: Path, actions: list[dict]) -> list[dict]:
+    snapshots: list[dict] = []
+    for action in actions:
+        relative = str(action["path"])
+        path = root / relative
+        stage = run_git(root, "ls-files", "--stage", "--", relative).strip()
+        snapshots.append({"path": relative, "index": stage})
+        target = str(action.get("preserve_target", ""))
+        if target:
+            destination = root / target
+            safe_relative(root, destination)
+            if destination.exists() or destination.is_symlink():
+                raise UpgradeError(
+                    f"local projection preservation target already exists: {target}"
+                )
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(path, destination)
+        run_git(root, "rm", "--cached", "--ignore-unmatch", "--", relative)
+        if action.get("choice") == "discard":
+            path.unlink(missing_ok=True)
+    return snapshots
+
+
+def rollback_local_projection_index(root: Path, snapshots: list[dict]) -> None:
+    for snapshot in snapshots:
+        line = str(snapshot.get("index", ""))
+        if not line:
+            continue
+        completed = subprocess.run(
+            ["git", "update-index", "--index-info"], cwd=root,
+            input=line + "\n", text=True, capture_output=True, check=False,
+        )
+        if completed.returncode != 0:
+            raise UpgradeError(
+                f"could not restore index entry for {snapshot.get('path', '')}"
+            )
+
+
+def snapshot_local_projection_index(root: Path, actions: list[dict]) -> list[dict]:
+    return [{
+        "path": str(action["path"]),
+        "index": run_git(
+            root, "ls-files", "--stage", "--", str(action["path"])
+        ).strip(),
+    } for action in actions]
 
 
 def git_preflight(root: Path) -> list[str]:
@@ -353,6 +547,108 @@ def active_database_work(db_file: Path, project_key: str = "") -> list[str]:
         return result
     except sqlite3.DatabaseError as exc:
         return [f"DATABASE_ACTIVITY_CHECK_FAILED:{exc}"]
+    finally:
+        con.close()
+
+
+def active_work_records(db_file: Path) -> list[dict[str, str]]:
+    if not db_file.is_file() or database_version(db_file) == 0:
+        return []
+    con = sqlite3.connect(db_file)
+    con.row_factory = sqlite3.Row
+    records: list[dict[str, str]] = []
+    try:
+        tables = {
+            row[0] for row in con.execute(
+                "SELECT name FROM sqlite_master WHERE type='table'"
+            )
+        }
+        if {"projects", "work_orders"} <= tables:
+            for row in con.execute(
+                "SELECT p.project_key, w.work_order_key AS item_key,"
+                " w.worktree_path FROM work_orders w"
+                " JOIN projects p ON p.id = w.project_id"
+                " WHERE w.status IN ('running','waiting_gate') ORDER BY p.project_key,w.id"
+            ):
+                records.append({
+                    "project": row["project_key"], "type": "work_order",
+                    "key": row["item_key"], "worktree": row["worktree_path"],
+                })
+        if {"projects", "work_items", "task_attempts"} <= tables:
+            for row in con.execute(
+                "SELECT p.project_key, i.external_id AS item_key,"
+                " COALESCE(w.worktree_path, '') AS worktree"
+                " FROM task_attempts a JOIN work_items i ON i.id = a.task_id"
+                " JOIN projects p ON p.id = i.project_id"
+                " LEFT JOIN work_orders w ON w.id = i.work_order_id"
+                " WHERE a.outcome = 'running' ORDER BY p.project_key,a.id"
+            ):
+                records.append({
+                    "project": row["project_key"], "type": "task_attempt",
+                    "key": row["item_key"], "worktree": row["worktree"],
+                })
+        if {"projects", "experience_runs"} <= tables:
+            for row in con.execute(
+                "SELECT p.project_key, r.run_key AS item_key"
+                " FROM experience_runs r JOIN projects p ON p.id = r.project_id"
+                " WHERE r.status = 'active' ORDER BY p.project_key,r.id"
+            ):
+                records.append({
+                    "project": row["project_key"], "type": "experience_run",
+                    "key": row["item_key"], "worktree": "",
+                })
+        if {"projects", "backlog_plans"} <= tables:
+            for row in con.execute(
+                "SELECT p.project_key, b.plan_key AS item_key"
+                " FROM backlog_plans b JOIN projects p ON p.id = b.project_id"
+                " WHERE b.status IN ('draft','verified') ORDER BY p.project_key,b.id"
+            ):
+                records.append({
+                    "project": row["project_key"], "type": "backlog_plan",
+                    "key": row["item_key"], "worktree": "",
+                })
+        return records
+    except sqlite3.DatabaseError as exc:
+        raise UpgradeError(f"active work scan failed: {exc}") from exc
+    finally:
+        con.close()
+
+
+def active_work_contract_moves(db_file: Path) -> list[str]:
+    if not db_file.is_file() or database_version(db_file) == 0:
+        return []
+    con = sqlite3.connect(db_file)
+    con.row_factory = sqlite3.Row
+    moved: list[str] = []
+    try:
+        for row in con.execute(
+            "SELECT work_order_key, worktree_path, bindings_json FROM work_orders"
+            " WHERE status IN ('running','waiting_gate') ORDER BY id"
+        ):
+            try:
+                bindings = json.loads(row["bindings_json"] or "{}")
+                baseline = bindings.get("agent_marketplace", {}).get("baseline", {})
+                root = project_root(row["worktree_path"])
+                _workspace, config_path = find_workspace(root)
+                contract = project_contract(root, config_path)
+                current = str(contract.get("contract_sha256", "")) \
+                    if isinstance(contract, dict) else ""
+                expected = str(baseline.get("contract_sha256", "")) \
+                    if isinstance(baseline, dict) else ""
+                if expected and current != expected:
+                    branch = run_git(
+                        root, "symbolic-ref", "--short", "-q", "HEAD"
+                    ).strip()
+                    head = run_git(root, "rev-parse", "HEAD").strip()
+                    moved.append(
+                        f"ACTIVE_WORK_CONTRACT_MOVED:{row['work_order_key']}:"
+                        f"{expected}->{current}:branch={branch}:head={head}"
+                    )
+            except (UpgradeError, OSError, json.JSONDecodeError):
+                moved.append(
+                    f"ACTIVE_WORK_CONTRACT_MOVED:{row['work_order_key']}:unreadable"
+                )
+        return moved
     finally:
         con.close()
 
@@ -531,12 +827,22 @@ def is_host_runtime_marker(
 def verify_package_provenance(root: Path, host: str, manifest: dict) -> str:
     path = root / ".agent-marketplace-package.json"
     data = load_json(path, None)
-    if not isinstance(data, dict) or data.get("schema_version") != 1:
+    if not isinstance(data, dict) or data.get("schema_version") not in {1, 2}:
         raise UpgradeError(f"package provenance missing or invalid: {root}")
     if data.get("component") != manifest.get("name") \
             or data.get("host") != host \
             or data.get("version") != manifest.get("version"):
         raise UpgradeError(f"package provenance identity mismatch: {root}")
+    manifest_snapshot = manifest.get("agent_marketplace", {})
+    if data.get("schema_version") == 2:
+        if not isinstance(manifest_snapshot, dict) or any(
+            data.get(key) != manifest_snapshot.get(key)
+            for key in (
+                "build_id", "marketplace_release", "source_channel",
+                "source_ref", "source_commit",
+            )
+        ):
+            raise UpgradeError(f"package snapshot identity mismatch: {root}")
     files = data.get("files")
     if not isinstance(files, dict):
         raise UpgradeError(f"package provenance file map invalid: {root}")
@@ -600,6 +906,7 @@ def normalize_registry(data_root: Path) -> dict:
                 "provenance_sha256": verify_package_provenance(
                     root, str(host), manifest
                 ),
+                "snapshot": manifest.get("agent_marketplace", {}),
                 "registered_at": str(host_entry.get("registered_at", "")),
             }
         normalized["plugins"][plugin] = {"hosts": clean_hosts}
@@ -613,10 +920,22 @@ def inventory(data_root: Path) -> tuple[dict, list[str]]:
     for plugin, entry in sorted(registry["plugins"].items()):
         hosts = entry["hosts"]
         versions = {host: value["version"] for host, value in hosts.items()}
+        build_ids = {
+            host: str(value.get("snapshot", {}).get("build_id", ""))
+            for host, value in hosts.items()
+        }
         if len(set(versions.values())) > 1:
             blockers.append(f"DUAL_HOST_VERSION_MISMATCH:{plugin}")
+        if len(set(build_ids.values())) > 1:
+            blockers.append(f"DUAL_HOST_BUILD_MISMATCH:{plugin}")
+        snapshot = next(iter(hosts.values()), {}).get("snapshot", {})
         components[plugin] = {
             "version": next(iter(versions.values()), ""),
+            "build_id": next(iter(build_ids.values()), ""),
+            "marketplace_release": str(snapshot.get("marketplace_release", "")),
+            "source_channel": str(snapshot.get("source_channel", "")),
+            "source_ref": str(snapshot.get("source_ref", "")),
+            "source_commit": str(snapshot.get("source_commit", "")),
             "hosts": sorted(hosts),
             "manifests": {
                 host: value["manifest_sha256"] for host, value in sorted(hosts.items())
@@ -627,11 +946,17 @@ def inventory(data_root: Path) -> tuple[dict, list[str]]:
         }
     if "project-management-office" not in components:
         blockers.append("REQUIRED_COMPONENT_MISSING:project-management-office")
+    snapshots = {
+        (value.get("marketplace_release"), value.get("build_id"))
+        for value in components.values()
+    }
+    if len(snapshots) > 1:
+        blockers.append("MARKETPLACE_SNAPSHOT_MISMATCH")
     return {"registry": registry, "components": components}, blockers
 
 
 def find_workspace(root: Path) -> tuple[str, Path | None]:
-    state = load_json(root / STATE_RELATIVE, {})
+    state = load_json(root / LEGACY_STATE_RELATIVE, {})
     if isinstance(state, dict) and isinstance(state.get("workspace"), str):
         workspace = state["workspace"]
         candidate = root / workspace / "config.json"
@@ -646,7 +971,8 @@ def find_workspace(root: Path) -> tuple[str, Path | None]:
     for path in candidates:
         data = load_json(path, {})
         if isinstance(data, dict) and (
-            data.get("team_id") or data.get("managed_by") or data.get("project_key")
+            data.get(CONTRACT_KEY) or data.get("team_id")
+            or data.get("managed_by") or data.get("project_key")
         ):
             recognized.append(path)
     if len(recognized) > 1:
@@ -658,6 +984,9 @@ def find_workspace(root: Path) -> tuple[str, Path | None]:
 
 
 def team_from_config(config: dict) -> str:
+    contract = config.get(CONTRACT_KEY)
+    if isinstance(contract, dict):
+        return str(contract.get("team_id", "")).strip()
     team = str(config.get("team_id", "")).strip()
     if team:
         return team
@@ -670,18 +999,24 @@ def team_from_config(config: dict) -> str:
 
 
 def config_owned_digest(config: dict) -> str:
-    owned = {
-        key: config[key] for key in (
-            "team_id", "managed_by", "project_key", "project_origin",
-        ) if key in config
-    }
+    owned = {"project_key": config.get("project_key", "")}
+    contract = config.get(CONTRACT_KEY)
+    if isinstance(contract, dict):
+        owned[CONTRACT_KEY] = contract_sha256(contract)
+    else:
+        owned.update({
+            key: config[key] for key in (
+                "team_id", "managed_by", "project_origin",
+            ) if key in config
+        })
     return sha256_bytes(canonical_json(owned).encode())
 
 
 def managed_gitignore_block(workspace: str) -> str:
+    local_rules = tuple(f"/{value}/" for value in project_local_roots())
     return "\n".join((
         GITIGNORE_START,
-        ".agentrof/agent-marketplace/.runtime/",
+        *local_rules,
         f"{workspace}/junit-*.xml",
         f"{workspace}/docs/.obsidian/*",
         f"!{workspace}/docs/.obsidian/app.json",
@@ -764,7 +1099,7 @@ def managed_surface_hashes(root: Path, config_path: Path | None) -> dict[str, st
     surfaces: dict[str, str] = {}
     if config_path is not None and config_path.is_file():
         config = load_json(config_path, {})
-        if isinstance(config, dict):
+        if isinstance(config, dict) and CONTRACT_KEY not in config:
             surfaces[safe_relative(root, config_path) + "#agent-marketplace"] = (
                 config_owned_digest(config)
             )
@@ -782,6 +1117,7 @@ def adapter_surfaces(
     root: Path,
     workspace: str,
     action: str = "inspect",
+    scope: str = "tracked",
 ) -> tuple[dict[str, str], list[str]]:
     """Collect host-owned project surfaces through the package protocol."""
     if not team_id:
@@ -792,7 +1128,9 @@ def adapter_surfaces(
     surfaces: dict[str, str] = {}
     changes: set[str] = set()
     for host, entry in sorted(hosts.items()):
-        result = run_adapter(Path(entry["root"]), action, root, workspace)
+        result = run_adapter(
+            Path(entry["root"]), action, root, workspace, scope=scope
+        )
         current = result.get("current_surfaces", {})
         if not isinstance(current, dict):
             raise UpgradeError(f"project adapter surfaces are invalid for {team_id}/{host}")
@@ -816,13 +1154,48 @@ def relevant_components(installed: dict, team_id: str) -> dict:
     return selected
 
 
+def contract_components(installed: dict, team_id: str) -> dict[str, dict[str, str]]:
+    return {
+        plugin: {
+            "version": str(value.get("version", "")),
+            "build_id": str(value.get("build_id", "")),
+        }
+        for plugin, value in sorted(relevant_components(installed, team_id).items())
+    }
+
+
+def marketplace_identity(installed: dict, team_id: str) -> dict[str, str]:
+    scoped = relevant_components(installed, team_id)
+    identities = {
+        (
+            str(value.get("marketplace_release", "")),
+            str(value.get("source_channel", "")),
+            str(value.get("source_ref", "")),
+            str(value.get("source_commit", "")),
+        )
+        for value in scoped.values()
+    }
+    if len(identities) != 1:
+        raise UpgradeError("installed components do not share one marketplace snapshot")
+    release, channel, ref, commit = next(iter(identities), ("", "", "", ""))
+    return {
+        "marketplace_release": release,
+        "source_channel": channel,
+        "source_ref": ref,
+        "source_commit": commit,
+    }
+
+
 def project_fingerprint(
     root: Path,
     config_path: Path | None,
     surfaces: dict[str, str] | None = None,
 ) -> dict:
-    state_path = root / STATE_RELATIVE
-    state_hash = sha256_file(state_path) if state_path.is_file() else ""
+    contract = project_contract(root, config_path)
+    state_hash = contract_sha256(contract) if isinstance(contract, dict) \
+        and contract.get("contract_version") == PROJECT_CONTRACT_VERSION \
+        else sha256_file(root / LEGACY_STATE_RELATIVE) \
+        if (root / LEGACY_STATE_RELATIVE).is_file() else ""
     workspace = config_path.parent.name if config_path is not None else "workspace"
     return {
         "state_sha256": state_hash,
@@ -876,16 +1249,202 @@ def repository_delivery(root: Path) -> dict:
 def target_contains_project_upgrade(root: Path, target: str, upgrade_id: str) -> bool:
     if not target or not upgrade_id:
         return False
-    content = run_git_optional(
-        root, "show", f"refs/heads/{target}:{STATE_RELATIVE.as_posix()}"
-    )
+    workspace, config_path = find_workspace(root)
+    relative = config_path.relative_to(root).as_posix() \
+        if config_path is not None else f"{workspace}/config.json"
+    content = run_git_optional(root, "show", f"refs/heads/{target}:{relative}")
     if not content:
         return False
     try:
         state = json.loads(content)
     except json.JSONDecodeError:
         return False
-    return isinstance(state, dict) and state.get("upgrade_id") == upgrade_id
+    contract = state.get(CONTRACT_KEY, {}) if isinstance(state, dict) else {}
+    return isinstance(contract, dict) and contract.get("upgrade_id") == upgrade_id
+
+
+def semver_tuple(value: str) -> tuple[int, int, int] | None:
+    matched = re.fullmatch(r"v?(\d+)\.(\d+)\.(\d+)", value)
+    return tuple(int(part) for part in matched.groups()) if matched else None
+
+
+def surface_digest(root: Path, key: str) -> str:
+    relative = key
+    if relative.startswith("shared:"):
+        relative = relative[len("shared:"):]
+    elif ":" in relative and (
+        "#" not in relative or relative.index(":") < relative.index("#")
+    ):
+        relative = relative.split(":", 1)[1]
+    marker = ""
+    if "#" in relative:
+        relative, marker = relative.split("#", 1)
+    path = root / relative
+    if marker == "reserved-absence":
+        return "absent" if not path.exists() and not path.is_symlink() else "present"
+    if marker == "agent-marketplace:software-engineering-team":
+        if not path.is_file():
+            return ""
+        return gitignore_owned_digest(path.read_text(encoding="utf-8"))
+    if not path.is_file() or path.is_symlink():
+        return ""
+    return sha256_file(path)
+
+
+def environment_status(
+    data_root: Path,
+    db_file: Path,
+    target_schema: int,
+    project_path: str | Path,
+) -> dict:
+    root = project_root(project_path)
+    reasons: list[str] = []
+    blockers: list[str] = []
+    try:
+        installed, inventory_blockers = inventory(data_root)
+        blockers.extend(inventory_blockers)
+    except UpgradeError as exc:
+        installed = {"components": {}, "registry": {"plugins": {}}}
+        blockers.append(f"PLUGIN_INVENTORY_INVALID:{exc}")
+    try:
+        workspace, config_path = find_workspace(root)
+        if config_path is None:
+            return {
+                "status": "AGENT_MARKETPLACE_FRESH_SETUP_REQUIRED",
+                "project_root": str(root), "workspace": workspace,
+                "reasons": ["PROJECT_CONTRACT_MISSING"], "blockers": blockers,
+                "active_work": [], "contract_sha256": "",
+                "mutation_performed": False,
+            }
+        config = load_json(config_path, {})
+        if not isinstance(config, dict):
+            raise UpgradeError("project config must be an object")
+        contract = contract_from_config(config)
+        if contract is None:
+            code = "AGENT_MARKETPLACE_PROJECT_UPGRADE_REQUIRED" \
+                if config.get("project_key") else "AGENT_MARKETPLACE_FRESH_SETUP_REQUIRED"
+            return {
+                "status": code, "project_root": str(root),
+                "workspace": workspace, "reasons": ["PROJECT_CONTRACT_MISSING"],
+                "blockers": blockers, "active_work": [],
+                "contract_sha256": "", "mutation_performed": False,
+            }
+        team_id = str(contract.get("team_id", ""))
+        project_key = str(config.get("project_key", ""))
+        if not team_id or not project_key:
+            blockers.append("PROJECT_IDENTITY_INCOMPLETE")
+        if contract.get("workspace") != workspace:
+            blockers.append("PROJECT_WORKSPACE_MISMATCH")
+        if contract.get("repository_fingerprint") != repository_fingerprint(root):
+            blockers.append("REPOSITORY_FINGERPRINT_MISMATCH")
+
+        expected_components = contract.get("components", {})
+        scoped = relevant_components(installed.get("components", {}), team_id)
+        project_choice = False
+        if not isinstance(expected_components, dict):
+            blockers.append("PROJECT_COMPONENT_BASELINE_INVALID")
+            expected_components = {}
+        for plugin in ("project-management-office", team_id):
+            expected = expected_components.get(plugin, {})
+            actual = scoped.get(plugin, {})
+            if not isinstance(expected, dict) or not expected.get("version") \
+                    or not expected.get("build_id"):
+                blockers.append(f"PROJECT_COMPONENT_BASELINE_INVALID:{plugin}")
+                continue
+            if not actual:
+                reasons.append(f"RUNTIME_COMPONENT_MISSING:{plugin}")
+                continue
+            expected_version = str(expected.get("version", ""))
+            actual_version = str(actual.get("version", ""))
+            if semver_tuple(actual_version) and semver_tuple(expected_version) \
+                    and semver_tuple(actual_version) > semver_tuple(expected_version):
+                project_choice = True
+                reasons.append(
+                    f"PROJECT_COMPONENT_OLDER:{plugin}:{expected_version}->{actual_version}"
+                )
+            elif actual_version != expected_version \
+                    or str(actual.get("build_id", "")) != str(expected.get("build_id", "")):
+                reasons.append(
+                    f"RUNTIME_COMPONENT_MISMATCH:{plugin}:"
+                    f"{actual_version}@{actual.get('build_id', '')}->"
+                    f"{expected_version}@{expected.get('build_id', '')}"
+                )
+
+        expected_surfaces = contract.get("managed_surfaces", {})
+        if not isinstance(expected_surfaces, dict):
+            blockers.append("PROJECT_MANAGED_SURFACES_INVALID")
+        else:
+            drift = sorted(
+                key for key, expected in expected_surfaces.items()
+                if surface_digest(root, str(key)) != str(expected)
+            )
+            if drift:
+                blockers.append("PROJECT_CONTRACT_DRIFT:" + ",".join(drift))
+
+        if database_version(db_file) != target_schema:
+            reasons.append(
+                f"LOCAL_DATABASE_SCHEMA:{database_version(db_file)}->{target_schema}"
+            )
+        if not blockers and team_id in installed.get("components", {}):
+            try:
+                _surfaces, local_changes = adapter_surfaces(
+                    data_root, team_id, root, workspace, "check", scope="local"
+                )
+                if local_changes:
+                    reasons.append(
+                        "LOCAL_PROJECTION_DRIFT:" + ",".join(local_changes)
+                    )
+            except UpgradeError as exc:
+                blockers.append(f"LOCAL_PROJECTION_CHECK_FAILED:{exc}")
+
+        if db_file.is_file() and database_version(db_file) == target_schema:
+            con = sqlite3.connect(db_file)
+            try:
+                row = con.execute(
+                    "SELECT project_uuid, repository_fingerprint FROM projects"
+                    " WHERE project_key = ?", (project_key,),
+                ).fetchone()
+                if row is None:
+                    reasons.append("LOCAL_PROJECT_ATTACH_REQUIRED")
+                elif tuple(str(value) for value in row) != (
+                    str(contract.get("project_id", "")),
+                    str(contract.get("repository_fingerprint", "")),
+                ):
+                    blockers.append("LOCAL_PROJECT_IDENTITY_CONFLICT")
+            finally:
+                con.close()
+        elif not db_file.is_file() or database_version(db_file) == 0:
+            reasons.append("LOCAL_PROJECT_ATTACH_REQUIRED")
+
+        active = active_work_records(db_file) if database_version(db_file) == target_schema else []
+        if database_version(db_file) == target_schema:
+            blockers.extend(active_work_contract_moves(db_file))
+        if blockers:
+            code = STATUS_BLOCKED
+        elif project_choice:
+            code = STATUS_PROJECT_CHOICE
+        elif reasons and active:
+            code = STATUS_RECONCILE_DEFERRED
+        elif reasons:
+            code = STATUS_RECONCILE
+        else:
+            code = STATUS_CURRENT
+        return {
+            "status": code, "project_root": str(root), "workspace": workspace,
+            "project_key": project_key, "team_id": team_id,
+            "reasons": sorted(set(reasons)), "blockers": sorted(set(blockers)),
+            "active_work": active,
+            "contract_sha256": str(contract.get("contract_sha256", "")),
+            "mutation_performed": False,
+        }
+    except UpgradeError as exc:
+        blockers.append(f"PROJECT_ENVIRONMENT_INVALID:{exc}")
+        return {
+            "status": STATUS_BLOCKED, "project_root": str(root),
+            "workspace": "", "reasons": [],
+            "blockers": sorted(set(blockers)), "active_work": [],
+            "contract_sha256": "", "mutation_performed": False,
+        }
 
 
 def status(
@@ -925,7 +1484,7 @@ def status(
             workspace, config_path = find_workspace(root)
             if not WORKSPACE_RE.fullmatch(workspace):
                 blockers.append(f"UNSAFE_WORKSPACE_NAME:{workspace}")
-            state_path = root / STATE_RELATIVE
+            state_path = root / LEGACY_STATE_RELATIVE
             safe_relative(root, state_path)
             for managed_target in (state_path, root / ".gitignore",
                                    config_path if config_path is not None else root / workspace / "config.json"):
@@ -933,8 +1492,8 @@ def status(
                     blockers.append(
                         "SYMLINKED_MANAGED_TARGET:" + safe_relative(root, managed_target)
                     )
-            state = load_json(state_path, None)
             config = load_json(config_path, {}) if config_path is not None else {}
+            state = project_contract(root, config_path)
             team_id = team_from_config(config) if isinstance(config, dict) else ""
             project_key = str(config.get("project_key", "")) \
                 if isinstance(config, dict) else ""
@@ -974,21 +1533,19 @@ def status(
                 scoped = relevant_components(installed["components"], team_id)
                 if isinstance(applied, dict):
                     for plugin, value in sorted(scoped.items()):
-                        if applied.get(plugin) != value["version"]:
+                        recorded = applied.get(plugin, {})
+                        recorded_version = recorded.get("version", "") \
+                            if isinstance(recorded, dict) else recorded
+                        recorded_build = recorded.get("build_id", "") \
+                            if isinstance(recorded, dict) else ""
+                        if recorded_version != value["version"] \
+                                or (version >= 5 and recorded_build != value["build_id"]):
                             reasons.append(
-                                f"PLUGIN_COMPONENT:{plugin}:{applied.get(plugin, 'missing')}"
-                                f"->{value['version']}"
+                                f"PLUGIN_COMPONENT:{plugin}:{recorded_version or 'missing'}"
+                                f"@{recorded_build or 'missing'}->{value['version']}"
+                                f"@{value['build_id']}"
                             )
                 installed_hosts = set(scoped.get(team_id, {}).get("hosts", []))
-                state_hosts = {
-                    str(value) for value in state.get("hosts", [])
-                } if isinstance(state.get("hosts", []), list) else set()
-                if installed_hosts != state_hosts:
-                    reasons.append(
-                        "HOST_SURFACES:"
-                        + ",".join(sorted(state_hosts))
-                        + "->" + ",".join(sorted(installed_hosts))
-                    )
                 expected = state.get("managed_surfaces", {})
                 actual = current_surfaces
                 if isinstance(expected, dict):
@@ -1650,13 +2207,14 @@ def run_adapter(
     project: Path,
     workspace: str,
     choices: dict[str, str] | None = None,
+    scope: str = "tracked",
 ) -> dict:
     script = root / "scripts" / "project_upgrade_adapter.py"
     if not script.is_file():
         raise UpgradeError(f"package lacks project upgrade adapter: {root}")
     command = [
         sys.executable, str(script), action, "--project-root", str(project),
-        "--workspace", workspace,
+        "--workspace", workspace, "--scope", scope,
     ]
     for request_id, selected in sorted(normalize_upgrade_choices(choices).items()):
         command.extend(["--choice", f"{request_id}={selected}"])
@@ -1698,10 +2256,7 @@ def project_changes(plan_payload: dict) -> tuple[dict[Path, bytes | None], dict]
     config["team_id"] = team_id
     config.pop("managed_by", None)
     config.setdefault("project_origin", "unclassified")
-    config_bytes = (json.dumps(config, indent=2) + "\n").encode()
     changes: dict[Path, bytes | None] = {}
-    if config_path.read_bytes() != config_bytes:
-        changes[config_path] = config_path.read_bytes()
     gitignore_path = root / ".gitignore"
     gitignore_current = gitignore_path.read_text(encoding="utf-8") \
         if gitignore_path.is_file() else ""
@@ -1715,11 +2270,17 @@ def project_changes(plan_payload: dict) -> tuple[dict[Path, bytes | None], dict]
     plan_payload["data_root"] = str(plan_payload["data_root"])
     package_roots = adapter_roots(plan_payload, team_id)
     adapter_choices = normalize_upgrade_choices(plan_payload.get("choices", {}))
+    local_actions, local_requests = tracked_local_projection_migration(
+        root, workspace, team_id, adapter_choices
+    )
+    for request in local_requests:
+        choice_requests[str(request["id"])] = request
     for package_root in package_roots:
         preview = run_adapter(
-            package_root, "check", root, workspace, adapter_choices
+            package_root, "check", root, workspace, adapter_choices,
+            scope="tracked",
         ) if adapter_choices else run_adapter(
-            package_root, "check", root, workspace
+            package_root, "check", root, workspace, scope="tracked"
         )
         adapter_previews.append((package_root, preview))
         for request in preview.get("choice_requests", []):
@@ -1741,8 +2302,22 @@ def project_changes(plan_payload: dict) -> tuple[dict[Path, bytes | None], dict]
             "choice_requests": [choice_requests[key] for key in sorted(choice_requests)],
             "adapters": adapter_previews,
         }
+    for action in local_actions:
+        path = root / str(action["path"])
+        changes.setdefault(path, path.read_bytes() if path.is_file() else None)
+        if action.get("preserve_target"):
+            target = root / str(action["preserve_target"])
+            safe_relative(root, target)
+            changes.setdefault(target, target.read_bytes() if target.is_file() else None)
+    old_gate = root / ".agentrof" / "agent-marketplace" / "checks" / "vault-gate.pyz"
+    new_gate = root / ".github" / "agentrof" / "vault-gate.pyz"
+    gate_bytes = old_gate.read_bytes() if old_gate.is_file() else None
+    if gate_bytes is not None:
+        if new_gate.is_file() and new_gate.read_bytes() != gate_bytes:
+            raise UpgradeError("portable gate migration target collides")
+        changes.setdefault(old_gate, old_gate.read_bytes())
+        changes.setdefault(new_gate, new_gate.read_bytes() if new_gate.is_file() else None)
     target_surfaces = {
-        safe_relative(root, config_path) + "#agent-marketplace": config_owned_digest(config),
         ".gitignore#agent-marketplace:software-engineering-team":
             gitignore_owned_digest(gitignore_text),
     }
@@ -1754,22 +2329,19 @@ def project_changes(plan_payload: dict) -> tuple[dict[Path, bytes | None], dict]
             if key in target_surfaces and target_surfaces[key] != rendered:
                 raise UpgradeError(f"shared target surface mismatch: {key}")
             target_surfaces[key] = rendered
+    identity = marketplace_identity(plan_payload.get("installed", {}), team_id)
     state = {
         "schema_version": PROJECT_STATE_SCHEMA,
         "project_id": plan_payload["project_id"],
-        "project_key": project_data.get("project_key", ""),
+        "team_id": team_id,
         "repository_fingerprint": project_data.get("repository_fingerprint", ""),
         "delivery": project_data.get("delivery", {}),
-        "team_id": team_id,
         "workspace": workspace,
         "contract_version": PROJECT_CONTRACT_VERSION,
-        "hosts": sorted(plan_payload.get("installed", {}).get(team_id, {}).get("hosts", [])),
-        "components": {
-            plugin: value["version"]
-            for plugin, value in sorted(relevant_components(
-                plan_payload.get("installed", {}), team_id
-            ).items())
-        },
+        **identity,
+        "components": contract_components(
+            plan_payload.get("installed", {}), team_id
+        ),
         "managed_surfaces": target_surfaces,
         "identities": {
             "preparation": "preparation_check.py",
@@ -1777,15 +2349,29 @@ def project_changes(plan_payload: dict) -> tuple[dict[Path, bytes | None], dict]
             "backlog": "backlog-plan",
         },
         "vault": vault_contract_state(root, workspace, package_roots),
-        "applied_at": plan_payload["created_at"],
+        "upgrade_provenance": {
+            "applied_at": plan_payload["created_at"],
+            "upgrade_id": plan_payload["upgrade_id"],
+            "base_head": project_data.get("fingerprint", {}).get("head", ""),
+        },
         "upgrade_id": plan_payload["upgrade_id"],
         "upgrade_base_head": project_data.get("fingerprint", {}).get("head", ""),
     }
-    state_path = root / STATE_RELATIVE
-    changes.setdefault(state_path, state_path.read_bytes() if state_path.is_file() else None)
+    config["project_key"] = project_data.get("project_key", "")
+    config.pop("team_id", None)
+    config[CONTRACT_KEY] = {
+        **state, "contract_sha256": contract_sha256(state),
+    }
+    config_bytes = (json.dumps(config, indent=2, sort_keys=True) + "\n").encode()
+    if config_path.read_bytes() != config_bytes:
+        changes[config_path] = config_path.read_bytes()
+    state_path = root / LEGACY_STATE_RELATIVE
+    if state_path.is_file():
+        changes.setdefault(state_path, state_path.read_bytes())
     return changes, {"state": state, "adapters": adapter_previews,
                      "config": config_bytes, "gitignore": gitignore_bytes,
-                     "choice_requests": []}
+                     "choice_requests": [], "local_actions": local_actions,
+                     "portable_gate": gate_bytes}
 
 
 def snapshot_content(snapshot: dict) -> bytes | None:
@@ -1814,15 +2400,12 @@ def validate_recovery_surfaces(
     if current_ignore not in {original_ignore, prepared["gitignore"]}:
         raise UpgradeError("managed .gitignore drifted during recovery")
 
-    state_path = root / STATE_RELATIVE
+    state_path = root / LEGACY_STATE_RELATIVE
     state_relative = safe_relative(root, state_path)
     original_state = snapshot_content(durable.get(state_relative, {}))
     current_state = state_path.read_bytes() if state_path.is_file() else None
-    target_state = (
-        json.dumps(prepared["state"], indent=2, sort_keys=True) + "\n"
-    ).encode()
-    if current_state not in {original_state, target_state}:
-        raise UpgradeError("managed project state drifted during recovery")
+    if current_state != original_state:
+        raise UpgradeError("legacy project state drifted during recovery")
 
     original_surfaces = project_data.get("managed_surfaces", {})
     for package_root, preview in prepared["adapters"]:
@@ -2003,21 +2586,30 @@ def apply_project(plan_payload: dict, journal: dict, journal_path: Path) -> None
     else:
         validate_recovery_surfaces(plan_payload, prepared, durable, root)
     journal["phase"] = "project_applying"
+    index_snapshots = snapshot_local_projection_index(
+        root, prepared.get("local_actions", [])
+    )
+    journal["local_index_snapshots"] = index_snapshots
     atomic_json(journal_path, journal)
     try:
+        applied_index = apply_local_projection_migration(
+            root, prepared.get("local_actions", [])
+        )
+        if applied_index != index_snapshots:
+            raise UpgradeError("local projection index changed during apply")
         migrate_project_runtime(
             root, project_data["workspace"], plan_payload,
             journal, journal_path,
         )
         config_path = root / project_data["workspace"] / "config.json"
-        if config_path.read_bytes() != prepared["config"]:
-            atomic_bytes(config_path, prepared["config"],
-                         config_path.stat().st_mode & 0o777)
         gitignore_path = root / ".gitignore"
         if not gitignore_path.is_file() or gitignore_path.read_bytes() != prepared["gitignore"]:
             atomic_bytes(gitignore_path, prepared["gitignore"],
                          gitignore_path.stat().st_mode & 0o777
                          if gitignore_path.exists() else 0o644)
+        if prepared.get("portable_gate") is not None:
+            gate = root / ".github" / "agentrof" / "vault-gate.pyz"
+            atomic_bytes(gate, prepared["portable_gate"], 0o755)
         for package_root, _preview in prepared["adapters"]:
             adapter_choices = normalize_upgrade_choices(
                 plan_payload.get("choices", {})
@@ -2029,6 +2621,7 @@ def apply_project(plan_payload: dict, journal: dict, journal_path: Path) -> None
                     root,
                     project_data["workspace"],
                     adapter_choices,
+                    scope="tracked",
                 )
             else:
                 run_adapter(
@@ -2036,7 +2629,11 @@ def apply_project(plan_payload: dict, journal: dict, journal_path: Path) -> None
                     "apply",
                     root,
                     project_data["workspace"],
+                    scope="tracked",
                 )
+        if config_path.read_bytes() != prepared["config"]:
+            atomic_bytes(config_path, prepared["config"],
+                         config_path.stat().st_mode & 0o777)
         state = prepared["state"]
         surfaces = managed_surface_hashes(root, config_path)
         host_surfaces, _ = adapter_surfaces(
@@ -2045,7 +2642,10 @@ def apply_project(plan_payload: dict, journal: dict, journal_path: Path) -> None
         )
         surfaces.update(host_surfaces)
         state["managed_surfaces"] = surfaces
-        atomic_json(root / STATE_RELATIVE, state, 0o644)
+        config = load_json(config_path, {})
+        if not isinstance(config, dict):
+            raise UpgradeError("project config became invalid during apply")
+        write_project_contract(config_path, config, state)
         journal["phase"] = "project_complete"
         atomic_json(journal_path, journal)
     except Exception:
@@ -2057,6 +2657,7 @@ def apply_project(plan_payload: dict, journal: dict, journal_path: Path) -> None
             else:
                 path.unlink(missing_ok=True)
         rollback_project_runtime(root, journal)
+        rollback_local_projection_index(root, index_snapshots)
         raise
 
 
@@ -2264,16 +2865,19 @@ def initialize_project_contract(
     workspace: str,
 ) -> dict:
     root = project_root(project_path)
-    state_path = root / STATE_RELATIVE
-    if state_path.exists():
-        state = load_json(state_path, {})
+    config_path = root / workspace / "config.json"
+    config = load_json(config_path, {})
+    if not isinstance(config, dict):
+        raise UpgradeError("project config must be an object")
+    existing = config.get(CONTRACT_KEY)
+    if existing is not None:
+        state = contract_from_config(config)
         if state.get("team_id") != team_id:
             raise UpgradeError("existing project contract belongs to another team")
         return state
     installed, blockers = inventory(data_root)
     if blockers:
         raise UpgradeError(", ".join(blockers))
-    config_path = root / workspace / "config.json"
     surfaces = managed_surface_hashes(
         root, config_path if config_path.is_file() else None
     )
@@ -2281,22 +2885,17 @@ def initialize_project_contract(
         data_root, team_id, root, workspace, "inspect"
     )
     surfaces.update(host_surfaces)
+    identity = marketplace_identity(installed["components"], team_id)
     state = {
         "schema_version": PROJECT_STATE_SCHEMA,
         "project_id": str(uuid.uuid4()),
-        "project_key": "",
         "repository_fingerprint": repository_fingerprint(root),
         "delivery": repository_delivery(root),
         "team_id": team_id,
         "workspace": workspace,
         "contract_version": PROJECT_CONTRACT_VERSION,
-        "hosts": sorted(installed["components"].get(team_id, {}).get("hosts", [])),
-        "components": {
-            plugin: value["version"]
-            for plugin, value in sorted(relevant_components(
-                installed["components"], team_id
-            ).items())
-        },
+        **identity,
+        "components": contract_components(installed["components"], team_id),
         "managed_surfaces": surfaces,
         "identities": {
             "preparation": "preparation_check.py",
@@ -2307,7 +2906,6 @@ def initialize_project_contract(
             "root": f"{workspace}/docs", "policy_version": 5,
             "status": "active", "adoption_plan_hash": "",
         },
-        "applied_at": utc_now(),
+        "upgrade_provenance": {"applied_at": utc_now(), "upgrade_id": ""},
     }
-    atomic_json(state_path, state, 0o644)
-    return state
+    return write_project_contract(config_path, config, state)

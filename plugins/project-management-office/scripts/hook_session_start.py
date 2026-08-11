@@ -86,6 +86,7 @@ def main() -> int:
     payload = hook_common.normalize_payload(hook_common.read_payload())
     bootstrap_ready = False
     upgrade = {"status": upgrade_core.STATUS_BLOCKED, "blockers": []}
+    environment = {"status": "", "contract_sha256": ""}
     try:
         hook_common.register_plugin_root(
             "project-management-office",
@@ -103,12 +104,21 @@ def main() -> int:
             initialized == 0 and synced == 0
             and upgrade["status"] == upgrade_core.STATUS_CURRENT
         )
+        resolved = hook_common.resolve_project(payload.get("cwd", ""))
+        if bootstrap_ready and resolved is not None:
+            _project_key, project_root = resolved
+            environment = upgrade_core.environment_status(
+                pmo_cli.data_dir(), pmo_cli.db_path(), pmo_cli.SCHEMA_VERSION,
+                project_root,
+            )
     except Exception as exc:
         hook_common.log(f"session_start bootstrap failed: {exc}")
     try:
         hook_common.write_session_readiness(
             str(payload.get("session_id", "")), bootstrap_ready,
             str(upgrade.get("status", "")),
+            str(environment.get("contract_sha256", "")),
+            str(environment.get("status", "")),
         )
     except Exception as exc:
         bootstrap_ready = False
@@ -131,6 +141,12 @@ def main() -> int:
     ]
     if bootstrap_ready:
         lines.append("AGENT_MARKETPLACE_PMO_READY: project-management-office")
+        environment_code = str(environment.get("status", ""))
+        if environment_code and environment_code != upgrade_core.STATUS_CURRENT:
+            lines.append(
+                f"{environment_code}: run the owning team's setup entry before"
+                " normal marketplace work. No project mutation was performed."
+            )
     else:
         upgrade_code = str(upgrade.get("status", ""))
         if upgrade_code.startswith("AGENT_MARKETPLACE_UPGRADE"):

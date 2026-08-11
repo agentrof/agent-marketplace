@@ -154,8 +154,7 @@ def inspect(root: Path, intent: str) -> dict:
     if work is None:
         return {"ok": False, "intent": intent, "next_entry": "setup", "reason": "managed workspace config is missing", "checks": {}}
     origin = str(config.get("project_origin", ""))
-    state = read_json(
-        root / ".agentrof" / "agent-marketplace" / "project.json")
+    state = config.get("agent_marketplace", {})
     vault_state = state.get("vault", {}) if isinstance(state, dict) else {}
     vault_active = (not state or state.get("contract_version", 0) < 3
                     or (isinstance(vault_state, dict)

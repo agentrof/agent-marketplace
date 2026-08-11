@@ -1,0 +1,8 @@
+{
+  "summary": "Move machine-local runtime and host projections outside Git, add tracked project contract v5, and reconcile cloned environments with active-work checkpoints.",
+  "components": {
+    "agent-marketplace": "minor",
+    "project-management-office": "minor",
+    "software-engineering-team": "minor"
+  }
+}

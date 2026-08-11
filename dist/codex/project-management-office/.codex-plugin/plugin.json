@@ -1,6 +1,6 @@
 {
   "name": "project-management-office",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Project Management Office: the shared operations backbone for Agent Marketplace team plugins, with deterministic state, hooks, and a read-only dashboard.",
   "author": {
     "name": "Agentrof",
@@ -34,10 +34,10 @@
     "brandColor": "#2563EB"
   },
   "agent_marketplace": {
-    "build_id": "snapshot.71b55a0822025f27c7af0229e73a713af79bb834dc65893c2e6af7d3fa6dcd83",
-    "marketplace_release": "0.2.0",
+    "build_id": "snapshot.1437ab48776bf08cbd7682b1c0d9989fb7a80b8e1aff9db034451e1923196e59",
+    "marketplace_release": "0.2.1",
     "source_channel": "snapshot",
-    "source_ref": "snapshot.71b55a0822025f27c7af0229e73a713af79bb834dc65893c2e6af7d3fa6dcd83",
+    "source_ref": "snapshot.1437ab48776bf08cbd7682b1c0d9989fb7a80b8e1aff9db034451e1923196e59",
     "source_commit": ""
   }
 }

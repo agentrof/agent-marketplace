@@ -14,3 +14,7 @@
 - Move machine-local runtime and host projections outside Git, add tracked project contract v5, and reconcile cloned environments with active-work checkpoints.
 - Standardize cross-host project instructions around canonical fragments, whole-file managed roots, user-owned companions, and choice-bound legacy migration.
 - Remove false upgrade session blockers and prepare remote upgrade branches safely from the default branch.
+
+## 0.2.1
+
+- Make fresh setup collect each configuration decision through bounded native choice gates and keep CI deferral separate.

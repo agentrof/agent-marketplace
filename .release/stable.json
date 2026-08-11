@@ -1,17 +1,14 @@
 {
   "schema_version": 1,
-  "version": "0.2.0",
-  "stable_base": "b51672ed64d31e1cb01a952bc658d82a8cd4b898",
-  "main_source": "d14d23dd2d61b5236cf0c81778cb661667447688",
+  "version": "0.2.1",
+  "stable_base": "b43e16bc5156613a2abfffb26a1379f66b2846c3",
+  "main_source": "2367647a8ee690e7368dccc2bfbe5b056f6092bb",
   "impacts": {
-    "agent-marketplace": "minor",
-    "project-management-office": "minor",
-    "software-engineering-team": "minor"
+    "agent-marketplace": "patch",
+    "project-management-office": "patch",
+    "software-engineering-team": "patch"
   },
   "summaries": [
-    "Exclude the v5 contract's containing config from managed surfaces and verify fresh host registration before release.",
-    "Move machine-local runtime and host projections outside Git, add tracked project contract v5, and reconcile cloned environments with active-work checkpoints.",
-    "Standardize cross-host project instructions around canonical fragments, whole-file managed roots, user-owned companions, and choice-bound legacy migration.",
-    "Remove false upgrade session blockers and prepare remote upgrade branches safely from the default branch."
+    "Make fresh setup collect each configuration decision through bounded native choice gates and keep CI deferral separate."
   ]
 }

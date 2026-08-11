@@ -1,6 +1,6 @@
 ---
 name: setup
-description: Fresh, idempotent project bootstrap for the software-engineering-team. Creates the workspace and machine-managed contract only when no project key or prior contract exists; keyed projects use Agent Marketplace Upgrade.
+description: Project bootstrap and environment reconciliation for the software-engineering-team. Attaches a clone to the tracked contract and materializes machine-local runtime and host projections without rewriting user content.
 disable-model-invocation: true
 ---
 
@@ -8,4 +8,4 @@ disable-model-invocation: true
 
 # Setup
 
-Read `${CLAUDE_PLUGIN_ROOT}/host-contract.md` and `${CLAUDE_PLUGIN_ROOT}/skill-content/setup/SKILL.md` completely. Follow the canonical skill as the authoritative workflow and the host contract as its platform adapter.
+Read `${CLAUDE_PLUGIN_ROOT}/host-contract.md` and `${CLAUDE_PLUGIN_ROOT}/skill-content/setup/SKILL.md` completely. Follow the canonical skill as the authoritative workflow and the host contract as its platform adapter. Before any workflow step inside a Git repository, run `project environment-status --project-root <git-root> --json` through the PMO launcher. A non-current environment permits only setup, upgrade, or recovery guidance.

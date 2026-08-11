@@ -186,16 +186,31 @@ def session_state_path(session_id: str) -> Path:
 
 
 def write_session_readiness(
-    session_id: str, ready: bool, upgrade_status: str = ""
+    session_id: str, ready: bool, upgrade_status: str = "",
+    contract_sha256_at_start: str = "",
+    environment_status: str = "",
 ) -> None:
     if not session_id:
         return
     path = session_state_path(session_id)
     path.parent.mkdir(parents=True, exist_ok=True)
+    previous = {}
+    try:
+        value = json.loads(path.read_text(encoding="utf-8"))
+        if isinstance(value, dict) and value.get("session_id") == session_id:
+            previous = value
+    except Exception:
+        pass
     payload = {
         "session_id": session_id,
         "pmo_ready": bool(ready),
         "upgrade_status": upgrade_status,
+        "environment_status": environment_status or str(
+            previous.get("environment_status", "")
+        ),
+        "contract_sha256_at_start": contract_sha256_at_start or str(
+            previous.get("contract_sha256_at_start", "")
+        ),
         "recorded_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
     }
     fd, tmp = tempfile.mkstemp(dir=str(path.parent), prefix=f".{path.name}.")
@@ -353,17 +368,14 @@ def run_cli(argv: list[str]) -> int:
 
 
 def project_config(root: Path) -> Path | None:
-    state = root / ".agentrof" / "agent-marketplace" / "project.json"
-    try:
-        workspace = str(json.loads(state.read_text(encoding="utf-8")).get("workspace", ""))
-        configured = root / workspace / "config.json"
-        if workspace and configured.is_file():
-            return configured
-    except Exception:
-        pass
     conventional = root / "workspace" / "config.json"
     if conventional.is_file():
-        return conventional
+        try:
+            value = json.loads(conventional.read_text(encoding="utf-8"))
+            if value.get("project_key") or value.get("agent_marketplace"):
+                return conventional
+        except Exception:
+            pass
     candidates = sorted(root.glob("*/config.json"))
     recognized = []
     for path in candidates:

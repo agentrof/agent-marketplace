@@ -66,9 +66,37 @@ class PmoHookTests(unittest.TestCase):
         self.env = {"AGENT_MARKETPLACE_HOME": str(root / "agentrof")}
         self.project_root = root / "proj"
         (self.project_root / "workspace").mkdir(parents=True)
+        for command in (
+            ["git", "init", "-q"],
+            ["git", "config", "user.email", "hooks@example.test"],
+            ["git", "config", "user.name", "Hook Tests"],
+        ):
+            completed = subprocess.run(
+                command, cwd=self.project_root, capture_output=True, text=True
+            )
+            self.assertEqual(completed.returncode, 0, completed.stderr)
+        contract = {
+            "schema_version": 1, "contract_version": 5,
+            "project_id": "hook-project", "team_id": "software-engineering-team",
+            "workspace": "workspace", "repository_fingerprint": "test",
+            "delivery": {"requires_pull_request": False,
+                         "target_branch": "master"},
+            "marketplace_release": "0.1.0", "source_channel": "stable",
+            "source_ref": "v0.1.0", "source_commit": "test",
+            "components": {}, "managed_surfaces": {}, "vault": {},
+            "upgrade_provenance": {},
+        }
+        contract["contract_sha256"] = hashlib.sha256(json.dumps(
+            contract, sort_keys=True, separators=(",", ":")
+        ).encode()).hexdigest()
         (self.project_root / "workspace" / "config.json").write_text(
-            json.dumps({"managed_by": "software-engineering-team", "project_key": "shop"}),
+            json.dumps({"project_key": "shop", "agent_marketplace": contract}),
             encoding="utf-8",
+        )
+        subprocess.run(["git", "add", "."], cwd=self.project_root, check=True)
+        subprocess.run(
+            ["git", "commit", "-qm", "baseline"],
+            cwd=self.project_root, check=True,
         )
         run_cli(["init-db"], self.env)
         run_cli(["project", "register", "--key", "shop", "--team", "software-engineering-team"],
@@ -241,9 +269,22 @@ class PmoHookTests(unittest.TestCase):
         lane_root = Path(self.tmp.name) / "lane-b"
         (lane_root / "workspace").mkdir(parents=True)
         (lane_root / "workspace" / "config.json").write_text(
-            json.dumps({"managed_by": "software-engineering-team", "project_key": "shop"}),
+            (self.project_root / "workspace" / "config.json").read_text(
+                encoding="utf-8"
+            ),
             encoding="utf-8",
         )
+        for command in (
+            ["git", "init", "-q"],
+            ["git", "config", "user.email", "hooks@example.test"],
+            ["git", "config", "user.name", "Hook Tests"],
+            ["git", "add", "."],
+            ["git", "commit", "-qm", "baseline"],
+        ):
+            completed = subprocess.run(
+                command, cwd=lane_root, capture_output=True, text=True
+            )
+            self.assertEqual(completed.returncode, 0, completed.stderr)
         backlog = Path(self.tmp.name) / "backlog-b.json"
         backlog.write_text(json.dumps({
             "epics": [{"external_id": "EP-01", "title": "Core"}],
@@ -775,7 +816,7 @@ class PmoHookTests(unittest.TestCase):
             },
         ), self.env)
         self.assertEqual(code, 2)
-        self.assertIn("project state is machine-owned", err)
+        self.assertIn("project contract is machine-owned", err)
 
 
 if __name__ == "__main__":

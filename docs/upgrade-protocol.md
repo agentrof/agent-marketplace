@@ -71,12 +71,15 @@ The upgrader may write only:
 - the PMO database through a writer-locked candidate validation and
   transactional live migration;
 - the global host-aware plugin registry, locks, plans, journals, and backups;
-- `.agentrof/agent-marketplace/project.json` in the consuming project;
-- declared machine-owned fields in the team config;
-- the complete generated root instruction file for each installed host;
+- the nested `agent_marketplace` contract in `<workspace>/config.json` through
+  its canonical atomic writer;
+- `.github/agentrof/vault-gate.pyz` as the tracked portable gate;
+- both portable generated root instruction files, independent of which host is
+  installed on the current machine;
 - `<workspace>/memory/agent-marketplace.md` and the reserved absence of root
   `AGENTS.override.md`;
-- Agent Marketplace-owned native project-agent files.
+- Agent Marketplace-owned native project-agent files in the ignored local
+  projection.
 
 It never overwrites user code, authored documentation, the user-owned host
 companions, `me.md`, `profile.md`, nested AGENTS files, nested overrides,
@@ -84,6 +87,12 @@ companions, `me.md`, `profile.md`, nested AGENTS files, nested overrides,
 unmanaged collision. Config updates preserve unknown and user-owned keys.
 Project files have before-images in the journal and are restored if their phase
 fails.
+
+The root `/.agentrof/`, `/.codex/`, and `/.claude/` directories are ignored.
+Migration removes Marketplace-owned files below them from the index while
+preserving local bytes. Foreign tracked content requires an explicit preserve,
+discard, or abort choice, and index mode, stage, and blob before-images are
+journaled for rollback.
 
 Legacy marker-owned or unmanaged root instruction content requires an explicit
 `preserve`, `discard`, or `abort` choice before a plan can exist. Preserve moves

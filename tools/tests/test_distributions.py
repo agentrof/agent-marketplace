@@ -86,6 +86,38 @@ class DistributionContractTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "differs from"):
                 build_distributions.load_product_contract(root)
 
+    def test_paired_host_builds_share_exact_snapshot_identity(self):
+        identities = set()
+        for component in (
+            "project-management-office", "software-engineering-team",
+        ):
+            component_identities = set()
+            for host in build_distributions.HOSTS:
+                package = REPO / "dist" / host / component
+                provenance = json.loads((
+                    package / ".agent-marketplace-package.json"
+                ).read_text(encoding="utf-8"))
+                manifest = json.loads((
+                    package / f".{host}-plugin" / "plugin.json"
+                ).read_text(encoding="utf-8"))
+                snapshot = manifest["agent_marketplace"]
+                self.assertEqual(provenance["schema_version"], 2)
+                for key in (
+                    "build_id", "marketplace_release", "source_channel",
+                    "source_ref", "source_commit",
+                ):
+                    self.assertEqual(provenance[key], snapshot[key])
+                self.assertEqual(
+                    json.loads((package / "product.json").read_text(
+                        encoding="utf-8"
+                    )),
+                    build_distributions.load_product_contract(REPO),
+                )
+                component_identities.add(tuple(sorted(snapshot.items())))
+                identities.add(tuple(sorted(snapshot.items())))
+            self.assertEqual(len(component_identities), 1)
+        self.assertEqual(len(identities), 1)
+
     def test_every_team_receives_shared_runtime_and_pmo_registry(self):
         teams = sorted(
             path.name for path in (REPO / "plugins").iterdir()
@@ -297,10 +329,12 @@ class DistributionContractTests(unittest.TestCase):
                 for host in ("claude", "codex"):
                     target = REPO / "dist" / host / source.name / relative
                     self.assertTrue(target.is_file(), f"{host} lacks {relative}")
-                    if relative.as_posix() == "templates/gitignore" \
-                            and host == "claude":
-                        self.assertTrue(target.read_bytes().startswith(
-                            source_bytes.rstrip(b"\n")))
+                    if relative.as_posix() == "templates/gitignore":
+                        rendered = source_bytes.replace(
+                            b"{{project_local_ignores}}",
+                            b"/.agentrof/\n/.claude/\n/.codex/",
+                        )
+                        self.assertEqual(target.read_bytes(), rendered)
                         continue
                     if b"\0" not in source_bytes:
                         expected = source_bytes.replace(b"\r\n", b"\n").replace(
@@ -391,7 +425,7 @@ class CodexProjectGeneratorTests(unittest.TestCase):
             "work",
             choices={"codex.root.agents": "preserve"},
         )
-        self.assertEqual(len(written), 9)
+        self.assertEqual(len(written), 11)
         agents = self.project / ".codex" / "agents"
         architect = (agents / "architect.toml").read_text(encoding="utf-8")
         developer = (agents / "developer.toml").read_text(encoding="utf-8")
@@ -415,6 +449,49 @@ class CodexProjectGeneratorTests(unittest.TestCase):
         )
         self.assertNotIn("agent-marketplace:sample-team:codex:start", agents_md)
         self.assertEqual(generate.materialize(self.project, self.plugin, "work"), [])
+
+    def test_tracked_contract_is_dual_host_and_local_projection_is_isolated(self):
+        codex_tracked = generate.preview(
+            self.project, self.plugin, "workspace", scope="tracked"
+        )
+        claude_tracked = generate_claude.preview(
+            self.project, self.plugin, "workspace", scope="tracked"
+        )
+        self.assertEqual(
+            {
+                path.relative_to(self.project).as_posix(): content
+                for path, content in codex_tracked["changes"].items()
+            },
+            {
+                path.relative_to(self.project).as_posix(): content
+                for path, content in claude_tracked["changes"].items()
+            },
+        )
+        self.assertEqual(
+            codex_tracked["target_surfaces"],
+            claude_tracked["target_surfaces"],
+        )
+        self.assertIn("codex:AGENTS.md", codex_tracked["target_surfaces"])
+        self.assertIn("claude:CLAUDE.md", codex_tracked["target_surfaces"])
+
+        generate_claude.materialize(
+            self.project, self.plugin, "workspace", scope="tracked"
+        )
+        self.assertTrue((self.project / "AGENTS.md").is_file())
+        self.assertTrue((self.project / "CLAUDE.md").is_file())
+        self.assertFalse((self.project / ".codex").exists())
+        self.assertEqual(generate.materialize(
+            self.project, self.plugin, "workspace", scope="tracked"
+        ), [])
+
+        local = generate.materialize(
+            self.project, self.plugin, "workspace", scope="local"
+        )
+        self.assertEqual(len(local), 4)
+        self.assertTrue((self.project / ".codex" / "agents").is_dir())
+        self.assertEqual(generate_claude.materialize(
+            self.project, self.plugin, "workspace", scope="local"
+        ), [])
 
     def test_only_owned_stale_files_are_removed(self):
         generate.materialize(self.project, self.plugin, "workspace")

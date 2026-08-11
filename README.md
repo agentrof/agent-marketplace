@@ -93,13 +93,12 @@ Start a new task/session, open `/hooks`, inspect and trust Project Management
 Office and Software Engineering Team, and start another task if Codex asks for
 a reload. Then select
 `software-engineering-team:setup` in the App skill picker or CLI `/skills`
-picker (or invoke `$software-engineering-team:setup`). Setup generates the
-complete Agent Marketplace-owned `AGENTS.md`, seeds a user-owned
-`AGENTS.user.md` only when missing, and generates native `.codex/agents/*.toml`
-role definitions. The generated root asks Codex to read the companion on a
-best-effort basis; safety rules remain in the generated file, hooks, and
-validators. Those instructions and agents become discoverable at the next
-task/session boundary.
+picker (or invoke `$software-engineering-team:setup`). Setup generates both
+portable tracked roots, `AGENTS.md` and `CLAUDE.md`, and seeds their user-owned
+companions only when missing. On Codex it also generates native
+`.codex/agents/*.toml` role definitions as an ignored machine-local projection;
+Claude obtains agents from the installed plugin. Instructions and local
+projections become discoverable at the next task/session boundary.
 
 One delivery team owns a project. PMO is shared infrastructure, but setup
 refuses a second team's workspace or project-agent ownership before changing
@@ -174,10 +173,11 @@ sole blocker, writes a fingerprint-bound plan after approval, and asks again
 before apply. A successful run requires another fresh session so both hosts
 load the new hooks, skills, and project agents.
 
-The upgrader owns only PMO data, `.agentrof/agent-marketplace/project.json`, the
-installed hosts' complete generated root instruction files,
-`<workspace>/memory/agent-marketplace.md`, Agent Marketplace-owned project agent
-files, and declared machine-owned config fields. User companions, `me.md`,
+The upgrader owns only PMO data, the nested v5 `agent_marketplace` contract in
+`<workspace>/config.json`, both complete generated root instruction files,
+`<workspace>/memory/agent-marketplace.md`, the portable vault gate, and declared
+machine-owned config fields. Machine-local project-agent files are reconciled
+by setup under ignored roots. User companions, `me.md`,
 `profile.md`, nested instruction files, `CLAUDE.local.md`, code, authored docs,
 demos, sketches, secrets, environment files, and custom CI remain user-owned.
 See [Upgrade protocol](docs/upgrade-protocol.md) for the complete safety and
@@ -187,8 +187,10 @@ Agentrof owns the vendor root, while Agent Marketplace owns a product directory
 inside it. The default runtime path is `.agentrof/agent-marketplace` under the
 user's home directory.
 `AGENTROF_HOME` overrides the vendor root and `AGENT_MARKETPLACE_HOME` overrides
-the complete product path. PMO data is stored in `pmo.db`; project compatibility
-state is stored in `.agentrof/agent-marketplace/project.json`.
+the complete product path. PMO data is stored in `pmo.db`. Portable project
+compatibility state is tracked inside `<workspace>/config.json`; repository-local
+`.agentrof`, `.codex`, and `.claude` roots are ignored and reconciled
+independently on each machine.
 
 ## Repository map
 

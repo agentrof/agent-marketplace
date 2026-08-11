@@ -30,6 +30,45 @@ PATCH_CORPUS = json.loads((
 ).read_text(encoding="utf-8"))
 
 
+def initialize_contract_repo(root: Path, project_key: str = "shop") -> None:
+    (root / "workspace").mkdir(parents=True, exist_ok=True)
+    for command in (
+        ["git", "init", "-q"],
+        ["git", "config", "user.email", "runtime@example.test"],
+        ["git", "config", "user.name", "Runtime Tests"],
+    ):
+        subprocess.run(command, cwd=root, check=True)
+    contract = {
+        "schema_version": 1,
+        "contract_version": 5,
+        "project_id": "runtime-project",
+        "team_id": "software-engineering-team",
+        "workspace": "workspace",
+        "repository_fingerprint": "test",
+        "delivery": {"requires_pull_request": False,
+                     "target_branch": "master"},
+        "marketplace_release": "0.1.0",
+        "source_channel": "stable",
+        "source_ref": "v0.1.0",
+        "source_commit": "test",
+        "components": {},
+        "managed_surfaces": {},
+        "vault": {},
+        "upgrade_provenance": {},
+    }
+    contract["contract_sha256"] = hashlib.sha256(json.dumps(
+        contract, sort_keys=True, separators=(",", ":")
+    ).encode()).hexdigest()
+    (root / "workspace" / "config.json").write_text(json.dumps({
+        "project_key": project_key,
+        "agent_marketplace": contract,
+    }), encoding="utf-8")
+    subprocess.run(["git", "add", "."], cwd=root, check=True)
+    subprocess.run(
+        ["git", "commit", "-qm", "baseline"], cwd=root, check=True
+    )
+
+
 def load_vault_hook():
     if str(SET_SCRIPTS) not in sys.path:
         sys.path.append(str(SET_SCRIPTS))
@@ -762,9 +801,8 @@ class LifecycleInferenceTests(unittest.TestCase):
         self.home = root / "agentrof"
         self.env = {"AGENT_MARKETPLACE_HOME": str(self.home)}
         self.project_root = root / "proj"
-        (self.project_root / "workspace").mkdir(parents=True)
-        (self.project_root / "workspace" / "config.json").write_text(
-            json.dumps({"project_key": "shop"}), encoding="utf-8")
+        self.project_root.mkdir()
+        initialize_contract_repo(self.project_root)
         run_cli(["init-db"], self.env)
         run_cli(["project", "register", "--key", "shop"], self.env)
         backlog = root / "backlog.json"

@@ -344,13 +344,13 @@ class PreparationTests(unittest.TestCase):
             workspace.mkdir()
             config = workspace / "config.json"
             config.write_text(json.dumps({
-                "team_id": "software-engineering-team",
                 "project_key": "shop",
                 "project_origin": "unclassified",
+                "agent_marketplace": {
+                    "contract_version": 5,
+                    "team_id": "software-engineering-team",
+                },
             }), encoding="utf-8")
-            state = root / ".agentrof" / "agent-marketplace" / "project.json"
-            state.parent.mkdir(parents=True)
-            state.write_text("{}", encoding="utf-8")
             code, _, err = call(PROJECT_CONFIG, [
                 "set-origin", "--config", str(config), "--origin", "existing",
             ])
@@ -363,7 +363,9 @@ class PreparationTests(unittest.TestCase):
 
     def test_setup_preflight_and_closing_contract(self):
         with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp); workspace = root / "workspace"
+            root = Path(tmp)
+            subprocess.run(["git", "init", "-q"], cwd=root, check=True)
+            workspace = root / "workspace"
             workspace.mkdir()
             config = workspace / "config.json"
             config.write_text(json.dumps({
@@ -391,13 +393,38 @@ class PreparationTests(unittest.TestCase):
                 "graph.json", "types.json",
             ):
                 (payload / name).write_text("{}\n", encoding="utf-8")
-            state = root / ".agentrof" / "agent-marketplace" / "project.json"
-            state.parent.mkdir(parents=True)
-            state.write_text(json.dumps({
-                "contract_version": 4,
-                "hosts": ["codex"],
-                "managed_surfaces": {"codex:AGENTS.md": "sha256:test"},
-            }), encoding="utf-8")
+            value = json.loads(config.read_text(encoding="utf-8"))
+            value.pop("team_id", None)
+            contract = {
+                "schema_version": 1, "contract_version": 5,
+                "project_id": "setup-project",
+                "team_id": "software-engineering-team",
+                "workspace": "workspace",
+                "repository_fingerprint": "sha256:test",
+                "delivery": {"requires_pull_request": False,
+                             "target_branch": "master"},
+                "marketplace_release": "0.1.0",
+                "source_channel": "stable", "source_ref": "v0.1.0",
+                "source_commit": "test",
+                "components": {
+                    "project-management-office": {
+                        "version": "0.0.2", "build_id": "snapshot.test",
+                    },
+                    "software-engineering-team": {
+                        "version": "0.4.0", "build_id": "snapshot.test",
+                    },
+                },
+                "managed_surfaces": {
+                    "codex:AGENTS.md": "sha256:test",
+                    "claude:CLAUDE.md": "sha256:test",
+                },
+                "vault": {}, "upgrade_provenance": {},
+            }
+            contract["contract_sha256"] = hashlib.sha256(json.dumps(
+                contract, sort_keys=True, separators=(",", ":")
+            ).encode()).hexdigest()
+            value["agent_marketplace"] = contract
+            config.write_text(json.dumps(value), encoding="utf-8")
             self.assertEqual(call(VAULT_GATE, [
                 "install", "--project-root", str(root),
             ])[0], 0)
@@ -414,7 +441,7 @@ class PreparationTests(unittest.TestCase):
                 "preflight", "--project-root", str(root), "--json",
             ])
             self.assertEqual(code, 1)
-            self.assertIn("Upgrade", out)
+            self.assertIn("environment reconciliation", out)
 
     def test_portable_vault_gate_install_is_byte_idempotent(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -424,8 +451,7 @@ class PreparationTests(unittest.TestCase):
             (docs / "home.md").write_text("# Home\n", encoding="utf-8")
             argv = ["install", "--project-root", str(root)]
             self.assertEqual(call(VAULT_GATE, argv)[0], 0)
-            gate = (root / ".agentrof" / "agent-marketplace" / "checks"
-                    / "vault-gate.pyz")
+            gate = root / ".github" / "agentrof" / "vault-gate.pyz"
             first = gate.read_bytes()
             self.assertEqual(call(VAULT_GATE, argv)[0], 0)
             self.assertEqual(first, gate.read_bytes())

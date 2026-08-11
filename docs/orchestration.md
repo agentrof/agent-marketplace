@@ -73,9 +73,11 @@ Routes:
   the product owner's planning and the develop flow's step-1 architect
   read the landscape and decision log as inputs; built components stay
   within the configured stacks and stack changes route to configure.
-- **setup** is idempotent bootstrap (including the PMO prerequisite
-  check and project registration); **configure** is the single change
-  gate for the project config file.
+- **setup** is the idempotent public environment entry. It performs fresh
+  bootstrap and PMO registration when no contract exists, or reconciles a
+  clone's ignored runtime and host projection to tracked contract v5. Project
+  upgrade changes the tracked contract once; other machines attach locally.
+  **configure** is the single change gate for user-owned project settings.
 - **organize-docs** is the on-demand vault librarian: a full-width
   audit of the docs vault, an owner-gated rename batch and curation
   program, deterministic migration before judgment repairs, closing on

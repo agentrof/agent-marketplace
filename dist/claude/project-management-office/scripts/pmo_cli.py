@@ -34,7 +34,7 @@ import marketplace_paths
 import upgrade_core
 
 PMO_VERSION = "0.0.2"
-SCHEMA_VERSION = 5
+SCHEMA_VERSION = 6
 DB_NAME = "pmo.db"
 
 WO_STATUSES = {"running", "waiting_gate", "blocked", "escalated", "complete"}
@@ -340,9 +340,11 @@ CREATE TABLE IF NOT EXISTS experience_runs (
   release_key TEXT NOT NULL DEFAULT '',
   session_id TEXT NOT NULL DEFAULT '',
   status TEXT NOT NULL DEFAULT 'active'
-    CHECK (status IN ('active', 'released')),
+    CHECK (status IN ('active', 'released', 'abandoned')),
   created_at TEXT NOT NULL,
   released_at TEXT NOT NULL DEFAULT '',
+  abandoned_at TEXT NOT NULL DEFAULT '',
+  abandon_reason TEXT NOT NULL DEFAULT '',
   UNIQUE (project_id, run_key)
 );
 CREATE TABLE IF NOT EXISTS experience_node_claims (
@@ -621,6 +623,63 @@ def active_work_orders(con, project_id: int) -> list[sqlite3.Row]:
     ).fetchall()
 
 
+def order_bindings(order: sqlite3.Row) -> dict:
+    try:
+        value = json.loads(order["bindings_json"] or "{}")
+        return value if isinstance(value, dict) else {}
+    except json.JSONDecodeError:
+        return {}
+
+
+def reconcile_reservation(order: sqlite3.Row) -> dict:
+    marketplace = order_bindings(order).get("agent_marketplace", {})
+    reconcile = marketplace.get("reconcile", {}) \
+        if isinstance(marketplace, dict) else {}
+    return reconcile if isinstance(reconcile, dict) \
+        and reconcile.get("status") == "checkpointed" else {}
+
+
+def claiming_work_orders(con, project_id: int) -> list[sqlite3.Row]:
+    rows = con.execute(
+        "SELECT * FROM work_orders WHERE project_id = ?"
+        " AND status != 'complete' ORDER BY id", (project_id,),
+    ).fetchall()
+    return [
+        row for row in rows
+        if row["status"] in ACTIVE_WO_STATUSES or reconcile_reservation(row)
+    ]
+
+
+def worktree_contract_baseline(worktree: str) -> dict[str, str]:
+    root = upgrade_core.project_root(worktree)
+    workspace, config_path = upgrade_core.find_workspace(root)
+    if config_path is None:
+        raise Rule("work-order worktree has no tracked project contract")
+    config = upgrade_core.load_json(config_path, {})
+    try:
+        contract = upgrade_core.contract_from_config(config)
+    except upgrade_core.UpgradeError as exc:
+        raise Rule(str(exc)) from exc
+    if contract is None:
+        raise Rule("work-order worktree requires project contract v5")
+    return {
+        "contract_sha256": str(contract["contract_sha256"]),
+        "marketplace_release": str(contract.get("marketplace_release", "")),
+        "git_head": upgrade_core.run_git(root, "rev-parse", "HEAD").strip(),
+        "git_branch": upgrade_core.run_git(
+            root, "symbolic-ref", "--short", "-q", "HEAD"
+        ).strip(),
+        "workspace": workspace,
+    }
+
+
+def write_order_bindings(con, order: sqlite3.Row, bindings: dict) -> None:
+    con.execute(
+        "UPDATE work_orders SET bindings_json = ?, updated_at = ? WHERE id = ?",
+        (json.dumps(bindings, sort_keys=True), now(), order["id"]),
+    )
+
+
 def norm_path(path: str) -> str:
     """Canonicalize a worktree path so symlinked variants compare equal."""
     try:
@@ -750,7 +809,7 @@ def revalidate_claims(con, order) -> None:
         "SELECT role, path_prefix FROM ownership WHERE work_order_id = ?",
         (order["id"],),
     ).fetchall()
-    for other in active_work_orders(con, order["project_id"]):
+    for other in claiming_work_orders(con, order["project_id"]):
         if other["id"] == order["id"]:
             continue
         if other["worktree_path"] == order["worktree_path"]:
@@ -976,7 +1035,7 @@ def cmd_project_register(args) -> int:
         config_path = Path(args.stamp_config)
         config = stamped_config or {}
         config["project_key"] = args.key
-        config_path.write_text(json.dumps(config, indent=2) + "\n", encoding="utf-8")
+        upgrade_core.atomic_json(config_path, config, 0o644)
     if args.project_root:
         if not args.team:
             raise Rule("project contract initialization requires --team")
@@ -986,9 +1045,6 @@ def cmd_project_register(args) -> int:
             )
         except upgrade_core.UpgradeError as exc:
             raise Rule(str(exc)) from exc
-        state["project_key"] = args.key
-        state_path = Path(args.project_root).resolve() / upgrade_core.STATE_RELATIVE
-        upgrade_core.atomic_json(state_path, state, 0o644)
         with mutate(con):
             con.execute(
                 "UPDATE projects SET project_uuid = ?, repository_fingerprint = ?"
@@ -1018,6 +1074,154 @@ def cmd_project_list(args) -> int:
     return 0
 
 
+def cmd_project_environment_status(args) -> int:
+    try:
+        result = upgrade_core.environment_status(
+            data_dir(), db_path(), SCHEMA_VERSION, args.project_root
+        )
+    except upgrade_core.UpgradeError as exc:
+        raise Rule(str(exc)) from exc
+    if args.json:
+        print(json.dumps(result, indent=2, sort_keys=True))
+    else:
+        print(result["status"])
+        for value in result.get("reasons", []):
+            print(f"reason: {value}")
+        for value in result.get("blockers", []):
+            print(f"blocker: {value}")
+        for value in result.get("active_work", []):
+            print(
+                "active: {project} {type} {key} {worktree}".format(**value)
+            )
+    return 0 if result["status"] == upgrade_core.STATUS_CURRENT else 1
+
+
+def cmd_project_attach(args) -> int:
+    root = Path(args.project_root).resolve()
+    status = upgrade_core.environment_status(
+        data_dir(), db_path(), SCHEMA_VERSION, root
+    )
+    if status["status"] == upgrade_core.STATUS_CURRENT:
+        result = {**status, "mutation_performed": False}
+        print(json.dumps(result, indent=2, sort_keys=True) if args.json else result["status"])
+        return 0
+    if status["status"] != upgrade_core.STATUS_RECONCILE:
+        raise Rule(
+            f"project attach requires a reconcilable environment; current status "
+            f"is {status['status']}"
+        )
+    unsupported = [
+        value for value in status.get("reasons", [])
+        if not value.startswith((
+            "LOCAL_PROJECT_ATTACH_REQUIRED", "LOCAL_PROJECTION_DRIFT:",
+        ))
+    ]
+    if unsupported:
+        raise Rule(
+            "project attach cannot change installed components or database schema: "
+            + ", ".join(unsupported)
+        )
+    workspace, config_path = upgrade_core.find_workspace(root)
+    if workspace != args.workspace or config_path is None:
+        raise Rule("--workspace does not match the tracked project contract")
+    config = upgrade_core.load_json(config_path, {})
+    contract = upgrade_core.contract_from_config(config)
+    project_key = str(config.get("project_key", ""))
+    con = connect()
+    with mutate(con):
+        row = con.execute(
+            "SELECT * FROM projects WHERE project_key = ?", (project_key,)
+        ).fetchone()
+        identity = (
+            str(contract.get("project_id", "")),
+            str(contract.get("repository_fingerprint", "")),
+        )
+        if row is None:
+            con.execute(
+                "INSERT INTO projects"
+                " (project_key, name, created_at, project_uuid, repository_fingerprint)"
+                " VALUES (?, ?, ?, ?, ?)",
+                (project_key, project_key, now(), *identity),
+            )
+            row = get_project(con, project_key)
+        elif (str(row["project_uuid"]), str(row["repository_fingerprint"])) != identity:
+            raise Rule("local PMO project identity conflicts with the tracked contract")
+        team_id = str(contract.get("team_id", ""))
+        con.execute(
+            "INSERT OR IGNORE INTO teams (plugin_name, display_name) VALUES (?, ?)",
+            (team_id, team_id.replace("-", " ").title()),
+        )
+        team = con.execute(
+            "SELECT id FROM teams WHERE plugin_name = ?", (team_id,)
+        ).fetchone()
+        existing_teams = {
+            value["plugin_name"] for value in con.execute(
+                "SELECT t.plugin_name FROM project_teams pt"
+                " JOIN teams t ON t.id = pt.team_id WHERE pt.project_id = ?",
+                (row["id"],),
+            )
+        }
+        if existing_teams - {team_id}:
+            raise Rule("local PMO project is attached to another delivery team")
+        con.execute(
+            "INSERT OR IGNORE INTO project_teams (project_id, team_id) VALUES (?, ?)",
+            (row["id"], team["id"]),
+        )
+        record(
+            con, "project_environment_attached", project_id=row["id"],
+            payload={"contract_sha256": contract["contract_sha256"]},
+        )
+    registry = upgrade_core.normalize_registry(data_dir())
+    hosts = registry["plugins"].get(contract["team_id"], {}).get("hosts", {})
+    for host, entry in sorted(hosts.items()):
+        upgrade_core.run_adapter(
+            Path(entry["root"]), "apply", root, workspace, scope="local"
+        )
+    result = upgrade_core.environment_status(
+        data_dir(), db_path(), SCHEMA_VERSION, root
+    )
+    if result["status"] != upgrade_core.STATUS_CURRENT:
+        raise Rule(
+            "project attach did not converge: "
+            + ", ".join(result.get("reasons", []) + result.get("blockers", []))
+        )
+    result["mutation_performed"] = True
+    result["restart_required"] = True
+    print(json.dumps(result, indent=2, sort_keys=True) if args.json else result["status"])
+    return 0
+
+
+def cmd_project_activate_vault(args) -> int:
+    root = Path(args.project_root).resolve()
+    workspace, config_path = upgrade_core.find_workspace(root)
+    if config_path is None or workspace != args.workspace:
+        raise Rule("vault activation workspace does not match project contract")
+    config = upgrade_core.load_json(config_path, {})
+    contract = upgrade_core.contract_from_config(config)
+    project_key = str(config.get("project_key", ""))
+    con = connect()
+    project = get_project(con, project_key)
+    original = config_path.read_bytes()
+    candidate = dict(contract)
+    candidate["vault"] = {
+        "root": f"{workspace}/docs", "policy_version": args.policy_version,
+        "status": "active", "adoption_plan_hash": args.plan_hash,
+    }
+    try:
+        with mutate(con):
+            upgrade_core.write_project_contract(config_path, config, candidate)
+            record(
+                con, "vault_adoption_activated", project_id=project["id"],
+                payload={"plan_hash": args.plan_hash,
+                         "policy_version": args.policy_version},
+            )
+    except Exception:
+        upgrade_core.atomic_bytes(config_path, original, 0o644)
+        raise
+    print(json.dumps(candidate["vault"], indent=2, sort_keys=True))
+    return 0
+
+
 def cmd_project_classify_origin(args) -> int:
     """Classify project origin while keeping the contract fingerprint aligned.
 
@@ -1031,34 +1235,25 @@ def cmd_project_classify_origin(args) -> int:
         root / args.workspace / "config.json"
     )
     try:
-        config_relative = upgrade_core.safe_relative(root, config_path)
+        upgrade_core.safe_relative(root, config_path)
     except upgrade_core.UpgradeError as exc:
         raise Rule(str(exc)) from exc
-    state_path = root / upgrade_core.STATE_RELATIVE
-    if not config_path.is_file() or not state_path.is_file():
+    if not config_path.is_file():
         raise Rule("origin classification requires config and project contract state")
     try:
         config = upgrade_core.load_json(config_path, {})
-        state = upgrade_core.load_json(state_path, {})
+        state = upgrade_core.contract_from_config(config)
     except upgrade_core.UpgradeError as exc:
         raise Rule(str(exc)) from exc
     if not isinstance(config, dict) or not isinstance(state, dict):
         raise Rule("project config and contract state must be JSON objects")
     if config.get("project_key") != args.project_key:
         raise Rule("project config key does not match --project-key")
-    if state.get("project_key") != args.project_key:
-        raise Rule("project contract key does not match --project-key")
     if state.get("contract_version") != upgrade_core.PROJECT_CONTRACT_VERSION:
         raise Rule("project contract must be upgraded before origin classification")
     current = str(config.get("project_origin", ""))
     if current not in {"unclassified", "greenfield", "existing"}:
         raise Rule("current project_origin is invalid")
-
-    surface_key = config_relative + "#agent-marketplace"
-    expected_digest = state.get("managed_surfaces", {}).get(surface_key, "")
-    actual_digest = upgrade_core.config_owned_digest(config)
-    if expected_digest and expected_digest != actual_digest:
-        raise Rule("managed config drift must be resolved before origin classification")
 
     con = connect()
     project = get_project(con, args.project_key)
@@ -1092,18 +1287,15 @@ def cmd_project_classify_origin(args) -> int:
         return 0
 
     original_config = config_path.read_bytes()
-    original_state = state_path.read_bytes()
     candidate_config = dict(config)
     candidate_config["project_origin"] = args.origin
     candidate_state = dict(state)
     candidate_state["project_origin"] = args.origin
-    candidate_surfaces = dict(state.get("managed_surfaces", {}))
-    candidate_surfaces[surface_key] = upgrade_core.config_owned_digest(candidate_config)
-    candidate_state["managed_surfaces"] = candidate_surfaces
     try:
         with mutate(con):
-            upgrade_core.atomic_json(config_path, candidate_config, 0o644)
-            upgrade_core.atomic_json(state_path, candidate_state, 0o644)
+            upgrade_core.write_project_contract(
+                config_path, candidate_config, candidate_state
+            )
             record(
                 con,
                 "project_origin_classified",
@@ -1112,7 +1304,6 @@ def cmd_project_classify_origin(args) -> int:
             )
     except Exception:
         upgrade_core.atomic_bytes(config_path, original_config, 0o644)
-        upgrade_core.atomic_bytes(state_path, original_state, 0o644)
         raise
     print(f"pmo: project_origin={args.origin}")
     return 0
@@ -1148,9 +1339,19 @@ def cmd_wo_init(args) -> int:
         raise Rule("--brief must name an analysis-space directory")
     con = connect()
     worktree = norm_path(args.worktree)
+    try:
+        bindings = json.loads(args.bindings or "{}")
+    except json.JSONDecodeError as exc:
+        raise Rule(f"--bindings is not valid JSON: {exc}") from exc
+    if not isinstance(bindings, dict):
+        raise Rule("--bindings must be a JSON object")
+    marketplace = bindings.setdefault("agent_marketplace", {})
+    if not isinstance(marketplace, dict):
+        raise Rule("bindings.agent_marketplace must be an object")
+    marketplace["baseline"] = worktree_contract_baseline(worktree)
     with mutate(con):
         project = get_project(con, args.project_key)
-        for order in active_work_orders(con, project["id"]):
+        for order in claiming_work_orders(con, project["id"]):
             if order["worktree_path"] == worktree:
                 raise Rule(
                     f"active work order '{order['work_order_key']}' already holds"
@@ -1170,11 +1371,10 @@ def cmd_wo_init(args) -> int:
                 raise Rule("managed story belongs to a release that is not active")
             if membership is not None and story["status"] != "ready":
                 raise Rule("managed story must be ready before a work order can claim it")
-            claimed = con.execute(
-                "SELECT work_order_key FROM work_orders WHERE story_id = ?"
-                " AND status IN (?, ?)",
-                (story["id"], *ACTIVE_WO_STATUSES),
-            ).fetchone()
+            claimed = next((
+                order for order in claiming_work_orders(con, project["id"])
+                if order["story_id"] == story["id"]
+            ), None)
             if claimed:
                 raise Rule(
                     f"story '{args.story}' is already claimed by active work order"
@@ -1191,7 +1391,7 @@ def cmd_wo_init(args) -> int:
             " status, current_step, worktree_path, bindings_json, created_at,"
             " updated_at) VALUES (?, ?, ?, ?, 'running', '0', ?, ?, ?, ?)",
             (project["id"], story_id, args.work_order_key, args.request, worktree,
-             args.bindings or "{}", now(), now()),
+             json.dumps(bindings, sort_keys=True), now(), now()),
         )
         order = get_work_order(con, args.work_order_key)
         if story_id is not None:
@@ -1212,7 +1412,8 @@ def cmd_wo_init(args) -> int:
         record(con, "work_order_initialized", project_id=project["id"],
                work_order_id=order["id"],
                payload={"work_order_key": args.work_order_key,
-                        "story": args.story or "", "worktree": worktree})
+                        "story": args.story or "", "worktree": worktree,
+                        "contract_sha256": marketplace["baseline"]["contract_sha256"]})
     if args.order_dir:
         order_dir = Path(args.order_dir)
         order_dir.mkdir(parents=True, exist_ok=True)
@@ -1343,7 +1544,7 @@ def cmd_wo_set_ownership(args) -> int:
                         f"ownership overlap inside the work order: {role_a}:{path_a}"
                         f" overlaps {role_b}:{path_b}"
                     )
-        for other in active_work_orders(con, order["project_id"]):
+        for other in claiming_work_orders(con, order["project_id"]):
             if other["id"] == order["id"]:
                 continue
             for row in con.execute(
@@ -1440,10 +1641,192 @@ def cmd_wo_set_status(args) -> int:
     return 0
 
 
+def cmd_wo_checkpoint_reconcile(args) -> int:
+    con = connect()
+    with mutate(con):
+        order = get_work_order(con, args.work_order_key)
+        require_cwd_inside(order)
+        if order["status"] not in ACTIVE_WO_STATUSES:
+            raise Rule("reconcile checkpoint requires an active work order")
+        bindings = order_bindings(order)
+        marketplace = bindings.get("agent_marketplace", {})
+        baseline = marketplace.get("baseline", {}) \
+            if isinstance(marketplace, dict) else {}
+        current = worktree_contract_baseline(order["worktree_path"])
+        if baseline.get("contract_sha256") != current["contract_sha256"]:
+            raise Rule(
+                "ACTIVE_WORK_CONTRACT_MOVED: worktree contract differs from the"
+                f" work-order baseline; baseline={baseline.get('contract_sha256', '')}"
+                f" current={current['contract_sha256']} branch={current['git_branch']}"
+                f" head={current['git_head']}"
+            )
+        running = con.execute(
+            "SELECT i.external_id FROM task_attempts a"
+            " JOIN work_items i ON i.id = a.task_id"
+            " WHERE i.work_order_id = ? AND a.outcome = 'running' ORDER BY a.id",
+            (order["id"],),
+        ).fetchall()
+        if running:
+            raise Rule(
+                "reconcile checkpoint requires all task attempts closed: "
+                + ", ".join(row["external_id"] for row in running)
+            )
+        incomplete = [
+            row["step_id"] for row in con.execute(
+                "SELECT step_id FROM work_order_steps WHERE work_order_id = ?"
+                " AND step_id IN ('0','1','2','3','4') AND status != 'done'"
+                " ORDER BY step_id", (order["id"],),
+            )
+        ]
+        if incomplete:
+            raise Rule(
+                "reconcile checkpoint requires steps 0 through 4 done: "
+                + ", ".join(incomplete)
+            )
+        open_findings = [
+            row["external_id"] for row in con.execute(
+                "SELECT external_id FROM findings WHERE work_order_id = ?"
+                " AND status = 'open' ORDER BY external_id", (order["id"],),
+            )
+        ]
+        if open_findings:
+            raise Rule(
+                "reconcile checkpoint requires all findings closed: "
+                + ", ".join(open_findings)
+            )
+        root = Path(order["worktree_path"])
+        if upgrade_core.run_git(
+            root, "status", "--porcelain=v1", "--untracked-files=all"
+        ).strip():
+            raise Rule("reconcile checkpoint requires a clean worktree")
+        marketplace["reconcile"] = {
+            "status": "checkpointed", "checkpointed_at": now(),
+            "contract_sha256": current["contract_sha256"],
+            "marketplace_release": current["marketplace_release"],
+            "git_branch": current["git_branch"], "git_head": current["git_head"],
+            "reservation": True,
+        }
+        bindings["agent_marketplace"] = marketplace
+        write_order_bindings(con, order, bindings)
+        con.execute(
+            "UPDATE work_orders SET status = 'blocked', updated_at = ? WHERE id = ?",
+            (now(), order["id"]),
+        )
+        record(
+            con, "work_order_reconcile_checkpointed",
+            project_id=order["project_id"], work_order_id=order["id"],
+            payload=marketplace["reconcile"],
+        )
+    print(f"pmo: work order '{args.work_order_key}' checkpointed for reconciliation")
+    return 0
+
+
+def cmd_wo_resume_reconcile(args) -> int:
+    con = connect()
+    order = get_work_order(con, args.work_order_key)
+    require_cwd_inside(order)
+    checkpoint = reconcile_reservation(order)
+    if not checkpoint or order["status"] != "blocked":
+        raise Rule("work order has no reconcile checkpoint reservation")
+    root = Path(order["worktree_path"])
+    environment = upgrade_core.environment_status(
+        data_dir(), db_path(), SCHEMA_VERSION, root
+    )
+    if environment["status"] != upgrade_core.STATUS_CURRENT:
+        raise Rule(
+            "work order cannot resume before environment reconciliation: "
+            + environment["status"]
+        )
+    with mutate(con):
+        order = get_work_order(con, args.work_order_key)
+        require_cwd_inside(order)
+        checkpoint = reconcile_reservation(order)
+        if not checkpoint or order["status"] != "blocked":
+            raise Rule("work order has no reconcile checkpoint reservation")
+        root = Path(order["worktree_path"])
+        current = worktree_contract_baseline(order["worktree_path"])
+        if current["git_branch"] != checkpoint.get("git_branch"):
+            raise Rule("work-order branch changed after reconcile checkpoint")
+        if upgrade_core.run_git(
+            root, "status", "--porcelain=v1", "--untracked-files=all"
+        ).strip():
+            raise Rule("resume-reconcile requires a clean worktree")
+        delivery = upgrade_core.repository_delivery(root)
+        target = str(delivery.get("target_branch", ""))
+        if target:
+            ancestor = subprocess.run(
+                ["git", "merge-base", "--is-ancestor", target, "HEAD"],
+                cwd=root, check=False,
+            )
+            if ancestor.returncode != 0:
+                raise Rule(
+                    f"work-order branch must contain current default branch {target}"
+                )
+        revalidate_claims(con, order)
+        con.execute(
+            "UPDATE work_order_steps SET status = 'in_progress'"
+            " WHERE work_order_id = ? AND step_id = '4'", (order["id"],),
+        )
+        con.execute(
+            "UPDATE work_order_steps SET status = 'pending'"
+            " WHERE work_order_id = ? AND step_id = '5'", (order["id"],),
+        )
+        con.execute(
+            "DELETE FROM gates WHERE work_order_id = ? AND name = 'delivery'",
+            (order["id"],),
+        )
+        if order["story_id"] is not None:
+            con.execute(
+                "UPDATE dod_items SET status = 'pending', verified_at = '',"
+                " failure_reason = '', updated_at = ? WHERE item_id = ?",
+                (now(), order["story_id"]),
+            )
+        bindings = order_bindings(order)
+        marketplace = bindings["agent_marketplace"]
+        marketplace["reconcile"] = {
+            **checkpoint, "status": "resumed", "reservation": False,
+            "resumed_at": now(), "resumed_contract_sha256": current["contract_sha256"],
+            "resumed_git_head": current["git_head"],
+        }
+        write_order_bindings(con, order, bindings)
+        con.execute(
+            "UPDATE work_orders SET status = 'running', current_step = '4',"
+            " updated_at = ? WHERE id = ?", (now(), order["id"]),
+        )
+        record(
+            con, "work_order_reconcile_resumed", project_id=order["project_id"],
+            work_order_id=order["id"], payload=marketplace["reconcile"],
+        )
+    print(f"pmo: work order '{args.work_order_key}' resumed at step 4")
+    return 0
+
+
 def cmd_wo_release(args) -> int:
     con = connect()
     with mutate(con):
         order = get_work_order(con, args.work_order_key)
+        checkpoint = reconcile_reservation(order)
+        if checkpoint and not args.confirm_reconcile_release:
+            raise Rule(
+                "reconcile-checkpointed work order retains its reservation;"
+                " rerun with --confirm-reconcile-release after explicit owner choice"
+            )
+        if checkpoint:
+            bindings = order_bindings(order)
+            reconcile = bindings["agent_marketplace"]["reconcile"]
+            reconcile.update({
+                "status": "released", "reservation": False, "released_at": now(),
+            })
+            write_order_bindings(con, order, bindings)
+            record(
+                con, "work_order_reconcile_reservation_released",
+                project_id=order["project_id"], work_order_id=order["id"],
+                payload={"checkpoint_head": checkpoint.get("git_head", "")},
+            )
+            print(
+                f"pmo: work order '{args.work_order_key}' reconcile reservation released"
+            )
+            return 0
         if order["status"] in ACTIVE_WO_STATUSES:
             con.execute(
                 "UPDATE work_orders SET status = 'blocked', updated_at = ?"
@@ -2835,13 +3218,39 @@ def cmd_sync_launcher(args) -> int:
     bin_dir.mkdir(parents=True, exist_ok=True)
     target = bin_dir / "pmo_cli.py"
     version_file = bin_dir / "VERSION"
-    current = version_file.read_text(encoding="utf-8").strip() if version_file.is_file() else ""
-    if current == PMO_VERSION and target.is_file() and not args.force:
+    identity_file = data_dir() / "launcher.json"
+    source = Path(__file__).resolve()
+    package_root = source.parent.parent
+    source_manifest = next(iter(sorted(package_root.glob(".*-plugin/plugin.json"))), None)
+    snapshot = {}
+    if source_manifest is not None:
+        try:
+            manifest = json.loads(source_manifest.read_text(encoding="utf-8"))
+            snapshot = manifest.get("agent_marketplace", {})
+        except (OSError, json.JSONDecodeError):
+            snapshot = {}
+    if not isinstance(snapshot, dict):
+        snapshot = {}
+    source_identity = {
+        "version": PMO_VERSION,
+        "build_id": str(snapshot.get("build_id", "")),
+    }
+    current_identity = upgrade_core.load_json(identity_file, {})
+    if source == target and source_manifest is None \
+            and isinstance(current_identity, dict):
+        source_identity = current_identity
+    product_source = package_root / "product.json"
+    product_target = data_dir() / "product.json"
+    product_current = product_target.read_bytes() if product_target.is_file() else None
+    product_wanted = product_source.read_bytes() if product_source.is_file() else None
+    if current_identity == source_identity and target.is_file() \
+            and product_current == product_wanted and not args.force:
         print(f"pmo: launcher already at version {PMO_VERSION}")
         return 0
-    source = Path(__file__).resolve()
     if source != target:
         shutil.copyfile(source, target)
+    if product_wanted is not None and product_current != product_wanted:
+        upgrade_core.atomic_bytes(product_target, product_wanted, 0o644)
     module_src, index_src = dashboard_assets()
     if module_src.is_file() and module_src != bin_dir / "pmo_dashboard.py":
         shutil.copyfile(module_src, bin_dir / "pmo_dashboard.py")
@@ -2861,6 +3270,7 @@ def cmd_sync_launcher(args) -> int:
             index_dst.parent.mkdir(parents=True, exist_ok=True)
             shutil.copyfile(index_src, index_dst)
     version_file.write_text(PMO_VERSION + "\n", encoding="utf-8")
+    upgrade_core.atomic_json(identity_file, source_identity, 0o600)
     print(f"pmo: launcher synced to {target} (version {PMO_VERSION})")
     return 0
 
@@ -3262,6 +3672,31 @@ def cmd_experience_run_release(args) -> int:
             raise Rule("experience run gates are incomplete: " + ", ".join(missing))
         con.execute("UPDATE experience_runs SET status = 'released', released_at = ? WHERE id = ?", (now(), run["id"]))
         record(con, "experience_run_released", project_id=run["project_id"], payload={"run": args.run_key})
+    return 0
+
+
+def cmd_experience_run_abandon(args) -> int:
+    con = connect()
+    with mutate(con):
+        run = con.execute(
+            "SELECT * FROM experience_runs WHERE run_key = ?", (args.run_key,)
+        ).fetchone()
+        if run is None:
+            raise Rule("unknown experience run")
+        if run["status"] != "active":
+            raise Rule("only an active experience run can be abandoned")
+        reason = args.reason.strip()
+        if not reason:
+            raise Rule("experience run abandonment requires a reason")
+        con.execute(
+            "UPDATE experience_runs SET status = 'abandoned', abandoned_at = ?,"
+            " abandon_reason = ? WHERE id = ?", (now(), reason, run["id"]),
+        )
+        record(
+            con, "experience_run_abandoned", project_id=run["project_id"],
+            payload={"run": args.run_key, "reason": reason},
+        )
+    print(f"pmo: experience run '{args.run_key}' abandoned")
     return 0
 
 
@@ -3742,6 +4177,21 @@ def build_parser() -> argparse.ArgumentParser:
     p = project.add_parser("list")
     p.add_argument("--json", action="store_true")
     p.set_defaults(func=cmd_project_list)
+    p = project.add_parser("environment-status")
+    p.add_argument("--project-root", required=True)
+    p.add_argument("--json", action="store_true")
+    p.set_defaults(func=cmd_project_environment_status)
+    p = project.add_parser("attach")
+    p.add_argument("--project-root", required=True)
+    p.add_argument("--workspace", required=True)
+    p.add_argument("--json", action="store_true")
+    p.set_defaults(func=cmd_project_attach)
+    p = project.add_parser("activate-vault")
+    p.add_argument("--project-root", required=True)
+    p.add_argument("--workspace", required=True)
+    p.add_argument("--plan-hash", required=True)
+    p.add_argument("--policy-version", type=int, required=True)
+    p.set_defaults(func=cmd_project_activate_vault)
     p = project.add_parser("classify-origin")
     p.add_argument("--project-key", required=True)
     p.add_argument("--project-root", required=True)
@@ -3770,6 +4220,18 @@ def build_parser() -> argparse.ArgumentParser:
     p = experience.add_parser("status"); p.add_argument("--project-key", required=True); p.add_argument("--run-key", default=""); p.set_defaults(func=cmd_experience_run_status)
     p = experience.add_parser("record-gate"); p.add_argument("--run-key", required=True); p.add_argument("--gate", required=True); p.add_argument("--decision", required=True, choices=["approved", "rejected"]); p.add_argument("--revision-hash", required=True); p.add_argument("--decided-by", default="owner"); p.set_defaults(func=cmd_experience_run_gate)
     p = experience.add_parser("release"); p.add_argument("--run-key", required=True); p.set_defaults(func=cmd_experience_run_release)
+    p = experience.add_parser("abandon"); p.add_argument("--run-key", required=True); p.add_argument("--reason", required=True); p.set_defaults(func=cmd_experience_run_abandon)
+
+    experience_group = sub.add_parser("experience").add_subparsers(
+        dest="experience_command", required=True
+    )
+    experience_run = experience_group.add_parser("run").add_subparsers(
+        dest="experience_run_command", required=True
+    )
+    p = experience_run.add_parser("abandon")
+    p.add_argument("--run-key", required=True)
+    p.add_argument("--reason", required=True)
+    p.set_defaults(func=cmd_experience_run_abandon)
 
     backlog = sub.add_parser("backlog-plan").add_subparsers(dest="subcommand", required=True)
     p = backlog.add_parser("init"); p.add_argument("--project-key", required=True); p.add_argument("--plan-key", required=True); p.add_argument("--program", required=True); p.add_argument("--mode", required=True, choices=["baseline", "replan", "feature"]); p.add_argument("--plan-file", required=True); p.add_argument("--session-id", default=""); p.set_defaults(func=cmd_backlog_plan_init)
@@ -3829,7 +4291,14 @@ def build_parser() -> argparse.ArgumentParser:
     p.set_defaults(func=cmd_wo_set_status)
     p = wo.add_parser("release")
     p.add_argument("--work-order-key", required=True)
+    p.add_argument("--confirm-reconcile-release", action="store_true")
     p.set_defaults(func=cmd_wo_release)
+    p = wo.add_parser("checkpoint-reconcile")
+    p.add_argument("--work-order-key", required=True)
+    p.set_defaults(func=cmd_wo_checkpoint_reconcile)
+    p = wo.add_parser("resume-reconcile")
+    p.add_argument("--work-order-key", required=True)
+    p.set_defaults(func=cmd_wo_resume_reconcile)
     p = wo.add_parser("validate")
     p.add_argument("--work-order-key", required=True)
     p.set_defaults(func=cmd_wo_validate)

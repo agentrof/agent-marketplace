@@ -98,6 +98,10 @@ PROPOSE before ending the cycle.
   ../<project-dir>-wp-<nn> <default-branch> (detached, because the
   default branch is checked out here; develop step 0 creates the story
   branch inside the lane).
+- Before recording the event or printing the handoff, run PMO `project
+  attach --project-root ../<project-dir>-wp-<nn> --workspace <workspace>
+  --json` and require `AGENT_MARKETPLACE_CURRENT`. A deferred or failed
+  attach closes no state and the lane is not handed off.
 - Record the advisory audit line: event append --action lane_opened
   --payload '{"story": "WP-<nn>", "worktree": "<path>"}'.
 - Print the handoff, verbatim shape:

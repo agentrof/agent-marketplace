@@ -49,7 +49,9 @@ def workspace_for(project_root: Path) -> Path:
                 (workspace / "config.json").read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError):
             continue
-        if config.get("team_id") == "software-engineering-team":
+        contract = config.get("agent_marketplace", {})
+        owner = contract.get("team_id", "") if isinstance(contract, dict) else ""
+        if (owner or config.get("team_id")) == "software-engineering-team":
             return workspace
     return project_root / "workspace"
 
@@ -114,8 +116,9 @@ def cmd_check(args) -> int:
 
 def cmd_install(args) -> int:
     root = package_root()
-    destination = (args.project_root.resolve() / ".agentrof"
-                   / "agent-marketplace" / "checks" / "vault-gate.pyz")
+    destination = (
+        args.project_root.resolve() / ".github" / "agentrof" / "vault-gate.pyz"
+    )
     destination.parent.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(prefix="vault-gate-build-") as temporary:
         staging = Path(temporary)

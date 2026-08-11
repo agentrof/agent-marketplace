@@ -4,6 +4,7 @@ catalog scan, HTTP adapter headers, and failure-mode responses."""
 from __future__ import annotations
 
 import concurrent.futures
+import hashlib
 import io
 import importlib.util
 import json
@@ -27,10 +28,11 @@ def load(name: str):
     return module
 
 
-def cli(argv, env):
+def cli(argv, env, cwd=None):
     proc = subprocess.run(
         [sys.executable, str(SCRIPTS / "pmo_cli.py"), *argv],
-        capture_output=True, text=True, env={**os.environ, **env},
+        capture_output=True, text=True, cwd=cwd,
+        env={**os.environ, **env},
     )
     return proc.returncode, proc.stdout, proc.stderr
 
@@ -48,6 +50,37 @@ class PmoDashboardTests(unittest.TestCase):
         cls._old_plugins = os.environ.get("AGENT_MARKETPLACE_CLAUDE_PLUGINS_DIR")
         os.environ["AGENT_MARKETPLACE_HOME"] = cls.home
         env = {"AGENT_MARKETPLACE_HOME": cls.home}
+        project_root = root / "project"
+        (project_root / "workspace").mkdir(parents=True)
+        for command in (
+            ["git", "init", "-q"],
+            ["git", "config", "user.email", "dashboard@example.test"],
+            ["git", "config", "user.name", "Dashboard Tests"],
+        ):
+            subprocess.run(command, cwd=project_root, check=True)
+        contract = {
+            "schema_version": 1, "contract_version": 5,
+            "project_id": "dashboard-project",
+            "team_id": "software-engineering-team",
+            "workspace": "workspace", "repository_fingerprint": "test",
+            "delivery": {"requires_pull_request": False,
+                         "target_branch": "master"},
+            "marketplace_release": "0.1.0", "source_channel": "stable",
+            "source_ref": "v0.1.0", "source_commit": "test",
+            "components": {}, "managed_surfaces": {}, "vault": {},
+            "upgrade_provenance": {},
+        }
+        contract["contract_sha256"] = hashlib.sha256(json.dumps(
+            contract, sort_keys=True, separators=(",", ":")
+        ).encode()).hexdigest()
+        (project_root / "workspace" / "config.json").write_text(json.dumps({
+            "project_key": "shop", "agent_marketplace": contract,
+        }), encoding="utf-8")
+        subprocess.run(["git", "add", "."], cwd=project_root, check=True)
+        subprocess.run(
+            ["git", "commit", "-qm", "baseline"],
+            cwd=project_root, check=True,
+        )
 
         code, _, err = cli(["init-db"], env)
         assert code == 0, err
@@ -76,19 +109,22 @@ class PmoDashboardTests(unittest.TestCase):
         # worktree, so the seed claims the test runner's own directory
         cli(["work-order", "init", "--project-key", "shop",
              "--work-order-key", "wo1", "--request", "build",
-             "--worktree", os.getcwd(), "--story", "WP-01"], env)
+             "--worktree", str(project_root), "--story", "WP-01"], env,
+            cwd=project_root)
         cli(["work-order", "set-step", "--work-order-key", "wo1",
-             "--step", "0", "--status", "done"], env)
+             "--step", "0", "--status", "done"], env, cwd=project_root)
         cli(["task", "touch", "--project-key", "shop",
              "--role", "backend_developer", "--phase", "start",
              "--session-id", "s1",
-             "--agent", "backend-developer"], env)
+             "--agent", "backend-developer"], env, cwd=project_root)
         cli(["task", "touch", "--project-key", "shop",
              "--role", "backend_developer", "--phase", "stop",
-             "--cost-usd", "0.42"], env)
+             "--cost-usd", "0.42"], env, cwd=project_root)
         cli(["finding", "open", "--work-order-key", "wo1", "--source", "review",
-             "--severity", "high", "--summary", "bug one"], env)
-        cli(["ledger", "checkpoint", "--work-order-key", "wo1"], env)
+             "--severity", "high", "--summary", "bug one"], env,
+            cwd=project_root)
+        cli(["ledger", "checkpoint", "--work-order-key", "wo1"], env,
+            cwd=project_root)
 
         # a fake Claude plugin registry for the catalog scan
         plugins = root / "plugins"

@@ -2382,15 +2382,25 @@ def cmd_adoption_plan(args, policy: dict) -> int:
 
 def cmd_activate_adoption(args, policy: dict) -> int:
     root = args.project_root.resolve()
-    state_path = root / ".agentrof" / "agent-marketplace" / "project.json"
+    candidates = sorted(root.glob("*/config.json"))
     try:
-        state = json.loads(state_path.read_text(encoding="utf-8"))
+        config_path = next(
+            path for path in candidates
+            if isinstance(json.loads(path.read_text(encoding="utf-8")).get(
+                "agent_marketplace"
+            ), dict)
+        )
+        config = json.loads(config_path.read_text(encoding="utf-8"))
+        state = config["agent_marketplace"]
     except (OSError, json.JSONDecodeError) as exc:
         print(f"vault_check: project contract is unreadable: {exc}",
               file=sys.stderr)
         return 2
-    if state.get("contract_version") != 4:
-        print("vault_check: project contract version 4 is required",
+    except StopIteration:
+        print("vault_check: project contract is missing", file=sys.stderr)
+        return 2
+    if state.get("contract_version") != 5:
+        print("vault_check: project contract version 5 is required",
               file=sys.stderr)
         return 2
     workspace = str(state.get("workspace", "workspace"))
@@ -2424,18 +2434,14 @@ def cmd_activate_adoption(args, policy: dict) -> int:
         print("vault_check: adoption findings must be resolved before activation",
               file=sys.stderr)
         return 1
-    state["vault"] = {
-        "root": f"{workspace}/docs",
-        "policy_version": effective.get("schema_version"),
-        "status": "active",
-        "adoption_plan_hash": args.plan_hash,
-    }
-    temporary = state_path.with_name(state_path.name + ".tmp")
-    temporary.write_text(json.dumps(state, indent=2, sort_keys=True) + "\n",
-                         encoding="utf-8")
-    temporary.replace(state_path)
-    print(json.dumps(state["vault"], indent=2, sort_keys=True))
-    return 0
+    launcher = marketplace_paths.marketplace_home() / "bin" / "pmo_cli.py"
+    completed = subprocess.run([
+        sys.executable, str(launcher), "project", "activate-vault",
+        "--project-root", str(root), "--workspace", workspace,
+        "--plan-hash", args.plan_hash, "--policy-version",
+        str(effective.get("schema_version")),
+    ], check=False)
+    return completed.returncode
 
 
 def restamp(note_path: Path, stamps: dict[str, str],

@@ -8,6 +8,7 @@ The learned profile of this user, derived from prompts, feedback, and requests a
 - An assessment is expected before acting; requests to think, evaluate and give a view recur. Reasoned opinion beats compliance.
 - Plans and exact content are reviewed before writing. Nothing ships unshown.
 - Structure and modularity matter. Single entry point, chained files, no duplication. Architecture gets corrected fast.
+- A capability spanning supported platforms is incomplete until behavior, adapters, generated artifacts, and acceptance tests stay in parity across every platform.
 - External evidence is valued. Research and sources beat invention.
 - Verbatim vs interpreted is specified per case. Read which is wanted before acting.
 - Tone and framing are corrected deliberately. Voice precision matters.

@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import re
@@ -122,7 +123,9 @@ def configured_team(project_root: Path, workspace: str) -> str:
     config = project_root / workspace / "config.json"
     try:
         data = json.loads(config.read_text(encoding="utf-8"))
-        value = data.get("team_id") or data.get("managed_by", "")
+        contract = data.get("agent_marketplace", {})
+        value = contract.get("team_id", "") if isinstance(contract, dict) else ""
+        value = value or data.get("team_id") or data.get("managed_by", "")
         value = str(value)
         suffix = " plugin; change only through the configure entry"
         return value[:-len(suffix)] if value.endswith(suffix) else value
@@ -139,7 +142,10 @@ def preview(
     *,
     choices: dict[str, str] | None = None,
     seed_user_files: bool = False,
+    scope: str = "all",
 ) -> dict:
+    if scope not in {"all", "tracked", "local"}:
+        raise ValueError(f"unsupported project generation scope: {scope}")
     project_instructions.validate_workspace(workspace)
     team = plugin_name(plugin_root)
     configured = configured_team(project_root, workspace)
@@ -147,11 +153,12 @@ def preview(
         raise ValueError(
             f"project is managed by team {configured!r}; only one delivery team may own it"
         )
-    rendered = render_agents(plugin_root, team)
+    rendered = render_agents(plugin_root, team) \
+        if scope in {"all", "local"} else {}
     agents_dir = project_root / ".codex" / "agents"
     current_owner = owner(team)
     collisions: list[Path] = []
-    if agents_dir.is_dir():
+    if scope in {"all", "local"} and agents_dir.is_dir():
         for target in sorted(agents_dir.glob("*.toml")):
             if target.is_symlink():
                 raise ValueError(f"managed Codex agent target is a symbolic link: {target}")
@@ -172,21 +179,37 @@ def preview(
         joined = ", ".join(str(path) for path in collisions)
         raise ValueError(f"unmanaged Codex agent collision: {joined}")
 
-    instructions = project_instructions.plan_project_files(
-        project_root, plugin_root, "codex", workspace,
+    instructions = project_instructions.plan_portable_project_files(
+        project_root, plugin_root, workspace,
         choices=choices, seed_user_files=seed_user_files,
-    )
+    ) if scope in {"all", "tracked"} else {
+        "changes": {}, "choice_requests": [],
+        "current_surfaces": {}, "target_surfaces": {},
+    }
     changes: dict[Path, str | None] = dict(instructions["changes"])
-    if agents_dir.is_dir():
+    current_agent_surfaces: dict[str, str] = {}
+    if scope in {"all", "local"} and agents_dir.is_dir():
         for target in sorted(agents_dir.glob("*.toml")):
-            if target.name not in rendered and target.read_text(
-                encoding="utf-8", errors="replace"
-            ).startswith(current_owner):
+            content = target.read_text(encoding="utf-8", errors="replace")
+            if content.startswith(current_owner):
+                current_agent_surfaces[
+                    "local:" + target.relative_to(project_root).as_posix()
+                ] = hashlib.sha256(content.encode()).hexdigest()
+            if scope in {"all", "local"} and target.name not in rendered \
+                    and content.startswith(current_owner):
                 changes[target] = None
-    for filename, content in rendered.items():
-        target = agents_dir / filename
-        if not target.is_file() or target.read_text(encoding="utf-8") != content:
-            changes[target] = content
+    target_agent_surfaces = {
+        "local:" + (agents_dir / filename).relative_to(project_root).as_posix():
+            hashlib.sha256(content.encode()).hexdigest()
+        for filename, content in rendered.items()
+    }
+    if scope in {"all", "local"}:
+        for filename, content in rendered.items():
+            target = agents_dir / filename
+            if not target.is_file() or target.read_text(encoding="utf-8") != content:
+                changes[target] = content
+        instructions["current_surfaces"].update(current_agent_surfaces)
+        instructions["target_surfaces"].update(target_agent_surfaces)
     instructions["changes"] = changes
     return instructions
 
@@ -199,10 +222,11 @@ def materialize(
     *,
     choices: dict[str, str] | None = None,
     seed_user_files: bool = True,
+    scope: str = "all",
 ) -> list[Path]:
     result = preview(
         project_root, plugin_root, workspace,
-        choices=choices, seed_user_files=seed_user_files,
+        choices=choices, seed_user_files=seed_user_files, scope=scope,
     )
     if result["choice_requests"]:
         raise ValueError(
@@ -245,11 +269,15 @@ def materialize(
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("action", nargs="?", choices=("check", "apply"), default="apply")
+    parser.add_argument(
+        "action", nargs="?", choices=("inspect", "check", "apply"),
+        default="apply",
+    )
     parser.add_argument("--project-root", type=Path, required=True)
     parser.add_argument("--workspace", default="workspace")
     parser.add_argument("--choice", action="append", default=[])
     parser.add_argument("--seed-user-files", action="store_true")
+    parser.add_argument("--scope", choices=("all", "tracked", "local"), default="all")
     args = parser.parse_args()
     project_root = args.project_root.resolve()
     if not (project_root / ".git").exists():
@@ -260,12 +288,14 @@ def main() -> int:
         result = preview(
             project_root, plugin_root, args.workspace,
             choices=choices, seed_user_files=args.seed_user_files,
+            scope=args.scope,
         )
         written = []
         if args.action == "apply" and not result["choice_requests"]:
             written = materialize(
                 project_root, plugin_root, args.workspace,
                 choices=choices, seed_user_files=args.seed_user_files,
+                scope=args.scope,
             )
     except ValueError as exc:
         raise SystemExit(f"codex-project: {exc}") from exc

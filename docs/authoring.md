@@ -369,10 +369,11 @@ CLAUDE template is a validation error. The builder preserves `{{workspace}}`;
 setup and upgrade replace it only after validating a single lower-kebab path
 segment. Generated root files must stay at or below 24 KiB and 180 lines.
 
-In a consumer repository, the installed host's root instruction file is wholly
-Agent Marketplace-owned and checksummed. It contains no mixed-ownership marker
-block. The matching `AGENTS.user.md` or `CLAUDE.user.md` is seeded once and is
-then wholly user-owned. PMO wholly owns `<workspace>/memory/agent-marketplace.md`;
+In a consumer repository, both host root instruction files are portable,
+tracked, wholly Agent Marketplace-owned, and checksummed regardless of which
+host runs setup. They contain no mixed-ownership marker block. The matching
+`AGENTS.user.md` and `CLAUDE.user.md` files are seeded once and are then wholly
+user-owned. PMO wholly owns `<workspace>/memory/agent-marketplace.md`;
 `me.md` and `profile.md` are seeded once and are then user-owned. Setup and
 upgrade never rewrite or recreate a missing user-owned seed after first setup.
 Codex reads `AGENTS.user.md` by instruction on a best-effort basis; safety may
@@ -387,8 +388,11 @@ unrecognized shell side effects lock subsequent managed work as contract drift.
 First setup has one bounded bootstrap state: the matching team config exists,
 its `project_key` is absent, and no Agent Marketplace project contract exists.
 The PMO project-register command is the sole operation that stamps the key and
-closes that state. A keyed config without a contract is never treated as new
-setup; it routes to upgrade. Remote-backed upgrades prepare and apply on an
+atomically writes nested contract v5. A keyed config without a valid contract
+is never treated as new setup; it routes to upgrade. Root `.agentrof`,
+`.codex`, and `.claude` are machine-local ignored surfaces. Setup is the public
+entry for clone attach and local reconciliation; it never silently upgrades or
+downgrades a project. Remote-backed upgrades prepare and apply on an
 `agent-marketplace/upgrade-*` branch and stay locked until the target branch
 contains the managed revision.
 

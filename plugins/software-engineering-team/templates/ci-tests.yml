@@ -11,7 +11,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Verify the single-vault knowledge contract
-        run: python3 .agentrof/agent-marketplace/checks/vault-gate.pyz check --project-root . --json
+        run: python3 .github/agentrof/vault-gate.pyz check --project-root . --json
 
   tests:
     runs-on: ubuntu-latest

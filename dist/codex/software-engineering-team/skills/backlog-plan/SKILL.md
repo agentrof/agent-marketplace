@@ -7,4 +7,4 @@ description: User-gated baseline or replan entry that compiles an approved progr
 
 # Backlog Plan
 
-Read `../../host-contract.md` and `../../skill-content/backlog-plan/SKILL.md` completely, resolving both paths relative to this file. Follow the canonical skill as the authoritative workflow and the host contract as its platform adapter.
+Read `../../host-contract.md` and `../../skill-content/backlog-plan/SKILL.md` completely, resolving both paths relative to this file. Follow the canonical skill as the authoritative workflow and the host contract as its platform adapter. Before any workflow step inside a Git repository, run `project environment-status --project-root <git-root> --json` through the PMO launcher. A non-current environment permits only setup, upgrade, or recovery guidance.

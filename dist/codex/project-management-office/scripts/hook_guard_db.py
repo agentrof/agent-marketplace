@@ -412,13 +412,14 @@ def guard_file(written: dict, payload: dict) -> int:
         )
     resolved = hook_common.resolve_project(cwd)
     if resolved is not None:
-        project_state = (
-            Path(resolved[1]).resolve() / ".agentrof"
-            / "agent-marketplace" / "project.json"
-        )
-        if target == project_state:
+        project_root = Path(resolved[1]).resolve()
+        project_state = project_root / ".agentrof" / "agent-marketplace" / "project.json"
+        project_config = hook_common.project_config(project_root)
+        if target == project_state or (
+            project_config is not None and target == project_config.resolve()
+        ):
             return deny(
-                "the Agent Marketplace project state is machine-owned and"
+                "the Agent Marketplace project contract is machine-owned and"
                 " written only through PMO setup or upgrade commands; direct"
                 " file writes are not allowed."
             )

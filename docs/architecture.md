@@ -129,13 +129,21 @@ the dependency contract.
    blocks preparation. Dead locks are reclaimed only from a same-host process
    proven absent; session records do not determine upgrade readiness.
    User-owned code and content are outside the writer set.
-16. **Preparation is distinct from activation.** Greenfield work closes
+16. **Tracked contract, local environment.** The nested v5 contract in
+   `<workspace>/config.json` is the portable project baseline. It pins exact
+   component version and paired build identity and hashes its canonical
+   payload. Root `.agentrof`, `.codex`, and `.claude` directories are ignored.
+   Setup reconciles those machine-local surfaces after clone or pull; project
+   upgrade changes Git once, while every other machine performs only local
+   reconciliation. Both tracked root instruction files are generated from
+   either host so a clone never depends on which host performed setup.
+17. **Preparation is distinct from activation.** Greenfield work closes
    analysis, solution, design system, release experience and baseline backlog
    as separate owner-gated stages. Deterministic preparation routing names the
    next entry. An approved backlog is applied atomically but does not activate
    delivery. Existing-project features reuse the same stages in scoped mode and
    execute only the approved feature set and owner-approved prerequisites.
-17. **Marketplace channels are closed snapshots.** A marketplace ref resolves
+18. **Marketplace channels are closed snapshots.** A marketplace ref resolves
    its catalog and both host packages from the same checkout through relative
    sources. `main` is an explicit development preview, `stable` is the moving
    released channel, and a `vX.Y.Z` tag is immutable. Public install and smoke

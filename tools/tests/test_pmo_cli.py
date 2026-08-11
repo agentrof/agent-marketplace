@@ -85,6 +85,9 @@ COMMAND_CONTRACTS = {
     "upgrade recover": "test_upgrade_status_current_without_project",
     "project register": "test_project_register_and_list",
     "project list": "test_project_register_and_list",
+    "project environment-status": "test_project_environment_status_and_attach",
+    "project attach": "test_project_environment_status_and_attach",
+    "project activate-vault": "test_project_activate_vault_updates_canonical_contract",
     "project classify-origin": "test_project_origin_classification_is_guarded",
     "program list": "test_program_experience_backlog_lifecycle",
     "program show": "test_program_experience_backlog_lifecycle",
@@ -102,6 +105,8 @@ COMMAND_CONTRACTS = {
     "experience-run status": "test_program_experience_backlog_lifecycle",
     "experience-run record-gate": "test_program_experience_backlog_lifecycle",
     "experience-run release": "test_program_experience_backlog_lifecycle",
+    "experience-run abandon": "test_experience_run_abandon_preserves_audit_state",
+    "experience run abandon": "test_experience_run_abandon_preserves_audit_state",
     "backlog-plan init": "test_program_experience_backlog_lifecycle",
     "backlog-plan status": "test_program_experience_backlog_lifecycle",
     "backlog-plan reserve-ids": "test_program_experience_backlog_lifecycle",
@@ -119,6 +124,8 @@ COMMAND_CONTRACTS = {
     "work-order set-ownership": "test_ownership_snake_case_and_cross_order_overlap",
     "work-order set-status": "test_complete_guard_full_chain",
     "work-order release": "test_release_frees_worktree_and_claim",
+    "work-order checkpoint-reconcile": "test_reconcile_checkpoint_contract",
+    "work-order resume-reconcile": "test_reconcile_checkpoint_contract",
     "work-order validate": "test_work_order_validate",
     "item import": "test_import_green_and_upsert",
     "item update": "test_priority_enum_on_update",
@@ -209,6 +216,33 @@ class PmoCliTests(unittest.TestCase):
         self.wt_two = Path(self.tmp.name) / "wt-two"
         self.wt_main.mkdir()
         self.wt_two.mkdir()
+        for root in (self.wt_main, self.wt_two):
+            subprocess.run(["git", "init", "-q"], cwd=root, check=True)
+            subprocess.run(
+                ["git", "config", "user.email", "tests@example.com"],
+                cwd=root, check=True,
+            )
+            subprocess.run(
+                ["git", "config", "user.name", "Tests"], cwd=root, check=True,
+            )
+            config_path = root / "workspace" / "config.json"
+            config_path.parent.mkdir()
+            config = {"project_key": "shop", "project_origin": "existing"}
+            contract = {
+                "schema_version": 1, "contract_version": 5,
+                "project_id": "test-project-id", "team_id": "software-engineering-team",
+                "workspace": "workspace", "repository_fingerprint": "test",
+                "delivery": {"requires_pull_request": False, "target_branch": "master"},
+                "marketplace_release": "0.1.0", "source_channel": "stable",
+                "source_ref": "v0.1.0", "source_commit": "test",
+                "components": {}, "managed_surfaces": {}, "vault": {},
+                "upgrade_provenance": {},
+            }
+            pmo_cli.upgrade_core.write_project_contract(
+                config_path, config, contract
+            )
+            subprocess.run(["git", "add", "."], cwd=root, check=True)
+            subprocess.run(["git", "commit", "-qm", "baseline"], cwd=root, check=True)
         self._old_cwd = os.getcwd()
         os.chdir(self.wt_main)
         code, _, err = run(["init-db"])
@@ -427,28 +461,49 @@ class PmoCliTests(unittest.TestCase):
                             "--reason", "superseded"])
         self.assertEqual(code, 0, err)
 
+    def test_experience_run_abandon_preserves_audit_state(self):
+        for run_key, command in (
+            ("ux-abandon-legacy", ["experience-run", "abandon"]),
+            ("ux-abandon-canonical", ["experience", "run", "abandon"]),
+        ):
+            code, _, err = run([
+                "experience-run", "init", "--project-key", "shop",
+                "--run-key", run_key, "--program", "PRG-001",
+                "--node", "marketplace",
+            ])
+            self.assertEqual(code, 0, err)
+            code, _, err = run([
+                *command, "--run-key", run_key,
+                "--reason", "environment reconciliation",
+            ])
+            self.assertEqual(code, 0, err)
+        with self.db() as con:
+            rows = con.execute(
+                "SELECT id, run_key, status, abandoned_at, abandon_reason"
+                " FROM experience_runs ORDER BY run_key"
+            ).fetchall()
+            self.assertEqual([row["status"] for row in rows],
+                             ["abandoned", "abandoned"])
+            self.assertTrue(all(row["abandoned_at"] for row in rows))
+            self.assertTrue(all(row["abandon_reason"] for row in rows))
+            claim_count = con.execute(
+                "SELECT COUNT(*) FROM experience_node_claims"
+            ).fetchone()[0]
+            audit_count = con.execute(
+                "SELECT COUNT(*) FROM events"
+                " WHERE action = 'experience_run_abandoned'"
+            ).fetchone()[0]
+            self.assertEqual(claim_count, 2)
+            self.assertEqual(audit_count, 2)
+
     def test_project_origin_classification_is_guarded(self):
         workspace = self.wt_main / "workspace"
-        workspace.mkdir()
         config_path = workspace / "config.json"
-        config = {
-            "team_id": "software-engineering-team",
-            "project_key": "shop",
-            "project_origin": "unclassified",
-            "user_setting": "preserved",
-        }
-        config_path.write_text(json.dumps(config), encoding="utf-8")
-        state_path = self.wt_main / pmo_cli.upgrade_core.STATE_RELATIVE
-        state_path.parent.mkdir(parents=True)
-        surface = "workspace/config.json#agent-marketplace"
-        state = {
-            "contract_version": pmo_cli.upgrade_core.PROJECT_CONTRACT_VERSION,
-            "project_key": "shop",
-            "managed_surfaces": {
-                surface: pmo_cli.upgrade_core.config_owned_digest(config),
-            },
-        }
-        state_path.write_text(json.dumps(state), encoding="utf-8")
+        config = json.loads(config_path.read_text(encoding="utf-8"))
+        config["project_origin"] = "unclassified"
+        config["user_setting"] = "preserved"
+        contract = config["agent_marketplace"]
+        pmo_cli.upgrade_core.write_project_contract(config_path, config, contract)
 
         code, out, err = run([
             "project", "classify-origin", "--project-key", "shop",
@@ -457,12 +512,12 @@ class PmoCliTests(unittest.TestCase):
         self.assertEqual(code, 0, err)
         self.assertIn("project_origin=existing", out)
         classified = json.loads(config_path.read_text(encoding="utf-8"))
-        contract = json.loads(state_path.read_text(encoding="utf-8"))
+        contract = classified["agent_marketplace"]
         self.assertEqual(classified["project_origin"], "existing")
         self.assertEqual(classified["user_setting"], "preserved")
         self.assertEqual(
-            contract["managed_surfaces"][surface],
-            pmo_cli.upgrade_core.config_owned_digest(classified),
+            contract["contract_sha256"],
+            pmo_cli.upgrade_core.contract_sha256(contract),
         )
 
         code, _, err = self.import_backlog()
@@ -683,6 +738,88 @@ class PmoCliTests(unittest.TestCase):
             [row["project_key"] for row in json.loads(out)],
             ["second", "shop"],
         )
+
+    def test_project_environment_status_and_attach(self):
+        current = {
+            "status": pmo_cli.upgrade_core.STATUS_CURRENT,
+            "reasons": [], "blockers": [], "active_work": [],
+            "contract_sha256": "sha256:current",
+        }
+        reconcile = {
+            "status": pmo_cli.upgrade_core.STATUS_RECONCILE,
+            "reasons": ["LOCAL_PROJECT_ATTACH_REQUIRED:shop"],
+            "blockers": [], "active_work": [],
+            "contract_sha256": "sha256:current",
+        }
+        with mock.patch.object(
+            pmo_cli.upgrade_core, "environment_status", return_value=current
+        ):
+            code, out, err = run([
+                "project", "environment-status", "--project-root",
+                str(self.wt_main), "--json",
+            ])
+        self.assertEqual(code, 0, err)
+        self.assertEqual(json.loads(out)["status"], current["status"])
+
+        config = json.loads(
+            (self.wt_main / "workspace" / "config.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        contract = config["agent_marketplace"]
+        with pmo_cli.connect() as con:
+            with pmo_cli.mutate(con):
+                con.execute(
+                    "UPDATE projects SET project_uuid = ?,"
+                    " repository_fingerprint = ? WHERE project_key = 'shop'",
+                    (contract["project_id"],
+                     contract["repository_fingerprint"]),
+                )
+        with mock.patch.object(
+            pmo_cli.upgrade_core, "environment_status",
+            side_effect=[reconcile, current],
+        ), mock.patch.object(
+            pmo_cli.upgrade_core, "normalize_registry",
+            return_value={"plugins": {
+                "software-engineering-team": {"hosts": {}}
+            }},
+        ):
+            code, out, err = run([
+                "project", "attach", "--project-root", str(self.wt_main),
+                "--workspace", "workspace", "--json",
+            ])
+        self.assertEqual(code, 0, err)
+        self.assertTrue(json.loads(out)["mutation_performed"])
+        with self.db() as con:
+            event = con.execute(
+                "SELECT 1 FROM events"
+                " WHERE action = 'project_environment_attached'"
+            ).fetchone()
+        self.assertTrue(event)
+
+    def test_project_activate_vault_updates_canonical_contract(self):
+        config_path = self.wt_main / "workspace" / "config.json"
+        code, _, err = run([
+            "project", "activate-vault", "--project-root", str(self.wt_main),
+            "--workspace", "workspace", "--plan-hash", "sha256:adoption",
+            "--policy-version", "2",
+        ])
+        self.assertEqual(code, 0, err)
+        config = json.loads(config_path.read_text(encoding="utf-8"))
+        contract = config["agent_marketplace"]
+        self.assertEqual(contract["vault"], {
+            "root": "workspace/docs", "policy_version": 2,
+            "status": "active", "adoption_plan_hash": "sha256:adoption",
+        })
+        self.assertEqual(
+            contract["contract_sha256"],
+            pmo_cli.upgrade_core.contract_sha256(contract),
+        )
+        with self.db() as con:
+            event = con.execute(
+                "SELECT 1 FROM events WHERE action = 'vault_adoption_activated'"
+            ).fetchone()
+        self.assertTrue(event)
 
     def test_init_db_idempotent(self):
         code1, _, _ = run(["init-db"])
@@ -1202,6 +1339,69 @@ class PmoCliTests(unittest.TestCase):
         self.assertEqual(code, 0)
         code, _, err = self.init_wo(wo_key="wo2")
         self.assertEqual(code, 0, err)
+
+    def test_reconcile_checkpoint_contract(self):
+        code, _, err = self.init_wo(wo_key="reconcile1", story="")
+        self.assertEqual(code, 0, err)
+        for step in ("0", "1", "2", "3", "4"):
+            code, _, err = run([
+                "work-order", "set-step", "--work-order-key", "reconcile1",
+                "--step", step, "--status", "in_progress",
+            ])
+            self.assertEqual(code, 0, err)
+            code, _, err = run([
+                "work-order", "set-step", "--work-order-key", "reconcile1",
+                "--step", step, "--status", "done",
+            ])
+            self.assertEqual(code, 0, err)
+        code, _, err = run([
+            "work-order", "checkpoint-reconcile",
+            "--work-order-key", "reconcile1",
+        ])
+        self.assertEqual(code, 0, err)
+        with self.db() as con:
+            order = con.execute(
+                "SELECT status, bindings_json FROM work_orders"
+                " WHERE work_order_key = 'reconcile1'"
+            ).fetchone()
+        checkpoint = json.loads(
+            order["bindings_json"]
+        )["agent_marketplace"]["reconcile"]
+        self.assertEqual(order["status"], "blocked")
+        self.assertTrue(checkpoint["reservation"])
+
+        current = {
+            "status": pmo_cli.upgrade_core.STATUS_CURRENT,
+            "reasons": [], "blockers": [], "active_work": [],
+        }
+        with mock.patch.object(
+            pmo_cli.upgrade_core, "environment_status", return_value=current
+        ):
+            code, _, err = run([
+                "work-order", "resume-reconcile",
+                "--work-order-key", "reconcile1",
+            ])
+        self.assertEqual(code, 0, err)
+        with self.db() as con:
+            order = con.execute(
+                "SELECT status, current_step, bindings_json FROM work_orders"
+                " WHERE work_order_key = 'reconcile1'"
+            ).fetchone()
+            steps = {
+                row["step_id"]: row["status"] for row in con.execute(
+                    "SELECT step_id, status FROM work_order_steps"
+                    " WHERE work_order_id = (SELECT id FROM work_orders"
+                    " WHERE work_order_key = 'reconcile1')"
+                )
+            }
+        reconcile = json.loads(
+            order["bindings_json"]
+        )["agent_marketplace"]["reconcile"]
+        self.assertEqual((order["status"], order["current_step"]),
+                         ("running", "4"))
+        self.assertEqual((steps["4"], steps["5"]),
+                         ("in_progress", "pending"))
+        self.assertFalse(reconcile["reservation"])
 
     # -- ownership -----------------------------------------------------------
 

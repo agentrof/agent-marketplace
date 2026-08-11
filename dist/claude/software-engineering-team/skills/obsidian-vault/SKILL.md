@@ -1,6 +1,6 @@
 ---
 name: obsidian-vault
-description: Vault authoring law for the team's workspace docs tree. Loaded by software-engineering-team flows and personas whenever they write under the docs tree; not user-facing.
+description: Machine-enforced authoring law for the team's workspace docs vault. Load whenever creating, editing, linking, classifying, navigating, rendering, or repairing content under the docs tree.
 user-invocable: false
 ---
 

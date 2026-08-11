@@ -10,7 +10,6 @@ import tempfile
 from pathlib import Path
 
 ALLOWED_ORIGINS = {"greenfield", "existing"}
-CONTRACT_RELATIVE = Path(".agentrof") / "agent-marketplace" / "project.json"
 
 
 def load(path: Path) -> dict:
@@ -46,15 +45,18 @@ def state_exists(workspace: Path) -> bool:
 
 
 def contract_root(config_path: Path) -> Path | None:
-    for candidate in (config_path.parent, *config_path.parents):
-        if (candidate / CONTRACT_RELATIVE).is_file():
-            return candidate
-    return None
+    config = load(config_path)
+    return config_path.parent.parent if isinstance(
+        config.get("agent_marketplace"), dict
+    ) else None
 
 
 def check(config: dict) -> list[str]:
     errors = []
-    if config.get("team_id") != "software-engineering-team":
+    contract = config.get("agent_marketplace", {})
+    owner = contract.get("team_id", "") if isinstance(contract, dict) else ""
+    owner = owner or config.get("team_id", "")
+    if owner != "software-engineering-team":
         errors.append("team_id must be software-engineering-team")
     if config.get("project_origin") not in ALLOWED_ORIGINS:
         errors.append("project_origin must be greenfield or existing")

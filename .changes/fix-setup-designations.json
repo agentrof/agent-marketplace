@@ -1,6 +1,7 @@
 {
   "summary": "Prevent setup from registering or closing before the complete vault designation map is minted and verified.",
   "components": {
+    "project-management-office": "patch",
     "software-engineering-team": "patch"
   }
 }

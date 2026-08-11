@@ -1,9 +1,9 @@
 {
-  "build_id": "snapshot.936298bc929acfb801e8f508dedae8c8cf3b5dfbed05bf7b79411731de944620",
+  "build_id": "snapshot.71b55a0822025f27c7af0229e73a713af79bb834dc65893c2e6af7d3fa6dcd83",
   "component": "project-management-office",
   "files": {
     ".agent-marketplace-generated-distribution": "bc5e5ffd58e656c315fc4230e335b1acaaeba4b3a6871fc57e84144035567474",
-    ".claude-plugin/plugin.json": "4cc28be7b4651948a1b0156819fe5981296d20c42b62d9855c8451d936b80e5c",
+    ".claude-plugin/plugin.json": "1fc8604e6ca0ae7b686306b2362ce5f3ef2df1674ba45b1739fa4d249acfeed6",
     "dashboard/design/MASTER.md": "69bc42d0a2f60221b6c3b6cffc845f0614fb06ca0d242c9e21824f331e2f38d0",
     "dashboard/index.html": "06557f8d8bc2d3afced183769e1f7254e11f7aaaf1776072e03a70c6a3282b95",
     "hooks/hooks.json": "43bed2bd18ebf1578dd08983ba3681b86b41f454fd268763a4cabdbe66eed9f4",
@@ -45,6 +45,6 @@
   "schema_version": 2,
   "source_channel": "snapshot",
   "source_commit": "",
-  "source_ref": "snapshot.936298bc929acfb801e8f508dedae8c8cf3b5dfbed05bf7b79411731de944620",
+  "source_ref": "snapshot.71b55a0822025f27c7af0229e73a713af79bb834dc65893c2e6af7d3fa6dcd83",
   "version": "0.1.0"
 }

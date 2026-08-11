@@ -278,6 +278,10 @@ by omission.
   target ships.
 - Every decision gate names the host-neutral choice gate at the gate site
   (`choice_gate`).
+- Fresh setup collects one config field per question in its declared order,
+  uses bounded question batches and keeps the CI add-or-defer decision
+  separate. The `choice_gate` rule rejects removal of that contract so a
+  multi-field default confirmation cannot replace it silently.
 - The Codex host contract maps that gate to `request_user_input`, preserving
   options, recommendation and tradeoffs; Claude maps it to
   `AskUserQuestion`. No custom popup state machine exists. Mutating flows

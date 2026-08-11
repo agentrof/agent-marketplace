@@ -1109,6 +1109,18 @@ def check_orchestrator_integrity(tree: Tree, findings: list[Finding]) -> None:
 CHOICE_GATE_MARKER = "explicit user choice"
 CHOICE_GATE_TOKEN = "choice gate"
 CHOICE_GATE_WINDOW = 3
+SETUP_CHOICE_CONTRACT = (
+    "one missing field per question",
+    "at most three questions per batch",
+    "accept defaults or provide corrections",
+    "separate choice gate",
+    "Keep the approved `project_key` out of the config",
+)
+SETUP_CHOICE_FIELDS = (
+    "`project_origin`", "`databases`", "`scale`", "`output_language`",
+    "`terminology_language`", "`project_key`", "`source_dirs`",
+    "`test_command`", "`mutation_command`", "`env_command`",
+)
 
 
 def check_choice_gate(tree: Tree, findings: list[Finding]) -> None:
@@ -1141,6 +1153,25 @@ def check_choice_gate(tree: Tree, findings: list[Finding]) -> None:
                 "error", rel(tree, contract), 1, "choice_gate",
                 f"{host} PMO host contract lacks {token}",
                 "map the canonical gate to the host-native input tool",
+            ))
+    setup = (tree.root / "plugins" / "software-engineering-team"
+             / "skill-content" / "setup" / "SKILL.md")
+    if setup.is_file():
+        text = read_text(setup)
+        normalized = " ".join(text.split())
+        missing = [
+            token for token in SETUP_CHOICE_CONTRACT if token not in normalized
+        ]
+        positions = [text.find(field) for field in SETUP_CHOICE_FIELDS]
+        fields_are_ordered = all(position >= 0 for position in positions) \
+            and positions == sorted(positions)
+        if missing or not fields_are_ordered:
+            detail = ", ".join(missing) if missing else "ordered setup fields"
+            findings.append(Finding(
+                "error", rel(tree, setup), 1, "choice_gate",
+                f"fresh setup choice contract is incomplete: {detail}",
+                "collect one config field per question in bounded batches and"
+                " keep the CI add-or-defer gate separate",
             ))
 
 

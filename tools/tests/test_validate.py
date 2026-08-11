@@ -63,6 +63,42 @@ class ValidatorFixtureTests(unittest.TestCase):
         self.assertEqual(findings[0].check, "naive_clock")
         self.assertIn("platforms/codex/_team", findings[0].path)
 
+    def test_setup_choice_contract_rejects_aggregate_and_early_key_write(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            fixtures.make_valid_root(root)
+            source = (
+                TESTS_DIR.parents[1] / "plugins" / "software-engineering-team"
+                / "skill-content" / "setup" / "SKILL.md"
+            ).read_text(encoding="utf-8")
+            setup = (root / "plugins" / "software-engineering-team"
+                     / "skill-content" / "setup" / "SKILL.md")
+            fixtures.write(setup, source)
+            findings: list[validate.Finding] = []
+            validate.check_choice_gate(validate.build_tree(root), findings)
+            self.assertFalse([
+                finding for finding in findings
+                if "fresh setup choice contract" in finding.message
+            ], findings)
+            defects = (
+                ("one missing field per question", "one preset per question"),
+                ("Keep the approved `project_key` out of the\n     config",
+                 "Write the approved `project_key` into the\n     config"),
+            )
+            for before, after in defects:
+                with self.subTest(defect=before):
+                    fixtures.write(setup, source.replace(before, after))
+                    findings = []
+                    validate.check_choice_gate(
+                        validate.build_tree(root), findings,
+                    )
+                    matching = [
+                        finding for finding in findings
+                        if finding.check == "choice_gate"
+                        and "fresh setup choice contract" in finding.message
+                    ]
+                    self.assertEqual(len(matching), 1, findings)
+
     def test_agent_and_skill_names_are_scoped_per_plugin(self):
         import json
         from fixtures import VALID_AGENT, VALID_SKILL, write

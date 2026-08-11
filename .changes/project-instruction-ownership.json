@@ -1,8 +1,0 @@
-{
-  "summary": "Standardize cross-host project instructions around canonical fragments, whole-file managed roots, user-owned companions, and choice-bound legacy migration.",
-  "components": {
-    "agent-marketplace": "minor",
-    "project-management-office": "minor",
-    "software-engineering-team": "minor"
-  }
-}

@@ -1,7 +1,0 @@
-{
-  "summary": "Remove false upgrade session blockers and prepare remote upgrade branches safely from the default branch.",
-  "components": {
-    "project-management-office": "patch",
-    "software-engineering-team": "patch"
-  }
-}

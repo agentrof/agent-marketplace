@@ -1942,6 +1942,26 @@ class ReconcileVerbTests(unittest.TestCase):
         self.assertEqual(code, 2)
         self.assertIn("setup entry", err)
 
+    def test_designation_contract_requires_complete_distinct_map(self):
+        code, out, err = run([
+            "check-designations", "--vault", str(self.root), "--json",
+        ])
+        self.assertEqual(code, 0, out + err)
+        partial = {"decision": "decision"}
+        write_config(self.root, partial)
+        code, out, _ = run([
+            "check-designations", "--vault", str(self.root), "--json",
+        ])
+        self.assertEqual(code, 1)
+        self.assertIn("has no designation", out)
+        duplicate = dict(DESIGNATIONS, entity="decision")
+        write_config(self.root, duplicate)
+        code, out, _ = run([
+            "check-designations", "--vault", str(self.root), "--json",
+        ])
+        self.assertEqual(code, 1)
+        self.assertIn("fold-equal designation", out)
+
 
 class ConfigGuardHookTests(unittest.TestCase):
     """The write-time single-writer guard on workspace/config.json: no
@@ -2034,6 +2054,33 @@ class ConfigGuardHookTests(unittest.TestCase):
                                                 / "config.json"),
                                "content": "{ broken"})
         self.assertEqual(code, 0, err)
+
+    def test_project_registration_requires_designations_first(self):
+        data = json.loads(self.config.read_text(encoding="utf-8"))
+        data.pop("doc_type_designations")
+        self.config.write_text(json.dumps(data), encoding="utf-8")
+        payload = {
+            "cwd": str(self.project),
+            "tool_input": {
+                "command": ("pmo project register --stamp-config "
+                            + str(self.config)),
+            },
+        }
+        err = io.StringIO()
+        with redirect_stderr(err):
+            code = vh.registration_guard(payload)
+        self.assertEqual(code, 2)
+        self.assertIn("out of order", err.getvalue())
+        data["doc_type_designations"] = DESIGNATIONS
+        self.config.write_text(json.dumps(data), encoding="utf-8")
+        self.assertEqual(vh.registration_guard(payload), 0)
+
+    def test_registration_words_in_read_only_command_are_ignored(self):
+        payload = {
+            "cwd": str(self.project),
+            "tool_input": {"command": "rg 'project register' ."},
+        }
+        self.assertEqual(vh.registration_guard(payload), 0)
 
 
 class FoldUnitTests(unittest.TestCase):

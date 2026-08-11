@@ -91,6 +91,22 @@ value).
 | engagement | engagement |
 | design-master | design master |
 | page-override | page override |
+| experience | experience |
+| program | program |
+| release | release |
+| journey | journey |
+| flow-set | flow set |
+| screen | screen |
+| experience-space | experience space |
+| experience-domain | experience domain |
+| api-contract | API contract |
+| data-model | data model |
+| threat-model | threat model |
+| environment-reference | environment reference |
+| artifact-manifest | artifact manifest |
+| engagement | engagement |
+| design-master | design master |
+| page-override | page override |
 
 Nav-layer notes (home, maps) carry no designation. Worked shapes,
 generic English (render the designation into the output_language):

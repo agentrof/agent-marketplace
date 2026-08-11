@@ -75,8 +75,19 @@ include tradeoffs. Anchor every path at the resolved git root.
      are constraints to report, not owner choices to manufacture.
    - Write `project_origin` only through `project_config.py set-origin`.
 8. Materialize the base vault payload without overwriting existing Obsidian
-   values. Reconcile owner-approved output-language designations through
-   `vault_check.py reconcile-designations`.
+   values with `vault_check.py materialize-payload --vault <workspace>/docs`.
+   Then mint designations before PMO registration:
+   - Read the canonical English table in the obsidian-vault metadata reference.
+     Render one distinct, non-empty value for every shipped taxonomy type in
+     `output_language`; navigation types carry no designation.
+   - Present the complete rendered map through one choice gate. Never invent
+     or apply an unapproved translation.
+   - Run `vault_check.py reconcile-designations --vault <workspace>/docs --set
+     <type>=<approved-value> ... --dry-run --json` with every pair. On approval,
+     run the same complete pair set without `--dry-run`, adding `--actor setup`.
+   - Run `vault_check.py check-designations --vault <workspace>/docs --json`
+     and require `ok: true`. Do not run PMO registration before this passes;
+     the write-time hook rejects an out-of-order `project register` command.
 9. Register PMO with `project register --key <key> --name <name> --team
    software-engineering-team --stamp-config <config> --project-root <root>
    --workspace <name>`. Registration preserves top-level `project_key` and
@@ -89,9 +100,10 @@ include tradeoffs. Anchor every path at the resolved git root.
     PR-triggered workflow exists, ask its add-or-defer decision through a
     separate choice gate after the command fields are approved. Never infer
     deferral or fold CI into a config-default approval. Then close in order:
-    config check; PMO identity; contract hash; host instructions; local
-    projection; effective ignore and force-add checks; vault renders; portable
-    gate; preparation status; setup check; and an empty setup preview.
+    config check; designation contract; PMO identity; contract hash; host
+    instructions; local projection; effective ignore and force-add checks;
+    vault renders; portable gate; preparation status; setup check; and an
+    empty setup preview.
 12. Run `project attach --project-root <root> --workspace <name> --json` and
     require `AGENT_MARKETPLACE_CURRENT`. Start a fresh session so local agents,
     hooks, instructions, and `contract_sha256_at_start` load together.

@@ -9,10 +9,10 @@
   "license": "MIT",
   "skills": "./skills/",
   "agent_marketplace": {
-    "build_id": "snapshot.95f15c0454c01086875039c10e607ee94558ea644e105b3387495d858784bf0e",
+    "build_id": "snapshot.b36895522c704b6cda0924302f258180df034cf084c5b125060f8929781948a4",
     "marketplace_release": "0.2.1",
     "source_channel": "snapshot",
-    "source_ref": "snapshot.95f15c0454c01086875039c10e607ee94558ea644e105b3387495d858784bf0e",
+    "source_ref": "snapshot.b36895522c704b6cda0924302f258180df034cf084c5b125060f8929781948a4",
     "source_commit": ""
   }
 }

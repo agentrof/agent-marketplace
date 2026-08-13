@@ -10,6 +10,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+import marketplace_paths
+
 SCRIPT_DIR = Path(__file__).resolve().parent
 
 
@@ -30,7 +32,7 @@ def workspace(root: Path) -> tuple[Path | None, dict]:
             continue
         seen.add(path)
         config = read_json(path)
-        if config.get("team_id") == "software-engineering-team":
+        if marketplace_paths.team_from_config(config) == "software-engineering-team":
             return path.parent, config
     return None, {}
 

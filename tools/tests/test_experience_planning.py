@@ -10,11 +10,13 @@ import tempfile
 import unittest
 import sys
 import subprocess
+import zipfile
 from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[2]
 SCRIPTS = REPO / "plugins" / "software-engineering-team" / "scripts"
+sys.path.insert(0, str(SCRIPTS))
 
 
 def module(name):
@@ -344,6 +346,16 @@ class PreparationTests(unittest.TestCase):
             (work / "config.json").write_text(json.dumps({"team_id": "software-engineering-team", "project_key": "shop", "project_origin": "greenfield"}), encoding="utf-8")
             result = PREPARATION.inspect(root, "deliver")
             self.assertEqual(result["next_entry"], "business-analysis")
+            (work / "config.json").write_text(json.dumps({
+                "project_key": "shop", "project_origin": "greenfield",
+                "agent_marketplace": {
+                    "contract_version": 5,
+                    "team_id": "software-engineering-team",
+                    "vault": {"status": "active"},
+                },
+            }), encoding="utf-8")
+            result = PREPARATION.inspect(root, "deliver")
+            self.assertEqual(result["next_entry"], "business-analysis")
             config = json.loads((work / "config.json").read_text()); config["project_origin"] = "existing"
             (work / "config.json").write_text(json.dumps(config), encoding="utf-8")
             result = PREPARATION.inspect(root, "deliver")
@@ -475,6 +487,19 @@ class PreparationTests(unittest.TestCase):
             first = gate.read_bytes()
             self.assertEqual(call(VAULT_GATE, argv)[0], 0)
             self.assertEqual(first, gate.read_bytes())
+            with zipfile.ZipFile(gate) as archive:
+                packaged = {
+                    name for name in archive.namelist()
+                    if name.startswith("scripts/") and name.endswith(".py")
+                }
+                expected = {
+                    f"scripts/{name}"
+                    for name in VAULT_GATE.packaged_scripts(
+                        VAULT_GATE.package_root()
+                    )
+                }
+                self.assertEqual(packaged, expected)
+                self.assertIn("scripts/marketplace_paths.py", packaged)
             completed = subprocess.run(
                 [sys.executable, str(gate), "check", "--project-root",
                  str(root), "--json"], capture_output=True, text=True,
@@ -482,6 +507,8 @@ class PreparationTests(unittest.TestCase):
             )
             self.assertEqual(completed.returncode, 1)
             self.assertIn("closed-vault-schema-and-relations", completed.stdout)
+            result = json.loads(completed.stdout)
+            self.assertEqual(result["results"][0]["stderr"], "")
 
 
 if __name__ == "__main__":

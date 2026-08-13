@@ -4,6 +4,8 @@
 from __future__ import annotations
 
 import argparse
+import ast
+import importlib.util
 import json
 import shutil
 import subprocess
@@ -29,6 +31,31 @@ def package_root() -> Path:
     return Path(__file__).resolve().parent.parent
 
 
+def packaged_scripts(root: Path) -> tuple[str, ...]:
+    """Close the portable archive over every shipped sibling import."""
+    scripts = root / "scripts"
+    pending = list(COMPILER_SCRIPTS)
+    included: set[str] = set()
+    while pending:
+        name = pending.pop()
+        if name in included:
+            continue
+        source = scripts / name
+        tree = ast.parse(source.read_text(encoding="utf-8"), filename=str(source))
+        included.add(name)
+        modules = set()
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import):
+                modules.update(alias.name.split(".", 1)[0] for alias in node.names)
+            elif isinstance(node, ast.ImportFrom) and node.level == 0 and node.module:
+                modules.add(node.module.split(".", 1)[0])
+        for module in sorted(modules):
+            dependency = f"{module}.py"
+            if (scripts / dependency).is_file() and dependency not in included:
+                pending.append(dependency)
+    return tuple(sorted(included))
+
+
 def run(command: list[str], name: str) -> dict:
     completed = subprocess.run(
         command, capture_output=True, text=True, check=False, timeout=300)
@@ -39,7 +66,20 @@ def run(command: list[str], name: str) -> dict:
     }
 
 
-def workspace_for(project_root: Path) -> Path:
+def team_resolver(root: Path):
+    helper = root / "scripts" / "marketplace_paths.py"
+    spec = importlib.util.spec_from_file_location(
+        "portable_gate_marketplace_paths", helper
+    )
+    if spec is None or spec.loader is None:
+        raise RuntimeError(f"portable gate path resolver cannot load: {helper}")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module.team_from_config
+
+
+def workspace_for(project_root: Path, root: Path) -> Path:
+    resolve_team = team_resolver(root)
     candidates = [project_root / "workspace"]
     candidates.extend(sorted(path.parent for path in project_root.glob(
         "*/config.json")))
@@ -49,15 +89,13 @@ def workspace_for(project_root: Path) -> Path:
                 (workspace / "config.json").read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError):
             continue
-        contract = config.get("agent_marketplace", {})
-        owner = contract.get("team_id", "") if isinstance(contract, dict) else ""
-        if (owner or config.get("team_id")) == "software-engineering-team":
+        if resolve_team(config) == "software-engineering-team":
             return workspace
     return project_root / "workspace"
 
 
 def gate(project_root: Path, root: Path) -> dict:
-    docs = workspace_for(project_root) / "docs"
+    docs = workspace_for(project_root, root) / "docs"
     scripts = root / "scripts"
     results = [run([
         sys.executable, str(scripts / "vault_check.py"), "check",
@@ -124,7 +162,7 @@ def cmd_install(args) -> int:
         staging = Path(temporary)
         shutil.copyfile(__file__, staging / "__main__.py")
         (staging / "scripts").mkdir()
-        for name in COMPILER_SCRIPTS:
+        for name in packaged_scripts(root):
             shutil.copyfile(root / "scripts" / name, staging / "scripts" / name)
         for relative in DATA_PATHS:
             source = root / relative

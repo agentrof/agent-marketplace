@@ -133,7 +133,35 @@ def packaging_names(root: Path) -> tuple[str, str]:
     )
 
 
-def marketplace_paths_source(product_contract: dict) -> str:
+def current_project_contract_version(root: Path) -> int:
+    versions = set()
+    for plugin in sorted((root / "plugins").iterdir()):
+        if not plugin.is_dir() or plugin.name == "project-management-office":
+            continue
+        path = plugin / "migrations" / "manifest.json"
+        try:
+            manifest = json.loads(path.read_text(encoding="utf-8"))
+            value = manifest["project_contract"]["current"]
+        except (OSError, json.JSONDecodeError, KeyError, TypeError) as exc:
+            raise ValueError(
+                f"{path}: current project contract version is missing"
+            ) from exc
+        if isinstance(value, bool) or not isinstance(value, int) or value < 1:
+            raise ValueError(
+                f"{path}: current project contract version must be a positive integer"
+            )
+        versions.add(value)
+    if len(versions) != 1:
+        raise ValueError(
+            "delivery-team migration manifests disagree on the current "
+            "project contract version"
+        )
+    return versions.pop()
+
+
+def marketplace_paths_source(
+    product_contract: dict, project_contract_version: int
+) -> str:
     vendor = product_contract["vendor"]
     product = product_contract["product"]
     return f'''#!/usr/bin/env python3
@@ -150,6 +178,7 @@ VENDOR_HOME_ENV = "{vendor["home_env"]}"
 MARKETPLACE_HOME_ENV = "{product["home_env"]}"
 VENDOR_HOME_DIR = "{vendor["default_home_dir"]}"
 MARKETPLACE_HOME_DIR = "{product["home_subdir"]}"
+CURRENT_PROJECT_CONTRACT_VERSION = {project_contract_version}
 PRIOR_OWNER_SUFFIX = " plugin; change only through the configure entry"
 
 
@@ -191,6 +220,40 @@ def team_from_config(config: Mapping[str, object]) -> str:
         return prior_owner
     return ""
 '''
+
+
+def marketplace_paths_targets(root: Path) -> list[Path]:
+    return [
+        plugin / "scripts" / "marketplace_paths.py"
+        for plugin in sorted((root / "plugins").iterdir())
+        if plugin.is_dir()
+    ]
+
+
+def sync_marketplace_paths_sources(root: Path) -> None:
+    expected = marketplace_paths_source(
+        load_product_contract(root), current_project_contract_version(root)
+    )
+    for target in marketplace_paths_targets(root):
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(expected, encoding="utf-8")
+
+
+def marketplace_paths_source_drift(root: Path) -> list[str]:
+    expected = marketplace_paths_source(
+        load_product_contract(root), current_project_contract_version(root)
+    )
+    problems = []
+    for target in marketplace_paths_targets(root):
+        try:
+            actual = target.read_text(encoding="utf-8")
+        except OSError:
+            actual = ""
+        if actual != expected:
+            problems.append(
+                f"generated runtime source is out of sync: {target}"
+            )
+    return problems
 
 
 _DEFAULT_ROOT = Path(__file__).resolve().parent.parent
@@ -761,6 +824,7 @@ def generated_tree_owned(output: Path, marker_name: str) -> bool:
 
 
 def replace_generated(root: Path, output: Path) -> None:
+    sync_marketplace_paths_sources(root)
     marker_name, _ = packaging_names(root)
     if output.exists():
         if not generated_tree_owned(output, marker_name):
@@ -794,6 +858,7 @@ def compare_dirs(expected: Path, actual: Path) -> list[str]:
 def check(root: Path, output: Path) -> list[str]:
     problems: list[str] = []
     try:
+        problems.extend(marketplace_paths_source_drift(root))
         with tempfile.TemporaryDirectory(prefix="agent-marketplace-dist-build-") as tmp:
             expected = Path(tmp) / "dist"
             build(root, expected)

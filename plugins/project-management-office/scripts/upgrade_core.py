@@ -34,7 +34,7 @@ import marketplace_paths
 
 
 PROJECT_STATE_SCHEMA = 1
-PROJECT_CONTRACT_VERSION = 5
+PROJECT_CONTRACT_VERSION = marketplace_paths.CURRENT_PROJECT_CONTRACT_VERSION
 REGISTRY_SCHEMA = 2
 WRITER_EPOCH = 1
 LEGACY_STATE_RELATIVE = Path(".agentrof") / "agent-marketplace" / "project.json"
@@ -2878,7 +2878,7 @@ def initialize_project_contract(
     installed, blockers = inventory(data_root)
     if blockers:
         raise UpgradeError(", ".join(blockers))
-    # The nested v5 contract is protected by contract_sha256. Recording the
+    # The current nested contract is protected by contract_sha256. Recording the
     # containing config as one of that contract's managed surfaces would make
     # the expected digest self-referential and drift immediately after write.
     surfaces = managed_surface_hashes(

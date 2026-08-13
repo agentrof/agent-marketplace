@@ -35,6 +35,9 @@ PREPARATION = module("preparation_check")
 PROJECT_CONFIG = module("project_config")
 SETUP_CHECK = module("setup_check")
 VAULT_GATE = module("vault_gate")
+CURRENT_PROJECT_CONTRACT_VERSION = (
+    SETUP_CHECK.marketplace_paths.CURRENT_PROJECT_CONTRACT_VERSION
+)
 
 
 def call(target, argv):
@@ -349,7 +352,7 @@ class PreparationTests(unittest.TestCase):
             (work / "config.json").write_text(json.dumps({
                 "project_key": "shop", "project_origin": "greenfield",
                 "agent_marketplace": {
-                    "contract_version": 5,
+                    "contract_version": CURRENT_PROJECT_CONTRACT_VERSION,
                     "team_id": "software-engineering-team",
                     "vault": {"status": "active"},
                 },
@@ -371,7 +374,7 @@ class PreparationTests(unittest.TestCase):
                 "project_key": "shop",
                 "project_origin": "unclassified",
                 "agent_marketplace": {
-                    "contract_version": 5,
+                    "contract_version": CURRENT_PROJECT_CONTRACT_VERSION,
                     "team_id": "software-engineering-team",
                 },
             }), encoding="utf-8")
@@ -420,7 +423,8 @@ class PreparationTests(unittest.TestCase):
             value = json.loads(config.read_text(encoding="utf-8"))
             value.pop("team_id", None)
             contract = {
-                "schema_version": 1, "contract_version": 5,
+                "schema_version": 1,
+                "contract_version": CURRENT_PROJECT_CONTRACT_VERSION,
                 "project_id": "setup-project",
                 "team_id": "software-engineering-team",
                 "workspace": "workspace",

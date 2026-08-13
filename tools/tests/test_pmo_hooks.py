@@ -15,6 +15,8 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from tools.tests.project_contract import CURRENT_PROJECT_CONTRACT_VERSION
+
 REPO = Path(__file__).resolve().parents[2]
 SCRIPTS = REPO / "dist" / "claude" / "project-management-office" / "scripts"
 
@@ -76,7 +78,8 @@ class PmoHookTests(unittest.TestCase):
             )
             self.assertEqual(completed.returncode, 0, completed.stderr)
         contract = {
-            "schema_version": 1, "contract_version": 5,
+            "schema_version": 1,
+            "contract_version": CURRENT_PROJECT_CONTRACT_VERSION,
             "project_id": "hook-project", "team_id": "software-engineering-team",
             "workspace": "workspace", "repository_fingerprint": "test",
             "delivery": {"requires_pull_request": False,

@@ -2334,6 +2334,9 @@ def check_product_namespace(tree: Tree, findings: list[Finding]) -> None:
         return
     try:
         build_distributions.load_product_contract(tree.root)
+        project_contract_version = (
+            build_distributions.current_project_contract_version(tree.root)
+        )
     except ValueError as exc:
         findings.append(Finding(
             "error", PRODUCT_CONFIG_RELPATH, 1, "product_namespace", str(exc),
@@ -2343,7 +2346,7 @@ def check_product_namespace(tree: Tree, findings: list[Finding]) -> None:
 
     helpers = []
     expected_helper = build_distributions.marketplace_paths_source(
-        tree.product
+        tree.product, project_contract_version
     ).encode()
     for plugin in sorted(path for path in tree.plugins_dir.iterdir() if path.is_dir()):
         helper = plugin / "scripts" / "marketplace_paths.py"

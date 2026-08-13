@@ -17,6 +17,8 @@ import re
 from pathlib import Path
 from unittest import mock
 
+from tools.tests.project_contract import CURRENT_PROJECT_CONTRACT_VERSION
+
 REPO = Path(__file__).resolve().parents[2]
 PMO_SCRIPTS = REPO / "dist" / "claude" / "project-management-office" / "scripts"
 SET_SCRIPTS = REPO / "dist" / "claude" / "software-engineering-team" / "scripts"
@@ -40,7 +42,7 @@ def initialize_contract_repo(root: Path, project_key: str = "shop") -> None:
         subprocess.run(command, cwd=root, check=True)
     contract = {
         "schema_version": 1,
-        "contract_version": 5,
+        "contract_version": CURRENT_PROJECT_CONTRACT_VERSION,
         "project_id": "runtime-project",
         "team_id": "software-engineering-team",
         "workspace": "workspace",

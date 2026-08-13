@@ -199,26 +199,34 @@ class ValidatorFixtureTests(unittest.TestCase):
                               }],
                           }
                       }))
+            current_contract = (
+                fixtures.build_distributions.current_project_contract_version(
+                    root
+                )
+            )
             write(root / "plugins" / "second-team" / "agents" / "planner.md",
                   VALID_AGENT)
-            write(
-                root / "plugins" / "second-team" / "scripts"
-                / "marketplace_paths.py",
-                fixtures.build_distributions.marketplace_paths_source(
-                    json.loads((root / "product.json").read_text(encoding="utf-8"))
-                ),
-            )
-            write(root / "plugins" / "second-team" / "skill-content" / "notes"
-                  / "SKILL.md", VALID_SKILL)
             write(root / "plugins" / "second-team" / "migrations"
                   / "manifest.json", json.dumps({
                       "schema_version": 1,
                       "component": "second-team",
                       "database": None,
                       "project_contract": {
-                          "baseline": 1, "current": 1, "steps": [],
+                          "baseline": current_contract,
+                          "current": current_contract,
+                          "steps": [],
                       },
                   }, indent=2))
+            write(
+                root / "plugins" / "second-team" / "scripts"
+                / "marketplace_paths.py",
+                fixtures.build_distributions.marketplace_paths_source(
+                    json.loads((root / "product.json").read_text(encoding="utf-8")),
+                    current_contract,
+                ),
+            )
+            write(root / "plugins" / "second-team" / "skill-content" / "notes"
+                  / "SKILL.md", VALID_SKILL)
             write(
                 root / "plugins" / "second-team" / "templates"
                 / "project-instructions" / "team.md",

@@ -244,7 +244,8 @@ class PmoCliTests(unittest.TestCase):
             config_path.parent.mkdir()
             config = {"project_key": "shop", "project_origin": "existing"}
             contract = {
-                "schema_version": 1, "contract_version": 5,
+                "schema_version": 1,
+                "contract_version": pmo_cli.upgrade_core.PROJECT_CONTRACT_VERSION,
                 "project_id": "test-project-id", "team_id": "software-engineering-team",
                 "workspace": "workspace", "repository_fingerprint": "test",
                 "delivery": {"requires_pull_request": False, "target_branch": "master"},

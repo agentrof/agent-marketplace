@@ -259,6 +259,9 @@ def new_plugin(root: Path, name: str) -> None:
     claude_platform = root / "platforms" / "claude" / name
     codex_platform = root / "platforms" / "codex" / name
     created = [plugin, claude_platform, codex_platform]
+    project_contract_version = (
+        build_distributions.current_project_contract_version(root)
+    )
     try:
         (plugin / "agents").mkdir(parents=True)
         (plugin / "skill-content").mkdir()
@@ -271,7 +274,9 @@ def new_plugin(root: Path, name: str) -> None:
         )
         (plugin / "scripts").mkdir()
         (plugin / "scripts" / "marketplace_paths.py").write_text(
-            build_distributions.marketplace_paths_source(product_contract),
+            build_distributions.marketplace_paths_source(
+                product_contract, project_contract_version
+            ),
             encoding="utf-8",
         )
         (plugin / "migrations").mkdir()
@@ -280,7 +285,11 @@ def new_plugin(root: Path, name: str) -> None:
                 "schema_version": 1,
                 "component": name,
                 "database": None,
-                "project_contract": {"baseline": 1, "current": 1, "steps": []},
+                "project_contract": {
+                    "baseline": project_contract_version,
+                    "current": project_contract_version,
+                    "steps": [],
+                },
             }, indent=2) + "\n",
             encoding="utf-8",
         )

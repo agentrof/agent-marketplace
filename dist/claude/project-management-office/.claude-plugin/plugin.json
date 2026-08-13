@@ -1,6 +1,6 @@
 {
   "name": "project-management-office",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Project Management Office: the shared operations backbone for every team plugin. One central database for projects, epics, stories, tasks with attempt history, dependencies, DoD records, work orders, findings and audit events, written only through its CLI, recorded deterministically via hooks, and viewed through a read-only web dashboard.",
   "author": {
     "name": "Agentrof",
@@ -9,10 +9,10 @@
   "license": "MIT",
   "skills": "./skills/",
   "agent_marketplace": {
-    "build_id": "snapshot.8b44e9e31e13972e90437b9e4681b5ae6fe4da00604a311ea18ebf606c05bfbb",
-    "marketplace_release": "0.2.1",
+    "build_id": "snapshot.304cd3e1957a96ddd6679885c429edeb2a5f8e8031fba2af3d2d0bfeb5e01116",
+    "marketplace_release": "0.2.2",
     "source_channel": "snapshot",
-    "source_ref": "snapshot.8b44e9e31e13972e90437b9e4681b5ae6fe4da00604a311ea18ebf606c05bfbb",
+    "source_ref": "snapshot.304cd3e1957a96ddd6679885c429edeb2a5f8e8031fba2af3d2d0bfeb5e01116",
     "source_commit": ""
   }
 }

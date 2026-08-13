@@ -1,14 +1,15 @@
 {
   "schema_version": 1,
-  "version": "0.2.1",
-  "stable_base": "b43e16bc5156613a2abfffb26a1379f66b2846c3",
-  "main_source": "2367647a8ee690e7368dccc2bfbe5b056f6092bb",
+  "version": "0.2.2",
+  "stable_base": "998f75935a8204251f90d889cfdcf5a747a789d7",
+  "main_source": "c8edb51d89d53fb7409f2f78702edb08c94bdc8a",
   "impacts": {
-    "agent-marketplace": "patch",
     "project-management-office": "patch",
     "software-engineering-team": "patch"
   },
   "summaries": [
-    "Make fresh setup collect each configuration decision through bounded native choice gates and keep CI deferral separate."
+    "Prevent setup from registering or closing before the complete vault designation map is minted and verified.",
+    "Restore portable vault validation and greenfield preparation routing for v5 project contracts.",
+    "Drive setup, portable gates, and cross-host regression fixtures from one current project-contract policy."
   ]
 }

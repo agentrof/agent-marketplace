@@ -1,8 +1,8 @@
 {
   "schema_version": 1,
-  "marketplace": "0.2.1",
+  "marketplace": "0.2.2",
   "plugins": {
-    "project-management-office": "0.1.1",
-    "software-engineering-team": "0.2.1"
+    "project-management-office": "0.1.2",
+    "software-engineering-team": "0.2.2"
   }
 }

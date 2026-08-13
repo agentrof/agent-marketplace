@@ -215,6 +215,24 @@ class DistributionContractTests(unittest.TestCase):
             namespace["CURRENT_PROJECT_CONTRACT_VERSION"], current + 1
         )
 
+    def test_delivery_team_contract_policies_must_agree(self):
+        current = build_distributions.current_project_contract_version(REPO)
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            for name, version in (
+                ("first-team", current),
+                ("second-team", current + 1),
+            ):
+                path = root / "plugins" / name / "migrations" / "manifest.json"
+                path.parent.mkdir(parents=True)
+                path.write_text(json.dumps({
+                    "project_contract": {"current": version}
+                }), encoding="utf-8")
+            with self.assertRaisesRegex(
+                ValueError, "migration manifests disagree"
+            ):
+                build_distributions.current_project_contract_version(root)
+
     def test_next_contract_policy_reaches_each_host_setup_runtime(self):
         contract = build_distributions.load_product_contract(REPO)
         current = build_distributions.current_project_contract_version(REPO)

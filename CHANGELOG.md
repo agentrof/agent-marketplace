@@ -18,3 +18,9 @@
 ## 0.2.1
 
 - Make fresh setup collect each configuration decision through bounded native choice gates and keep CI deferral separate.
+
+## 0.2.2
+
+- Prevent setup from registering or closing before the complete vault designation map is minted and verified.
+- Restore portable vault validation and greenfield preparation routing for v5 project contracts.
+- Drive setup, portable gates, and cross-host regression fixtures from one current project-contract policy.

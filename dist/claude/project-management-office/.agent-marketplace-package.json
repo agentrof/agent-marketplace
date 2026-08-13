@@ -1,9 +1,9 @@
 {
-  "build_id": "snapshot.8b44e9e31e13972e90437b9e4681b5ae6fe4da00604a311ea18ebf606c05bfbb",
+  "build_id": "snapshot.304cd3e1957a96ddd6679885c429edeb2a5f8e8031fba2af3d2d0bfeb5e01116",
   "component": "project-management-office",
   "files": {
     ".agent-marketplace-generated-distribution": "bc5e5ffd58e656c315fc4230e335b1acaaeba4b3a6871fc57e84144035567474",
-    ".claude-plugin/plugin.json": "eb2104fe717a581ce127ba2cc6bd899246d272a08d58319f43bd83f9848d1326",
+    ".claude-plugin/plugin.json": "451acd2de8af16fc07c8e198980178a13d4b97afc50badf069c5bd6aea2a82d1",
     "dashboard/design/MASTER.md": "69bc42d0a2f60221b6c3b6cffc845f0614fb06ca0d242c9e21824f331e2f38d0",
     "dashboard/index.html": "06557f8d8bc2d3afced183769e1f7254e11f7aaaf1776072e03a70c6a3282b95",
     "hooks/hooks.json": "43bed2bd18ebf1578dd08983ba3681b86b41f454fd268763a4cabdbe66eed9f4",
@@ -21,7 +21,7 @@
     "scripts/hook_subagent.py": "f80a1444d8429cfa027f64b678fb0a84dad5f34ab599e0379b705e3fd0b09ea9",
     "scripts/marketplace_paths.py": "0285377da6a3fd4c3dd4582718ea90578b349f567a8c86f04c046e21c709d2d5",
     "scripts/marketplace_run.py": "53f69a1b51e59567857d028db4886b473546e26209a82dd66c2e79affe1b1bf2",
-    "scripts/pmo_cli.py": "26696478736bf1eb361164e38cd4ce981a819a342061b9e8dae2cff843fd9c5c",
+    "scripts/pmo_cli.py": "7f055a70daf3aa60adc970e8444dbe2164173181c77b81d31442e67a80e1e3a6",
     "scripts/pmo_dashboard.py": "6dd54373f71d7dff1b27f955bc62c74e679674113ce1ace580544065041b1c1c",
     "scripts/upgrade_core.py": "ff9d3a7385b4b45ce95896f6cac1ca15a5a31ce580557ebb8a8776ce0ea967fd",
     "scripts/upgrade_guidance.json": "312e3358b94f83b7d688a556486a2bdef506dd02b824c1cdfd93fbd8af825d7c",
@@ -38,13 +38,13 @@
     "templates/project-instructions/common.md": "7ac897c04bb7707eedb89eafbc35b5b721ab9e4322a69b9ebe8bcccc6ff73728"
   },
   "host": "claude",
-  "marketplace_release": "0.2.1",
+  "marketplace_release": "0.2.2",
   "runtime_contracts": [
     "in_use_pid_marker_v1"
   ],
   "schema_version": 2,
   "source_channel": "snapshot",
   "source_commit": "",
-  "source_ref": "snapshot.8b44e9e31e13972e90437b9e4681b5ae6fe4da00604a311ea18ebf606c05bfbb",
-  "version": "0.1.1"
+  "source_ref": "snapshot.304cd3e1957a96ddd6679885c429edeb2a5f8e8031fba2af3d2d0bfeb5e01116",
+  "version": "0.1.2"
 }

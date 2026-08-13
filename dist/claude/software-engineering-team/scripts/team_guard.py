@@ -119,12 +119,7 @@ def conflicting_team(cwd: str, current_team: str) -> str:
             config = candidates[0]
     try:
         data = json.loads(config.read_text(encoding="utf-8"))
-        contract = data.get("agent_marketplace", {})
-        owner = contract.get("team_id", "") if isinstance(contract, dict) else ""
-        owner = owner or data.get("team_id") or data.get("managed_by", "")
-        suffix = " plugin; change only through the configure entry"
-        if isinstance(owner, str) and owner.endswith(suffix):
-            owner = owner[:-len(suffix)]
+        owner = marketplace_paths.team_from_config(data)
         if owner and owner != current_team:
             return str(owner)
     except FileNotFoundError:

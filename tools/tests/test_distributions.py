@@ -6,9 +6,12 @@ import concurrent.futures
 import hashlib
 import importlib.util
 import json
+import shutil
+import subprocess
 import sys
 import tempfile
 import unittest
+import zipfile
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[2]
@@ -48,6 +51,64 @@ generate_claude = load_claude_generator()
 
 
 class DistributionContractTests(unittest.TestCase):
+    def test_each_host_runs_self_contained_gate_and_reads_v5_owner(self):
+        for host in build_distributions.HOSTS:
+            scripts = REPO / "dist" / host / "software-engineering-team" / "scripts"
+            with self.subTest(host=host), tempfile.TemporaryDirectory() as tmp:
+                root = Path(tmp)
+                workspace = root / "knowledge"
+                docs = workspace / "docs"
+                template = (
+                    REPO / "dist" / host / "software-engineering-team"
+                    / "templates" / "vault"
+                )
+                docs.mkdir(parents=True)
+                shutil.copy2(template / "home.md", docs / "home.md")
+                shutil.copytree(template / ".obsidian", docs / ".obsidian")
+                (workspace / "config.json").write_text(json.dumps({
+                    "project_key": "issue-30",
+                    "project_origin": "greenfield",
+                    "team_id": "stale-legacy-owner",
+                    "agent_marketplace": {
+                        "contract_version": 5,
+                        "team_id": "software-engineering-team",
+                        "vault": {"status": "active"},
+                    },
+                }), encoding="utf-8")
+                rendered = subprocess.run(
+                    [sys.executable, str(scripts / "vault_check.py"),
+                     "render-relations", "--vault", str(docs)],
+                    capture_output=True, text=True, check=False,
+                )
+                self.assertEqual(rendered.returncode, 0, rendered.stderr)
+                installed = subprocess.run(
+                    [sys.executable, str(scripts / "vault_gate.py"), "install",
+                     "--project-root", str(root)], capture_output=True, text=True,
+                    check=False,
+                )
+                self.assertEqual(installed.returncode, 0, installed.stderr)
+                gate = root / ".github" / "agentrof" / "vault-gate.pyz"
+                with zipfile.ZipFile(gate) as archive:
+                    self.assertIn("scripts/marketplace_paths.py", archive.namelist())
+                checked = subprocess.run(
+                    [sys.executable, str(gate), "check", "--project-root",
+                     str(root), "--json"], capture_output=True, text=True,
+                    check=False,
+                )
+                self.assertEqual(checked.returncode, 0, checked.stderr)
+                result = json.loads(checked.stdout)
+                self.assertTrue(result["ok"])
+                self.assertEqual(result["results"][0]["stderr"], "")
+                routed = subprocess.run(
+                    [sys.executable, str(scripts / "preparation_check.py"),
+                     "status", "--project-root", str(root), "--json"],
+                    capture_output=True, text=True, check=False,
+                )
+                self.assertEqual(routed.returncode, 1)
+                self.assertEqual(
+                    json.loads(routed.stdout)["next_entry"], "business-analysis"
+                )
+
     def test_marketplace_root_claude_uses_canonical_imports_only(self):
         self.assertEqual(
             (REPO / "CLAUDE.md").read_text(encoding="utf-8"),
@@ -667,6 +728,22 @@ class CodexProjectGeneratorTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "another-team"):
             generate.materialize(self.project, self.plugin, "workspace")
         self.assertEqual(self.snapshot(), before)
+
+    def test_nested_owner_is_authoritative_over_legacy_fields(self):
+        workspace = self.project / "workspace"
+        workspace.mkdir()
+        config = workspace / "config.json"
+        config.write_text(json.dumps({
+            "team_id": "another-team",
+            "agent_marketplace": {"team_id": "sample-team"},
+        }), encoding="utf-8")
+        generate.preview(self.project, self.plugin, "workspace")
+        config.write_text(json.dumps({
+            "team_id": "sample-team",
+            "agent_marketplace": {"team_id": "another-team"},
+        }), encoding="utf-8")
+        with self.assertRaisesRegex(ValueError, "another-team"):
+            generate.preview(self.project, self.plugin, "workspace")
 
     def test_alternative_workspace_controls_ownership_and_rendering(self):
         workspace = self.project / "knowledge"

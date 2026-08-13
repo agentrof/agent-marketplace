@@ -18,6 +18,7 @@ if str(SCRIPT_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPT_DIR))
 
 import project_instructions
+import marketplace_paths
 
 
 OWNER_RE = re.compile(
@@ -123,12 +124,7 @@ def configured_team(project_root: Path, workspace: str) -> str:
     config = project_root / workspace / "config.json"
     try:
         data = json.loads(config.read_text(encoding="utf-8"))
-        contract = data.get("agent_marketplace", {})
-        value = contract.get("team_id", "") if isinstance(contract, dict) else ""
-        value = value or data.get("team_id") or data.get("managed_by", "")
-        value = str(value)
-        suffix = " plugin; change only through the configure entry"
-        return value[:-len(suffix)] if value.endswith(suffix) else value
+        return marketplace_paths.team_from_config(data)
     except FileNotFoundError:
         return ""
     except Exception as exc:

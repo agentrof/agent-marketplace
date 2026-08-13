@@ -1,0 +1,7 @@
+{
+  "summary": "Restore portable vault validation and greenfield preparation routing for v5 project contracts.",
+  "components": {
+    "project-management-office": "patch",
+    "software-engineering-team": "patch"
+  }
+}

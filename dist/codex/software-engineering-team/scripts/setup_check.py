@@ -10,6 +10,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+import marketplace_paths
+
 START = "# agent-marketplace:software-engineering-team:gitignore:start"
 END = "# agent-marketplace:software-engineering-team:gitignore:end"
 TEAM = "software-engineering-team"
@@ -62,9 +64,7 @@ def preflight(root: Path, workspace: str) -> list[str]:
     findings = []
     if isinstance(config, dict):
         contract = config.get("agent_marketplace", {})
-        owner = contract.get("team_id", "") if isinstance(contract, dict) else ""
-        owner = owner or config.get("team_id") \
-            or str(config.get("managed_by", "")).split(" plugin", 1)[0]
+        owner = marketplace_paths.team_from_config(config)
         if owner and owner != TEAM:
             findings.append(f"foreign managed-team trace: {owner}")
         if config.get("project_key") and (

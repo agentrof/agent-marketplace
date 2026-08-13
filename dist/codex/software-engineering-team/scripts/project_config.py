@@ -9,6 +9,8 @@ import os
 import tempfile
 from pathlib import Path
 
+import marketplace_paths
+
 ALLOWED_ORIGINS = {"greenfield", "existing"}
 
 
@@ -53,9 +55,7 @@ def contract_root(config_path: Path) -> Path | None:
 
 def check(config: dict) -> list[str]:
     errors = []
-    contract = config.get("agent_marketplace", {})
-    owner = contract.get("team_id", "") if isinstance(contract, dict) else ""
-    owner = owner or config.get("team_id", "")
+    owner = marketplace_paths.team_from_config(config)
     if owner != "software-engineering-team":
         errors.append("team_id must be software-engineering-team")
     if config.get("project_origin") not in ALLOWED_ORIGINS:

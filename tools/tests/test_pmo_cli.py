@@ -170,6 +170,21 @@ def parser_leaf_commands(parser, prefix=()) -> list[str]:
 
 
 class MarketplacePathContractTests(unittest.TestCase):
+    def test_team_owner_resolution_is_contract_first_and_fail_closed(self):
+        resolver = pmo_cli.marketplace_paths.team_from_config
+        cases = (
+            ({"agent_marketplace": {"team_id": "nested"},
+              "team_id": "legacy"}, "nested"),
+            ({"team_id": "legacy"}, "legacy"),
+            ({"managed_by": "legacy plugin; change only through the configure entry"},
+             "legacy"),
+            ({"managed_by": "legacy"}, "legacy"),
+            ({"agent_marketplace": {}, "team_id": "legacy"}, ""),
+        )
+        for config, expected in cases:
+            with self.subTest(config=config):
+                self.assertEqual(resolver(config), expected)
+
     def test_environment_precedence(self):
         resolver = pmo_cli.marketplace_paths
         cases = (

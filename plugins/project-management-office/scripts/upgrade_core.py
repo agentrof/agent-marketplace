@@ -26,6 +26,12 @@ import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 
+SCRIPT_DIR = Path(__file__).resolve().parent
+if str(SCRIPT_DIR) not in sys.path:
+    sys.path.insert(0, str(SCRIPT_DIR))
+
+import marketplace_paths
+
 
 PROJECT_STATE_SCHEMA = 1
 PROJECT_CONTRACT_VERSION = 5
@@ -37,7 +43,7 @@ RUNTIME_RELATIVE = (Path(".agentrof") / "agent-marketplace" / ".runtime")
 MAINTENANCE_NAME = "maintenance.json"
 UPGRADES_DIR = "upgrades"
 LOCKS_DIR = "locks"
-PRIOR_OWNER_SUFFIX = " plugin; change only through the configure entry"
+PRIOR_OWNER_SUFFIX = marketplace_paths.PRIOR_OWNER_SUFFIX
 GITIGNORE_START = "# agent-marketplace:software-engineering-team:gitignore:start"
 GITIGNORE_END = "# agent-marketplace:software-engineering-team:gitignore:end"
 ACTIVE_ORDER_STATUSES = ("running", "waiting_gate")
@@ -984,18 +990,7 @@ def find_workspace(root: Path) -> tuple[str, Path | None]:
 
 
 def team_from_config(config: dict) -> str:
-    contract = config.get(CONTRACT_KEY)
-    if isinstance(contract, dict):
-        return str(contract.get("team_id", "")).strip()
-    team = str(config.get("team_id", "")).strip()
-    if team:
-        return team
-    prior_owner = str(config.get("managed_by", "")).strip()
-    if prior_owner.endswith(PRIOR_OWNER_SUFFIX):
-        return prior_owner[:-len(PRIOR_OWNER_SUFFIX)]
-    if prior_owner and " " not in prior_owner:
-        return prior_owner
-    return ""
+    return marketplace_paths.team_from_config(config)
 
 
 def config_owned_digest(config: dict) -> str:

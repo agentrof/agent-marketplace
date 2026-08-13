@@ -1,9 +1,9 @@
 {
-  "build_id": "snapshot.95f15c0454c01086875039c10e607ee94558ea644e105b3387495d858784bf0e",
+  "build_id": "snapshot.b36895522c704b6cda0924302f258180df034cf084c5b125060f8929781948a4",
   "component": "project-management-office",
   "files": {
     ".agent-marketplace-generated-distribution": "bc5e5ffd58e656c315fc4230e335b1acaaeba4b3a6871fc57e84144035567474",
-    ".claude-plugin/plugin.json": "9686fdf6b454e1a36816b361736e4f446ccc8c86e53f89fa5e61960b2bde8426",
+    ".claude-plugin/plugin.json": "1cb9cd3ba8c48fd8603f7c34572cd65a398ec891dc2ba87d28c1ad6c93c47716",
     "dashboard/design/MASTER.md": "69bc42d0a2f60221b6c3b6cffc845f0614fb06ca0d242c9e21824f331e2f38d0",
     "dashboard/index.html": "06557f8d8bc2d3afced183769e1f7254e11f7aaaf1776072e03a70c6a3282b95",
     "hooks/hooks.json": "43bed2bd18ebf1578dd08983ba3681b86b41f454fd268763a4cabdbe66eed9f4",
@@ -19,11 +19,11 @@
     "scripts/hook_session_end.py": "39ddd558d94137b8c48b84840e408c51f8d19574e1beb050e688d06b30ebb89a",
     "scripts/hook_session_start.py": "b185bfaabbd4cf662b34228300b2c3cad9761450b5b656eaac9a233f82e982bb",
     "scripts/hook_subagent.py": "f80a1444d8429cfa027f64b678fb0a84dad5f34ab599e0379b705e3fd0b09ea9",
-    "scripts/marketplace_paths.py": "c32da903c8975f911f0fe983f53d0fc527d28fc26e506905c2f25515359c7fde",
+    "scripts/marketplace_paths.py": "689b84d51cfd1e86b679498c584d07b715a675be26a5de05c3b847b76e9e1e27",
     "scripts/marketplace_run.py": "53f69a1b51e59567857d028db4886b473546e26209a82dd66c2e79affe1b1bf2",
     "scripts/pmo_cli.py": "132989060bec4388c7a8c835b926871dc29abf27df86ceaf5f926f2ee32d1e18",
     "scripts/pmo_dashboard.py": "6dd54373f71d7dff1b27f955bc62c74e679674113ce1ace580544065041b1c1c",
-    "scripts/upgrade_core.py": "dad721a26ad4554a214d85e6383fa8e035269b3a9c070cc7c72b1e62dc907824",
+    "scripts/upgrade_core.py": "27eb83ee50331b216979cc9fe00e5fdb19940445f79f4b5dac4bfd66576c6ce1",
     "scripts/upgrade_guidance.json": "312e3358b94f83b7d688a556486a2bdef506dd02b824c1cdfd93fbd8af825d7c",
     "skill-content/control-tower/SKILL.md": "9f263d25b6ccd693420eea630fb5e283119f331ea8a48da16e6d41e9c89a1b0c",
     "skill-content/issue-desk/SKILL.md": "48a5be80d7b7a09181b38586679c7a481dd9a481d12949986fcd87b4cc4c07a4",
@@ -45,6 +45,6 @@
   "schema_version": 2,
   "source_channel": "snapshot",
   "source_commit": "",
-  "source_ref": "snapshot.95f15c0454c01086875039c10e607ee94558ea644e105b3387495d858784bf0e",
+  "source_ref": "snapshot.b36895522c704b6cda0924302f258180df034cf084c5b125060f8929781948a4",
   "version": "0.1.1"
 }

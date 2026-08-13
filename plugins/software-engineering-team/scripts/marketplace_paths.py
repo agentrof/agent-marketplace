@@ -12,6 +12,7 @@ VENDOR_HOME_ENV = "AGENTROF_HOME"
 MARKETPLACE_HOME_ENV = "AGENT_MARKETPLACE_HOME"
 VENDOR_HOME_DIR = ".agentrof"
 MARKETPLACE_HOME_DIR = "agent-marketplace"
+PRIOR_OWNER_SUFFIX = " plugin; change only through the configure entry"
 
 
 def vendor_home(
@@ -35,3 +36,19 @@ def marketplace_home(
     if override:
         return Path(override)
     return vendor_home(values, user_home) / MARKETPLACE_HOME_DIR
+
+
+def team_from_config(config: Mapping[str, object]) -> str:
+    """Resolve the sole delivery-team owner across supported contracts."""
+    contract = config.get("agent_marketplace")
+    if isinstance(contract, Mapping):
+        return str(contract.get("team_id", "")).strip()
+    team = str(config.get("team_id", "")).strip()
+    if team:
+        return team
+    prior_owner = str(config.get("managed_by", "")).strip()
+    if prior_owner.endswith(PRIOR_OWNER_SUFFIX):
+        return prior_owner[:-len(PRIOR_OWNER_SUFFIX)]
+    if prior_owner and " " not in prior_owner:
+        return prior_owner
+    return ""

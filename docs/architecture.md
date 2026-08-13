@@ -129,7 +129,7 @@ the dependency contract.
    blocks preparation. Dead locks are reclaimed only from a same-host process
    proven absent; session records do not determine upgrade readiness.
    User-owned code and content are outside the writer set.
-16. **Tracked contract, local environment.** The nested v5 contract in
+16. **Tracked contract, local environment.** The current nested contract in
    `<workspace>/config.json` is the portable project baseline. It pins exact
    component version and paired build identity and hashes its canonical
    payload. Root `.agentrof`, `.codex`, and `.claude` directories are ignored.
@@ -158,6 +158,8 @@ the dependency contract.
 - `.changes/`: pending release-impact declarations, one per normal pull request.
 - `plugins/<team>/`: host-neutral canonical content. Full skills live in
   `skill-content/`; ordered compatibility contracts live in `migrations/`;
+  every delivery-team migration manifest declares the same current project
+  contract version, which generates the shared runtime and test policy;
   agent frontmatter uses neutral exposure and reasoning enums. Every team owns
   exactly one `templates/project-instructions/team.md` fragment.
 - `plugins/project-management-office/templates/project-instructions/common.md`:

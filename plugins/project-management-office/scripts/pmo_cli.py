@@ -661,7 +661,7 @@ def worktree_contract_baseline(worktree: str) -> dict[str, str]:
     except upgrade_core.UpgradeError as exc:
         raise Rule(str(exc)) from exc
     if contract is None:
-        raise Rule("work-order worktree requires project contract v5")
+        raise Rule("work-order worktree requires the current project contract")
     return {
         "contract_sha256": str(contract["contract_sha256"]),
         "marketplace_release": str(contract.get("marketplace_release", "")),

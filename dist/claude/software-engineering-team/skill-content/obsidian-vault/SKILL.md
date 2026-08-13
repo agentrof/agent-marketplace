@@ -55,7 +55,7 @@ and pass frozen paths as repeated `--exclude` flags.
 - `render-decisions`, `render-navigation`, and `render-relations` own generated
   indexes, navigation, inverse projections, shards, and traceability reports.
 - `adoption-plan` inventories legacy content. `activate-adoption` requires the
-  exact green plan hash and project contract v5.
+  exact green plan hash and current project contract.
 - `stamp-decision` writes status, UTC date, tag mirror, and both supersede ends
   atomically.
 - `migrate` owns deterministic normalization; `migrate --rename` applies the

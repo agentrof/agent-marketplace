@@ -12,10 +12,10 @@
   ],
   "skills": "./skills/",
   "agent_marketplace": {
-    "build_id": "snapshot.b36895522c704b6cda0924302f258180df034cf084c5b125060f8929781948a4",
+    "build_id": "snapshot.8b44e9e31e13972e90437b9e4681b5ae6fe4da00604a311ea18ebf606c05bfbb",
     "marketplace_release": "0.2.1",
     "source_channel": "snapshot",
-    "source_ref": "snapshot.b36895522c704b6cda0924302f258180df034cf084c5b125060f8929781948a4",
+    "source_ref": "snapshot.8b44e9e31e13972e90437b9e4681b5ae6fe4da00604a311ea18ebf606c05bfbb",
     "source_commit": ""
   }
 }

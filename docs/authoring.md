@@ -392,13 +392,19 @@ unrecognized shell side effects lock subsequent managed work as contract drift.
 First setup has one bounded bootstrap state: the matching team config exists,
 its `project_key` is absent, and no Agent Marketplace project contract exists.
 The PMO project-register command is the sole operation that stamps the key and
-atomically writes nested contract v5. A keyed config without a valid contract
-is never treated as new setup; it routes to upgrade. Root `.agentrof`,
+atomically writes the current nested contract. A keyed config without a valid
+contract is never treated as new setup; it routes to upgrade. Root `.agentrof`,
 `.codex`, and `.claude` are machine-local ignored surfaces. Setup is the public
 entry for clone attach and local reconciliation; it never silently upgrades or
 downgrades a project. Remote-backed upgrades prepare and apply on an
 `agent-marketplace/upgrade-*` branch and stay locked until the target branch
 contains the managed revision.
+
+The current project-contract version comes from the ordered delivery-team
+migration manifests. All delivery teams must agree on that value. After adding
+the next migration step, run `python3 tools/build_distributions.py`; it rewrites
+the shared runtime policy and both host distributions. `--check` rejects stale
+generated runtime sources, so tests and setup cannot remain on the prior value.
 
 ## Depending on the operations backbone
 

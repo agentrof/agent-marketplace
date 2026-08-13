@@ -91,7 +91,7 @@ include tradeoffs. Anchor every path at the resolved git root.
 9. Register PMO with `project register --key <key> --name <name> --team
    software-engineering-team --stamp-config <config> --project-root <root>
    --workspace <name>`. Registration preserves top-level `project_key` and
-   atomically writes nested project contract v5 with its hash.
+   atomically writes the current nested project contract with its hash.
 10. Install the tracked portable gate with `vault_gate.py install
     --project-root <root>`. The output is
     `.github/agentrof/vault-gate.pyz`.

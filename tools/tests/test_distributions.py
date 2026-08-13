@@ -51,63 +51,96 @@ generate_claude = load_claude_generator()
 
 
 class DistributionContractTests(unittest.TestCase):
-    def test_each_host_runs_self_contained_gate_and_reads_v5_owner(self):
+    def prepare_host_project(
+        self, package: Path, project: Path, contract_version: int
+    ) -> Path:
+        scripts = package / "scripts"
+        workspace = project / "knowledge"
+        docs = workspace / "docs"
+        template = package / "templates" / "vault"
+        docs.mkdir(parents=True)
+        shutil.copy2(template / "home.md", docs / "home.md")
+        shutil.copytree(template / ".obsidian", docs / ".obsidian")
+        (workspace / "config.json").write_text(json.dumps({
+            "project_key": "portable-gate",
+            "project_origin": "greenfield",
+            "team_id": "stale-legacy-owner",
+            "agent_marketplace": {
+                "contract_version": contract_version,
+                "team_id": "software-engineering-team",
+                "vault": {"status": "active"},
+            },
+        }), encoding="utf-8")
+        rendered = subprocess.run(
+            [sys.executable, str(scripts / "vault_check.py"),
+             "render-relations", "--vault", str(docs)],
+            capture_output=True, text=True, check=False,
+        )
+        self.assertEqual(rendered.returncode, 0, rendered.stderr)
+        return scripts
+
+    def assert_self_contained_gate(
+        self, scripts: Path, project: Path
+    ) -> None:
+        installed = subprocess.run(
+            [sys.executable, str(scripts / "vault_gate.py"), "install",
+             "--project-root", str(project)], capture_output=True, text=True,
+            check=False,
+        )
+        self.assertEqual(installed.returncode, 0, installed.stderr)
+        gate = project / ".github" / "agentrof" / "vault-gate.pyz"
+        with zipfile.ZipFile(gate) as archive:
+            self.assertIn("scripts/marketplace_paths.py", archive.namelist())
+        checked = subprocess.run(
+            [sys.executable, str(gate), "check", "--project-root",
+             str(project), "--json"], capture_output=True, text=True,
+            check=False,
+        )
+        self.assertEqual(checked.returncode, 0, checked.stderr)
+        result = json.loads(checked.stdout)
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["results"][0]["stderr"], "")
+
+    def assert_canonical_owner_routing(
+        self, scripts: Path, project: Path
+    ) -> None:
+        routed = subprocess.run(
+            [sys.executable, str(scripts / "preparation_check.py"),
+             "status", "--project-root", str(project), "--json"],
+            capture_output=True, text=True, check=False,
+        )
+        self.assertEqual(routed.returncode, 1)
+        self.assertEqual(
+            json.loads(routed.stdout)["next_entry"], "business-analysis"
+        )
+
+    def test_each_host_installs_and_runs_self_contained_portable_gate(self):
+        contract_version = build_distributions.current_project_contract_version(
+            REPO
+        )
         for host in build_distributions.HOSTS:
-            scripts = REPO / "dist" / host / "software-engineering-team" / "scripts"
             with self.subTest(host=host), tempfile.TemporaryDirectory() as tmp:
-                root = Path(tmp)
-                workspace = root / "knowledge"
-                docs = workspace / "docs"
-                template = (
+                package = (
                     REPO / "dist" / host / "software-engineering-team"
-                    / "templates" / "vault"
                 )
-                docs.mkdir(parents=True)
-                shutil.copy2(template / "home.md", docs / "home.md")
-                shutil.copytree(template / ".obsidian", docs / ".obsidian")
-                (workspace / "config.json").write_text(json.dumps({
-                    "project_key": "issue-30",
-                    "project_origin": "greenfield",
-                    "team_id": "stale-legacy-owner",
-                    "agent_marketplace": {
-                        "contract_version": 5,
-                        "team_id": "software-engineering-team",
-                        "vault": {"status": "active"},
-                    },
-                }), encoding="utf-8")
-                rendered = subprocess.run(
-                    [sys.executable, str(scripts / "vault_check.py"),
-                     "render-relations", "--vault", str(docs)],
-                    capture_output=True, text=True, check=False,
+                scripts = self.prepare_host_project(
+                    package, Path(tmp), contract_version
                 )
-                self.assertEqual(rendered.returncode, 0, rendered.stderr)
-                installed = subprocess.run(
-                    [sys.executable, str(scripts / "vault_gate.py"), "install",
-                     "--project-root", str(root)], capture_output=True, text=True,
-                    check=False,
+                self.assert_self_contained_gate(scripts, Path(tmp))
+
+    def test_each_host_routes_preparation_from_canonical_team_owner(self):
+        contract_version = build_distributions.current_project_contract_version(
+            REPO
+        )
+        for host in build_distributions.HOSTS:
+            with self.subTest(host=host), tempfile.TemporaryDirectory() as tmp:
+                package = (
+                    REPO / "dist" / host / "software-engineering-team"
                 )
-                self.assertEqual(installed.returncode, 0, installed.stderr)
-                gate = root / ".github" / "agentrof" / "vault-gate.pyz"
-                with zipfile.ZipFile(gate) as archive:
-                    self.assertIn("scripts/marketplace_paths.py", archive.namelist())
-                checked = subprocess.run(
-                    [sys.executable, str(gate), "check", "--project-root",
-                     str(root), "--json"], capture_output=True, text=True,
-                    check=False,
+                scripts = self.prepare_host_project(
+                    package, Path(tmp), contract_version
                 )
-                self.assertEqual(checked.returncode, 0, checked.stderr)
-                result = json.loads(checked.stdout)
-                self.assertTrue(result["ok"])
-                self.assertEqual(result["results"][0]["stderr"], "")
-                routed = subprocess.run(
-                    [sys.executable, str(scripts / "preparation_check.py"),
-                     "status", "--project-root", str(root), "--json"],
-                    capture_output=True, text=True, check=False,
-                )
-                self.assertEqual(routed.returncode, 1)
-                self.assertEqual(
-                    json.loads(routed.stdout)["next_entry"], "business-analysis"
-                )
+                self.assert_canonical_owner_routing(scripts, Path(tmp))
 
     def test_marketplace_root_claude_uses_canonical_imports_only(self):
         self.assertEqual(
@@ -120,7 +153,9 @@ class DistributionContractTests(unittest.TestCase):
         marker, provenance = build_distributions.packaging_names(REPO)
         self.assertEqual(marker, ".agent-marketplace-generated-distribution")
         self.assertEqual(provenance, ".agent-marketplace-package.json")
-        expected_resolver = build_distributions.marketplace_paths_source(contract)
+        expected_resolver = build_distributions.marketplace_paths_source(
+            contract, build_distributions.current_project_contract_version(REPO)
+        )
         for plugin in sorted(path for path in (REPO / "plugins").iterdir()
                              if path.is_dir()):
             source = plugin / "scripts" / "marketplace_paths.py"
@@ -146,6 +181,77 @@ class DistributionContractTests(unittest.TestCase):
             )
             with self.assertRaisesRegex(ValueError, "differs from"):
                 build_distributions.load_product_contract(root)
+
+    def test_project_contract_version_is_policy_driven(self):
+        contract = json.loads(
+            (REPO / "product.json").read_text(encoding="utf-8")
+        )
+        current = build_distributions.current_project_contract_version(REPO)
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "product.json").write_text(
+                json.dumps(contract), encoding="utf-8"
+            )
+            target = root / "plugins" / "sample-team" / "scripts"
+            target.mkdir(parents=True)
+            (target.parent / "migrations").mkdir()
+            (target.parent / "migrations" / "manifest.json").write_text(
+                json.dumps({
+                    "project_contract": {"current": current + 1}
+                }), encoding="utf-8"
+            )
+            source = target / "marketplace_paths.py"
+            source.write_text("stale\n", encoding="utf-8")
+            build_distributions.sync_marketplace_paths_sources(root)
+            generated = source.read_text(encoding="utf-8")
+            source.write_text("drift\n", encoding="utf-8")
+            self.assertEqual(
+                build_distributions.marketplace_paths_source_drift(root),
+                [f"generated runtime source is out of sync: {source}"],
+            )
+        namespace = {}
+        exec(generated, namespace)
+        self.assertEqual(
+            namespace["CURRENT_PROJECT_CONTRACT_VERSION"], current + 1
+        )
+
+    def test_next_contract_policy_reaches_each_host_setup_runtime(self):
+        contract = build_distributions.load_product_contract(REPO)
+        current = build_distributions.current_project_contract_version(REPO)
+        generated = build_distributions.marketplace_paths_source(
+            contract, current + 1
+        )
+        for host in build_distributions.HOSTS:
+            with self.subTest(host=host), tempfile.TemporaryDirectory() as tmp:
+                root = Path(tmp)
+                package = root / "package"
+                shutil.copytree(
+                    REPO / "dist" / host / "software-engineering-team",
+                    package,
+                )
+                (package / "scripts" / "marketplace_paths.py").write_text(
+                    generated, encoding="utf-8"
+                )
+                project = root / "project"
+                scripts = self.prepare_host_project(
+                    package, project, current + 1
+                )
+                self.assert_self_contained_gate(scripts, project)
+                self.assert_canonical_owner_routing(scripts, project)
+                checked = subprocess.run(
+                    [sys.executable, str(package / "scripts" / "setup_check.py"),
+                     "preflight", "--project-root", str(project),
+                     "--workspace", "knowledge", "--json"],
+                    capture_output=True, text=True, check=False,
+                )
+                self.assertEqual(checked.returncode, 1, checked.stderr)
+                self.assertEqual(
+                    json.loads(checked.stdout)["findings"],
+                    [
+                        "existing project contract must use "
+                        "environment reconciliation"
+                    ],
+                )
 
     def test_paired_host_builds_share_exact_snapshot_identity(self):
         identities = set()

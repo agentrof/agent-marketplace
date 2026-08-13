@@ -75,7 +75,7 @@ Routes:
   within the configured stacks and stack changes route to configure.
 - **setup** is the idempotent public environment entry. It performs fresh
   bootstrap and PMO registration when no contract exists, or reconciles a
-  clone's ignored runtime and host projection to tracked contract v5. Project
+  clone's ignored runtime and host projection to the current tracked contract. Project
   upgrade changes the tracked contract once; other machines attach locally.
   **configure** is the single change gate for user-owned project settings.
 - **organize-docs** is the on-demand vault librarian: a full-width

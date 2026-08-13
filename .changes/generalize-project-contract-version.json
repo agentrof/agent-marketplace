@@ -1,0 +1,7 @@
+{
+  "summary": "Drive setup, portable gates, and cross-host regression fixtures from one current project-contract policy.",
+  "components": {
+    "project-management-office": "patch",
+    "software-engineering-team": "patch"
+  }
+}

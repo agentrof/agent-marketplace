@@ -15,6 +15,7 @@ import marketplace_paths
 START = "# agent-marketplace:software-engineering-team:gitignore:start"
 END = "# agent-marketplace:software-engineering-team:gitignore:end"
 TEAM = "software-engineering-team"
+PROJECT_CONTRACT_VERSION = marketplace_paths.CURRENT_PROJECT_CONTRACT_VERSION
 
 
 def read(path: Path):
@@ -69,10 +70,13 @@ def preflight(root: Path, workspace: str) -> list[str]:
             findings.append(f"foreign managed-team trace: {owner}")
         if config.get("project_key") and (
             not isinstance(contract, dict)
-            or contract.get("contract_version") != 5
+            or contract.get("contract_version") != PROJECT_CONTRACT_VERSION
         ):
             findings.append("keyed config must use Agent Marketplace Upgrade")
-        elif isinstance(contract, dict) and contract.get("contract_version") == 5:
+        elif (
+            isinstance(contract, dict)
+            and contract.get("contract_version") == PROJECT_CONTRACT_VERSION
+        ):
             findings.append(
                 "existing project contract must use environment reconciliation"
             )
@@ -126,8 +130,13 @@ def closing(root: Path, workspace: str) -> list[str]:
         findings.append("project_origin is not classified")
     if not config.get("project_key"):
         findings.append("PMO registration has not stamped project_key")
-    if not isinstance(state, dict) or state.get("contract_version") != 5:
-        findings.append("project contract version is not 5")
+    if (
+        not isinstance(state, dict)
+        or state.get("contract_version") != PROJECT_CONTRACT_VERSION
+    ):
+        findings.append(
+            f"project contract version is not {PROJECT_CONTRACT_VERSION}"
+        )
     elif not state.get("contract_sha256"):
         findings.append("project contract hash is missing")
     required = (

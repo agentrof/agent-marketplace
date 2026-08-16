@@ -19,7 +19,6 @@ MARKETPLACE_COMPONENT = "agent-marketplace"
 IMPACTS = {"patch": 1, "minor": 2, "major": 3}
 SEMVER_RE = re.compile(r"^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$")
 CHANGESET_NAME_RE = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*\.json$")
-PMO = "project-management-office"
 BOOTSTRAP_VERSION = "0.0.1"
 
 
@@ -199,19 +198,6 @@ def sync_version_surfaces(root: Path, versions: dict) -> None:
         codex_entries[plugin]["source"] = channel_source("codex", plugin)
     write_json(codex_path, codex)
 
-    pmo_path = root / "plugins" / PMO / "scripts" / "pmo_cli.py"
-    if pmo_path.is_file():
-        text = pmo_path.read_text(encoding="utf-8")
-        updated, count = re.subn(
-            r'^PMO_VERSION = "[^"]+"$',
-            f'PMO_VERSION = "{versions["plugins"][PMO]}"',
-            text,
-            count=1,
-            flags=re.MULTILINE,
-        )
-        if count != 1:
-            raise ReleaseError("PMO runtime version declaration is missing")
-        pmo_path.write_text(updated, encoding="utf-8")
 
 
 def validate_version_surfaces(root: Path) -> list[str]:
@@ -262,12 +248,6 @@ def validate_version_surfaces(root: Path) -> list[str]:
                 problems.append(
                     f"{plugin} {host} marketplace source must stay inside the selected channel"
                 )
-    pmo_path = root / "plugins" / PMO / "scripts" / "pmo_cli.py"
-    if pmo_path.is_file():
-        match = re.search(r'^PMO_VERSION = "([^"]+)"$', pmo_path.read_text(encoding="utf-8"), re.MULTILINE)
-        actual = match.group(1) if match else ""
-        if actual != versions["plugins"].get(PMO):
-            problems.append("PMO runtime version differs from versions.json")
     return problems
 
 
@@ -300,6 +280,55 @@ def changed_paths(root: Path, base: str) -> list[tuple[str, str]]:
         if len(fields) >= 2:
             result.append((fields[0], fields[-1]))
     return result
+
+
+def json_at_ref(root: Path, ref: str, path: str) -> dict | None:
+    """Read a JSON object from Git, returning None when the ref/path is absent."""
+    try:
+        raw = git(root, "show", f"{ref}:{path}")
+        value = json.loads(raw)
+    except (ReleaseError, json.JSONDecodeError):
+        return None
+    return value if isinstance(value, dict) else None
+
+
+def retirement_registry_delta(
+    base_versions: dict | None, current_versions: dict,
+) -> set[str]:
+    """Return safely retired plugins, or an empty set for any version edit."""
+    if not isinstance(base_versions, dict):
+        return set()
+    base_plugins = base_versions.get("plugins")
+    current_plugins = current_versions.get("plugins")
+    if not isinstance(base_plugins, dict) or not isinstance(current_plugins, dict):
+        return set()
+    retired = set(base_plugins) - set(current_plugins)
+    if not retired or set(current_plugins) - set(base_plugins):
+        return set()
+    if base_versions.get("schema_version") != current_versions.get("schema_version"):
+        return set()
+    if base_versions.get("marketplace") != current_versions.get("marketplace"):
+        return set()
+    if any(base_plugins[name] != version for name, version in current_plugins.items()):
+        return set()
+    return retired
+
+
+def stable_retirement_cleanup(
+    base_metadata: dict | None, current_metadata: dict | None,
+    retired: set[str],
+) -> bool:
+    """Allow only deletion of retired plugin keys from historical impacts."""
+    if not retired or not isinstance(base_metadata, dict) \
+            or not isinstance(current_metadata, dict):
+        return False
+    expected = json.loads(json.dumps(base_metadata))
+    impacts = expected.get("impacts")
+    if not isinstance(impacts, dict):
+        return False
+    for plugin in retired:
+        impacts.pop(plugin, None)
+    return expected == current_metadata
 
 
 def check_pr_changeset(root: Path, base: str, allow_bootstrap: bool = False) -> None:
@@ -337,6 +366,21 @@ def check_pr_changeset(root: Path, base: str, allow_bootstrap: bool = False) -> 
         and version_registry_is_bootstrapped
         and version_is_bootstrap
     )
+    retired: set[str] = set()
+    registry_retirement = False
+    stable_retirement = False
+    if version_registry_is_bootstrapped and not bootstrap:
+        retired = retirement_registry_delta(
+            json_at_ref(root, base, "versions.json"), versions
+        )
+        registry_retirement = bool(retired)
+        if any(path == ".release/stable.json" for _status, path in changed):
+            stable_retirement = stable_retirement_cleanup(
+                json_at_ref(root, base, ".release/stable.json"),
+                read_json(root / ".release" / "stable.json")
+                if (root / ".release" / "stable.json").is_file() else None,
+                retired,
+            )
     protected = {
         path for status, path in changed
         if path in {"versions.json", "CHANGELOG.md", ".release/stable.json"}
@@ -346,6 +390,8 @@ def check_pr_changeset(root: Path, base: str, allow_bootstrap: bool = False) -> 
                 "versions.json", "CHANGELOG.md", ".release/stable.json"
             }
         )
+        and not (path == "versions.json" and registry_retirement)
+        and not (path == ".release/stable.json" and stable_retirement)
     }
     changed_existing_changesets = {
         path for status, path in changed

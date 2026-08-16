@@ -54,11 +54,12 @@ and pass frozen paths as repeated `--exclude` flags.
 - `check` validates; errors block, warnings do not.
 - `render-decisions`, `render-navigation`, and `render-relations` own generated
   indexes, navigation, inverse projections, shards, and traceability reports.
-- `adoption-plan` inventories legacy content. `activate-adoption` requires the
-  exact green plan hash and current project contract.
+- `check` and `normalize` are the only vault-wide adoption/repair operations;
+  they inspect the tracked vault directly and never require a project state
+  service.
 - `stamp-decision` writes status, UTC date, tag mirror, and both supersede ends
   atomically.
-- `migrate` owns deterministic normalization; `migrate --rename` applies the
+- `normalize` owns deterministic repair; `normalize --rename` applies the
   naming grammar and rewrites every referrer atomically, vetoing frozen
   referrers.
 - The per-write hook denies invalid content before landing and rechecks after

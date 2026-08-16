@@ -1,149 +1,41 @@
 # Upgrade protocol
 
-Agent Marketplace Upgrade is the single compatibility entry for Project
-Management Office and every installed team. Claude and Codex use the same
-engine, plan, database, project UUID, migration ledger, and result. Host
-adapters change only the native question and project-instruction surfaces.
+An Agent Marketplace upgrade is an idempotent package refresh followed by a
+project-local setup and check. The consuming repository's authored Markdown is
+the source of truth.
 
-## User sequence
+1. Build and validate both host distributions from the same source snapshot.
+2. Preview changes to package-owned instructions, hooks, vault payload and
+   compiler-owned views.
+3. Preserve authored documents and user-owned companion files. Apply only the
+   selected managed-file changes.
+4. Preserve configured designation wording and retired-value history. Setup
+   may add defaults for newly shipped document types, but never replaces an
+   existing project-selected designation.
+5. Rerun the packaged setup command against the canonical `workspace/` path.
+   The compatibility `--workspace workspace` argument is accepted; every other
+   workspace value and every second managed vault is rejected. Repeated setup with the same package and
+   project inputs must produce no authored-file diff.
+6. Run the portable vault gate and every compiler for a subtree that exists,
+   including the approved-integrity check when the backlog is approved.
+7. Review and commit the exact tracked diff, then start a fresh host session so
+   the refreshed skills and hooks load.
 
-1. Update the installed marketplace plugins with the host's normal plugin
-   update mechanism.
-2. Finish or release active PMO work across every project and leave the project
-   checkout clean on its resolved default branch.
-3. Invoke `/project-management-office:upgrade` on Claude or
-   `$project-management-office:upgrade` on Codex.
-4. Approve the host-neutral prerequisite gate. Status then runs read-only. When
-   the default-branch requirement is its only blocker, PMO creates the
-   `agent-marketplace/upgrade-*` branch and continues in the same session.
-5. Review status. If ready, approve plan creation, inspect the exact plan, and
-   approve apply separately.
-6. After apply, close the session. In a fresh session on the same branch,
-   review, commit and push only the planned files, then open the upgrade pull
-   request. Normal marketplace work remains locked until the target branch
-   contains that revision and a fresh session starts there.
+The project-local `.agentrof/agent-marketplace/.runtime/` directory is
+disposable and never participates in compatibility decisions. A refresh may
+recreate it without changing preparation state.
 
-Skipping stable releases is supported when the installed migration catalogs
-contain a continuous step-by-step chain from the recorded contract to the
-target contract. Missing steps, reversed versions, host catalog drift, and
-downgrades fail closed.
+## Version and build identity
 
-## Status model
-
-| Status | Meaning | Mutation policy |
-|---|---|---|
-| `AGENT_MARKETPLACE_CURRENT` | Runtime, database, and project agree. | Normal work allowed. |
-| `AGENT_MARKETPLACE_UPGRADE_REQUIRED_READY` | Change is required and preflight is clear. | Upgrade commands only. |
-| `AGENT_MARKETPLACE_UPGRADE_REQUIRED_BLOCKED` | A safety condition prevents apply. | No mutation; clear blockers first. |
-| `AGENT_MARKETPLACE_UPGRADE_APPLY_READY` | A fingerprint-bound plan awaits approval. | Exact plan apply or stop. |
-| `AGENT_MARKETPLACE_UPGRADING` | The maintenance lock has an owner. | No competing mutation. |
-| `AGENT_MARKETPLACE_UPGRADE_RECOVERY_REQUIRED` | A durable journal is incomplete. | Recorded recovery only. |
-| `AGENT_MARKETPLACE_UPGRADE_COMPLETE_RESTART_REQUIRED` | Apply completed against pre-upgrade session context. | Fresh session required. |
-| `AGENT_MARKETPLACE_PROJECT_UPGRADE_PR_PENDING` | Managed changes are not yet on the configured target branch. | Exact review, commit, push and PR operations only. |
-
-`PROJECT_CONTRACT_DRIFT` identifies a declared managed field or whole-file
-surface changed outside its owner. It is never repaired silently. A dirty checkout, active PMO
-work in any project, frozen work, path collision, symbolic link, missing
-adapter, package provenance failure, cross-host version mismatch, insufficient
-disk, database integrity error, stale plan, or downgrade also blocks apply.
-
-Package provenance covers authored distribution files exactly. Claude may add
-host-owned `.in_use/<pid>` or `.in_use/<pid>.tmp.<8-hex>` cache markers after
-installation. Only regular, non-symlink marker files with an empty body or the
-matching bounded `pid`/`procStart` JSON shape are excluded. The same path on
-another host, a nested marker, an unknown filename, malformed content, a PID
-mismatch, or any other unlisted file remains a provenance blocker.
-
-Session readiness still guards normal marketplace mutations, but session
-records do not participate in upgrade readiness. Upgrade safety derives from
-global PMO work state, repository preflight, migration journals and writer
-locks.
-
-The PMO-owned `upgrade prepare-branch --project-root <git-root>` command runs
-only when `UPGRADE_BRANCH_REQUIRED:<target>` is the sole blocker. It creates a
-UTC-named branch from the resolved default branch, verifies the unchanged base
-HEAD, and recomputes status. Raw branch creation is not an upgrade exception.
-
-## Writer boundary
-
-The upgrader may write only:
-
-- the PMO database through a writer-locked candidate validation and
-  transactional live migration;
-- the global host-aware plugin registry, locks, plans, journals, and backups;
-- the nested `agent_marketplace` contract in `<workspace>/config.json` through
-  its canonical atomic writer;
-- `.github/agentrof/vault-gate.pyz` as the tracked portable gate;
-- both portable generated root instruction files, independent of which host is
-  installed on the current machine;
-- `<workspace>/memory/agent-marketplace.md` and the reserved absence of root
-  `AGENTS.override.md`;
-- Agent Marketplace-owned native project-agent files in the ignored local
-  projection.
-
-It never overwrites user code, authored documentation, the user-owned host
-companions, `me.md`, `profile.md`, nested AGENTS files, nested overrides,
-`CLAUDE.local.md`, demos, sketches, secrets, environment files, custom CI, or an
-unmanaged collision. Config updates preserve unknown and user-owned keys.
-Project files have before-images in the journal and are restored if their phase
-fails.
-
-The root `/.agentrof/`, `/.codex/`, and `/.claude/` directories are ignored.
-Migration removes Marketplace-owned files below them from the index while
-preserving local bytes. Foreign tracked content requires an explicit preserve,
-discard, or abort choice, and index mode, stage, and blob before-images are
-journaled for rollback.
-
-Legacy marker-owned or unmanaged root instruction content requires an explicit
-`preserve`, `discard`, or `abort` choice before a plan can exist. Preserve moves
-the exact old user content into the matching companion after any existing
-companion content; no semantic merge is attempted. A root
-`AGENTS.override.md` is appended to `AGENTS.user.md` and removed only through
-the same approved preserve migration. Resolved choices are part of the plan
-fingerprint, and apply never asks again. Unsafe legacy workspace names stop
-before mutation with `UNSAFE_WORKSPACE_NAME`; folder renaming is never inferred.
-
-All global runtime state is rooted at `AGENT_MARKETPLACE_HOME` when set,
-otherwise at `${AGENTROF_HOME:-$HOME/.agentrof}/agent-marketplace`. The PMO
-database is `pmo.db`; logs, sessions, locks, plugin roots, plans, journals and
-backups remain inside that product root.
-
-After apply, the pre-upgrade session admits no finalization work. A fresh
-session on the same upgrade branch admits only read-only diff inspection, exact
-planned-file staging, the fixed upgrade commit, its branch push and pull-request
-creation while `AGENT_MARKETPLACE_PROJECT_UPGRADE_PR_PENDING` is active. Other
-marketplace mutations remain locked. A feature-branch commit does not clear the
-status. Normal work resumes only when the configured target branch's project
-state contains the exact managed upgrade identity. Descendant work branches then
-remain current instead of re-entering PR-pending state.
-
-## Database safety and recovery
-
-The engine acquires the database writer lock before taking an online backup and
-separate candidate. Each migration step has an immutable id, source and target
-schema, checksum, component version, and source fingerprint. The candidate must
-pass its full chain, foreign-key check, integrity check, PMO content stamp, and
-writer-epoch installation before the same migration commits to the live database
-as one transaction. The schema migration ledger is exactly-once evidence, not a
-reason to skip checksum validation.
-
-The journal advances by durable phases. Failure before database commit or
-project application rolls back without entering recovery. Once project
-application begins, any failure enters recovery even when the adapter restores
-its before-images or no database schema migration was needed. This conservative
-boundary covers partial adapter writes and the following identity sync. Failure
-after that boundary preserves maintenance mode, backup, before-images, and run id.
-The recovery command resumes only that recorded plan. It does not invent a new
-chain or delete evidence.
-
-The upgrade lock records its host and process id. Recovery reclaims it only
-when the owner belongs to the same host and the operating system proves that
-process no longer exists. A live, foreign-host or unreadable owner remains
-fail-closed.
-
-## If plugins were updated but upgrade was not run
-
-Session hooks and team PreToolUse guards recompute status from disk. Read-only
-diagnostics and the upgrade entry remain available. Normal marketplace Write,
-Edit, patch, and shell mutations stop with the exact status and guidance. This
-lock is mechanical and does not depend on the agent remembering a warning.
+- A `.changes/*.json` file declares release impact. The release workflow is the
+  only writer that bumps `versions.json`; host manifests expose that semantic
+  plugin version.
+- Each generated package carries `.agent-marketplace-package.json` with a
+  deterministic snapshot `build_id`, source provenance and file hashes. This
+  metadata verifies the package; it is not project state.
+- Setup never copies a package version or build ID into project configuration,
+  and upgrade never compares an old project build ID with a new one. There is
+  therefore no compatibility lock, migration chain or durable upgrade ledger.
+- `doc_type_designation_history` is not an upgrade ledger. It contains only
+  retired project-selected display values used to find stale titles after an
+  explicit designation rename.

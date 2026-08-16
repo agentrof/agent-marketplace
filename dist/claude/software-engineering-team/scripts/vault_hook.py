@@ -8,16 +8,15 @@ Two moments, one law (the obsidian-vault skill):
   in a table-row wikilink, or an inline flow-list tags:/aliases: value
   never reaches disk, regardless of which agent writes. Content-only
   regexes, zero vault I/O. The one exception is workspace/config.json:
-  its designation keys are machine-managed with a single writer (the
-  reconcile-designations verb, a subprocess this hook never sees), so
-  ANY tool-level change to them is denied, which needs one disk read.
+  team-owned keys have subprocess writers this hook never sees, so any
+  tool-level change to them is denied, which needs one disk read.
 - post (PostToolUse, Write|Edit): after a write lands under the vault,
   run vault_check's --changed fast path and surface its findings to the
   writing session immediately, so link and metadata duties are repaired
   in-session instead of at a distant gate. Gates stay the hard barrier.
-- register (SessionStart): record this plugin's install root in the
-  shared plugin_roots registry the marketplace_run dispatcher resolves
-  from; env-free (the root comes from this file's own location).
+- register (SessionStart): perform no global registration. The hook runs from
+  its installed team package and all mutable inventory remains under the
+  current project's ignored `.agentrof/` runtime.
 
 The normalize shim gives both moments one payload shape (canonical tool
 name, per-file write targets). File operations through the shell (moves,
@@ -33,13 +32,11 @@ import io
 import json
 import os
 import re
-import shlex
 import shutil
 import sys
 import tempfile
 from pathlib import Path
 
-import team_guard
 import vault_check
 try:
     import experience_compile
@@ -57,21 +54,21 @@ TOOL_NAME_CANON = {
 
 PATCH_HEADER_RE = re.compile(r"^\*\*\* (Add|Update|Delete) File: (.+)$")
 
-# Machine-managed config keys with a single sanctioned writer (the
-# vault_check.py reconcile-designations verb). The verb writes via
-# subprocess and never traverses PreToolUse, so the deny below needs no
-# handshake: no Write/Edit call ever changes these keys legitimately.
+# Team-owned config keys have one of two sanctioned subprocess writers:
+# project_config.py for ordinary fields and reconcile-designations for display
+# wording. Neither traverses PreToolUse, so direct Write/Edit changes are denied.
 CONFIG_GUARD_KEYS = (
-    "project_origin", "doc_type_designations", "doc_type_designation_history",
+    "team_id", "project_origin", "scale", "output_language",
+    "terminology_language", "backend_stack", "frontend_stack",
+    "environment_stack", "databases", "test_command", "mutation_command",
+    "env_command", "source_dirs", "max_parallel", "limits",
+    "doc_type_designations", "doc_type_designation_history",
 )
 
 CONFIG_GUARD_MESSAGE = (
-    "project_origin, doc_type_designations and its history ledger are"
-    " machine-managed; their single writers are setup project_config.py, PMO"
-    " project classify-origin and"
-    " vault_check.py reconcile-designations, driven by setup/configure."
-    " Setup and organize-docs mint through the same verb."
-    " Direct edits desynchronize the project contract.")
+    "team-owned workspace config fields are machine-managed; their writers are"
+    " setup, project_config.py and vault_check.py reconcile-designations."
+    " Direct edits desynchronize the workspace config.")
 
 # A relative markdown link that is not http(s)/mailto/anchor/root form.
 MD_LINK_RE = re.compile(
@@ -85,6 +82,12 @@ EXPERIENCE_MACHINE_FIELD_RE = re.compile(
 DESIGN_SYSTEM_MACHINE_FIELD_RE = re.compile(
     r"(?m)^\s*(status|revision|approved_at_utc|baseline_hash|"
     r"supersedes_hash):")
+BACKLOG_MACHINE_FIELD_RE = re.compile(
+    r"(?m)^\s*(approved_at_utc|source_hash|package_hash|approval_hash):")
+BACKLOG_APPROVED_STATE_RE = re.compile(
+    r"(?m)^\s*(?:status:\s*[\"']?approved[\"']?\s*$|"
+    r"-\s*[\"']?status/approved[\"']?\s*$)"
+)
 EXPERIENCE_PATHS = (
     re.compile(r"^experience-design/experience\.md$"),
     re.compile(r"^experience-design/programs/prg-[0-9]+/program\.md$"),
@@ -229,13 +232,8 @@ def normalize(payload: dict) -> dict:
     return out
 
 
-def data_dir() -> Path:
-    return team_guard.data_dir()
-
-
 def register() -> int:
-    """Register through the PMO-owned launcher when it is available."""
-    team_guard.register(team_guard.plugin_name())
+    """SessionStart is informational; no global registration is required."""
     return 0
 
 
@@ -315,7 +313,7 @@ def is_workspace_config(file_path: str, written: dict) -> bool:
             candidates.append(json.loads(str(written.get("content") or "")))
         except Exception:
             pass
-    managed = {"team_id", "project_key", *CONFIG_GUARD_KEYS}
+    managed = {"team_id", *CONFIG_GUARD_KEYS}
     return path.parent.name == "workspace" or any(
         isinstance(value, dict) and managed & set(value) for value in candidates
     )
@@ -365,8 +363,9 @@ def guarded_spans(text: str) -> list[tuple[int, int]]:
 
 
 def config_guard(tool_input: dict, file_path: str) -> int:
-    """Deny any tool-level change to the guarded designation keys, mint
-    included: introduction over an absent key is a change. Writes are
+    """Deny any tool-level change to team-owned config keys, mint included.
+
+    Introduction over an absent key is a change. Writes are
     diffed subtree-against-disk (a Write changing only other config keys
     passes); Edits are fragments the final JSON cannot be rebuilt from,
     so any fragment naming a guarded key or landing inside its on-disk
@@ -594,6 +593,11 @@ def pre_target(written: dict) -> int:
     rel = vault_relative(file_path)
     if rel is None:
         return 0
+    if rel.startswith("backlog/_generated/"):
+        return deny(
+            "backlog/_generated files are compiler-owned; run"
+            " backlog_compile.py check --render"
+        )
     if rel.startswith(("maps/_relations/", "maps/_navigation/")):
         return deny(
             "inverse relation catalogs are compiler-owned; run"
@@ -655,6 +659,30 @@ def pre_target(written: dict) -> int:
         content = written_content(written) + "\n" + str(written.get("old_string") or "")
         if EXPERIENCE_MACHINE_FIELD_RE.search(content):
             return deny("Experience Design approval, revision hash and timestamp fields are machine-managed; use render/stamp")
+    if rel.startswith("backlog/") and rel.endswith(".md"):
+        proposed = written_content(written)
+        removed = str(written.get("old_string") or "")
+        content = proposed + "\n" + removed
+        if BACKLOG_MACHINE_FIELD_RE.search(content):
+            return deny(
+                "Backlog approval timestamps and hashes are machine-managed;"
+                " use backlog_compile.py"
+            )
+        approval_transition = bool(BACKLOG_APPROVED_STATE_RE.search(content))
+        if "content" in written and Path(file_path).is_file():
+            try:
+                current = Path(file_path).read_text(encoding="utf-8")
+            except OSError:
+                current = ""
+            approval_transition = approval_transition or (
+                bool(BACKLOG_APPROVED_STATE_RE.search(current))
+                != bool(BACKLOG_APPROVED_STATE_RE.search(proposed))
+            )
+        if approval_transition:
+            return deny(
+                "Backlog transitions into or out of approved status are"
+                " machine-managed; use backlog_compile.py approve"
+            )
     if not rel.endswith(".md"):
         return 0
     content = written_content(written)
@@ -746,67 +774,8 @@ def shell_vault(payload: dict) -> Path | None:
 
 
 def registration_guard(payload: dict) -> int:
-    """Registration is the irreversible fresh-setup boundary. Refuse it
-    until the complete designation map already matches the shipped taxonomy."""
-    tool_input = payload.get("tool_input")
-    command = ""
-    if isinstance(tool_input, dict):
-        command = str(tool_input.get("command", tool_input.get("cmd", "")))
-    try:
-        tokens = shlex.split(command, posix=True)
-        if tokens and Path(tokens[0]).name in {"bash", "sh", "zsh"}:
-            command_index = next(
-                (index + 1 for index, token in enumerate(tokens[:-1])
-                 if token in {"-c", "-lc"}),
-                None,
-            )
-            if command_index is not None:
-                tokens = shlex.split(tokens[command_index], posix=True)
-    except ValueError:
-        return deny(
-            "cannot verify setup order for the project registration command;"
-            " use a directly parseable project register invocation")
-    registration_index = next(
-        (index for index in range(len(tokens) - 1)
-         if tokens[index:index + 2] == ["project", "register"]),
-        None,
-    )
-    if registration_index is None:
-        return 0
-    launcher_tokens = tokens[:registration_index]
-    if not any("pmo" in Path(token).name.casefold()
-               for token in launcher_tokens):
-        return 0
-    config_value = ""
-    for index, token in enumerate(tokens):
-        if token == "--stamp-config" and index + 1 < len(tokens):
-            config_value = tokens[index + 1]
-            break
-        if token.startswith("--stamp-config="):
-            config_value = token.split("=", 1)[1]
-            break
-    if not config_value or "$" in config_value or "`" in config_value:
-        return deny(
-            "PMO project registration requires a resolved --stamp-config path"
-            " so setup order can be verified")
-    config_path = Path(config_value)
-    if not config_path.is_absolute():
-        config_path = Path(str(payload.get("cwd") or ".")) / config_path
-    try:
-        config = json.loads(config_path.read_text(encoding="utf-8"))
-        policy = vault_check.load_policy(vault_check.DEFAULT_POLICY)
-    except (OSError, json.JSONDecodeError) as exc:
-        return deny(f"cannot verify designation contract before PMO project"
-                    f" registration: {exc}")
-    issues = vault_check.designation_config_issues(config, policy)
-    if issues:
-        detail = "; ".join(issue["message"] for issue in issues)
-        return deny(
-            "PMO project registration is out of order: mint and verify the"
-            " complete designation map first with reconcile-designations and"
-            f" check-designations. Current detail: {detail}")
+    """Project configuration is validated by its owning setup command."""
     return 0
-
 
 def vault_inventory(root: Path) -> dict[str, str]:
     result = {}
@@ -825,7 +794,9 @@ def vault_inventory(root: Path) -> dict[str, str]:
 def inventory_path(payload: dict) -> Path:
     session = str(payload.get("session_id") or "unknown")
     safe = re.sub(r"[^A-Za-z0-9_.-]", "_", session)
-    return data_dir() / "vault-inventory" / f"{safe}.json"
+    root = shell_vault(payload)
+    project = root.parent.parent if root else Path(str(payload.get("cwd") or ".")).resolve()
+    return project / ".agentrof" / "agent-marketplace" / ".runtime" / "vault-inventory" / f"{safe}.json"
 
 
 def shell_snapshot(payload: dict) -> int:
@@ -855,17 +826,22 @@ def shell_verify(payload: dict) -> int:
                      if old.get(key) != new.get(key))
     if not changed:
         return 0
-    argv = ["check", "--vault", str(root)]
-    if len(changed) == 1:
-        argv.extend(("--impact", changed[0]))
-    buffer = io.StringIO()
-    with contextlib.redirect_stdout(buffer):
-        code = vault_check.main(argv)
-    if code:
-        sys.stderr.write(buffer.getvalue())
-        return deny(
-            "Bash changed vault inventory and left the full/impact gate red;"
-            " repair or restore the changed paths")
+    deleted = [key for key in changed if key not in new]
+    checks = [None] if deleted else [
+        key for key in changed if key.endswith(".md")
+    ]
+    for impacted in checks:
+        argv = ["check", "--vault", str(root)]
+        if impacted is not None:
+            argv.extend(("--impact", impacted))
+        buffer = io.StringIO()
+        with contextlib.redirect_stdout(buffer):
+            code = vault_check.main(argv)
+        if code:
+            sys.stderr.write(buffer.getvalue())
+            return deny(
+                "Bash changed vault inventory and left its scoped vault"
+                " check red; repair or restore the changed paths")
     return 0
 
 

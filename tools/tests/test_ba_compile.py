@@ -619,6 +619,39 @@ class ValidSpaceTests(unittest.TestCase):
         self.assertEqual(code, 0)
         self.assertEqual(collect(self.space), [])
 
+    def test_generated_inverse_relations_do_not_change_ba_semantics(self):
+        target = (
+            self.space / "domains" / "inventory" / "acceptance"
+            / "goods-receipt-acceptance.md"
+        )
+        target.write_text(
+            target.read_text(encoding="utf-8").rstrip()
+            + "\n\n<!-- sec: nav -->\n"
+            "- [[maps/business-analysis|Business Analysis]]\n",
+            encoding="utf-8",
+        )
+        code, _, err = run(["render", "--space", str(self.space)])
+        self.assertEqual(code, 0, err)
+        registry = self.space / "_generated" / "registry.json"
+        before = registry.read_bytes()
+        relation = (
+            "## Related knowledge <!-- sec: relations:generated:start -->\n\n"
+            "- Verified by: "
+            "[[backlog/epics/receiving/stories/receive-goods/story|ST-001]]\n\n"
+            "<!-- sec: relations:generated:end -->"
+        )
+        text = target.read_text(encoding="utf-8")
+        target.write_text(
+            text.replace(
+                "<!-- sec: nav -->", relation + "\n\n<!-- sec: nav -->"
+            ),
+            encoding="utf-8",
+        )
+        self.assertEqual(collect(self.space), [])
+        code, _, err = run(["render", "--space", str(self.space)])
+        self.assertEqual(code, 0, err)
+        self.assertEqual(registry.read_bytes(), before)
+
 
 class BuilderFixtureTests(unittest.TestCase):
     def test_registry_lockstep_with_compiler_checks(self):
@@ -1024,7 +1057,7 @@ class ProjectLimitsTests(unittest.TestCase):
         self.assertIn("## Advisories: split proposals", status)
         self.assertIn("split proposal: process doc is", status)
         self.assertIn("(warn at 1350)", status)
-        self.assertIn("explicit owner", status)
+        self.assertIn("explicit project decision authority", status)
         index = (self.space / "_generated" / "index.md").read_text(
             encoding="utf-8")
         self.assertNotIn("split proposal", index)

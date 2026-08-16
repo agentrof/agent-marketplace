@@ -139,7 +139,7 @@ The slice is not a story when:
   observable, never into a grab-bag.
 - Merge two stories only when they cite the same brief criterion and
   neither is verifiable alone; propose the merge at a checkpoint (splits
-  and merges need owner approval, never happen silently).
+  and merges need project decision authority approval, never happen silently).
 - Never merge across concerns to shorten the backlog; two concerns stay
   two stories even when both are small.
 

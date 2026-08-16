@@ -1,6 +1,6 @@
 ---
 name: delivery-lanes
-description: The integrator surface for parallel delivery; it never delivers a story itself. Proposes which ready stories can start together from dependencies and claims, opens git worktree lanes the user drives through their own deliver sessions, tracks where gate approvals are pending, and owns every merge checkpoint on the main line.
+description: Later-scope parallel delivery entry that currently reports the approved backlog boundary without creating runtime state.
 disable-model-invocation: true
 ---
 
@@ -8,4 +8,4 @@ disable-model-invocation: true
 
 # Delivery Lanes
 
-Read `${CLAUDE_PLUGIN_ROOT}/host-contract.md` and `${CLAUDE_PLUGIN_ROOT}/skill-content/delivery-lanes/SKILL.md` completely. Follow the canonical skill as the authoritative workflow and the host contract as its platform adapter. Before any workflow step inside a Git repository, run `project environment-status --project-root <git-root> --json` through the PMO launcher. A non-current environment permits only setup, upgrade, or recovery guidance.
+Read `${CLAUDE_PLUGIN_ROOT}/host-contract.md` and `${CLAUDE_PLUGIN_ROOT}/skill-content/delivery-lanes/SKILL.md` completely. Follow the canonical skill as the authoritative workflow and the host contract as its platform adapter. Before changing a project, confirm the workspace config and local docs contract are present; setup is the only entry that may create them.

@@ -22,6 +22,8 @@
     "direction": "text",
     "round": "number",
     "locked": "checkbox",
+    "baseline_hash": "text",
+    "supersedes_hash": "text",
     "tags": "tags",
     "aliases": "aliases",
     "program_id": "text",
@@ -63,6 +65,15 @@
     "artifact_path": "text",
     "artifact_sha256": "text",
     "artifact_owner": "text",
-    "declared_ids": "multitext"
+    "declared_ids": "multitext",
+    "goal": "text",
+    "priority": "text",
+    "priority_reason": "text",
+    "supporting_roles": "multitext",
+    "experience_refs": "multitext",
+    "depends_on": "multitext",
+    "dependency_refs": "multitext",
+    "scenario_refs": "multitext",
+    "package_hash": "text"
   }
 }

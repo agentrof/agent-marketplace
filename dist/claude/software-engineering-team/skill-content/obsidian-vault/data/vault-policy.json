@@ -8,7 +8,9 @@
     "solution-design",
     "system-architecture",
     "design-system",
-    "experience-design"
+    "experience-design",
+    "backlog",
+    "issues"
   ],
   "extra_maps": [],
   "machine_dirs": [
@@ -133,6 +135,41 @@
       "id": "navigation",
       "query": "tag:#doc/moc OR tag:#doc/home",
       "rgb": 9741240
+    },
+    {
+      "id": "backlog",
+      "query": "tag:#doc/backlog",
+      "rgb": 11032055
+    },
+    {
+      "id": "backlog-review",
+      "query": "tag:#doc/backlog-review",
+      "rgb": 16007006
+    },
+    {
+      "id": "epic",
+      "query": "tag:#doc/epic",
+      "rgb": 3900150
+    },
+    {
+      "id": "epic-review",
+      "query": "tag:#doc/epic-review",
+      "rgb": 16096779
+    },
+    {
+      "id": "story",
+      "query": "tag:#doc/story",
+      "rgb": 1357990
+    },
+    {
+      "id": "test-plan",
+      "query": "tag:#doc/test-plan",
+      "rgb": 2278750
+    },
+    {
+      "id": "issue-report",
+      "query": "tag:#doc/issue-report",
+      "rgb": 14513808
     }
   ],
   "hubs": [
@@ -230,6 +267,8 @@
     "direction": "text",
     "round": "number",
     "locked": "checkbox",
+    "baseline_hash": "text",
+    "supersedes_hash": "text",
     "tags": "tags",
     "aliases": "aliases",
     "program_id": "text",
@@ -271,14 +310,29 @@
     "artifact_path": "text",
     "artifact_sha256": "text",
     "artifact_owner": "text",
-    "declared_ids": "multitext"
+    "declared_ids": "multitext",
+    "goal": "text",
+    "priority": "text",
+    "priority_reason": "text",
+    "supporting_roles": "multitext",
+    "experience_refs": "multitext",
+    "package_hash": "text",
+    "depends_on": "multitext",
+    "dependency_refs": "multitext",
+    "scenario_refs": "multitext"
   },
   "lazy_fragments": {
     "base": ["type", "title", "status", "tags", "aliases", "derives_from", "satisfies", "constrained_by", "implements", "uses_design", "related_to"],
     "business_analysis": ["code", "scope", "round"],
     "solution_design": ["engagement", "territory", "revisit_trigger"],
     "system_architecture": ["story", "governs", "verifies"],
-    "design_system": ["locked"],
+    "design_system": [
+      "locked",
+      "revision",
+      "approved_at_utc",
+      "baseline_hash",
+      "supersedes_hash"
+    ],
     "experience_design": [
       "program_id",
       "release_id",
@@ -291,6 +345,21 @@
       "artifact_sha256",
       "artifact_owner",
       "declared_ids"
+    ],
+    "backlog": [
+      "goal",
+      "priority",
+      "priority_reason",
+      "supporting_roles",
+      "depends_on",
+      "dependency_refs",
+      "experience_refs",
+      "package_hash",
+      "scenario_refs",
+      "release_id",
+      "criterion_refs",
+      "revision",
+      "approved_at_utc"
     ]
   },
   "fragment_graph_groups": {
@@ -299,7 +368,8 @@
     "solution_design": ["landscape", "engagement", "decision"],
     "system_architecture": ["decision", "system-living"],
     "design_system": ["design-master", "page-override"],
-    "experience_design": ["experience", "journey", "screen"]
+    "experience_design": ["experience", "journey", "screen"],
+    "backlog": ["backlog", "backlog-review", "epic", "epic-review", "story", "test-plan", "issue-report"]
   },
   "extra_doc_types": [
     "moc",
@@ -320,8 +390,24 @@
     "data-model",
     "threat-model",
     "environment-reference",
-    "artifact-manifest"
+    "artifact-manifest",
+    "backlog",
+    "backlog-review",
+    "epic",
+    "epic-review",
+    "story",
+    "test-plan",
+    "issue-report"
   ],
+  "default_designations": {
+    "backlog": "backlog",
+    "backlog_review": "backlog review",
+    "epic": "epic",
+    "epic_review": "epic review",
+    "story": "story",
+    "test_plan": "test plan",
+    "issue_report": "issue report"
+  },
   "type_path_patterns": {
     "home": ["^home\\.md$"],
     "moc": ["^maps/[a-z0-9-]+\\.md$", "^maps/_relations/[a-f0-9]{12}/relations-[0-9]{3}\\.md$"],
@@ -343,7 +429,14 @@
     "threat_model": ["^system-architecture/threat-model\\.md$"],
     "environment_reference": ["^system-architecture/environment\\.md$"],
     "decision": ["^(?:solution-design|system-architecture)/decisions/[a-z0-9]+(?:-[a-z0-9]+)*-decision\\.md$", "^business-analysis/.+/decisions/[a-z0-9]+(?:-[a-z0-9]+)*-decision\\.md$"],
-    "challenge_record": ["^(?:business-analysis/.+|solution-design|experience-design/.+)/reviews/[a-z0-9]+(?:-[a-z0-9]+)*-review\\.md$"]
+    "challenge_record": ["^(?:business-analysis/.+|solution-design|experience-design/.+)/reviews/[a-z0-9]+(?:-[a-z0-9]+)*-review\\.md$"],
+    "backlog": ["^backlog/backlog\\.md$"],
+    "backlog_review": ["^backlog/reviews/round-[0-9]+-backlog-review\\.md$"],
+    "epic": ["^backlog/epics/[a-z0-9]+(?:-[a-z0-9]+)*/epic\\.md$"],
+    "epic_review": ["^backlog/epics/[a-z0-9]+(?:-[a-z0-9]+)*/reviews/round-[0-9]+-epic-review\\.md$"],
+    "story": ["^backlog/epics/[a-z0-9]+(?:-[a-z0-9]+)*/stories/[a-z0-9]+(?:-[a-z0-9]+)*/story\\.md$"],
+    "test_plan": ["^backlog/epics/[a-z0-9]+(?:-[a-z0-9]+)*/stories/[a-z0-9]+(?:-[a-z0-9]+)*/test-plan\\.md$"],
+    "issue_report": ["^issues/[a-z0-9]+(?:-[a-z0-9]+)*\\.md$"]
   },
   "status_values": {
     "decision": ["draft", "proposed", "accepted", "rejected", "approved", "superseded"],
@@ -360,7 +453,66 @@
     "api_contract": ["draft", "in_review", "approved", "retired"],
     "data_model": ["draft", "in_review", "approved", "retired"],
     "threat_model": ["draft", "in_review", "approved", "retired"],
-    "environment_reference": ["draft", "in_review", "approved", "retired"]
+    "environment_reference": ["draft", "in_review", "approved", "retired"],
+    "backlog": ["draft", "approved", "superseded"],
+    "backlog_review": ["draft", "changes_requested", "approved"],
+    "epic": ["draft", "approved", "superseded"],
+    "epic_review": ["draft", "changes_requested", "approved"],
+    "story": ["planned", "done", "deferred", "cancelled", "superseded"],
+    "test_plan": ["draft", "approved", "superseded", "retired"],
+    "issue_report": ["draft", "approved", "filed", "closed"]
+  },
+  "backlog_contract": {
+    "story_owner_roles": [
+      "backend_developer",
+      "frontend_developer",
+      "devops_engineer"
+    ],
+    "story_supporting_roles": [
+      "backend_developer",
+      "frontend_developer",
+      "devops_engineer",
+      "software_architect",
+      "ux_designer"
+    ],
+    "required_story_sections": [
+      "User Value",
+      "Scope",
+      "Non-Goals",
+      "Implementation Responsibilities",
+      "Acceptance",
+      "Dependencies",
+      "Delivery Notes"
+    ],
+    "required_epic_review_sections": [
+      "Scope",
+      "Slicing",
+      "Criteria Coverage",
+      "Test Design",
+      "Dependencies",
+      "Role Ownership",
+      "Findings",
+      "Verdict"
+    ],
+    "required_backlog_review_sections": [
+      "Epic Coverage",
+      "Cross-Epic Overlap",
+      "Cross-Epic Dependencies",
+      "Release Ordering",
+      "Shared Contracts",
+      "Deferred Criteria",
+      "Global Test Coverage",
+      "Findings",
+      "Verdict"
+    ],
+    "experience_ref_types": [
+      "release",
+      "journey",
+      "flow-set",
+      "screen",
+      "experience-space",
+      "experience-domain"
+    ]
   },
   "relation_contract": {
     "inverse_inline_max": 100,
@@ -372,7 +524,8 @@
       "constrained_by": {"targets": ["budget-set", "decision", "landscape", "design-master", "page-override", "api-contract", "data-model", "threat-model", "environment-reference"], "inverse_label": "Constrains"},
       "implements": {"targets": ["landscape", "decision", "journey", "flow-set", "screen", "api-contract", "data-model", "threat-model", "environment-reference"], "inverse_label": "Implemented by"},
       "uses_design": {"targets": ["design-master", "page-override"], "inverse_label": "Used by"},
-      "related_to": {"targets": ["*"], "inverse_label": "Related from"}
+      "related_to": {"targets": ["*"], "inverse_label": "Related from"},
+      "verifies": {"targets": ["process", "story", "acceptance-set", "rule-set", "test-plan"], "inverse_label": "Verified by"}
     },
     "required_by_type_status": {
       "landscape": {"approved": ["derives_from"]},
@@ -388,7 +541,11 @@
       "experience_domain": {"derives_from": {"min": 1, "max": 1}},
       "page_override": {"uses_design": {"min": 1, "max": 1}},
       "screen": {"uses_design": {"min": 1, "max": 1}},
-      "artifact_manifest": {"related_to": {"min": 1, "max": 1}}
+      "artifact_manifest": {"related_to": {"min": 1, "max": 1}},
+      "backlog_review": {"derives_from": {"min": 1, "max": 1}},
+      "epic_review": {"derives_from": {"min": 1, "max": 1}},
+      "story": {"derives_from": {"min": 1, "max": 20}},
+      "test_plan": {"derives_from": {"min": 1, "max": 1}, "verifies": {"min": 1, "max": 100}}
     }
   }
 }

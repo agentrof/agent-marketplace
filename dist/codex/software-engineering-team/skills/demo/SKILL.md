@@ -7,4 +7,4 @@ description: Pre-sales package builder. Produces a customer-ready, multi-screen,
 
 # Demo
 
-Read `../../host-contract.md` and `../../skill-content/demo/SKILL.md` completely, resolving both paths relative to this file. Follow the canonical skill as the authoritative workflow and the host contract as its platform adapter. Before any workflow step inside a Git repository, run `project environment-status --project-root <git-root> --json` through the PMO launcher. A non-current environment permits only setup, upgrade, or recovery guidance.
+Read `../../host-contract.md` and `../../skill-content/demo/SKILL.md` completely, resolving both paths relative to this file. Follow the canonical skill as the authoritative workflow and the host contract as its platform adapter. Before any workflow step inside a Git repository, confirm the project-local workspace config and docs contract.

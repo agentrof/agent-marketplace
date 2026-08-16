@@ -1,0 +1,87 @@
+"""Mutation tests for the repository validator's active architecture rules."""
+
+from __future__ import annotations
+
+import json
+import sys
+import tempfile
+import unittest
+from pathlib import Path
+
+
+TESTS = Path(__file__).resolve().parent
+sys.path.insert(0, str(TESTS))
+sys.path.insert(0, str(TESTS.parent))
+
+import fixtures  # noqa: E402
+import validate  # noqa: E402
+
+
+class ValidatorContractTests(unittest.TestCase):
+    def fixture(self, temporary: str) -> Path:
+        root = Path(temporary)
+        fixtures.make_valid_root(root)
+        return root
+
+    @staticmethod
+    def checks(root: Path) -> list[str]:
+        return [finding.check for finding in validate.run(root)]
+
+    def test_valid_single_team_fixture_is_clean_and_deterministic(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = self.fixture(temporary)
+            first = validate.run(root)
+            second = validate.run(root)
+            self.assertEqual(first, [])
+            self.assertEqual(first, second)
+
+    def test_database_artifact_is_rejected(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = self.fixture(temporary)
+            database = root / "plugins/software-engineering-team/cache.sqlite"
+            database.write_bytes(b"fixture")
+            self.assertIn("retired_operations_residue", self.checks(root))
+
+    def test_retired_pmo_vocabulary_is_rejected(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = self.fixture(temporary)
+            note = root / "plugins/software-engineering-team/flows/obsolete.md"
+            note.write_text("# PMO Control Tower\n", encoding="utf-8")
+            self.assertIn("retired_operations_residue", self.checks(root))
+
+    def test_retired_vault_migrate_command_is_rejected(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = self.fixture(temporary)
+            note = root / "plugins/software-engineering-team/flows/obsolete.md"
+            note.write_text("Run `vault_check.py migrate`.\n", encoding="utf-8")
+            self.assertIn("retired_operations_residue", self.checks(root))
+
+    def test_plugin_dependency_is_rejected(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = self.fixture(temporary)
+            path = root / "platforms/claude/software-engineering-team/manifest.json"
+            manifest = json.loads(path.read_text(encoding="utf-8"))
+            manifest["dependencies"] = ["some-team"]
+            path.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
+            self.assertIn("single_team_contract", self.checks(root))
+
+    def test_graph_palette_identity_query_and_rgb_are_validated(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = self.fixture(temporary)
+            path = (
+                root / "plugins/software-engineering-team/skill-content/"
+                "obsidian-vault/data/vault-policy.json"
+            )
+            policy = json.loads(path.read_text(encoding="utf-8"))
+            story = next(
+                group for group in policy["graph_color_groups"]
+                if group["id"] == "story"
+            )
+            story["query"] = "tag:#doc/wrong"
+            story["rgb"] = -1
+            path.write_text(json.dumps(policy, indent=2) + "\n", encoding="utf-8")
+            self.assertIn("vault_policy_shape", self.checks(root))
+
+
+if __name__ == "__main__":
+    unittest.main()

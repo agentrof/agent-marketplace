@@ -1,7 +1,7 @@
 {
   "name": "software-engineering-team",
   "version": "0.2.2",
-  "description": "Software Engineering Team: a complete Codex-native team for analysis, planning, architecture, design, implementation, review, and verification.",
+  "description": "Software Engineering Team for approved analysis, solution and experience design, and a delivery-ready Obsidian backlog.",
   "author": {
     "name": "Agentrof",
     "url": "https://github.com/agentrof"
@@ -18,7 +18,7 @@
   "interface": {
     "displayName": "Software Engineering Team",
     "shortDescription": "An orchestrated product and engineering team",
-    "longDescription": "Requires Project Management Office. Drive approved product work through analysis, architecture, design, implementation, adversarial review, QA, and pull-request delivery with Codex-native project agents.",
+    "longDescription": "Drive product work through analysis, architecture, design, test planning, and an approved project-local Obsidian backlog with Codex-native agents.",
     "developerName": "Agentrof",
     "category": "Engineering",
     "capabilities": [
@@ -29,7 +29,7 @@
     "websiteURL": "https://github.com/agentrof/agent-marketplace",
     "defaultPrompt": [
       "Set up this repository for the Software Engineering Team.",
-      "Deliver this request through the Software Engineering Team workflow."
+      "Prepare this project through the Software Engineering Team workflow."
     ],
     "brandColor": "#2563EB"
   }

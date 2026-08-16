@@ -1,112 +1,50 @@
 ---
 name: setup
-description: Project bootstrap and environment reconciliation for the software-engineering-team. Attaches a clone to the tracked contract and materializes machine-local runtime and host projections without rewriting user content.
+description: Idempotent project bootstrap for the local workspace, disposable runtime, Obsidian payload and standalone team instructions.
 exposure: entry
 ---
 
 # Setup
 
-Use one public entry for a fresh repository, a new clone, or an environment
-that no longer matches the tracked project contract.
-
 ## When to Use
 
 - First run after installing the team in a repository.
-- First run after clone, pull, host change, or Marketplace component update.
-- Recovery from `AGENT_MARKETPLACE_ENVIRONMENT_RECONCILE_REQUIRED`.
+- A clone or host change needs local instructions regenerated.
+- A package refresh needs managed-file drift previewed and reconciled.
 
 ## Procedure
 
-Use a choice gate for every owner decision. Recommended options come first and
-include tradeoffs. Anchor every path at the resolved git root.
-
-1. Resolve PMO and the marketplace dispatcher through the host contract. A
-   repository is required; offer initialization when none exists. Register
-   plugin roots and run PMO `ensure` before reading environment state.
-2. Run `project environment-status --project-root <root> --json`.
-   - `AGENT_MARKETPLACE_CURRENT`: setup is idempotent; report current.
-   - `AGENT_MARKETPLACE_FRESH_SETUP_REQUIRED`: continue with fresh setup.
-   - `AGENT_MARKETPLACE_ENVIRONMENT_RECONCILE_REQUIRED`: update any named
-     older or missing installed component, start a fresh session, then rerun
-     setup. When only attach or projection drift remains, run `project attach
-     --project-root <root> --workspace <workspace> --json`.
-   - `AGENT_MARKETPLACE_RECONCILE_DEFERRED_ACTIVE_WORK`: list every project,
-     type, key, and worktree. Start no new managed work. Close the named task,
-     plan, or Experience run, or checkpoint the named work order through its
-     owning flow, then rerun setup.
-   - `AGENT_MARKETPLACE_PROJECT_UPGRADE_CHOICE_REQUIRED`: present `Upgrade
-     Project (Recommended)` and `Cancel`. Upgrade uses the existing upgrade
-     entry; setup never silently upgrades or downgrades the project.
-   - Unsupported, corrupt, identity-conflicting, or contract-drift state stops
-     fail-closed.
-3. For fresh setup, run `setup_check.py preflight --project-root <root>
-   --workspace <name> --json` before the first write. A foreign workspace gets
-   an owner-chosen alternative lower-kebab name used consistently.
-4. Materialize both portable host instructions, the active machine-local host
-   projection, and memory templates through the host contract with `--scope
-   all`. User-owned
-   companions, `me.md`, and `profile.md` are seeded only when missing.
-5. Reconcile `.gitignore` by marker ownership. Preserve every user line and
-   write the product contract's runtime and host-projection root ignores,
-   substituting `{{project_local_ignores}}` with one anchored ignore per root,
-   followed by the workspace test and vault rules. A missing
-   half-marker or duplicate marker fails closed. Verify each root with
-   `git check-ignore --no-index` and reject any force-added file below it.
-6. Create only missing top-level structure: apps; environment; demos; sketches;
-   and docs with maps, business-analysis, solution-design,
-   system-architecture, design-system/pages, and experience-design. Add
-   `.gitkeep` only to empty tracked directories. Runtime paths are lazy.
-7. Read [config-contract.md](../configure/references/config-contract.md)
-   completely, then build `<workspace>/config.json` interactively. Detect
-   existing values before asking only for gaps.
-   - Collect one missing field per question through the choice gate, with at
-     most three questions per batch. Never replace these gates with one
-     aggregate "accept defaults or provide corrections" prompt, and never put
-     multiple config fields in one confirmation.
-   - Ask in this order: `project_origin`, `databases`, `scale`;
-     `output_language`, `terminology_language`, `project_key`; `source_dirs`,
-     `test_command`, `mutation_command`; then `env_command`. Explicit values
-     already supplied by the owner count as answers. Every missing value waits
-     for its own answer before use. Keep the approved `project_key` out of the
-     config until `project register` stamps it atomically in step 9.
-   - Present a detected or conventional candidate first with its tradeoff,
-     plus supported alternatives and free-form input where the field permits
-     it. The fixed supported backend, frontend and environment stack values
-     are constraints to report, not owner choices to manufacture.
-   - Write `project_origin` only through `project_config.py set-origin`.
-8. Materialize the base vault payload without overwriting existing Obsidian
-   values with `vault_check.py materialize-payload --vault <workspace>/docs`.
-   Then mint designations before PMO registration:
-   - Read the canonical English table in the obsidian-vault metadata reference.
-     Render one distinct, non-empty value for every shipped taxonomy type in
-     `output_language`; navigation types carry no designation.
-   - Present the complete rendered map through one choice gate. Never invent
-     or apply an unapproved translation.
-   - Run `vault_check.py reconcile-designations --vault <workspace>/docs --set
-     <type>=<approved-value> ... --dry-run --json` with every pair. On approval,
-     run the same complete pair set without `--dry-run`, adding `--actor setup`.
-   - Run `vault_check.py check-designations --vault <workspace>/docs --json`
-     and require `ok: true`. Do not run PMO registration before this passes;
-     the write-time hook rejects an out-of-order `project register` command.
-9. Register PMO with `project register --key <key> --name <name> --team
-   software-engineering-team --stamp-config <config> --project-root <root>
-   --workspace <name>`. Registration preserves top-level `project_key` and
-   atomically writes the current nested project contract with its hash.
-10. Install the tracked portable gate with `vault_gate.py install
-    --project-root <root>`. The output is
-    `.github/agentrof/vault-gate.pyz`.
-11. Handle CI through [ci-bootstrap.md](references/ci-bootstrap.md), replacing
-    `{{test_command}}`, `{{audit_command}}`, and `{{env_command}}`. When no
-    PR-triggered workflow exists, ask its add-or-defer decision through a
-    separate choice gate after the command fields are approved. Never infer
-    deferral or fold CI into a config-default approval. Then close in order:
-    config check; designation contract; PMO identity; contract hash; host
-    instructions; local projection; effective ignore and force-add checks;
-    vault renders; portable gate; preparation status; setup check; and an
-    empty setup preview.
-12. Run `project attach --project-root <root> --workspace <name> --json` and
-    require `AGENT_MARKETPLACE_CURRENT`. Start a fresh session so local agents,
-    hooks, instructions, and `contract_sha256_at_start` load together.
-13. For greenfield print `business-analysis -> solution-design -> design-system
-    -> experience-design -> backlog-plan`. For existing projects print the
-    scoped `deliver` route.
+1. Resolve the Git root. The only workspace is `workspace/`; never ask for or
+   create an alternate vault location. One team owns one project. Run the packaged
+   `scripts/setup_project.py --project-root <root> --origin <greenfield|existing>`
+   bootstrap. It creates the project-local
+   `.agentrof/agent-marketplace/.runtime/` scratch directory and
+   only missing tracked directories, project config, payload, managed ignore
+   block and portable gate; it preserves authored files.
+2. Run the generated host project check. Present any preserve/discard choice
+   for user-owned instruction companions; never overwrite them silently.
+3. Read the `obsidian-vault` skill completely. The bootstrap materializes its
+   vault payload under `workspace/docs/` and runs
+   `vault_check.py reconcile-designations --defaults`. The canonical map includes the
+   fixed backlog keys `backlog`, `backlog-review`, `epic`, `epic-review`,
+   `story` and `test-plan`, plus the team's `issue-report` designation, in
+   addition to the analysis/design types. Type keys and graph colors stay
+   stable; display designation wording may follow the project's output and
+   terminology languages. Route wording changes through `configure` and its
+   decision gate.
+4. Ensure the root `.gitignore` ignores only the project-local runtime and
+   host projections.
+5. Run `setup_check.py check`, `vault_check.py check` and the relevant
+   compilers. CI materialization is a delivery concern and remains deferred
+   until its command derivation contract is activated; setup never emits a
+   template with unresolved command placeholders. The dormant CI template's
+   `{{test_command}}`, `{{audit_command}}` and `{{env_command}}` substitutions
+   are defined in [ci-bootstrap.md](references/ci-bootstrap.md) for that later
+   activation. The ignore template's `{{project_local_ignores}}` substitution
+   is the project-local root set from the packaged product contract. Commit
+   generated project instructions only with user approval. On a package
+   refresh, preview managed-file drift and apply only the user's selected
+   managed changes.
+6. Report `business-analysis -> solution-design -> design-system ->
+   experience-design -> backlog-plan` for greenfield, or the scoped delivery
+   route for an existing project. Start a fresh host session after setup.

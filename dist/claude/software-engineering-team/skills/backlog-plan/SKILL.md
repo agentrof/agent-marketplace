@@ -1,6 +1,6 @@
 ---
 name: backlog-plan
-description: User-gated baseline or replan entry that compiles an approved program and release backlog from analysis, solution, budget and exact Experience Design revisions, atomically applies it to PMO, then stops before delivery activation.
+description: User-gated preparation entry that turns approved analysis, solution, design-system and experience documents into a project-local nested Markdown backlog with epic reviews, story test plans and reproducible coverage views.
 disable-model-invocation: true
 ---
 
@@ -8,4 +8,4 @@ disable-model-invocation: true
 
 # Backlog Plan
 
-Read `${CLAUDE_PLUGIN_ROOT}/host-contract.md` and `${CLAUDE_PLUGIN_ROOT}/skill-content/backlog-plan/SKILL.md` completely. Follow the canonical skill as the authoritative workflow and the host contract as its platform adapter. Before any workflow step inside a Git repository, run `project environment-status --project-root <git-root> --json` through the PMO launcher. A non-current environment permits only setup, upgrade, or recovery guidance.
+Read `${CLAUDE_PLUGIN_ROOT}/host-contract.md` and `${CLAUDE_PLUGIN_ROOT}/skill-content/backlog-plan/SKILL.md` completely. Follow the canonical skill as the authoritative workflow and the host contract as its platform adapter. Before changing a project, confirm the workspace config and local docs contract are present; setup is the only entry that may create them.

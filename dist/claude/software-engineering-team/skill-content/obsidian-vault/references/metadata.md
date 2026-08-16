@@ -45,14 +45,15 @@ aliases:
 
 ## Type designations
 
-The title's closing designation is now MECHANICAL. The canonical
-ENGLISH table below is minted per project into config.json's
-`doc_type_designations` map (type-kebab -> designation) in the
-output_language, owner-approved. The checker holds each typed note's
-title against that DATA: the designation at a word boundary under an
-NFKC+casefold fold, and a challenge-record title also its round number
-as a standalone token. Map absent or config unreadable warns per note
-naming the mint duty, never a silent pass; only the English table ships.
+The title's closing designation is mechanical. The English default table below
+is minted per project into config.json's `doc_type_designations` map
+(type-kebab -> designation). Display wording may follow the project's output
+language, terminology language, or an explicitly approved mixture. The checker
+holds each typed note's title against that data: the designation at a word
+boundary under an NFKC+casefold fold, and a challenge-record title also its
+round number as a standalone token. Map absence or unreadable config warns per
+note naming the mint duty, never a silent pass; only the English default table
+ships.
 
 The map is mutable with memory, never hand-edited. Its single writer,
 for mint and change alike, is `vault_check.py reconcile-designations`
@@ -65,10 +66,10 @@ double suffix survives), sweeps wikilink aliases byte-equal to the source
 title, and re-renders the generated views. The `designation_drift`
 check holds titles against the ledger: a retired value closing a title
 is an error (mechanically fixable), a mid-title stranding or a
-non-closing designation warns. Locked records are skipped by default
-and always report warnings, never errors: the owner-approved relabel
-(`--include-locked`, title and H1 only, one PMO audit event per record)
-is the sanctioned path, and a declined relabel stays a named residual.
+non-closing designation warns. Locked records are skipped by default and always
+report warnings, never errors. A decision-authority approved relabel
+(`--include-locked`, title and H1 only) is the sanctioned path, and a declined
+relabel stays a named residual.
 An adopted vault with stale titles and no ledger states its prior value
 explicitly via `--from` (never recorded: it was not a configured
 value).
@@ -91,6 +92,13 @@ value).
 | engagement | engagement |
 | design-master | design master |
 | page-override | page override |
+| backlog | product backlog |
+| backlog-review | backlog review |
+| epic | epic |
+| epic-review | epic review |
+| story | story |
+| test-plan | test plan |
+| issue-report | issue report |
 | experience | experience |
 | program | program |
 | release | release |
@@ -150,7 +158,7 @@ governs:
 
 - `governs` and `verifies` are ALWAYS block lists, one quoted wikilink
   per `- item` line, even for a single target: the property panel
-  holds one value type per key. The `migrate` verb lifts a scalar into
+  holds one value type per key. The `normalize` verb lifts a scalar into
   a one-item list.
 - The supersede chain is bidirectional (`supersedes` on the younger,
   `superseded_by` on the older) and is written by `stamp-decision` in

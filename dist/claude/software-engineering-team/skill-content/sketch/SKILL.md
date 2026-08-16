@@ -14,10 +14,9 @@ Pure design exploration: no code, no sales package, just directions.
 
 ## Procedure
 
-1. Pre-flight: read workspace/config.json (missing: route to the setup
-   entry and stop). Dispatcher for plugin files:
-   RUN="${AGENT_MARKETPLACE_HOME:-${AGENTROF_HOME:-$HOME/.agentrof}/agent-marketplace}/bin/marketplace_run.py" and
-   TEAM=software-engineering-team.
+1. Pre-flight: read `workspace/config.json` (missing: route to the setup entry
+   and stop). Resolve all referenced flow and skill files from the installed
+   Software Engineering Team package.
 2. Preconditions, in order:
    a. Approved brief for the topic; missing: run the business-analysis
       entry flow first, then continue.
@@ -25,8 +24,7 @@ Pure design exploration: no code, no sales package, just directions.
       note; the obsidian-vault skill owns its docs-tree law); missing:
       stop, say "no design system yet", route the user into the
       design-system entry, and continue here once it exists.
-3. Execute the flow printed by "$RUN" path "$TEAM" flows/design.md in
-   sketch mode:
+3. Read the packaged `flows/design.md` and execute it in sketch mode:
    directions in one self-contained preview under
    workspace/sketches/<slug>/, direction pick, refinement rounds,
    handshake.

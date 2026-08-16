@@ -1,13 +1,15 @@
 # CI Bootstrap
 
-When the repository has no PR-triggered test workflow in its CI directory
-(`.github/workflows/` on GitHub), offer to add the file printed by `"$RUN"
-path "$TEAM" templates/ci-tests.yml`.
+This is the deferred delivery activation contract. Preparation setup does not
+materialize CI. After the delivery contract is approved, when the repository
+has no PR-triggered test workflow in its CI directory (`.github/workflows/` on
+GitHub), offer to add the packaged `templates/ci-tests.yml` file.
 
 The template always runs the tracked portable single-vault gate before the
 project-specific jobs. Do not replace it with an installed plugin path; every
 supported host and CI must execute the same `.pyz` bytes.
 
+- Refuse materialization while any placeholder source is absent.
 - Use the configured test command for the test placeholder.
 - Build one dependency-audit command per configured stack, anchored at its
   lockfile. Python FastAPI uses `pip-audit`; React TypeScript runs `npm audit

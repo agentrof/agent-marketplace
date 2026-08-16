@@ -19,8 +19,9 @@ Vault traceability is typed and cross-subtree. Living docs and ADRs use
 owning Solution decision, qualified BA budget/criterion and exact Experience
 journey, screen or transition. API contracts connect the acceptance criterion
 and Experience transition they realize; threat models may connect actors,
-journeys, screens and solution boundaries. PMO story identity remains a raw
-`story` field; vault knowledge references are aliased wikilinks. Run the
+journeys, screens and solution boundaries. Story identity remains a raw
+`story` field in the project-local Markdown backlog; vault knowledge references
+are aliased wikilinks. Run the
 relation renderer after each architecture delta.
 
 ## Style Selection

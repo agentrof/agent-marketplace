@@ -6,8 +6,7 @@ markdown documents. Authored files are the single source of truth;
 everything derived (index, registries, backlinks, status, question board)
 is generated into <space>/_generated/ by the compiler and protected
 against hand edits. The compiler
-(ba_compile.py, run through the dispatcher per the develop flow's
-state contract) reads its taxonomy from the
+(ba_compile.py) reads its taxonomy from the
 schema data file shipped with the business-analysis skill; this reference
 explains the standard to a human and to the analyst persona. When the two
 ever disagree, the schema and the compiler win: a rule that is not
@@ -26,7 +25,7 @@ machine-checked is not a rule.
   layer labels the graph. Typed content carries its type as the
   schema's English filename suffix (filename_suffix per doc type); the
   compiler refuses a typed file without its suffix, and the vault
-  checker's migrate --rename repairs nonconforming names and rewrites
+  checker's normalize --rename repairs nonconforming names and rewrites
   referrers.
 - Content folders inside any node, created only when non-empty:
   processes/, entities/, rules/, acceptance/, decisions/, reviews/.
@@ -155,8 +154,8 @@ frontmatter, unique across the whole space. LEG is reserved.
   (`[[path\|BR-INV-001]]`); the compiler normalizes cells back to bare
   ids for the registry and statement hashes, so cell rewrites never
   change machine identity, and a bare id left in a citation cell is an
-  error the vault checker's migrate verb rewrites.
-- AS and OQ rows carry opened_on dates, pasted from the PMO CLI's
+  error the vault checker's normalize verb rewrites.
+- AS and OQ rows carry opened_on dates, pasted from the local compiler's
   `now --date` output (never typed from memory; the compiler rejects a
   future date); the compiler flags open rows older than the schema
   threshold. The assumption-aging principle is machine-checked, not
@@ -242,18 +241,18 @@ space-level challenge round when child domains exist.
 - The vault checker runs at every gate alongside the compiler; frozen
   docs are passed as repeated --exclude flags and surface as named
   warnings, never silently skipped.
-- Deterministic format repairs go through the vault checker's migrate
-  verb. Migrate is format-only and sanctioned on approved docs: it never
+- Deterministic format repairs go through the vault checker's `normalize`
+  verb. Normalize is format-only and sanctioned on approved docs: it never
   touches status and never stamps.
 
 ## Rename and restructure runbook
 
 1. Renames are grammar work, not grep work: run the vault checker's
-   `migrate --rename --dry-run --json` for the plan (each source -> target
+   `normalize --rename --dry-run --json` for the plan (each source -> target
    pair with its referrer count; renames whose referrers include a
    frozen path are listed as blocked_by_frozen_referrer and stay
    deferred until release).
-2. Execute `migrate --rename`: it renames and rewrites every referrer
+2. Execute `normalize --rename`: it renames and rewrites every referrer
    across the whole vault (body links, frontmatter values, map rows)
    in one operation; already-compliant files are skipped.
 3. Moving a doc between nodes is still a manual move first: relocate

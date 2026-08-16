@@ -1,14 +1,12 @@
 {
   "name": "software-engineering-team",
   "version": "0.2.2",
-  "description": "Software Engineering Team: a complete, orchestrated software and product development team for analysis, planning, architecture, design, implementation, review and verification.",
+  "description": "Software Engineering Team for approved analysis, solution and experience design, and a delivery-ready Obsidian backlog.",
   "author": {
     "name": "Agentrof",
     "url": "https://github.com/agentrof"
   },
   "license": "MIT",
-  "dependencies": [
-    "project-management-office"
-  ],
+  "dependencies": [],
   "skills": "./skills/"
 }

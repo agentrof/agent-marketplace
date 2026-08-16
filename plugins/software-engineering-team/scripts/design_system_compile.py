@@ -50,6 +50,10 @@ def rewrite_frontmatter(path: Path, updates: dict, removals: set[str]) -> None:
     written: set[str] = set()
     for raw in lines[1:end]:
         stripped = raw.strip()
+        if stripped.startswith("- status/") and "status" in updates:
+            prefix = raw[:len(raw) - len(raw.lstrip())]
+            output.append(f"{prefix}- status/{updates['status']}")
+            continue
         if ":" not in stripped or stripped.startswith("- "):
             output.append(raw)
             continue
@@ -73,6 +77,8 @@ def normalized_master(path: Path) -> bytes:
     kept = ["---"]
     for raw in lines[1:end]:
         stripped = raw.strip()
+        if stripped.startswith("- status/"):
+            continue
         key = stripped.split(":", 1)[0].strip() if ":" in stripped else ""
         if key in MACHINE_FIELDS:
             continue
@@ -101,7 +107,7 @@ def findings(root: Path) -> list[str]:
     if not master.is_file():
         return ["MASTER.md is missing"]
     try:
-        fields, _lines, _end = parse_frontmatter(master)
+        fields, lines, end = parse_frontmatter(master)
     except (OSError, ValueError) as exc:
         return [str(exc)]
     result: list[str] = []
@@ -110,6 +116,10 @@ def findings(root: Path) -> list[str]:
     status = fields.get("status")
     if status not in {"draft", "approved"}:
         result.append("MASTER.md status must be draft or approved")
+    status_tags = [raw.strip()[2:] for raw in lines[1:end]
+                   if raw.strip().startswith("- status/")]
+    if status in {"draft", "approved"} and status_tags != [f"status/{status}"]:
+        result.append("MASTER.md must carry exactly one status tag matching status")
     revision = fields.get("revision")
     if not isinstance(revision, int) or revision < 1:
         result.append("MASTER.md revision must be a positive integer")

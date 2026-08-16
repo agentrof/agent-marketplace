@@ -27,6 +27,7 @@ artifact_check = load("artifact_check")
 contract_check = load("contract_check")
 atomic_tripwire = load("atomic_tripwire")
 landscape_check = load("landscape_check")
+design_system_compile = load("design_system_compile")
 
 
 def run(module, argv):
@@ -155,6 +156,7 @@ class LandscapeCheckTests(unittest.TestCase):
                 "## Framing\nf\n\n## Options\no\n\n## Verdict\nv\n")
             code, _, _ = run(landscape_check, ["--tree", tree])
             self.assertEqual(code, 0)
+
 
     def test_non_ascii_component_fails(self):
         land = self.LAND_OK.replace("| queue |", "| mesaj kuyruğu |")
@@ -290,6 +292,49 @@ class LandscapeCheckTests(unittest.TestCase):
                 encoding="utf-8")
             self.assertIn("Status: open", text)
             self.assertNotIn("Status: approved", text)
+
+
+class DesignSystemCompileTests(unittest.TestCase):
+    MASTER = (
+        "---\ntype: design_master\ntitle: Product design system\n"
+        "status: draft\nrevision: 1\ntags:\n"
+        "  - doc/design-master\n  - status/draft\naliases:\n"
+        "  - Design System\n---\n\n# Product design system\n\nBaseline.\n"
+    )
+
+    def test_approve_and_revision_keep_status_tag_and_hash_contract_aligned(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            master = root / "MASTER.md"
+            master.write_text(self.MASTER, encoding="utf-8")
+
+            code, _, err = run(
+                design_system_compile, ["approve", "--root", str(root)]
+            )
+            self.assertEqual(code, 0, err)
+            approved = master.read_text(encoding="utf-8")
+            self.assertIn("status: approved", approved)
+            self.assertIn("  - status/approved", approved)
+            self.assertNotIn("status/draft", approved)
+            code, _, err = run(
+                design_system_compile, ["check", "--root", str(root)]
+            )
+            self.assertEqual(code, 0, err)
+
+            code, _, err = run(
+                design_system_compile,
+                ["begin-revision", "--root", str(root)],
+            )
+            self.assertEqual(code, 0, err)
+            revised = master.read_text(encoding="utf-8")
+            self.assertIn("status: draft", revised)
+            self.assertIn("  - status/draft", revised)
+            self.assertIn("supersedes_hash: sha256:", revised)
+            self.assertNotIn("baseline_hash:", revised)
+            code, _, err = run(
+                design_system_compile, ["check", "--root", str(root)]
+            )
+            self.assertEqual(code, 0, err)
 
 
 class TripwireEnvironmentTests(unittest.TestCase):

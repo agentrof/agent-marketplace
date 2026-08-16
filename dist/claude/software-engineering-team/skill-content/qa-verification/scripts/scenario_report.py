@@ -126,7 +126,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--json-out", type=Path, default=None, metavar="JSON",
         help="also write the matrix rows and summary as JSON (the shape"
-             " the PMO CLI's coverage import consumes)",
+             " the backlog coverage compiler consumes)",
     )
     args = parser.parse_args(argv)
 

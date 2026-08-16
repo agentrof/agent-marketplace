@@ -32,15 +32,17 @@ project root. Pass `--output-dir` for any other target; never persist
 while sitting inside the plugin directory.
 
 1. **Analyze product context.** Purpose, users, dominant content (data/text/media/forms), emotional goal (trust/energy/calm), interaction pattern (scan/keyboard/input/navigate). Method: the design-rationale-method reference below.
-2. **Generate the design system** (required first step):
-   `"$RUN" run "$TEAM" skill-content/ui-ux-design/scripts/search.py "<product> <industry> <tone> <density>" --design-system -p "Project Name"`
-3. **Persist Master + overrides** once a candidate is chosen:
-   `"$RUN" run "$TEAM" skill-content/ui-ux-design/scripts/search.py "<query>" --design-system --persist -p "Project Name" [--page "dashboard"]`
+2. **Generate the design system** (required first step) with the packaged
+   `skill-content/ui-ux-design/scripts/search.py "<product> <industry> <tone>
+   <density>" --design-system -p "Project Name"`.
+3. **Persist Master + overrides** once a candidate is chosen with the packaged
+   `search.py "<query>" --design-system --persist -p "Project Name" [--page
+   "dashboard"]`.
    Writes `workspace/docs/design-system/MASTER.md` and `pages/<page>.md` as vault notes (frontmatter, tags and nav section per the obsidian-vault skill; the script emits them). When building a page, read `pages/<page>.md` first; if it exists its rules override MASTER.md, otherwise follow MASTER.md strictly.
-4. **Deep-dive domains** as needed:
-   `"$RUN" run "$TEAM" skill-content/ui-ux-design/scripts/search.py "<keywords>" --domain <product|style|color|typography|landing|ux|chart|icons>`
-5. **Stack guidance** for implementation fidelity:
-   `"$RUN" run "$TEAM" skill-content/ui-ux-design/scripts/search.py "<keywords>" --stack <react|html-tailwind|shadcn>`
+4. **Deep-dive domains** as needed with the packaged `search.py "<keywords>"
+   --domain <product|style|color|typography|landing|ux|chart|icons>`.
+5. **Stack guidance** for implementation fidelity with the packaged
+   `search.py "<keywords>" --stack <react|html-tailwind|shadcn>`.
 
 ## Query Strategy and Divergence
 
@@ -53,9 +55,9 @@ while sitting inside the plugin directory.
 
 | Script | Purpose |
 |--------|---------|
-| `scripts/search.py` | CLI: domain search, stack search, `--design-system`, `--persist`, `--style-emphasis`, `--output-dir`, `--force-master` |
-| `scripts/core.py` | BM25 engine, CSV and domain config; standard library only |
-| `scripts/design_system.py` | Aggregation, reasoning rules, light+dark palette derivation (native mode annotated), success and warning roles, MASTER.md and page-override writer; persisting over an existing MASTER refuses without `--force-master` and routes to UPDATE mode |
+| `skill-content/ui-ux-design/scripts/search.py` | CLI: domain search, stack search, `--design-system`, `--persist`, `--style-emphasis`, `--output-dir`, `--force-master` |
+| `skill-content/ui-ux-design/scripts/core.py` | BM25 engine, CSV and domain config; standard library only |
+| `skill-content/ui-ux-design/scripts/design_system.py` | Aggregation, reasoning rules, light+dark palette derivation (native mode annotated), success and warning roles, MASTER.md and page-override writer; persisting over an existing MASTER refuses without `--force-master` and routes to UPDATE mode |
 
 Generated MASTER.md always contains: light+dark palette pair per semantic
 role, spacing tokens, radius scale derived from the style, shadow scale,

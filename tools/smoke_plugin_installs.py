@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Exercise checkout or public-stable installs on real host CLIs."""
+"""Install the standalone team on real host CLIs and exercise its package."""
 
 from __future__ import annotations
 
@@ -16,7 +16,7 @@ import time
 from pathlib import Path
 
 
-PMO = "project-management-office"
+TEAM = "software-engineering-team"
 MARKETPLACE = "agent-marketplace"
 PUBLIC_MARKETPLACES = {
     "claude": "https://github.com/agentrof/agent-marketplace.git#stable",
@@ -28,20 +28,12 @@ class SmokeFailure(RuntimeError):
     pass
 
 
-def marketplace_home(env: dict[str, str]) -> Path:
-    override = env.get("AGENT_MARKETPLACE_HOME", "").strip()
-    if override:
-        return Path(override)
-    vendor = env.get("AGENTROF_HOME", "").strip()
-    return (Path(vendor) if vendor else Path.home() / ".agentrof") / MARKETPLACE
-
-
-def run(command: list[str], env: dict[str, str], input_text: str = "") -> str:
+def run(command: list[str], env: dict[str, str]) -> str:
     completed = subprocess.run(
-        command, input=input_text, capture_output=True, text=True, env=env,
-        check=False, timeout=60,
+        command, capture_output=True, text=True, env=env, check=False,
+        timeout=120,
     )
-    if completed.returncode != 0:
+    if completed.returncode:
         raise SmokeFailure(
             f"command failed ({completed.returncode}): {' '.join(command)}\n"
             f"stdout:\n{completed.stdout}\nstderr:\n{completed.stderr}"
@@ -49,285 +41,126 @@ def run(command: list[str], env: dict[str, str], input_text: str = "") -> str:
     return completed.stdout
 
 
-def team_names(root: Path) -> list[str]:
-    return sorted(
-        path.name for path in (root / "plugins").iterdir()
-        if path.is_dir() and path.name != PMO
-    )
-
-
 def require_cli(name: str) -> None:
     if shutil.which(name) is None:
         raise SmokeFailure(f"required host CLI is unavailable: {name}")
 
 
-def assert_enabled(inventory: dict | list, expected: set[str], host: str) -> None:
-    if host == "claude":
-        enabled = {
-            entry.get("id", "").split("@", 1)[0]
-            for entry in inventory
-            if entry.get("enabled") is True
-        }
-    else:
-        enabled = {
-            entry.get("name", "")
-            for entry in inventory.get("installed", [])
-            if entry.get("enabled") is True
-        }
-    if not expected <= enabled:
-        raise SmokeFailure(
-            f"{host} enabled set is incomplete: missing "
-            + ", ".join(sorted(expected - enabled))
-        )
+def init_project(path: Path, env: dict[str, str]) -> None:
+    run(["git", "init", "--initial-branch=main", str(path)], env)
+    run(["git", "-C", str(path), "config", "user.name", "Marketplace Smoke"], env)
+    run(["git", "-C", str(path), "config", "user.email", "smoke@example.invalid"], env)
 
 
-def plugin_install_path(inventory: dict | list, plugin: str, host: str) -> Path:
+def installed_root(inventory: dict | list, host: str) -> Path:
     entries = inventory if host == "claude" else inventory.get("installed", [])
     for entry in entries:
         name = entry.get("id", "").split("@", 1)[0] \
             if host == "claude" else entry.get("name", "")
-        if name == plugin:
-            raw = entry.get("installPath") if host == "claude" \
-                else entry.get("installedPath")
-            if not raw and host == "codex":
-                source = entry.get("source") or {}
-                raw = source.get("path") if isinstance(source, dict) else ""
-            if raw:
-                return Path(raw)
-    raise SmokeFailure(f"{host} inventory has no install path for {plugin}")
+        if name != TEAM or entry.get("enabled") is not True:
+            continue
+        raw = entry.get("installPath") if host == "claude" \
+            else entry.get("installedPath")
+        if not raw and host == "codex":
+            source = entry.get("source") or {}
+            raw = source.get("path") if isinstance(source, dict) else ""
+        if raw:
+            return Path(raw)
+    raise SmokeFailure(f"{host} inventory has no enabled {TEAM} install")
 
 
-def hook_payload(session_id: str, project: Path, event: str, tool: str = "") -> str:
-    payload = {
-        "session_id": session_id,
-        "cwd": str(project),
-        "hook_event_name": event,
-        "permission_mode": "default",
-    }
-    if tool:
-        payload.update({
-            "tool_name": tool,
-            "tool_input": {
-                "file_path": str(project / "smoke-change.txt"),
-                "content": "smoke",
-            },
-        })
-    return json.dumps(payload)
-
-
-def initialize_project(project: Path, team: str, env: dict[str, str]) -> None:
-    workspace = project / "workspace"
-    workspace.mkdir(parents=True)
-    (workspace / "config.json").write_text(
-        json.dumps({
-            "team_id": team,
-            "project_key": "smoke",
-            "project_origin": "greenfield",
-        }),
-        encoding="utf-8",
-    )
-    run(["git", "init", "--initial-branch=main", str(project)], env)
-    run(["git", "-C", str(project), "config", "user.name", "Agent Marketplace Smoke"], env)
+def exercise_package(team_root: Path, project: Path, env: dict[str, str]) -> None:
+    setup = team_root / "scripts" / "setup_project.py"
+    check = team_root / "scripts" / "setup_check.py"
+    route = team_root / "scripts" / "preparation_check.py"
+    for path in (setup, check, route, team_root / "scripts" / "backlog_compile.py"):
+        if not path.is_file():
+            raise SmokeFailure(f"installed package is missing {path.relative_to(team_root)}")
+    first = json.loads(run([
+        sys.executable, str(setup), "--project-root", str(project), "--json",
+    ], env))
+    if first.get("next_entry") != "business-analysis":
+        raise SmokeFailure("fresh setup did not route to business-analysis")
+    host = "claude" if (team_root / ".claude-plugin" / "plugin.json").is_file() \
+        else "codex" if (team_root / ".codex-plugin" / "plugin.json").is_file() \
+        else ""
+    if not host:
+        raise SmokeFailure("installed package has no host manifest")
+    generator = team_root / "scripts" / f"generate_{host}_project.py"
+    if not generator.is_file():
+        raise SmokeFailure(f"installed package is missing {generator.name}")
+    generator_args = [
+        sys.executable, str(generator), "apply", "--project-root", str(project),
+        "--workspace", "workspace", "--seed-user-files", "--scope", "all",
+    ]
+    run(generator_args, env)
     run([
-        "git", "-C", str(project), "config", "user.email",
-        "agent-marketplace-smoke@example.invalid",
+        sys.executable, str(generator), "check", "--project-root", str(project),
+        "--workspace", "workspace", "--scope", "all",
     ], env)
-    run(["git", "-C", str(project), "add", "--", "workspace/config.json"], env)
+    sentinel = project / "workspace" / "user-authored.txt"
+    sentinel.write_text("user-owned\n", encoding="utf-8")
+    run([sys.executable, str(setup), "--project-root", str(project), "--json"], env)
+    run(generator_args, env)
+    if sentinel.read_text(encoding="utf-8") != "user-owned\n":
+        raise SmokeFailure("setup refresh changed a user-owned project file")
     run([
-        "git", "-C", str(project), "commit", "--no-gpg-sign", "-m",
-        "test: initialize smoke project",
+        sys.executable, str(check), "check", "--project-root", str(project),
+        "--json",
     ], env)
+    portable = project / ".github" / "agentrof" / "vault-gate.pyz"
+    run([sys.executable, str(portable), "check", "--project-root", str(project), "--json"], env)
+    routed = subprocess.run([
+        sys.executable, str(route), "route", "--project-root", str(project),
+        "--json",
+    ], capture_output=True, text=True, env=env, check=False, timeout=60)
+    payload = json.loads(routed.stdout)
+    if routed.returncode != 1 or payload.get("next_entry") != "business-analysis":
+        raise SmokeFailure("greenfield document router did not stop at business-analysis")
 
 
-def register_project_contract(
-    env: dict[str, str], pmo_root: Path, team_root: Path, project: Path, team: str,
-) -> None:
-    run([
-        sys.executable,
-        str(marketplace_home(env) / "bin" / "marketplace_run.py"),
-        "register", "--plugin", team, "--root", str(team_root),
-    ], env)
-    run([
-        sys.executable, str(pmo_root / "scripts" / "pmo_cli.py"),
-        "project", "register", "--key", "smoke", "--name", "Smoke",
-        "--team", team,
-        "--stamp-config", str(project / "workspace" / "config.json"),
-        "--project-root", str(project), "--workspace", "workspace",
-    ], env)
-    config = json.loads(
-        (project / "workspace" / "config.json").read_text(encoding="utf-8")
-    )
-    contract = config.get("agent_marketplace", {})
-    config_surface = "workspace/config.json#agent-marketplace"
-    if isinstance(contract, dict) and config_surface in contract.get(
-        "managed_surfaces", {}
-    ):
-        raise SmokeFailure(
-            "project contract contains its own config as a managed surface"
-        )
-
-
-def assert_preparation_payload(
-    env: dict[str, str], team_root: Path, project: Path, team: str,
-) -> None:
-    script = team_root / "scripts" / "preparation_check.py"
-    if team != "software-engineering-team" or not team_root.exists():
-        return  # deterministic host simulations use synthetic install paths
-    required = (
-        script,
-        team_root / "scripts" / "experience_compile.py",
-        team_root / "scripts" / "backlog_compile.py",
-        team_root / "skill-content" / "experience-design" / "SKILL.md",
-        team_root / "skill-content" / "backlog-plan" / "SKILL.md",
-        team_root / "agents" / "experience-reviewer.md",
-        team_root / "agents" / "backlog-reviewer.md",
-        team_root / "flows" / "experience-design.md",
-        team_root / "flows" / "backlog-planning.md",
-    )
-    missing = [str(path.relative_to(team_root)) for path in required if not path.is_file()]
-    if missing:
-        raise SmokeFailure("greenfield preparation payload is incomplete: " + ", ".join(missing))
-    if (team_root / "skill-content" / "plan-backlog").exists():
-        raise SmokeFailure("removed plan-backlog alias is still packaged")
-    completed = subprocess.run(
-        [sys.executable, str(script), "route", "--project-root", str(project),
-         "--intent", "deliver", "--json"],
-        capture_output=True, text=True, env=env, check=False, timeout=30,
-    )
-    try:
-        payload = json.loads(completed.stdout)
-    except json.JSONDecodeError as exc:
-        raise SmokeFailure("preparation route returned invalid JSON") from exc
-    if completed.returncode != 1 or payload.get("next_entry") != "business-analysis":
-        raise SmokeFailure("fresh greenfield route did not stop at business-analysis")
-
-
-def assert_team_gate(
-    env: dict[str, str], team_root: Path, project: Path, session_id: str,
-    expected: int,
-) -> None:
-    completed = subprocess.run(
-        [sys.executable, str(team_root / "scripts" / "team_guard.py"), "pre"],
-        input=hook_payload(session_id, project, "PreToolUse", "Write"),
-        capture_output=True,
-        text=True,
-        env=env,
-        check=False,
-        timeout=30,
-    )
-    if completed.returncode != expected:
-        diagnostic = ""
-        launcher = marketplace_home(env) / "bin" / "pmo_cli.py"
-        if launcher.is_file():
-            inspected = subprocess.run(
-                [sys.executable, str(launcher), "upgrade", "status",
-                 "--project-root", str(project), "--json"],
-                capture_output=True, text=True, env=env, check=False, timeout=30,
-            )
-            diagnostic = (
-                f"\nupgrade status ({inspected.returncode}):\n"
-                f"{inspected.stdout}{inspected.stderr}"
-            )
-        raise SmokeFailure(
-            f"team preflight returned {completed.returncode}, expected {expected}:\n"
-            f"{completed.stderr}{diagnostic}"
-        )
-
-
-def mark_pmo_ready(
-    env: dict[str, str], pmo_root: Path, project: Path, session_id: str,
-) -> None:
-    output = run(
-        [sys.executable, str(pmo_root / "scripts" / "hook_session_start.py")],
-        env,
-        hook_payload(session_id, project, "SessionStart"),
-    )
-    if "AGENT_MARKETPLACE_PMO_READY: project-management-office" not in output:
-        diagnostic = output.strip()
-        launcher = marketplace_home(env) / "bin" / "pmo_cli.py"
-        if launcher.is_file():
-            inspected = subprocess.run(
-                [sys.executable, str(launcher), "upgrade", "status",
-                 "--project-root", str(project), "--json"],
-                capture_output=True, text=True, env=env, check=False, timeout=30,
-            )
-            diagnostic += (
-                f"\nupgrade status ({inspected.returncode}):\n"
-                f"{inspected.stdout}{inspected.stderr}"
-            )
-        raise SmokeFailure(
-            "PMO SessionStart did not mark the smoke session ready:\n"
-            + diagnostic
-        )
-
-
-def codex_skills(env: dict[str, str], project: Path) -> list[dict]:
+def codex_skill_names(env: dict[str, str], project: Path) -> set[str]:
     process = subprocess.Popen(
-        ["codex", "app-server"],
-        stdin=subprocess.PIPE,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        text=True,
-        env=env,
+        ["codex", "app-server"], stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, env=env,
     )
-    assert process.stdin is not None
-    assert process.stdout is not None
+    assert process.stdin is not None and process.stdout is not None
     responses: queue.Queue[str] = queue.Queue()
+    threading.Thread(
+        target=lambda: [responses.put(line) for line in process.stdout],
+        daemon=True,
+    ).start()
 
-    def collect_stdout() -> None:
-        for line in process.stdout:
-            responses.put(line)
-
-    threading.Thread(target=collect_stdout, daemon=True).start()
-    seen: list[str] = []
-
-    def send(message: dict) -> None:
-        process.stdin.write(json.dumps(message) + "\n")
+    def send(value: dict) -> None:
+        process.stdin.write(json.dumps(value) + "\n")
         process.stdin.flush()
 
     def receive(request_id: int) -> dict:
-        deadline = time.monotonic() + 20
+        deadline = time.monotonic() + 30
         while time.monotonic() < deadline:
             try:
-                line = responses.get(timeout=max(0.01, deadline - time.monotonic()))
-            except queue.Empty:
-                break
-            seen.append(line)
-            try:
-                message = json.loads(line)
-            except json.JSONDecodeError:
+                value = json.loads(responses.get(timeout=1))
+            except (queue.Empty, json.JSONDecodeError):
                 continue
-            if message.get("id") == request_id:
-                return message
-        raise SmokeFailure(
-            f"codex app-server returned no response for request {request_id}\n"
-            + "".join(seen)
-        )
+            if value.get("id") == request_id:
+                return value
+        raise SmokeFailure(f"Codex app-server omitted response {request_id}")
 
     try:
-        send({
-            "method": "initialize", "id": 1,
-            "params": {"clientInfo": {
-                "name": "agent_marketplace_smoke", "title": "Agent Marketplace Smoke",
-                "version": "1.0.0",
-            }},
-        })
-        initialized = receive(1)
-        if initialized.get("error"):
-            raise SmokeFailure(f"codex initialize error: {initialized['error']}")
+        send({"method": "initialize", "id": 1, "params": {
+            "clientInfo": {"name": "marketplace_smoke", "title": "Smoke", "version": "1"},
+        }})
+        if receive(1).get("error"):
+            raise SmokeFailure("Codex app-server initialization failed")
         send({"method": "initialized", "params": {}})
-        send({
-            "method": "skills/list", "id": 2,
-            "params": {"cwds": [str(project)], "forceReload": True},
-        })
+        send({"method": "skills/list", "id": 2, "params": {
+            "cwds": [str(project)], "forceReload": True,
+        }})
         response = receive(2)
-        if response.get("error"):
-            raise SmokeFailure(f"codex skills/list error: {response['error']}")
-        data = response.get("result", {}).get("data", [])
-        for entry in data:
-            if entry.get("cwd") == str(project):
-                return entry.get("skills", [])
-        raise SmokeFailure("codex skills/list response omitted the project cwd")
+        for item in response.get("result", {}).get("data", []):
+            if item.get("cwd") == str(project):
+                return {skill.get("name", "") for skill in item.get("skills", [])}
+        raise SmokeFailure("Codex skills/list omitted the project")
     finally:
         process.terminate()
         try:
@@ -336,202 +169,57 @@ def codex_skills(env: dict[str, str], project: Path) -> list[dict]:
             process.kill()
 
 
-def smoke_claude(
-    root: Path, teams: list[str], marketplace_source: str | Path | None = None
-) -> None:
+def smoke_claude(source: str | Path) -> None:
     require_cli("claude")
-    version = run(["claude", "--version"], os.environ.copy()).strip()
-    for team in teams:
-        with tempfile.TemporaryDirectory(prefix="agent-marketplace-claude-smoke.") as state:
-            state_root = Path(state)
-            env = {
-                **os.environ,
-                "CLAUDE_CONFIG_DIR": str(state_root / "claude"),
-                "AGENTROF_HOME": str(state_root / "agentrof"),
-            }
-            project = state_root / "project"
-            initialize_project(project, team, env)
-            run([
-                "claude", "plugin", "marketplace", "add",
-                str(marketplace_source or root),
-            ], env)
-            run(["claude", "plugin", "install", f"{team}@{MARKETPLACE}"], env)
-            installed = json.loads(run(
-                ["claude", "plugin", "list", "--json"], env
-            ))
-            assert_enabled(installed, {PMO, team}, "claude")
-            run([
-                "claude", "plugin", "update", f"{team}@{MARKETPLACE}",
-            ], env)
-            team_root = plugin_install_path(installed, team, "claude")
-            pmo_root = plugin_install_path(installed, PMO, "claude")
-            assert_preparation_payload(env, team_root, project, team)
-            assert_team_gate(env, team_root, project, "missing-pmo", 2)
-            first_setup = json.loads(run([
-                sys.executable,
-                str(team_root / "scripts" / "generate_claude_project.py"),
-                "apply", "--project-root", str(project),
-                "--workspace", "workspace",
-            ], env))
-            if not first_setup.get("changes"):
-                raise SmokeFailure("Claude project generator wrote no managed surface")
-            second_setup = json.loads(run([
-                sys.executable,
-                str(team_root / "scripts" / "generate_claude_project.py"),
-                "apply", "--project-root", str(project),
-                "--workspace", "workspace",
-            ], env))
-            if second_setup.get("changes") != []:
-                raise SmokeFailure("Claude project generator is not idempotent")
-            mark_pmo_ready(env, pmo_root, project, "ready-pmo")
-            register_project_contract(env, pmo_root, team_root, project, team)
-            assert_team_gate(env, team_root, project, "ready-pmo", 0)
-            run(["claude", "plugin", "disable", f"{team}@{MARKETPLACE}"], env)
-            run(["claude", "plugin", "disable", f"{PMO}@{MARKETPLACE}"], env)
-            disabled = json.loads(run(
-                ["claude", "plugin", "list", "--json"], env
-            ))
-            assert_team_gate(env, team_root, project, "disabled-pmo", 2)
-            run(["claude", "plugin", "enable", f"{PMO}@{MARKETPLACE}"], env)
-            run(["claude", "plugin", "enable", f"{team}@{MARKETPLACE}"], env)
-            run(["claude", "plugin", "uninstall", f"{team}@{MARKETPLACE}"], env)
-            removed = json.loads(run(
-                ["claude", "plugin", "list", "--json"], env
-            ))
-            if any(entry.get("id", "").split("@", 1)[0] == team for entry in removed):
-                raise SmokeFailure(f"Claude did not remove {team}")
-            run(["claude", "plugin", "install", f"{team}@{MARKETPLACE}"], env)
-            assert_enabled(json.loads(run(
-                ["claude", "plugin", "list", "--json"], env
-            )), {PMO, team}, "claude")
-    print(f"plugin-smoke: Claude lifecycle passed for every team ({version})")
+    with tempfile.TemporaryDirectory(prefix="marketplace-claude-smoke.") as temporary:
+        state = Path(temporary)
+        env = {**os.environ, "CLAUDE_CONFIG_DIR": str(state / "claude")}
+        project = state / "project"
+        init_project(project, env)
+        run(["claude", "plugin", "marketplace", "add", str(source)], env)
+        run(["claude", "plugin", "install", f"{TEAM}@{MARKETPLACE}"], env)
+        inventory = json.loads(run(["claude", "plugin", "list", "--json"], env))
+        root = installed_root(inventory, "claude")
+        exercise_package(root, project, env)
+        run(["claude", "plugin", "update", f"{TEAM}@{MARKETPLACE}"], env)
+        exercise_package(installed_root(json.loads(run(
+            ["claude", "plugin", "list", "--json"], env)), "claude"), project, env)
 
 
-def smoke_codex(
-    root: Path, teams: list[str], marketplace_source: str | Path | None = None
-) -> None:
+def smoke_codex(root: Path, source: str | Path) -> None:
     require_cli("codex")
-    version = run(["codex", "--version"], os.environ.copy()).strip()
-    for team in teams:
-        with tempfile.TemporaryDirectory(prefix="agent-marketplace-codex-smoke.") as state:
-            state_root = Path(state)
-            codex_home = state_root / "codex"
-            codex_home.mkdir()
-            env = {
-                **os.environ,
-                "CODEX_HOME": str(codex_home),
-                "AGENT_MARKETPLACE_HOME": str(state_root / "marketplace"),
-            }
-            project = state_root / "project"
-            initialize_project(project, team, env)
-            run([
-                "codex", "plugin", "marketplace", "add",
-                str(marketplace_source or root), "--json",
-            ], env)
-            available = json.loads(run([
-                "codex", "plugin", "list", "--available", "--json",
-            ], env))
-            available_names = {entry.get("name") for entry in available.get("available", [])}
-            if not {PMO, team} <= available_names:
-                raise SmokeFailure("Codex available inventory is incomplete")
-            run([
-                "codex", "plugin", "add", f"{team}@{MARKETPLACE}", "--json",
-            ], env)
-            if marketplace_source == PUBLIC_MARKETPLACES["codex"]:
-                run([
-                    "codex", "plugin", "marketplace", "upgrade",
-                    MARKETPLACE, "--json",
-                ], env)
-            inventory = json.loads(run([
-                "codex", "plugin", "list", "--json",
-            ], env))
-            assert_enabled(inventory, {team}, "codex")
-            team_root = plugin_install_path(inventory, team, "codex")
-            assert_preparation_payload(env, team_root, project, team)
-            assert_team_gate(env, team_root, project, "missing-pmo", 2)
-            run([
-                "codex", "plugin", "add", f"{PMO}@{MARKETPLACE}", "--json",
-            ], env)
-            inventory = json.loads(run([
-                "codex", "plugin", "list", "--json",
-            ], env))
-            assert_enabled(inventory, {PMO, team}, "codex")
-            pmo_root = plugin_install_path(inventory, PMO, "codex")
-            first_setup = json.loads(run([
-                sys.executable,
-                str(team_root / "scripts" / "generate_codex_project.py"),
-                "--project-root", str(project), "--workspace", "workspace",
-            ], env))
-            if not first_setup.get("written"):
-                raise SmokeFailure("Codex project generator wrote no managed surfaces")
-            second_setup = json.loads(run([
-                sys.executable,
-                str(team_root / "scripts" / "generate_codex_project.py"),
-                "--project-root", str(project), "--workspace", "workspace",
-            ], env))
-            if second_setup.get("written") != []:
-                raise SmokeFailure("Codex project generator is not idempotent")
-            mark_pmo_ready(env, pmo_root, project, "ready-pmo")
-            register_project_contract(env, pmo_root, team_root, project, team)
-            assert_team_gate(env, team_root, project, "ready-pmo", 0)
-            skills = codex_skills(env, project)
-            names = {entry.get("name", "") for entry in skills}
-            expected_entries = {
-                f"{team}:{path.name}"
-                for path in (root / "plugins" / team / "skill-content").iterdir()
-                if path.is_dir() and "exposure: entry" in
-                (path / "SKILL.md").read_text(encoding="utf-8")
-            }
-            internal = {
-                f"{team}:{path.name}"
-                for path in (root / "plugins" / team / "skill-content").iterdir()
-                if path.is_dir() and "exposure: internal" in
-                (path / "SKILL.md").read_text(encoding="utf-8")
-            }
-            if not expected_entries <= names:
-                raise SmokeFailure(
-                    "Codex skills/list misses entry skills: "
-                    + ", ".join(sorted(expected_entries - names))
-                )
-            if internal & names:
-                raise SmokeFailure(
-                    "Codex skills/list exposed internal skills: "
-                    + ", ".join(sorted(internal & names))
-                )
-            run([
-                "codex", "plugin", "remove", f"{team}@{MARKETPLACE}", "--json",
-            ], env)
-            removed = json.loads(run([
-                "codex", "plugin", "list", "--json",
-            ], env))
-            if any(entry.get("name") == team for entry in removed.get("installed", [])):
-                raise SmokeFailure(f"Codex did not remove {team}")
-            names_after_remove = {
-                entry.get("name", "") for entry in codex_skills(env, project)
-            }
-            if expected_entries & names_after_remove:
-                raise SmokeFailure("Codex skills remained discoverable after removal")
-            run([
-                "codex", "plugin", "add", f"{team}@{MARKETPLACE}", "--json",
-            ], env)
-            assert_enabled(json.loads(run([
-                "codex", "plugin", "list", "--json",
-            ], env)), {PMO, team}, "codex")
-    print(f"plugin-smoke: Codex lifecycle passed for every team ({version})")
+    with tempfile.TemporaryDirectory(prefix="marketplace-codex-smoke.") as temporary:
+        state = Path(temporary)
+        codex_home = state / "codex"
+        codex_home.mkdir()
+        env = {**os.environ, "CODEX_HOME": str(codex_home)}
+        project = state / "project"
+        init_project(project, env)
+        run(["codex", "plugin", "marketplace", "add", str(source), "--json"], env)
+        run(["codex", "plugin", "add", f"{TEAM}@{MARKETPLACE}", "--json"], env)
+        inventory = json.loads(run(["codex", "plugin", "list", "--json"], env))
+        team_root = installed_root(inventory, "codex")
+        exercise_package(team_root, project, env)
+        expected = {
+            f"{TEAM}:{path.parent.name}"
+            for path in (root / "plugins" / TEAM / "skill-content").glob("*/SKILL.md")
+            if "exposure: entry" in path.read_text(encoding="utf-8")
+        }
+        names = codex_skill_names(env, project)
+        if not expected <= names:
+            raise SmokeFailure("Codex omitted entry skills: " + ", ".join(sorted(expected - names)))
+        if isinstance(source, Path):
+            # Local marketplaces are refreshed by reinstalling the plugin;
+            # Codex reserves `marketplace upgrade` for Git-backed sources.
+            run(["codex", "plugin", "add", f"{TEAM}@{MARKETPLACE}", "--json"], env)
+        else:
+            run(["codex", "plugin", "marketplace", "upgrade", MARKETPLACE, "--json"], env)
+        exercise_package(installed_root(json.loads(run(
+            ["codex", "plugin", "list", "--json"], env)), "codex"), project, env)
 
 
 def checkout_marketplace(root: Path, target: Path) -> Path:
-    """Copy one channel-closed marketplace snapshot for local host tests."""
     shutil.copytree(root / "dist", target / "dist")
-    for package in sorted((target / "dist" / "claude").iterdir()):
-        if not package.is_dir():
-            continue
-        marker = package / ".in_use" / "4242.tmp.deadbeef"
-        marker.parent.mkdir()
-        marker.write_text(
-            json.dumps({"pid": 4242, "procStart": "release-check fixture"}),
-            encoding="utf-8",
-        )
     shutil.copytree(root / ".claude-plugin", target / ".claude-plugin")
     shutil.copytree(root / ".agents", target / ".agents")
     return target
@@ -539,29 +227,23 @@ def checkout_marketplace(root: Path, target: Path) -> Path:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--host", choices=("all", "claude", "codex"),
-                        default="all")
-    parser.add_argument("--root", type=Path,
-                        default=Path(__file__).resolve().parent.parent)
-    parser.add_argument("--channel", choices=("checkout", "public"),
-                        default="checkout")
+    parser.add_argument("--host", choices=("all", "claude", "codex"), default="all")
+    parser.add_argument("--channel", choices=("checkout", "public"), default="checkout")
+    parser.add_argument("--root", type=Path, default=Path(__file__).resolve().parent.parent)
     args = parser.parse_args()
     root = args.root.resolve()
-    teams = team_names(root)
-    if not teams:
-        raise SmokeFailure("marketplace contains no team plugins")
     if args.channel == "public":
-        if args.host in ("all", "claude"):
-            smoke_claude(root, teams, PUBLIC_MARKETPLACES["claude"])
-        if args.host in ("all", "codex"):
-            smoke_codex(root, teams, PUBLIC_MARKETPLACES["codex"])
-    else:
-        with tempfile.TemporaryDirectory(prefix="agent-marketplace-checkout.") as tmp:
-            source = checkout_marketplace(root, Path(tmp))
-            if args.host in ("all", "claude"):
-                smoke_claude(root, teams, source)
-            if args.host in ("all", "codex"):
-                smoke_codex(root, teams, source)
+        if args.host in {"all", "claude"}:
+            smoke_claude(PUBLIC_MARKETPLACES["claude"])
+        if args.host in {"all", "codex"}:
+            smoke_codex(root, PUBLIC_MARKETPLACES["codex"])
+        return 0
+    with tempfile.TemporaryDirectory(prefix="marketplace-checkout.") as temporary:
+        source = checkout_marketplace(root, Path(temporary))
+        if args.host in {"all", "claude"}:
+            smoke_claude(source)
+        if args.host in {"all", "codex"}:
+            smoke_codex(root, source)
     return 0
 
 

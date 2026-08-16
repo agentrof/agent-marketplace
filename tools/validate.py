@@ -121,7 +121,7 @@ MD_LINK_RE = re.compile(r"(?<!\!)\[[^\]]*\]\(([^)\s]+?)(?:\s+\"[^\"]*\")?\)")
 KEBAB_RE = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
 DISPLAY_TOKENS = {
     "api": "API", "cli": "CLI", "devops": "DevOps",
-    "fastapi": "FastAPI", "nosql": "NoSQL", "pmo": "PMO",
+    "fastapi": "FastAPI", "nosql": "NoSQL",
     "qa": "QA", "sql": "SQL", "ui": "UI", "ux": "UX",
 }
 
@@ -146,9 +146,6 @@ COUNTS_START = "<!-- counts:start -->"
 COUNTS_END = "<!-- counts:end -->"
 
 CONSTITUTION_PLACEHOLDER = "{{constitution}}"
-PMO_PLUGIN = "project-management-office"
-PMO_READY = "AGENT_MARKETPLACE_PMO_READY: project-management-office"
-
 AGENT_ROLE_SUFFIX_RE_TPL = r"\b{plugin}-([a-z0-9]+(?:-[a-z0-9]+)*)\b"
 
 
@@ -852,10 +849,7 @@ def check_distribution_packaging(tree: Tree, findings: list[Finding]) -> None:
                   f"{plugin.name} Codex source escapes the selected marketplace channel",
                   "point the Codex marketplace at its local dist/codex package")
         policy = entry.get("policy") or {}
-        expected_install = (
-            "INSTALLED_BY_DEFAULT"
-            if plugin.name == "project-management-office" else "AVAILABLE"
-        )
+        expected_install = "INSTALLED_BY_DEFAULT"
         if policy.get("installation") != expected_install \
                 or policy.get("authentication") != "ON_INSTALL" \
                 or entry.get("category") != "Engineering":
@@ -920,11 +914,9 @@ def check_distribution_packaging(tree: Tree, findings: list[Finding]) -> None:
                       "generate default_prompt with $<plugin>:<skill>")
 
 
-def check_team_pmo_contract(tree: Tree, findings: list[Finding]) -> None:
-    """Every team is born with the same PMO install and runtime contract."""
+def check_single_team_contract(tree: Tree, findings: list[Finding]) -> None:
+    """The marketplace ships one standalone team with no plugin dependency."""
     for plugin in plugin_dirs(tree):
-        if plugin.name == PMO_PLUGIN:
-            continue
         problems: list[str] = []
         claude_manifest_path = (
             tree.root / "platforms" / "claude" / plugin.name / "manifest.json"
@@ -942,9 +934,9 @@ def check_team_pmo_contract(tree: Tree, findings: list[Finding]) -> None:
             claude_manifest = json.loads(read_text(claude_manifest_path))
         except (OSError, json.JSONDecodeError):
             claude_manifest = {}
-        dependencies = claude_manifest.get("dependencies") or []
-        if not isinstance(dependencies, list) or PMO_PLUGIN not in dependencies:
-            problems.append("Claude manifest lacks the PMO dependency")
+        dependencies = claude_manifest.get("dependencies")
+        if dependencies not in ([], None):
+            problems.append("Claude manifest must not declare plugin dependencies")
         try:
             codex_manifest = json.loads(read_text(codex_manifest_path))
         except (OSError, json.JSONDecodeError):
@@ -954,37 +946,16 @@ def check_team_pmo_contract(tree: Tree, findings: list[Finding]) -> None:
         long_description = str(
             (codex_manifest.get("interface") or {}).get("longDescription", "")
         )
-        if not long_description.startswith("Requires Project Management Office."):
-            problems.append("Codex visible description does not name the PMO requirement")
+        if "requires project management office" in long_description.lower():
+            problems.append("Codex visible description must not require another plugin")
         claude_contract = read_text(claude_contract_path) \
             if claude_contract_path.is_file() else ""
-        for token in (
-            PMO_READY,
-            "team_guard.py",
-            "One delivery team",
-            "AskUserQuestion",
-            "generate_claude_project.py",
-            "claude plugin list --json",
-            "/plugin install project-management-office@agent-marketplace",
-            "/plugin enable project-management-office@agent-marketplace",
-            "no files or project state were changed",
-        ):
+        for token in ("team_guard.py", "vault_hook.py", "One Software Engineering Team", "AskUserQuestion", "generated project check"):
             if token.lower() not in claude_contract.lower():
                 problems.append(f"Claude host contract lacks {token!r}")
         codex_contract = read_text(codex_contract_path) \
             if codex_contract_path.is_file() else ""
-        for token in (
-            PMO_READY,
-            "team_guard.py",
-            "One delivery team",
-            "request_user_input",
-            "generate_codex_project.py",
-            "codex plugin list --json",
-            "codex plugin add project-management-office@agent-marketplace",
-            "enable it in Plugins",
-            "/hooks",
-            "no files or project state were changed",
-        ):
+        for token in ("team_guard.py", "vault_hook.py", "One Software Engineering Team", "request_user_input", "generated project check"):
             if token.lower() not in codex_contract.lower():
                 problems.append(f"Codex host contract lacks {token!r}")
         hook_contracts = (
@@ -992,13 +963,13 @@ def check_team_pmo_contract(tree: Tree, findings: list[Finding]) -> None:
                 "Claude",
                 tree.root / "platforms" / "claude" / plugin.name
                 / "overlay" / "hooks" / "hooks.json",
-                ("team_guard.py", "Write|Edit|Bash"),
+                ("team_guard.py register", "vault_hook.py pre", "vault_hook.py post", "Write|Edit|Bash"),
             ),
             (
                 "Codex",
                 tree.root / "platforms" / "codex" / plugin.name
                 / "overlay" / "hooks" / "hooks.json",
-                ("team_guard.py", "Write|Edit|apply_patch|Bash"),
+                ("team_guard.py register", "vault_hook.py pre", "vault_hook.py post", "Write|Edit|apply_patch|Bash"),
             ),
         )
         for label, hook_path, tokens in hook_contracts:
@@ -1006,17 +977,73 @@ def check_team_pmo_contract(tree: Tree, findings: list[Finding]) -> None:
             for token in tokens:
                 if token not in hook_text:
                     problems.append(f"{label} hooks lack {token!r}")
-            if "team_guard.py post" not in hook_text:
-                problems.append(f"{label} hooks lack managed-surface postflight")
         if problems:
             findings.append(Finding(
                 "error", rel(tree, claude_manifest_path), 1,
-                "team_pmo_contract",
-                f"team plugin '{plugin.name}' has an incomplete PMO contract: "
+                "single_team_contract",
+                f"team plugin '{plugin.name}' has an incomplete standalone contract: "
                 + "; ".join(problems),
-                "declare the Claude dependency, expose the Codex requirement,"
-                " and keep both host preflights fail-closed on PMO readiness",
+                "remove plugin dependencies and keep both host preflights scoped"
+                " to the project-local workspace",
             ))
+
+
+RETIRED_OPERATIONS_RE = re.compile(
+    r"project-management-office|\bPMO\b|control[- _]?tower|pmo_cli|"
+    r"pmo_dashboard|hook_guard_db|marketplace_run\.py|agentrof\.db|"
+    r"\bwork[- ]order(?:s)?\b|(?:import|from)\s+sqlite3\b|"
+    r"\bMigrate is format-only\b|vault_check\.py\s+migrate\b",
+    re.IGNORECASE,
+)
+
+
+def check_retired_operations_residue(
+    tree: Tree, findings: list[Finding]
+) -> None:
+    """The standalone team carries no retired operations runtime surface."""
+    roots = (
+        tree.plugins_dir,
+        tree.root / "platforms",
+        tree.root / "dist",
+        tree.root / ".release",
+        tree.root / ".claude-plugin",
+        tree.root / ".agents" / "plugins",
+    )
+    for root in roots:
+        if not root.exists():
+            continue
+        for path in sorted(candidate for candidate in root.rglob("*")
+                           if candidate.is_file()):
+            if path.suffix.casefold() in {".db", ".sqlite", ".sqlite3"}:
+                findings.append(Finding(
+                    "error", rel(tree, path), 1,
+                    "retired_operations_residue",
+                    "database file remains in a packaged or release surface",
+                    "remove runtime state from tracked and distributed files",
+                ))
+                continue
+            try:
+                text = path.read_text(encoding="utf-8")
+            except (OSError, UnicodeDecodeError):
+                continue
+            match = RETIRED_OPERATIONS_RE.search(text)
+            if match is None:
+                continue
+            findings.append(Finding(
+                "error", rel(tree, path),
+                text[:match.start()].count("\n") + 1,
+                "retired_operations_residue",
+                f"retired operations surface remains: {match.group(0)}",
+                "remove the obsolete runtime, dependency, launcher or prose",
+            ))
+    migration_tree = tree.plugins_dir / "software-engineering-team" / "migrations"
+    if migration_tree.exists():
+        findings.append(Finding(
+            "error", rel(tree, migration_tree), 1,
+            "retired_operations_residue",
+            "obsolete project-contract migration catalog remains",
+            "use idempotent setup and checks instead of a migration engine",
+        ))
 
 
 def _walk_keys(obj: object, path: str, out: list[tuple[str, str]]) -> None:
@@ -1109,25 +1136,6 @@ def check_orchestrator_integrity(tree: Tree, findings: list[Finding]) -> None:
 CHOICE_GATE_MARKER = "explicit user choice"
 CHOICE_GATE_TOKEN = "choice gate"
 CHOICE_GATE_WINDOW = 3
-SETUP_CHOICE_CONTRACT = (
-    "one missing field per question",
-    "at most three questions per batch",
-    "accept defaults or provide corrections",
-    "separate choice gate",
-    "Keep the approved `project_key` out of the config",
-)
-SETUP_CHOICE_FIELDS = (
-    "`project_origin`", "`databases`", "`scale`", "`output_language`",
-    "`terminology_language`", "`project_key`", "`source_dirs`",
-    "`test_command`", "`mutation_command`", "`env_command`",
-)
-SETUP_DESIGNATION_SEQUENCE = (
-    "materialize-payload", "reconcile-designations", "check-designations",
-)
-SETUP_DESIGNATION_CONTRACT = (
-    "Do not run PMO registration before this passes",
-    "write-time hook rejects an out-of-order `project register` command",
-)
 
 
 def check_choice_gate(tree: Tree, findings: list[Finding]) -> None:
@@ -1154,53 +1162,15 @@ def check_choice_gate(tree: Tree, findings: list[Finding]) -> None:
         ("codex", "request_user_input"),
     ):
         contract = (tree.root / "platforms" / host
-                    / PMO_PLUGIN / "host-contract.md")
+                    / "software-engineering-team" / "host-contract.md")
         if contract.is_file() and token not in read_text(contract):
             findings.append(Finding(
                 "error", rel(tree, contract), 1, "choice_gate",
-                f"{host} PMO host contract lacks {token}",
+                f"{host} host contract lacks {token}",
                 "map the canonical gate to the host-native input tool",
             ))
-    setup = (tree.root / "plugins" / "software-engineering-team"
-             / "skill-content" / "setup" / "SKILL.md")
-    if setup.is_file():
-        text = read_text(setup)
-        normalized = " ".join(text.split())
-        missing = [
-            token for token in SETUP_CHOICE_CONTRACT if token not in normalized
-        ]
-        positions = [text.find(field) for field in SETUP_CHOICE_FIELDS]
-        fields_are_ordered = all(position >= 0 for position in positions) \
-            and positions == sorted(positions)
-        if missing or not fields_are_ordered:
-            detail = ", ".join(missing) if missing else "ordered setup fields"
-            findings.append(Finding(
-                "error", rel(tree, setup), 1, "choice_gate",
-                f"fresh setup choice contract is incomplete: {detail}",
-                "collect one config field per question in bounded batches and"
-                " keep the CI add-or-defer gate separate",
-            ))
-        step_start = text.find("8. Materialize")
-        step_end = text.find("9. Register PMO")
-        section = text[step_start:step_end] \
-            if 0 <= step_start < step_end else ""
-        sequence = [section.find(token)
-                    for token in SETUP_DESIGNATION_SEQUENCE]
-        missing_designation = [
-            token for token in SETUP_DESIGNATION_CONTRACT
-            if token not in section
-        ]
-        sequence_is_ordered = all(position >= 0 for position in sequence) \
-            and sequence == sorted(sequence)
-        if missing_designation or not sequence_is_ordered:
-            detail = ", ".join(missing_designation) \
-                if missing_designation else "ordered designation commands"
-            findings.append(Finding(
-                "error", rel(tree, setup), 1, "choice_gate",
-                f"fresh setup designation contract is incomplete: {detail}",
-                "materialize, reconcile, and verify the complete designation"
-                " map before PMO registration",
-            ))
+    # Setup fields are project-specific and are checked by the owning config
+    # writer. This validator only requires host-native gate wording above.
 
 
 # Fallback for runtimes that predate sys.stdlib_module_names.
@@ -1210,7 +1180,7 @@ FALLBACK_STDLIB = frozenset(
     "enum errno fnmatch functools getpass glob gzip hashlib heapq hmac html "
     "http importlib inspect io itertools json logging math mimetypes "
     "multiprocessing operator os pathlib pickle platform pprint queue random "
-    "re secrets shlex shutil signal socket sqlite3 statistics string struct "
+    "re secrets shlex shutil signal socket statistics string struct "
     "subprocess sys tarfile tempfile textwrap threading time tomllib "
     "traceback types typing unicodedata unittest urllib uuid warnings "
     "webbrowser xml zipfile zlib".split()
@@ -1315,55 +1285,55 @@ def check_naive_clock(tree: Tree, findings: list[Finding]) -> None:
                     ))
 
 
-# The dispatcher grammar shipped content uses to reach plugin files:
-# "$RUN" run|path "$TEAM"|<plugin-name> <relpath>. "$TEAM" resolves to
-# the plugin whose markdown carries the reference.
-RUN_REF_RE = re.compile(
-    r"\"\$RUN\"\s+(run|path)\s+(\"\$TEAM\"|[a-z0-9]+(?:-[a-z0-9]+)*)"
-    r"\s+([A-Za-z0-9_\-./]+)")
+LEGACY_DISPATCH_RE = re.compile(r"\$RUN|marketplace_run\.py")
+PACKAGED_SCRIPT_REF_RE = re.compile(
+    r"(?<![A-Za-z0-9_./-])((?:scripts|skill-content/[a-z0-9-]+/scripts)"
+    r"/[A-Za-z0-9_./-]+\.py)"
+)
 DIRECT_SCRIPT_REF_RE = re.compile(r"\bpython3?\s+scripts/[A-Za-z0-9_./-]+\.py\b")
 
 
 def check_script_references(tree: Tree, findings: list[Finding]) -> None:
-    """Every plugin-file reference in shipped markdown must resolve to a
-    shipped file and use the dispatcher grammar
-    ("$RUN" run|path ... <relpath>)."""
+    """Packaged script references resolve without a shared dispatcher."""
     for plugin in plugin_dirs(tree):
         for path in sorted(plugin.rglob("*.md")):
             for lineno, line in enumerate(read_text(path).splitlines(), start=1):
+                if LEGACY_DISPATCH_RE.search(line):
+                    findings.append(Finding(
+                        "error", rel(tree, path), lineno, "script_references",
+                        "legacy shared dispatcher reference",
+                        "refer to the packaged plugin-relative script; the host"
+                        " wrapper resolves its installed root",
+                    ))
                 if DIRECT_SCRIPT_REF_RE.search(line):
                     findings.append(Finding(
                         "error", rel(tree, path), lineno, "script_references",
-                        "direct scripts/ invocation bypasses the dispatcher",
-                        "invoke plugin scripts through \"$RUN\" run \"$TEAM\""
-                        " <plugin-relative-path>",
+                        "project-relative Python invocation cannot resolve an"
+                        " installed plugin script",
+                        "name the packaged plugin-relative script and let the"
+                        " host wrapper resolve its installed root",
                     ))
-                for match in RUN_REF_RE.finditer(line):
-                    verb, owner, relpath = match.groups()
-                    target_plugin = plugin if owner == '"$TEAM"' \
-                        else tree.plugins_dir / owner
-                    if not target_plugin.is_dir():
-                        findings.append(Finding(
-                            "error", rel(tree, path), lineno, "script_references",
-                            f"dispatcher reference names unknown plugin: {owner}",
-                            "name a shipped plugin or use \"$TEAM\"",
-                        ))
+                for match in PACKAGED_SCRIPT_REF_RE.finditer(line):
+                    relpath = match.group(1)
+                    candidates = [plugin / relpath]
+                    try:
+                        relative_parts = path.relative_to(plugin).parts
+                    except ValueError:
+                        relative_parts = ()
+                    if len(relative_parts) >= 2 \
+                            and relative_parts[0] == "skill-content":
+                        candidates.append(
+                            plugin / "skill-content" / relative_parts[1]
+                            / relpath
+                        )
+                    if any(candidate.is_file() for candidate in candidates) \
+                            or line.lstrip().startswith("#"):
                         continue
-                    target = target_plugin / relpath
-                    if verb == "run" and relpath.endswith(".py") \
-                            and not target.is_file():
+                    if not any(candidate.is_file() for candidate in candidates):
                         findings.append(Finding(
                             "error", rel(tree, path), lineno, "script_references",
-                            f"dispatched script does not exist: {relpath}",
-                            "ship the script or fix the reference; flows carry"
-                            " only real mechanics",
-                        ))
-                    elif verb == "path" and "<" not in relpath \
-                            and not target.exists():
-                        findings.append(Finding(
-                            "error", rel(tree, path), lineno, "script_references",
-                            f"dispatched path does not exist: {relpath}",
-                            "ship the file or fix the reference",
+                            f"packaged script does not exist: {relpath}",
+                            "ship the script or fix the reference",
                         ))
 
 
@@ -1429,13 +1399,13 @@ def check_project_instruction_contract(
 ) -> None:
     """Project instructions have one common source and whole-file host outputs."""
     problems: list[str] = []
-    pmo_templates = tree.plugins_dir / PMO_PLUGIN / "templates"
-    common = pmo_templates / "project-instructions" / "common.md"
+    templates = tree.plugins_dir / "software-engineering-team" / "templates"
+    common = templates / "project-instructions" / "common.md"
     if not common.is_file():
-        problems.append("PMO common project instruction fragment is missing")
+        problems.append("common project instruction fragment is missing")
     for filename in ("agent-marketplace.md", "me.md", "profile.md"):
-        if not (pmo_templates / "memory" / filename).is_file():
-            problems.append(f"PMO memory template is missing {filename}")
+        if not (templates / "memory" / filename).is_file():
+            problems.append(f"memory template is missing {filename}")
     host_deltas: dict[str, Path] = {}
     for host in ("claude", "codex"):
         delta = (
@@ -1450,8 +1420,6 @@ def check_project_instruction_contract(
     max_bytes = int(caps.get("project_instruction_max_bytes", 0) or 0)
     max_lines = int(caps.get("project_instruction_max_lines", 0) or 0)
     for plugin in plugin_dirs(tree):
-        if plugin.name == PMO_PLUGIN:
-            continue
         team = plugin / "templates" / "project-instructions" / "team.md"
         allowed_workspace_fragments.add(team)
         if not team.is_file():
@@ -1507,7 +1475,7 @@ def check_project_instruction_contract(
         findings.append(Finding(
             "error", rel(tree, common), 1, "project_instruction_contract",
             "; ".join(problems),
-            "restore PMO common and memory sources, one team fragment, shared"
+            "restore common and memory sources, one team fragment, shared"
             " host deltas, canonical root imports, and regenerated distributions",
         ))
 
@@ -2334,9 +2302,6 @@ def check_product_namespace(tree: Tree, findings: list[Finding]) -> None:
         return
     try:
         build_distributions.load_product_contract(tree.root)
-        project_contract_version = (
-            build_distributions.current_project_contract_version(tree.root)
-        )
     except ValueError as exc:
         findings.append(Finding(
             "error", PRODUCT_CONFIG_RELPATH, 1, "product_namespace", str(exc),
@@ -2346,7 +2311,7 @@ def check_product_namespace(tree: Tree, findings: list[Finding]) -> None:
 
     helpers = []
     expected_helper = build_distributions.marketplace_paths_source(
-        tree.product, project_contract_version
+        tree.product
     ).encode()
     for plugin in sorted(path for path in tree.plugins_dir.iterdir() if path.is_dir()):
         helper = plugin / "scripts" / "marketplace_paths.py"
@@ -2393,7 +2358,7 @@ def check_product_namespace(tree: Tree, findings: list[Finding]) -> None:
     old_project_status = re.compile(
         rf"(?<!AGENT_MARKETPLACE_){old_project_status_value}\b"
     )
-    old_shell_home = "${" + allowed_vendor_home + ":-$HOME/.agentrof}/bin"
+    old_shell_home = "${" + allowed_vendor_home + ":-$HOME/.agent-marketplace}/bin"
     direct_vendor_bin = re.compile(
         rf"Path\([^\n]*{allowed_vendor_home}[^\n]*\)\s*/\s*[\"']bin[\"']"
     )
@@ -2435,7 +2400,8 @@ CHECKS = {
     "reference_triggers": check_reference_triggers,
     "registration": check_registration,
     "distribution_packaging": check_distribution_packaging,
-    "team_pmo_contract": check_team_pmo_contract,
+    "single_team_contract": check_single_team_contract,
+    "retired_operations_residue": check_retired_operations_residue,
     "json_hygiene": check_json_hygiene,
     "orchestrator_integrity": check_orchestrator_integrity,
     "choice_gate": check_choice_gate,

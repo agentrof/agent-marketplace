@@ -49,7 +49,7 @@ Schema-declared id-citation columns (cites, affects, blocks, targets,
 verify) carry the SAME escaped-pipe wikilink form, targeting the doc
 that mints the id: `[[business-analysis/shop/domains/inventory/rules/stock-item-lifecycle-rules\|BR-INV-001]]`.
 The compiler normalizes citation cells back to bare ids for the registry.
-A bare id left in a citation cell is an error the `migrate` verb rewrites.
+A bare id left in a citation cell is an error the `normalize` verb rewrites.
 The ONE place a bare id stays legal is its mint: the id
 column of the owning row, where a wikilink is the error instead.
 
@@ -63,7 +63,7 @@ column of the owning row, where a wikilink is the error instead.
 ## Renames
 
 Headless renames are owned by the checker, not by the vault app or a
-manual grep: `vault_check.py migrate --rename [--dry-run] [--json]` builds
+manual grep: `vault_check.py normalize --rename [--dry-run] [--json]` builds
 the grammar-driven rename map (plain named files, type-suffixed content
 notes; already-compliant files are skipped), then renames and
 rewrites every referrer across the WHOLE vault (body links, frontmatter

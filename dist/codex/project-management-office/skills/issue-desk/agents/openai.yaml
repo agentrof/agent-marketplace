@@ -1,6 +1,0 @@
-interface:
-  display_name: "Issue Desk"
-  short_description: "Start the Issue Desk guided workflow"
-  default_prompt: "Use $project-management-office:issue-desk to start this workflow."
-policy:
-  allow_implicit_invocation: false

@@ -113,9 +113,9 @@ knowledge.
 `workspace.json`, `workspace-mobile.json` and `.trash/` are the
 gitignored UI state. New vaults receive the standard palette exactly.
 Later color edits in an existing `graph.json` are treated as user
-overrides and the migrate verb preserves them. Run
-`"$RUN" run "$TEAM" scripts/vault_check.py standardize-graph-colors --vault workspace/docs`
-to discard those overrides and restore every standard color. Global-graph
+overrides and the normalize verb preserves them. Run the packaged
+`vault_check.py standardize-graph-colors --vault workspace/docs` to discard
+those overrides and restore every standard color. Global-graph
 forces beyond the committed groups and search, and every local-graph
 setting, are per-user; teach owners the local graph (depth 1-2) as the
 daily tool and the global graph as the onboarding and QA view.

@@ -4,18 +4,22 @@
 from __future__ import annotations
 
 import argparse
-import hashlib
 import json
 import subprocess
 import sys
 from pathlib import Path
 
 import marketplace_paths
+import project_config
 
 START = "# agent-marketplace:software-engineering-team:gitignore:start"
 END = "# agent-marketplace:software-engineering-team:gitignore:end"
 TEAM = "software-engineering-team"
-PROJECT_CONTRACT_VERSION = marketplace_paths.CURRENT_PROJECT_CONTRACT_VERSION
+WORKSPACE = "workspace"
+RUNTIME_PARTS = ("agent-marketplace", ".runtime")
+PRIOR_OWNER_SUFFIX = " plugin; change only through the configure entry"
+FORBIDDEN_RUNTIME_NAMES = {"project.json", "backlog.json"}
+FORBIDDEN_RUNTIME_SUFFIXES = {".db", ".sqlite", ".sqlite3"}
 
 
 def read(path: Path):
@@ -23,6 +27,20 @@ def read(path: Path):
         return json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
         return None
+
+
+def setup_owner(config: dict) -> str:
+    """Recognize current ownership plus the two retired setup inputs."""
+    owner = marketplace_paths.team_from_config(config)
+    if owner:
+        return owner
+    contract = config.get("agent_marketplace")
+    if isinstance(contract, dict):
+        return str(contract.get("team_id", "")).strip()
+    prior = str(config.get("managed_by", "")).strip()
+    if prior.endswith(PRIOR_OWNER_SUFFIX):
+        return prior[:-len(PRIOR_OWNER_SUFFIX)]
+    return ""
 
 
 def local_roots() -> tuple[str, ...]:
@@ -43,6 +61,10 @@ def local_roots() -> tuple[str, ...]:
     raise ValueError("project-local root policy is missing")
 
 
+def runtime_root(root: Path) -> Path:
+    return root / local_roots()[0] / Path(*RUNTIME_PARTS)
+
+
 def managed_block(workspace: str) -> str:
     return "\n".join((START, *(f"/{value}/" for value in local_roots()),
                       f"{workspace}/junit-*.xml",
@@ -60,28 +82,26 @@ def managed_block(workspace: str) -> str:
 
 
 def preflight(root: Path, workspace: str) -> list[str]:
-    config = read(root / workspace / "config.json")
-    state = read(root / ".agentrof" / "agent-marketplace" / "project.json")
+    config_path = root / workspace / "config.json"
+    config = read(config_path)
     findings = []
+    for candidate in sorted(root.glob("*/config.json")):
+        if candidate.parent.name == WORKSPACE:
+            continue
+        value = read(candidate)
+        if isinstance(value, dict) and setup_owner(value) == TEAM:
+            findings.append(
+                "non-canonical managed workspace: "
+                + candidate.parent.relative_to(root).as_posix()
+            )
+    if not config_path.exists():
+        return findings
     if isinstance(config, dict):
-        contract = config.get("agent_marketplace", {})
-        owner = marketplace_paths.team_from_config(config)
+        owner = setup_owner(config)
         if owner and owner != TEAM:
             findings.append(f"foreign managed-team trace: {owner}")
-        if config.get("project_key") and (
-            not isinstance(contract, dict)
-            or contract.get("contract_version") != PROJECT_CONTRACT_VERSION
-        ):
-            findings.append("keyed config must use Agent Marketplace Upgrade")
-        elif (
-            isinstance(contract, dict)
-            and contract.get("contract_version") == PROJECT_CONTRACT_VERSION
-        ):
-            findings.append(
-                "existing project contract must use environment reconciliation"
-            )
-    if state is not None:
-        findings.append("existing project contract must use Agent Marketplace Upgrade")
+    if not isinstance(config, dict):
+        findings.append("workspace config is missing or invalid")
     return findings
 
 
@@ -122,28 +142,26 @@ def closing(root: Path, workspace: str) -> list[str]:
     if not isinstance(config, dict):
         findings.append("workspace config is missing or invalid")
         config = {}
-    state = config.get("agent_marketplace", {}) if isinstance(config, dict) else {}
-    owner = state.get("team_id", "") if isinstance(state, dict) else ""
+    owner = marketplace_paths.team_from_config(config)
     if owner != TEAM:
         findings.append("config team_id mismatch")
     if config.get("project_origin") not in {"greenfield", "existing"}:
         findings.append("project_origin is not classified")
-    if not config.get("project_key"):
-        findings.append("PMO registration has not stamped project_key")
-    if (
-        not isinstance(state, dict)
-        or state.get("contract_version") != PROJECT_CONTRACT_VERSION
-    ):
-        findings.append(
-            f"project contract version is not {PROJECT_CONTRACT_VERSION}"
-        )
-    elif not state.get("contract_sha256"):
-        findings.append("project contract hash is missing")
+    findings.extend(f"config contract: {value}" for value in project_config.check(config))
+    for candidate in sorted(root.glob("*/config.json")):
+        if candidate.parent.name == WORKSPACE:
+            continue
+        value = read(candidate)
+        if isinstance(value, dict) and marketplace_paths.team_from_config(value) == TEAM:
+            findings.append(
+                "non-canonical managed workspace: "
+                + candidate.parent.relative_to(root).as_posix()
+            )
     required = (
         "apps", "environment", "demos", "sketches",
         "docs/business-analysis", "docs/solution-design",
         "docs/system-architecture", "docs/design-system/pages",
-        "docs/experience-design",
+        "docs/experience-design", "docs/backlog",
     )
     for relative in required:
         path = work / relative
@@ -182,27 +200,32 @@ def closing(root: Path, workspace: str) -> list[str]:
     ):
         if not (work / relative).is_file():
             findings.append(f"missing managed vault payload: {workspace}/{relative}")
+    runtime = runtime_root(root)
+    runtime_chain = (runtime.parent.parent, runtime.parent, runtime)
+    symlink = next((path for path in runtime_chain if path.is_symlink()), None)
+    if symlink is not None:
+        findings.append(
+            "project-local runtime path is symlinked: "
+            + symlink.relative_to(root).as_posix()
+        )
+    elif not runtime.is_dir():
+        findings.append(
+            "missing project-local runtime: .agentrof/agent-marketplace/.runtime"
+        )
+    else:
+        for path in sorted(runtime.rglob("*")):
+            if not path.is_file():
+                continue
+            if path.name in FORBIDDEN_RUNTIME_NAMES \
+                    or path.suffix.casefold() in FORBIDDEN_RUNTIME_SUFFIXES:
+                findings.append(
+                    "database or canonical state is forbidden in runtime: "
+                    + path.relative_to(root).as_posix()
+                )
     findings.extend(designation_findings(work))
     portable_gate = root / ".github" / "agentrof" / "vault-gate.pyz"
     if not portable_gate.is_file():
         findings.append("repository-portable vault gate is missing")
-    if isinstance(state, dict):
-        payload = dict(state)
-        expected_hash = str(payload.pop("contract_sha256", ""))
-        actual_hash = hashlib.sha256(json.dumps(
-            payload, sort_keys=True, separators=(",", ":")
-        ).encode()).hexdigest()
-        if expected_hash != actual_hash:
-            findings.append("project contract hash mismatch")
-        components = state.get("components", {})
-        if not isinstance(components, dict) or not all(
-            isinstance(value, dict) and value.get("version") and value.get("build_id")
-            for value in components.values()
-        ):
-            findings.append("component version and build baselines are missing")
-        surfaces = state.get("managed_surfaces", {})
-        if not isinstance(surfaces, dict) or not any(":" in key for key in surfaces):
-            findings.append("host-managed project surfaces are missing")
     return findings
 
 
@@ -210,7 +233,10 @@ def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("command", choices=["preflight", "check"])
     parser.add_argument("--project-root", required=True)
-    parser.add_argument("--workspace", default="workspace")
+    parser.add_argument(
+        "--workspace", default=WORKSPACE, choices=(WORKSPACE,),
+        help="compatibility option; the project workspace is always 'workspace'",
+    )
     parser.add_argument("--json", action="store_true")
     args = parser.parse_args(argv)
     root = Path(args.project_root).resolve()

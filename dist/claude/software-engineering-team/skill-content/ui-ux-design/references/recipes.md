@@ -50,8 +50,8 @@ function getContrastRatio(foreground, background) {
 ## Dark Palette Derivation Rules
 
 The generator derives the dark value for each semantic role deterministically
-(implemented in `scripts/design_system.py`, `derive_dark_palette`). Apply the
-same rules when adjusting palettes by hand:
+(implemented in `skill-content/ui-ux-design/scripts/design_system.py`,
+`derive_dark_palette`). Apply the same rules when adjusting palettes by hand:
 
 | Role group | Rule | Clamp |
 |------------|------|-------|

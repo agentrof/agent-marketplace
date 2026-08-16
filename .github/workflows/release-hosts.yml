@@ -28,4 +28,6 @@ jobs:
           claude --version
           codex --version
       - name: Run deterministic and public stable lifecycle gates
-        run: make public-release-check
+        run: |
+          make public-release-check
+          python3 tools/smoke_plugin_installs.py --channel checkout

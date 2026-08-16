@@ -1,114 +1,89 @@
 ---
 name: product-planning
-description: Program, release and feature backlog planning knowledge for the team's product-owner role. Loaded by software-engineering-team flows; not user-facing.
+description: Product-owner methods for grouping approved knowledge into a nested Markdown backlog and designing complete story test plans.
 exposure: internal
 ---
 
 # Product Planning
 
-Worked methods for grouping an approved brief into epics, slicing it into
-stories and ordering them. The role constitution says what a story is;
-this skill says how to cut one and where it goes in the queue.
+Use this skill after Business Analysis, Solution Design, Design System and
+Experience Design are approved. The project vault is canonical:
+`workspace/docs/backlog/` contains one root backlog, one folder per epic, one
+review folder per epic, one story folder per capability and one test plan per
+story. Read the `obsidian-vault` skill before reading or writing this tree; its
+policy defines paths, metadata, designations and graph colors.
 
 ## When to Use
 
-Loaded by `flows/backlog-planning.md` in baseline, replan or feature mode.
-The product-owner authors a transient JSON plan; only an approved, exact-hash
-`backlog-plan apply` may create or change durable program, release, epic and
-story structure in PMO. Approved analysis registries are the criteria source. An existing
-solution-design tree (workspace/docs/solution-design/, vault law per
-the obsidian-vault skill) is read first: build-buy-integrate
-verdicts shape what is sliced versus bought; exact Experience Design release
-registries constrain behavior and ordering. Not for analysis, architecture or
-release activation.
+- Loaded by the Product Owner, Business Analyst and QA Engineer during
+  `backlog-plan`.
+- Loaded by the Backlog Reviewer when challenging a complete backlog package.
 
-Read `references/program-release-contract.md` before authoring or reviewing any
-baseline, replan or feature plan.
+## Hierarchy
 
-## Hierarchy and Sizing
+- Backlog: the single project planning boundary.
+- Epic: a business goal with a measurable outcome, never a work unit.
+- Story: one vertical, demonstrable capability and one review unit.
+- Test plan: the planned scenario design for that story.
 
-Four authored planning levels and one runtime level:
-- Program: the approved outcome and full product planning boundary. A large
-  greenfield effort has one program with multiple ordered releases, not one
-  unbounded release.
-- Release: an activatable slice with one exact effective Experience Design
-  registry hash. Every story belongs to exactly one release. A later release
-  may depend on an earlier one; the reverse is invalid.
-- Epic: a business goal with a one-line goal statement ("customers
-  manage their own accounts"); groups stories for reporting, nothing is
-  built from an epic directly. Few and broad beats many and thin; a
-  one-story epic is a label, not a group.
-- Story: the only planning unit. One demonstrable capability, one review
-  unit, one work order, worked by several roles together (analysis fed
-  in, architecture delta, implementation, review, verification). Carries
-  scope, what it excludes, Definition of Ready, Definition of Done.
-- Task: NEVER authored here. The work order generates task rows from
-  its own steps and spawns; writing "backend task, frontend task" into
-  the backlog duplicates the flow and drifts from it.
-- The broad-story tripwire: a story named for a module or a screen
-  family ("quotes module", "order viewing") is an epic in disguise; it
-  can go anywhere and never finishes. Recut until the demo sentence is
-  one user-observable behavior with a named criterion.
-- The micro-story tripwire: a story whose whole scope is one role's few
-  edits (rename a field, restyle a button) is atomic work for the
-  deliver entry, or a task the work order records itself.
+Approved Experience Design notes remain the source for journeys, screens and
+release boundaries. Stories link to them directly.
 
-## Slicing Rules
+## Story contract
 
-- Slice vertically only: every story crosses all the layers it needs
-  to deliver ONE outside-observable capability. A demo sentence starting
-  "the code now has" means re-slice.
-- Split with the named patterns, in order: by workflow step, by
-  business-rule variation, by data variation, by interface subset,
-  spike as last resort.
-- Gate every slice on the two checks that bite hardest here:
-  - Independent: the Definition of Done is verifiable with the story's
-    listed dependencies merged and nothing else. A slice only verifiable
-    after a LATER slice is mis-cut; re-slice or fix the dependency field.
-  - Testable: the Definition of Done names at least one analysis
-    criterion and the observable behavior that proves it.
-- DON'T create horizontal layer stories ("the schema", "all endpoints"):
-  nothing observable ships and the dependency graph serializes.
-- DON'T create setup-or-plumbing stories without an observable criterion;
-  fold scaffolding into the first story that needs it.
-- DON'T accept a story whose Definition of Done cites no analysis id
-  (AC or BR): too small (merge it) or invented scope (raise it in open
-  questions).
+Every story has exactly one accountable `owner_role`. Optional
+`supporting_roles` name other team roles that make a concrete implementation
+contribution. The owner cannot repeat in the supporting list, supporting roles
+cannot repeat, and every listed role has a concrete responsibility in the
+body. These fields contain stable team role identifiers, never people, host
+tasks, agent sessions or execution IDs.
 
-## Ordering Method
+The required body sections are User Value, Scope, Non-Goals, Implementation
+Responsibilities, Acceptance, Dependencies and Delivery Notes. A dependency
+is a vault-absolute story link plus a reason, never list order. A deferred
+criterion records an owner and revisit trigger.
 
-Two passes; the second never overrides the first.
-1. Dependency order: dependency fields decide before anything else; name
-   the critical path in the backlog summary.
-2. Risk-adjusted value, over the stories dependency order leaves free:
-   - Walking skeleton first: the thinnest end-to-end slice through every
-     layer, even when a richer story carries more user value.
-   - Then the story whose failure would invalidate the most others;
-     de-risk or spike a high-uncertainty story first when its
-     assumptions gate other stories.
-   - Then highest user-visible value per review unit.
-   - Cosmetic tail (polish, copy, layout refinement) last, as named
-     stories, never padding inside earlier ones.
+## Traceability
 
-- The priority field carries the reason ("high: unblocks WP-04"), never
-  a bare rank; tiers are critical/high/medium/low, import-enforced.
-- The quality ledger (PMO database rows) is an ordering input: read its
-  tail before planning (ledger list --project-key <key> --tail <N>
-  --json); a recurring finding category is risk evidence (sequence the
-  next story touching that area earlier, or mint an analysis rule), and
-  rising rounds-to-green on a module argues for smaller slices there.
-- At the backlog gate, negotiate scope in plain must/should/deferred
-  language; every "deferred" lands on the deferred list with a written
-  reason, never a silent drop.
-- Method transparency: the backlog summary names the ordering method
-  applied (dependency order, then risk-adjusted value) and the top three
-  ordering decisions with one-line rationale each: the gate reviews
-  reasoning, not a bare list.
+Use vault-absolute wikilinks in `criterion_refs`, `experience_refs`,
+`derives_from`, `depends_on`, `uses_design` and `constrained_by`. Criterion and
+rule links target exact stable headings in approved notes. Every target must
+exist and remain approved; bare aliases or invented shorthand do not satisfy
+coverage.
+
+## Scenario coverage
+
+The Business Analyst and QA Engineer co-author the sibling `test-plan.md`.
+Each scenario has a stable `<story-id>-TS-###` heading, category, target,
+automation (`required` or `manual`), source links and Given/When/Then.
+Automation-required scenarios name an `automation_target`; the target may be
+planned until delivery. Every mapped criterion and rule appears in at least one
+scenario. Empty, boundary, invalid input, authorization, duplicate/concurrent
+action, failure and adjacent-regression paths are covered or explicitly marked
+inapplicable with a reason.
+
+Backlog preparation never records suite output, test results, story completion
+or release readiness.
+
+## Review
+
+The epic review derives from its epic and verifies exactly every child story
+and test plan. It covers scope, slicing, criteria, test design, dependencies,
+role ownership, findings and verdict. The root review derives from the backlog
+and relates to exactly every epic. It covers cross-epic overlap, dependency
+direction, cycles, release ordering, shared contracts, deferred criteria,
+global coverage, findings and verdict.
+
+Run the packaged `backlog_compile.py check --render` as the mechanical gate.
+The atomic approval verb preserves stories as `planned`, stamps the approved
+package and records a content hash that becomes stale after any authored
+change. Generated views under `_generated/` are disposable.
 
 ## References
 
-- [program-release-contract](references/program-release-contract.md): mandatory JSON plan identities, qualified refs, ownership, release allocation, feature execution-set and gate contract. Read when starting any planning run.
-- [slicing-patterns](references/slicing-patterns.md): each split pattern with a worked before/after, the size tests, merge rules, anti-pattern gallery. Read when a story fails a size test or resists vertical slicing.
-- [structured-records](references/structured-records.md): dependency-edge rules with reasons, the SHARES definition with a worked example, DoD item authoring rules, both anti-pattern galleries. Read when authoring depends_on or dod_items.
-- [prioritization](references/prioritization.md): risk-adjusted sequencing step by step, one worked value/risk/size weighing, deferral discipline. Read when ordering the backlog or defending the order at the gate.
-- [flow-metrics](references/flow-metrics.md): cadence, throughput and cycle-time concepts, explicitly not ordering inputs. Read when the owner asks for schedule forecasting.
+- [slicing-patterns](references/slicing-patterns.md). Read when a story fails a size test or resists vertical slicing.
+- [structured-records](references/structured-records.md). Read when authoring role ownership, dependency edges, references or scenarios.
+- [prioritization](references/prioritization.md). Read when ordering stories.
+- [program-release-contract](references/program-release-contract.md). Read when attaching approved Experience Design references.
+- [flow-metrics](references/flow-metrics.md). Read when forecasting cadence;
+  never use it as a scope gate.

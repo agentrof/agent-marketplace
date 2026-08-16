@@ -36,10 +36,12 @@ Both forms reduce to the same rule the script applies: the literal id string, ma
 ## Running the Audit
 
 ```
-"$RUN" run "$TEAM" skill-content/qa-verification/scripts/scenario_report.py \
+scenario_report.py \
   --brief workspace/docs/user-stories.md workspace/docs/business-rules.md \
   --junit results-server.xml results-client.xml
 ```
+
+Run the packaged `skill-content/qa-verification/scripts/scenario_report.py`.
 
 Multiple briefs and multiple JUnit files are merged. The script prints the matrix, then a machine-readable summary line, and exits nonzero when any NO-TEST or FAIL row exists. Paste the matrix into the verification record unedited.
 

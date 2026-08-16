@@ -5,13 +5,20 @@ configuration change.
 
 ## Supported fields
 
+Preparation consumes `project_origin`, `scale`, both language fields,
+`doc_type_designations`, `doc_type_designation_history` and `limits`. Stack,
+database, command, source-directory and parallelism fields are retained for
+delivery. They are optional until delivery activation is designed; when
+present they must satisfy this contract.
+
 - `project_origin`: `greenfield` or `existing`. It may change only before
-  program, backlog, or delivery state exists. A migrated `unclassified`
+  program, backlog, or delivery state exists. A legacy `unclassified`
   project may be classified exactly once.
 - `backend_stack`: `python-fastapi`.
 - `frontend_stack`: `react-typescript`.
 - `environment_stack`: `docker-compose`.
-- `databases`: a non-empty set drawn from `sql` and `nosql`, one or both.
+- `databases`: a non-empty JSON list of unique values drawn from `sql` and
+  `nosql`, one or both.
   Values outside these stack enums are refused because the team ships only
   tested stacks; new stacks arrive as maintainer releases.
 - `test_command` and `mutation_command`: non-empty command strings.
@@ -25,20 +32,19 @@ configuration change.
 - `terminology_language`: a non-empty language name, default English,
   governing names, technical terms, code, comments, commit messages, and PR
   bodies. File names, keys, ids, CLI output, and the machine layer stay English.
-- `max_parallel`: an optional positive integer controlling the delivery-lanes
-  proposal cap; absent means 3.
+- `max_parallel`: an optional positive integer reserved to control the
+  delivery-lanes proposal cap after delivery activation; absent means 3.
 - `scale`: optional enum `small`, `medium`, `large`, `x-large`, `xx-large`, or
   `enterprise`; absent means `small`. The business-analysis space schema's
   `scale_profiles` table defines the effective thresholds. Scale multiplies
   volume warnings and raises the domain-nesting ladder; aging, summary caps,
   challenge rounds, and nav peers never scale.
-- `model_overrides`: reserved and consumed by nothing. Decline any requested
-  value until a maintainer release defines it.
 
 ## Limits
 
-`limits` is an optional flat object of positive-integer overrides. Known keys
-are exactly:
+`limits` is an optional flat object of integer overrides. Known keys are
+exactly. Values are positive except `nav_peer_min` and `nav_peer_max`, which
+may be zero:
 
 - `node_direct_docs_warn`, `rule_sets_per_node_warn`,
   `active_br_per_node_warn`, `rules_per_set_warn`, `criteria_per_set_warn`
@@ -59,37 +65,45 @@ brick a space.
 
 ## Document type designations
 
-`doc_type_designations` maps each known taxonomy type-kebab to a non-empty
-designation in `output_language`. Refuse unknown types and values fold-equal
-to another type's current designation. This map and
+`doc_type_designations` maps each fixed taxonomy type-kebab to a non-empty,
+project-selected display designation. Its wording may follow
+`output_language`, `terminology_language`, or an explicitly approved mixture;
+the map is never silently translated. Refuse unknown types and values
+fold-equal to another type's current designation. Graph queries and colors
+remain fixed policy keyed by document type, independent of display wording.
+This map and
 `doc_type_designation_history` have one writer:
 `vault_check.py reconcile-designations`. The write-time hook denies every
 other writer.
 
-For a designation change, or an `output_language` change that re-renders the
-canonical designation table, obtain the impact plan with:
+For a designation change, or a language change that also changes display
+wording, obtain the impact plan with:
 
 ```text
-"$RUN" run "$TEAM" scripts/vault_check.py reconcile-designations \
+vault_check.py reconcile-designations \
   --vault workspace/docs --set <type>=<value> ... --dry-run --json
 ```
 
 Render apply, reject, and adjust-wording options from that plan, including all
 before-to-after retitles and alias sweeps. If `locked_skipped` is non-empty,
-ask a second choice: audited title/H1 relabel with `--include-locked`
+ask a second choice: controlled title/H1 relabel with `--include-locked`
 (recommended), or retain the named warnings. Present `manual` and `blocked`
-entries as residuals, never approvable options. Apply with `--actor configure`
-and the selected `--include-locked`; the verb updates config, titles, H1s,
-byte-equal aliases, generated views, and PMO audit events atomically. Close
+entries as residuals, never approvable options. Apply with the selected
+`--include-locked`; the verb updates config, titles, H1s, byte-equal aliases
+and generated views through one controlled writer. The history ledger stores
+only retired display values needed to detect stale titles; it never stores a
+package version, build id, migration level or runtime identity. Close
 with a full check and name every residual.
 
 ## Impact analysis
 
 Before the choice gate, state:
 
-- Which role-to-skill bindings change. Resolve the static map from
-  `"$RUN" path "$TEAM" flows/develop.md`; method skills remain static.
-- What future packages do differently and any migration effect on existing
+- The current consumer of every field, whether the field affects preparation
+  now or only future delivery, and whether absence is currently allowed.
+- Which role-to-skill bindings will change when delivery activates. Method
+  skills remain packaged while the delivery dispatcher is deferred.
+- What future packages do differently and any compatibility effect on existing
   work. For example, adding a document store makes the architect load both
   database skills and declare a store per entity.
 - For `terminology_language`, that only newly authored names change; existing

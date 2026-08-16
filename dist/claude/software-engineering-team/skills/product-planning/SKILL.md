@@ -1,6 +1,6 @@
 ---
 name: product-planning
-description: Program, release and feature backlog planning knowledge for the team's product-owner role. Loaded by software-engineering-team flows; not user-facing.
+description: Product-owner methods for grouping approved knowledge into a nested Markdown backlog and designing complete story test plans.
 user-invocable: false
 ---
 

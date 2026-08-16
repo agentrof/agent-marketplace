@@ -36,7 +36,7 @@ an independent check before the record closes:
   and rejected rows cite, and re-judges each such disposition: does the
   cited evidence actually support burying the finding?
 - Disagreements are recorded in the record's triage audit section and
-  presented at the gate; the owner rules. The audit never re-opens fix,
+  presented at the gate; the project decision authority rules. The review never re-opens fix,
   assumption or question rows; those already surface on their own.
 
 ## The round record

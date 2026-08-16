@@ -24,6 +24,7 @@ def preview(
     seed_user_files: bool = False,
     scope: str = "all",
 ) -> dict:
+    project_instructions.validate_workspace(workspace)
     if scope not in {"all", "tracked", "local"}:
         raise project_instructions.ProjectInstructionError(
             f"unsupported project generation scope: {scope}"
@@ -60,7 +61,7 @@ def materialize(
     )
     if result["choice_requests"]:
         raise project_instructions.ProjectInstructionError(
-            "project instruction migration choice required: "
+            "project instruction reconciliation choice required: "
             + json.dumps(result["choice_requests"], sort_keys=True)
         )
     return project_instructions.apply_changes(result["changes"])
@@ -70,7 +71,10 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("action", choices=("inspect", "check", "apply"))
     parser.add_argument("--project-root", type=Path, required=True)
-    parser.add_argument("--workspace", required=True)
+    parser.add_argument(
+        "--workspace", default="workspace", choices=("workspace",),
+        help="compatibility option; the project workspace is canonical",
+    )
     parser.add_argument("--choice", action="append", default=[])
     parser.add_argument("--seed-user-files", action="store_true")
     parser.add_argument("--scope", choices=("all", "tracked", "local"), default="all")

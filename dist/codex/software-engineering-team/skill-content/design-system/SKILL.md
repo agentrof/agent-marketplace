@@ -40,8 +40,8 @@ The only place the design master is born or changed.
 3. CREATION mode: resolve any material style fork through a choice gate,
    then use the bound design knowledge skill's persist command to write one
    `workspace/docs/design-system/MASTER.md` draft directly. The persist
-   script emits vault frontmatter, `status: draft` and `revision: 1`; there
-   is no candidate file, run key or promotion step. The draft contains the
+   script emits vault frontmatter, `status: draft` and `revision: 1`; the
+   draft itself is the review candidate. The draft contains the
    logic header, global rules
    (semantic palette with light and dark pairs, typography, spacing,
    radius derived from style, shadows, motion tokens, breakpoints, one
@@ -51,9 +51,9 @@ The only place the design master is born or changed.
    its impact and apply it to MASTER.md or as a page override at
    `workspace/docs/design-system/pages/<page>.md` (deviations only; no
    deviation, no file).
-5. UPDATE mode: for an approved baseline first run
-   `"$RUN" run "$TEAM" scripts/design_system_compile.py begin-revision
-   --root workspace/docs/design-system`; never overwrite an approved
+5. UPDATE mode: for an approved baseline first run the packaged
+   `design_system_compile.py begin-revision --root
+   workspace/docs/design-system`; never overwrite an approved
    revision. Then apply the requested change to MASTER.md or as a page
    override at
    workspace/docs/design-system/pages/<page>.md (deviations only; no
@@ -65,12 +65,10 @@ The only place the design master is born or changed.
    flow's periodic reconciliation requests it).
 6. Close: update maps/design-system.md to match (one wikilink per
    override with its deviation summary), ensure home.md links this
-   tree's map, then run
-   "$RUN" run "$TEAM" scripts/vault_check.py check --vault
-   workspace/docs --scope design-system; run `vault_check.py
+   tree's map, then run the packaged `vault_check.py check --vault
+   workspace/docs --scope design-system`; run `vault_check.py
    render-relations --vault workspace/docs`; repair every finding. At the
-   owner gate run `"$RUN" run "$TEAM"
-   scripts/design_system_compile.py approve --root
+   project decision gate run the packaged `design_system_compile.py approve --root
    workspace/docs/design-system`, then rerun its `check` verb.
 7. HARD SCOPE LIMIT: this flow writes only under
    workspace/docs/design-system/, plus home and its own map note repair, and

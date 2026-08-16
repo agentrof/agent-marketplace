@@ -12,7 +12,7 @@ project's workspace/config.json may relax thresholds over those shipped
 defaults (a scale level plus per-key limits; precedence limits > scale >
 shipped), every finding names its effective value and source, and the
 volume warnings form an advisory class: split PROPOSALS grouped in
-status.md, acted on only with explicit owner approval.
+status.md, acted on only with explicit project decision authority approval.
 
 Subcommands:
   init          create a new space skeleton
@@ -53,6 +53,12 @@ ABSOLUTE_PATH_RE = re.compile(r"(?:^|[\s\"'`(=])(?:/Users/|/home/|[A-Za-z]:\\\\|
 LINK_RE = re.compile(r"\[([^\]]+)\]\(([^)\s]+)(?:\s+\"[^\"]*\")?\)")
 # Vault wikilink grammar, shared with vault_check (single parsing home).
 WIKILINK_RE = re.compile(r"(?P<embed>!?)\[\[(?P<inner>[^\[\]\n]+?)\]\]")
+GENERATED_BODY_BLOCKS = (
+    ("## Related knowledge <!-- sec: relations:generated:start -->",
+     "<!-- sec: relations:generated:end -->"),
+    ("## Contents <!-- sec: structural:generated:start -->",
+     "<!-- sec: structural:generated:end -->"),
+)
 INLINE_CODE_RE = re.compile(r"`[^`]*`")
 
 
@@ -247,6 +253,22 @@ def parse_frontmatter(text: str) -> tuple[dict, int, str | None]:
             continue
         return fm, i + 1, f"unparseable frontmatter line: {stripped[:40]}"
     return fm, 1, "unterminated frontmatter block"
+
+
+def mask_generated_body_blocks(text: str) -> str:
+    """Blank compiler-owned blocks while preserving authored line numbers."""
+    lines = text.splitlines()
+    masked = list(lines)
+    for start, end in GENERATED_BODY_BLOCKS:
+        active = False
+        for index, line in enumerate(lines):
+            if line.strip() == start:
+                active = True
+            if active:
+                masked[index] = ""
+            if active and line.strip() == end:
+                active = False
+    return "\n".join(masked)
 
 
 def heading_has_emoji(line: str) -> bool:
@@ -518,7 +540,7 @@ def scan_space(space_dir: Path, schema: dict) -> tuple[Space, list[Finding]]:
                 "move the file or fix the type")
         doc = Doc(rel=rel, abs_path=file_path, fm=fm, fm_end=fm_end,
                   doc_type=doc_type, node=node_rel,
-                  lines=text.splitlines())
+                  lines=mask_generated_body_blocks(text).splitlines())
         parse_doc_body(doc)
         space.docs[rel] = doc
 
@@ -623,7 +645,7 @@ def collect_ids(space: Space, findings: list[Finding]) -> None:
                                 f"bare id {m_bare.group(0)} in citation"
                                 f" column '{column}'",
                                 "citation cells carry escaped-pipe wikilinks"
-                                " to the owning doc; vault_check.py migrate"
+                                " to the owning doc; vault_check.py normalize"
                                 " rewrites this class"))
                     id_value = row["id"]
                     m = NAMESPACED_ID_RE.fullmatch(id_value)
@@ -777,7 +799,7 @@ def run_checks(space: Space, base: list[Finding], gate: bool = False,
                 err(rel, 1, "future_dates",
                     f"approved_at {doc.fm['approved_at']} is in the future",
                     "stamps come from the clock: ba_compile.py approve, or"
-                    " paste pmo_cli.py now --date output")
+                    " paste UTC timestamp now --date output")
 
         h1s = [h for h in doc.headings if h[1] == 1]
         if len(h1s) != 1:
@@ -828,7 +850,7 @@ def run_checks(space: Space, base: list[Finding], gate: bool = False,
                     err(rel, lineno, "dead_links",
                         f"vault-internal citation uses a markdown link: {target}",
                         "cite vault content as a vault-absolute wikilink"
-                        " (vault_check.py migrate rewrites this class)")
+                        " (vault_check.py normalize rewrites this class)")
                     continue
             if not resolved.exists():
                 err(rel, lineno, "dead_links",
@@ -903,12 +925,12 @@ def run_checks(space: Space, base: list[Finding], gate: bool = False,
                         err(rel, info["line"], "row_schema",
                             f"{id_value} opened_on is not a YYYY-MM-DD date",
                             "stamp the date the row was opened from the"
-                            " clock: paste pmo_cli.py now --date output")
+                            " clock: paste UTC timestamp now --date output")
                     elif stamp > today:
                         err(rel, info["line"], "future_dates",
                             f"{id_value} opened_on {row['opened_on']} is in"
                             " the future",
-                            "stamps come from the clock: paste pmo_cli.py"
+                            "stamps come from the clock: paste UTC timestamp"
                             " now --date output")
                     elif row.get("status") == "open":
                         age = (today - stamp).days
@@ -1205,7 +1227,7 @@ def check_thresholds(space: Space, findings: list[Finding], warn) -> None:
              f" {th['space_docs_warn']}"
              f"{limit_provenance(space.schema, 'space_docs_warn')})",
              "propose splitting the topic into multiple spaces; a space split"
-             " needs explicit owner approval")
+             " needs explicit project decision authority approval")
     if total_bytes > th["space_bytes_warn"]:
         warn(space_rel, 1, "thresholds",
              f"split proposal: space totals {total_bytes} bytes (warn at"
@@ -1255,7 +1277,7 @@ def check_thresholds(space: Space, findings: list[Finding], warn) -> None:
                      f" {th['process_doc_lines_warn']}"
                      f"{limit_provenance(space.schema, 'process_doc_lines_warn')})",
                      "a split proposal: offer a split by workflow stage or"
-                     " variant; owner approval required")
+                     " variant; project decision authority approval required")
             if d.doc_type == "rule_set":
                 count = sum(1 for i in space.ids.values()
                             if i["doc"] == d.rel and i["kind"] == "BR"
@@ -1266,7 +1288,7 @@ def check_thresholds(space: Space, findings: list[Finding], warn) -> None:
                          f" {th['rules_per_set_warn']}"
                          f"{limit_provenance(space.schema, 'rules_per_set_warn')})",
                          "a split proposal: offer a split by governed target;"
-                         " owner approval required")
+                         " project decision authority approval required")
             if d.doc_type == "acceptance_set":
                 count = sum(1 for i in space.ids.values()
                             if i["doc"] == d.rel and i["kind"] == "AC"
@@ -1277,7 +1299,7 @@ def check_thresholds(space: Space, findings: list[Finding], warn) -> None:
                          f" (warn at {th['criteria_per_set_warn']}"
                          f"{limit_provenance(space.schema, 'criteria_per_set_warn')})",
                          "a split proposal: offer a split by flow (main versus"
-                         " exceptions); owner approval required")
+                         " exceptions); project decision authority approval required")
 
         processes = [d for d in own if d.doc_type == "process"]
         if len(processes) >= 2:
@@ -1316,7 +1338,7 @@ def check_thresholds(space: Space, findings: list[Finding], warn) -> None:
                      "split proposal: node's processes touch disjoint"
                      " entity clusters",
                      "the clusters may be separate domains; offer the"
-                     " split, owner approval required")
+                     " split, project decision authority approval required")
 
 
 def check_br_citations(space: Space, findings: list[Finding],
@@ -1615,15 +1637,11 @@ def render_views(space: Space, warnings: list[Finding]) -> dict[str, str]:
 
     def semantic_hash(doc: Document) -> str:
         text = doc.abs_path.read_text(encoding="utf-8")
-        for start, end in (
-            ("## Related knowledge <!-- sec: relations:generated:start -->",
-             "<!-- sec: relations:generated:end -->"),
-            ("## Contents <!-- sec: structural:generated:start -->",
-             "<!-- sec: structural:generated:end -->"),
-        ):
+        for start, end in GENERATED_BODY_BLOCKS:
             text = re.sub(r"\n*" + re.escape(start) + r".*?"
-                          + re.escape(end) + r"\n*", "\n", text,
+                          + re.escape(end) + r"\n*", "\n\n", text,
                           flags=re.DOTALL)
+        text = text.rstrip() + "\n"
         return "sha256:" + hashlib.sha256(text.encode("utf-8")).hexdigest()
 
     registry = {"schema_version": space.schema["schema_version"],
@@ -1711,7 +1729,7 @@ def render_views(space: Space, warnings: list[Finding]) -> dict[str, str]:
     if advisories:
         lines += ["", "## Advisories: split proposals", "",
                   "Proposals, not instructions: a domain or space splits only",
-                  "on explicit owner approval, asked through a choice gate;",
+                  "on explicit project decision authority approval, asked through a choice gate;",
                   "a declined proposal is recorded as a",
                   "deferral row in the node's open questions.", ""]
         for w in sorted(advisories, key=lambda f: (f.path, f.line, f.check)):

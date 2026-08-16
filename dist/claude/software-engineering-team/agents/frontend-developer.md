@@ -47,8 +47,8 @@ design master's tokens.
   silent deviation from either is a violation.
 
 ## Approach
-1. Follow the constitution included in the spawn prompt; if absent, read
-   the order-directory copy.
+1. Follow the constitution included in the role prompt; if absent, read the
+   installed team's `constitution.md`.
 2. Load the bound stack skill; read the three inputs named in the spawn
    prompt: preview, contract, design master (plus any page override).
 3. Wire tokens first, then build components small to large, then routing

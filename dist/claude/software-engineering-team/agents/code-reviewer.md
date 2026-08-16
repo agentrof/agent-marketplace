@@ -41,8 +41,8 @@ finding without a file, line and evidence does not exist.
   downgrading a severity to spare anyone a re-review round.
 
 ## Approach
-1. Follow the constitution included in the spawn prompt; if absent, read
-   the order-directory copy.
+1. Follow the constitution included in the role prompt; if absent, read the
+   installed team's `constitution.md`.
 2. Load the bound review skill and the stack checklists it names.
 3. Build the complete changed-file inventory; no file is skipped; plan
    the order: security-critical first, then core logic, then the rest.

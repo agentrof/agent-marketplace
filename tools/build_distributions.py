@@ -32,7 +32,6 @@ DISPLAY_TOKENS = {
     "devops": "DevOps",
     "fastapi": "FastAPI",
     "nosql": "NoSQL",
-    "pmo": "PMO",
     "qa": "QA",
     "sql": "SQL",
     "ui": "UI",
@@ -64,7 +63,6 @@ CANONICAL_COMPONENTS = {
     "dashboard",
     "flows",
     "hooks",
-    "migrations",
     "scripts",
     "skill-content",
     "templates",
@@ -109,9 +107,9 @@ def load_product_contract(root: Path) -> dict:
     except (KeyError, TypeError) as exc:
         raise ValueError(f"{path}: incomplete product contract") from exc
     expected = (
-        1, "agentrof", "Agentrof", "AGENTROF_HOME", ".agentrof",
+        1, "agentrof", "Agentrof", "AGENT_MARKETPLACE_HOME", ".agent-marketplace",
         "agent-marketplace", "Agent Marketplace", "AGENT_MARKETPLACE_HOME",
-        "agent-marketplace", "AGENT_MARKETPLACE_CLAUDE_PLUGINS_DIR",
+        "", "AGENT_MARKETPLACE_CLAUDE_PLUGINS_DIR",
         "AGENT_MARKETPLACE_CODEX_PLUGINS_DIR",
     )
     if values != expected:
@@ -133,92 +131,19 @@ def packaging_names(root: Path) -> tuple[str, str]:
     )
 
 
-def current_project_contract_version(root: Path) -> int:
-    versions = set()
-    for plugin in sorted((root / "plugins").iterdir()):
-        if not plugin.is_dir() or plugin.name == "project-management-office":
-            continue
-        path = plugin / "migrations" / "manifest.json"
-        try:
-            manifest = json.loads(path.read_text(encoding="utf-8"))
-            value = manifest["project_contract"]["current"]
-        except (OSError, json.JSONDecodeError, KeyError, TypeError) as exc:
-            raise ValueError(
-                f"{path}: current project contract version is missing"
-            ) from exc
-        if isinstance(value, bool) or not isinstance(value, int) or value < 1:
-            raise ValueError(
-                f"{path}: current project contract version must be a positive integer"
-            )
-        versions.add(value)
-    if len(versions) != 1:
-        raise ValueError(
-            "delivery-team migration manifests disagree on the current "
-            "project contract version"
-        )
-    return versions.pop()
-
-
-def marketplace_paths_source(
-    product_contract: dict, project_contract_version: int
-) -> str:
-    vendor = product_contract["vendor"]
-    product = product_contract["product"]
+def marketplace_paths_source(product_contract: dict) -> str:
+    del product_contract
     return f'''#!/usr/bin/env python3
-"""Agent Marketplace runtime path contract."""
+"""Resolve the Software Engineering Team owner from project config."""
 
 from __future__ import annotations
 
-import os
 from collections.abc import Mapping
-from pathlib import Path
-
-
-VENDOR_HOME_ENV = "{vendor["home_env"]}"
-MARKETPLACE_HOME_ENV = "{product["home_env"]}"
-VENDOR_HOME_DIR = "{vendor["default_home_dir"]}"
-MARKETPLACE_HOME_DIR = "{product["home_subdir"]}"
-CURRENT_PROJECT_CONTRACT_VERSION = {project_contract_version}
-PRIOR_OWNER_SUFFIX = " plugin; change only through the configure entry"
-
-
-def vendor_home(
-    environ: Mapping[str, str] | None = None,
-    user_home: str | Path | None = None,
-) -> Path:
-    values = os.environ if environ is None else environ
-    override = values.get(VENDOR_HOME_ENV, "").strip()
-    if override:
-        return Path(override)
-    base = Path.home() if user_home is None else Path(user_home)
-    return base / VENDOR_HOME_DIR
-
-
-def marketplace_home(
-    environ: Mapping[str, str] | None = None,
-    user_home: str | Path | None = None,
-) -> Path:
-    values = os.environ if environ is None else environ
-    override = values.get(MARKETPLACE_HOME_ENV, "").strip()
-    if override:
-        return Path(override)
-    return vendor_home(values, user_home) / MARKETPLACE_HOME_DIR
 
 
 def team_from_config(config: Mapping[str, object]) -> str:
-    """Resolve the sole delivery-team owner across supported contracts."""
-    contract = config.get("agent_marketplace")
-    if isinstance(contract, Mapping):
-        return str(contract.get("team_id", "")).strip()
-    team = str(config.get("team_id", "")).strip()
-    if team:
-        return team
-    prior_owner = str(config.get("managed_by", "")).strip()
-    if prior_owner.endswith(PRIOR_OWNER_SUFFIX):
-        return prior_owner[:-len(PRIOR_OWNER_SUFFIX)]
-    if prior_owner and " " not in prior_owner:
-        return prior_owner
-    return ""
+    """Resolve the sole team from the current project config contract."""
+    return str(config.get("team_id", "")).strip()
 '''
 
 
@@ -231,18 +156,14 @@ def marketplace_paths_targets(root: Path) -> list[Path]:
 
 
 def sync_marketplace_paths_sources(root: Path) -> None:
-    expected = marketplace_paths_source(
-        load_product_contract(root), current_project_contract_version(root)
-    )
+    expected = marketplace_paths_source(load_product_contract(root))
     for target in marketplace_paths_targets(root):
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text(expected, encoding="utf-8")
 
 
 def marketplace_paths_source_drift(root: Path) -> list[str]:
-    expected = marketplace_paths_source(
-        load_product_contract(root), current_project_contract_version(root)
-    )
+    expected = marketplace_paths_source(load_product_contract(root))
     problems = []
     for target in marketplace_paths_targets(root):
         try:
@@ -318,10 +239,9 @@ def claude_skill_wrapper(
         else "user-invocable: false\n"
     )
     environment_gate = (
-        " Before any workflow step inside a Git repository, run `project "
-        "environment-status --project-root <git-root> --json` through the PMO "
-        "launcher. A non-current environment permits only setup, upgrade, or "
-        "recovery guidance."
+        " Before changing a project, confirm the workspace config and local "
+        "docs contract are present; setup is the only entry that may create "
+        "them."
     ) if exposure == "entry" else ""
     return (
         "---\n"
@@ -350,17 +270,13 @@ def codex_skill_wrapper(name: str, description: str) -> str:
         f"`../../skill-content/{name}/SKILL.md` completely, resolving both paths "
         "relative to this file. Follow the canonical skill as the authoritative "
         "workflow and the host contract as its platform adapter. Before any "
-        "workflow step inside a Git repository, run `project "
-        "environment-status --project-root <git-root> --json` through the PMO "
-        "launcher. A non-current environment permits only setup, upgrade, or "
-        "recovery guidance.\n"
+        "workflow step inside a Git repository, confirm the project-local "
+        "workspace config and docs contract.\n"
     )
 
 
 def openai_yaml(plugin: str, name: str) -> str:
-    visible = "Agent Marketplace Upgrade" \
-        if plugin == "project-management-office" and name == "upgrade" \
-        else title_of(name)
+    visible = title_of(name)
     short = f"Start the {visible} guided workflow"
     if len(short) > 64:
         short = f"Run {visible}"
@@ -461,10 +377,8 @@ def compose_project_instructions(
     root: Path, source: Path, target: Path,
 ) -> None:
     """Compose every portable project instruction template for a team."""
-    if source.name == "project-management-office":
-        return
     common = (
-        root / "plugins" / "project-management-office" / "templates"
+        source / "templates"
         / "project-instructions" / "common.md"
     )
     team = source / "templates" / "project-instructions" / "team.md"
@@ -515,9 +429,7 @@ def compose_project_instructions(
             )
         (templates / filename).write_text(rendered, encoding="utf-8")
 
-    memory_source = (
-        root / "plugins" / "project-management-office" / "templates" / "memory"
-    )
+    memory_source = source / "templates" / "memory"
     if not memory_source.is_dir():
         raise ValueError(f"missing shared memory templates: {memory_source}")
     shutil.copytree(memory_source, templates / "memory", dirs_exist_ok=True)
@@ -646,9 +558,8 @@ def build_plugin(
             "\n".join(f"/{value}/" for value in roots),
         )
         gitignore.write_text(text, encoding="utf-8")
-    if source.name != "project-management-office":
-        copy_overlay(root / "platforms" / "shared" / "_team" / "overlay", target)
-        copy_overlay(root / "platforms" / host / "_team" / "overlay", target)
+    copy_overlay(root / "platforms" / "shared" / "_team" / "overlay", target)
+    copy_overlay(root / "platforms" / host / "_team" / "overlay", target)
     copy_overlay(shared / "overlay", target)
     copy_overlay(platform / "overlay", target)
     apply_appends(shared / "append", target)
@@ -661,27 +572,12 @@ def build_plugin(
     except json.JSONDecodeError as exc:
         raise ValueError(f"{manifest}: invalid JSON") from exc
     manifest_data["version"] = version
-    manifest_data["agent_marketplace"] = {
-        key: snapshot[key] for key in (
-            "build_id", "marketplace_release", "source_channel",
-            "source_ref", "source_commit",
-        )
-    }
     (manifest_dir / "plugin.json").write_text(
         json.dumps(manifest_data, indent=2) + "\n", encoding="utf-8"
     )
     generate_skills(source, target, host)
     generate_agents(source, target, host)
     compose_project_instructions(root, source, target)
-    if source.name == "project-management-office":
-        teams = sorted(
-            path.name for path in (root / "plugins").iterdir()
-            if path.is_dir() and path.name != "project-management-office"
-        )
-        (target / "team_plugins.json").write_text(
-            json.dumps({"schema_version": 1, "plugins": teams}, indent=2) + "\n",
-            encoding="utf-8",
-        )
     (target / marker_name).write_text(
         "Generated by tools/build_distributions.py; do not edit.\n",
         encoding="utf-8",
@@ -710,55 +606,6 @@ def validate_canonical(root: Path) -> None:
                     f"{candidate}: symbolic links are forbidden in packaged sources"
                 )
     for source in sorted(path for path in (root / "plugins").iterdir() if path.is_dir()):
-        migration_manifest = source / "migrations" / "manifest.json"
-        try:
-            migration = json.loads(migration_manifest.read_text(encoding="utf-8"))
-            if migration.get("schema_version") != 1 \
-                    or migration.get("component") != source.name:
-                problems.append(f"{migration_manifest}: invalid migration identity")
-            for surface in ("database", "project_contract"):
-                contract = migration.get(surface)
-                if contract is None and surface == "database":
-                    continue
-                if not isinstance(contract, dict) \
-                        or not isinstance(contract.get("baseline"), int) \
-                        or not isinstance(contract.get("current"), int) \
-                        or not isinstance(contract.get("steps"), list):
-                    problems.append(
-                        f"{migration_manifest}: invalid {surface} migration contract"
-                    )
-                    continue
-                expected = contract["baseline"]
-                for step in contract["steps"]:
-                    if not isinstance(step, dict) or step.get("from") != expected \
-                            or step.get("to") != expected + 1 \
-                            or not re.fullmatch(r"sha256:[0-9a-f]{64}", str(step.get("checksum", ""))):
-                        problems.append(
-                            f"{migration_manifest}: broken ordered {surface} migration chain"
-                        )
-                        break
-                    runner = source / str(step.get("runner", ""))
-                    try:
-                        runner.resolve().relative_to(source.resolve())
-                    except (OSError, ValueError):
-                        problems.append(
-                            f"{migration_manifest}: migration runner escapes component"
-                        )
-                        break
-                    if not runner.is_file() or step.get("checksum") != (
-                        "sha256:" + hashlib.sha256(runner.read_bytes()).hexdigest()
-                    ):
-                        problems.append(
-                            f"{migration_manifest}: migration runner checksum drift"
-                        )
-                        break
-                    expected = step["to"]
-                if expected != contract["current"]:
-                    problems.append(
-                        f"{migration_manifest}: {surface} chain does not reach current"
-                    )
-        except (OSError, json.JSONDecodeError) as exc:
-            problems.append(f"{migration_manifest}: missing or invalid: {exc}")
         for child in sorted(source.iterdir()):
             if is_python_cache(child):
                 continue

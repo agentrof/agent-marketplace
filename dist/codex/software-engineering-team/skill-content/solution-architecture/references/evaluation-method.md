@@ -1,6 +1,8 @@
 # Evaluation Method
 
-How an engagement turns a landscape question into a defensible verdict. The unit of work is the options matrix; the reasoning trail is append-only.
+How an engagement turns a landscape question into a defensible verdict. The
+unit of work is the options matrix; the committed final document is the current
+reasoning trail and Git retains prior revisions.
 
 ## Framing First
 
@@ -42,4 +44,10 @@ When no analysis space exists yet (pre-analysis groundwork), the engagement proc
 
 ## From Verdict to Record
 
-An accepted verdict produces, in the same session: the decision note under decisions/ (alternatives, tradeoffs, exit path, sustainability judgment) and the index re-render, the landscape.md update (component list, build-buy-integrate verdicts, topology), and any handed-down questions for the software architect named at the gate. The engagement doc itself is the study and stays as written; corrections happen by appending, never rewriting history.
+An accepted verdict produces, in the same session: the decision note under
+decisions/ (alternatives, tradeoffs, exit path, sustainability judgment) and
+the index re-render, the landscape.md update (component list,
+build-buy-integrate verdicts, topology), and any handed-down questions for the
+software architect named at the gate. If the engagement reopens, update the
+same study to the new final truth and commit it with the affected outputs; Git,
+not an in-document audit stream, retains the prior revision.

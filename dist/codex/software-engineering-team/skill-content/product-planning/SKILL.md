@@ -6,8 +6,10 @@ exposure: internal
 
 # Product Planning
 
-Use this skill after Business Analysis, Solution Design, Design System and
-Experience Design are approved. The project vault is canonical:
+Use this skill after the required intake evidence is approved. A greenfield
+project requires Business Analysis, Solution Design, Design System and
+Experience Design; an existing defect or technical intake may begin from
+approved source, issue or decision evidence. The project vault is canonical:
 `workspace/docs/backlog/` contains one root backlog, one folder per epic, one
 review folder per epic, one story folder per capability and one test plan per
 story. Read the `obsidian-vault` skill before reading or writing this tree; its
@@ -38,6 +40,18 @@ cannot repeat, and every listed role has a concrete responsibility in the
 body. These fields contain stable team role identifiers, never people, host
 tasks, agent sessions or execution IDs.
 
+Every story has `work_kind: feature|defect|technical`. Greenfield stories are
+always `feature` and keep approved BA, Solution Design, Design System and
+Experience Design references.
+Existing-project `defect` and `technical` stories may omit those feature-only
+references only when `related_to` cites approved or accepted source, issue or
+decision evidence.
+
+Existing-project coverage is scoped to explicitly selected story and review
+sources. `analysis_scopes` on the root backlog deliberately expands it to every
+active approved AC and BR in a named BA space or domain. It is never inferred
+from unrelated historical registries.
+
 The required body sections are User Value, Scope, Non-Goals, Implementation
 Responsibilities, Acceptance, Dependencies and Delivery Notes. A dependency
 is a vault-absolute story link plus a reason, never list order. A deferred
@@ -57,10 +71,16 @@ The Business Analyst and QA Engineer co-author the sibling `test-plan.md`.
 Each scenario has a stable `<story-id>-TS-###` heading, category, target,
 automation (`required` or `manual`), source links and Given/When/Then.
 Automation-required scenarios name an `automation_target`; the target may be
-planned until delivery. Every mapped criterion and rule appears in at least one
-scenario. Empty, boundary, invalid input, authorization, duplicate/concurrent
-action, failure and adjacent-regression paths are covered or explicitly marked
-inapplicable with a reason.
+planned until delivery. Every scenario cites at least one declared planning
+source. Feature scenarios cite story criteria; defect and technical scenarios
+cite story criteria and/or approved `related_to` evidence. Every declared
+planning source appears in at least one scenario. A structured `Coverage
+Classes` table contains exactly empty,
+boundary, invalid-input, authorization, duplicate-concurrent, failure and
+adjacent-regression. A class is `covered` by existing scenario IDs or
+`not_applicable` with a concrete reason and no scenario IDs. Covered rows
+classify the exact scenario set; scenarios may appear in multiple rows but none
+may be orphaned.
 
 Backlog preparation never records suite output, test results, story completion
 or release readiness.
@@ -74,10 +94,22 @@ and relates to exactly every epic. It covers cross-epic overlap, dependency
 direction, cycles, release ordering, shared contracts, deferred criteria,
 global coverage, findings and verdict.
 
-Run the packaged `backlog_compile.py check --render` as the mechanical gate.
-The atomic approval verb preserves stories as `planned`, stamps the approved
-package and records a content hash that becomes stale after any authored
-change. Generated views under `_generated/` are disposable.
+The latest root review's `Deferred Criteria` table records exactly four fields:
+`criterion_ref`, `owner_role`, `reason`, `revisit_trigger`. The criterion is a
+vault-absolute aliased wikilink with its table pipe escaped. For greenfield,
+every active AC and BR in every approved BA registry occurs in story `criterion_refs`
+or that table, never both. Existing projects apply the same
+equality only to explicitly selected values, or to every value under an
+explicit root `analysis_scopes` declaration. Unknown, overlapping and
+uncovered identities fail. Generic review placeholders are not review evidence.
+
+Run `backlog_compile.py check --render` as the mechanical gate; atomic approval
+keeps stories `planned` and hash-stamps the package. Generated views are disposable.
+
+Configured document-type designations govern human-facing authored titles.
+The capitalized designation is the whole root backlog/root-review label;
+authored epic/story/test-plan bases append it. Canonical keys, paths, IDs,
+registry JSON and generated machine-view labels remain stable English vocabulary.
 
 ## References
 
@@ -85,5 +117,4 @@ change. Generated views under `_generated/` are disposable.
 - [structured-records](references/structured-records.md). Read when authoring role ownership, dependency edges, references or scenarios.
 - [prioritization](references/prioritization.md). Read when ordering stories.
 - [program-release-contract](references/program-release-contract.md). Read when attaching approved Experience Design references.
-- [flow-metrics](references/flow-metrics.md). Read when forecasting cadence;
-  never use it as a scope gate.
+- [flow-metrics](references/flow-metrics.md). Read when forecasting cadence; never use it as a scope gate.

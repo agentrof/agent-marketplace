@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import shutil
+import stat
 import subprocess
 import sys
 import tempfile
@@ -62,6 +63,87 @@ class GreenfieldFlowTests(unittest.TestCase):
             text[:marker] + "\n" + rows.rstrip() + text[marker:],
             encoding="utf-8",
         )
+
+    @staticmethod
+    def complete_review(path: Path, sections: tuple[str, ...]) -> None:
+        text = path.read_text(encoding="utf-8")
+        title = next(
+            line.partition(":")[2].strip()
+            for line in text.splitlines() if line.startswith("title:")
+        )
+        frontmatter_end = text.find("\n---", 4)
+        frontmatter = text[:frontmatter_end + 4]
+        lines = [frontmatter, "", f"# {title}", ""]
+        for section_name in sections:
+            lines.extend([f"## {section_name}", ""])
+            if section_name == "Deferred Criteria":
+                lines.extend([
+                    "| criterion_ref | owner_role | reason | revisit_trigger |",
+                    "|---|---|---|---|",
+                ])
+            else:
+                lines.extend([
+                    f"Evidence [{section_name}]: [[backlog/backlog|Backlog]] "
+                    f"records the exact inputs evaluated for {section_name}.",
+                    f"Conclusion [{section_name}]: {section_name} is supported "
+                    "by the cited inputs and their exact relation coverage.",
+                ])
+            lines.append("")
+        path.write_text("\n".join(lines), encoding="utf-8")
+
+    @staticmethod
+    def assess_coverage(path: Path) -> None:
+        text = path.read_text(encoding="utf-8")
+        classes = (
+            "empty", "boundary", "invalid-input", "authorization",
+            "duplicate-concurrent", "failure", "adjacent-regression",
+        )
+        for class_name in classes:
+            replacement = (
+                f"| {class_name} | covered | ST-001-TS-001 | |"
+                if class_name == "empty" else
+                f"| {class_name} | not_applicable | - | "
+                f"The reviewed story declares no {class_name} behavior. |"
+            )
+            text = text.replace(
+                f"| {class_name} | not_applicable | - | TODO: assess this coverage class. |",
+                replacement,
+            )
+        path.write_text(text, encoding="utf-8")
+
+    @staticmethod
+    def author_story(story: Path, test_plan: Path) -> None:
+        text = story.read_text(encoding="utf-8")
+        replacements = {
+            "priority_reason: Required for the epic outcome.":
+                "priority_reason: Required for verified inventory receiving.",
+            "Describe the observable user or business value.":
+                "Warehouse staff can record received goods against inventory.",
+            "Describe the smallest valuable behavior.":
+                "Record one valid goods receipt and expose its inventory result.",
+            "List behavior deliberately excluded from this story.":
+                "Supplier settlement and bulk imports remain outside this slice.",
+            "- backend_developer: Own implementation and integration.":
+                "- backend_developer: Implement receipt validation and inventory persistence.",
+            "- [ ] Map every cited criterion to an observable result.":
+                "- [ ] Every receiving criterion has an observable passing result.",
+            "Record delivery constraints without execution state.":
+                "Preserve the approved inventory and release boundaries.",
+        }
+        for old, new in replacements.items():
+            text = text.replace(old, new)
+        story.write_text(text, encoding="utf-8")
+        text = test_plan.read_text(encoding="utf-8").replace(
+            "the preconditions are satisfied",
+            "a warehouse receipt references a valid stock item",
+        ).replace(
+            "the user performs the story action",
+            "warehouse staff submit the goods receipt",
+        ).replace(
+            "the expected outcome is observable",
+            "inventory reflects the accepted receipt exactly once",
+        )
+        test_plan.write_text(text, encoding="utf-8")
 
     def reconcile_fragment(self, docs: Path, fragment: str) -> None:
         self.run_cli(
@@ -338,17 +420,12 @@ The baseline defines a restrained, accessible interface for inventory work.
             "--criterion-set",
             "erp:AC-INV-001",
         )
-        challenge_hash = "sha256:" + hashlib.sha256(
-            b"greenfield experience challenge"
-        ).hexdigest()
         self.run_cli(EXPERIENCE, "render", "--release-root", str(release))
         self.run_cli(
             EXPERIENCE,
             "stamp",
             "--release-root",
             str(release),
-            "--challenge-hash",
-            challenge_hash,
         )
         self.run_cli(
             EXPERIENCE,
@@ -365,8 +442,6 @@ The baseline defines a restrained, accessible interface for inventory work.
             str(root),
             "--program",
             "PRG-001",
-            "--challenge-hash",
-            challenge_hash,
         )
         self.run_cli(
             EXPERIENCE,
@@ -379,38 +454,64 @@ The baseline defines a restrained, accessible interface for inventory work.
             "--json",
         )
 
-    def seed_backlog(self, docs: Path) -> None:
-        criterion = (
+    def seed_backlog(self, docs: Path,
+                     analysis_scopes: tuple[str, ...] = ()) -> None:
+        criteria = (
             "[[business-analysis/erp/domains/inventory/acceptance/"
-            "goods-receipt-acceptance|erp:AC-INV-001]]"
+            "goods-receipt-acceptance|erp:AC-INV-001]]",
+            "[[business-analysis/erp/domains/inventory/acceptance/"
+            "goods-receipt-acceptance|erp:AC-INV-002]]",
+            "[[business-analysis/erp/domains/inventory/rules/"
+            "stock-item-lifecycle-rules|erp:BR-INV-001]]",
+            "[[business-analysis/erp/domains/inventory/rules/"
+            "stock-item-lifecycle-rules|erp:BR-INV-002]]",
         )
         experience = (
             "[[experience-design/programs/prg-001/releases/rel-001/release|"
             "Inventory Experience Release]]"
         )
         self.run_cli(BACKLOG, "init", "--docs", str(docs))
+        if analysis_scopes:
+            backlog = docs / "backlog/backlog.md"
+            self.extend_frontmatter(
+                backlog,
+                "analysis_scopes:\n" + "\n".join(
+                    f"  - {scope}" for scope in analysis_scopes
+                ),
+            )
         self.run_cli(
             BACKLOG,
             "stub-epic",
             "inventory-receiving",
             "--id",
             "EP-001",
+            "--goal",
+            "Make approved goods receiving observable and reliable.",
             "--docs",
             str(docs),
         )
-        self.run_cli(
-            BACKLOG,
-            "stub-story",
-            "inventory-receiving",
-            "receive-goods",
-            "--id",
-            "ST-001",
-            "--criterion-ref",
-            criterion,
-            "--experience-ref",
-            experience,
-            "--docs",
-            str(docs),
+        story_args = [
+            "stub-story", "inventory-receiving", "receive-goods",
+            "--id", "ST-001", "--experience-ref", experience,
+            "--uses-design",
+            "[[design-system/MASTER|ERP Design Master]]",
+            "--constrained-by",
+            "[[solution-design/landscape|ERP Solution Landscape]]",
+            "--scope",
+            "Record one valid goods receipt and expose its inventory result.",
+            "--docs", str(docs),
+        ]
+        for criterion in criteria:
+            story_args.extend(["--criterion-ref", criterion])
+        self.run_cli(BACKLOG, *story_args)
+        story_root = (
+            docs / "backlog/epics/inventory-receiving/stories/receive-goods"
+        )
+        self.author_story(
+            story_root / "story.md", story_root / "test-plan.md"
+        )
+        self.assess_coverage(
+            docs / "backlog/epics/inventory-receiving/stories/receive-goods/test-plan.md"
         )
         epic_review = (
             docs
@@ -427,6 +528,10 @@ scenario_refs:
 dependency_refs:
 """,
         )
+        self.complete_review(epic_review, (
+            "Scope", "Slicing", "Criteria Coverage", "Test Design",
+            "Dependencies", "Role Ownership", "Findings", "Verdict",
+        ))
         root_review = docs / "backlog/reviews/round-1-backlog-review.md"
         self.extend_frontmatter(
             root_review,
@@ -436,6 +541,11 @@ related_to:
 dependency_refs:
 """,
         )
+        self.complete_review(root_review, (
+            "Epic Coverage", "Cross-Epic Overlap", "Cross-Epic Dependencies",
+            "Release Ordering", "Shared Contracts", "Deferred Criteria",
+            "Global Test Coverage", "Findings", "Verdict",
+        ))
         self.run_cli(BACKLOG, "check", "--docs", str(docs), "--render", "--json")
         self.run_cli(BACKLOG, "approve", "--docs", str(docs))
         self.run_cli(
@@ -476,6 +586,12 @@ dependency_refs:
                 tracked,
             )
             self.assertFalse(any(path.startswith(".agentrof/") for path in tracked))
+            self.assertFalse(any(
+                path == "workspace/docs/.obsidian/community-plugins.json"
+                or path.startswith("workspace/docs/.obsidian/plugins/")
+                for path in tracked
+            ))
+            self.assertIn("workspace/docs/.obsidian/app.json", tracked)
 
             portable = project / ".github" / "agentrof" / "vault-gate.pyz"
             gate = self.run_cli(
@@ -495,6 +611,18 @@ dependency_refs:
                     "backlog:approved",
                 },
             )
+            subprocess.run(
+                ["git", "-c", "user.name=Agentrof Test",
+                 "-c", "user.email=agentrof-test@example.invalid",
+                 "commit", "-qm", "Approve greenfield preparation"],
+                cwd=project, check=True,
+            )
+            active_work = project / "workspace/apps/in-progress.py"
+            active_work.write_text("# unrelated active authoring\n", encoding="utf-8")
+            refreshed = self.run_cli(
+                SETUP, "apply", "--project-root", str(project), "--json"
+            )
+            self.assertEqual(json.loads(refreshed.stdout)["next_entry"], "deliver")
 
             before = self.run_cli(
                 PREPARATION,
@@ -520,6 +648,22 @@ dependency_refs:
                 )
             ))
 
+            config_path = project / "workspace/config.json"
+            config_before = config_path.read_bytes()
+            config = json.loads(config_before)
+            config["handoff_probe"] = "uncommitted"
+            config_path.write_text(
+                json.dumps(config, indent=2) + "\n", encoding="utf-8"
+            )
+            blocked = subprocess.run([
+                sys.executable, str(PREPARATION), "route", "--project-root",
+                str(project), "--intent", "deliver", "--json",
+            ], cwd=ROOT, capture_output=True, text=True, check=False)
+            self.assertEqual(blocked.returncode, 1, blocked.stdout + blocked.stderr)
+            blocked_payload = json.loads(blocked.stdout)
+            self.assertIn("Git handoff is incomplete", blocked_payload["reason"])
+            config_path.write_bytes(config_before)
+
             shutil.rmtree(project / ".agentrof")
             after = self.run_cli(
                 PREPARATION,
@@ -531,6 +675,66 @@ dependency_refs:
                 "--json",
             )
             self.assertEqual(json.loads(after.stdout), before_payload)
+
+    def test_existing_feature_requires_and_hands_off_complete_upstream_packages(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            project = root / "project"
+            project.mkdir()
+            subprocess.run(["git", "init", "-q", str(project)], check=True)
+            self.run_cli(
+                SETUP, "--project-root", str(project), "--origin", "existing",
+                "--json",
+            )
+            docs = project / "workspace/docs"
+            ba_space = self.seed_business_analysis(docs)
+            self.seed_solution_design(docs)
+            self.seed_design_system(docs)
+            self.seed_experience_design(docs, ba_space)
+            self.seed_backlog(docs, ("erp#domains/inventory",))
+            self.run_cli(VAULT, "render-relations", "--vault", str(docs))
+            self.run_cli(VAULT, "check", "--vault", str(docs), "--json")
+
+            subprocess.run(["git", "add", "--all"], cwd=project, check=True)
+            subprocess.run(
+                ["git", "-c", "user.name=Agentrof Test",
+                 "-c", "user.email=agentrof-test@example.invalid",
+                 "commit", "-qm", "Approve existing feature scope"],
+                cwd=project, check=True,
+            )
+            routed = self.run_cli(
+                PREPARATION, "route", "--project-root", str(project),
+                "--intent", "deliver", "--json",
+            )
+            self.assertEqual(json.loads(routed.stdout)["next_entry"], "deliver")
+
+            registry = docs / "business-analysis/erp/_generated/registry.json"
+            before_mode = stat.S_IMODE(registry.stat().st_mode)
+            registry.chmod(before_mode | stat.S_IXUSR)
+            blocked = subprocess.run(
+                [sys.executable, str(PREPARATION), "route", "--project-root",
+                 str(project), "--intent", "deliver", "--json"],
+                cwd=ROOT, capture_output=True, text=True, check=False,
+            )
+            self.assertEqual(blocked.returncode, 1, blocked.stdout)
+            self.assertIn("Git handoff is incomplete", blocked.stdout)
+            registry.chmod(before_mode)
+
+            clone = root / "clone"
+            subprocess.run(
+                ["git", "clone", "-q", str(project), str(clone)], check=True
+            )
+            portable = clone / ".github/agentrof/vault-gate.pyz"
+            self.run_cli(
+                portable, "check", "--project-root", str(clone), "--json"
+            )
+            cloned_route = self.run_cli(
+                PREPARATION, "route", "--project-root", str(clone),
+                "--intent", "deliver", "--json",
+            )
+            self.assertEqual(
+                json.loads(cloned_route.stdout)["next_entry"], "deliver"
+            )
 
 
 if __name__ == "__main__":

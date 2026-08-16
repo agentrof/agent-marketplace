@@ -23,7 +23,7 @@ exposure: entry
    must already be valid.
 4. For designation or language changes, run `vault_check.py
    reconcile-designations --dry-run --json`, present the complete title, H1,
-   alias and locked-record impact, then request approval. Language changes do
+   alias impact, then request approval. Language changes do
    not silently translate existing designation values.
 5. On approval, run the owning writer, `project_config.py check`,
    `vault_check.py check-designations` and the scoped vault gate. On rejection,

@@ -49,15 +49,17 @@ checker are the only mechanical authorities.
    non-functional budget.
 4. After each authoring milestone run `ba_compile.py check` and `render`, then
    run the scoped vault check. A red compiler or vault check stops the session.
-5. Challenge each domain and the complete space. Record round 1 under the
-   space `reviews/` folder, disposition each finding as fix, covered,
-   assumption, question or rejected-with-reason, and run at most three rounds
-   while blocking findings remain. Review notes are ordinary tracked
-   Markdown.
+5. Challenge each domain and the complete space with fresh, read-only
+   reviewers. Reviewers return structured findings to this workflow; they do
+   not write files. The Business Analyst resolves each blocking finding in its
+   owning analysis document, or records the unresolved fact as an existing
+   assumption, open question or decision row. Re-run only the affected
+   challenge after fixes until no blocking evidence gap remains. Do not create
+   review-history documents, round counters or lock state.
 6. Close the gates in order:
 
    - foundation documents and their links are complete;
-   - each domain has no unresolved blocking question;
+   - each domain has no unresolved blocking question or challenge finding;
    - the complete space passes `ba_compile.py check --gate approval`;
    - the project decision authority approves through the compiler's `approve` command.
 

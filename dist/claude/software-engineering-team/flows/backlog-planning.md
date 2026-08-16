@@ -9,8 +9,12 @@ authoritative.
 
 ## 0. Preconditions
 
-- Business Analysis, Solution Design, Design System and Experience Design are
-  approved and their own compilers are green.
+- A greenfield project has approved Business Analysis, Solution Design, Design
+  System and Experience Design packages, and their compilers are green.
+- An existing project may instead enter with a bounded feature, defect or
+  technical intake. Feature work keeps the same approved BA and Experience
+  Design references. Defect and technical work carry approved or accepted
+  source, issue or decision evidence.
 - The user explicitly starts the backlog entry and reviews each authored
   package.
 - Preparation state comes only from the tracked documents and their checks.
@@ -47,6 +51,19 @@ have a concrete contribution in `Implementation Responsibilities`; the owner
 cannot be repeated there as a supporting role. Store team role identifiers,
 never people or runtime identities.
 
+Every story declares `work_kind: feature|defect|technical`. Greenfield
+backlogs accept only `feature`; its `criterion_refs`, `experience_refs`,
+`uses_design` and Solution Design `constrained_by` links remain mandatory. An
+existing project may use `defect` or `technical` only
+with at least one approved or accepted `related_to` source, issue or decision
+note. This is scoped intake evidence, not a replacement for feature
+traceability.
+
+An existing backlog normally scopes only the criteria and evidence explicitly
+selected by its stories and root review. Add canonical `analysis_scopes` to
+`backlog.md` (`<space>` or `<space>#domains/<path>`) only when the whole named
+approved BA scope must receive an exact covered-or-deferred disposition.
+
 Use vault-absolute wikilinks for `criterion_refs`, `experience_refs`,
 `derives_from`, `depends_on`, `uses_design` and `constrained_by`. Criterion
 links target the approved owning note and carry its BA registry-qualified
@@ -75,10 +92,17 @@ Every scenario has a stable `<story-id>-TS-###` heading and this shape:
 
 `automation` is `required` or `manual`; `required` needs an
 `automation_target`. The target records intended delivery work and need not
-exist yet. Every mapped criterion and rule appears in at least one scenario.
-The scenario set explicitly considers empty, boundary, invalid input,
-authorization, duplicate or concurrent action, failure and adjacent-regression
-paths, recording why any inapplicable class is excluded.
+exist yet. Every scenario has non-empty `source_refs`. Feature scenarios cite
+only their story's declared criteria. Defect and technical scenarios may cite
+their story's declared criteria and approved `related_to` evidence. Every
+declared planning source appears in at least one scenario.
+The `Coverage Classes` table contains exactly `empty`, `boundary`,
+`invalid-input`, `authorization`, `duplicate-concurrent`, `failure` and
+`adjacent-regression`. Each row is `covered` with existing scenario IDs or
+`not_applicable` with no scenario IDs and a concrete reason. The union of all
+`covered` rows equals the story's exact scenario set; one scenario may cover
+multiple classes, but none may remain unclassified. A missing class, unknown
+scenario, orphan scenario or unexplained exclusion fails the compiler.
 
 The preparation trace ends at planned verification:
 
@@ -91,21 +115,56 @@ belong to delivery.
 
 ## 4. Challenge and render
 
-Run the packaged compiler:
+The Product Owner finishes the candidate package, then the active orchestrator
+runs the packaged compiler before spawning any reviewer:
 
 ```text
 backlog_compile.py check --docs <workspace>/docs --render --json
 ```
 
-An epic review uses `derives_from` for its owning epic and `verifies` for the
-exact child story and test-plan set. Its body covers scope, slicing, criteria,
-test design, intra-epic dependencies, role ownership, findings and verdict.
+For each epic, build an explicit reviewer input containing the exact epic,
+story and test-plan paths plus the expected `derives_from` and `verifies`
+target sets. Invoke one fresh `backlog-reviewer` per epic. Independent epic
+reviewers may run in parallel because they are read-only. Wait for every epic
+reviewer to return before any writer action.
 
-The root review uses `derives_from` for the root backlog and `related_to` for
-the exact epic set. Its body covers cross-epic overlap, dependency direction,
-cycles, release ordering, shared contracts, deferred criteria, global test
-coverage, findings and verdict. Fix every finding and repeat until both review
-layers are approved.
+The Product Owner is the single writer: it triages the returned findings,
+repairs source documents, and writes each designated epic review note. An epic
+review uses `derives_from` for its owning epic and `verifies` for the exact
+child story and test-plan set. Its body covers scope, slicing, criteria, test
+design, intra-epic dependencies, role ownership, findings and verdict. Re-run
+the compiler after these serialized writes.
+
+Only after every epic package and review is green, invoke one fresh
+`backlog-reviewer` with the root backlog, every epic and the exact expected
+`derives_from` and `related_to` sets. Wait for its return. The Product Owner
+then writes the root review note and any source fixes. The root review covers
+cross-epic overlap, dependency direction, cycles, release ordering, shared
+contracts, deferred criteria, global test coverage, findings and verdict.
+
+Use the current host's agent invocation and wait mechanism; no host-specific
+command is canonical. Reviewer responses are input, never durable state. If a
+blocking finding remains, rerun only the affected reviewer after the Product
+Owner's fix, then re-run the compiler. Continue until both review layers are
+approved.
+
+`Deferred Criteria` is a structured table with `criterion_ref`, `owner_role`,
+`reason` and `revisit_trigger`; `owner_role` is exactly `product_owner`.
+`criterion_ref` is an escaped-table,
+vault-absolute wikilink to the approved owning BA note, for example
+`[[business-analysis/erp/domains/inventory/rules/stock-rules\|erp:BR-INV-002]]`.
+For greenfield, the compiler derives every active AC and BR in every approved
+BA registry and requires the exact universe to be covered by one or more story
+`criterion_refs`, or represented once in this table, never both. A shared
+criterion may support multiple stories when the delivery slices are distinct.
+For existing projects, unrelated
+historical BA remains out of scope unless `backlog.md` explicitly declares
+`analysis_scopes`; a declared scope receives the same exact treatment. Unknown
+and uncovered values fail. Every non-deferral review lens uses an
+`Evidence [<section>]:` line with a resolvable vault note and a separate
+`Conclusion [<section>]:` line. Long
+generic approvals such as `the package was reviewed`, `looks good` or
+`no findings` fail.
 
 ## 5. User approval and handoff
 
@@ -121,3 +180,10 @@ stories remain `planned`. Commit `workspace/docs/backlog/` and the updated
 `workspace/config.json` in the same project change. Report the package hash
 and exact generated views. Stop and route to `deliver`; do not create delivery
 state in this flow.
+
+Human-facing authored titles use the project's configured document-type
+designations. The root backlog and root review use the capitalized designation
+as their complete title; user-authored epic/story/test-plan bases append their
+type designation. Stable type keys, paths, IDs, CLI messages, registry JSON and
+the disposable generated board, dependency and coverage view labels remain
+English machine vocabulary.

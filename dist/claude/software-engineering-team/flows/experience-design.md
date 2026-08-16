@@ -4,7 +4,7 @@ This flow turns approved analysis, solution decisions and design-system tokens
 into an approved, project-local experience baseline. It ends before backlog
 planning and never creates delivery state.
 
-Spawn template: paste `{{constitution}}`, the frozen input paths, output paths
+Spawn template: paste `{{constitution}}`, the approved input paths, output paths
 and required `SELF-CHECK` into every role prompt.
 
 ## Preconditions
@@ -31,15 +31,19 @@ and required `SELF-CHECK` into every role prompt.
    only through `approve-artifact`, which verifies declared IDs, navigation,
    local assets and hashes.
 4. Run `experience_compile.py check`, artifact checks and the scoped vault
-   check after each bounded change. Record challenge rounds in the owning
-   `reviews/` folder, fix all blocking findings, and cap the loop at three
-   rounds unless the owner explicitly reopens the scope.
+   check after each bounded change. Invoke a fresh read-only Experience
+   Reviewer with the exact candidate paths and return its structured findings
+   to the active workflow. The writer fixes every blocking finding and reruns
+   the checks. Reviewer responses are not durable audit records; the corrected
+   final documents are the stage result.
 
 ## Gates and handoff
 
 Close in this order: leaf domain, parent domain, space, multi-space, release,
 then program. At every gate render the registry, coverage, navigation and
-typed relations, ask the owner for an explicit choice, and commit the complete
-tracked subtree. When the program is approved, report `backlog-plan` as the
-next entry. Do not create stories, tasks, lanes, release ledgers or hidden
-records in this flow.
+typed relations, show the current compiler and reviewer result, ask the owner
+for an explicit choice, run `experience_compile.py stamp`, and commit the
+complete tracked subtree. The stamp records only the approved registry hash
+and compiler-owned UTC approval data. When the program is approved, report
+`backlog-plan` as the next entry. Do not create stories, tasks, lanes, review
+histories, release ledgers or hidden records in this flow.

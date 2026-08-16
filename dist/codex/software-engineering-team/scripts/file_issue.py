@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""File an explicitly approved issue to the Agent Marketplace repository.
+"""File an explicitly approved issue report to Agent Marketplace.
 
 The target is deliberately fixed. Drafts and approval belong in the project
 workspace; this command only performs the final external filing step.
@@ -16,6 +16,8 @@ import sys
 import urllib.error
 import urllib.request
 from pathlib import Path
+
+import issue_compile
 
 MARKETPLACE_REPO = "agentrof/agent-marketplace"
 
@@ -63,20 +65,45 @@ def create_issue(title: str, body: str) -> str:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--title", required=True)
-    parser.add_argument("--body", default="")
-    parser.add_argument("--body-file", default="")
+    parser.add_argument("--report", required=True, type=Path)
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args(argv)
-    body = Path(args.body_file).read_text(encoding="utf-8") if args.body_file else args.body
+    report = args.report.resolve()
+    findings = issue_compile.report_findings(report, require_approved=True)
+    docs = report.parents[1] if report.parent.name == "issues" else report.parent
+    findings.extend(issue_compile.package_findings(docs))
+    if findings:
+        print("file_issue: report is not fileable: " + "; ".join(findings),
+              file=sys.stderr)
+        return 2
+    props, body = issue_compile.split_note(report)
+    if props.get("status") != "approved":
+        print(
+            "file_issue: report is not fileable: only an approved, "
+            "not-yet-filed report can be filed",
+            file=sys.stderr,
+        )
+        return 2
+    title = str(props["title"])
     if args.dry_run:
-        print(f"file_issue: would file to {MARKETPLACE_REPO}: {args.title}")
+        print(f"file_issue: would file to {MARKETPLACE_REPO}: {title}")
         return 0
     try:
-        print(create_issue(args.title, body))
-    except (OSError, RuntimeError) as exc:
+        url = create_issue(title, issue_compile.authored_body(body))
+    except (OSError, RuntimeError, ValueError) as exc:
         print(f"file_issue: {exc}", file=sys.stderr)
         return 1
+    print(url, flush=True)
+    try:
+        issue_compile.mark_filed(report, url)
+    except (OSError, RuntimeError, ValueError) as exc:
+        print(
+            "file_issue: external issue was created, but the local report "
+            f"could not be marked filed: {exc}. Do not retry. Record {url} "
+            "on the report manually and run the issue checks.",
+            file=sys.stderr,
+        )
+        return 3
     return 0
 
 

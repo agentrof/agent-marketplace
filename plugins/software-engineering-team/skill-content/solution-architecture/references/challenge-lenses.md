@@ -16,9 +16,16 @@ package and pasted into the prompt.
 - **security-and-compliance:** Which trust boundaries, data obligations and
   deferred security decisions are present?
 
-## Disposition
+## Return and disposition
 
-The solution architect records every finding as fix, reject with one-line
-reason, or defer with a named revisit note. A blocking finding left unfixed
-forces another round; the cap is three rounds. Residuals go to the owner at the
-gate and are never silently dropped.
+Each challenger returns `lens`, `verdict` and findings with evidence, impact
+and a required resolution. Challengers never edit project files and their
+responses are not durable audit records. Independent lenses may run in
+parallel; the active workflow waits for all of them before the Solution
+Architect writes.
+
+The Solution Architect fixes each finding in the final landscape, engagement
+or decision documents, rejects it with a concrete reason shown at the approval
+gate, or records a genuine product risk with a named revisit trigger. Run the
+mechanical compilers again after the serialized writes. No fixed retry count,
+reviewer artifact, digest or lock is part of the project contract.

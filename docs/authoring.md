@@ -93,18 +93,20 @@ Verdict.
 
 Claude and Codex install the same standalone team. Their manifests contain no
 plugin dependency. Setup creates only a project-local runtime and host
-projection, materializes the tracked vault payload, reconciles the designation
-map, and runs checks. Generated distributions come from:
+projection, reconciles the tracked vault contract plus the ignored local
+community-plugin projection, preserves the designation map, and runs the same
+convergence check on both hosts. Generated distributions come from:
 
 ```text
 python3 tools/build_distributions.py
 make check
 ```
 
-Package upgrades rerun the idempotent setup contract, preview managed-file
-drift, preserve authored Markdown, regenerate only selected managed surfaces
-and run the local checks. Any future delivery upgrade policy must keep this
-file-first, project-local boundary.
+Package upgrades run `setup_project.py inspect`, `apply` and `check`, preserve
+authored Markdown and user-owned configuration, and roll back setup-owned
+writes when the closing check fails. Completed-stage routing requires only its
+relevant docs and config to be committed and clean. Any future delivery upgrade
+policy must keep this file-first, project-local boundary.
 
 ## Validation expectations
 

@@ -49,7 +49,8 @@ vault_check.py check --vault workspace/docs --scope <subtree>
 ```
 
 Repair every error before its gate, name warnings, re-render generated files,
-and pass frozen paths as repeated `--exclude` flags.
+and use repeated `--exclude` flags only for an explicitly reviewed repair
+scope. Exclusion is not a lifecycle, lock, or approval state.
 
 - `check` validates; errors block, warnings do not.
 - `render-decisions`, `render-navigation`, and `render-relations` own generated
@@ -60,8 +61,8 @@ and pass frozen paths as repeated `--exclude` flags.
 - `stamp-decision` writes status, UTC date, tag mirror, and both supersede ends
   atomically.
 - `normalize` owns deterministic repair; `normalize --rename` applies the
-  naming grammar and rewrites every referrer atomically, vetoing frozen
-  referrers.
+  naming grammar and rewrites every referrer atomically. An explicitly
+  excluded referrer vetoes that rename and is reported by path.
 - The per-write hook denies invalid content before landing and rechecks after
   landing. Shell moves surface at the next check.
 - The portable full gate is `.github/agentrof/vault-gate.pyz check

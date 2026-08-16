@@ -1,6 +1,6 @@
 ---
 name: setup
-description: Idempotent project bootstrap for the local workspace, disposable runtime, Obsidian payload and standalone team instructions.
+description: Inspect, check and apply one convergent project bootstrap or package refresh without replacing authored project truth.
 disable-model-invocation: true
 ---
 

@@ -13,7 +13,7 @@ workspace/docs/            the vault root (open THIS in the vault app)
   maps/                    one map note per content-bearing subtree
   business-analysis/       analysis spaces (space standard governs)
     shop/                  a space: space.md, glossary.md, actors.md,
-                           budgets.md, domains/, decisions/, reviews/,
+                           budgets.md, domains/, decisions/,
                            _generated/
   solution-design/         landscape, engagements, decisions/, index
   system-architecture/     living documents, decisions/, index
@@ -45,9 +45,9 @@ policy, never ad hoc.
   `space.md`, `glossary.md`, `actors.md`, `budgets.md`; every domain
   folder holds its own `domain.md`
   (`domains/inventory/domain.md`, nested
-  `domains/finance/domains/accounts-payable/domain.md`); review
-  records are `round-<n>-review.md` (space-level rounds
-  `space-round-<n>-review.md`).
+  `domains/finance/domains/accounts-payable/domain.md`). Live challenge
+  feedback is resolved into canonical records and is not stored as a BA
+  review-round file.
 - Typed content carries its type as the schema's English filename
   suffix: `<slug>-rules.md`, `<slug>-acceptance.md`,
   `<slug>-process.md`, `<slug>-entity.md`, `<slug>-decision.md`,

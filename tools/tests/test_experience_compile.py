@@ -179,7 +179,7 @@ class ExperienceCompilerTests(unittest.TestCase):
         payload = json.loads(output)
         self.assertTrue(any("remote" in finding for finding in payload["findings"]))
 
-    def test_gate_requires_challenge_stamp(self):
+    def test_gate_requires_compiler_bound_approval_stamp(self):
         self.assertEqual(self.stub("journey", "JRN-001", "browse")[0], 0)
         self.assertEqual(call(EXPERIENCE, [
             "render", "--release-root", str(self.release)
@@ -189,7 +189,6 @@ class ExperienceCompilerTests(unittest.TestCase):
         ])[0], 1)
         code, _, error = call(EXPERIENCE, [
             "stamp", "--release-root", str(self.release),
-            "--challenge-hash", "sha256:review",
         ])
         self.assertEqual(code, 0, error)
         self.assertEqual(call(EXPERIENCE, [

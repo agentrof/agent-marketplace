@@ -240,9 +240,7 @@ class LandscapeCheckTests(unittest.TestCase):
                 "--status", "parked"])
             self.assertEqual(code, 2, err)
 
-    def test_stamp_refuses_closed_engagement(self):
-        """Closed engagements are append-only: approved or superseded
-        Status lines are never restamped."""
+    def test_stamp_can_reopen_approved_engagement_without_lock_state(self):
         with tempfile.TemporaryDirectory() as tmp:
             tree = self._tree(
                 tmp, self.LAND_OK,
@@ -251,11 +249,10 @@ class LandscapeCheckTests(unittest.TestCase):
             code, _, err = run(landscape_check, [
                 "--tree", tree, "--stamp-engagement", "q",
                 "--status", "open"])
-            self.assertEqual(code, 1, err)
-            self.assertIn("append-only", err)
+            self.assertEqual(code, 0, err)
             text = (Path(tree) / "engagements" / "q.md").read_text(
                 encoding="utf-8")
-            self.assertIn("Status: approved 2026-07-01", text)
+            self.assertIn("Status: open", text)
 
     def test_stamp_refuses_non_status_first_line(self):
         """The stamp replaces a Status line only; prose is never

@@ -92,11 +92,6 @@
       "rgb": 38536
     },
     {
-      "id": "challenge-record",
-      "query": "tag:#doc/challenge-record",
-      "rgb": 10394916
-    },
-    {
       "id": "landscape",
       "query": "tag:#doc/landscape",
       "rgb": 5227511
@@ -249,6 +244,9 @@
     "title": "text",
     "status": "text",
     "owner_role": "text",
+    "issue_kind": "text",
+    "external_url": "text",
+    "filed_at_utc": "datetime",
     "approved_at": "date",
     "decided_at": "date",
     "superseded_by": "text",
@@ -266,7 +264,6 @@
     "system_name": "text",
     "direction": "text",
     "round": "number",
-    "locked": "checkbox",
     "baseline_hash": "text",
     "supersedes_hash": "text",
     "tags": "tags",
@@ -287,8 +284,6 @@
     "analysis_hash": "text",
     "criterion_set": "multitext",
     "experience_coverage": "multitext",
-    "challenge_status": "text",
-    "challenge_hash": "text",
     "scale": "text",
     "inherits": "text",
     "states": "multitext",
@@ -314,6 +309,7 @@
     "goal": "text",
     "priority": "text",
     "priority_reason": "text",
+    "work_kind": "text",
     "supporting_roles": "multitext",
     "experience_refs": "multitext",
     "package_hash": "text",
@@ -321,13 +317,17 @@
     "dependency_refs": "multitext",
     "scenario_refs": "multitext"
   },
+  "retired_managed_properties": [
+    "locked",
+    "challenge_status",
+    "challenge_hash"
+  ],
   "lazy_fragments": {
     "base": ["type", "title", "status", "tags", "aliases", "derives_from", "satisfies", "constrained_by", "implements", "uses_design", "related_to"],
     "business_analysis": ["code", "scope", "round"],
     "solution_design": ["engagement", "territory", "revisit_trigger"],
     "system_architecture": ["story", "governs", "verifies"],
     "design_system": [
-      "locked",
       "revision",
       "approved_at_utc",
       "baseline_hash",
@@ -348,8 +348,14 @@
     ],
     "backlog": [
       "goal",
+      "analysis_scopes",
       "priority",
       "priority_reason",
+      "work_kind",
+      "issue_kind",
+      "external_url",
+      "filed_at_utc",
+      "source_hash",
       "supporting_roles",
       "depends_on",
       "dependency_refs",
@@ -364,7 +370,7 @@
   },
   "fragment_graph_groups": {
     "base": ["navigation"],
-    "business_analysis": ["space", "domain", "glossary", "actor-roster", "budget-set", "entity", "process", "rule-set", "acceptance-set", "decision", "integration", "challenge-record"],
+    "business_analysis": ["space", "domain", "glossary", "actor-roster", "budget-set", "entity", "process", "rule-set", "acceptance-set", "decision", "integration"],
     "solution_design": ["landscape", "engagement", "decision"],
     "system_architecture": ["decision", "system-living"],
     "design_system": ["design-master", "page-override"],
@@ -429,7 +435,6 @@
     "threat_model": ["^system-architecture/threat-model\\.md$"],
     "environment_reference": ["^system-architecture/environment\\.md$"],
     "decision": ["^(?:solution-design|system-architecture)/decisions/[a-z0-9]+(?:-[a-z0-9]+)*-decision\\.md$", "^business-analysis/.+/decisions/[a-z0-9]+(?:-[a-z0-9]+)*-decision\\.md$"],
-    "challenge_record": ["^(?:business-analysis/.+|solution-design|experience-design/.+)/reviews/[a-z0-9]+(?:-[a-z0-9]+)*-review\\.md$"],
     "backlog": ["^backlog/backlog\\.md$"],
     "backlog_review": ["^backlog/reviews/round-[0-9]+-backlog-review\\.md$"],
     "epic": ["^backlog/epics/[a-z0-9]+(?:-[a-z0-9]+)*/epic\\.md$"],
@@ -458,9 +463,9 @@
     "backlog_review": ["draft", "changes_requested", "approved"],
     "epic": ["draft", "approved", "superseded"],
     "epic_review": ["draft", "changes_requested", "approved"],
-    "story": ["planned", "done", "deferred", "cancelled", "superseded"],
+    "story": ["planned"],
     "test_plan": ["draft", "approved", "superseded", "retired"],
-    "issue_report": ["draft", "approved", "filed", "closed"]
+    "issue_report": ["draft", "approved", "filed"]
   },
   "backlog_contract": {
     "story_owner_roles": [

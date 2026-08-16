@@ -76,8 +76,15 @@ def exercise_package(team_root: Path, project: Path, env: dict[str, str]) -> Non
     for path in (setup, check, route, team_root / "scripts" / "backlog_compile.py"):
         if not path.is_file():
             raise SmokeFailure(f"installed package is missing {path.relative_to(team_root)}")
+    inspected = json.loads(run([
+        sys.executable, str(setup), "inspect", "--project-root", str(project),
+        "--json",
+    ], env))
+    if inspected.get("ok") is not True:
+        raise SmokeFailure("project refresh inspection did not produce a viable plan")
     first = json.loads(run([
-        sys.executable, str(setup), "--project-root", str(project), "--json",
+        sys.executable, str(setup), "apply", "--project-root", str(project),
+        "--json",
     ], env))
     if first.get("next_entry") != "business-analysis":
         raise SmokeFailure("fresh setup did not route to business-analysis")
@@ -98,12 +105,51 @@ def exercise_package(team_root: Path, project: Path, env: dict[str, str]) -> Non
         sys.executable, str(generator), "check", "--project-root", str(project),
         "--workspace", "workspace", "--scope", "all",
     ], env)
-    sentinel = project / "workspace" / "user-authored.txt"
-    sentinel.write_text("user-owned\n", encoding="utf-8")
-    run([sys.executable, str(setup), "--project-root", str(project), "--json"], env)
+    sentinel = project / "workspace" / "user-authored.md"
+    sentinel.write_text("# User-owned package refresh sentinel\n", encoding="utf-8")
+    config_path = project / "workspace/config.json"
+    config = json.loads(config_path.read_text(encoding="utf-8"))
+    config["consumer_refresh_fixture"] = "preserve"
+    config_path.write_text(json.dumps(config, indent=2) + "\n", encoding="utf-8")
+    app_path = project / "workspace/docs/.obsidian/app.json"
+    app = json.loads(app_path.read_text(encoding="utf-8"))
+    app["alwaysUpdateLinks"] = False
+    app["consumer_knob"] = "preserve"
+    app_path.write_text(json.dumps(app, indent=2) + "\n", encoding="utf-8")
+    drift = json.loads(run([
+        sys.executable, str(setup), "inspect", "--project-root", str(project),
+        "--json",
+    ], env))
+    if "workspace/docs/.obsidian/app.json" not in {
+        item.get("path") for item in drift.get("operations", [])
+    }:
+        raise SmokeFailure("project refresh inspection omitted managed payload drift")
+    rejected = subprocess.run([
+        sys.executable, str(setup), "check", "--project-root", str(project),
+        "--json",
+    ], capture_output=True, text=True, env=env, check=False, timeout=60)
+    if rejected.returncode != 1:
+        raise SmokeFailure("project refresh check accepted managed payload drift")
+    run([
+        sys.executable, str(setup), "apply", "--project-root", str(project),
+        "--json",
+    ], env)
     run(generator_args, env)
-    if sentinel.read_text(encoding="utf-8") != "user-owned\n":
+    if sentinel.read_text(encoding="utf-8") \
+            != "# User-owned package refresh sentinel\n":
         raise SmokeFailure("setup refresh changed a user-owned project file")
+    if json.loads(config_path.read_text(encoding="utf-8")).get(
+        "consumer_refresh_fixture"
+    ) != "preserve":
+        raise SmokeFailure("setup refresh changed a user-owned config field")
+    refreshed_app = json.loads(app_path.read_text(encoding="utf-8"))
+    if refreshed_app.get("alwaysUpdateLinks") is not True \
+            or refreshed_app.get("consumer_knob") != "preserve":
+        raise SmokeFailure("setup refresh did not isolate managed Obsidian keys")
+    run([
+        sys.executable, str(setup), "check", "--project-root", str(project),
+        "--json",
+    ], env)
     run([
         sys.executable, str(check), "check", "--project-root", str(project),
         "--json",

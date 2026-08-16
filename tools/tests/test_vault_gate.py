@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -43,6 +44,31 @@ class PortableVaultGateTests(unittest.TestCase):
             self.assertIn("scripts/design_system_compile.py", names)
             self.assertIn("scripts/backlog_compile.py", names)
             self.assertIn("scripts/vault_check.py", names)
+
+    def test_clean_clone_may_omit_ignored_local_obsidian_projection(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            project = Path(temporary)
+            gate = self.setup_project(project)
+            obsidian = project / "workspace/docs/.obsidian"
+            (obsidian / "community-plugins.json").unlink()
+            shutil.rmtree(obsidian / "plugins")
+
+            local_check = subprocess.run(
+                [sys.executable, str(SETUP), "check", "--project-root",
+                 str(project), "--json"],
+                cwd=ROOT, capture_output=True, text=True, check=False,
+            )
+            self.assertEqual(local_check.returncode, 1)
+            self.assertIn("local", local_check.stdout.lower())
+
+            portable = subprocess.run(
+                [sys.executable, str(gate), "check", "--project-root",
+                 str(project), "--json"],
+                capture_output=True, text=True, check=False,
+            )
+            self.assertEqual(
+                portable.returncode, 0, portable.stdout + portable.stderr
+            )
 
     def test_present_malformed_design_system_is_checked(self):
         with tempfile.TemporaryDirectory() as temporary:

@@ -62,8 +62,8 @@ def seed_vault_scaffolding(space: Path) -> None:
 
 def make_valid_space(space: Path) -> None:
     """A gate-passing ERP space with one inventory domain: approved docs,
-    wikilink-cited rules, a converged locked challenge round. Named files
-    carry their plain contract names; typed content is type-suffixed."""
+    wikilink-cited rules and no review-history state. Named files carry their
+    plain contract names; typed content is type-suffixed."""
     seed_vault_scaffolding(space)
     write(space / "space.md", """---
 type: space
@@ -293,7 +293,7 @@ Lifecycle constraints for [[business-analysis/erp/domains/inventory/entities/sto
 
 | id | statement | source | affects | status | opened_on |
 |---|---|---|---|---|---|
-| AS-INV-001 | Negative on-hand is never permitted. | owner confirmed in round two | [[business-analysis/erp/domains/inventory/rules/stock-item-lifecycle-rules\\|BR-INV-002]] | confirmed | 2026-07-09 |
+| AS-INV-001 | Negative on-hand is never permitted. | owner confirmed during analysis | [[business-analysis/erp/domains/inventory/rules/stock-item-lifecycle-rules\\|BR-INV-002]] | confirmed | 2026-07-09 |
 """)
     write(space / "domains" / "inventory" / "acceptance" / "goods-receipt-acceptance.md", """---
 type: acceptance_set
@@ -315,80 +315,6 @@ Criteria for [[business-analysis/erp/domains/inventory/processes/goods-receipt-p
 |---|---|---|---|---|
 | AC-INV-001 | Given an accepted line, when the receipt posts, then a movement row exists and on-hand rises by the line quantity. | [[business-analysis/erp/domains/inventory/rules/stock-item-lifecycle-rules\\|BR-INV-002]] | assert movement row and quantity delta via the stock query | active |
 | AC-INV-002 | Given an item with a movement, when its sku is edited, then the edit is refused naming the movement date. | [[business-analysis/erp/domains/inventory/rules/stock-item-lifecycle-rules\\|BR-INV-001]] | attempt the edit; assert refusal message content | active |
-""")
-    write(space / "domains" / "inventory" / "reviews"
-          / "round-1-review.md", """---
-type: challenge_record
-title: Inventory Challenge Round 1
-status: approved
-approved_at: 2026-07-12
-owner_role: business_analyst
-round: 1
-review_scope: domain
-verdict: converged
-locked: true
----
-
-# Inventory Challenge Round 1
-
-Round 1 panel found no blocking gaps; one minor finding triaged.
-
-## Panel <!-- sec: panel -->
-
-| member | kind | why |
-|---|---|---|
-| negative-scenarios | lens | receipt edge cases |
-| warehouse operations expert | expert | floor operations depth |
-
-## Findings <!-- sec: findings -->
-
-| id | lens | severity | finding | disposition | targets |
-|---|---|---|---|---|---|
-| CH-INV-001 | warehouse operations expert | minor | Damaged-goods refusal already covered. | covered | [[business-analysis/erp/domains/inventory/rules/stock-item-lifecycle-rules\\|BR-INV-002]] |
-
-## Triage Audit <!-- sec: triage_audit -->
-
-Independent audit reviewed the covered disposition; no disagreement.
-
-## Verdict <!-- sec: verdict -->
-
-Converged: zero blocking findings this round.
-""")
-    write(space / "reviews" / "space-round-1-review.md", """---
-type: challenge_record
-title: Space Challenge Round 1
-status: approved
-approved_at: 2026-07-12
-owner_role: business_analyst
-round: 1
-review_scope: space
-verdict: converged
-locked: true
----
-
-# Space Challenge Round 1
-
-Cross-domain round over the registry and the inventory overview.
-
-## Panel <!-- sec: panel -->
-
-| member | kind | why |
-|---|---|---|
-| cross-domain consistency | lens | single domain so far; ran against the registry |
-
-## Findings <!-- sec: findings -->
-
-| id | lens | severity | finding | disposition | targets |
-|---|---|---|---|---|---|
-| CH-ERP-001 | cross-domain consistency | minor | Movement wording consistent with glossary. | covered | [[business-analysis/erp/domains/inventory/rules/stock-item-lifecycle-rules\\|BR-INV-002]] |
-
-## Triage Audit <!-- sec: triage_audit -->
-
-Independent audit reviewed the covered disposition; no disagreement.
-
-## Verdict <!-- sec: verdict -->
-
-Converged: zero blocking findings this round.
 """)
     (space / "_generated").mkdir(exist_ok=True)
     code, _, err = run(["render", "--space", str(space)])
@@ -480,12 +406,6 @@ def break_approval_preconditions(space: Path) -> None:
          "| confirmed | 2026-07-09 |", "| open | 2026-07-09 |")
 
 
-def break_challenge_record(space: Path) -> None:
-    edit(space / INV / "reviews" / "round-1-review.md",
-         "| minor | Damaged-goods refusal already covered. |",
-         "| blocking | Damaged-goods refusal already covered. |")
-
-
 def break_br_uncited(space: Path) -> None:
     edit(space / INV / "rules" / "stock-item-lifecycle-rules.md",
          "| BR-INV-002 | On-hand quantity",
@@ -545,7 +465,6 @@ BA_BUILDERS = {
     "row_schema": break_row_schema,
     "semantic_links": break_semantic_links,
     "approval_preconditions": break_approval_preconditions,
-    "challenge_record": break_challenge_record,
     "br_uncited": break_br_uncited,
     "thresholds": break_thresholds,
     "aging": break_aging,
@@ -595,9 +514,25 @@ class ValidSpaceTests(unittest.TestCase):
         findings = collect(self.space)
         self.assertEqual(findings, [], [f"{f.check}: {f.message}" for f in findings])
 
-    def test_valid_space_passes_the_gate(self):
+    def test_valid_space_without_review_history_passes_the_gate(self):
         findings = collect(self.space, gate=True)
         self.assertEqual([f for f in findings if f.severity == "error"], [])
+
+    def test_schema_has_no_persistent_challenge_state(self):
+        self.assertNotIn("challenge_record", SCHEMA["doc_types"])
+        self.assertNotIn("challenge", SCHEMA)
+        self.assertNotIn("locked", SCHEMA["frontmatter"]["optional"])
+        self.assertNotRegex(SCHEMA["id_format"], r"(?:^|\|)CH(?:\||\))")
+
+    def test_generated_views_have_no_challenge_history(self):
+        registry = (self.space / "_generated" / "registry.md").read_text(
+            encoding="utf-8"
+        )
+        status = (self.space / "_generated" / "status.md").read_text(
+            encoding="utf-8"
+        )
+        self.assertNotIn("Challenge Findings", registry)
+        self.assertNotIn("Challenge coverage", status)
 
     def test_render_is_deterministic(self):
         first = {p.name: p.read_bytes()
@@ -685,9 +620,8 @@ class BuilderFixtureTests(unittest.TestCase):
 
 
 class ApproveTests(unittest.TestCase):
-    """The approve verb stamps status, the UTC date and (for challenge
-    records) verdict + locked in one script-owned write; a doc the checks
-    reject is restored byte-identical."""
+    """The approve verb stamps status and the UTC date in one script-owned
+    write; a doc the checks reject is restored byte-identical."""
 
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
@@ -743,38 +677,10 @@ class ApproveTests(unittest.TestCase):
         self.assertEqual(code, 1)
         self.assertIn("in_review", err)
 
-    def test_approve_rejects_verdict_on_non_challenge_docs(self):
-        target = self.space / INV / "entities" / "stock-item-entity.md"
-        edit(target, "status: approved\napproved_at: 2026-07-12",
-             "status: in_review")
-        code, _, err = run(["approve", "--space", str(self.space),
-                            "--doc", "domains/inventory/entities/stock-item-entity.md",
-                            "--verdict", "converged"])
-        self.assertEqual(code, 2)
-        self.assertIn("challenge", err)
-
     def test_approve_unknown_doc_is_usage_error(self):
         code, _, err = run(["approve", "--space", str(self.space),
                             "--doc", "nope.md"])
         self.assertEqual(code, 2, err)
-
-    def test_challenge_record_requires_verdict_and_locks(self):
-        target = self.space / INV / "reviews" / "round-1-review.md"
-        edit(target, "status: approved\napproved_at: 2026-07-12",
-             "status: in_review")
-        edit(target, "verdict: converged\nlocked: true", "verdict: continue")
-        rel = "domains/inventory/reviews/round-1-review.md"
-        code, _, err = run(["approve", "--space", str(self.space),
-                            "--doc", rel])
-        self.assertEqual(code, 2, err)
-        code, out, err = run(["approve", "--space", str(self.space),
-                              "--doc", rel, "--verdict", "converged"])
-        self.assertEqual(code, 0, out + err)
-        text = target.read_text(encoding="utf-8")
-        self.assertIn("verdict: converged", text)
-        self.assertIn("locked: true", text)
-        self.assertIn(f"approved_at: {self.utc_today()}", text)
-
 
 class SubcommandTests(unittest.TestCase):
     def setUp(self):
@@ -805,6 +711,16 @@ class SubcommandTests(unittest.TestCase):
         structural = [f for f in findings if f.check in
                       ("frontmatter_schema", "required_sections", "status_legality")]
         self.assertEqual(structural, [])
+
+    def test_challenge_record_stub_is_retired(self):
+        space = self.root / "topic"
+        run(["init", "--space", str(space), "--title", "Topic", "--code", "TOP"])
+        code, _, err = run([
+            "stub", "--space", str(space), "--type", "challenge_record",
+            "--title", "Legacy review",
+        ])
+        self.assertEqual(code, 2)
+        self.assertIn("unknown type 'challenge_record'", err)
 
     def test_stub_nav_targets_owning_hub(self):
         """Content stubs nav to their owning overview hub; overview stubs
@@ -1004,7 +920,6 @@ class ProjectLimitsTests(unittest.TestCase):
     def test_structural_values_never_scale(self):
         write_config(self.space, {"scale": "enterprise"})
         merged = self.effective()
-        self.assertEqual(merged["challenge"]["max_rounds"], 3)
         self.assertEqual(merged["summary_max_lines"],
                          SCHEMA["summary_max_lines"])
         break_aging(self.space)
@@ -1014,14 +929,12 @@ class ProjectLimitsTests(unittest.TestCase):
         self.assertNotIn("scale", hits[0].message)
 
     def test_structural_overrides_apply(self):
-        write_config(self.space, {"limits": {"challenge_max_rounds": 5,
-                                             "summary_max_lines_default": 3}})
+        write_config(self.space, {"limits": {"summary_max_lines_default": 3}})
         merged = self.effective()
-        self.assertEqual(merged["challenge"]["max_rounds"], 5)
         self.assertEqual(merged["summary_max_lines"]["default"], 3)
         self.assertEqual(merged["summary_max_lines"]["space"], 30)
         self.assertEqual(
-            ba.limit_provenance(merged, "challenge_max_rounds"),
+            ba.limit_provenance(merged, "summary_max_lines_default"),
             ": project override")
 
     def test_invalid_config_fails_soft(self):

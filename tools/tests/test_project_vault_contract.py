@@ -405,6 +405,42 @@ class ProjectVaultContractTests(unittest.TestCase):
             self.assertEqual(second.returncode, 0, second.stdout + second.stderr)
             self.assertEqual(graph_path.read_bytes(), before)
 
+    def test_brand_payload_and_enablement_converge_without_losing_appearance(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            project = Path(temporary)
+            workspace = self.setup_project(project)
+            docs = workspace / "docs"
+            brand = docs / ".obsidian/snippets/brand.css"
+            brand.write_text("stale brand\n", encoding="utf-8")
+            appearance_path = docs / ".obsidian/appearance.json"
+            appearance = json.loads(appearance_path.read_text(encoding="utf-8"))
+            appearance["accentColor"] = "#ABCDEF"
+            appearance["enabledCssSnippets"] = ["project-custom"]
+            appearance_path.write_text(
+                json.dumps(appearance, indent=2) + "\n", encoding="utf-8"
+            )
+
+            failed = self.check_vault(workspace)
+            self.assertEqual(failed.returncode, 1)
+            self.assertIn("brand.css does not match", failed.stdout)
+            self.assertIn("must include brand", failed.stdout)
+
+            applied = subprocess.run(
+                [sys.executable, str(SETUP), "apply", "--project-root",
+                 str(project), "--json"], cwd=ROOT, capture_output=True,
+                text=True, check=False,
+            )
+            self.assertEqual(applied.returncode, 0, applied.stdout + applied.stderr)
+            self.assertEqual(
+                brand.read_bytes(),
+                (PLUGIN / "templates/vault/.obsidian/snippets/brand.css").read_bytes(),
+            )
+            repaired = json.loads(appearance_path.read_text(encoding="utf-8"))
+            self.assertEqual(repaired["accentColor"], "#ABCDEF")
+            self.assertEqual(
+                repaired["enabledCssSnippets"], ["project-custom", "brand"]
+            )
+
     def test_standardize_graph_colors_preserves_unowned_knobs(self):
         with tempfile.TemporaryDirectory() as temporary:
             workspace = self.setup_project(Path(temporary))
@@ -434,44 +470,6 @@ class ProjectVaultContractTests(unittest.TestCase):
             )
             self.assertEqual(second.returncode, 0, second.stdout + second.stderr)
             self.assertIn("already standard", second.stdout)
-
-    def test_locked_designation_change_requires_explicit_include(self):
-        with tempfile.TemporaryDirectory() as temporary:
-            workspace = self.setup_project(Path(temporary))
-            review = (
-                workspace / "docs/business-analysis/erp/reviews/space-round-2-review.md"
-            )
-            review.parent.mkdir(parents=True)
-            config = json.loads(
-                (workspace / "config.json").read_text(encoding="utf-8")
-            )
-            current = config["doc_type_designations"]["challenge-record"]
-            old_title = f"ERP {current} 2"
-            review.write_text(
-                f"---\ntype: challenge-record\ntitle: {old_title}\n"
-                "status: approved\nowner_role: business_analyst\nround: 2\n"
-                "review_scope: space\nverdict: continue\nlocked: true\n"
-                "approved_at: 2026-07-01\ntags:\n  - doc/challenge-record\n"
-                f"  - status/approved\n---\n\n# {old_title}\n",
-                encoding="utf-8",
-            )
-            before = review.read_bytes()
-            skipped = self.run_vault(
-                "reconcile-designations", "--vault", str(workspace / "docs"),
-                "--set", "challenge-record=assessment round",
-            )
-            self.assertEqual(skipped.returncode, 0, skipped.stdout + skipped.stderr)
-            self.assertEqual(review.read_bytes(), before)
-            self.assertIn("LOCKED skipped", skipped.stdout)
-            included = self.run_vault(
-                "reconcile-designations", "--vault", str(workspace / "docs"),
-                "--set", "challenge-record=assessment round", "--include-locked",
-            )
-            self.assertEqual(included.returncode, 0, included.stdout + included.stderr)
-            text = review.read_text(encoding="utf-8")
-            self.assertIn("title: ERP assessment round 2", text)
-            self.assertIn("# ERP assessment round 2", text)
-            self.assertIn("locked: true", text)
 
     def test_designation_history_rejects_unknown_and_current_values(self):
         with tempfile.TemporaryDirectory() as temporary:

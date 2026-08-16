@@ -92,13 +92,6 @@
       }
     },
     {
-      "query": "tag:#doc/challenge-record",
-      "color": {
-        "a": 1,
-        "rgb": 10394916
-      }
-    },
-    {
       "query": "tag:#doc/landscape",
       "color": {
         "a": 1,
@@ -156,31 +149,52 @@
     },
     {
       "query": "tag:#doc/backlog",
-      "color": {"a": 1, "rgb": 11032055}
+      "color": {
+        "a": 1,
+        "rgb": 11032055
+      }
     },
     {
       "query": "tag:#doc/backlog-review",
-      "color": {"a": 1, "rgb": 16007006}
+      "color": {
+        "a": 1,
+        "rgb": 16007006
+      }
     },
     {
       "query": "tag:#doc/epic",
-      "color": {"a": 1, "rgb": 3900150}
+      "color": {
+        "a": 1,
+        "rgb": 3900150
+      }
     },
     {
       "query": "tag:#doc/epic-review",
-      "color": {"a": 1, "rgb": 16096779}
+      "color": {
+        "a": 1,
+        "rgb": 16096779
+      }
     },
     {
       "query": "tag:#doc/story",
-      "color": {"a": 1, "rgb": 1357990}
+      "color": {
+        "a": 1,
+        "rgb": 1357990
+      }
     },
     {
       "query": "tag:#doc/test-plan",
-      "color": {"a": 1, "rgb": 2278750}
+      "color": {
+        "a": 1,
+        "rgb": 2278750
+      }
     },
     {
       "query": "tag:#doc/issue-report",
-      "color": {"a": 1, "rgb": 14513808}
+      "color": {
+        "a": 1,
+        "rgb": 14513808
+      }
     }
   ],
   "collapse-display": false,

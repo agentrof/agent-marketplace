@@ -11,6 +11,12 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 HASH_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
+RELATION_BLOCK_RE = re.compile(
+    r"\n*## Related knowledge "
+    r"<!-- sec: relations:generated:start -->.*?"
+    r"<!-- sec: relations:generated:end -->\s*",
+    re.DOTALL,
+)
 MACHINE_FIELDS = {
     "status", "approved_at_utc", "baseline_hash", "supersedes_hash",
 }
@@ -87,6 +93,13 @@ def normalized_master(path: Path) -> bytes:
     return ("\n".join(kept).rstrip() + "\n").encode()
 
 
+def without_generated_relations(content: bytes) -> bytes:
+    text = content.decode("utf-8")
+    if "<!-- sec: relations:generated:start -->" not in text:
+        return content
+    return (RELATION_BLOCK_RE.sub("\n\n", text).rstrip() + "\n").encode()
+
+
 def baseline_hash(root: Path) -> str:
     digest = hashlib.sha256()
     for path in sorted(root.rglob("*.md")):
@@ -94,10 +107,9 @@ def baseline_hash(root: Path) -> str:
             raise ValueError(f"symlinked Design System note: {path}")
         digest.update(path.relative_to(root).as_posix().encode())
         digest.update(b"\0")
-        digest.update(
-            normalized_master(path) if path.name == "MASTER.md"
+        content = normalized_master(path) if path.name == "MASTER.md" \
             else path.read_bytes()
-        )
+        digest.update(without_generated_relations(content))
         digest.update(b"\0")
     return "sha256:" + digest.hexdigest()
 

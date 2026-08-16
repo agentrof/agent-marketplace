@@ -1,52 +1,38 @@
-# Triage: Findings Into the Space
+# Triage: Findings Into Canonical Documents
 
-Every returned finding gets exactly one disposition, recorded as a CH
-row in the round record. The record is audit history: closed rounds are
-locked and never edited; corrections happen in the next round.
+Challenge findings are live review input, not durable project state. The
+owning persona triages every returned finding after all readers finish, and is
+the only writer. The approved canonical documents and compiler result are the
+lasting evidence.
 
 ## Dispositions
 
-| disposition | meaning | targets cell carries |
+| disposition | meaning | required action |
 |---|---|---|
-| covered | the analysis already handles it | the BR/AC ids that prove it |
-| fix | a real gap; the analyst edits the owning doc | the ids minted or changed by the fix |
-| assumption | plausible expert knowledge awaiting the owner | the AS id it became |
-| question | needs the owner's ruling | the OQ id it became |
-| rejected | not a real finding | the one-sentence reason |
+| covered | canonical evidence already handles it | cite the exact document and stable ids in the live response |
+| fix | a real gap | edit the owning document, then re-run its compiler |
+| assumption | plausible knowledge awaits confirmation | mint or update the stage's canonical assumption structure |
+| question | the project decision authority must rule | mint or update the stage's canonical open-question or decision structure |
+| rejected | evidence disproves or excludes the finding | state the evidence-backed reason in the live response |
 
 Rules:
 
-- Severity is copied from the challenger verbatim; a triage that
-  downgrades severity is a contract violation. Disposition is the
-  analyst's judgment; severity is not.
-- covered/fix/assumption/question MUST cite resolving target ids that
-  exist; the compiler fails a record whose targets do not resolve.
-- Duplicates across lenses merge into one row, the merged lenses named
-  in the lens cell; merging is triage's job, never the panel's.
-- A blocking finding keeps its round from converging even when its fix
-  landed the same day: the NEXT round's fresh eyes confirm the fix.
+- Severity stays exactly as returned. Disposition is the owner's judgment;
+  severity is not.
+- Covered and rejected findings need exact evidence in the live triage. They
+  create no file merely to prove the review occurred.
+- Fix, assumption and question dispositions must land in the canonical
+  document structure with existing stable identifiers and relations.
+- Merge duplicate findings only for triage clarity. Do not mint challenge ids,
+  maintain counters, or preserve reviewer transcripts.
+- Re-run a fresh, targeted reviewer after a blocking fix. A compiler-green
+  document alone proves structure; the fresh reader confirms the evidence gap
+  is actually closed.
 
-## The triage audit
+## Completion
 
-The analyst grades critique of its own work, so the two burial paths get
-an independent check before the record closes:
-
-- One fresh-context, read-only spawn (analysis-challenger role, audit
-  task) receives ONLY the round record plus the documents its covered
-  and rejected rows cite, and re-judges each such disposition: does the
-  cited evidence actually support burying the finding?
-- Disagreements are recorded in the record's triage audit section and
-  presented at the gate; the project decision authority rules. The review never re-opens fix,
-  assumption or question rows; those already surface on their own.
-
-## The round record
-
-Created via the compiler's stub (type challenge_record), one file per
-round under the node's reviews/ folder (space rounds at the root). It
-holds: the panel roster with the one-line why per member, the findings
-table (CH rows), the triage audit outcome, and the verdict. Closing a
-round is a status flip plus one script call, never a hand edit: flip the
-round to in_review, then ba_compile.py approve --space <space> --doc
-<round file> --verdict <converged|continue> sets verdict, status
-approved with the UTC date, and locked true in the same write; the
-guard hook denies any later edit (and any hand-written stamp date).
+Challenge is complete when every selected reader has returned, no blocking
+finding remains, the canonical documents contain every accepted resolution,
+and the owning compiler and vault checks are green. The normal approval verb
+then stamps the final documents. No reviewer-state field, transcript or audit
+note participates in the gate.

@@ -28,9 +28,10 @@ codex plugin add software-engineering-team@agent-marketplace
 ```
 
 Start `software-engineering-team:setup` in the project. The setup entry uses
-`scripts/setup_project.py` to bootstrap the workspace, tracked vault payload,
-designation map, managed ignore block and portable gate. Claude and Codex use
-the same canonical workflows and project-local files.
+`scripts/setup_project.py inspect|apply|check` to converge the workspace,
+tracked vault contract, ignored local Obsidian plugin projection, designation
+map, managed ignore block and portable gate. Claude and Codex use the same
+canonical workflows and project-local files.
 
 ## Greenfield path
 
@@ -77,10 +78,11 @@ disposable scratch/cache state. Durable truth is tracked Markdown and JSON
 under the project workspace. The Software Engineering Team installs as one
 standalone plugin.
 
-Marketplace package upgrades rerun the idempotent project setup and checks. A
-project previews changes to managed instructions and vault payload, preserves
-authored and user-owned files, regenerates only selected managed surfaces and
-commits the exact diff. Delivery and delivery-lane runtime design is a
+Marketplace package upgrades inspect one deterministic refresh plan, apply it
+with closing-gate rollback, then prove that no operation remains. Authored
+files, unknown project configuration and user-owned Obsidian knobs are
+preserved. Policy-owned keys and package-local plugin files converge before the
+tracked diff is committed. Delivery and delivery-lane runtime design is a
 separate scope.
 
 ## Quality

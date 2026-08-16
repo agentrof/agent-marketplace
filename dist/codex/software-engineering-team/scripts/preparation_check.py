@@ -1,19 +1,60 @@
 #!/usr/bin/env python3
-"""Route greenfield preparation from project-local documents only."""
+"""Route preparation from approved files and scoped Git handoffs only."""
 
 from __future__ import annotations
 
 import argparse
 import json
+import re
 import subprocess
 import sys
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 import marketplace_paths
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 TEAM = "software-engineering-team"
 WORKSPACE = "workspace"
+STAGE_PATHS = {
+    "business_analysis": (
+        "workspace/docs/business-analysis",
+        "workspace/docs/maps/business-analysis.md",
+    ),
+    "solution_design": (
+        "workspace/docs/solution-design",
+        "workspace/docs/maps/solution-design.md",
+    ),
+    "design_system": (
+        "workspace/docs/design-system",
+        "workspace/docs/maps/design-system.md",
+    ),
+    "experience_design": (
+        "workspace/docs/experience-design",
+        "workspace/docs/maps/experience-design.md",
+    ),
+    "backlog": (
+        "workspace/docs/backlog",
+        "workspace/docs/maps/backlog.md",
+    ),
+}
+WIKILINK_RE = re.compile(r"\[\[([^\[\]\n]+)\]\]")
+GENERATED_RELATION_RE = re.compile(
+    r"(?ms)^## Related knowledge "
+    r"<!-- sec: relations:generated:start -->.*?"
+    r"<!-- sec: relations:generated:end -->\s*"
+)
+FENCED_BLOCK_RE = re.compile(
+    r"(?ms)^(?P<fence>`{3,}|~{3,})[^\n]*\n.*?^\s*(?P=fence)\s*$"
+)
+TRACKED_VAULT_PAYLOAD = (
+    "workspace/docs/.obsidian/app.json",
+    "workspace/docs/.obsidian/appearance.json",
+    "workspace/docs/.obsidian/core-plugins.json",
+    "workspace/docs/.obsidian/graph.json",
+    "workspace/docs/.obsidian/types.json",
+    "workspace/docs/.obsidian/snippets",
+    ".github/agentrof/vault-gate.pyz",
+)
 
 
 def read_json(path: Path) -> dict:
@@ -106,6 +147,190 @@ def backlog_state(work: Path) -> tuple[bool, bool]:
     return approved, present
 
 
+def wikilink_targets(path: Path) -> list[str]:
+    if path.is_symlink() or not path.is_file():
+        return []
+    try:
+        text = path.read_text(encoding="utf-8")
+    except OSError:
+        return []
+    text = GENERATED_RELATION_RE.sub("", text)
+    text = FENCED_BLOCK_RE.sub("", text)
+    targets: list[str] = []
+    for match in WIKILINK_RE.finditer(text):
+        inner = match.group(1)
+        for separator in ("\\|", "|"):
+            if separator in inner:
+                inner = inner.split(separator, 1)[0]
+                break
+        target = inner.split("#", 1)[0].strip()
+        target_path = PurePosixPath(target)
+        if (target and not target_path.is_absolute()
+                and all(part not in {"", ".", ".."}
+                        for part in target_path.parts)):
+            targets.append(target)
+    return targets
+
+
+def source_package_roots(docs: Path, path: Path) -> list[Path]:
+    """Map a linked owner note to the smallest compiler-bound package."""
+    try:
+        parts = path.relative_to(docs).parts
+    except ValueError:
+        return []
+    roots: list[Path] = []
+    if len(parts) >= 2 and parts[0] == "business-analysis":
+        roots.extend((docs / "business-analysis" / parts[1],
+                      docs / "maps/business-analysis.md"))
+    elif parts and parts[0] == "solution-design":
+        roots.extend((docs / "solution-design",
+                      docs / "maps/solution-design.md"))
+    elif parts and parts[0] == "design-system":
+        roots.extend((docs / "design-system",
+                      docs / "maps/design-system.md"))
+    elif len(parts) >= 4 and parts[:2] == ("experience-design", "programs"):
+        roots.extend((docs / "experience-design/programs" / parts[2],
+                      docs / "experience-design/experience.md",
+                      docs / "maps/experience-design.md"))
+    elif parts and parts[0] == "system-architecture":
+        roots.extend((docs / "system-architecture",
+                      docs / "maps/system-architecture.md"))
+    elif parts and parts[0] == "issues":
+        roots.append(docs / "maps/issues.md")
+    return roots
+
+
+def backlog_linked_paths(root: Path) -> list[str]:
+    """Close a backlog over linked evidence and compiler-owned packages."""
+    docs = root / "workspace" / "docs"
+    backlog = docs / "backlog"
+    if not backlog.is_dir():
+        return []
+    required: set[Path] = set()
+    queued = list(sorted(backlog.rglob("*.md")))
+    scanned: set[Path] = set()
+
+    def add(candidate: Path) -> None:
+        if not (candidate.exists() or candidate.is_symlink()):
+            return
+        if candidate != backlog and backlog not in candidate.parents:
+            required.add(candidate)
+        if candidate.is_dir() and not candidate.is_symlink():
+            queued.extend(sorted(candidate.rglob("*.md")))
+        elif (candidate.suffix == ".md"
+              and docs / "maps" not in candidate.parents):
+            queued.append(candidate)
+
+    while queued:
+        note = queued.pop(0)
+        if note in scanned:
+            continue
+        scanned.add(note)
+        for target in wikilink_targets(note):
+            if target == "backlog" or target.startswith("backlog/"):
+                continue
+            candidate = docs / f"{target}.md"
+            add(candidate)
+            for package in source_package_roots(docs, candidate):
+                add(package)
+    return sorted(path.relative_to(root).as_posix() for path in required)
+
+
+def handoff_paths(root: Path, stages: list[str]) -> list[str]:
+    paths = ["workspace/config.json", "workspace/docs/home.md",
+             *TRACKED_VAULT_PAYLOAD]
+    for stage in stages:
+        paths.extend(STAGE_PATHS[stage])
+    if "backlog" in stages:
+        paths.extend(backlog_linked_paths(root))
+    return list(dict.fromkeys(paths))
+
+
+def git_handoff(root: Path, stages: list[str]) -> dict:
+    """Check only completed-stage inputs, never unrelated active work."""
+    paths = handoff_paths(root, stages)
+    files: list[str] = []
+    missing_paths: list[str] = []
+    symlink_paths: list[str] = []
+    for relative in paths:
+        target = root / relative
+        if target.is_symlink():
+            symlink_paths.append(relative)
+            continue
+        if target.is_file():
+            files.append(relative)
+        elif target.is_dir():
+            for path in sorted(target.rglob("*")):
+                relative_path = path.relative_to(root).as_posix()
+                if path.is_symlink():
+                    symlink_paths.append(relative_path)
+                elif path.is_file():
+                    files.append(relative_path)
+        else:
+            missing_paths.append(relative)
+    tracked_result = subprocess.run(
+        ["git", "ls-files", "--", *paths], cwd=root,
+        capture_output=True, text=True, check=False,
+    )
+    tracked = set(tracked_result.stdout.splitlines()) \
+        if tracked_result.returncode == 0 else set()
+    untracked = sorted(path for path in files if path not in tracked)
+    status_result = subprocess.run(
+        ["git", "status", "--porcelain=v1", "--untracked-files=all", "--", *paths],
+        cwd=root, capture_output=True, text=True, check=False,
+    )
+    changes = status_result.stdout.splitlines() \
+        if status_result.returncode == 0 else ["Git status failed"]
+    head = subprocess.run(
+        ["git", "rev-parse", "--verify", "HEAD"], cwd=root,
+        capture_output=True, text=True, check=False,
+    )
+    blockers = []
+    if tracked_result.returncode != 0:
+        blockers.append("Git tracked-file inspection failed")
+    if head.returncode != 0:
+        blockers.append("the repository has no commit yet")
+    if missing_paths:
+        blockers.append(
+            "required handoff paths are missing: " + ", ".join(missing_paths)
+        )
+    if symlink_paths:
+        blockers.append(
+            "required handoff paths are symlinked: " + ", ".join(symlink_paths)
+        )
+    if untracked:
+        blockers.append("required files are not tracked: " + ", ".join(untracked))
+    if changes:
+        blockers.append(
+            "required files have uncommitted changes: " + "; ".join(changes)
+        )
+    return {
+        "ok": not blockers,
+        "stages": stages,
+        "required_paths": paths,
+        "missing_paths": missing_paths,
+        "symlink_paths": symlink_paths,
+        "untracked_files": untracked,
+        "changes": changes,
+        "blockers": blockers,
+    }
+
+
+def blocked_handoff(intent: str, entry: str, stage: str, checks: dict,
+                    handoff: dict) -> dict:
+    checks["git_handoff"] = handoff
+    return {
+        "ok": False,
+        "intent": intent,
+        "next_entry": entry,
+        "reason": (
+            f"{stage} is approved but its Git handoff is incomplete: "
+            + "; ".join(handoff["blockers"])
+        ),
+        "checks": checks,
+    }
+
+
 def inspect(root: Path, intent: str) -> dict:
     work, config, conflicts = workspace(root)
     if conflicts:
@@ -126,13 +351,57 @@ def inspect(root: Path, intent: str) -> dict:
     backlog_approved, backlog_present = backlog_state(work)
     checks.update({"backlog_approved": backlog_approved, "backlog_present": backlog_present})
     if origin == "existing":
-        return {"ok": True, "intent": intent, "next_entry": "deliver", "reason": "existing project uses scoped delivery preparation", "checks": checks}
-    route = (("business_analysis", "business-analysis"), ("solution_design", "solution-design"), ("design_system", "design-system"), ("experience_design", "experience-design"), ("backlog_present", "backlog-plan"))
-    for key, entry in route:
+        if not backlog_approved:
+            return {
+                "ok": False, "intent": intent, "next_entry": "backlog-plan",
+                "reason": (
+                    "existing project delivery requires an approved scoped backlog"
+                    if backlog_present else
+                    "existing project has no approved scoped backlog"
+                ),
+                "checks": checks,
+            }
+        handoff = git_handoff(root, ["backlog"])
+        if not handoff["ok"]:
+            return blocked_handoff(
+                intent, "backlog-plan", "backlog", checks, handoff
+            )
+        checks["git_handoff"] = handoff
+        return {
+            "ok": True, "intent": intent, "next_entry": "deliver",
+            "alternatives": ["delivery-lanes"],
+            "reason": "existing project scoped backlog is approved and committed",
+            "checks": checks,
+        }
+    route = (
+        ("business_analysis", "business-analysis", "business_analysis"),
+        ("solution_design", "solution-design", "solution_design"),
+        ("design_system", "design-system", "design_system"),
+        ("experience_design", "experience-design", "experience_design"),
+    )
+    completed: list[str] = []
+    for key, entry, stage in route:
         if not checks[key]:
             return {"ok": False, "intent": intent, "next_entry": entry, "reason": f"greenfield preparation stage {key} is incomplete", "checks": checks}
+        completed.append(stage)
+        handoff = git_handoff(root, completed)
+        if not handoff["ok"]:
+            return blocked_handoff(intent, entry, stage, checks, handoff)
+    if not backlog_present:
+        return {
+            "ok": False, "intent": intent, "next_entry": "backlog-plan",
+            "reason": "greenfield preparation is complete; backlog is not present",
+            "checks": checks,
+        }
     if not backlog_approved:
         return {"ok": False, "intent": intent, "next_entry": "backlog-plan", "reason": "backlog documents exist but cross-epic and epic approvals are incomplete", "checks": checks}
+    completed.append("backlog")
+    handoff = git_handoff(root, completed)
+    if not handoff["ok"]:
+        return blocked_handoff(
+            intent, "backlog-plan", "backlog", checks, handoff
+        )
+    checks["git_handoff"] = handoff
     return {"ok": True, "intent": intent, "next_entry": "deliver", "alternatives": ["delivery-lanes"], "reason": "greenfield preparation is complete; delivery activation remains explicit", "checks": checks}
 
 

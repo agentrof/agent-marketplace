@@ -10,7 +10,6 @@ The solution tree's contract. One living tree per project at workspace/docs/solu
 | decisions/<kebab-slug>-decision.md | one solution decision per note: alternatives, tradeoffs, exit path, sustainability judgment, revisit trigger; supersede, never edit | frontmatter contract in the skeleton below |
 | decision-log.md | GENERATED index of decisions/ (marker first line; rendered, never authored) | none: rendered |
 | engagements/<slug>.md | one study per invocation topic: framing, options matrix, verdict | Summary, Framing, Options, Verdict |
-| reviews/<slug>-round-<n>-review.md | one challenge round: findings table plus dispositions | Summary, Findings |
 
 The subtree carries a map duty: every doc birth or retirement updates
 maps/solution-design.md in the same session.
@@ -19,7 +18,6 @@ maps/solution-design.md in the same session.
 
 - landscape.md: `# Landscape`, `## Summary` (one paragraph plus the Engagements index table: slug, status, minted decision ids), `## Current`, `## Target`, `## Transition`, `## Components` (table: component, verdict, decision, engagement, status).
 - engagements/<slug>.md: `# <Title>`, `## Summary` (first body line `Status: open`), `## Framing`, `## Options`, `## Verdict`.
-- reviews/<slug>-round-<n>-review.md: `# Round <n>: <slug>`, `## Summary`, `## Findings` (table: lens, finding, severity, disposition).
 - decision-log.md has NO skeleton: the first `render-decisions` births it.
 - decisions/<kebab-slug>-decision.md, the decision-note skeleton (empty
   supersedes/superseded_by keys are omitted entirely; decided_at exists
@@ -55,7 +53,9 @@ Greenfield first run: Current states "Nothing built yet" plus any inherited cons
 
 ## landscape.md
 
-- The Summary carries the Engagements index table (slug, status line copy, minted decision ids), updated at every fold-in; session resume enters here.
+- The Summary carries the Engagements index table (slug, status line copy,
+  minted decision ids), updated at every fold-in; every invocation reads this
+  current summary before changing the tree.
 - **Current** describes what exists today, honestly, including components the team did not choose and would not choose again.
 - **Target** describes the decided destination, each delta traceable to a decision record by id. When a Target delta ships, fold it into Current and drop it from Target in the fold-in that records the shipping.
 - **Transition** orders the deltas from Current to Target: each step cites its owning decision and names its precondition; the planner reads it when sequencing stories. A non-empty gap between Current and Target with an empty Transition is a defect.
@@ -71,22 +71,18 @@ Greenfield first run: Current states "Nothing built yet" plus any inherited cons
 - Solution notes carry, as first-class fields: the exit path, the sustainability judgment, the requirement ids and budget block-ids they rest on (so "which decisions rest on this requirement" is answerable from the note alone), and a revisit trigger: one named condition that reopens the decision (a cited budget or scale threshold crossed, a pricing or licensing term changed, a date reached). A note with no condition that could invalidate it states why.
 - decision-log.md is the GENERATED index (marker first line), rendered by
   `scripts/vault_check.py render-decisions --vault workspace/docs` after any
-  decision write. It is never authored or hand-edited. Session resume and the
-  gate read this index; a re-render heals a stale view.
+  decision write. It is never authored or hand-edited. Entries and gates read
+  this index; a re-render heals a stale view.
 
 ## engagements/
 
-- The slug names the topic, kebab-case, minted at the entry's pre-flight; a reopened topic appends -2, -3, never reuses a closed slug.
-- The Summary's first body line is exactly `Status: open`, `Status: approved YYYY-MM-DD`, `Status: parked YYYY-MM-DD: <reason>`, or `Status: superseded by <slug>`. Dated Status lines are written only by the stamp mode (`landscape_check.py --tree <tree> --stamp-engagement <slug> --status approved|parked|open [--reason ...]`): the script stamps the UTC date and re-checks the tree; a hand-typed date is denied by the guard hook and a future date fails the check. Session resume greps the line, reads open engagements fully and skips parked ones. Parked covers an owner pause, a spike in flight and topics ruled not-now; a parked engagement reopens through the stamp mode's `--status open`, with the note dated from `now --date`.
+- The slug names the topic in kebab-case and remains stable for that engagement.
+- The Summary's first body line is exactly `Status: open`, `Status: approved YYYY-MM-DD`, `Status: parked YYYY-MM-DD: <reason>`, or `Status: superseded by <slug>`. Dated Status lines are written only by the stamp mode (`landscape_check.py --tree <tree> --stamp-engagement <slug> --status approved|parked|open [--reason ...]`): the script stamps the UTC date and re-checks the tree; a hand-typed date is denied by the guard hook and a future date fails the check. Parked covers an owner pause, a spike in flight and topics ruled not-now; a parked engagement reopens through the stamp mode's `--status open`, with the note dated from `now --date`.
 - Deferred questions and named risks live under Verdict, each with a revisit note; silence is never a deferral.
-- An engagement is append-only once its gate closes; a reopened topic gets a new engagement citing the old one.
+- The current engagement may be amended through the same checks and approval
+  gate. Git history carries prior prose; create a distinct engagement only
+  when the topic or decision scope is genuinely different.
 - The `ungrounded-by-analysis` flag, when present, sits in the Summary and is removed only by re-verification against an approved analysis domain.
-
-## reviews/
-
-- One file per challenge round: the findings table (lens, finding, severity) and the disposition per finding (fix with the landing doc, reject with the one-line reason, defer with the gate note).
-- Landscape-scoped rounds are `reviews/landscape-round-<n>-review.md`, numbered in their own sequence.
-- Round files are locked at round close; the gate presentation cites them.
 
 ## Linking Rules (the tree is a graph)
 
@@ -105,14 +101,17 @@ minted [[solution-design/decisions/order-event-distribution-decision|SD-007]]
 ```
 
 - Every decision note links back to the engagement that minted it (the quoted `engagement` frontmatter wikilink) and forward through the quoted supersede-chain keys when a successor exists; stamp-decision writes both ends.
-- An engagement cites decisions and analysis docs as wikilinks too: `[[business-analysis/shop/domains/orders/rules/order-events|BR-ORD-014]]`; a review round links its engagement.
+- An engagement cites decisions and analysis docs as wikilinks too: `[[business-analysis/shop/domains/orders/rules/order-events|BR-ORD-014]]`.
 - Budgets are cited via block ids: `[[business-analysis/shop/budgets#^event-volume|volume budget]]`; heading anchors are banned vault-wide.
 
-The result reads as one navigable web: engagement to decisions to landscape and back, reviews hanging off their engagement, analysis grounding one hop away.
+The result reads as one navigable web: engagement to decisions to landscape
+and back, with analysis grounding one hop away.
 
 ## Fold-In Rules (gate close)
 
 1. Engagement verdict accepted: proposed notes flip to accepted through stamp-decision only, the landscape updates to match (Components, Target, Transition, the Engagements index), the engagement doc is stamped and finalized.
 2. After any decision write, re-render the index with the packaged `vault_check.py render-decisions --vault workspace/docs`.
 3. Consistency check, mechanical: artifact_check green on every touched doc; landscape_check exit 0 over the tree (every Components decision link targets an existing, non-superseded note; every Target delta cites a note; every engagement carries a valid status line; ids are unique); and the packaged vault check scoped to this subtree (`vault_check.py check --vault workspace/docs --scope solution-design`).
-4. Commit the tree together (engagement, decisions/, the rendered decision-log.md, landscape, review rounds, the map note maps/solution-design.md); the tree is the deliverable, the conversation is not.
+4. Commit the tree together (engagement, `decisions/`, the rendered
+   `decision-log.md`, landscape and `maps/solution-design.md`). The corrected
+   final tree is the deliverable; challenger replies are not.

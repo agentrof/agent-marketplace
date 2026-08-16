@@ -26,4 +26,7 @@ Treat experience as a versioned graph projected from approved analysis scopes.
   `artifacts/` directory. Edit only draft packages; approve network-free HTML
   in place with declared IDs and the effective registry hash.
 - Enforce schema and limits from `data/experience-schema.json`. Overrides require the configure gate.
-- Mechanical findings cannot be waived. Semantic findings need fix or reasoned rejection within three review rounds.
+- Mechanical findings cannot be waived. A fresh read-only reviewer returns
+  semantic findings to the active workflow; each finding needs a fix or a
+  reasoned rejection before the owner sees the final approval gate. Do not
+  persist reviewer rounds or hashes as project state.

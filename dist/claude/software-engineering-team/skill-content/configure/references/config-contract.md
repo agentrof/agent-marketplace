@@ -11,8 +11,8 @@ database, command, source-directory and parallelism fields are retained for
 delivery. They are optional until delivery activation is designed; when
 present they must satisfy this contract.
 
-- `project_origin`: `greenfield` or `existing`. It may change only before
-  program, backlog, or delivery state exists. A legacy `unclassified`
+- `project_origin`: `greenfield` or `existing`. It may change only before any
+  durable preparation Markdown exists. A legacy `unclassified`
   project may be classified exactly once.
 - `backend_stack`: `python-fastapi`.
 - `frontend_stack`: `react-typescript`.
@@ -37,8 +37,8 @@ present they must satisfy this contract.
 - `scale`: optional enum `small`, `medium`, `large`, `x-large`, `xx-large`, or
   `enterprise`; absent means `small`. The business-analysis space schema's
   `scale_profiles` table defines the effective thresholds. Scale multiplies
-  volume warnings and raises the domain-nesting ladder; aging, summary caps,
-  challenge rounds, and nav peers never scale.
+  volume warnings and raises the domain-nesting ladder; aging, summary caps
+  and nav peers never scale.
 
 ## Limits
 
@@ -50,7 +50,7 @@ may be zero:
   `active_br_per_node_warn`, `rules_per_set_warn`, `criteria_per_set_warn`
 - `process_doc_lines_warn`, `open_row_age_days_warn`, `space_docs_warn`,
   `space_bytes_warn`
-- `nesting_warn_depth`, `nesting_fail_depth`, `challenge_max_rounds`
+- `nesting_warn_depth`, `nesting_fail_depth`
 - `summary_max_lines_space`, `summary_max_lines_default`
 - `nav_peer_min`, `nav_peer_max`
 - `experience_flows_per_set`, `experience_transitions_per_set`,
@@ -85,12 +85,10 @@ vault_check.py reconcile-designations \
 ```
 
 Render apply, reject, and adjust-wording options from that plan, including all
-before-to-after retitles and alias sweeps. If `locked_skipped` is non-empty,
-ask a second choice: controlled title/H1 relabel with `--include-locked`
-(recommended), or retain the named warnings. Present `manual` and `blocked`
-entries as residuals, never approvable options. Apply with the selected
-`--include-locked`; the verb updates config, titles, H1s, byte-equal aliases
-and generated views through one controlled writer. The history ledger stores
+before-to-after retitles and alias sweeps. Present `manual` entries as
+residuals, never approvable options. The verb updates config, titles, H1s,
+byte-equal aliases and generated views through one controlled writer. The
+history ledger stores
 only retired display values needed to detect stale titles; it never stores a
 package version, build id, migration level or runtime identity. Close
 with a full check and name every residual.
@@ -110,11 +108,11 @@ Before the choice gate, state:
   names, glossary rows, and merged code are not renamed.
 - For `scale` or `limits`, every affected key's effective before-to-after
   value and enforcing checker. The space compiler owns volume, nesting,
-  aging, summary, and challenge-round findings; the vault checker owns nav
+  aging and summary findings; the vault checker owns nav
   peers. Findings must carry exact provenance such as `warn at N: scale
   <level>` or `warn at N: project override`, and generated views remain stale
   until rendered.
 - The sharp edge: lowering thresholds may produce split proposals; lowering
-  nesting failure depth, summary caps, or challenge rounds may turn approved
+  nesting failure depth or summary caps may turn approved
   content into a red compile. Run check immediately after the write and show
   every new finding.

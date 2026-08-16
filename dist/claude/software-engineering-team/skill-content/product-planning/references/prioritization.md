@@ -74,10 +74,17 @@ that gates WP-03").
 - must/should/deferred is the whole scope vocabulary at the backlog gate
   (the must-should-could scheme is the lineage, paraphrased); both "could"
   and "won't" land as deferred.
-- Every deferred item enters the deferred list with the criterion it
-  defers and a written reason: "deferred: BR-013 delegation, no absent
-  approvers expected before the second release". A deferral without a
-  reason is a silent drop and fails the coverage map.
+- Every deferred item enters the root backlog review's `Deferred Criteria`
+  table with a vault-absolute link to its approved owning note (the table pipe
+  escaped and registry-qualified identity as alias), a stable `owner_role`, a
+  concrete reason and a concrete `revisit_trigger`. Free prose is not a
+  disposition. A deferral missing any field is a silent drop and fails the
+  coverage map.
+- In greenfield, every active AC and BR in every approved BA registry appears
+  exactly once: either a story covers it or the table defers it. Existing
+  projects apply that rule to explicitly selected values, or to every value in
+  root `analysis_scopes`; unrelated historical BA is not silently imported.
+  Overlap, wrong-owner/unknown links and uncovered identities fail.
 - Revisit the deferred list at every checkpoint: reinstate the item as a
   story, re-affirm its reason, or drop it by the owner's explicit
   decision. A deferred list untouched across two checkpoints is a smell,

@@ -2,7 +2,7 @@
 """Vault checker for the team's workspace docs tree (the product vault).
 
 The consuming project's workspace/docs/ is one vault: wikilinked notes,
-typed frontmatter, map hubs and a committed app payload. Every rule the
+typed frontmatter, map hubs and a managed app payload. Every rule the
 obsidian-vault skill states is enforced here; a rule without a check is
 not a rule. Variation points (subtrees, map notes, tag namespaces, id
 grammars, peer range, generated surfaces, property types) come from the
@@ -959,14 +959,12 @@ def check_title_shape(vault: Vault, findings: list[Finding]) -> None:
 
 def check_title_designation(vault: Vault, note: Note, title: str,
                             kebab_type: str, findings: list[Finding]) -> None:
-    """The title carries its type's configured designation (word-boundary,
-    folded), and a challenge-record title also carries its round number as a
-    standalone token. The map is config data: absent, or missing this type,
-    is the mint-duty WARNING (never a silent pass); present binds the
-    containment ERROR. Locked records downgrade to warnings: an error no
-    Write/Edit can ever repair (the project-local state lock guard denies them) would
-    deadlock every gate, so the finding names the audited relabel path
-    instead."""
+    """The title carries its configured designation at a folded word boundary.
+
+    The map is project config: absence is a mint-duty warning, while a present
+    designation binds an ordinary containment error that the reconcile writer
+    can repair.
+    """
     designations = vault.designations
     if designations is None:
         findings.append(Finding(
@@ -985,41 +983,15 @@ def check_title_designation(vault: Vault, note: Note, title: str,
             "run setup/configure or organize-docs to mint this type's"
             " designation in workspace/config.json"))
         return
-    locked = note.fm.get("locked") is True
     if not designation_present(title, designation):
-        if locked:
-            findings.append(Finding(
-                "warning", note.rel, 1, "title_shape",
-                f"locked record title '{title}' does not carry the"
-                f" '{kebab_type}' designation '{designation}'",
-                "locked records are closed audit history; relabel the"
-                " title through reconcile-designations --include-locked"
-                " (controlled designation rename, title and H1 only) or"
-                " accept this named"
-                " residual"))
-        else:
-            findings.append(Finding(
-                "error", note.rel, 1, "title_shape",
-                f"title '{title}' does not carry the '{kebab_type}'"
-                f" designation '{designation}'",
-                "the title is a natural output_language phrase carrying its"
-                " type's designation; the normalize verb appends it (titles"
-                " holding a retired value reconcile through"
-                " reconcile-designations)"))
-    if kebab_type == "challenge-record":
-        round_no = note.fm.get("round")
-        if isinstance(round_no, int) and not re.search(
-                r"(?<!\d)" + re.escape(str(round_no)) + r"(?!\d)", title):
-            findings.append(Finding(
-                "warning" if locked else "error", note.rel, 1, "title_shape",
-                f"review-round title '{title}' does not carry its round"
-                f" number {round_no} as a standalone token",
-                ("locked records are closed audit history; relabel through"
-                 " reconcile-designations --include-locked or accept this"
-                 " named residual") if locked else
-                ("review-round titles read '<scope> <review-round"
-                 " designation> <n>'; retitle it (auto-append leaves"
-                 " round-number placement to judgment)")))
+        findings.append(Finding(
+            "error", note.rel, 1, "title_shape",
+            f"title '{title}' does not carry the '{kebab_type}'"
+            f" designation '{designation}'",
+            "the title is a natural output_language phrase carrying its"
+            " type's designation; the normalize verb appends it (titles"
+            " holding a retired value reconcile through"
+            " reconcile-designations)"))
 
 
 def check_designation_coverage(vault: Vault, findings: list[Finding]) -> None:
@@ -1049,9 +1021,7 @@ def check_designation_drift(vault: Vault, findings: list[Finding]) -> None:
     designation: the double-suffix shape) is the mechanically fixable
     ERROR; a retired value stranded mid-title, and a current designation
     that is not the title's closing phrase, are judgment WARNINGS.
-    Locked records always warn (the audited relabel or the named
-    residual, never a red no tool-level write can repair). Ledger
-    hygiene findings land on config.json. A vault with no ledger emits
+    Ledger hygiene findings land on config.json. A vault with no ledger emits
     nothing per note: green vaults stay green by construction."""
     designations = vault.designations
     policy = vault.policy
@@ -1068,14 +1038,7 @@ def check_designation_drift(vault: Vault, findings: list[Finding]) -> None:
             designation = designations.get(kebab_type)
             if not designation:
                 continue
-            locked = note.fm.get("locked") is True
             work = title
-            if kebab_type == "challenge-record":
-                round_no = note.fm.get("round")
-                if isinstance(round_no, int):
-                    peeled = peel_trailing_token(work, str(round_no))
-                    if peeled is not None:
-                        work = peeled
             span = designation_tail_span(work, designation)
             base = work[:span].rstrip() if span not in (None, 0) else work
             stale = stale_designation_values(vault, kebab_type)
@@ -1084,15 +1047,12 @@ def check_designation_drift(vault: Vault, findings: list[Finding]) -> None:
                  if (designation_tail_span(base, h) or 0) > 0), None)
             if tail_hit is not None:
                 findings.append(Finding(
-                    "warning" if locked else "error", note.rel, 1,
+                    "error", note.rel, 1,
                     "designation_drift",
-                    f"{'locked record ' if locked else ''}title '{title}'"
-                    f" still carries the retired '{kebab_type}'"
+                    f"title '{title}' still carries the retired '{kebab_type}'"
                     f" designation '{tail_hit}'",
                     "reconcile-designations strips the retired tail and"
-                    " appends the current designation"
-                    + (" (--include-locked, controlled rename for locked"
-                       " records)" if locked else "")))
+                    " appends the current designation"))
             else:
                 judgment_hit = next((h for h in stale
                                      if designation_present(base, h)), None)
@@ -1115,8 +1075,7 @@ def check_designation_drift(vault: Vault, findings: list[Finding]) -> None:
                     "warning", note.rel, 1, "designation_drift",
                     f"'{kebab_type}' designation '{designation}' is not"
                     f" the closing phrase of title '{title}'",
-                    "titles close with their designation (review rounds:"
-                    " designation then round number); retitle, or"
+                    "titles close with their designation; retitle, or"
                     " reconcile-designations --from names an unrecorded"
                     " prior value"))
     for unknown in sorted(set(vault.designation_history)
@@ -2046,15 +2005,53 @@ def check_home_shape(vault: Vault, findings: list[Finding]) -> None:
 
 
 def check_obsidian_payload(vault: Vault, findings: list[Finding],
-                           payload_dir: Path | None) -> None:
+                           payload_dir: Path | None,
+                           require_local_projection: bool = False) -> None:
     policy = vault.policy
     obsidian = vault.root / ".obsidian"
     for name in PAYLOAD_FILES:
         if not (obsidian / name).is_file():
             findings.append(Finding(
                 "error", f".obsidian/{name}", 1, "obsidian_payload",
-                "committed payload file is missing",
+                "tracked managed payload file is missing",
                 "copy the vault payload (per-file, only where missing)"))
+    brand_source = payload_dir / "snippets" / "brand.css" \
+        if payload_dir is not None else None
+    brand_target = obsidian / "snippets" / "brand.css"
+    if (brand_source is not None and brand_source.is_file()
+            and brand_target.is_file()
+            and brand_target.read_bytes() != brand_source.read_bytes()):
+        findings.append(Finding(
+            "error", ".obsidian/snippets/brand.css", 1,
+            "obsidian_payload",
+            "brand.css does not match the installed package",
+            "the house visual contract is package-owned; rerun project "
+            "refresh while appearance.json remains project-owned",
+        ))
+    appearance_path = obsidian / "appearance.json"
+    if appearance_path.is_file():
+        try:
+            appearance = json.loads(
+                appearance_path.read_text(encoding="utf-8")
+            )
+        except json.JSONDecodeError:
+            appearance = None
+            findings.append(Finding(
+                "error", ".obsidian/appearance.json", 1,
+                "obsidian_payload", "appearance.json does not parse",
+                "repair the project-owned appearance JSON and rerun setup",
+            ))
+        enabled = appearance.get("enabledCssSnippets") \
+            if isinstance(appearance, dict) else None
+        if isinstance(appearance, dict) and (
+                not isinstance(enabled, list) or "brand" not in enabled):
+            findings.append(Finding(
+                "error", ".obsidian/appearance.json", 1,
+                "obsidian_payload",
+                "enabledCssSnippets must include brand",
+                "brand enablement is managed while other appearance knobs "
+                "and snippets remain project-owned",
+            ))
     app_path = obsidian / "app.json"
     if app_path.is_file():
         try:
@@ -2110,6 +2107,13 @@ def check_obsidian_payload(vault: Vault, findings: list[Finding],
                     f"property '{key}' must be typed '{expected}'",
                     "types.json is derived from vault-policy.json"
                     " property_types; restore the drifted entry"))
+        for key in policy.get("retired_managed_properties", []):
+            if key in declared:
+                findings.append(Finding(
+                    "error", ".obsidian/types.json", 1, "obsidian_payload",
+                    f"retired managed property '{key}' is still declared",
+                    "project refresh removes package-owned property types"
+                    " that no active document contract consumes"))
     graph_path = obsidian / "graph.json"
     expected_queries = graph_group_queries(policy)
     if graph_path.is_file() and expected_queries:
@@ -2136,15 +2140,21 @@ def check_obsidian_payload(vault: Vault, findings: list[Finding],
                     "the global graph filter is policy data; rerun setup to"
                     " reconcile it"))
     community = policy.get("community_plugins", [])
-    if community:
+    local_projection_present = (
+        (obsidian / "community-plugins.json").exists()
+        or any((obsidian / "plugins" / plugin_id).exists()
+               for plugin_id in community)
+    )
+    if community and (require_local_projection or local_projection_present):
         cp_path = obsidian / "community-plugins.json"
         cp_data = None
         if not cp_path.is_file():
             findings.append(Finding(
                 "error", ".obsidian/community-plugins.json", 1,
                 "obsidian_payload",
-                "committed payload file is missing",
-                "copy the vault payload (per-file, only where missing)"))
+                "package-projected local enable list is missing",
+                "rerun project refresh to restore the local Obsidian"
+                " community-plugin projection"))
         else:
             try:
                 cp_data = json.loads(cp_path.read_text(encoding="utf-8"))
@@ -2170,8 +2180,8 @@ def check_obsidian_payload(vault: Vault, findings: list[Finding],
                         "error", f".obsidian/plugins/{plugin_id}/{fname}",
                         1, "obsidian_payload",
                         "vendored plugin file is missing",
-                        "copy the vault payload (per-file, only where"
-                        " missing)"))
+                        "rerun project refresh to restore the package-local"
+                        " plugin projection"))
             manifest_path = plugin_dir / "manifest.json"
             if manifest_path.is_file():
                 try:
@@ -2668,10 +2678,8 @@ def append_designation(vault: Vault, note: Note, lines: list[str]) -> int:
     rewriting the first H1 in the same write (title == H1 law). Reads the
     CURRENT title from lines, so it composes with the id-lead strip; skips
     when the map is absent, the type is nav or unmapped, or the designation
-    is already present (idempotent through the SAME test the check uses).
-    Challenge records are excluded: round-number placement is judgment, so
-    they stay a check finding for organize-docs to retitle. A title
-    whose tail holds a RETIRED value is reconcile-designations' class:
+    is already present (idempotent through the SAME test the check uses). A
+    title whose tail holds a RETIRED value is reconcile-designations' class:
     appending over it would mint the double suffix, so it is skipped and
     stays a designation_drift finding."""
     designations = vault.designations
@@ -2679,7 +2687,7 @@ def append_designation(vault: Vault, note: Note, lines: list[str]) -> int:
         return 0
     note_type = note.fm.get("type")
     kebab_type = kebab(note_type) if note_type else ""
-    if kebab_type not in vault.taxonomy_types or kebab_type == "challenge-record":
+    if kebab_type not in vault.taxonomy_types:
         return 0
     designation = designations.get(kebab_type)
     if not designation:
@@ -2925,16 +2933,20 @@ def standardize_graph_colors(root: Path, policy: dict) -> int:
     return 1
 
 
-def payload_reconcile(root: Path, policy: dict,
-                      payload_src: Path | None) -> int:
-    """Heal present-but-stale payload files by rewriting ONLY the
-    policy-asserted keys, preserving the consumer's tuned unasserted
-    knobs. community-plugins.json and plugins/ are only-if-missing
-    copies."""
-    changed = 0
+def payload_reconcile_updates(root: Path, policy: dict,
+                              payload_src: Path | None) -> dict[Path, bytes]:
+    """Plan byte updates for policy-owned payload fields and local plugins.
+
+    JSON files retain every unasserted consumer knob. The vetted community
+    plugin is a disposable package projection, so shipped files converge to
+    the installed package while unrelated local plugin files remain alone.
+    Missing base payload files stay the responsibility of
+    :func:`materialize_payload`.
+    """
+    updates: dict[Path, bytes] = {}
     obsidian = root / ".obsidian"
     if not obsidian.is_dir():
-        return 0
+        return updates
 
     def load_json(path: Path):
         try:
@@ -2942,8 +2954,10 @@ def payload_reconcile(root: Path, policy: dict,
         except (OSError, json.JSONDecodeError):
             return None
 
-    def dump(path: Path, data) -> None:
-        path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+    def propose_json(path: Path, data) -> None:
+        content = (json.dumps(data, indent=2) + "\n").encode("utf-8")
+        if not path.is_file() or path.read_bytes() != content:
+            updates[path] = content
 
     graph_path = obsidian / "graph.json"
     groups = graph_group_queries(policy)
@@ -2952,24 +2966,15 @@ def payload_reconcile(root: Path, policy: dict,
         if isinstance(data, dict):
             new = dict(data)
             dirty = False
-            queries = [str(g.get("query", ""))
-                       for g in data.get("colorGroups", [])
-                       if isinstance(g, dict)]
-            if queries != groups:
-                old_colors = {str(g.get("query", "")): g.get("color")
-                              for g in data.get("colorGroups", [])
-                              if isinstance(g, dict)}
-                new["colorGroups"] = [
-                    {"query": q,
-                     "color": old_colors.get(q) or group_color(policy, q)}
-                    for q in groups]
+            standard_groups = standard_graph_color_groups(policy)
+            if data.get("colorGroups") != standard_groups:
+                new["colorGroups"] = standard_groups
                 dirty = True
             if new.get("search", "") != policy.get("graph_search", ""):
                 new["search"] = policy.get("graph_search", "")
                 dirty = True
             if dirty:
-                dump(graph_path, new)
-                changed += 1
+                propose_json(graph_path, new)
     types_path = obsidian / "types.json"
     if types_path.is_file():
         data = load_json(types_path)
@@ -2980,11 +2985,14 @@ def payload_reconcile(root: Path, policy: dict,
                 if types.get(key) != value:
                     types[key] = value
                     dirty = True
+            for key in policy.get("retired_managed_properties", []):
+                if key in types:
+                    del types[key]
+                    dirty = True
             if dirty:
                 new = dict(data)
                 new["types"] = types
-                dump(types_path, new)
-                changed += 1
+                propose_json(types_path, new)
     app_path = obsidian / "app.json"
     if app_path.is_file():
         data = load_json(app_path)
@@ -2999,22 +3007,145 @@ def payload_reconcile(root: Path, policy: dict,
                     new[key] = value
                     dirty = True
             if dirty:
-                dump(app_path, new)
-                changed += 1
+                propose_json(app_path, new)
+    appearance_path = obsidian / "appearance.json"
+    if appearance_path.is_file():
+        data = load_json(appearance_path)
+        if isinstance(data, dict):
+            enabled = data.get("enabledCssSnippets")
+            snippets = [value for value in enabled
+                        if isinstance(value, str)] \
+                if isinstance(enabled, list) else []
+            if "brand" not in snippets:
+                new = dict(data)
+                new["enabledCssSnippets"] = snippets + ["brand"]
+                propose_json(appearance_path, new)
+    core_path = obsidian / "core-plugins.json"
+    if core_path.is_file():
+        data = load_json(core_path)
+        if isinstance(data, list) and "bases" in data:
+            propose_json(core_path, [value for value in data if value != "bases"])
+        elif isinstance(data, dict) and data.get("bases") is not False:
+            new = dict(data)
+            new["bases"] = False
+            propose_json(core_path, new)
+    brand_source = payload_src / "snippets" / "brand.css" \
+        if payload_src is not None else None
+    brand_target = obsidian / "snippets" / "brand.css"
+    if (brand_source is not None and brand_source.is_file()
+            and brand_target.exists() and not brand_target.is_symlink()):
+        content = brand_source.read_bytes()
+        if not brand_target.is_file() or brand_target.read_bytes() != content:
+            updates[brand_target] = content
     community = policy.get("community_plugins", [])
     if community:
         cp_path = obsidian / "community-plugins.json"
-        if not cp_path.is_file():
-            dump(cp_path, list(community))
-            changed += 1
+        cp_data = load_json(cp_path) if cp_path.is_file() else None
+        if cp_path.is_file() and cp_data != list(community):
+            propose_json(cp_path, list(community))
         for plugin_id in community:
             plugin_dir = obsidian / "plugins" / plugin_id
             src = (payload_src / "plugins" / plugin_id
                    if payload_src is not None else None)
-            if not plugin_dir.is_dir() and src is not None and src.is_dir():
-                shutil.copytree(src, plugin_dir)
-                changed += 1
-    return changed
+            if src is None or not src.is_dir():
+                continue
+            for source in sorted(path for path in src.rglob("*")
+                                 if path.is_file()):
+                target = plugin_dir / source.relative_to(src)
+                content = source.read_bytes()
+                if target.is_symlink():
+                    # Reconciliation deletes package-owned symlinks before
+                    # materialization. Do not follow one while planning bytes.
+                    continue
+                if target.exists() and (
+                    not target.is_file() or target.read_bytes() != content
+                ):
+                    updates[target] = content
+    return updates
+
+
+def payload_reconcile_deletions(root: Path, policy: dict,
+                                payload_src: Path | None) -> list[Path]:
+    """Plan stale or wrong-shaped package-owned plugin projection entries."""
+    if payload_src is None:
+        return []
+    obsidian = root / ".obsidian"
+    deletions: list[Path] = []
+
+    def kind(path: Path) -> str:
+        # Check symlinks first so neither planning nor cleanup follows a local
+        # projection link outside the package-owned plugin directory.
+        if path.is_symlink():
+            return "symlink"
+        if path.is_dir():
+            return "directory"
+        if path.is_file():
+            return "file"
+        return "other"
+
+    brand_source = payload_src / "snippets" / "brand.css"
+    brand_parent = obsidian / "snippets"
+    brand_target = brand_parent / "brand.css"
+    if brand_source.is_file():
+        if brand_parent.is_symlink() or (
+                brand_parent.exists() and not brand_parent.is_dir()):
+            deletions.append(brand_parent)
+        elif brand_target.is_symlink() or (
+                brand_target.exists() and not brand_target.is_file()):
+            deletions.append(brand_target)
+
+    for plugin_id in policy.get("community_plugins", []):
+        source = payload_src / "plugins" / plugin_id
+        target = obsidian / "plugins" / plugin_id
+        if not source.is_dir():
+            continue
+        if target.is_symlink() or (target.exists() and not target.is_dir()):
+            deletions.append(target)
+            continue
+        if not target.is_dir():
+            continue
+        shipped = {
+            path.relative_to(source).as_posix(): kind(path)
+            for path in source.rglob("*")
+        }
+        for path in target.rglob("*"):
+            relative = path.relative_to(target).as_posix()
+            if shipped.get(relative) != kind(path):
+                deletions.append(path)
+    return sorted(
+        deletions, key=lambda path: (len(path.parts), str(path)), reverse=True
+    )
+
+
+def payload_reconcile(root: Path, policy: dict,
+                      payload_src: Path | None) -> int:
+    """Apply the policy-owned payload refresh without replacing user knobs."""
+    updates = payload_reconcile_updates(root, policy, payload_src)
+    deletions = payload_reconcile_deletions(root, policy, payload_src)
+    # Wrong-shaped ancestors and obsolete package assets must disappear before
+    # byte updates are written. This supports both file -> directory and
+    # directory -> file changes between package versions.
+    for path in deletions:
+        if path.is_symlink() or path.is_file():
+            path.unlink(missing_ok=True)
+        elif path.is_dir():
+            try:
+                path.rmdir()
+            except OSError:
+                pass
+    for path, content in sorted(updates.items(), key=lambda item: str(item[0])):
+        path.parent.mkdir(parents=True, exist_ok=True)
+        fd, raw = tempfile.mkstemp(prefix=f".{path.name}.", dir=path.parent)
+        temporary = Path(raw)
+        try:
+            with os.fdopen(fd, "wb") as handle:
+                handle.write(content)
+                handle.flush()
+                os.fsync(handle.fileno())
+            os.replace(temporary, path)
+        finally:
+            temporary.unlink(missing_ok=True)
+    return len(updates) + len(deletions)
 
 
 def reconcile_payload_fragment(root: Path, policy: dict, fragment: str) -> int:
@@ -3169,11 +3300,6 @@ def cmd_normalize(args, policy: dict) -> int:
     return 0
 
 
-# Nonconforming review names map to the schema-defined -review target. The
-# patterns are node-scoped and never match an already compliant filename.
-REVIEW_ROUND_RE = re.compile(r"^(?:[a-z0-9]+(?:-[a-z0-9]+)*-)?round-(\d+)\.md$")
-SPACE_REVIEW_ROUND_RE = re.compile(
-    r"^(?:[a-z0-9]+(?:-[a-z0-9]+)*-)?space-round-(\d+)\.md$")
 ID_PREFIXED_DECISION_RE = re.compile(
     r"^dec-[a-z][a-z0-9]{1,3}-\d{3,}-([a-z0-9]+(?:-[a-z0-9]+)*)\.md$")
 
@@ -3184,7 +3310,6 @@ def build_rename_map(vault: Vault, policy: dict,
     Compliant names are skipped; record ids remain in frontmatter aliases."""
     renames: dict[str, str] = {}
     manual: list[str] = []
-    ch_folder = schema["doc_types"]["challenge_record"]["location"]["folder"]
     plain_space = ba_compile.space_overview_rel(schema)
     roots = set()
     for rel in vault.index:
@@ -3224,23 +3349,6 @@ def build_rename_map(vault: Vault, policy: dict,
                         continue
                     renames[rel] = f"{node_prefix}{plain}"
                     break
-            elif len(rest) == 2 and rest[0] == ch_folder:
-                # Node-scoped inverses: the root applies only the space-round
-                # inverse and a domain only the round inverse, so a domain
-                # never claims a space-round name; the -review target is
-                # schema-driven and already-suffixed names never re-match.
-                name = rest[1]
-                if node_rel:
-                    m = (None if SPACE_REVIEW_ROUND_RE.match(name)
-                         else REVIEW_ROUND_RE.match(name))
-                    new_name = (ba_compile.round_file_name(
-                        schema, "domain", int(m.group(1))) if m else None)
-                else:
-                    m = SPACE_REVIEW_ROUND_RE.match(name)
-                    new_name = (ba_compile.round_file_name(
-                        schema, "space", int(m.group(1))) if m else None)
-                if new_name and new_name != name:
-                    renames[rel] = f"{node_prefix}{ch_folder}/{new_name}"
             elif len(rest) == 2:
                 folder, name = rest
                 for doc_type, spec in schema["doc_types"].items():
@@ -3407,15 +3515,15 @@ def parse_type_values(pairs: list[str], universe: set,
 
 
 def build_designation_plan(vault: Vault, changes: list[dict],
-                           extra_old: dict, include_locked: bool) -> dict:
+                           extra_old: dict) -> dict:
     """The retitle and alias plan for the requested designation changes.
     Pure planning, no writes. A title transitions to base + current
-    designation (+ round for review rounds), the base found by stripping
-    every known prior value of the note's OWN type from the tail only
+    designation, the base found by stripping every known prior value of the
+    note's OWN type from the tail only
     (type-scoped: another type's designation is legitimate title
     vocabulary, never a strip candidate)."""
-    plan: dict = {"changes": changes, "retitles": [], "locked_skipped": [],
-                  "alias_rewrites": [], "manual": [], "blocked": []}
+    plan: dict = {"changes": changes, "retitles": [],
+                  "alias_rewrites": [], "manual": []}
     by_type = {c["type"]: c for c in changes}
     retitled: dict[str, tuple[str, str]] = {}
     for note in authored(vault):
@@ -3433,21 +3541,7 @@ def build_designation_plan(vault: Vault, changes: list[dict],
         candidates = [new] + ([change["old"]] if change["old"] else []) \
             + vault.designation_history.get(kebab_type, []) \
             + extra_old.get(kebab_type, [])
-        round_no = note.fm.get("round") \
-            if kebab_type == "challenge-record" else None
         work = title
-        round_suffix = ""
-        if isinstance(round_no, int):
-            peeled = peel_trailing_token(title, str(round_no))
-            if peeled is None:
-                plan["manual"].append({
-                    "path": note.rel,
-                    "reason": "review-round title does not close with its"
-                              " round number; round placement is judgment,"
-                              " retitle in-session"})
-                continue
-            work = peeled
-            round_suffix = f" {round_no}"
         base = strip_designation_tails(work, candidates)
         if any(designation_tail_span(base, c) == 0 for c in candidates):
             plan["manual"].append({
@@ -3456,26 +3550,11 @@ def build_designation_plan(vault: Vault, changes: list[dict],
                           " transition would empty it, retitle by"
                           " judgment"})
             continue
-        new_title = f"{base} {new}{round_suffix}"
+        new_title = f"{base} {new}"
         if new_title == title:
             continue
-        locked = note.fm.get("locked") is True
         entry = {"path": note.rel, "type": kebab_type, "old_title": title,
-                 "new_title": new_title, "locked": locked,
-                 "round": round_no if isinstance(round_no, int) else None}
-        if locked and not include_locked:
-            plan["locked_skipped"].append(entry)
-            continue
-        if locked:
-            first_h1 = next((text for (_l, text, level) in note.headings
-                             if level == 1), None)
-            if first_h1 is not None and first_h1 != title:
-                plan["manual"].append({
-                    "path": note.rel,
-                    "reason": "locked record H1 differs from its title;"
-                              " excluded from relabel (a half-write would"
-                              " strand an unrepairable H1 mismatch)"})
-                continue
+                 "new_title": new_title}
         plan["retitles"].append(entry)
         retitled[note.rel] = (title, new_title)
     for rel, (old_title, new_title) in sorted(retitled.items()):
@@ -3485,17 +3564,9 @@ def build_designation_plan(vault: Vault, changes: list[dict],
             for (lineno, _e, target, _a, alias, _i) in ref.wikilinks:
                 if target != stem or alias != old_title:
                     continue
-                ref_locked = ref.fm.get("locked") is True
-                if ref_locked and not include_locked:
-                    plan["blocked"].append({
-                        "path": ref_rel,
-                        "reason": f"locked referrer of {rel}; sweep with"
-                                  " --include-locked"})
-                    continue
                 plan["alias_rewrites"].append({
                     "path": ref_rel, "line": lineno, "target": stem,
-                    "old_alias": old_title, "new_alias": new_title,
-                    "locked": ref_locked})
+                    "old_alias": old_title, "new_alias": new_title})
     return plan
 
 
@@ -3542,9 +3613,7 @@ def write_designation_config(config_path: Path, config: dict,
 
 def apply_retitle(vault_root: Path, rel: str, old_title: str,
                   new_title: str) -> bool:
-    """Rewrite the frontmatter title and the byte-matching first H1 in
-    one write; nothing else in the file is touched (what makes the
-    locked relabel 'title and H1 only' true by construction)."""
+    """Rewrite the frontmatter title and byte-matching first H1 only."""
     path = vault_root / rel
     try:
         text = path.read_text(encoding="utf-8")
@@ -3706,8 +3775,7 @@ def cmd_reconcile_designations(args, policy: dict) -> int:
             "old_source": ("config" if old
                            else "from" if extra_old.get(kebab_type)
                            else None)})
-    plan = build_designation_plan(vault, changes, extra_old,
-                                  args.include_locked)
+    plan = build_designation_plan(vault, changes, extra_old)
     plan["mint"] = not current_map
     plan["dry_run"] = bool(args.dry_run)
     residuals: list[str] = []
@@ -3744,25 +3812,17 @@ def cmd_reconcile_designations(args, policy: dict) -> int:
               f" '{change['old'] or '(unset)'}' -> '{change['new']}'")
     for entry in plan["retitles"]:
         print(f"vault_check: retitle {entry['path']}:"
-              f" '{entry['old_title']}' -> '{entry['new_title']}'"
-              + (" [locked, audited]" if entry["locked"] else ""))
-    for entry in plan["locked_skipped"]:
-        print(f"vault_check: LOCKED skipped {entry['path']}:"
-              f" '{entry['old_title']}' -> '{entry['new_title']}'"
-              " (relabel with --include-locked, decision-authority approved)")
+              f" '{entry['old_title']}' -> '{entry['new_title']}'")
     for entry in plan["alias_rewrites"]:
         print(f"vault_check: alias {entry['path']}:{entry['line']}:"
               f" '{entry['old_alias']}' -> '{entry['new_alias']}'")
     for entry in plan["manual"]:
         print(f"vault_check: manual {entry['path']}: {entry['reason']}")
-    for entry in plan["blocked"]:
-        print(f"vault_check: BLOCKED {entry['path']}: {entry['reason']}")
     for residual in residuals:
         print(f"vault_check: RESIDUAL {residual}")
     print(f"vault_check: reconcile plan: {len(plan['retitles'])}"
           f" retitle(s), {len(plan['alias_rewrites'])} alias(es),"
-          f" {len(plan['locked_skipped'])} locked skipped,"
-          f" {len(plan['manual'])} manual, {len(plan['blocked'])} blocked"
+          f" {len(plan['manual'])} manual"
           + (" (dry run: nothing written)" if args.dry_run else
              "; run check to confirm green"))
     return 0
@@ -3932,10 +3992,6 @@ def main(argv: list[str] | None = None) -> int:
                    dest="from_values", metavar="TYPE=VALUE",
                    help="an unrecorded prior value to strip (repeatable;"
                         " never written to the ledger)")
-    p.add_argument("--include-locked", action="store_true",
-                   dest="include_locked",
-                   help="decision-authority approved: relabel locked records'"
-                        " title and H1 only")
     p.add_argument("--dry-run", action="store_true", dest="dry_run")
     p.add_argument("--json", action="store_true")
     p.set_defaults(func=cmd_reconcile_designations)

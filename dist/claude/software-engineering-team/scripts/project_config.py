@@ -37,7 +37,7 @@ LIMIT_KEYS = {
     "active_br_per_node_warn", "rules_per_set_warn",
     "criteria_per_set_warn", "process_doc_lines_warn",
     "open_row_age_days_warn", "space_docs_warn", "space_bytes_warn",
-    "nesting_warn_depth", "nesting_fail_depth", "challenge_max_rounds",
+    "nesting_warn_depth", "nesting_fail_depth",
     "summary_max_lines_space", "summary_max_lines_default",
     "nav_peer_min", "nav_peer_max", "experience_flows_per_set",
     "experience_transitions_per_set", "experience_screens_per_leaf_domain",

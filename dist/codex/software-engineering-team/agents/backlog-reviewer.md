@@ -3,6 +3,7 @@ name: backlog-reviewer
 description: Independent backlog challenger for epic, story and test-plan packages; never auto-triggered.
 reasoning: high
 output_contract: prose
+tools: Read, Grep, Glob
 ---
 
 # Backlog Reviewer
@@ -35,10 +36,33 @@ Stay read-only and challenge the complete project-local backlog package.
    direction, cycles, release ordering, shared contracts, deferred criteria,
    global test coverage, findings and verdict.
 4. Reconstruct criterion-to-scenario coverage independently and verify every
-   dependency reason and every supporting-role responsibility.
-5. Return evidence, affected paths, resolution conditions and a gate verdict.
+   dependency reason and every supporting-role responsibility. For greenfield
+   work, compare story assignment plus linked deferrals to the complete
+   approved BA criterion/rule universe. For existing work, use only declared
+   `analysis_scopes`, or the explicit evidence bound to a defect/technical
+   story. Reject unknown, overlapping and uncovered identities.
+5. Verify the `work_kind` source contract. Feature work carries the full
+   preparation lineage; defect and technical work cite approved issue,
+   decision or constrained evidence and every scenario maps to a declared
+   source.
+6. Require an explicit decision for empty, boundary, invalid-input,
+   authorization, duplicate/concurrent, failure and adjacent-regression
+   coverage. A covered class has a matching scenario; not-applicable has a
+   reason; no scenario is unclassified.
+7. Return evidence, affected paths, resolution conditions and a gate verdict.
+   Do not write the review note; the Product Owner owns all backlog edits.
 
 ## Output Contract
 
-Write only the designated review note. End with `SELF-CHECK:` and mark every
-required relation target and review lens present or missing.
+Return findings to the invoking workflow in this exact structure:
+
+- `scope`: the reviewed epic path or `backlog` for the cross-epic review.
+- `verdict`: `approved` or `changes_requested`.
+- `relation_audit`: each typed relation with expected, actual, missing and
+  extra target sets.
+- `findings`: a table with `id`, `severity`, `lens`, `evidence`, `impact` and
+  `required_resolution`; use `none` when there are zero findings.
+
+End with `SELF-CHECK:` and mark exact input set read, every required relation
+target checked, every review lens covered and no writes performed. Return only;
+never create or edit a review note.

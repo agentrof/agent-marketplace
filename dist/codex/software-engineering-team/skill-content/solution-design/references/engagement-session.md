@@ -12,8 +12,9 @@ studies one topic; accepted decisions are written back to the landscape.
 2. Ground every cited analysis domain with
    `ba_compile.py check --space <space> --gate approval`. Route failures to
    business analysis.
-3. Use a new kebab-case topic slug for each engagement. Reopened topics append
-   `-2`, `-3`, and so on; never reuse a closed slug.
+3. Use one stable kebab-case slug per engagement topic. A later revisit updates
+   the same canonical engagement and records changed decisions in their normal
+   structures; Git history preserves the prior prose.
 4. Run `landscape_check.py --tree workspace/docs/solution-design` and
    `vault_check.py check --vault workspace/docs --scope solution-design`.
 
@@ -23,8 +24,9 @@ studies one topic; accepted decisions are written back to the landscape.
    requirements, constraints, options and a verdict.
 2. Link the landscape, analysis criteria and decisions in front matter. Every
    decision records its accepted alternative and the reason for rejection.
-3. Debate in explicit rounds. Record each round under `reviews/` and resolve
-   every finding as fix, reject (with a reason), or defer (with a revisit note).
+3. Ask fresh read-only challengers for structured findings. Resolve accepted
+   findings in the engagement or decision documents and keep the reviewer
+   replies transient.
 4. Run the artifact, landscape and vault checks after each milestone.
 
 ## Solution gate

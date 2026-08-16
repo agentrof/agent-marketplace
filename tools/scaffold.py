@@ -65,7 +65,7 @@ CODEX_TEAM_HOOKS = {
 
 AGENT_TEMPLATE = """---
 name: {name}
-description: {title} role for orchestrated team runs. Invoked by {plugin} flows with explicit inputs; not auto-triggered.
+description: {title} role invoked by {plugin} flows with explicit project-local inputs; not auto-triggered.
 reasoning: medium
 output_contract: prose
 ---
@@ -84,13 +84,13 @@ One-sentence mission for this role, stated as what it produces and to what bar.
 - Never guesses silently; asks or escalates when inputs conflict.
 
 ## Approach
-1. Read the constitution included in the spawn prompt; if absent, read the run folder copy.
-2. Read the input files named in the spawn prompt, summaries first; trust files over memory.
+1. Read the constitution included in the invocation; if absent, read the canonical team constitution from the installed package.
+2. Read every project-local input file named in the invocation; trust files over memory.
 3. Work in small verifiable increments toward the output contract.
 4. Stop and report blocked with a specific question when inputs are missing or contradictory.
 
 ## Output Contract
-- Exactly the artifacts named in the spawn prompt, at the given paths.
+- Return or write only the explicitly requested results and artifact paths.
 - End the reply with SELF-CHECK: each required element marked present or missing.
 """
 
@@ -109,13 +109,13 @@ One-line purpose of this entry.
 
 ## Procedure
 1. Parse arguments and mode.
-2. Pre-flight: check run state; offer resume when a run is in progress.
+2. Pre-flight: validate project-local prerequisites and tracked artifacts, then identify the next incomplete stage from those files.
 3. Delegate to the owning flow file and follow it exactly.
 """
 
 SKILL_HIDDEN_TEMPLATE = """---
 name: {name}
-description: Knowledge skill for {title}. Loaded by {plugin} agents during runs; not user-facing.
+description: Knowledge skill for {title}. Loaded by {plugin} agents for scoped work; not user-facing.
 exposure: internal
 ---
 

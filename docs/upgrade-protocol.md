@@ -1,25 +1,57 @@
 # Upgrade protocol
 
-An Agent Marketplace upgrade is an idempotent package refresh followed by a
-project-local setup and check. The consuming repository's authored Markdown is
-the source of truth.
+An Agent Marketplace upgrade is a package replacement followed by one
+convergent project refresh. The consuming repository's authored Markdown and
+configuration remain the source of truth.
 
 1. Build and validate both host distributions from the same source snapshot.
-2. Preview changes to package-owned instructions, hooks, vault payload and
-   compiler-owned views.
-3. Preserve authored documents and user-owned companion files. Apply only the
-   selected managed-file changes.
-4. Preserve configured designation wording and retired-value history. Setup
+2. Run `setup_project.py inspect --project-root <root> --json`. This is a
+   read-only, pre-mutation plan over the workspace contract, policy-owned
+   Obsidian keys, package-local Obsidian plugin projection, managed ignore block
+   and portable gate. JSON changes expose exact key-level before/after values;
+   byte-owned assets expose hashes. Resolve every blocker before applying.
+3. Run `setup_project.py apply --project-root <root> --json`, then
+   `setup_project.py check --project-root <root> --json`. All three commands use
+   the same convergence planner; apply rebuilds its authoritative plan after
+   acquiring the mutation guard. Apply rolls back setup-owned paths that still
+   match its exact postimage when the closing check fails; a concurrent edit is
+   preserved and reported as a rollback conflict when observed at a target
+   boundary. Mutating setup apply processes are serialized and every target is
+   rechecked immediately before atomic replacement. Pause non-setup editors on
+   all setup-managed targets during this short window; no portable filesystem
+   primitive can conditionally replace against an uncooperative writer. Check
+   rejects any operation still required.
+4. Preserve authored documents, unknown project configuration fields and
+   user-owned Obsidian knobs. Refresh only policy-asserted JSON keys. Preserve
+   user-owned instruction companions through the separate host projection
+   choice gate.
+5. Preserve configured designation wording and retired-value history. Setup
    may add defaults for newly shipped document types, but never replaces an
-   existing project-selected designation.
-5. Rerun the packaged setup command against the canonical `workspace/` path.
-   The compatibility `--workspace workspace` argument is accepted; every other
-   workspace value and every second managed vault is rejected. Repeated setup with the same package and
-   project inputs must produce no authored-file diff.
-6. Run the portable vault gate and every compiler for a subtree that exists,
+   existing project-selected designation. Adding a default writes only
+   `workspace/config.json`; setup never retitles authored notes as an implicit
+   upgrade side effect. Intentional designation changes remain explicit
+   configure/reconcile operations with their own reviewable plans.
+6. The compatibility `--workspace workspace` argument is accepted; every other
+   workspace value and every second managed vault is rejected. Omit `--origin`
+   during refresh so an existing classification is preserved. Repeated apply
+   with the same package and project must produce an empty inspect plan.
+7. Treat `workspace/docs/.obsidian/community-plugins.json` and each
+   policy-owned `.obsidian/plugins/<id>/` directory as ignored local package
+   projections. Refresh updates shipped files and removes package-retired
+   assets from those owned directories. It leaves unrelated plugin directories
+   alone. These files are validated locally but never committed in the
+   consuming repository.
+8. Run the portable vault gate and every compiler for a subtree that exists,
    including the approved-integrity check when the backlog is approved.
-7. Review and commit the exact tracked diff, then start a fresh host session so
+9. Review and commit the exact tracked diff, then start a fresh host session so
    the refreshed skills and hooks load.
+
+Stage routing inspects Git only at a completed-stage handoff. The relevant
+config, approved subtree, home note and stage map must be tracked, committed and
+clean. Unrelated application work and the current draft stage are outside that
+path set and do not block active authoring. Existing projects without an
+approved, committed scoped backlog return to `backlog-plan`, never directly to
+delivery.
 
 The project-local `.agentrof/agent-marketplace/.runtime/` directory is
 disposable and never participates in compatibility decisions. A refresh may

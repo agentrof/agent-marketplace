@@ -9,6 +9,12 @@ The template always runs the tracked portable single-vault gate before the
 project-specific jobs. Do not replace it with an installed plugin path; every
 supported host and CI must execute the same `.pyz` bytes.
 
+The deferred materializer substitutes `{{test_command}}`,
+`{{audit_command}}` and `{{env_command}}` in `ci-tests.yml`. Project setup
+substitutes `{{project_local_ignores}}` in the packaged gitignore template
+from the product's declared project-local roots. No token is written
+literally to a consuming repository.
+
 - Refuse materialization while any placeholder source is absent.
 - Use the configured test command for the test placeholder.
 - Build one dependency-audit command per configured stack, anchored at its

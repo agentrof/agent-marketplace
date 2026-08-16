@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Fail-closed fresh setup preflight and closing contract verifier."""
+"""Fail-closed project refresh preflight and closing contract verifier."""
 
 from __future__ import annotations
 
@@ -11,6 +11,7 @@ from pathlib import Path
 
 import marketplace_paths
 import project_config
+import vault_check
 
 START = "# agent-marketplace:software-engineering-team:gitignore:start"
 END = "# agent-marketplace:software-engineering-team:gitignore:end"
@@ -63,6 +64,42 @@ def local_roots() -> tuple[str, ...]:
 
 def runtime_root(root: Path) -> Path:
     return root / local_roots()[0] / Path(*RUNTIME_PARTS)
+
+
+def runtime_findings(root: Path) -> list[str]:
+    """The owned local tree contains only one disposable runtime directory."""
+    findings: list[str] = []
+    runtime = runtime_root(root)
+    owned_root = runtime.parent
+    runtime_chain = (owned_root.parent, owned_root, runtime)
+    symlink = next((path for path in runtime_chain if path.is_symlink()), None)
+    if symlink is not None:
+        return [
+            "project-local runtime path is symlinked: "
+            + symlink.relative_to(root).as_posix()
+        ]
+    if not runtime.is_dir():
+        findings.append(
+            "missing project-local runtime: .agentrof/agent-marketplace/.runtime"
+        )
+    if owned_root.is_dir():
+        for path in sorted(owned_root.iterdir()):
+            if path.name != ".runtime":
+                findings.append(
+                    "only .runtime may exist in the owned local tree: "
+                    + path.relative_to(root).as_posix()
+                )
+    if runtime.is_dir():
+        for path in sorted(runtime.rglob("*")):
+            if not path.is_file():
+                continue
+            if path.name in FORBIDDEN_RUNTIME_NAMES \
+                    or path.suffix.casefold() in FORBIDDEN_RUNTIME_SUFFIXES:
+                findings.append(
+                    "database or canonical state is forbidden in runtime: "
+                    + path.relative_to(root).as_posix()
+                )
+    return findings
 
 
 def managed_block(workspace: str) -> str:
@@ -135,6 +172,45 @@ def designation_findings(work: Path) -> list[str]:
             + (f": {detail}" if detail else "")]
 
 
+def payload_findings(work: Path) -> list[str]:
+    """Validate only the Obsidian payload, never active authored notes."""
+    docs = work / "docs"
+    if not docs.is_dir():
+        return []
+    try:
+        policy = vault_check.load_policy(vault_check.DEFAULT_POLICY)
+        policy = vault_check.effective_policy(policy, docs)
+        vault = vault_check.build_vault(docs, policy)
+        findings = []
+        vault_check.check_obsidian_payload(
+            vault, findings, vault_check.DEFAULT_PAYLOAD,
+            require_local_projection=True,
+        )
+        stale = vault_check.payload_reconcile_updates(
+            docs, policy, vault_check.DEFAULT_PAYLOAD
+        )
+        stale_deletions = vault_check.payload_reconcile_deletions(
+            docs, policy, vault_check.DEFAULT_PAYLOAD
+        )
+    except (OSError, ValueError, json.JSONDecodeError) as exc:
+        return [f"managed vault payload check failed: {exc}"]
+    messages = [
+        f"managed vault payload: {finding.path}: {finding.message}"
+        for finding in findings if finding.severity == "error"
+    ]
+    messages.extend(
+        "managed vault payload is stale: "
+        + path.relative_to(work.parent).as_posix()
+        for path in sorted(stale, key=lambda value: str(value))
+    )
+    messages.extend(
+        "managed vault payload has stale package-local content: "
+        + path.relative_to(work.parent).as_posix()
+        for path in stale_deletions
+    )
+    return list(dict.fromkeys(messages))
+
+
 def closing(root: Path, workspace: str) -> list[str]:
     work = root / workspace
     config = read(work / "config.json")
@@ -193,6 +269,21 @@ def closing(root: Path, workspace: str) -> list[str]:
             "local runtime or projection files are force-added: "
             + ", ".join(tracked_local.stdout.splitlines())
         )
+    tracked_plugins = subprocess.run(
+        [
+            "git", "ls-files", "--",
+            f"{workspace}/docs/.obsidian/community-plugins.json",
+            f"{workspace}/docs/.obsidian/plugins",
+        ],
+        cwd=root, capture_output=True, text=True, check=False,
+    )
+    if tracked_plugins.returncode != 0:
+        findings.append("local Obsidian plugin projection tracking check failed")
+    elif tracked_plugins.stdout.strip():
+        findings.append(
+            "package-projected local Obsidian plugin files are tracked: "
+            + ", ".join(tracked_plugins.stdout.splitlines())
+        )
     for relative in (
         "docs/.obsidian/app.json", "docs/.obsidian/appearance.json",
         "docs/.obsidian/core-plugins.json", "docs/.obsidian/graph.json",
@@ -200,28 +291,8 @@ def closing(root: Path, workspace: str) -> list[str]:
     ):
         if not (work / relative).is_file():
             findings.append(f"missing managed vault payload: {workspace}/{relative}")
-    runtime = runtime_root(root)
-    runtime_chain = (runtime.parent.parent, runtime.parent, runtime)
-    symlink = next((path for path in runtime_chain if path.is_symlink()), None)
-    if symlink is not None:
-        findings.append(
-            "project-local runtime path is symlinked: "
-            + symlink.relative_to(root).as_posix()
-        )
-    elif not runtime.is_dir():
-        findings.append(
-            "missing project-local runtime: .agentrof/agent-marketplace/.runtime"
-        )
-    else:
-        for path in sorted(runtime.rglob("*")):
-            if not path.is_file():
-                continue
-            if path.name in FORBIDDEN_RUNTIME_NAMES \
-                    or path.suffix.casefold() in FORBIDDEN_RUNTIME_SUFFIXES:
-                findings.append(
-                    "database or canonical state is forbidden in runtime: "
-                    + path.relative_to(root).as_posix()
-                )
+    findings.extend(runtime_findings(root))
+    findings.extend(payload_findings(work))
     findings.extend(designation_findings(work))
     portable_gate = root / ".github" / "agentrof" / "vault-gate.pyz"
     if not portable_gate.is_file():

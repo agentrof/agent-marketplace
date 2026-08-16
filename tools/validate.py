@@ -992,7 +992,19 @@ RETIRED_OPERATIONS_RE = re.compile(
     r"project-management-office|\bPMO\b|control[- _]?tower|pmo_cli|"
     r"pmo_dashboard|hook_guard_db|marketplace_run\.py|agentrof\.db|"
     r"\bwork[- ]order(?:s)?\b|(?:import|from)\s+sqlite3\b|"
+    r"\bproject[_ -]key(?:s)?\b|AGENTROF_HOME|"
+    r"(?:~|\$HOME|\$\{HOME\})/\.agentrof\b|"
+    r"challenge[_ -]record|challenge[_ -]round|audit[_ -]history|"
+    r"blocked_by_frozen_referrer|space-round-[0-9]+-review|"
+    r"\b(?:locked|challenge_status|challenge_hash)\s*:|"
     r"\bMigrate is format-only\b|vault_check\.py\s+migrate\b",
+    re.IGNORECASE,
+)
+RETIRED_OPERATIONS_PATH_RE = re.compile(
+    r"(?:^|/)(?:project-management-office|control-tower)(?:/|$)|"
+    r"(?:^|/)(?:pmo_(?:cli|dashboard)|hook_guard_db|marketplace_run)\.py$|"
+    r"(?:^|/)(?:challenge[_-]record|challenge[_-]round|audit[_-]history)"
+    r"(?:[./_-]|$)",
     re.IGNORECASE,
 )
 
@@ -1014,9 +1026,20 @@ def check_retired_operations_residue(
             continue
         for path in sorted(candidate for candidate in root.rglob("*")
                            if candidate.is_file()):
+            relative = rel(tree, path)
+            retired_path = RETIRED_OPERATIONS_PATH_RE.search(relative)
+            if retired_path is not None:
+                findings.append(Finding(
+                    "error", relative, 1,
+                    "retired_operations_residue",
+                    "retired operations component path remains",
+                    "remove the obsolete team, dashboard, runtime or history "
+                    "component",
+                ))
+                continue
             if path.suffix.casefold() in {".db", ".sqlite", ".sqlite3"}:
                 findings.append(Finding(
-                    "error", rel(tree, path), 1,
+                    "error", relative, 1,
                     "retired_operations_residue",
                     "database file remains in a packaged or release surface",
                     "remove runtime state from tracked and distributed files",
@@ -1030,7 +1053,7 @@ def check_retired_operations_residue(
             if match is None:
                 continue
             findings.append(Finding(
-                "error", rel(tree, path),
+                "error", relative,
                 text[:match.start()].count("\n") + 1,
                 "retired_operations_residue",
                 f"retired operations surface remains: {match.group(0)}",
@@ -1513,17 +1536,6 @@ def check_ba_schema_shape(tree: Tree, findings: list[Finding]) -> None:
             except re.error:
                 err("id_format does not compile as a regex",
                     "id_format is the id law; it must compile")
-            challenge = schema.get("challenge")
-            for key in ("round_file_format", "space_round_file_format"):
-                value = (challenge.get(key)
-                         if isinstance(challenge, dict) else None)
-                if not (isinstance(value, str) and "{n}" in value
-                        and value.endswith("-review.md")):
-                    err(f"challenge.{key} must be a format string carrying"
-                        " {n} and ending in -review.md",
-                        "review round filenames are schema-driven; every"
-                        " typed review file carries the -review suffix like"
-                        " the rest of the folder law")
             row_schemas = schema.get("row_schemas", {})
             all_columns = {c for row in row_schemas.values()
                            if isinstance(row, dict)
@@ -1559,9 +1571,7 @@ def check_ba_schema_shape(tree: Tree, findings: list[Finding]) -> None:
                         err(f"doc type '{type_name}' folder location must"
                             " carry a non-empty filename_suffix",
                             "typed content files carry a -<suffix>; the"
-                            " suffix is schema data, never implied (review"
-                            " rounds carry the review suffix through their"
-                            " round file format)")
+                            " suffix is schema data, never implied")
                 for kind in spec.get("mints", []) or []:
                     if str(kind).lower() not in row_schemas:
                         err(f"doc type '{type_name}' mints '{kind}' which has"

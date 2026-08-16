@@ -11,8 +11,11 @@ approved. This entry prepares delivery, but it does not start delivery.
 
 ## When to Use
 
-- Business Analysis, Solution Design, Design System and Experience Design are
-  approved and their compilers are green.
+- For greenfield, Business Analysis, Solution Design, Design System and
+  Experience Design are approved and their compilers are green.
+- For an existing project, the bounded feature intake has equivalent approved
+  upstreams, or each defect/technical intake has approved source, issue or
+  decision evidence.
 - The user wants a tracked backlog before any delivery work begins.
 
 ## Procedure
@@ -23,26 +26,51 @@ approved. This entry prepares delivery, but it does not start delivery.
    skill completely; the vault policy is authoritative for paths and metadata.
 3. Initialize `workspace/docs/backlog/` with `backlog_compile.py init`.
 4. Create one folder per epic. Each epic contains `epic.md`, `reviews/` and
-   `stories/<story-slug>/story.md` plus `test-plan.md` for every story.
+   `stories/<story-slug>/story.md` plus `test-plan.md` for every story. Authored
+   titles and H1s use the configured document-type designations. The
+   capitalized designation is the complete root backlog/root-review label;
+   authored epic/story/test-plan bases append it. Stable paths, IDs and type
+   keys do not change with display language.
 5. Assign one `owner_role` per story and any concrete `supporting_roles`.
-   Author the seven required story sections, resolvable upstream links,
-   dependency reasons, complete criterion coverage and an automation target
-   for every automation-required scenario. Do not add an assignee or any
-   runtime identity.
-6. Run the packaged `backlog_compile.py check --render` and the scoped
+   Author the seven required story sections, resolvable upstream links and
+   dependency reasons. Set `work_kind` to `feature`, `defect` or `technical`.
+   Greenfield work is feature-only. Feature work always needs criterion,
+   Experience, Design System and Solution Design constraint refs. Only an
+   existing-project defect or technical story may use
+   explicit approved source, issue or decision evidence instead. Do not add an
+   assignee or any runtime identity. Historical BA is out of scope unless the
+   root backlog deliberately declares canonical `analysis_scopes`.
+6. Give every scenario non-empty source refs. Feature scenarios use story
+   criteria; defect/technical scenarios use declared criteria and/or approved
+   `related_to` evidence. Map every declared planning source to at least one
+   scenario and complete the exact seven-class
+   coverage table: `empty`, `boundary`, `invalid-input`, `authorization`,
+   `duplicate-concurrent`, `failure`, `adjacent-regression`. A covered class
+   cites existing scenarios; an inapplicable class cites none and explains why.
+   Covered rows classify the exact scenario set. Give every
+   automation-required scenario an automation target.
+7. Run the packaged `backlog_compile.py check --render` and the scoped
    Obsidian vault check;
    initialization reconciles the backlog property/graph fragment and renders
    the map and backlog navigation. Outgoing wikilinks provide graph and
-   backlink relations without rewriting approved upstream notes. Challenge
-   the whole
-   package: the epic review covers the exact story and test-plan set; the root
-   review covers the exact epic set, global scope, dependencies, release
-   ordering and coverage.
-7. Only after the user approves the exact Markdown changes, use the packaged
+   backlink relations without rewriting approved upstream notes. Challenge the
+   whole package through fresh read-only backlog reviewers. Give each reviewer
+   an exact named input set and expected relation sets; wait for all epic
+   reviewers before the Product Owner writes any epic review or fix. The
+   Product Owner is the only backlog writer. After epic packages are green,
+   invoke and wait for the root reviewer, then let the Product Owner write the
+   root review. The epic review covers the exact story and test-plan set; the
+   root review covers the exact epic set, global scope, dependencies, release
+   ordering and coverage. Its structured `Deferred Criteria` table carries
+   an escaped-table vault wikilink `criterion_ref`, `owner_role`, `reason` and
+   `revisit_trigger`. Every greenfield AC/BR, or every selected/scoped existing
+   AC/BR, is either story-covered or deferred, never both. Replace all review
+   placeholders and generic approvals with concrete evidence and conclusions.
+8. Only after the user approves the exact Markdown changes, use the packaged
    compiler's atomic `approve` verb. It stamps the package, backlog, epics,
    reviews and test plans, preserves stories as `planned`, renders
    `_generated/registry.json`, `board.md`, `dependency-map.md` and
    `test-coverage.md`, and verifies the resulting package hash. Commit the
    tracked docs.
-8. Stop with `deliver` as the next explicit entry. Backlog approval is not
+9. Stop with `deliver` as the next explicit entry. Backlog approval is not
    delivery activation.

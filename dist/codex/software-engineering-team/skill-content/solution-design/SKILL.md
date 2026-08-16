@@ -35,11 +35,12 @@ decision. Nothing decided remains only in conversation.
    approved documents are the complete stage state.
 3. Work one kebab-case engagement topic at a time. Record framing, constraints,
    options, rejected alternatives, verdict, affected components and exact
-   traceability links in `engagements/`, `decisions/` and `reviews/`.
-4. Run one fresh read-only challenge round before the project decision gate. Fix every
-   mechanical finding; disposition judgment findings with a reason or named
-   revisit note. Render the decision index, relations and navigation after
-   each accepted change.
+   traceability links in `engagements/` and `decisions/`.
+4. Run a fresh read-only challenge panel before the project decision gate.
+   Apply accepted resolutions to the canonical documents, then re-run only
+   affected readers until no blocking evidence gap remains. Reviewer replies
+   are transient input, not files. Render the decision index, relations and
+   navigation after each accepted change.
 5. Ask the owner to Approve, Request changes or Pause through the host choice
    gate. On approval, stamp the engagement with its compiler, update the
    landscape and maps, run the complete checks, and commit the tree.

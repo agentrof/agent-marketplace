@@ -32,6 +32,36 @@ class ScaffoldContracts(unittest.TestCase):
             self.assertNotIn("project-management-office", claude)
             self.assertNotIn('"dependencies"', claude)
 
+    def test_new_agent_has_no_retired_run_state_language(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            fixtures.make_valid_root(root)
+            scaffold.new_plugin(root, "sample-team")
+            scaffold.new_agent(root, "sample-team", "sample-reviewer")
+            text = (root / "plugins/sample-team/agents/sample-reviewer.md").read_text(
+                encoding="utf-8"
+            ).lower()
+            for retired in ("run state", "resume", "run folder", "work order",
+                            "during runs"):
+                self.assertNotIn(retired, text)
+            self.assertIn("project-local input", text)
+
+    def test_new_skills_have_no_retired_run_state_language(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            fixtures.make_valid_root(root)
+            scaffold.new_plugin(root, "sample-team")
+            scaffold.new_skill(root, "sample-team", "sample-entry", "entry")
+            scaffold.new_skill(root, "sample-team", "sample-knowledge", "hidden")
+            for relative in (
+                "plugins/sample-team/skill-content/sample-entry/SKILL.md",
+                "plugins/sample-team/skill-content/sample-knowledge/SKILL.md",
+            ):
+                text = (root / relative).read_text(encoding="utf-8").lower()
+                for retired in ("run state", "resume", "run folder", "work order",
+                                "during runs"):
+                    self.assertNotIn(retired, text)
+
 
 if __name__ == "__main__":
     unittest.main()

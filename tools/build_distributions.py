@@ -60,7 +60,6 @@ CANONICAL_HOST_TOKENS = (
 CANONICAL_COMPONENTS = {
     "agents",
     "constitution.md",
-    "dashboard",
     "flows",
     "hooks",
     "scripts",

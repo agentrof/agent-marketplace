@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
-"""Safe naming and read-only preflight for Delivery Git coordination.
+"""Safe Delivery Git coordination with exact remote leases and recovery.
 
-Remote mutation verbs are intentionally added only after this layer is
-validated. All subprocesses use argument arrays and never accept a user value
-as a shell fragment.
+All subprocesses use argument arrays and never accept a user value as a shell
+fragment. Semantic compilers prepare Markdown; this module owns atomic Fence,
+Integration, Item and Slot transitions, local receipts/worktrees, target
+refresh and cancellation publication.
 """
 
 from __future__ import annotations
@@ -533,7 +534,11 @@ def resolve_target(root: Path, remote: str) -> tuple[str, str]:
         branch = run_git(root, "branch", "--show-current")
     if not branch:
         raise RuntimeError("target branch cannot be resolved")
-    oid = run_git(root, "rev-parse", f"refs/remotes/{remote}/{branch}")
+    remote_line = run_git(root, "ls-remote", remote, f"refs/heads/{branch}")
+    if remote_line:
+        oid = remote_line.split()[0]
+    else:
+        oid = run_git(root, "rev-parse", f"refs/remotes/{remote}/{branch}")
     return branch, oid
 
 
@@ -763,6 +768,70 @@ def open_pr(project_root: Path, delivery_id: str, remote: str = "origin") -> dic
             "fence": recorded["fence"], "refs": short_refs(delivery_id)}
 
 
+def merge_pr(project_root: Path, delivery_id: str, remote: str = "origin") -> dict:
+    """Merge the one reviewed PR with exact head/base evidence.
+
+    Provider mutation is followed by a fresh all-state query and target
+    ancestry proof. A ready/squash/rebase/admin result or missing merge object
+    is never interpreted as successful closure.
+    """
+    root = main_worktree(project_root.resolve())
+    from delivery_compile import docs_root, find_delivery, split_note
+    from delivery_provider import GitHubProvider, ProviderError
+    docs = docs_root(root)
+    directory = find_delivery(docs, delivery_id)
+    if directory is None:
+        raise RuntimeError("Delivery package not found")
+    review_props, _ = split_note(directory / "delivery-review.md")
+    url = str(review_props.get("pull_request_url", ""))
+    canonical_url, _ = canonical_github_pr(url)
+    refs = canonical_refs(delivery_id)
+    integration_oid = remote_oid(root, remote, refs["integration"])
+    integration_message = commit_message(root, integration_oid)
+    if trailer(integration_message, "Record") != "pr-url-recorded-v1":
+        raise RuntimeError("merge-pr requires the current recorded Delivery PR")
+    target_branch, target_before = resolve_target(root, remote)
+    provider = GitHubProvider(root, remote)
+    candidates = [item for item in provider.list_pull_requests(short_refs(delivery_id)["integration"], target_branch)
+                  if str(item.get("url", "")) == canonical_url]
+    if len(candidates) != 1:
+        raise ProviderError("exactly one lifecycle PR is required")
+    pr = candidates[0]
+    if str(pr.get("state", "")).upper() == "MERGED":
+        merged = pr
+    else:
+        if str(pr.get("state", "")).upper() != "OPEN" or pr.get("headRefName") != short_refs(delivery_id)["integration"] or pr.get("baseRefName") != target_branch:
+            raise ProviderError("Delivery PR head/base/state is not mergeable")
+        if pr.get("isDraft"):
+            provider.make_ready(canonical_url)
+        head_now = remote_oid(root, remote, refs["integration"])
+        if head_now != integration_oid:
+            raise RuntimeError("Integration advanced after PR review; re-run Delivery Review")
+        provider.merge_commit(canonical_url, integration_oid)
+        refreshed = [item for item in provider.list_pull_requests(short_refs(delivery_id)["integration"], target_branch)
+                     if str(item.get("url", "")) == canonical_url]
+        if len(refreshed) != 1:
+            raise ProviderError("merged PR cannot be reconstructed")
+        merged = refreshed[0]
+    if str(merged.get("state", "")).upper() != "MERGED":
+        raise ProviderError("provider PR is not merged")
+    merge_value = merged.get("mergeCommit")
+    merge_oid = merge_value.get("oid") if isinstance(merge_value, dict) else merge_value
+    if not isinstance(merge_oid, str) or not OID_RE.fullmatch(merge_oid):
+        raise ProviderError("provider did not return an exact merge commit")
+    target_after = resolve_target(root, remote)[1]
+    run_git(root, "fetch", "--no-tags", remote, f"refs/heads/{target_branch}:refs/remotes/{remote}/{target_branch}")
+    try:
+        run_git(root, "merge-base", "--is-ancestor", merge_oid, target_after)
+        run_git(root, "merge-base", "--is-ancestor", integration_oid, target_after)
+    except RuntimeError as exc:
+        raise RuntimeError("provider merge is not present in the exact target ancestry") from exc
+    return {"ok": True, "delivery": delivery_id, "status": "merged",
+            "pull_request_url": canonical_url, "merge_commit": merge_oid,
+            "target_before": target_before, "target_after": target_after,
+            "reviewed_integration": integration_oid, "refs": short_refs(delivery_id)}
+
+
 def cancellation_projection(delivery_id: str, scope_hash: str, reason: str,
                              stories: dict[str, dict[str, str]], target: str) -> tuple[dict, str]:
     if not reason.strip() or not OID_RE.fullmatch(target):
@@ -772,18 +841,112 @@ def cancellation_projection(delivery_id: str, scope_hash: str, reason: str,
         validate_story_id(story)
         if set(value) != {"disposition", "tip"}:
             raise ValueError("cancellation story projection has unexpected keys")
-        if value["disposition"] != "not_started" or value["tip"] != "none":
-            raise ValueError("scope-only cancellation requires not_started/none")
-        normalized[story] = {"disposition": "not_started", "tip": "none"}
+        disposition = str(value["disposition"])
+        tip = str(value["tip"])
+        if disposition == "not_started":
+            if tip != "none":
+                raise ValueError("not_started cancellation stories must use tip none")
+        elif disposition in {"integrated_reverted", "unintegrated_discarded"}:
+            if not OID_RE.fullmatch(tip):
+                raise ValueError("executed cancellation stories require an exact previous Item tip")
+        else:
+            raise ValueError("unsupported cancellation disposition")
+        normalized[story] = {"disposition": disposition, "tip": tip}
     projection = {"delivery": delivery_id, "reason": reason.strip(),
                   "scope_hash": scope_hash, "stories": normalized, "target": target}
     digest = "sha256:" + hashlib.sha256(_canonical_json(projection).encode("utf-8")).hexdigest()
     return projection, digest
 
 
-def cancel_scope_delivery(project_root: Path, delivery_id: str, reason: str,
-                          remote: str = "origin") -> dict:
-    """Atomically close a claims-free Delivery through cancellation Review."""
+def cancellation_projection_hash(delivery_id: str, intent_hash: str,
+                                 stories: dict[str, dict[str, str]], target: str,
+                                 barrier_epoch: str) -> str:
+    """Hash the final, pre-finalization disposition projection.
+
+    The commit OIDs are deliberately excluded. This makes the Review and the
+    target package reproducible after an accepted-response-loss recovery.
+    """
+    if not EPOCH_RE.fullmatch(barrier_epoch):
+        raise ValueError("cancellation barrier epoch is invalid")
+    final_stories = {}
+    for story, value in sorted(stories.items()):
+        validate_story_id(story)
+        if set(value) != {"disposition", "tip"}:
+            raise ValueError("cancellation finalization story projection has unexpected keys")
+        final_stories[story] = {
+            "disposition": str(value["disposition"]),
+            "previous_tip": str(value["tip"]),
+        }
+    value = {
+        "barrier_epoch": barrier_epoch,
+        "cancellation_intent_hash": intent_hash,
+        "delivery": delivery_id,
+        "stories": final_stories,
+        "target": target,
+    }
+    return "sha256:" + hashlib.sha256(_canonical_json(value).encode("utf-8")).hexdigest()
+
+
+def revert_merge_candidate(root: Path, base: str, merge_oid: str,
+                           subject: str, trailers: dict[str, str]) -> str:
+    """Create a deterministic reverse-order revert of one Item merge.
+
+    Integration commits are merge commits whose first parent is the previous
+    Integration head. Applying the inverse first-parent patch to the current
+    head preserves all later unrelated history while requiring explicit
+    conflict resolution instead of silently choosing a product tree.
+    """
+    parents = run_git(root, "show", "-s", "--format=%P", merge_oid).split()
+    if len(parents) < 2:
+        raise RuntimeError(f"integrated Item tip is not a merge commit: {merge_oid}")
+    first_parent = parents[0]
+    patch = subprocess.run(
+        ["git", "diff", "--binary", first_parent, merge_oid], cwd=root,
+        text=False, capture_output=True, check=False,
+    )
+    if patch.returncode:
+        raise RuntimeError(patch.stderr.decode("utf-8", "replace") or "cannot calculate Item revert")
+    with tempfile.TemporaryDirectory(prefix="agentrof-revert-index-") as temporary:
+        index = Path(temporary) / "index"
+        env = os.environ.copy()
+        env["GIT_INDEX_FILE"] = str(index)
+        read = subprocess.run(["git", "read-tree", base], cwd=root, env=env,
+                              text=True, capture_output=True, check=False)
+        if read.returncode:
+            raise RuntimeError(read.stderr.strip() or "cannot prepare cancellation revert index")
+        apply = subprocess.run(
+            ["git", "apply", "--cached", "--reverse", "--binary", "-"],
+            cwd=root, env=env, input=patch.stdout, capture_output=True, check=False,
+        )
+        if apply.returncode:
+            detail = apply.stderr.decode("utf-8", "replace") or "cancellation revert conflicts with current Integration"
+            raise RuntimeError(detail.strip())
+        tree = subprocess.run(["git", "write-tree"], cwd=root, env=env,
+                              text=True, capture_output=True, check=False)
+        if tree.returncode:
+            raise RuntimeError(tree.stderr.strip() or "cannot write cancellation revert tree")
+        message = subject + "\n\n" + "\n".join(
+            f"Agentrof-{key}: {value}" for key, value in trailers.items()
+        ) + "\n"
+        commit = subprocess.run(
+            ["git", "commit-tree", tree.stdout.strip(), "-p", base],
+            cwd=root, env=env, input=message, text=True,
+            capture_output=True, check=False,
+        )
+        if commit.returncode:
+            raise RuntimeError(commit.stderr.strip() or "cannot create cancellation revert")
+        return commit.stdout.strip()
+
+
+def cancel_delivery(project_root: Path, delivery_id: str, reason: str,
+                    remote: str = "origin") -> dict:
+    """Cancel a Delivery through one intent, disposition and Review push.
+
+    The operation is fail-closed: all Item/Slot/Integration/Fence leases are
+    checked in one final atomic push. Integrated Item merge commits are
+    reverted in reverse first-parent order before the cancelled projections
+    are published. No remote partial cancellation is accepted.
+    """
     root = main_worktree(project_root.resolve())
     from delivery_compile import docs_root, find_delivery, split_note, frontmatter, body_for, title, designation, content_hash
     docs = docs_root(root)
@@ -791,9 +954,9 @@ def cancel_scope_delivery(project_root: Path, delivery_id: str, reason: str,
     if directory is None:
         raise RuntimeError("Delivery package not found")
     delivery_path_value = directory / "delivery.md"
-    delivery_props, delivery_body = split_note(delivery_path_value)
-    if delivery_props.get("status") not in {"scope_approved", "execution_approved"}:
-        raise RuntimeError("scope-only cancellation requires an approved, unclaimed Delivery")
+    local_props, _ = split_note(delivery_path_value)
+    if local_props.get("status") in {"draft", "cancelled", "target_merged"}:
+        raise RuntimeError("cancel-delivery requires a nonterminal approved Delivery")
     refs = canonical_refs(delivery_id)
     fence_oid = remote_oid(root, remote, refs["fence"])
     integration_oid = remote_oid(root, remote, refs["integration"])
@@ -802,29 +965,43 @@ def cancel_scope_delivery(project_root: Path, delivery_id: str, reason: str,
     if trailer(fence_message, "Mode") != "open" or trailer(integration_message, "Record") in {
             "cancellation-intent-v1", "delivery-barrier-v1", "cancellation-finalized-v1"}:
         raise RuntimeError("Delivery already has a barrier or non-open Fence")
-    if remote_slot_oids(root, remote):
-        raise RuntimeError("scope-only cancellation cannot run while any global Slot exists")
-    stories = {}
+
+    relative_delivery = str(delivery_path_value.relative_to(root))
+    remote_props, remote_body = split_remote_note(root, integration_oid, relative_delivery, split_note)
+    scope_hash = str(remote_props.get("scope_hash", "none"))
+    all_slots = remote_slot_oids(root, remote)
+    contexts: dict[str, dict] = {}
+    stories: dict[str, dict[str, str]] = {}
     for item_path in sorted(directory.glob("items/*/item.md")):
         story = item_path.parent.name.upper()
         item_ref = canonical_refs(delivery_id, story)["item"]
+        relative_item = str(item_path.relative_to(root))
+        context = {"path": relative_item, "item_ref": item_ref, "item_oid": None,
+                   "slot": None, "props": None, "body": None}
         if remote_has_ref(root, remote, item_ref):
-            raise RuntimeError("scope-only cancellation cannot run after Item claims")
-        stories[story] = {"disposition": "not_started", "tip": "none"}
+            item_oid = remote_oid(root, remote, item_ref)
+            item_props, item_body = split_remote_note(root, item_oid, relative_item, split_note)
+            if item_props.get("status") == "cancelled":
+                raise RuntimeError(f"Item is already cancelled: {story}")
+            disposition = "integrated_reverted" if item_props.get("status") == "integrated" else "unintegrated_discarded"
+            context.update({"item_oid": item_oid, "slot": next((key for key, oid in all_slots.items() if oid == item_oid), None),
+                            "props": item_props, "body": item_body})
+            stories[story] = {"disposition": disposition, "tip": item_oid}
+        else:
+            stories[story] = {"disposition": "not_started", "tip": "none"}
+        contexts[story] = context
     target = trailer(fence_message, "Target") or resolve_target(root, remote)[1]
-    projection, intent_hash = cancellation_projection(
-        delivery_id, str(delivery_props.get("scope_hash", "none")), reason, stories, target,
-    )
+    projection, intent_hash = cancellation_projection(delivery_id, scope_hash, reason, stories, target)
     barrier_epoch = epoch_token()
-    relative_delivery = str(delivery_path_value.relative_to(root))
-    intent_props = dict(delivery_props)
+
+    intent_props = dict(remote_props)
     intent_props["cancellation_intent_hash"] = intent_hash
-    intent_props["source_hash"] = content_hash(intent_props, delivery_body)
+    intent_props["source_hash"] = content_hash(intent_props, remote_body)
     intent = commit_replacements(
-        root, integration_oid, {relative_delivery: frontmatter(intent_props, delivery_body)},
+        root, integration_oid, {relative_delivery: frontmatter(intent_props, remote_body)},
         f"Record cancellation intent for {delivery_id}",
         {"Record": "cancellation-intent-v1", "Protocol": "1", "Delivery": delivery_id,
-         "Scope-Hash": str(delivery_props.get("scope_hash", "none")), "Target": target,
+         "Scope-Hash": scope_hash, "Target": target,
          "Cancellation-Intent": intent_hash, "Cancellation-Intent-Hash": intent_hash},
     )
     barrier = commit_tree(
@@ -833,31 +1010,90 @@ def cancel_scope_delivery(project_root: Path, delivery_id: str, reason: str,
          "Barrier-Kind": "cancellation", "Barrier-Epoch": barrier_epoch,
          "Cancellation-Intent-Hash": intent_hash},
     )
+
+    integrated = [(story, context["item_oid"]) for story, context in contexts.items()
+                  if context["item_oid"] and context["props"].get("status") == "integrated"]
+    first_parent_order = {oid: index for index, oid in enumerate(
+        run_git(root, "rev-list", "--first-parent", integration_oid).splitlines())}
+    integrated.sort(key=lambda pair: first_parent_order.get(pair[1], 10**9))
+    current = barrier
+    revert_commits = []
+    for story, item_oid in integrated:
+        current = revert_merge_candidate(
+            root, current, item_oid, f"Revert Item {story} for {delivery_id}",
+            {"Record": "cancellation-revert-v1", "Protocol": "1", "Delivery": delivery_id,
+             "Story": story, "Previous-Tip": item_oid, "Barrier-Epoch": barrier_epoch},
+        )
+        revert_commits.append(current)
+
+    item_candidates: dict[str, str] = {}
+    item_replacements: dict[str, str] = {}
+    final_stories: dict[str, dict[str, str]] = {}
+    for story, context in contexts.items():
+        disposition = stories[story]["disposition"]
+        if context["item_oid"]:
+            props = dict(context["props"])
+            body = context["body"]
+            props["status"] = "cancelled"
+            props["tags"] = [tag for tag in props.get("tags", []) if not str(tag).startswith("status/")] + ["status/cancelled"]
+            props["cancellation_disposition"] = disposition
+            props["cancellation_previous_tip"] = context["item_oid"]
+            props["cancellation_intent_hash"] = intent_hash
+            props["source_hash"] = content_hash(props, body)
+            item_candidate = commit_replacements(
+                root, context["item_oid"], {context["path"]: frontmatter(props, body)},
+                f"Cancel Item {story} for {delivery_id}",
+                {"Record": "item-cancelled-v1", "Protocol": "1", "Delivery": delivery_id,
+                 "Story": story, "Disposition": disposition, "Previous-Tip": context["item_oid"],
+                 "Barrier-Epoch": barrier_epoch, "Cancellation-Intent-Hash": intent_hash},
+            )
+            item_candidates[story] = item_candidate
+            item_replacements[context["path"]] = frontmatter(props, body)
+            final_stories[story] = {"disposition": disposition, "tip": context["item_oid"]}
+        else:
+            try:
+                props, body = split_remote_note(root, current, context["path"], split_note)
+            except RuntimeError:
+                continue
+            props["status"] = "cancelled"
+            props["tags"] = [tag for tag in props.get("tags", []) if not str(tag).startswith("status/")] + ["status/cancelled"]
+            props["cancellation_disposition"] = "not_started"
+            props["cancellation_previous_tip"] = "none"
+            props["cancellation_intent_hash"] = intent_hash
+            props["source_hash"] = content_hash(props, body)
+            item_replacements[context["path"]] = frontmatter(props, body)
+            final_stories[story] = {"disposition": "not_started", "tip": "none"}
+
+    projection_hash = cancellation_projection_hash(
+        delivery_id, intent_hash, final_stories, target, barrier_epoch,
+    )
     cancelled_props = dict(intent_props)
     cancelled_props["status"] = "cancelled"
     cancelled_props["tags"] = [tag for tag in cancelled_props.get("tags", []) if not str(tag).startswith("status/")] + ["status/cancelled"]
-    cancelled_props["source_hash"] = content_hash(cancelled_props, delivery_body)
+    cancelled_props["cancellation_projection_hash"] = projection_hash
+    cancelled_props["source_hash"] = content_hash(cancelled_props, remote_body)
+    item_replacements[relative_delivery] = frontmatter(cancelled_props, remote_body)
     finalization = commit_replacements(
-        root, barrier, {relative_delivery: frontmatter(cancelled_props, delivery_body)},
+        root, current, item_replacements,
         f"Finalize cancellation for {delivery_id}",
         {"Record": "cancellation-finalized-v1", "Protocol": "1", "Delivery": delivery_id,
          "Barrier-Epoch": barrier_epoch, "Cancellation-Intent-Hash": intent_hash,
-         "Cancellation-Projection-Hash": intent_hash, "Target": target},
+         "Cancellation-Projection-Hash": projection_hash, "Target": target},
     )
+
     review_props = {
         "type": "delivery-review", "id": f"{delivery_id}-REVIEW",
-        "title": title(delivery_props.get("goal", delivery_id), designation(docs, "delivery-review", "delivery review")),
+        "title": title(remote_props.get("goal", delivery_id), designation(docs, "delivery-review", "delivery review")),
         "status": "approved", "derives_from": [f"[[{delivery_path_value.relative_to(docs).with_suffix('')}|{delivery_id}]]"],
-        "scope_hash": delivery_props.get("scope_hash", "none"),
-        "cancellation_intent_hash": intent_hash, "reviewed_integration_commit": finalization,
+        "scope_hash": scope_hash, "cancellation_intent_hash": intent_hash,
+        "cancellation_projection_hash": projection_hash, "reviewed_integration_commit": finalization,
         "approved_at_utc": datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z"),
         "tags": ["doc/delivery-review", "status/approved"],
     }
     review_body = body_for("delivery-review", review_props["title"], {
-        "Goal Outcome": delivery_props.get("goal", ""),
-        "Verdict": "Cancellation approved and finalized before Item claims.",
-        "Cancellation": reason.strip(),
-        "Cancellation Projection": _canonical_json(projection),
+        "Goal Outcome": remote_props.get("goal", ""),
+        "Verdict": "Cancellation approved and finalized with exact Item dispositions.",
+        "Cancellation": reason.strip(), "Cancellation Projection": _canonical_json(projection),
         "Navigation": f"[[{delivery_path_value.relative_to(docs).with_suffix('')}|{delivery_id}]]",
     })
     review_props["approval_hash"] = content_hash(review_props, review_body, exclude={"status", "approved_at_utc", "source_hash", "approval_hash"})
@@ -868,20 +1104,33 @@ def cancel_scope_delivery(project_root: Path, delivery_id: str, reason: str,
         f"Publish delivery review for {delivery_id}",
         {"Record": "delivery-review-published-v1", "Protocol": "1", "Delivery": delivery_id,
          "Reviewed-Integration": finalization, "Approval-Hash": review_props["approval_hash"],
-         "Target": target, "Cancellation-Intent-Hash": intent_hash},
+         "Target": target, "Cancellation-Intent-Hash": intent_hash,
+         "Cancellation-Projection-Hash": projection_hash},
     )
     fence_candidate = commit_tree(
         root, fence_oid, [], "Fence project in open mode",
         {"Record": "project-fence-v1", "Protocol": "1", "Mode": "open",
-         "Epoch": trailer(fence_message, "Epoch") or epoch_token(),
-         "Target": target, "Config-Hash": trailer(fence_message, "Config-Hash") or "none"},
+         "Epoch": trailer(fence_message, "Epoch") or epoch_token(), "Target": target,
+         "Config-Hash": trailer(fence_message, "Config-Hash") or "none"},
     )
-    atomic_push(root, remote, [(refs["fence"], fence_oid, fence_candidate),
-                               (refs["integration"], integration_oid, review)])
-    return {"ok": True, "delivery": delivery_id, "status": "cancelled",
-            "intent": intent, "barrier": barrier, "finalization": finalization,
+    updates = [(refs["fence"], fence_oid, fence_candidate),
+               (refs["integration"], integration_oid, review)]
+    for story, item_candidate in sorted(item_candidates.items()):
+        context = contexts[story]
+        updates.append((context["item_ref"], context["item_oid"], item_candidate))
+        if context["slot"] is not None:
+            updates.append((f"refs/heads/agentrof/slots/{context['slot']}", context["item_oid"], ""))
+    atomic_push(root, remote, updates)
+    return {"ok": True, "delivery": delivery_id, "status": "cancelled", "intent": intent,
+            "barrier": barrier, "reverts": revert_commits, "finalization": finalization,
             "review": review, "fence": fence_candidate, "cancellation_intent_hash": intent_hash,
-            "refs": short_refs(delivery_id)}
+            "cancellation_projection_hash": projection_hash, "refs": short_refs(delivery_id)}
+
+
+def cancel_scope_delivery(project_root: Path, delivery_id: str, reason: str,
+                          remote: str = "origin") -> dict:
+    """Backward-compatible alias for the public cancellation coordinator."""
+    return cancel_delivery(project_root, delivery_id, reason, remote)
 
 
 def reserve_delivery(project_root: Path, delivery_id: str, remote: str = "origin") -> dict:
@@ -969,6 +1218,130 @@ def publish_execution_plan(project_root: Path, delivery_id: str,
                                (refs["integration"], integration_oid, integration_candidate)])
     return {"ok": True, "delivery": delivery_id, "fence": fence_candidate,
             "integration": integration_candidate, "refs": short_refs(delivery_id)}
+
+
+def target_impact_hash(delivery_id: str, previous_target: str, target: str,
+                       items: dict[str, dict], previous_plan_hash: str = "none",
+                       barrier_epoch: str = "none") -> str:
+    """Return the canonical target-impact digest for a nonempty mapping."""
+    if not OID_RE.fullmatch(previous_target) or not OID_RE.fullmatch(target):
+        raise ValueError("target impact requires exact previous and current target OIDs")
+    value = {
+        "barrier_epoch": barrier_epoch,
+        "delivery": delivery_id,
+        "items": {story: items[story] for story in sorted(items)},
+        "previous_plan_hash": previous_plan_hash,
+        "previous_target": previous_target,
+        "target": target,
+    }
+    return "sha256:" + hashlib.sha256(_canonical_json(value).encode("utf-8")).hexdigest()
+
+
+def _changed_target_paths(root: Path, previous_target: str, target: str) -> list[str]:
+    """List normalized target paths, fetching the target objects when needed."""
+    result = subprocess.run(
+        ["git", "diff", "--name-only", previous_target, target], cwd=root,
+        text=True, capture_output=True, check=False,
+    )
+    if result.returncode:
+        raise RuntimeError(result.stderr.strip() or "cannot inspect target drift")
+    return sorted(path for path in result.stdout.splitlines() if path)
+
+
+def refresh_target(project_root: Path, delivery_id: str,
+                   remote: str = "origin") -> dict:
+    """Merge a fresh target tip into one open Delivery under the Fence lease.
+
+    Disjoint target movement is fully supported. A path/contract overlap with
+    an already claimed Item is rejected before any ref mutation. A relevant
+    pre-claim overlap invalidates the published Plan and returns the package to
+    scope-approved state; a fresh Execution Plan approval is then required.
+    """
+    root = main_worktree(project_root.resolve())
+    from delivery_compile import docs_root, find_delivery, split_note, frontmatter, content_hash
+    docs = docs_root(root)
+    directory = find_delivery(docs, delivery_id)
+    if directory is None:
+        raise RuntimeError("Delivery package not found")
+    refs = canonical_refs(delivery_id)
+    fence_oid = remote_oid(root, remote, refs["fence"])
+    integration_oid = remote_oid(root, remote, refs["integration"])
+    fence_message = commit_message(root, fence_oid)
+    if trailer(fence_message, "Record") != "project-fence-v1" or trailer(fence_message, "Mode") != "open":
+        raise RuntimeError("target-refresh requires an open Fence")
+    previous_target = trailer(fence_message, "Target")
+    if not previous_target or not OID_RE.fullmatch(previous_target):
+        raise RuntimeError("Fence has no valid target baseline")
+    target_branch, target = resolve_target(root, remote)
+    if target == previous_target:
+        return {"ok": True, "delivery": delivery_id, "changed": False,
+                "target": target, "refs": short_refs(delivery_id)}
+    # Ensure the target objects exist locally without changing any semantic ref.
+    run_git(root, "fetch", "--no-tags", remote, f"refs/heads/{target_branch}:refs/remotes/{remote}/{target_branch}")
+    changed = _changed_target_paths(root, previous_target, target)
+    selected: dict[str, dict] = {}
+    claimed: dict[str, str] = {}
+    for item_path in sorted(directory.glob("items/*/item.md")):
+        story = item_path.parent.name.upper()
+        item_ref = canonical_refs(delivery_id, story)["item"]
+        if not remote_has_ref(root, remote, item_ref):
+            continue
+        item_oid = remote_oid(root, remote, item_ref)
+        item_props, _ = split_remote_note(root, item_oid, str(item_path.relative_to(root)), split_note)
+        for claim in item_props.get("path_claims", []) or []:
+            claimed[str(claim).lstrip("./")] = story
+    overlaps = sorted(path for path in changed if path in claimed)
+    if overlaps:
+        raise RuntimeError("claimed_source_violation: target changed claimed paths " + ", ".join(overlaps))
+    relevant = []
+    for path in changed:
+        if path.startswith(str(directory.relative_to(root)) + "/"):
+            relevant.append(path)
+        elif path in {"workspace/docs/maps/delivery.md", "workspace/docs/definition-of-done.md"}:
+            relevant.append(path)
+    merge = merge_candidate(
+        root, integration_oid, target, f"Refresh target for {delivery_id}",
+        {"Record": "target-refresh-v1", "Protocol": "1", "Delivery": delivery_id,
+         "Previous-Target": previous_target, "Target": target,
+         "Target-Impact-Hash": "none"},
+    )
+    final_candidate = merge
+    invalidated = bool(relevant)
+    if invalidated:
+        delivery_path = directory / "delivery.md"
+        plan_path = directory / "execution-plan.md"
+        replacements = {}
+        remote_delivery_props, remote_delivery_body = split_remote_note(root, merge, str(delivery_path.relative_to(root)), split_note)
+        remote_delivery_props["status"] = "scope_approved"
+        remote_delivery_props.pop("plan_hash", None)
+        remote_delivery_props["source_hash"] = content_hash(remote_delivery_props, remote_delivery_body)
+        replacements[str(delivery_path.relative_to(root))] = frontmatter(remote_delivery_props, remote_delivery_body)
+        if plan_path.exists():
+            try:
+                plan_props, plan_body = split_remote_note(root, merge, str(plan_path.relative_to(root)), split_note)
+                plan_props["status"] = "draft"
+                plan_props["source_hash"] = content_hash(plan_props, plan_body)
+                replacements[str(plan_path.relative_to(root))] = frontmatter(plan_props, plan_body)
+            except RuntimeError:
+                pass
+        final_candidate = commit_replacements(
+            root, merge, replacements, f"Invalidate execution plan for {delivery_id}",
+            {"Record": "target-refresh-v1", "Protocol": "1", "Delivery": delivery_id,
+             "Previous-Target": previous_target, "Target": target,
+             "Target-Impact-Hash": "none", "Plan-Invalidated": "true"},
+        )
+    fence_candidate = commit_tree(
+        root, fence_oid, [], "Refresh project target",
+        {"Record": "project-fence-v1", "Protocol": "1", "Mode": "open",
+         "Epoch": trailer(fence_message, "Epoch") or epoch_token(), "Target": target,
+         "Config-Hash": trailer(fence_message, "Config-Hash") or "none"},
+    )
+    atomic_push(root, remote, [(refs["fence"], fence_oid, fence_candidate),
+                               (refs["integration"], integration_oid, final_candidate)])
+    return {"ok": True, "delivery": delivery_id, "changed": True, "target": target,
+            "previous_target": previous_target, "paths": changed,
+            "plan_invalidated": invalidated, "integration": final_candidate,
+            "fence": fence_candidate, "refs": short_refs(delivery_id)}
 
 
 def claim_items(project_root: Path, delivery_id: str, remote: str = "origin") -> dict:
@@ -1439,6 +1812,7 @@ def main(argv=None) -> int:
     check = sub.add_parser("preflight"); check.add_argument("--project-root", default="."); check.add_argument("--delivery", required=True); check.add_argument("--story"); check.add_argument("--slot"); check.set_defaults(func="preflight")
     reserve = sub.add_parser("reserve-delivery"); reserve.add_argument("--project-root", default="."); reserve.add_argument("--delivery", required=True); reserve.add_argument("--remote", default="origin"); reserve.set_defaults(func="reserve")
     publish = sub.add_parser("publish-execution-plan"); publish.add_argument("--project-root", default="."); publish.add_argument("--delivery", required=True); publish.add_argument("--remote", default="origin"); publish.set_defaults(func="publish")
+    refresh = sub.add_parser("refresh-target"); refresh.add_argument("--project-root", default="."); refresh.add_argument("--delivery", required=True); refresh.add_argument("--remote", default="origin"); refresh.set_defaults(func="refresh")
     claim = sub.add_parser("claim-items"); claim.add_argument("--project-root", default="."); claim.add_argument("--delivery", required=True); claim.add_argument("--remote", default="origin"); claim.set_defaults(func="claim")
     start = sub.add_parser("start-item"); start.add_argument("--project-root", default="."); start.add_argument("--delivery", required=True); start.add_argument("--story", required=True); start.add_argument("--remote", default="origin"); start.set_defaults(func="start")
     pause = sub.add_parser("pause-item"); pause.add_argument("--project-root", default="."); pause.add_argument("--delivery", required=True); pause.add_argument("--story", required=True); pause.add_argument("--remote", default="origin"); pause.set_defaults(func="pause")
@@ -1450,7 +1824,8 @@ def main(argv=None) -> int:
     prepare_pr = sub.add_parser("prepare-pr-creation"); prepare_pr.add_argument("--project-root", default="."); prepare_pr.add_argument("--delivery", required=True); prepare_pr.add_argument("--remote", default="origin"); prepare_pr.set_defaults(func="prepare-pr")
     record_pr_parser = sub.add_parser("record-pr-remote"); record_pr_parser.add_argument("--project-root", default="."); record_pr_parser.add_argument("--delivery", required=True); record_pr_parser.add_argument("--url", required=True); record_pr_parser.add_argument("--remote", default="origin"); record_pr_parser.set_defaults(func="record-pr-remote")
     open_pr_parser = sub.add_parser("open-pr"); open_pr_parser.add_argument("--project-root", default="."); open_pr_parser.add_argument("--delivery", required=True); open_pr_parser.add_argument("--remote", default="origin"); open_pr_parser.set_defaults(func="open-pr")
-    cancel_scope = sub.add_parser("cancel-scope-delivery"); cancel_scope.add_argument("--project-root", default="."); cancel_scope.add_argument("--delivery", required=True); cancel_scope.add_argument("--reason", required=True); cancel_scope.add_argument("--remote", default="origin"); cancel_scope.set_defaults(func="cancel-scope")
+    merge_pr_parser = sub.add_parser("merge-pr"); merge_pr_parser.add_argument("--project-root", default="."); merge_pr_parser.add_argument("--delivery", required=True); merge_pr_parser.add_argument("--remote", default="origin"); merge_pr_parser.set_defaults(func="merge-pr")
+    cancel = sub.add_parser("cancel-delivery"); cancel.add_argument("--project-root", default="."); cancel.add_argument("--delivery", required=True); cancel.add_argument("--reason", required=True); cancel.add_argument("--remote", default="origin"); cancel.set_defaults(func="cancel")
     args = parser.parse_args(argv)
     try:
         if args.func == "names":
@@ -1461,6 +1836,8 @@ def main(argv=None) -> int:
                 result = reserve_delivery(Path(args.project_root), args.delivery, args.remote)
             elif args.func == "publish":
                 result = publish_execution_plan(Path(args.project_root), args.delivery, args.remote)
+            elif args.func == "refresh":
+                result = refresh_target(Path(args.project_root), args.delivery, args.remote)
             elif args.func == "claim":
                 result = claim_items(Path(args.project_root), args.delivery, args.remote)
             elif args.func == "start":
@@ -1483,8 +1860,10 @@ def main(argv=None) -> int:
                 result = record_pr_remote(Path(args.project_root), args.delivery, args.url, args.remote)
             elif args.func == "open-pr":
                 result = open_pr(Path(args.project_root), args.delivery, args.remote)
-            elif args.func == "cancel-scope":
-                result = cancel_scope_delivery(Path(args.project_root), args.delivery, args.reason, args.remote)
+            elif args.func == "merge-pr":
+                result = merge_pr(Path(args.project_root), args.delivery, args.remote)
+            elif args.func == "cancel":
+                result = cancel_delivery(Path(args.project_root), args.delivery, args.reason, args.remote)
             else:
                 result = preflight(Path(args.project_root), args.delivery, args.story, args.slot)
     except (ValueError, RuntimeError) as exc:

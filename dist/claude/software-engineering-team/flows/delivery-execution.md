@@ -23,5 +23,11 @@ evidence. The Git coordinator first publishes the approved Review, then
 publishes one durable PR-creation intent and records the provider URL as its
 exact descendant. Provider create/merge calls are adapter-owned and must
 requery the intent and reviewed Integration head before any external mutation.
+Before Item work starts, `/deliver DLV-###` may run the internal
+`refresh-target` coordinator. A disjoint target advance becomes one
+`target-refresh-v1` Integration child. A claimed-path overlap is rejected
+without ref mutation; a pre-claim package overlap invalidates the plan and
+requires a fresh Execution Plan approval. No stale target grants a Slot or
+worktree.
 Failed checks, target drift, review changes and process loss become explicit
 resumable states. Release Management is intentionally not part of this flow.

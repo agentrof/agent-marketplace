@@ -9,7 +9,8 @@
     "delivery": {
       "path": "workspace/docs/delivery/deliveries/dlv-<digits>-<slug>/delivery.md",
       "statuses": ["scope_proposed", "scope_approved", "execution_approved", "active", "review", "pr_handoff", "awaiting_merge", "merged", "cancelled"],
-      "required_properties": ["type", "id", "title", "status", "goal", "derives_from", "definition_of_done", "target_branch", "revision", "tags"]
+      "required_properties": ["type", "id", "title", "status", "goal", "derives_from", "definition_of_done", "target_branch", "revision", "tags"],
+      "cancellation_properties": ["cancellation_intent_hash", "cancellation_projection_hash"]
     },
     "execution_plan": {
       "path": "<delivery>/execution-plan.md",
@@ -19,7 +20,8 @@
     "delivery_item": {
       "path": "<delivery>/items/<lower-story-id>/item.md",
       "statuses": ["in_scope", "claimed", "active", "blocked", "paused", "integrated", "cancelled"],
-      "required_properties": ["type", "status", "derives_from", "related_to", "tags"]
+      "required_properties": ["type", "status", "derives_from", "related_to", "tags"],
+      "cancellation_properties": ["cancellation_disposition", "cancellation_previous_tip", "cancellation_intent_hash"]
     },
     "code_review": {
       "path": "<item>/code-review.md",

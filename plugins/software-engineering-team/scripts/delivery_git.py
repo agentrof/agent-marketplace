@@ -424,6 +424,114 @@ def start_item(project_root: Path, delivery_id: str, story_id: str,
             "fence": fence_candidate, "refs": short_refs(delivery_id, story_id, slot)}
 
 
+def push_item(project_root: Path, delivery_id: str, story_id: str,
+              remote: str = "origin") -> dict:
+    root = main_worktree(project_root.resolve())
+    from delivery_compile import docs_root, split_note, frontmatter, content_hash
+    docs = docs_root(root)
+    directory = find_delivery_dir_from_remote(root, remote, delivery_id)
+    if directory is None:
+        raise RuntimeError("local Delivery package is required for Item push")
+    refs = canonical_refs(delivery_id, story_id)
+    item_oid = remote_oid(root, remote, refs["item"])
+    slots = remote_slot_oids(root, remote)
+    slot = next((key for key, oid in slots.items() if oid == item_oid), None)
+    if slot is None:
+        raise RuntimeError("Item and Slot refs diverge; refuse active writer push")
+    slot_ref = f"refs/heads/agentrof/slots/{slot}"; slot_oid = slots[slot]
+    item_path = directory / "items" / story_key(story_id) / "item.md"
+    if not item_path.exists():
+        raise RuntimeError(f"missing local Item projection: {item_path}")
+    item_props, item_body = split_note(item_path)
+    if item_props.get("status") != "active":
+        raise RuntimeError("push-item requires an active local Item projection")
+    review = item_path.parent / "code-review.md"
+    verification = item_path.parent / "verification.md"
+    if not review.exists() or not verification.exists():
+        raise RuntimeError("push-item requires Item review and verification files")
+    review_props, review_body = split_note(review)
+    verification_props, verification_body = split_note(verification)
+    if review_props.get("status") != "approved" or verification_props.get("status") != "passed":
+        raise RuntimeError("push-item requires approved code review and passed verification")
+    item_props["source_hash"] = content_hash(item_props, item_body)
+    replacements = {
+        str(item_path.relative_to(root)): frontmatter(item_props, item_body),
+        str(review.relative_to(root)): frontmatter(review_props, review_body),
+        str(verification.relative_to(root)): frontmatter(verification_props, verification_body),
+    }
+    candidate = commit_replacements(root, item_oid, replacements, f"Update Item {story_id}", {})
+    atomic_push(root, remote, [(refs["item"], item_oid, candidate), (slot_ref, slot_oid, candidate)])
+    return {"ok": True, "delivery": delivery_id, "story": story_id, "item": candidate, "slot": candidate}
+
+
+def integrate_item(project_root: Path, delivery_id: str, story_id: str,
+                  remote: str = "origin") -> dict:
+    root = main_worktree(project_root.resolve())
+    from delivery_compile import docs_root, split_note, frontmatter, content_hash
+    docs = docs_root(root)
+    directory = find_delivery_dir_from_remote(root, remote, delivery_id)
+    if directory is None:
+        raise RuntimeError("local Delivery package is required for Item integration")
+    refs = canonical_refs(delivery_id, story_id)
+    integration_oid = remote_oid(root, remote, refs["integration"])
+    item_oid = remote_oid(root, remote, refs["item"])
+    slots = remote_slot_oids(root, remote)
+    slot = next((key for key, oid in slots.items() if oid == item_oid), None)
+    if slot is None:
+        raise RuntimeError("Item and Slot refs diverge; refuse integration")
+    slot_ref = f"refs/heads/agentrof/slots/{slot}"; slot_oid = slots[slot]
+    item_path = directory / "items" / story_key(story_id) / "item.md"
+    item_props, item_body = split_note(item_path)
+    if item_props.get("status") != "active":
+        raise RuntimeError("integrate-item requires an active Item")
+    review = item_path.parent / "code-review.md"; verification = item_path.parent / "verification.md"
+    review_props, _ = split_note(review); verification_props, _ = split_note(verification)
+    if review_props.get("status") != "approved" or verification_props.get("status") != "passed":
+        raise RuntimeError("integrate-item requires approved code review and passed verification")
+    item_props["status"] = "integrated"
+    item_props["tags"] = [tag for tag in item_props.get("tags", []) if not str(tag).startswith("status/")] + ["status/integrated"]
+    item_props["integration_base_commit"] = integration_oid
+    item_props["source_hash"] = content_hash(item_props, item_body)
+    seal = commit_replacements(root, item_oid,
+                               {str(item_path.relative_to(root)): frontmatter(item_props, item_body)},
+                               f"Seal Item {story_id} for {delivery_id}",
+                               {"Record": "item-integration-v1", "Protocol": "1", "Delivery": delivery_id,
+                                "Story": story_id, "Item-Plan-Hash": str(item_props.get("item_plan_hash", "none")),
+                                "Reviewed-Tip": item_oid, "Integration-Parent": integration_oid})
+    integration_candidate = merge_candidate(root, integration_oid, seal,
+                                            f"Integrate Item {story_id} for {delivery_id}",
+                                            {"Record": "item-integration-v1", "Protocol": "1", "Delivery": delivery_id,
+                                             "Story": story_id, "Item-Plan-Hash": str(item_props.get("item_plan_hash", "none")),
+                                             "Reviewed-Tip": seal, "Integration-Parent": integration_oid})
+    atomic_push(root, remote, [(refs["integration"], integration_oid, integration_candidate),
+                               (refs["item"], item_oid, integration_candidate),
+                               (slot_ref, slot_oid, "")])
+    return {"ok": True, "delivery": delivery_id, "story": story_id,
+            "integration": integration_candidate, "item": integration_candidate,
+            "slot_released": slot_ref}
+
+
+def merge_candidate(root: Path, first_parent: str, second_parent: str,
+                    subject: str, trailers: dict[str, str]) -> str:
+    with tempfile.TemporaryDirectory(prefix="agentrof-merge-index-") as temporary:
+        index = Path(temporary) / "index"
+        env = os.environ.copy(); env["GIT_INDEX_FILE"] = str(index)
+        merge = subprocess.run(["git", "read-tree", "-m", first_parent, second_parent], cwd=root, env=env,
+                               text=True, capture_output=True, check=False)
+        if merge.returncode:
+            raise RuntimeError(merge.stderr.strip() or "Item and Integration trees conflict")
+        tree = subprocess.run(["git", "write-tree"], cwd=root, env=env, text=True,
+                              capture_output=True, check=False)
+        if tree.returncode:
+            raise RuntimeError(tree.stderr.strip() or "cannot write integration tree")
+        message = subject + "\n\n" + "\n".join(f"Agentrof-{key}: {value}" for key, value in trailers.items()) + "\n"
+        commit = subprocess.run(["git", "commit-tree", tree.stdout.strip(), "-p", first_parent, "-p", second_parent],
+                                cwd=root, env=env, input=message, text=True, capture_output=True, check=False)
+        if commit.returncode:
+            raise RuntimeError(commit.stderr.strip() or "cannot create integration commit")
+        return commit.stdout.strip()
+
+
 def find_delivery_dir_from_remote(root: Path, remote: str, delivery_id: str) -> Path | None:
     from delivery_compile import docs_root, find_delivery
     return find_delivery(docs_root(root), delivery_id)
@@ -493,6 +601,8 @@ def main(argv=None) -> int:
     publish = sub.add_parser("publish-execution-plan"); publish.add_argument("--project-root", default="."); publish.add_argument("--delivery", required=True); publish.add_argument("--remote", default="origin"); publish.set_defaults(func="publish")
     claim = sub.add_parser("claim-items"); claim.add_argument("--project-root", default="."); claim.add_argument("--delivery", required=True); claim.add_argument("--remote", default="origin"); claim.set_defaults(func="claim")
     start = sub.add_parser("start-item"); start.add_argument("--project-root", default="."); start.add_argument("--delivery", required=True); start.add_argument("--story", required=True); start.add_argument("--remote", default="origin"); start.set_defaults(func="start")
+    push_item_parser = sub.add_parser("push-item"); push_item_parser.add_argument("--project-root", default="."); push_item_parser.add_argument("--delivery", required=True); push_item_parser.add_argument("--story", required=True); push_item_parser.add_argument("--remote", default="origin"); push_item_parser.set_defaults(func="push-item")
+    integrate = sub.add_parser("integrate-item"); integrate.add_argument("--project-root", default="."); integrate.add_argument("--delivery", required=True); integrate.add_argument("--story", required=True); integrate.add_argument("--remote", default="origin"); integrate.set_defaults(func="integrate")
     args = parser.parse_args(argv)
     try:
         if args.func == "names":
@@ -507,6 +617,10 @@ def main(argv=None) -> int:
                 result = claim_items(Path(args.project_root), args.delivery, args.remote)
             elif args.func == "start":
                 result = start_item(Path(args.project_root), args.delivery, args.story, args.remote)
+            elif args.func == "push-item":
+                result = push_item(Path(args.project_root), args.delivery, args.story, args.remote)
+            elif args.func == "integrate":
+                result = integrate_item(Path(args.project_root), args.delivery, args.story, args.remote)
             else:
                 result = preflight(Path(args.project_root), args.delivery, args.story, args.slot)
     except (ValueError, RuntimeError) as exc:

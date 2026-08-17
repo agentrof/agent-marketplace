@@ -105,9 +105,16 @@ class DeliveryGitTests(unittest.TestCase):
             self.assertEqual(result["claims"], ["AUTH-01"])
             activation = delivery_git.start_item(project, "DLV-001", "AUTH-01")
             self.assertEqual(activation["slot"], "001")
+            transition = type("Args", (), {"docs": str(docs), "delivery": "DLV-001", "story": "AUTH-01", "to": "active"})
+            delivery_compile.prepare_item_transition(transition)
+            evidence = type("Args", (), {"docs": str(docs), "delivery": "DLV-001", "story": "AUTH-01", "reviewed_commit": "r1", "verified_commit": "r1"})
+            delivery_compile.approve_item_evidence(evidence)
+            delivery_git.push_item(project, "DLV-001", "AUTH-01")
+            integrated = delivery_git.integrate_item(project, "DLV-001", "AUTH-01")
+            self.assertTrue(integrated["ok"])
             refs = subprocess.run(["git", "--git-dir", str(remote), "show-ref"], check=True, text=True, capture_output=True).stdout
             self.assertIn("refs/heads/agentrof/items/auth-01", refs)
-            self.assertIn("refs/heads/agentrof/slots/001", refs)
+            self.assertNotIn("refs/heads/agentrof/slots/001", refs)
 
 
 if __name__ == "__main__":

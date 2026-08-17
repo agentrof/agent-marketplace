@@ -538,6 +538,36 @@ def check_item_ready(args) -> int:
     print(json.dumps({"ok": not errors, "errors": errors}, indent=2)); return 0 if not errors else 1
 
 
+def approve_item_evidence(args) -> int:
+    docs = docs_root(args.docs)
+    root = find_delivery(docs, args.delivery)
+    item = root / "items" / id_slug(args.story) / "item.md" if root else None
+    if item is None or not item.exists():
+        print(json.dumps({"ok": False, "errors": ["Delivery Item not found"]}, indent=2)); return 1
+    review = item.parent / "code-review.md"
+    verification = item.parent / "verification.md"
+    if not review.exists() or not verification.exists():
+        print(json.dumps({"ok": False, "errors": ["Item evidence files are not initialized"]}, indent=2)); return 1
+    item_props, _ = split_note(item)
+    review_props, review_body = split_note(review)
+    verification_props, verification_body = split_note(verification)
+    reviewed = args.reviewed_commit
+    verified = args.verified_commit
+    if not reviewed or not verified:
+        print(json.dumps({"ok": False, "errors": ["reviewed and verified commits are required"]}, indent=2)); return 2
+    review_props["status"] = "approved"; review_props["reviewed_commit"] = reviewed
+    review_props["item_plan_hash"] = item_props.get("item_plan_hash", "none")
+    review_props["source_hash"] = content_hash(review_props, review_body)
+    verification_props["status"] = "passed"; verification_props["verified_commit"] = verified
+    verification_props["item_plan_hash"] = item_props.get("item_plan_hash", "none")
+    verification_props["source_hash"] = content_hash(verification_props, verification_body)
+    review_props["tags"] = [tag for tag in review_props.get("tags", []) if not str(tag).startswith("status/")] + ["status/approved"]
+    verification_props["tags"] = [tag for tag in verification_props.get("tags", []) if not str(tag).startswith("status/")] + ["status/passed"]
+    atomic_text(review, frontmatter(review_props, review_body))
+    atomic_text(verification, frontmatter(verification_props, verification_body))
+    print(json.dumps({"ok": True, "story": args.story, "reviewed_commit": reviewed, "verified_commit": verified}, indent=2)); return 0
+
+
 def approve_review(args) -> int:
     docs = docs_root(args.docs)
     root = find_delivery(docs, args.delivery)
@@ -597,6 +627,10 @@ def main(argv=None) -> int:
     transition.add_argument("--to", required=True, choices=sorted(ITEM_STATUSES)); transition.set_defaults(func=prepare_item_transition)
     ready = sub.add_parser("check-item-ready")
     ready.add_argument("--delivery", required=True); ready.add_argument("--story", required=True); ready.set_defaults(func=check_item_ready)
+    evidence = sub.add_parser("approve-item-evidence")
+    evidence.add_argument("--delivery", required=True); evidence.add_argument("--story", required=True)
+    evidence.add_argument("--reviewed-commit", required=True); evidence.add_argument("--verified-commit", required=True)
+    evidence.set_defaults(func=approve_item_evidence)
     review = sub.add_parser("approve-review")
     review.add_argument("--delivery", required=True); review.add_argument("--reviewed-commit"); review.add_argument("--reviewed-integration-commit"); review.set_defaults(func=approve_review)
     pr = sub.add_parser("record-pr")

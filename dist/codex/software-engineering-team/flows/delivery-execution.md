@@ -8,6 +8,13 @@ predecessor, Fence and global slot checks pass. Product and test changes stay
 on the Item worktree; Integration accepts only reviewed, verified Item
 handoffs and compiler-owned projections.
 
+Activation writes an ignored pending writer receipt before the atomic Item,
+Slot, Integration and Fence transaction. The receipt is promoted only after
+both Item and Slot refs equal the candidate OID, then the coordinator
+materializes the detached Item worktree from that exact OID. A missing receipt
+does not change remote semantic status, but it denies local writer readiness
+until the exact remote activation is re-verified or explicitly taken over.
+
 The flow ends in one Delivery Review, one final PR and provider-neutral merged
 evidence. Failed checks, target drift, review changes and process loss become
 explicit resumable states. Release Management is intentionally not part of

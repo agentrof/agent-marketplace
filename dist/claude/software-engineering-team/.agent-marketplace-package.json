@@ -1,5 +1,5 @@
 {
-  "build_id": "snapshot.94bc10b06535460e1e846faa7991cdb2d9039621ab67cb2ee7f58d2af61ac0d6",
+  "build_id": "snapshot.cde8ada81b100ee207ebb63da8a468920dbff36de2112574a5e8fcae1656b75a",
   "component": "software-engineering-team",
   "files": {
     ".agent-marketplace-generated-distribution": "bc5e5ffd58e656c315fc4230e335b1acaaeba4b3a6871fc57e84144035567474",
@@ -20,7 +20,7 @@
     "agents/ux-designer.md": "c70fb4b5645c3e7a9c9128f7f28a2ce9a9b158e0bf7ee9954f334ab12eec04f8",
     "constitution.md": "32177174a6855417d1bfca8ffdb91011b525443c696d824e7ccad4cd4e457cde",
     "flows/backlog-planning.md": "bfb260a2f5ae54da45352ecac7881f3c88b8d744afbb2c78eb949397f90e480c",
-    "flows/delivery-execution.md": "3d8e0d41e46a8c82e6c1490b102443390e1a53a7a9dcbd2010d5a4eeec8957be",
+    "flows/delivery-execution.md": "1031f885ed074a0f126f90a2fb519d159b4f6a5309469b90f65e426792383769",
     "flows/delivery-lanes.md": "7dcc23be5872b0b03a0e97887a621938213002ed9be2e995e851499e2f11494e",
     "flows/delivery-planning.md": "762602b10827aca3b43c0e662c2105c02da9e152a85e5cc1e22e89da57bcec3a",
     "flows/design.md": "5e87edb63497b9b06deff9bf210b6674bc7990245d70b4f7e2be1b1fad9dfbca",
@@ -36,7 +36,7 @@
     "scripts/backlog_compile.py": "c863e1b75459092f9c332284ee53d8e41c69d8e56f619f34daea3b8d7d365175",
     "scripts/contract_check.py": "91717c2c430f5c6b7aa5025c2f4444a50349e26c00e34ddf8646f2b8b1718875",
     "scripts/delivery_compile.py": "12279e3844d32890148769fd4e6232e3bd8e65394fcd31b1d9759920471a9443",
-    "scripts/delivery_git.py": "d5e08addbeb63d70af9cfe796b215603666c8b77e9da10ee6c501fa0692f69ec",
+    "scripts/delivery_git.py": "fad7f9d3ed6e360a576438039c4b44a7a234f6c00c90784261c5004fc8eae246",
     "scripts/design_system_compile.py": "59d38d56ef3605e2deb9ea5eac8ccca0c578ffacc5858acbb1f476ed492a5e79",
     "scripts/experience_artifact_check.py": "d848b3f5d00cc2aaaf70ff41192c158fc29a7a3b08e2bf6e3ba0488059f4cdef",
     "scripts/experience_compile.py": "b002dc0741a8009dcaf167afbf6baf78802764c8df208f154f579c41ddf93590",
@@ -74,6 +74,7 @@
     "skill-content/deliver/data/delivery-document-contract.json": "dcd5fc5e5e5322aa4e671660d0aead09762dbcff4408be555fbbfc5ecec5911d",
     "skill-content/deliver/data/delivery-migration-registry.json": "f64038305866281b869348757e6df7a14f23fbed19d2081a49625d68af4a07ac",
     "skill-content/deliver/data/delivery-protocol-1.json": "df67be261343f67e0e6e57d4280c3c2f16ea1ee791b3ac0ff133e43b4488508b",
+    "skill-content/deliver/data/delivery-receipt-contract.json": "e29c80c56d732b6a368c052a25dfc4a358e55f3747a9de33d7ab2711847315dc",
     "skill-content/deliver/data/delivery-result-contract.json": "bef814fee27e7e49008f7d268e7631b48c18930e4fcf0ea66e3c80f67988c17d",
     "skill-content/delivery-lanes/SKILL.md": "bf66e2f2da86c129a67035bda7644d05b9ff33990565cf2efc09c7899d3e4d58",
     "skill-content/delivery-plan/SKILL.md": "838d6a1304eaf79ca5297576b3899d5aee6e6d2454409aaec6023a481cbbbd80",
@@ -261,6 +262,6 @@
   "schema_version": 2,
   "source_channel": "snapshot",
   "source_commit": "",
-  "source_ref": "snapshot.94bc10b06535460e1e846faa7991cdb2d9039621ab67cb2ee7f58d2af61ac0d6",
+  "source_ref": "snapshot.cde8ada81b100ee207ebb63da8a468920dbff36de2112574a5e8fcae1656b75a",
   "version": "0.2.2"
 }

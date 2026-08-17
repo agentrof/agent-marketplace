@@ -10,6 +10,8 @@ from __future__ import annotations
 
 import argparse
 import base64
+import contextlib
+import hashlib
 import json
 import os
 import re
@@ -22,6 +24,17 @@ from pathlib import Path
 DELIVERY_ID_RE = re.compile(r"^DLV-[0-9]{3,}$")
 STORY_ID_RE = re.compile(r"^[A-Za-z][A-Za-z0-9]*-[0-9]{2,}$")
 SLOT_RE = re.compile(r"^[0-9]{3,}$")
+EPOCH_RE = re.compile(r"^[A-Za-z0-9_-]{22}$")
+OID_RE = re.compile(r"^[0-9a-f]{40,64}$")
+RECEIPT_SCHEMA_VERSION = 1
+
+
+def _fcntl_module():
+    """Load the optional POSIX lock module without adding a runtime dependency."""
+    try:
+        return __import__("fcntl")
+    except ImportError:  # pragma: no cover - Windows hosts use the adapter fallback.
+        return None
 
 
 def validate_delivery_id(value: str) -> str:
@@ -76,6 +89,196 @@ def worktree_paths(main_worktree: Path, delivery_id: str,
     if story_id is not None:
         paths["item"] = root / "items" / story_key(story_id)
     return paths
+
+
+def runtime_root(main_worktree: Path) -> Path:
+    """Return the project-local disposable runtime anchor."""
+    return main_worktree / ".agentrof" / "agent-marketplace" / ".runtime"
+
+
+def writer_receipt_paths(main_worktree: Path, delivery_id: str,
+                         story_id: str) -> tuple[Path, Path]:
+    """Return the ignored receipt and sibling lock paths for one Item writer."""
+    validate_delivery_id(delivery_id)
+    validate_story_id(story_id)
+    base = runtime_root(main_worktree) / "receipts"
+    name = f"item-{delivery_id.lower()}-{story_key(story_id)}.json"
+    return base / name, base / f"{name}.lock"
+
+
+def _canonical_json(value: dict) -> str:
+    return json.dumps(value, ensure_ascii=False, sort_keys=True,
+                      separators=(",", ":"))
+
+
+def receipt_digest(receipt: dict) -> str:
+    """Hash the canonical receipt projection, excluding no mutable side field."""
+    encoded = _canonical_json(receipt).encode("utf-8")
+    return "sha256:" + hashlib.sha256(encoded).hexdigest()
+
+
+def _fsync_directory(path: Path) -> None:
+    try:
+        descriptor = os.open(path, os.O_RDONLY)
+    except OSError:
+        return
+    try:
+        os.fsync(descriptor)
+    finally:
+        os.close(descriptor)
+
+
+@contextlib.contextmanager
+def receipt_lock(lock_path: Path):
+    """Hold a crash-releasing process lock across receipt preimage transitions."""
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    descriptor = os.open(lock_path, os.O_CREAT | os.O_RDWR, 0o600)
+    module = _fcntl_module()
+    try:
+        if module is None:
+            raise RuntimeError("receipt locking is unavailable on this host")
+        module.flock(descriptor, module.LOCK_EX)
+        yield
+    finally:
+        if module is not None:
+            module.flock(descriptor, module.LOCK_UN)
+        os.close(descriptor)
+
+
+def _validate_receipt(receipt: dict) -> dict:
+    required = {
+        "schema_version", "kind", "state", "delivery", "story", "slot",
+        "writer_epoch", "item_ref", "slot_ref", "candidate_oid",
+        "created_at", "receipt_digest",
+    }
+    if set(receipt) != required:
+        raise RuntimeError("writer receipt has an unexpected field set")
+    if receipt["schema_version"] != RECEIPT_SCHEMA_VERSION or receipt["kind"] != "item-writer-v1":
+        raise RuntimeError("writer receipt schema is unsupported")
+    if receipt["state"] not in {"pending", "verified"}:
+        raise RuntimeError("writer receipt state is invalid")
+    validate_delivery_id(str(receipt["delivery"]))
+    validate_story_id(str(receipt["story"]))
+    slot_key(str(receipt["slot"]))
+    if not EPOCH_RE.fullmatch(str(receipt["writer_epoch"])):
+        raise RuntimeError("writer receipt epoch is invalid")
+    if not OID_RE.fullmatch(str(receipt["candidate_oid"])):
+        raise RuntimeError("writer receipt candidate OID is invalid")
+    expected = dict(receipt)
+    actual = expected.pop("receipt_digest")
+    if actual != receipt_digest(expected):
+        raise RuntimeError("writer receipt digest is invalid")
+    return receipt
+
+
+def read_writer_receipt(main_worktree: Path, delivery_id: str,
+                        story_id: str) -> dict | None:
+    receipt_path, lock_path = writer_receipt_paths(main_worktree, delivery_id, story_id)
+    if not receipt_path.exists():
+        return None
+    with receipt_lock(lock_path):
+        try:
+            value = json.loads(receipt_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            raise RuntimeError(f"writer receipt cannot be read: {exc}")
+        return _validate_receipt(value)
+
+
+def _write_writer_receipt_locked(receipt_path: Path, receipt: dict) -> None:
+    candidate = dict(receipt)
+    candidate.pop("receipt_digest", None)
+    candidate["receipt_digest"] = receipt_digest(candidate)
+    data = json.dumps(candidate, ensure_ascii=False, sort_keys=True, indent=2) + "\n"
+    with tempfile.NamedTemporaryFile("w", encoding="utf-8", dir=receipt_path.parent,
+                                     prefix=receipt_path.name + ".", delete=False) as temporary:
+        temporary.write(data)
+        temporary.flush()
+        os.fsync(temporary.fileno())
+        temporary_path = Path(temporary.name)
+    os.replace(temporary_path, receipt_path)
+    _fsync_directory(receipt_path.parent)
+
+
+def create_writer_receipt(main_worktree: Path, delivery_id: str, story_id: str,
+                          slot: str, writer_epoch: str, item_ref: str,
+                          slot_ref: str, candidate_oid: str) -> dict:
+    """Persist a pending activation before the remote CAS is attempted."""
+    if not EPOCH_RE.fullmatch(writer_epoch):
+        raise ValueError("writer epoch must be exactly 22 base64url characters")
+    if not OID_RE.fullmatch(candidate_oid):
+        raise ValueError("candidate OID is invalid")
+    receipt_path, lock_path = writer_receipt_paths(main_worktree, delivery_id, story_id)
+    receipt = {
+        "schema_version": RECEIPT_SCHEMA_VERSION,
+        "kind": "item-writer-v1",
+        "state": "pending",
+        "delivery": delivery_id,
+        "story": story_id,
+        "slot": slot_key(slot),
+        "writer_epoch": writer_epoch,
+        "item_ref": item_ref,
+        "slot_ref": slot_ref,
+        "candidate_oid": candidate_oid,
+        "created_at": datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z"),
+    }
+    with receipt_lock(lock_path):
+        existing = None
+        if receipt_path.exists():
+            existing = _validate_receipt(json.loads(receipt_path.read_text(encoding="utf-8")))
+        if existing is not None:
+            if existing["candidate_oid"] != candidate_oid:
+                raise RuntimeError("a different active writer receipt already exists")
+            return existing
+        _write_writer_receipt_locked(receipt_path, receipt)
+    return _validate_receipt(json.loads(receipt_path.read_text(encoding="utf-8")))
+
+
+def promote_writer_receipt(main_worktree: Path, delivery_id: str, story_id: str,
+                           candidate_oid: str) -> dict:
+    """Promote a pending receipt only after both remote refs equal its candidate."""
+    receipt_path, lock_path = writer_receipt_paths(main_worktree, delivery_id, story_id)
+    with receipt_lock(lock_path):
+        if not receipt_path.exists():
+            raise RuntimeError("pending writer receipt is missing")
+        receipt = _validate_receipt(json.loads(receipt_path.read_text(encoding="utf-8")))
+        if receipt["candidate_oid"] != candidate_oid:
+            raise RuntimeError("writer receipt candidate does not match remote activation")
+        if receipt["state"] == "verified":
+            return receipt
+        receipt["state"] = "verified"
+        _write_writer_receipt_locked(receipt_path, receipt)
+        return _validate_receipt(json.loads(receipt_path.read_text(encoding="utf-8")))
+
+
+def discard_pending_writer_receipt(main_worktree: Path, delivery_id: str,
+                                   story_id: str, candidate_oid: str) -> None:
+    """Delete a pending receipt only after the remote CAS is conclusively rejected."""
+    receipt_path, lock_path = writer_receipt_paths(main_worktree, delivery_id, story_id)
+    with receipt_lock(lock_path):
+        if not receipt_path.exists():
+            return
+        receipt = _validate_receipt(json.loads(receipt_path.read_text(encoding="utf-8")))
+        if receipt["state"] != "pending" or receipt["candidate_oid"] != candidate_oid:
+            raise RuntimeError("cannot discard a spent or different writer receipt")
+        receipt_path.unlink()
+        _fsync_directory(receipt_path.parent)
+
+
+def materialize_item_worktree(main_worktree: Path, delivery_id: str, story_id: str,
+                             candidate_oid: str) -> Path:
+    """Create or verify the detached Item worktree after remote activation."""
+    path = worktree_paths(main_worktree, delivery_id, story_id)["item"]
+    path.parent.mkdir(parents=True, exist_ok=True)
+    if path.exists():
+        try:
+            current = run_git(main_worktree, "-C", str(path), "rev-parse", "HEAD")
+        except RuntimeError as exc:
+            raise RuntimeError(f"Item worktree path is occupied: {path}") from exc
+        if current != candidate_oid:
+            raise RuntimeError(f"Item worktree is attached to a different OID: {path}")
+        return path
+    run_git(main_worktree, "worktree", "add", "--detach", str(path), candidate_oid)
+    return path
 
 
 def run_git(root: Path, *args: str) -> str:
@@ -415,13 +618,32 @@ def start_item(project_root: Path, delivery_id: str, story_id: str,
          "Target": trailer(fence_message, "Target") or "none",
          "Config-Hash": trailer(fence_message, "Config-Hash") or "none"},
     )
-    atomic_push(root, remote, [(refs["fence"], fence_oid, fence_candidate),
-                               (refs["integration"], integration_oid, integration_candidate),
-                               (refs["item"], item_oid, item_candidate),
-                               (slot_ref, "", item_candidate)])
+    receipt = create_writer_receipt(
+        root, delivery_id, story_id, slot, writer, refs["item"], slot_ref,
+        item_candidate,
+    )
+    updates = [(refs["fence"], fence_oid, fence_candidate),
+               (refs["integration"], integration_oid, integration_candidate),
+               (refs["item"], item_oid, item_candidate),
+               (slot_ref, "", item_candidate)]
+    try:
+        atomic_push(root, remote, updates)
+    except RuntimeError:
+        observed_item = remote_oid(root, remote, refs["item"]) if remote_has_ref(root, remote, refs["item"]) else None
+        observed_slot = remote_oid(root, remote, slot_ref) if remote_has_ref(root, remote, slot_ref) else None
+        if observed_item is None and observed_slot is None:
+            discard_pending_writer_receipt(root, delivery_id, story_id, item_candidate)
+        elif observed_item == item_candidate and observed_slot == item_candidate:
+            promote_writer_receipt(root, delivery_id, story_id, item_candidate)
+        raise
+    if remote_oid(root, remote, refs["item"]) != item_candidate or remote_oid(root, remote, slot_ref) != item_candidate:
+        raise RuntimeError("activation refs did not converge to the receipt candidate")
+    receipt = promote_writer_receipt(root, delivery_id, story_id, item_candidate)
+    worktree = materialize_item_worktree(root, delivery_id, story_id, item_candidate)
     return {"ok": True, "delivery": delivery_id, "story": story_id, "slot": slot,
             "writer_epoch": writer, "item": item_candidate, "integration": integration_candidate,
-            "fence": fence_candidate, "refs": short_refs(delivery_id, story_id, slot)}
+            "fence": fence_candidate, "receipt": receipt, "worktree": str(worktree),
+            "refs": short_refs(delivery_id, story_id, slot)}
 
 
 def push_item(project_root: Path, delivery_id: str, story_id: str,

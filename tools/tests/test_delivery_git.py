@@ -46,6 +46,33 @@ class DeliveryGitTests(unittest.TestCase):
         self.assertEqual(str(paths["integration"]), "/project/.agentrof/agent-marketplace/.runtime/worktrees/dlv-001/integration")
         self.assertEqual(str(paths["item"]), "/project/.agentrof/agent-marketplace/.runtime/worktrees/dlv-001/items/auth-01")
 
+    def test_writer_receipt_is_exact_and_same_candidate_is_idempotent(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            candidate = "a" * 40
+            epoch = delivery_git.epoch_token()
+            first = delivery_git.create_writer_receipt(
+                root, "DLV-001", "AUTH-01", "001", epoch,
+                "refs/heads/agentrof/items/auth-01",
+                "refs/heads/agentrof/slots/001", candidate,
+            )
+            second = delivery_git.create_writer_receipt(
+                root, "DLV-001", "AUTH-01", "001", epoch,
+                "refs/heads/agentrof/items/auth-01",
+                "refs/heads/agentrof/slots/001", candidate,
+            )
+            self.assertEqual(first, second)
+            self.assertEqual(first["state"], "pending")
+            promoted = delivery_git.promote_writer_receipt(root, "DLV-001", "AUTH-01", candidate)
+            self.assertEqual(promoted["state"], "verified")
+            self.assertEqual(delivery_git.read_writer_receipt(root, "DLV-001", "AUTH-01"), promoted)
+            with self.assertRaises(RuntimeError):
+                delivery_git.create_writer_receipt(
+                    root, "DLV-001", "AUTH-01", "001", delivery_git.epoch_token(),
+                    "refs/heads/agentrof/items/auth-01",
+                    "refs/heads/agentrof/slots/001", "b" * 40,
+                )
+
     def test_ref_free_reservation_pushes_fence_and_integration_atomically(self):
         with tempfile.TemporaryDirectory() as temporary:
             project = Path(temporary)
@@ -105,6 +132,15 @@ class DeliveryGitTests(unittest.TestCase):
             self.assertEqual(result["claims"], ["AUTH-01"])
             activation = delivery_git.start_item(project, "DLV-001", "AUTH-01")
             self.assertEqual(activation["slot"], "001")
+            self.assertEqual(activation["receipt"]["state"], "verified")
+            self.assertTrue(Path(activation["worktree"]).is_dir())
+            self.assertEqual(
+                subprocess.run(
+                    ["git", "-C", activation["worktree"], "rev-parse", "HEAD"],
+                    check=True, capture_output=True, text=True,
+                ).stdout.strip(),
+                activation["item"],
+            )
             transition = type("Args", (), {"docs": str(docs), "delivery": "DLV-001", "story": "AUTH-01", "to": "active"})
             delivery_compile.prepare_item_transition(transition)
             evidence = type("Args", (), {"docs": str(docs), "delivery": "DLV-001", "story": "AUTH-01", "reviewed_commit": "r1", "verified_commit": "r1"})

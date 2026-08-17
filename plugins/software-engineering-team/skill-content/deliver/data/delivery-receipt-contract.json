@@ -1,0 +1,32 @@
+{
+  "schema_version": 1,
+  "kind": "item-writer-v1",
+  "path": ".agentrof/agent-marketplace/.runtime/receipts/item-<dlv-id>-<story-id>.json",
+  "lock_path": ".agentrof/agent-marketplace/.runtime/receipts/item-<dlv-id>-<story-id>.json.lock",
+  "states": ["pending", "verified"],
+  "fields": {
+    "schema_version": "integer 1",
+    "kind": "literal item-writer-v1",
+    "state": "pending|verified",
+    "delivery": "DLV-<at-least-3-digits>",
+    "story": "<stable story ID>",
+    "slot": "<positive slot, at least 3 digits>",
+    "writer_epoch": "22 unpadded base64url characters",
+    "item_ref": "exact refs/heads/agentrof/items/<story>",
+    "slot_ref": "exact refs/heads/agentrof/slots/<slot>",
+    "candidate_oid": "40-64 lowercase hexadecimal Git object ID",
+    "created_at": "compiler-owned UTC instant",
+    "receipt_digest": "sha256 over the canonical object without receipt_digest"
+  },
+  "transition_contract": {
+    "pending": "written before the activation CAS",
+    "verified": "written only after Item and Slot remotely equal candidate_oid",
+    "rejection": "pending may be deleted only after both expected refs are conclusively absent or unchanged",
+    "response_loss": "preserve pending and requery; never blind-repeat the remote mutation"
+  },
+  "election": {
+    "lock": "exclusive sibling lock held across validation, atomic replacement and external-call election",
+    "write": "same-directory temporary file, fsync, replace, parent-directory fsync",
+    "source_of_truth": "remote control records; receipt grants local writer readiness only"
+  }
+}

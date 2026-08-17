@@ -1,5 +1,5 @@
 {
-  "build_id": "snapshot.2eb10df2fcd2faf11f6fa803af5e1d7328e2e7c158967e6e465f3a567677d7d5",
+  "build_id": "snapshot.682d7ef34ee70ebb47db1e865813eaf90b8971d5a0bd0de529d36871229e2565",
   "component": "software-engineering-team",
   "files": {
     ".agent-marketplace-generated-distribution": "bc5e5ffd58e656c315fc4230e335b1acaaeba4b3a6871fc57e84144035567474",
@@ -36,7 +36,7 @@
     "scripts/backlog_compile.py": "c863e1b75459092f9c332284ee53d8e41c69d8e56f619f34daea3b8d7d365175",
     "scripts/contract_check.py": "91717c2c430f5c6b7aa5025c2f4444a50349e26c00e34ddf8646f2b8b1718875",
     "scripts/delivery_compile.py": "12279e3844d32890148769fd4e6232e3bd8e65394fcd31b1d9759920471a9443",
-    "scripts/delivery_git.py": "1a8d488c6b19535df40f6cddf0d572999b6f2514f69a85aa73a573c9e41353e5",
+    "scripts/delivery_git.py": "ad8b33fb7bebc73f088fbb70c260fde87c7d6d830db5b75cce8ddae698947a3f",
     "scripts/delivery_provider.py": "1215b28ae3502e33322ee511eaef49d857971cfd8aff2b69fb4270aac196c047",
     "scripts/design_system_compile.py": "59d38d56ef3605e2deb9ea5eac8ccca0c578ffacc5858acbb1f476ed492a5e79",
     "scripts/experience_artifact_check.py": "d848b3f5d00cc2aaaf70ff41192c158fc29a7a3b08e2bf6e3ba0488059f4cdef",
@@ -261,6 +261,6 @@
   "schema_version": 2,
   "source_channel": "snapshot",
   "source_commit": "",
-  "source_ref": "snapshot.2eb10df2fcd2faf11f6fa803af5e1d7328e2e7c158967e6e465f3a567677d7d5",
+  "source_ref": "snapshot.682d7ef34ee70ebb47db1e865813eaf90b8971d5a0bd0de529d36871229e2565",
   "version": "0.2.2"
 }

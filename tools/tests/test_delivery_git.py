@@ -73,6 +73,22 @@ class DeliveryGitTests(unittest.TestCase):
                     "refs/heads/agentrof/slots/001", "b" * 40,
                 )
 
+    def test_scope_cancellation_projection_is_sorted_and_closed(self):
+        stories = {
+            "AUTH-02": {"disposition": "not_started", "tip": "none"},
+            "AUTH-01": {"disposition": "not_started", "tip": "none"},
+        }
+        projection, digest = delivery_git.cancellation_projection(
+            "DLV-001", "sha256:" + "a" * 64,
+            "Request withdrawn before execution", stories, "1" * 40,
+        )
+        self.assertEqual(list(projection["stories"]), ["AUTH-01", "AUTH-02"])
+        self.assertRegex(digest, r"^sha256:[0-9a-f]{64}$")
+        with self.assertRaises(ValueError):
+            delivery_git.cancellation_projection(
+                "DLV-001", "sha256:" + "a" * 64, "", stories, "1" * 40,
+            )
+
     def test_ref_free_reservation_pushes_fence_and_integration_atomically(self):
         with tempfile.TemporaryDirectory() as temporary:
             project = Path(temporary)

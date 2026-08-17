@@ -763,6 +763,127 @@ def open_pr(project_root: Path, delivery_id: str, remote: str = "origin") -> dic
             "fence": recorded["fence"], "refs": short_refs(delivery_id)}
 
 
+def cancellation_projection(delivery_id: str, scope_hash: str, reason: str,
+                             stories: dict[str, dict[str, str]], target: str) -> tuple[dict, str]:
+    if not reason.strip() or not OID_RE.fullmatch(target):
+        raise ValueError("cancellation reason and exact target OID are required")
+    normalized = {}
+    for story, value in sorted(stories.items()):
+        validate_story_id(story)
+        if set(value) != {"disposition", "tip"}:
+            raise ValueError("cancellation story projection has unexpected keys")
+        if value["disposition"] != "not_started" or value["tip"] != "none":
+            raise ValueError("scope-only cancellation requires not_started/none")
+        normalized[story] = {"disposition": "not_started", "tip": "none"}
+    projection = {"delivery": delivery_id, "reason": reason.strip(),
+                  "scope_hash": scope_hash, "stories": normalized, "target": target}
+    digest = "sha256:" + hashlib.sha256(_canonical_json(projection).encode("utf-8")).hexdigest()
+    return projection, digest
+
+
+def cancel_scope_delivery(project_root: Path, delivery_id: str, reason: str,
+                          remote: str = "origin") -> dict:
+    """Atomically close a claims-free Delivery through cancellation Review."""
+    root = main_worktree(project_root.resolve())
+    from delivery_compile import docs_root, find_delivery, split_note, frontmatter, body_for, title, designation, content_hash
+    docs = docs_root(root)
+    directory = find_delivery(docs, delivery_id)
+    if directory is None:
+        raise RuntimeError("Delivery package not found")
+    delivery_path_value = directory / "delivery.md"
+    delivery_props, delivery_body = split_note(delivery_path_value)
+    if delivery_props.get("status") not in {"scope_approved", "execution_approved"}:
+        raise RuntimeError("scope-only cancellation requires an approved, unclaimed Delivery")
+    refs = canonical_refs(delivery_id)
+    fence_oid = remote_oid(root, remote, refs["fence"])
+    integration_oid = remote_oid(root, remote, refs["integration"])
+    fence_message = commit_message(root, fence_oid)
+    integration_message = commit_message(root, integration_oid)
+    if trailer(fence_message, "Mode") != "open" or trailer(integration_message, "Record") in {
+            "cancellation-intent-v1", "delivery-barrier-v1", "cancellation-finalized-v1"}:
+        raise RuntimeError("Delivery already has a barrier or non-open Fence")
+    if remote_slot_oids(root, remote):
+        raise RuntimeError("scope-only cancellation cannot run while any global Slot exists")
+    stories = {}
+    for item_path in sorted(directory.glob("items/*/item.md")):
+        story = item_path.parent.name.upper()
+        item_ref = canonical_refs(delivery_id, story)["item"]
+        if remote_has_ref(root, remote, item_ref):
+            raise RuntimeError("scope-only cancellation cannot run after Item claims")
+        stories[story] = {"disposition": "not_started", "tip": "none"}
+    target = trailer(fence_message, "Target") or resolve_target(root, remote)[1]
+    projection, intent_hash = cancellation_projection(
+        delivery_id, str(delivery_props.get("scope_hash", "none")), reason, stories, target,
+    )
+    barrier_epoch = epoch_token()
+    relative_delivery = str(delivery_path_value.relative_to(root))
+    intent_props = dict(delivery_props)
+    intent_props["cancellation_intent_hash"] = intent_hash
+    intent_props["source_hash"] = content_hash(intent_props, delivery_body)
+    intent = commit_replacements(
+        root, integration_oid, {relative_delivery: frontmatter(intent_props, delivery_body)},
+        f"Record cancellation intent for {delivery_id}",
+        {"Record": "cancellation-intent-v1", "Protocol": "1", "Delivery": delivery_id,
+         "Scope-Hash": str(delivery_props.get("scope_hash", "none")), "Target": target,
+         "Cancellation-Intent": intent_hash, "Cancellation-Intent-Hash": intent_hash},
+    )
+    barrier = commit_tree(
+        root, intent, [], f"Quiesce {delivery_id} for cancellation",
+        {"Record": "delivery-barrier-v1", "Protocol": "1", "Delivery": delivery_id,
+         "Barrier-Kind": "cancellation", "Barrier-Epoch": barrier_epoch,
+         "Cancellation-Intent-Hash": intent_hash},
+    )
+    cancelled_props = dict(intent_props)
+    cancelled_props["status"] = "cancelled"
+    cancelled_props["tags"] = [tag for tag in cancelled_props.get("tags", []) if not str(tag).startswith("status/")] + ["status/cancelled"]
+    cancelled_props["source_hash"] = content_hash(cancelled_props, delivery_body)
+    finalization = commit_replacements(
+        root, barrier, {relative_delivery: frontmatter(cancelled_props, delivery_body)},
+        f"Finalize cancellation for {delivery_id}",
+        {"Record": "cancellation-finalized-v1", "Protocol": "1", "Delivery": delivery_id,
+         "Barrier-Epoch": barrier_epoch, "Cancellation-Intent-Hash": intent_hash,
+         "Cancellation-Projection-Hash": intent_hash, "Target": target},
+    )
+    review_props = {
+        "type": "delivery-review", "id": f"{delivery_id}-REVIEW",
+        "title": title(delivery_props.get("goal", delivery_id), designation(docs, "delivery-review", "delivery review")),
+        "status": "approved", "derives_from": [f"[[{delivery_path_value.relative_to(docs).with_suffix('')}|{delivery_id}]]"],
+        "scope_hash": delivery_props.get("scope_hash", "none"),
+        "cancellation_intent_hash": intent_hash, "reviewed_integration_commit": finalization,
+        "approved_at_utc": datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z"),
+        "tags": ["doc/delivery-review", "status/approved"],
+    }
+    review_body = body_for("delivery-review", review_props["title"], {
+        "Goal Outcome": delivery_props.get("goal", ""),
+        "Verdict": "Cancellation approved and finalized before Item claims.",
+        "Cancellation": reason.strip(),
+        "Cancellation Projection": _canonical_json(projection),
+        "Navigation": f"[[{delivery_path_value.relative_to(docs).with_suffix('')}|{delivery_id}]]",
+    })
+    review_props["approval_hash"] = content_hash(review_props, review_body, exclude={"status", "approved_at_utc", "source_hash", "approval_hash"})
+    review_props["source_hash"] = content_hash(review_props, review_body)
+    relative_review = str((directory / "delivery-review.md").relative_to(root))
+    review = commit_replacements(
+        root, finalization, {relative_review: frontmatter(review_props, review_body)},
+        f"Publish delivery review for {delivery_id}",
+        {"Record": "delivery-review-published-v1", "Protocol": "1", "Delivery": delivery_id,
+         "Reviewed-Integration": finalization, "Approval-Hash": review_props["approval_hash"],
+         "Target": target, "Cancellation-Intent-Hash": intent_hash},
+    )
+    fence_candidate = commit_tree(
+        root, fence_oid, [], "Fence project in open mode",
+        {"Record": "project-fence-v1", "Protocol": "1", "Mode": "open",
+         "Epoch": trailer(fence_message, "Epoch") or epoch_token(),
+         "Target": target, "Config-Hash": trailer(fence_message, "Config-Hash") or "none"},
+    )
+    atomic_push(root, remote, [(refs["fence"], fence_oid, fence_candidate),
+                               (refs["integration"], integration_oid, review)])
+    return {"ok": True, "delivery": delivery_id, "status": "cancelled",
+            "intent": intent, "barrier": barrier, "finalization": finalization,
+            "review": review, "fence": fence_candidate, "cancellation_intent_hash": intent_hash,
+            "refs": short_refs(delivery_id)}
+
+
 def reserve_delivery(project_root: Path, delivery_id: str, remote: str = "origin") -> dict:
     """Reserve a ref-free scope-approved Delivery with an atomic two-ref push.
 
@@ -1329,6 +1450,7 @@ def main(argv=None) -> int:
     prepare_pr = sub.add_parser("prepare-pr-creation"); prepare_pr.add_argument("--project-root", default="."); prepare_pr.add_argument("--delivery", required=True); prepare_pr.add_argument("--remote", default="origin"); prepare_pr.set_defaults(func="prepare-pr")
     record_pr_parser = sub.add_parser("record-pr-remote"); record_pr_parser.add_argument("--project-root", default="."); record_pr_parser.add_argument("--delivery", required=True); record_pr_parser.add_argument("--url", required=True); record_pr_parser.add_argument("--remote", default="origin"); record_pr_parser.set_defaults(func="record-pr-remote")
     open_pr_parser = sub.add_parser("open-pr"); open_pr_parser.add_argument("--project-root", default="."); open_pr_parser.add_argument("--delivery", required=True); open_pr_parser.add_argument("--remote", default="origin"); open_pr_parser.set_defaults(func="open-pr")
+    cancel_scope = sub.add_parser("cancel-scope-delivery"); cancel_scope.add_argument("--project-root", default="."); cancel_scope.add_argument("--delivery", required=True); cancel_scope.add_argument("--reason", required=True); cancel_scope.add_argument("--remote", default="origin"); cancel_scope.set_defaults(func="cancel-scope")
     args = parser.parse_args(argv)
     try:
         if args.func == "names":
@@ -1361,6 +1483,8 @@ def main(argv=None) -> int:
                 result = record_pr_remote(Path(args.project_root), args.delivery, args.url, args.remote)
             elif args.func == "open-pr":
                 result = open_pr(Path(args.project_root), args.delivery, args.remote)
+            elif args.func == "cancel-scope":
+                result = cancel_scope_delivery(Path(args.project_root), args.delivery, args.reason, args.remote)
             else:
                 result = preflight(Path(args.project_root), args.delivery, args.story, args.slot)
     except (ValueError, RuntimeError) as exc:

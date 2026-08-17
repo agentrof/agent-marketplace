@@ -162,6 +162,11 @@ def validate_envelope(envelope: dict) -> None:
     planned, errors = _normalise_planned(envelope["planned_mutations"])
     if errors or planned != envelope["planned_mutations"]:
         raise ValueError("invalid planned mutations")
+    expected_hash = mutation_plan_hash(envelope["operation"], observations, planned)
+    if envelope["mutation_plan_hash"] != expected_hash:
+        raise ValueError("mutation plan hash does not match canonical projection")
+    if not isinstance(envelope["findings"], list):
+        raise ValueError("findings must be an array")
     finding_keys = {"code", "severity", "refs", "paths", "message", "next_entry"}
     for finding in envelope["findings"]:
         if not isinstance(finding, dict) or set(finding) != finding_keys:

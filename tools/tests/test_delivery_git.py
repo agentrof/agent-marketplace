@@ -110,12 +110,29 @@ class DeliveryGitTests(unittest.TestCase):
         try:
             acquired = delivery_git.begin_source_handoff(project, "sha256:" + "a" * 64)
             self.assertEqual(acquired["mode"], "source_handoff")
+            head = subprocess.run(
+                ["git", "-C", str(project), "rev-parse", "HEAD"],
+                check=True, capture_output=True, text=True,
+            ).stdout.strip()
+            subprocess.run(["git", "-C", str(project), "branch", "handoff-source", head], check=True)
+            subprocess.run(["git", "-C", str(project), "push", "-q", "origin",
+                            "handoff-source:refs/heads/handoff-source"], check=True)
             authorized = delivery_git.authorize_target_update(
-                project, "source_handoff", "sha256:" + "b" * 64,
+                project, "source_handoff", "sha256:" + "b" * 64, "origin",
+                "direct_target", "refs/heads/handoff-source", "direct",
+                head, head, "upstream",
             )
             self.assertEqual(authorized["target_update_intent"], "sha256:" + "b" * 64)
+            self.assertEqual(authorized["receipt"]["state"], "prepared")
+            self.assertEqual(
+                delivery_git.mark_target_call_started(project, "source_handoff",
+                                                      authorized["attempt"])["state"],
+                "call_started",
+            )
             with self.assertRaises(RuntimeError):
                 delivery_git.abort_source_handoff(project)
+            applied = delivery_git.apply_target_update(project, "source_handoff")
+            self.assertEqual(applied["receipt"]["state"], "verified")
             finished = delivery_git.finish_source_handoff(project)
             self.assertEqual(finished["mode"], "open")
             _ref, fence_oid, values = delivery_git._fence_context(project, "origin")

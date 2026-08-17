@@ -56,6 +56,11 @@ def repository_from_remote(root: Path, remote: str = "origin") -> str:
 class GitHubProvider:
     name = "github"
 
+    _PR_JSON_FIELDS = (
+        "number,url,state,isDraft,headRefName,headRefOid,baseRefName,baseRefOid,"
+        "headRepository,mergeCommit,mergedAt,mergeStateStatus,statusCheckRollup"
+    )
+
     def __init__(self, root: Path, remote: str = "origin"):
         self.root = root
         self.remote = remote
@@ -65,7 +70,7 @@ class GitHubProvider:
         raw = run_gh(
             self.root, "pr", "list", "--repo", self.repository, "--state", "all",
             "--head", head, "--base", base,
-            "--json", "number,url,state,isDraft,headRefName,headRefOid,baseRefName,baseRefOid,headRepository,mergeCommit",
+            "--json", self._PR_JSON_FIELDS,
         )
         try:
             value = json.loads(raw or "[]")
@@ -73,6 +78,25 @@ class GitHubProvider:
             raise ProviderError("GitHub returned invalid PR JSON") from exc
         if not isinstance(value, list) or any(not isinstance(item, dict) for item in value):
             raise ProviderError("GitHub PR response shape is invalid")
+        return value
+
+    def inspect_pull_request(self, url: str) -> dict:
+        """Return one provider PR object with the fields used by closure.
+
+        The adapter deliberately validates the response shape here rather
+        than letting callers treat a missing merge object or malformed
+        provider response as a successful handoff.
+        """
+        raw = run_gh(self.root, "pr", "view", url, "--repo", self.repository,
+                     "--json", self._PR_JSON_FIELDS)
+        try:
+            value = json.loads(raw or "{}")
+        except json.JSONDecodeError as exc:
+            raise ProviderError("GitHub returned invalid PR JSON") from exc
+        if not isinstance(value, dict):
+            raise ProviderError("GitHub PR response shape is invalid")
+        if not isinstance(value.get("url"), str) or not value["url"].startswith("https://github.com/"):
+            raise ProviderError("GitHub PR response has no canonical URL")
         return value
 
     def exact_unmerged(self, head: str, base: str) -> list[dict]:
@@ -104,4 +128,15 @@ class GitHubProvider:
             self.root, "pr", "merge", url, "--merge", "--match-head-commit", head_oid,
             "--delete-branch=false",
         )
-        return {"url": url, "head": head_oid}
+        value = self.inspect_pull_request(url)
+        if str(value.get("state", "")).upper() != "MERGED":
+            raise ProviderError("GitHub PR merge call returned before the PR was merged")
+        merge_value = value.get("mergeCommit")
+        merge_oid = merge_value.get("oid") if isinstance(merge_value, dict) else merge_value
+        if not isinstance(merge_oid, str) or not merge_oid:
+            raise ProviderError("GitHub PR has no provider-confirmed merge commit")
+        observed_head = value.get("headRefOid")
+        if observed_head != head_oid:
+            raise ProviderError("GitHub PR head changed during merge")
+        return {"url": value["url"], "head": head_oid,
+                "merge_commit": merge_oid, "provider": value}

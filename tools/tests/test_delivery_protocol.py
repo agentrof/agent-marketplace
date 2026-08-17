@@ -40,7 +40,7 @@ class DeliveryProtocolTests(unittest.TestCase):
             "configure-parallelism", "begin-source-handoff", "authorize-target-update",
             "reauthorize-target-update", "finish-source-handoff", "abort-source-handoff",
             "begin-plan-revision", "finish-plan-revision", "abort-plan-revision",
-            "quiesce-upgrade", "finish-upgrade", "abort-upgrade", "publish-execution-plan",
+            "quiesce-upgrade", "upgrade-target-merge", "finish-upgrade", "abort-upgrade", "publish-execution-plan",
             "refresh-target", "claim-items", "start-item", "pause-item", "resume-item",
             "takeover-item", "publish-delivery-review", "invalidate-delivery-review",
             "open-pr", "merge-pr", "cancel-delivery",

@@ -32,6 +32,18 @@ EPOCH_RE = re.compile(r"^[A-Za-z0-9_-]{22}$")
 OID_RE = re.compile(r"^[0-9a-f]{40,64}$")
 RECEIPT_SCHEMA_VERSION = 1
 GITHUB_PR_RE = re.compile(r"^/([^/]+)/([^/]+)/pull/([1-9][0-9]*)$")
+FENCE_MODES = {"open", "source_handoff", "configuring", "upgrade"}
+SOURCE_KINDS = {"none", "requirement_supersession", "backlog_revision",
+                "designation_reconciliation"}
+CARRIER_KINDS = {"none", "github_pr", "direct_target"}
+UPGRADE_PHASES = {"none", "acquired", "target_handoff"}
+FENCE_CANONICAL_KEYS = (
+    "Mode", "Epoch", "Target", "Config-Hash", "Source-Kind", "Source-Intent",
+    "Target-Update-Intent", "Target-Update-Attempt", "Target-Repository",
+    "Target-Carrier-Kind", "Target-Carrier-Ref", "Target-Carrier-Object",
+    "Target-Carrier-Head", "Target-Carrier-Base", "Upgrade-Phase",
+    "Upgrade-Contract", "Handoff-Target",
+)
 
 
 def _fcntl_module():
@@ -366,6 +378,131 @@ def mark_provider_verified(main_worktree: Path, delivery_id: str,
         return _validate_provider_receipt(_write_provider_receipt_locked(path, receipt))
 
 
+def target_receipt_paths(main_worktree: Path, mode: str) -> tuple[Path, Path]:
+    if mode not in {"source_handoff", "configuring", "upgrade"}:
+        raise ValueError("target receipt mode is unsupported")
+    base = runtime_root(main_worktree) / "target-update-receipts"
+    name = f"{mode}.json"
+    return base / name, base / f"{name}.lock"
+
+
+def _validate_target_receipt(receipt: dict) -> dict:
+    required = {
+        "schema_version", "kind", "state", "mode", "attempt", "fence_candidate",
+        "intent", "target_repository", "carrier_kind", "carrier_ref",
+        "carrier_object", "carrier_head", "carrier_base", "receipt_digest",
+    }
+    if set(receipt) != required or receipt.get("schema_version") != 1 or receipt.get("kind") != "target-update-v1":
+        raise RuntimeError("target update receipt schema is unsupported")
+    if receipt["state"] not in {"prepared", "call_started", "verified"}:
+        raise RuntimeError("target update receipt state is invalid")
+    if receipt["mode"] not in {"source_handoff", "configuring", "upgrade"}:
+        raise RuntimeError("target update receipt mode is invalid")
+    _validate_epoch(str(receipt["attempt"]), "target update attempt")
+    if not OID_RE.fullmatch(str(receipt["fence_candidate"])):
+        raise RuntimeError("target update receipt Fence candidate is invalid")
+    _validate_hash_or_none(str(receipt["intent"]), "target update intent")
+    values = {
+        "Mode": receipt["mode"], "Epoch": receipt["attempt"],
+        "Target": receipt["carrier_base"], "Config-Hash": "none",
+        "Source-Kind": "requirement_supersession" if receipt["mode"] == "source_handoff" else "none",
+        "Source-Intent": "none", "Target-Update-Intent": receipt["intent"],
+        "Target-Update-Attempt": receipt["attempt"], "Target-Repository": receipt["target_repository"],
+        "Target-Carrier-Kind": receipt["carrier_kind"], "Target-Carrier-Ref": receipt["carrier_ref"],
+        "Target-Carrier-Object": receipt["carrier_object"], "Target-Carrier-Head": receipt["carrier_head"],
+        "Target-Carrier-Base": receipt["carrier_base"], "Upgrade-Phase": "acquired" if receipt["mode"] == "upgrade" else "none",
+        "Upgrade-Contract": "none", "Handoff-Target": "none",
+    }
+    # Validate carrier grammar without making the receipt a second Fence.
+    if receipt["target_repository"] == "none" or receipt["carrier_kind"] not in {"github_pr", "direct_target"}:
+        raise RuntimeError("target update receipt carrier is incomplete")
+    if not receipt["carrier_ref"].startswith("refs/heads/") or receipt["carrier_ref"].startswith("refs/heads/agentrof/"):
+        raise RuntimeError("target update receipt carrier ref is invalid")
+    if not OID_RE.fullmatch(receipt["carrier_head"]) or not OID_RE.fullmatch(receipt["carrier_base"]):
+        raise RuntimeError("target update receipt carrier OID is invalid")
+    expected = dict(receipt)
+    digest = expected.pop("receipt_digest")
+    if digest != receipt_digest(expected):
+        raise RuntimeError("target update receipt digest is invalid")
+    return receipt
+
+
+def create_target_update_receipt(main_worktree: Path, mode: str, attempt: str,
+                                 fence_candidate: str, intent: str,
+                                 target_repository: str, carrier_kind: str,
+                                 carrier_ref: str, carrier_object: str,
+                                 carrier_head: str, carrier_base: str) -> dict:
+    path, lock = target_receipt_paths(main_worktree, mode)
+    value = {
+        "schema_version": 1, "kind": "target-update-v1", "state": "prepared",
+        "mode": mode, "attempt": attempt, "fence_candidate": fence_candidate,
+        "intent": intent, "target_repository": target_repository,
+        "carrier_kind": carrier_kind, "carrier_ref": carrier_ref,
+        "carrier_object": carrier_object, "carrier_head": carrier_head,
+        "carrier_base": carrier_base,
+    }
+    value["receipt_digest"] = receipt_digest(value)
+    with receipt_lock(lock):
+        if path.exists():
+            existing = _validate_target_receipt(json.loads(path.read_text(encoding="utf-8")))
+            if existing["attempt"] != attempt:
+                raise RuntimeError("a different target update receipt already exists")
+            return existing
+        _write_provider_receipt_locked(path, value)
+        return _validate_target_receipt(json.loads(path.read_text(encoding="utf-8")))
+
+
+def mark_target_call_started(main_worktree: Path, mode: str, attempt: str) -> dict:
+    path, lock = target_receipt_paths(main_worktree, mode)
+    with receipt_lock(lock):
+        if not path.exists():
+            raise RuntimeError("target update receipt is missing")
+        value = _validate_target_receipt(json.loads(path.read_text(encoding="utf-8")))
+        if value["attempt"] != attempt:
+            raise RuntimeError("target update receipt attempt is stale")
+        if value["state"] == "prepared":
+            value["state"] = "call_started"
+            _write_provider_receipt_locked(path, value)
+        return _validate_target_receipt(json.loads(path.read_text(encoding="utf-8")))
+
+
+def mark_target_verified(main_worktree: Path, mode: str, attempt: str) -> dict:
+    path, lock = target_receipt_paths(main_worktree, mode)
+    with receipt_lock(lock):
+        if not path.exists():
+            raise RuntimeError("target update receipt is missing")
+        value = _validate_target_receipt(json.loads(path.read_text(encoding="utf-8")))
+        if value["attempt"] != attempt:
+            raise RuntimeError("target update receipt attempt is stale")
+        value["state"] = "verified"
+        _write_provider_receipt_locked(path, value)
+        return _validate_target_receipt(json.loads(path.read_text(encoding="utf-8")))
+
+
+def discard_target_update_receipt(main_worktree: Path, mode: str, attempt: str) -> None:
+    path, lock = target_receipt_paths(main_worktree, mode)
+    with receipt_lock(lock):
+        if not path.exists():
+            return
+        value = _validate_target_receipt(json.loads(path.read_text(encoding="utf-8")))
+        if value["state"] != "prepared" or value["attempt"] != attempt:
+            raise RuntimeError("cannot discard a spent or different target update receipt")
+        path.unlink()
+        _fsync_directory(path.parent)
+
+
+def clear_target_update_receipt(main_worktree: Path, mode: str, attempt: str) -> None:
+    path, lock = target_receipt_paths(main_worktree, mode)
+    with receipt_lock(lock):
+        if not path.exists():
+            return
+        value = _validate_target_receipt(json.loads(path.read_text(encoding="utf-8")))
+        if value["state"] != "verified" or value["attempt"] != attempt:
+            raise RuntimeError("cannot clear an unverified or different target update receipt")
+        path.unlink()
+        _fsync_directory(path.parent)
+
+
 def materialize_item_worktree(main_worktree: Path, delivery_id: str, story_id: str,
                              candidate_oid: str) -> Path:
     """Create or verify the detached Item worktree after remote activation."""
@@ -425,6 +562,7 @@ def run_git(root: Path, *args: str) -> str:
 def commit_tree(root: Path, base: str, paths: list[str], subject: str,
                 trailers: dict[str, str]) -> str:
     """Create an unreferenced candidate tree from *base* plus exact paths."""
+    trailers = _normalise_control_trailers(trailers)
     with tempfile.TemporaryDirectory(prefix="agentrof-index-") as temporary:
         index = Path(temporary) / "index"
         env = os.environ.copy()
@@ -456,6 +594,7 @@ def commit_tree(root: Path, base: str, paths: list[str], subject: str,
 def commit_replacements(root: Path, base: str, replacements: dict[str, str],
                         subject: str, trailers: dict[str, str]) -> str:
     """Create a candidate from *base* with exact in-memory file replacements."""
+    trailers = _normalise_control_trailers(trailers)
     with tempfile.TemporaryDirectory(prefix="agentrof-index-") as temporary:
         index = Path(temporary) / "index"
         env = os.environ.copy()
@@ -517,6 +656,78 @@ def trailer(message: str, key: str) -> str | None:
     return None
 
 
+def _validate_epoch(value: str, label: str = "epoch") -> str:
+    if not EPOCH_RE.fullmatch(value):
+        raise RuntimeError(f"DELIVERY_FENCE_CORRUPT: {label} must be a 22-character base64url token")
+    return value
+
+
+def _validate_hash_or_none(value: str, label: str) -> str:
+    if value != "none" and not re.fullmatch(r"sha256:[0-9a-f]{64}", value):
+        raise RuntimeError(f"DELIVERY_FENCE_CORRUPT: {label} must be none or a sha256 digest")
+    return value
+
+
+def _validate_fence_values(values: dict[str, str]) -> dict[str, str]:
+    """Validate the canonical project-fence projection before any mutation."""
+    missing = [key for key in FENCE_CANONICAL_KEYS if key not in values]
+    if missing:
+        raise RuntimeError("DELIVERY_FENCE_CORRUPT: missing fence fields " + ", ".join(missing))
+    if values["Mode"] not in FENCE_MODES:
+        raise RuntimeError("DELIVERY_FENCE_MODE: unsupported Fence mode")
+    _validate_epoch(values["Epoch"])
+    if not OID_RE.fullmatch(values["Target"]):
+        raise RuntimeError("DELIVERY_FENCE_CORRUPT: Target must be an object ID")
+    _validate_hash_or_none(values["Config-Hash"], "Config-Hash")
+    if values["Source-Kind"] not in SOURCE_KINDS:
+        raise RuntimeError("DELIVERY_FENCE_CORRUPT: Source-Kind is unsupported")
+    _validate_hash_or_none(values["Source-Intent"], "Source-Intent")
+    _validate_hash_or_none(values["Target-Update-Intent"], "Target-Update-Intent")
+    attempt = values["Target-Update-Attempt"]
+    if attempt != "none":
+        _validate_epoch(attempt, "Target-Update-Attempt")
+    repository = values["Target-Repository"]
+    if repository not in {"none", "upstream"} and not re.fullmatch(r"github:[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", repository):
+        raise RuntimeError("DELIVERY_FENCE_CORRUPT: Target-Repository is unsupported")
+    carrier_kind = values["Target-Carrier-Kind"]
+    if carrier_kind not in CARRIER_KINDS:
+        raise RuntimeError("DELIVERY_FENCE_CORRUPT: Target-Carrier-Kind is unsupported")
+    carrier_fields = (
+        values["Target-Carrier-Ref"], values["Target-Carrier-Object"],
+        values["Target-Carrier-Head"], values["Target-Carrier-Base"],
+    )
+    if carrier_kind == "none":
+        if any(value != "none" for value in carrier_fields) or repository != "none":
+            raise RuntimeError("DELIVERY_FENCE_CORRUPT: absent carrier has non-none fields")
+    else:
+        if repository == "none" or not values["Target-Carrier-Ref"].startswith("refs/heads/"):
+            raise RuntimeError("DELIVERY_TARGET_CARRIER_INVALID: incomplete carrier binding")
+        if values["Target-Carrier-Ref"].startswith("refs/heads/agentrof/"):
+            raise RuntimeError("DELIVERY_TARGET_CARRIER_INVALID: coordination refs cannot be carriers")
+        if not OID_RE.fullmatch(values["Target-Carrier-Head"]) or not OID_RE.fullmatch(values["Target-Carrier-Base"]):
+            raise RuntimeError("DELIVERY_TARGET_CARRIER_INVALID: carrier head/base must be object IDs")
+        if carrier_kind == "github_pr" and not re.fullmatch(r"pr:[1-9][0-9]*", values["Target-Carrier-Object"]):
+            raise RuntimeError("DELIVERY_TARGET_CARRIER_INVALID: GitHub carrier object is invalid")
+        if carrier_kind == "direct_target" and values["Target-Carrier-Object"] != "direct":
+            raise RuntimeError("DELIVERY_TARGET_CARRIER_INVALID: direct carrier object is invalid")
+    if values["Upgrade-Phase"] not in UPGRADE_PHASES:
+        raise RuntimeError("DELIVERY_FENCE_CORRUPT: Upgrade-Phase is unsupported")
+    _validate_hash_or_none(values["Upgrade-Contract"], "Upgrade-Contract")
+    handoff_target = values["Handoff-Target"]
+    if handoff_target != "none" and not OID_RE.fullmatch(handoff_target):
+        raise RuntimeError("DELIVERY_FENCE_CORRUPT: Handoff-Target must be an object ID")
+    if values["Mode"] == "source_handoff" and values["Source-Kind"] == "none":
+        raise RuntimeError("DELIVERY_FENCE_CORRUPT: source_handoff requires Source-Kind")
+    if values["Target-Update-Intent"] != "none" and values["Target-Carrier-Kind"] == "none":
+        raise RuntimeError("DELIVERY_TARGET_CARRIER_INVALID: target intent has no carrier")
+    if values["Mode"] == "upgrade":
+        if values["Upgrade-Phase"] == "none" or values["Upgrade-Contract"] == "none":
+            raise RuntimeError("DELIVERY_FENCE_CORRUPT: upgrade mode requires an upgrade contract and phase")
+    elif any(values[key] != "none" for key in ("Upgrade-Phase", "Upgrade-Contract", "Handoff-Target")):
+        raise RuntimeError("DELIVERY_FENCE_CORRUPT: upgrade fields outside upgrade mode")
+    return values
+
+
 def atomic_push(root: Path, remote: str, updates: list[tuple[str, str, str]]) -> None:
     args = ["push", "--atomic", remote]
     for ref, expected, candidate in updates:
@@ -526,6 +737,36 @@ def atomic_push(root: Path, remote: str, updates: list[tuple[str, str, str]]) ->
                             capture_output=True, check=False)
     if result.returncode:
         raise RuntimeError(result.stderr.strip() or "atomic remote transaction rejected")
+
+
+def _normalise_control_trailers(trailers: dict[str, str]) -> dict[str, str]:
+    """Add the canonical Fence projection to every project-fence commit.
+
+    Older coordinator call sites use short internal aliases. Keeping this
+    normalization at the commit boundary prevents one path from silently
+    emitting a different wire schema while the migration is in progress.
+    """
+    if trailers.get("Record") != "project-fence-v1":
+        return trailers
+    value = dict(trailers)
+    aliases = {
+        "Source-Intent": value.get("Source-Intent", value.get("Source-Hash", "none")),
+        "Target-Update-Attempt": value.get("Target-Update-Attempt", value.get("Attempt", "none")),
+    }
+    for key in FENCE_CANONICAL_KEYS:
+        if key not in value:
+            value[key] = aliases.get(key, "none")
+    value.setdefault("Source-Kind", "none")
+    value.setdefault("Target-Repository", "none")
+    value.setdefault("Target-Carrier-Kind", "none")
+    value.setdefault("Target-Carrier-Ref", "none")
+    value.setdefault("Target-Carrier-Object", "none")
+    value.setdefault("Target-Carrier-Head", "none")
+    value.setdefault("Target-Carrier-Base", "none")
+    value.setdefault("Upgrade-Phase", "none")
+    value.setdefault("Upgrade-Contract", "none")
+    value.setdefault("Handoff-Target", "none")
+    return value
 
 
 def resolve_target(root: Path, remote: str) -> tuple[str, str]:
@@ -886,8 +1127,13 @@ def merge_pr(project_root: Path, delivery_id: str, remote: str = "origin") -> di
     try:
         run_git(root, "merge-base", "--is-ancestor", merge_oid, target_after)
         run_git(root, "merge-base", "--is-ancestor", integration_oid, target_after)
+        merge_object = run_git(root, "cat-file", "-p", merge_oid)
     except RuntimeError as exc:
         raise RuntimeError("provider merge is not present in the exact target ancestry") from exc
+    parents = [line.split(" ", 1)[1] for line in merge_object.splitlines()
+               if line.startswith("parent ") and " " in line]
+    if len(parents) != 2 or parents[1] != integration_oid:
+        raise ProviderError("provider merge is not an exact two-parent merge of the reviewed Integration")
     return {"ok": True, "delivery": delivery_id, "status": "merged",
             "pull_request_url": canonical_url, "merge_commit": merge_oid,
             "target_before": target_before, "target_after": target_after,
@@ -1467,7 +1713,7 @@ def refresh_target(project_root: Path, delivery_id: str,
         root, integration_oid, target, f"Refresh target for {delivery_id}",
         {"Record": "target-refresh-v1", "Protocol": "1", "Delivery": delivery_id,
          "Previous-Target": previous_target, "Target": target,
-         "Target-Impact-Hash": "none"},
+         "Target-Impact-Hash": "none", "Refresh-Kind": "disjoint"},
     )
     final_candidate = merge
     invalidated = bool(relevant)
@@ -1492,7 +1738,8 @@ def refresh_target(project_root: Path, delivery_id: str,
             root, merge, replacements, f"Invalidate execution plan for {delivery_id}",
             {"Record": "target-refresh-v1", "Protocol": "1", "Delivery": delivery_id,
              "Previous-Target": previous_target, "Target": target,
-             "Target-Impact-Hash": "none", "Plan-Invalidated": "true"},
+             "Target-Impact-Hash": "none", "Refresh-Kind": "plan_invalidated",
+             "Plan-Invalidated": "true"},
         )
     fence_candidate = commit_tree(
         root, fence_oid, [], "Refresh project target",
@@ -1546,7 +1793,7 @@ def revise_unclaimed_scope(project_root: Path, delivery_id: str,
             root, integration_oid, target, f"Refresh target before scope revision for {delivery_id}",
             {"Record": "target-refresh-v1", "Protocol": "1", "Delivery": delivery_id,
              "Previous-Target": trailer(fence_message, "Target"), "Target": target,
-             "Target-Impact-Hash": "none"},
+             "Target-Impact-Hash": "none", "Refresh-Kind": "scope_revision"},
         )
     package = package_paths(root, directory, docs)
     candidate = commit_tree(
@@ -1579,32 +1826,49 @@ def _fence_context(root: Path, remote: str) -> tuple[str, str, dict[str, str]]:
     protocol = trailer(message, "Protocol")
     if protocol != "1":
         raise RuntimeError("DELIVERY_PROTOCOL_UNSUPPORTED: Fence protocol is not 1")
-    values = {
-        key: trailer(message, key) or "none"
-        for key in ("Mode", "Epoch", "Target", "Config-Hash", "Source-Hash",
-                    "Barrier-Kind", "Barrier-Epoch", "Target-Update-Intent", "Attempt")
-    }
+    values = {key: trailer(message, key) or "none" for key in FENCE_CANONICAL_KEYS}
+    # Read the pre-canonical names emitted by older package versions as
+    # compatibility observations, then immediately expose the canonical
+    # projection to all new writers.
+    values["Source-Intent"] = values["Source-Intent"] if values["Source-Intent"] != "none" else (trailer(message, "Source-Hash") or "none")
+    values["Target-Update-Attempt"] = values["Target-Update-Attempt"] if values["Target-Update-Attempt"] != "none" else (trailer(message, "Attempt") or "none")
+    values["Barrier-Kind"] = trailer(message, "Barrier-Kind") or "none"
+    values["Barrier-Epoch"] = trailer(message, "Barrier-Epoch") or "none"
+    values["Source-Hash"] = trailer(message, "Source-Hash") or values["Source-Intent"]
+    values["Attempt"] = trailer(message, "Attempt") or values["Target-Update-Attempt"]
+    _validate_fence_values(values)
     return ref, fence_oid, values
 
 
 def _fence_child(root: Path, fence_oid: str, values: dict[str, str], subject: str) -> str:
+    canonical = {key: values.get(key, "none") for key in FENCE_CANONICAL_KEYS}
+    canonical["Epoch"] = values.get("Epoch", epoch_token())
+    canonical["Target"] = values.get("Target", "none")
+    canonical["Mode"] = values.get("Mode", "open")
+    canonical["Source-Intent"] = values.get("Source-Intent", values.get("Source-Hash", "none"))
+    canonical["Target-Update-Attempt"] = values.get("Target-Update-Attempt", values.get("Attempt", "none"))
+    if canonical["Mode"] == "open" and canonical["Target"] == "none":
+        raise RuntimeError("DELIVERY_FENCE_CORRUPT: open Fence requires a target")
+    _validate_fence_values(canonical)
+    # Keep old aliases in the commit for one protocol transition so old hosts
+    # can observe the same state; new validators consume the canonical fields.
     trailers = {
-        "Record": "project-fence-v1", "Protocol": "1",
-        "Mode": values.get("Mode", "open"), "Epoch": values.get("Epoch", epoch_token()),
-        "Target": values.get("Target", "none"), "Config-Hash": values.get("Config-Hash", "none"),
-        "Source-Hash": values.get("Source-Hash", "none"),
+        "Record": "project-fence-v1", "Protocol": "1", **canonical,
+        "Source-Hash": canonical["Source-Intent"],
         "Barrier-Kind": values.get("Barrier-Kind", "none"),
         "Barrier-Epoch": values.get("Barrier-Epoch", "none"),
-        "Target-Update-Intent": values.get("Target-Update-Intent", "none"),
-        "Attempt": values.get("Attempt", "none"),
+        "Attempt": canonical["Target-Update-Attempt"],
     }
     return commit_tree(root, fence_oid, [], subject, trailers)
 
 
 def begin_source_handoff(project_root: Path, source_hash: str = "none",
-                         remote: str = "origin") -> dict:
+                         remote: str = "origin",
+                         source_kind: str = "requirement_supersession") -> dict:
     """Acquire the shared Fence for a source/configuration handoff."""
     root = main_worktree(project_root.resolve())
+    if source_kind not in SOURCE_KINDS - {"none"}:
+        raise ValueError("source_kind is unsupported")
     if source_hash != "none" and not re.fullmatch(r"sha256:[0-9a-f]{64}", source_hash):
         raise ValueError("source_hash must be none or a canonical sha256 digest")
     ref = canonical_refs("DLV-000")["fence"]
@@ -1620,6 +1884,7 @@ def begin_source_handoff(project_root: Path, source_hash: str = "none",
         if target == "none":
             _branch, target = resolve_target(root, remote)
         values.update({"Mode": "source_handoff", "Epoch": epoch_token(), "Target": target,
+                       "Source-Kind": source_kind, "Source-Intent": source_hash,
                        "Source-Hash": source_hash, "Barrier-Kind": "none",
                        "Barrier-Epoch": "none", "Target-Update-Intent": "none", "Attempt": "none"})
         candidate = _fence_child(root, fence_oid, values, "Acquire source handoff Fence")
@@ -1629,7 +1894,8 @@ def begin_source_handoff(project_root: Path, source_hash: str = "none",
             raise
         _branch, target = resolve_target(root, remote)
         values = {"Mode": "source_handoff", "Epoch": epoch_token(), "Target": target,
-                  "Config-Hash": "none", "Source-Hash": source_hash,
+                  "Config-Hash": "none", "Source-Kind": source_kind,
+                  "Source-Intent": source_hash, "Source-Hash": source_hash,
                   "Barrier-Kind": "none", "Barrier-Epoch": "none",
                   "Target-Update-Intent": "none", "Attempt": "none"}
         candidate = commit_tree(root, target, [], "Acquire source handoff Fence", {
@@ -1641,7 +1907,11 @@ def begin_source_handoff(project_root: Path, source_hash: str = "none",
 
 
 def authorize_target_update(project_root: Path, mode: str = "source_handoff",
-                            candidate_hash: str = "none", remote: str = "origin") -> dict:
+                            candidate_hash: str = "none", remote: str = "origin",
+                            carrier_kind: str = "none", carrier_ref: str = "none",
+                            carrier_object: str = "none", carrier_head: str = "none",
+                            carrier_base: str = "none",
+                            target_repository: str = "none") -> dict:
     """Install the durable target-update intent before an external target write."""
     root = main_worktree(project_root.resolve())
     ref, fence_oid, values = _fence_context(root, remote)
@@ -1649,14 +1919,54 @@ def authorize_target_update(project_root: Path, mode: str = "source_handoff",
         raise RuntimeError(f"DELIVERY_FENCE_MODE: expected {mode}, found {values['Mode']}")
     if values["Target-Update-Intent"] != "none":
         raise RuntimeError("DELIVERY_TARGET_UPDATE_UNCERTAIN: target-update intent already exists")
-    if candidate_hash != "none" and not re.fullmatch(r"sha256:[0-9a-f]{64}", candidate_hash):
-        raise ValueError("candidate_hash must be none or a canonical sha256 digest")
+    if candidate_hash == "none" or not re.fullmatch(r"sha256:[0-9a-f]{64}", candidate_hash):
+        raise ValueError("candidate_hash must be a canonical sha256 digest")
+    if carrier_kind not in {"github_pr", "direct_target"}:
+        raise ValueError("carrier_kind must be github_pr or direct_target")
+    if target_repository not in {"upstream"} and not re.fullmatch(
+            r"github:[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", target_repository):
+        raise ValueError("target_repository must be upstream or github:<owner>/<repo>")
+    if (not carrier_ref.startswith("refs/heads/") or carrier_ref.startswith("refs/heads/agentrof/")
+            or not OID_RE.fullmatch(carrier_head) or not OID_RE.fullmatch(carrier_base)):
+        raise ValueError("carrier ref/head/base is invalid")
+    if carrier_kind == "github_pr" and not re.fullmatch(r"pr:[1-9][0-9]*", carrier_object):
+        raise ValueError("github_pr carrier_object must be pr:<number>")
+    if carrier_kind == "direct_target" and carrier_object != "direct":
+        raise ValueError("direct_target carrier_object must be direct")
+    observed_carrier = remote_oid(root, remote, carrier_ref)
+    if observed_carrier != carrier_head:
+        raise RuntimeError("DELIVERY_TARGET_CARRIER_INVALID: carrier ref does not equal carrier head")
     values["Target-Update-Intent"] = candidate_hash
-    values["Attempt"] = epoch_token()
+    values.update({
+        "Target-Update-Attempt": epoch_token(), "Attempt": values.get("Attempt", "none"),
+        "Target-Repository": target_repository, "Target-Carrier-Kind": carrier_kind,
+        "Target-Carrier-Ref": carrier_ref, "Target-Carrier-Object": carrier_object,
+        "Target-Carrier-Head": carrier_head, "Target-Carrier-Base": carrier_base,
+    })
+    values["Attempt"] = values["Target-Update-Attempt"]
     candidate = _fence_child(root, fence_oid, values, "Authorize target update")
-    atomic_push(root, remote, [(ref, fence_oid, candidate)])
+    receipt = create_target_update_receipt(
+        root, mode, values["Target-Update-Attempt"], candidate, candidate_hash,
+        target_repository, carrier_kind, carrier_ref, carrier_object,
+        carrier_head, carrier_base,
+    )
+    try:
+        atomic_push(root, remote, [(ref, fence_oid, candidate)])
+    except Exception:
+        # A conclusive Fence lease rejection leaves no target mutation; the
+        # pending local candidate may be discarded and retried by a fresh
+        # authorizing observation. Ambiguous transport remains conservative.
+        try:
+            discard_target_update_receipt(root, mode, values["Target-Update-Attempt"])
+        except Exception:
+            pass
+        raise
     return {"ok": True, "mode": mode, "fence": candidate,
-            "target_update_intent": candidate_hash, "attempt": values["Attempt"]}
+            "target_update_intent": candidate_hash, "attempt": values["Target-Update-Attempt"],
+            "receipt": receipt,
+            "carrier": {key: values[key] for key in (
+                "Target-Repository", "Target-Carrier-Kind", "Target-Carrier-Ref",
+                "Target-Carrier-Object", "Target-Carrier-Head", "Target-Carrier-Base")}}
 
 
 def finish_source_handoff(project_root: Path, remote: str = "origin") -> dict:
@@ -1668,11 +1978,31 @@ def finish_source_handoff(project_root: Path, remote: str = "origin") -> dict:
     if values["Target-Update-Intent"] == "none":
         raise RuntimeError("finish-source-handoff requires an authorized target-update intent")
     _branch, target = resolve_target(root, remote)
+    handoff_mode = values["Mode"]
+    attempt = values["Target-Update-Attempt"]
+    if attempt != "none":
+        # The target writer must explicitly prove the provider/direct
+        # postcondition before the Fence is released. A prepared receipt is
+        # never treated as a successful external handoff.
+        receipt_path, _lock = target_receipt_paths(root, values["Mode"])
+        if receipt_path.exists():
+            receipt = _validate_target_receipt(json.loads(receipt_path.read_text(encoding="utf-8")))
+            if receipt["state"] != "verified":
+                raise RuntimeError("DELIVERY_TARGET_CONVERGENCE_REQUIRED: target update is not verified")
+        else:
+            raise RuntimeError("DELIVERY_TARGET_UPDATE_UNCERTAIN: target update receipt is missing")
     values.update({"Mode": "open", "Epoch": epoch_token(), "Target": target,
-                   "Source-Hash": "none", "Barrier-Kind": "none", "Barrier-Epoch": "none",
-                   "Target-Update-Intent": "none", "Attempt": "none"})
+                   "Source-Kind": "none", "Source-Intent": "none", "Source-Hash": "none",
+                   "Barrier-Kind": "none", "Barrier-Epoch": "none",
+                   "Target-Update-Intent": "none", "Target-Update-Attempt": "none",
+                   "Target-Repository": "none", "Target-Carrier-Kind": "none",
+                   "Target-Carrier-Ref": "none", "Target-Carrier-Object": "none",
+                   "Target-Carrier-Head": "none", "Target-Carrier-Base": "none",
+                   "Attempt": "none", "Upgrade-Phase": "none",
+                   "Upgrade-Contract": "none", "Handoff-Target": "none"})
     candidate = _fence_child(root, fence_oid, values, "Finish source handoff")
     atomic_push(root, remote, [(ref, fence_oid, candidate)])
+    clear_target_update_receipt(root, handoff_mode, attempt)
     return {"ok": True, "mode": "open", "fence": candidate, "target": target}
 
 
@@ -1684,8 +2014,15 @@ def abort_source_handoff(project_root: Path, remote: str = "origin") -> dict:
         raise RuntimeError("DELIVERY_FENCE_MODE: no source handoff is active")
     if values["Target-Update-Intent"] != "none":
         raise RuntimeError("DELIVERY_TARGET_UPDATE_UNCERTAIN: abort is forbidden after target-update intent")
-    values.update({"Mode": "open", "Epoch": epoch_token(), "Source-Hash": "none",
-                   "Barrier-Kind": "none", "Barrier-Epoch": "none", "Attempt": "none"})
+    values.update({"Mode": "open", "Epoch": epoch_token(), "Source-Kind": "none",
+                   "Source-Intent": "none", "Source-Hash": "none",
+                   "Barrier-Kind": "none", "Barrier-Epoch": "none",
+                   "Target-Update-Intent": "none", "Target-Update-Attempt": "none",
+                   "Target-Repository": "none", "Target-Carrier-Kind": "none",
+                   "Target-Carrier-Ref": "none", "Target-Carrier-Object": "none",
+                   "Target-Carrier-Head": "none", "Target-Carrier-Base": "none",
+                   "Attempt": "none", "Upgrade-Phase": "none",
+                   "Upgrade-Contract": "none", "Handoff-Target": "none"})
     candidate = _fence_child(root, fence_oid, values, "Abort source handoff")
     atomic_push(root, remote, [(ref, fence_oid, candidate)])
     return {"ok": True, "mode": "open", "fence": candidate}
@@ -1705,6 +2042,14 @@ def _barrier_transition(project_root: Path, kind: str, action: str,
         epoch = epoch_token()
         values.update({"Barrier-Kind": kind, "Barrier-Epoch": epoch,
                        "Mode": "upgrade" if kind == "upgrade" else "open"})
+        if kind == "upgrade":
+            values.update({
+                "Upgrade-Phase": "acquired",
+                "Upgrade-Contract": "sha256:" + hashlib.sha256(
+                    f"agentrof-upgrade-v1:{delivery_id}:{epoch}".encode("utf-8")
+                ).hexdigest(),
+                "Handoff-Target": "none",
+            })
         fence_candidate = _fence_child(root, fence_oid, values, f"Begin {kind} barrier")
         updates = [(fence_ref, fence_oid, fence_candidate)]
         integration_candidate = None
@@ -1713,7 +2058,8 @@ def _barrier_transition(project_root: Path, kind: str, action: str,
                 root, integration_oid, [], f"Begin {kind} barrier for {delivery_id}",
                 {"Record": "delivery-barrier-v1", "Protocol": "1", "Delivery": delivery_id,
                  "Barrier-Kind": kind, "Barrier-Epoch": epoch,
-                 "Cancellation-Intent-Hash": "none"},
+                 "Cancellation-Intent-Hash": "none",
+                 "Upgrade-Contract": values.get("Upgrade-Contract", "none")},
             )
             updates.append((integration_ref, integration_oid, integration_candidate))
         atomic_push(root, remote, updates)
@@ -1725,7 +2071,11 @@ def _barrier_transition(project_root: Path, kind: str, action: str,
     if action == "abort" and kind == "cancellation":
         raise RuntimeError("DELIVERY_CANCELLATION_INVALID: cancellation barriers are irreversible")
     barrier_epoch = values["Barrier-Epoch"]
-    values.update({"Barrier-Kind": "none", "Barrier-Epoch": "none", "Mode": "open", "Epoch": epoch_token()})
+    values.update({
+        "Barrier-Kind": "none", "Barrier-Epoch": "none", "Mode": "open",
+        "Epoch": epoch_token(), "Upgrade-Phase": "none",
+        "Upgrade-Contract": "none", "Handoff-Target": "none",
+    })
     fence_candidate = _fence_child(root, fence_oid, values, f"Release {kind} barrier")
     updates = [(fence_ref, fence_oid, fence_candidate)]
     integration_candidate = None
@@ -1734,7 +2084,9 @@ def _barrier_transition(project_root: Path, kind: str, action: str,
             root, integration_oid, [], f"Release {kind} barrier for {delivery_id}",
              {"Record": "delivery-barrier-release-v1", "Protocol": "1", "Delivery": delivery_id,
              "Barrier-Kind": kind, "Barrier-Epoch": barrier_epoch,
-             "Target": values.get("Target", "none"), "Target-Impact-Hash": "none"},
+             "Barrier-OID": integration_oid, "Target": values.get("Target", "none"),
+             "Plan-Hash": "none", "Target-Impact-Hash": "none",
+             "Upgrade-Contract": values.get("Upgrade-Contract", "none")},
         )
         updates.append((integration_ref, integration_oid, integration_candidate))
     atomic_push(root, remote, updates)
@@ -1766,6 +2118,77 @@ def abort_upgrade(project_root: Path, delivery_id: str, remote: str = "origin") 
     return _barrier_transition(project_root, "upgrade", "abort", delivery_id, remote)
 
 
+def upgrade_target_merge(project_root: Path, delivery_id: str,
+                         remote: str = "origin") -> dict:
+    """Merge the current target into one Delivery during an acquired upgrade."""
+    root = main_worktree(project_root.resolve())
+    validate_delivery_id(delivery_id)
+    from delivery_compile import docs_root, find_delivery, split_note
+    directory = find_delivery(docs_root(root), delivery_id)
+    if directory is None:
+        raise RuntimeError("Delivery package not found")
+    fence_ref, fence_oid, values = _fence_context(root, remote)
+    if values["Mode"] != "upgrade" or values["Upgrade-Phase"] not in {"acquired", "target_handoff"}:
+        raise RuntimeError("DELIVERY_UPGRADE_INCOMPATIBLE: upgrade target merge requires acquired/target_handoff Fence")
+    if values["Target-Update-Intent"] == "none" or values["Upgrade-Contract"] == "none":
+        raise RuntimeError("DELIVERY_UPGRADE_INCOMPATIBLE: upgrade target intent/contract is missing")
+    refs = canonical_refs(delivery_id)
+    integration_oid = remote_oid(root, remote, refs["integration"])
+    _branch, target = resolve_target(root, remote)
+    previous_target = values["Handoff-Target"] if values["Upgrade-Phase"] == "target_handoff" and values["Handoff-Target"] != "none" else values["Target"]
+    if target == previous_target:
+        return {"ok": True, "changed": False, "delivery": delivery_id,
+                "target": target, "upgrade_contract": values["Upgrade-Contract"]}
+    target_branch, _target_oid = resolve_target(root, remote)
+    run_git(root, "fetch", "--no-tags", remote,
+            f"refs/heads/{target_branch}:refs/remotes/{remote}/{target_branch}")
+    props, _ = split_note(directory / "delivery.md")
+    candidate = merge_candidate(
+        root, integration_oid, target,
+        f"Merge target during upgrade for {delivery_id}",
+        {"Record": "upgrade-target-merge-v1", "Protocol": "1",
+         "Delivery": delivery_id, "Upgrade-Epoch": values["Epoch"],
+         "Upgrade-Contract": values["Upgrade-Contract"],
+         "Previous-Target": previous_target, "Target": target,
+         "Scope-Hash": str(props.get("scope_hash", "none")),
+         "Plan-Hash": str(props.get("plan_hash", "none")),
+         "Target-Impact-Hash": "none"},
+    )
+    values["Handoff-Target"] = target if values["Upgrade-Phase"] == "target_handoff" else "none"
+    fence_candidate = _fence_child(root, fence_oid, values,
+                                   f"Merge target during upgrade for {delivery_id}")
+    atomic_push(root, remote, [
+        (fence_ref, fence_oid, fence_candidate),
+        (refs["integration"], integration_oid, candidate),
+    ])
+    return {"ok": True, "changed": True, "delivery": delivery_id,
+            "previous_target": previous_target, "target": target,
+            "integration": candidate, "fence": fence_candidate,
+            "upgrade_contract": values["Upgrade-Contract"]}
+
+
+def begin_configuring(project_root: Path, desired_hash: str, remote: str = "origin") -> dict:
+    """Acquire the project Fence for a governed configuration handoff."""
+    root = main_worktree(project_root.resolve())
+    if not re.fullmatch(r"sha256:[0-9a-f]{64}", desired_hash):
+        raise ValueError("desired configuration hash must be canonical")
+    ref, fence_oid, values = _fence_context(root, remote)
+    if values["Mode"] != "open" or values["Target-Update-Intent"] != "none":
+        raise RuntimeError("DELIVERY_FENCE_MODE: configuration requires an open, unoccupied Fence")
+    values.update({
+        "Mode": "configuring", "Epoch": epoch_token(), "Config-Hash": desired_hash,
+        "Source-Kind": "none", "Source-Intent": "none",
+        "Target-Repository": "none", "Target-Carrier-Kind": "none",
+        "Target-Carrier-Ref": "none", "Target-Carrier-Object": "none",
+        "Target-Carrier-Head": "none", "Target-Carrier-Base": "none",
+        "Upgrade-Phase": "none", "Upgrade-Contract": "none", "Handoff-Target": "none",
+    })
+    candidate = _fence_child(root, fence_oid, values, "Begin configuration handoff")
+    atomic_push(root, remote, [(ref, fence_oid, candidate)])
+    return {"ok": True, "mode": "configuring", "fence": candidate,
+            "config_hash": desired_hash}
+
+
 def configure_parallelism(project_root: Path, value: int, *, dry_run: bool = False,
                           remote: str = "origin") -> dict:
     """Set the single project-wide Delivery Item WIP value.
@@ -1793,10 +2216,14 @@ def configure_parallelism(project_root: Path, value: int, *, dry_run: bool = Fal
     if not dry_run:
         fence_ref = canonical_refs("DLV-000")["fence"]
         if remote_has_ref(root, remote, fence_ref):
+            desired = "sha256:" + hashlib.sha256(
+                _canonical_json({"max_parallel": value}).encode("utf-8")
+            ).hexdigest()
             # Config changes compete with Delivery reservation/claim through
             # the same Fence. The user commits the local config while this
-            # source_handoff is held, then finishes it after target handoff.
-            handoff = begin_source_handoff(root, "none", remote)
+            # configuring handoff is held, then finishes it after target
+            # handoff.
+            handoff = begin_configuring(root, desired, remote)
     config["max_parallel"] = value
     try:
         if not dry_run:
@@ -1826,6 +2253,79 @@ def reauthorize_target_update(project_root: Path, mode: str = "source_handoff",
     raise RuntimeError(
         "DELIVERY_TARGET_UPDATE_UNCERTAIN: reauthorization requires a provider-validated zero-target-effect proof"
     )
+
+
+def apply_target_update(project_root: Path, mode: str = "source_handoff",
+                        remote: str = "origin") -> dict:
+    """Execute the one authorized direct/provider target mutation.
+
+    The Fence intent and its target receipt are the only authorization. A
+    direct carrier is handled with an exact fast-forward lease; GitHub PR
+    carriers use the provider adapter and merge-commit-only postcondition.
+    """
+    root = main_worktree(project_root.resolve())
+    _ref, _fence_oid, values = _fence_context(root, remote)
+    if values["Mode"] != mode or values["Target-Update-Intent"] == "none":
+        raise RuntimeError("DELIVERY_TARGET_UPDATE_UNCERTAIN: no matching target intent")
+    carrier = values["Target-Carrier-Kind"]
+    attempt = values["Target-Update-Attempt"]
+    if carrier == "none" or attempt == "none":
+        raise RuntimeError("DELIVERY_TARGET_CARRIER_INVALID: target carrier is incomplete")
+    receipt_path, _lock = target_receipt_paths(root, mode)
+    if not receipt_path.exists():
+        raise RuntimeError("DELIVERY_TARGET_UPDATE_UNCERTAIN: target receipt is missing")
+    receipt = _validate_target_receipt(json.loads(receipt_path.read_text(encoding="utf-8")))
+    if receipt["state"] == "verified":
+        return {"ok": True, "mode": mode, "state": "verified", "target": values["Target"]}
+    if receipt["state"] != "call_started":
+        receipt = mark_target_call_started(root, mode, attempt)
+    target_branch, target_before = resolve_target(root, remote)
+    base = values["Target-Carrier-Base"]
+    if target_before != base:
+        raise RuntimeError("DELIVERY_TARGET_UPDATE_UNCERTAIN: target moved before authorized mutation")
+    if carrier == "direct_target":
+        target_ref = f"refs/heads/{target_branch}"
+        push = subprocess.run(
+            ["git", "push", "--atomic", remote,
+             f"--force-with-lease={target_ref}:{base}",
+             f"{values['Target-Carrier-Head']}:{target_ref}"],
+            cwd=root, text=True, capture_output=True, check=False,
+        )
+        if push.returncode:
+            raise RuntimeError(push.stderr.strip() or "direct target update was rejected")
+        verified = mark_target_verified(root, mode, attempt)
+        return {"ok": True, "mode": mode, "carrier": carrier,
+                "target": target_ref, "target_oid": values["Target-Carrier-Head"],
+                "receipt": verified}
+    if carrier == "github_pr":
+        from delivery_provider import GitHubProvider
+        repository = values["Target-Repository"].removeprefix("github:")
+        provider = GitHubProvider(root, remote)
+        number = values["Target-Carrier-Object"].removeprefix("pr:")
+        url = f"https://github.com/{repository}/pull/{number}"
+        provider.ensure_draft(url)
+        provider.make_ready(url)
+        merged = provider.merge_commit(url, values["Target-Carrier-Head"])
+        merge_oid = merged["merge_commit"]
+        target_ref = f"refs/heads/{target_branch}"
+        fetched_target_ref = f"refs/remotes/{remote}/{target_branch}"
+        run_git(root, "fetch", "--no-tags", remote,
+                f"{target_ref}:{fetched_target_ref}")
+        target_after = remote_oid(root, remote, target_ref)
+        try:
+            run_git(root, "merge-base", "--is-ancestor", merge_oid, target_after)
+            commit = run_git(root, "cat-file", "-p", merge_oid)
+        except RuntimeError as exc:
+            raise RuntimeError("DELIVERY_TARGET_CONVERGENCE_REQUIRED: provider merge is not in target ancestry") from exc
+        parents = [line.split(" ", 1)[1] for line in commit.splitlines()
+                   if line.startswith("parent ") and " " in line]
+        if len(parents) != 2 or parents[1] != values["Target-Carrier-Head"]:
+            raise RuntimeError("DELIVERY_TARGET_CARRIER_INVALID: provider result is not an exact merge commit")
+        verified = mark_target_verified(root, mode, attempt)
+        return {"ok": True, "mode": mode, "carrier": carrier,
+                "pull_request_url": url, "merge_commit": merge_oid,
+                "target": target_after, "receipt": verified}
+    raise RuntimeError("DELIVERY_TARGET_CARRIER_INVALID: unsupported carrier kind")
 
 
 def claim_items(project_root: Path, delivery_id: str, remote: str = "origin") -> dict:
@@ -2451,8 +2951,9 @@ def main(argv=None) -> int:
     check = sub.add_parser("preflight"); check.add_argument("--project-root", default="."); check.add_argument("--delivery", required=True); check.add_argument("--story"); check.add_argument("--slot"); check.set_defaults(func="preflight")
     reserve = sub.add_parser("reserve-delivery"); reserve.add_argument("--project-root", default="."); reserve.add_argument("--delivery", required=True); reserve.add_argument("--remote", default="origin"); reserve.set_defaults(func="reserve")
     config = sub.add_parser("configure-parallelism"); config.add_argument("--project-root", default="."); config.add_argument("--value", type=int, required=True); config.add_argument("--dry-run", action="store_true"); config.add_argument("--remote", default="origin"); config.set_defaults(func="configure")
-    source_begin = sub.add_parser("begin-source-handoff"); source_begin.add_argument("--project-root", default="."); source_begin.add_argument("--source-hash", default="none"); source_begin.add_argument("--remote", default="origin"); source_begin.set_defaults(func="source-begin")
-    source_auth = sub.add_parser("authorize-target-update"); source_auth.add_argument("--project-root", default="."); source_auth.add_argument("--mode", choices=["source_handoff", "configuring", "upgrade"], default="source_handoff"); source_auth.add_argument("--candidate-hash", default="none"); source_auth.add_argument("--remote", default="origin"); source_auth.set_defaults(func="source-authorize")
+    source_begin = sub.add_parser("begin-source-handoff"); source_begin.add_argument("--project-root", default="."); source_begin.add_argument("--source-hash", default="none"); source_begin.add_argument("--source-kind", choices=["requirement_supersession", "backlog_revision", "designation_reconciliation"], default="requirement_supersession"); source_begin.add_argument("--remote", default="origin"); source_begin.set_defaults(func="source-begin")
+    source_auth = sub.add_parser("authorize-target-update"); source_auth.add_argument("--project-root", default="."); source_auth.add_argument("--mode", choices=["source_handoff", "configuring", "upgrade"], default="source_handoff"); source_auth.add_argument("--candidate-hash", required=True); source_auth.add_argument("--carrier-kind", choices=["github_pr", "direct_target"], required=True); source_auth.add_argument("--carrier-ref", required=True); source_auth.add_argument("--carrier-object", required=True); source_auth.add_argument("--carrier-head", required=True); source_auth.add_argument("--carrier-base", required=True); source_auth.add_argument("--target-repository", required=True); source_auth.add_argument("--remote", default="origin"); source_auth.set_defaults(func="source-authorize")
+    source_apply = sub.add_parser("apply-target-update"); source_apply.add_argument("--project-root", default="."); source_apply.add_argument("--mode", choices=["source_handoff", "configuring", "upgrade"], default="source_handoff"); source_apply.add_argument("--remote", default="origin"); source_apply.set_defaults(func="source-apply")
     source_reauth = sub.add_parser("reauthorize-target-update"); source_reauth.add_argument("--project-root", default="."); source_reauth.add_argument("--mode", choices=["source_handoff", "configuring", "upgrade"], default="source_handoff"); source_reauth.add_argument("--candidate-hash", default="none"); source_reauth.add_argument("--remote", default="origin"); source_reauth.set_defaults(func="source-reauthorize")
     source_finish = sub.add_parser("finish-source-handoff"); source_finish.add_argument("--project-root", default="."); source_finish.add_argument("--remote", default="origin"); source_finish.set_defaults(func="source-finish")
     source_abort = sub.add_parser("abort-source-handoff"); source_abort.add_argument("--project-root", default="."); source_abort.add_argument("--remote", default="origin"); source_abort.set_defaults(func="source-abort")
@@ -2465,6 +2966,7 @@ def main(argv=None) -> int:
     plan_finish = sub.add_parser("finish-plan-revision"); plan_finish.add_argument("--project-root", default="."); plan_finish.add_argument("--delivery", required=True); plan_finish.add_argument("--remote", default="origin"); plan_finish.set_defaults(func="plan-finish")
     plan_abort = sub.add_parser("abort-plan-revision"); plan_abort.add_argument("--project-root", default="."); plan_abort.add_argument("--delivery", required=True); plan_abort.add_argument("--remote", default="origin"); plan_abort.set_defaults(func="plan-abort")
     upgrade_begin = sub.add_parser("quiesce-upgrade"); upgrade_begin.add_argument("--project-root", default="."); upgrade_begin.add_argument("--delivery", required=True); upgrade_begin.add_argument("--remote", default="origin"); upgrade_begin.set_defaults(func="upgrade-begin")
+    upgrade_merge = sub.add_parser("upgrade-target-merge"); upgrade_merge.add_argument("--project-root", default="."); upgrade_merge.add_argument("--delivery", required=True); upgrade_merge.add_argument("--remote", default="origin"); upgrade_merge.set_defaults(func="upgrade-merge")
     upgrade_finish = sub.add_parser("finish-upgrade"); upgrade_finish.add_argument("--project-root", default="."); upgrade_finish.add_argument("--delivery", required=True); upgrade_finish.add_argument("--remote", default="origin"); upgrade_finish.set_defaults(func="upgrade-finish")
     upgrade_abort = sub.add_parser("abort-upgrade"); upgrade_abort.add_argument("--project-root", default="."); upgrade_abort.add_argument("--delivery", required=True); upgrade_abort.add_argument("--remote", default="origin"); upgrade_abort.set_defaults(func="upgrade-abort")
     start = sub.add_parser("start-item"); start.add_argument("--project-root", default="."); start.add_argument("--delivery", required=True); start.add_argument("--story", required=True); start.add_argument("--remote", default="origin"); start.set_defaults(func="start")
@@ -2498,11 +3000,17 @@ def main(argv=None) -> int:
             elif args.func == "configure":
                 result = configure_parallelism(Path(args.project_root), args.value, dry_run=args.dry_run, remote=args.remote)
             elif args.func == "source-begin":
-                result = begin_source_handoff(Path(args.project_root), args.source_hash, args.remote)
+                result = begin_source_handoff(Path(args.project_root), args.source_hash, args.remote, args.source_kind)
             elif args.func == "source-authorize":
-                result = authorize_target_update(Path(args.project_root), args.mode, args.candidate_hash, args.remote)
+                result = authorize_target_update(
+                    Path(args.project_root), args.mode, args.candidate_hash, args.remote,
+                    args.carrier_kind, args.carrier_ref, args.carrier_object,
+                    args.carrier_head, args.carrier_base, args.target_repository,
+                )
             elif args.func == "source-reauthorize":
                 result = reauthorize_target_update(Path(args.project_root), args.mode, args.candidate_hash, args.remote)
+            elif args.func == "source-apply":
+                result = apply_target_update(Path(args.project_root), args.mode, args.remote)
             elif args.func == "source-finish":
                 result = finish_source_handoff(Path(args.project_root), args.remote)
             elif args.func == "source-abort":
@@ -2523,6 +3031,8 @@ def main(argv=None) -> int:
                 result = abort_plan_revision(Path(args.project_root), args.delivery, args.remote)
             elif args.func == "upgrade-begin":
                 result = begin_upgrade(Path(args.project_root), args.delivery, args.remote)
+            elif args.func == "upgrade-merge":
+                result = upgrade_target_merge(Path(args.project_root), args.delivery, args.remote)
             elif args.func == "upgrade-finish":
                 result = finish_upgrade(Path(args.project_root), args.delivery, args.remote)
             elif args.func == "upgrade-abort":

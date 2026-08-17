@@ -55,6 +55,16 @@ class DeliveryResultTests(unittest.TestCase):
         self.assertTrue(any(item["code"] == "DELIVERY_INPUT_INVALID" for item in result["findings"]))
         delivery_result.validate_envelope(result)
 
+    def test_mutation_plan_hash_is_bound_to_the_payload(self):
+        result = delivery_result.from_raw(
+            "status", {"ok": True, "fence": "a" * 40}
+        )
+        result["observations"].append({
+            "kind": "ref", "target": "integration", "value": "b" * 40,
+        })
+        with self.assertRaises(ValueError):
+            delivery_result.validate_envelope(result)
+
 
 if __name__ == "__main__":
     unittest.main()

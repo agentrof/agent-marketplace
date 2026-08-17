@@ -679,8 +679,8 @@ def record_pr_remote(project_root: Path, delivery_id: str, url: str,
     fence_oid = remote_oid(root, remote, refs["fence"])
     integration_oid = remote_oid(root, remote, refs["integration"])
     intent_message = commit_message(root, integration_oid)
-    if trailer(intent_message, "Record") != "pr-creation-intent-v1":
-        raise RuntimeError("record-pr requires the exact unmatched PR creation intent")
+    if trailer(intent_message, "Record") not in {"pr-creation-intent-v1", "pr-adoption-intent-v1"}:
+        raise RuntimeError("record-pr requires the exact unmatched PR intent")
     review_props["pull_request_url"] = canonical_url
     review_props["source_hash"] = content_hash(review_props, review_body, exclude={"status", "approved_at_utc", "source_hash", "approval_hash"})
     relative_review = str(review_path.relative_to(root))
@@ -727,14 +727,66 @@ def open_pr(project_root: Path, delivery_id: str, remote: str = "origin") -> dic
         canonical_url, _ = canonical_github_pr(url)
         return {"ok": True, "delivery": delivery_id, "pull_request_url": canonical_url,
                 "reused": True, "provider_call": False}
-    if record_name != "pr-creation-intent-v1":
-        raise RuntimeError("open-pr requires an unmatched PR creation intent")
-    attempt = trailer(integration_message, "Attempt")
-    if not attempt:
-        raise RuntimeError("PR creation intent has no Attempt")
+    adoption = False
     provider = GitHubProvider(root, remote)
     target_branch, _ = resolve_target(root, remote)
     head = short_refs(delivery_id)["integration"]
+    if record_name == "delivery-review-published-v1":
+        existing = provider.exact_unmerged(head, target_branch)
+        if len(existing) != 1:
+            raise RuntimeError("external PR adoption requires exactly one unmerged exact PR")
+        pr = existing[0]
+        if str(pr.get("state", "")).upper() != "OPEN":
+            raise RuntimeError("external closed-unmerged PR requires explicit provider reopen before adoption")
+        if pr.get("headRefName") != head or pr.get("baseRefName") != target_branch:
+            raise RuntimeError("external PR head/base does not match the Delivery")
+        if pr.get("headRefOid") and pr.get("headRefOid") != integration_oid:
+            raise RuntimeError("external PR head does not match the reviewed Integration")
+        url = pr.get("url")
+        if not isinstance(url, str):
+            raise ProviderError("external PR has no canonical URL")
+        canonical_url, number = canonical_github_pr(url)
+        if not pr.get("isDraft"):
+            provider.ensure_draft(canonical_url)
+        fence_oid = remote_oid(root, remote, refs["fence"])
+        fence_message = commit_message(root, fence_oid)
+        adoption_intent = commit_tree(
+            root, integration_oid, [], f"Adopt PR for {delivery_id}",
+            {"Record": "pr-adoption-intent-v1", "Protocol": "1", "Delivery": delivery_id,
+             "Review-Head": integration_oid, "Target": trailer(fence_message, "Target") or "none",
+             "Provider": "github", "Pull-Request": number,
+             "URL-Hash": "sha256:" + hashlib.sha256(canonical_url.encode("utf-8")).hexdigest()},
+        )
+        fence_candidate = commit_tree(
+            root, fence_oid, [], "Fence project in open mode",
+            {"Record": "project-fence-v1", "Protocol": "1", "Mode": "open",
+             "Epoch": trailer(fence_message, "Epoch") or epoch_token(),
+             "Target": trailer(fence_message, "Target") or "none",
+             "Config-Hash": trailer(fence_message, "Config-Hash") or "none"},
+        )
+        atomic_push(root, remote, [(refs["fence"], fence_oid, fence_candidate),
+                                   (refs["integration"], integration_oid, adoption_intent)])
+        integration_oid = adoption_intent
+        integration_message = commit_message(root, integration_oid)
+        record_name = "pr-adoption-intent-v1"
+        adoption = True
+    if record_name != "pr-creation-intent-v1":
+        if record_name != "pr-adoption-intent-v1":
+            raise RuntimeError("open-pr requires an unmatched PR creation or adoption intent")
+    attempt = trailer(integration_message, "Attempt")
+    if not adoption and not attempt:
+        raise RuntimeError("PR creation intent has no Attempt")
+    if adoption:
+        # The provider was already normalized to draft and the exact URL is
+        # carried by the adoption intent. No create receipt or provider POST
+        # is permitted on this path.
+        canonical_url, _ = canonical_github_pr(url)
+        record_pr(type("Args", (), {"docs": str(docs), "delivery": delivery_id, "url": canonical_url}))
+        recorded = record_pr_remote(root, delivery_id, canonical_url, remote)
+        return {"ok": True, "delivery": delivery_id, "pull_request_url": canonical_url,
+                "provider_call": False, "adopted": True,
+                "integration": recorded["integration"], "fence": recorded["fence"],
+                "refs": short_refs(delivery_id)}
     existing = provider.exact_unmerged(head, target_branch)
     if len(existing) > 1:
         raise RuntimeError("multiple exact unmerged Delivery PRs exist")
@@ -830,6 +882,60 @@ def merge_pr(project_root: Path, delivery_id: str, remote: str = "origin") -> di
             "pull_request_url": canonical_url, "merge_commit": merge_oid,
             "target_before": target_before, "target_after": target_after,
             "reviewed_integration": integration_oid, "refs": short_refs(delivery_id)}
+
+
+def invalidate_delivery_review(project_root: Path, delivery_id: str,
+                               finding_code: str, finding_hash: str,
+                               remote: str = "origin") -> dict:
+    """Persist an evidence/review-only change request on the Integration ref."""
+    if not re.fullmatch(r"[A-Z][A-Z0-9_.-]{2,63}", finding_code):
+        raise ValueError("finding code must be an uppercase stable code")
+    if not re.fullmatch(r"sha256:[0-9a-f]{64}", finding_hash):
+        raise ValueError("finding hash must be a canonical sha256 digest")
+    root = main_worktree(project_root.resolve())
+    from delivery_compile import docs_root, find_delivery, split_note, frontmatter, content_hash
+    docs = docs_root(root)
+    directory = find_delivery(docs, delivery_id)
+    if directory is None:
+        raise RuntimeError("Delivery package not found")
+    refs = canonical_refs(delivery_id)
+    fence_oid = remote_oid(root, remote, refs["fence"])
+    integration_oid = remote_oid(root, remote, refs["integration"])
+    fence_message = commit_message(root, fence_oid)
+    integration_message = commit_message(root, integration_oid)
+    if trailer(fence_message, "Mode") != "open":
+        raise RuntimeError("review invalidation requires an open Fence")
+    if trailer(integration_message, "Record") not in {"delivery-review-published-v1", "pr-url-recorded-v1"}:
+        raise RuntimeError("review invalidation requires a published current Review")
+    review_path = directory / "delivery-review.md"
+    relative_review = str(review_path.relative_to(root))
+    review_props, review_body = split_remote_note(root, integration_oid, relative_review, split_note)
+    if review_props.get("status") != "approved":
+        raise RuntimeError("current Delivery Review is not approved")
+    review_props["status"] = "changes_requested"
+    review_props["finding_code"] = finding_code
+    review_props["finding_hash"] = finding_hash
+    review_props.pop("approval_hash", None)
+    review_props["source_hash"] = content_hash(review_props, review_body)
+    candidate = commit_replacements(
+        root, integration_oid, {relative_review: frontmatter(review_props, review_body)},
+        f"Invalidate Delivery Review for {delivery_id}",
+        {"Record": "delivery-review-invalidated-v1", "Protocol": "1", "Delivery": delivery_id,
+         "Previous-Review": integration_oid, "Finding-Code": finding_code,
+         "Finding-Hash": finding_hash, "Target": trailer(fence_message, "Target") or "none"},
+    )
+    fence_candidate = commit_tree(
+        root, fence_oid, [], "Fence project in open mode",
+        {"Record": "project-fence-v1", "Protocol": "1", "Mode": "open",
+         "Epoch": trailer(fence_message, "Epoch") or epoch_token(),
+         "Target": trailer(fence_message, "Target") or "none",
+         "Config-Hash": trailer(fence_message, "Config-Hash") or "none"},
+    )
+    atomic_push(root, remote, [(refs["fence"], fence_oid, fence_candidate),
+                               (refs["integration"], integration_oid, candidate)])
+    return {"ok": True, "delivery": delivery_id, "status": "changes_requested",
+            "finding_code": finding_code, "finding_hash": finding_hash,
+            "integration": candidate, "fence": fence_candidate, "refs": short_refs(delivery_id)}
 
 
 def cancellation_projection(delivery_id: str, scope_hash: str, reason: str,
@@ -1344,6 +1450,63 @@ def refresh_target(project_root: Path, delivery_id: str,
             "fence": fence_candidate, "refs": short_refs(delivery_id)}
 
 
+def revise_unclaimed_scope(project_root: Path, delivery_id: str,
+                           remote: str = "origin") -> dict:
+    """Publish a revised pre-claim scope after a fresh local approval."""
+    root = main_worktree(project_root.resolve())
+    from delivery_compile import docs_root, find_delivery, split_note
+    docs = docs_root(root)
+    directory = find_delivery(docs, delivery_id)
+    if directory is None:
+        raise RuntimeError("Delivery package not found")
+    local_props, _ = split_note(directory / "delivery.md")
+    if local_props.get("status") != "scope_approved":
+        raise RuntimeError("revise-unclaimed-scope requires a scope-approved Delivery")
+    refs = canonical_refs(delivery_id)
+    fence_oid = remote_oid(root, remote, refs["fence"])
+    integration_oid = remote_oid(root, remote, refs["integration"])
+    fence_message = commit_message(root, fence_oid)
+    if trailer(fence_message, "Mode") != "open":
+        raise RuntimeError("revise-unclaimed-scope requires an open Fence")
+    for item_path in sorted(directory.glob("items/*/item.md")):
+        story = item_path.parent.name.upper()
+        if remote_has_ref(root, remote, canonical_refs(delivery_id, story)["item"]):
+            raise RuntimeError(f"scope revision is forbidden after Item claim: {story}")
+    occupied = remote_slot_oids(root, remote)
+    if occupied:
+        raise RuntimeError("scope revision requires no active global Slot")
+    previous_scope = trailer(commit_message(root, integration_oid), "Scope-Hash") or "none"
+    target_branch, target = resolve_target(root, remote)
+    base = integration_oid
+    if trailer(fence_message, "Target") and trailer(fence_message, "Target") != target:
+        run_git(root, "fetch", "--no-tags", remote, f"refs/heads/{target_branch}:refs/remotes/{remote}/{target_branch}")
+        base = merge_candidate(
+            root, integration_oid, target, f"Refresh target before scope revision for {delivery_id}",
+            {"Record": "target-refresh-v1", "Protocol": "1", "Delivery": delivery_id,
+             "Previous-Target": trailer(fence_message, "Target"), "Target": target,
+             "Target-Impact-Hash": "none"},
+        )
+    package = package_paths(root, directory, docs)
+    candidate = commit_tree(
+        root, base, package, f"Revise scope for {delivery_id}",
+        {"Record": "delivery-scope-revised-v1", "Protocol": "1", "Delivery": delivery_id,
+         "Previous-Scope-Hash": previous_scope, "Scope-Hash": str(local_props.get("scope_hash", "none")),
+         "Target": target},
+    )
+    fence_candidate = commit_tree(
+        root, fence_oid, [], "Fence project in open mode",
+        {"Record": "project-fence-v1", "Protocol": "1", "Mode": "open",
+         "Epoch": trailer(fence_message, "Epoch") or epoch_token(), "Target": target,
+         "Config-Hash": trailer(fence_message, "Config-Hash") or "none"},
+    )
+    atomic_push(root, remote, [(refs["fence"], fence_oid, fence_candidate),
+                               (refs["integration"], integration_oid, candidate)])
+    return {"ok": True, "delivery": delivery_id, "integration": candidate,
+            "fence": fence_candidate, "previous_scope_hash": previous_scope,
+            "scope_hash": local_props.get("scope_hash", "none"), "target": target,
+            "refs": short_refs(delivery_id)}
+
+
 def claim_items(project_root: Path, delivery_id: str, remote: str = "origin") -> dict:
     root = main_worktree(project_root.resolve())
     from delivery_compile import delivery_findings, docs_root, split_note, frontmatter, content_hash
@@ -1495,6 +1658,132 @@ def start_item(project_root: Path, delivery_id: str, story_id: str,
     return {"ok": True, "delivery": delivery_id, "story": story_id, "slot": slot,
             "writer_epoch": writer, "item": item_candidate, "integration": integration_candidate,
             "fence": fence_candidate, "receipt": receipt, "worktree": str(worktree),
+            "refs": short_refs(delivery_id, story_id, slot)}
+
+
+def _set_active_item_status(project_root: Path, delivery_id: str, story_id: str,
+                            status: str, remote: str = "origin") -> dict:
+    """Advance an active Item and its retained Slot to blocked/active."""
+    if status not in {"active", "blocked"}:
+        raise ValueError("active Item status transition must be active or blocked")
+    root = main_worktree(project_root.resolve())
+    from delivery_compile import docs_root, split_note, frontmatter, content_hash
+    directory = find_delivery_dir_from_remote(root, remote, delivery_id)
+    if directory is None:
+        raise RuntimeError("local Delivery package is required for Item status transition")
+    refs = canonical_refs(delivery_id, story_id)
+    item_oid = remote_oid(root, remote, refs["item"])
+    slots = remote_slot_oids(root, remote)
+    slot = next((key for key, oid in slots.items() if oid == item_oid), None)
+    if slot is None:
+        raise RuntimeError("Item and Slot refs diverge; refuse active status transition")
+    relative_item = str((directory / "items" / story_key(story_id) / "item.md").relative_to(root))
+    props, body = split_remote_note(root, item_oid, relative_item, split_note)
+    if props.get("status") not in {"active", "blocked"}:
+        raise RuntimeError("Item is not active or blocked")
+    worktree = worktree_paths(root, delivery_id, story_id)["item"]
+    if worktree.exists():
+        worktree_is_clean_and_at(root, worktree, item_oid)
+    previous = props.get("status")
+    props["status"] = status
+    props["tags"] = [tag for tag in props.get("tags", []) if not str(tag).startswith("status/")] + [f"status/{status}"]
+    props["source_hash"] = content_hash(props, body)
+    candidate = commit_replacements(
+        root, item_oid, {relative_item: frontmatter(props, body)},
+        f"Set {story_id} {status} for {delivery_id}",
+        {"Record": "item-status-v1", "Protocol": "1", "Delivery": delivery_id,
+         "Story": story_id, "Previous-Tip": item_oid, "Status": status, "Slot": slot},
+    )
+    slot_ref = f"refs/heads/agentrof/slots/{slot}"
+    atomic_push(root, remote, [(refs["item"], item_oid, candidate),
+                               (slot_ref, item_oid, candidate)])
+    if worktree.exists():
+        run_git(root, "-C", str(worktree), "reset", "--hard", candidate)
+    return {"ok": True, "delivery": delivery_id, "story": story_id,
+            "from": previous, "status": status, "item": candidate, "slot": candidate}
+
+
+def block_item(project_root: Path, delivery_id: str, story_id: str,
+               remote: str = "origin") -> dict:
+    return _set_active_item_status(project_root, delivery_id, story_id, "blocked", remote)
+
+
+def unblock_item(project_root: Path, delivery_id: str, story_id: str,
+                 remote: str = "origin") -> dict:
+    return _set_active_item_status(project_root, delivery_id, story_id, "active", remote)
+
+
+def reopen_item(project_root: Path, delivery_id: str, story_id: str,
+                remote: str = "origin") -> dict:
+    """Reopen one integrated Item through the explicit failure path.
+
+    A sealed Item is never passed back through ``start-item``. Its remote tip
+    becomes a child with invalidated evidence, Integration receives a separate
+    authorization record and the new Item tip alone acquires the Slot.
+    """
+    root = main_worktree(project_root.resolve())
+    from delivery_compile import docs_root, split_note, frontmatter, content_hash
+    directory = find_delivery_dir_from_remote(root, remote, delivery_id)
+    if directory is None:
+        raise RuntimeError("local Delivery package is required for Item reopen")
+    refs = canonical_refs(delivery_id, story_id)
+    fence_oid = remote_oid(root, remote, refs["fence"])
+    integration_oid = remote_oid(root, remote, refs["integration"])
+    item_oid = remote_oid(root, remote, refs["item"])
+    fence_message = commit_message(root, fence_oid)
+    if trailer(fence_message, "Mode") != "open":
+        raise RuntimeError("reopen-item requires an open Fence")
+    if any(oid == item_oid for oid in remote_slot_oids(root, remote).values()):
+        raise RuntimeError("reopen-item requires a sealed, slotless Item")
+    relative_item = str((directory / "items" / story_key(story_id) / "item.md").relative_to(root))
+    props, body = split_remote_note(root, item_oid, relative_item, split_note)
+    if props.get("status") != "integrated":
+        raise RuntimeError("reopen-item requires an integrated Item")
+    props["status"] = "active"
+    props["tags"] = [tag for tag in props.get("tags", []) if not str(tag).startswith("status/")] + ["status/active"]
+    props["integration_base_commit"] = integration_oid
+    props["source_hash"] = content_hash(props, body)
+    writer = epoch_token()
+    item_candidate = commit_replacements(
+        root, item_oid, {relative_item: frontmatter(props, body)},
+        f"Reopen {story_id} for {delivery_id}",
+        {"Record": "item-reopen-v1", "Protocol": "1", "Delivery": delivery_id,
+         "Story": story_id, "Previous-Tip": item_oid, "Integration-Base": integration_oid,
+         "Writer-Epoch": writer},
+    )
+    integration_candidate = commit_tree(
+        root, integration_oid, [], f"Authorize reopen of {story_id} for {delivery_id}",
+        {"Record": "item-reopen-authorized-v1", "Protocol": "1", "Delivery": delivery_id,
+         "Story": story_id, "Previous-Tip": item_oid, "Item-Tip": item_candidate,
+         "Integration-Base": integration_oid, "Writer-Epoch": writer},
+    )
+    max_parallel = project_max_parallel(root)
+    occupied = remote_slot_oids(root, remote)
+    free = next((slot for slot in range(1, max_parallel + 1) if slot_key(slot) not in occupied), None)
+    if free is None:
+        raise RuntimeError("no global execution Slot is available for reopen")
+    slot = slot_key(free)
+    slot_ref = canonical_refs(delivery_id, story_id, slot)["slot"]
+    fence_candidate = commit_tree(
+        root, fence_oid, [], "Authorize Item reopen",
+        {"Record": "project-fence-v1", "Protocol": "1", "Mode": "open",
+         "Epoch": trailer(fence_message, "Epoch") or epoch_token(),
+         "Target": trailer(fence_message, "Target") or "none",
+         "Config-Hash": trailer(fence_message, "Config-Hash") or "none"},
+    )
+    receipt = create_writer_receipt(
+        root, delivery_id, story_id, slot, writer, refs["item"], slot_ref,
+        item_candidate, allow_verified_replace=True, expected_previous_oid=item_oid,
+    )
+    atomic_push(root, remote, [(refs["fence"], fence_oid, fence_candidate),
+                               (refs["integration"], integration_oid, integration_candidate),
+                               (refs["item"], item_oid, item_candidate),
+                               (slot_ref, "", item_candidate)])
+    receipt = promote_writer_receipt(root, delivery_id, story_id, item_candidate)
+    worktree = materialize_item_worktree(root, delivery_id, story_id, item_candidate)
+    return {"ok": True, "delivery": delivery_id, "story": story_id, "status": "active",
+            "writer_epoch": writer, "item": item_candidate, "integration": integration_candidate,
+            "slot": slot, "receipt": receipt, "worktree": str(worktree),
             "refs": short_refs(delivery_id, story_id, slot)}
 
 
@@ -1719,6 +2008,8 @@ def integrate_item(project_root: Path, delivery_id: str, story_id: str,
     atomic_push(root, remote, [(refs["integration"], integration_oid, integration_candidate),
                                (refs["item"], item_oid, integration_candidate),
                                (slot_ref, slot_oid, "")])
+    remove_item_worktree(root, delivery_id, story_id)
+    clear_verified_writer_receipt(root, delivery_id, story_id)
     return {"ok": True, "delivery": delivery_id, "story": story_id,
             "integration": integration_candidate, "item": integration_candidate,
             "slot_released": slot_ref}
@@ -1813,8 +2104,12 @@ def main(argv=None) -> int:
     reserve = sub.add_parser("reserve-delivery"); reserve.add_argument("--project-root", default="."); reserve.add_argument("--delivery", required=True); reserve.add_argument("--remote", default="origin"); reserve.set_defaults(func="reserve")
     publish = sub.add_parser("publish-execution-plan"); publish.add_argument("--project-root", default="."); publish.add_argument("--delivery", required=True); publish.add_argument("--remote", default="origin"); publish.set_defaults(func="publish")
     refresh = sub.add_parser("refresh-target"); refresh.add_argument("--project-root", default="."); refresh.add_argument("--delivery", required=True); refresh.add_argument("--remote", default="origin"); refresh.set_defaults(func="refresh")
+    revise_scope = sub.add_parser("revise-unclaimed-scope"); revise_scope.add_argument("--project-root", default="."); revise_scope.add_argument("--delivery", required=True); revise_scope.add_argument("--remote", default="origin"); revise_scope.set_defaults(func="revise-scope")
     claim = sub.add_parser("claim-items"); claim.add_argument("--project-root", default="."); claim.add_argument("--delivery", required=True); claim.add_argument("--remote", default="origin"); claim.set_defaults(func="claim")
     start = sub.add_parser("start-item"); start.add_argument("--project-root", default="."); start.add_argument("--delivery", required=True); start.add_argument("--story", required=True); start.add_argument("--remote", default="origin"); start.set_defaults(func="start")
+    block = sub.add_parser("block-item"); block.add_argument("--project-root", default="."); block.add_argument("--delivery", required=True); block.add_argument("--story", required=True); block.add_argument("--remote", default="origin"); block.set_defaults(func="block")
+    unblock = sub.add_parser("unblock-item"); unblock.add_argument("--project-root", default="."); unblock.add_argument("--delivery", required=True); unblock.add_argument("--story", required=True); unblock.add_argument("--remote", default="origin"); unblock.set_defaults(func="unblock")
+    reopen = sub.add_parser("reopen-item"); reopen.add_argument("--project-root", default="."); reopen.add_argument("--delivery", required=True); reopen.add_argument("--story", required=True); reopen.add_argument("--remote", default="origin"); reopen.set_defaults(func="reopen")
     pause = sub.add_parser("pause-item"); pause.add_argument("--project-root", default="."); pause.add_argument("--delivery", required=True); pause.add_argument("--story", required=True); pause.add_argument("--remote", default="origin"); pause.set_defaults(func="pause")
     resume = sub.add_parser("resume-item"); resume.add_argument("--project-root", default="."); resume.add_argument("--delivery", required=True); resume.add_argument("--story", required=True); resume.add_argument("--remote", default="origin"); resume.set_defaults(func="resume")
     takeover = sub.add_parser("takeover-item"); takeover.add_argument("--project-root", default="."); takeover.add_argument("--delivery", required=True); takeover.add_argument("--story", required=True); takeover.add_argument("--remote", default="origin"); takeover.add_argument("--confirm", action="store_true"); takeover.set_defaults(func="takeover")
@@ -1825,6 +2120,7 @@ def main(argv=None) -> int:
     record_pr_parser = sub.add_parser("record-pr-remote"); record_pr_parser.add_argument("--project-root", default="."); record_pr_parser.add_argument("--delivery", required=True); record_pr_parser.add_argument("--url", required=True); record_pr_parser.add_argument("--remote", default="origin"); record_pr_parser.set_defaults(func="record-pr-remote")
     open_pr_parser = sub.add_parser("open-pr"); open_pr_parser.add_argument("--project-root", default="."); open_pr_parser.add_argument("--delivery", required=True); open_pr_parser.add_argument("--remote", default="origin"); open_pr_parser.set_defaults(func="open-pr")
     merge_pr_parser = sub.add_parser("merge-pr"); merge_pr_parser.add_argument("--project-root", default="."); merge_pr_parser.add_argument("--delivery", required=True); merge_pr_parser.add_argument("--remote", default="origin"); merge_pr_parser.set_defaults(func="merge-pr")
+    invalidate_review = sub.add_parser("invalidate-delivery-review"); invalidate_review.add_argument("--project-root", default="."); invalidate_review.add_argument("--delivery", required=True); invalidate_review.add_argument("--finding-code", required=True); invalidate_review.add_argument("--finding-hash", required=True); invalidate_review.add_argument("--remote", default="origin"); invalidate_review.set_defaults(func="invalidate-review")
     cancel = sub.add_parser("cancel-delivery"); cancel.add_argument("--project-root", default="."); cancel.add_argument("--delivery", required=True); cancel.add_argument("--reason", required=True); cancel.add_argument("--remote", default="origin"); cancel.set_defaults(func="cancel")
     args = parser.parse_args(argv)
     try:
@@ -1838,10 +2134,18 @@ def main(argv=None) -> int:
                 result = publish_execution_plan(Path(args.project_root), args.delivery, args.remote)
             elif args.func == "refresh":
                 result = refresh_target(Path(args.project_root), args.delivery, args.remote)
+            elif args.func == "revise-scope":
+                result = revise_unclaimed_scope(Path(args.project_root), args.delivery, args.remote)
             elif args.func == "claim":
                 result = claim_items(Path(args.project_root), args.delivery, args.remote)
             elif args.func == "start":
                 result = start_item(Path(args.project_root), args.delivery, args.story, args.remote)
+            elif args.func == "block":
+                result = block_item(Path(args.project_root), args.delivery, args.story, args.remote)
+            elif args.func == "unblock":
+                result = unblock_item(Path(args.project_root), args.delivery, args.story, args.remote)
+            elif args.func == "reopen":
+                result = reopen_item(Path(args.project_root), args.delivery, args.story, args.remote)
             elif args.func == "pause":
                 result = pause_item(Path(args.project_root), args.delivery, args.story, args.remote)
             elif args.func == "resume":
@@ -1862,6 +2166,8 @@ def main(argv=None) -> int:
                 result = open_pr(Path(args.project_root), args.delivery, args.remote)
             elif args.func == "merge-pr":
                 result = merge_pr(Path(args.project_root), args.delivery, args.remote)
+            elif args.func == "invalidate-review":
+                result = invalidate_delivery_review(Path(args.project_root), args.delivery, args.finding_code, args.finding_hash, args.remote)
             elif args.func == "cancel":
                 result = cancel_delivery(Path(args.project_root), args.delivery, args.reason, args.remote)
             else:

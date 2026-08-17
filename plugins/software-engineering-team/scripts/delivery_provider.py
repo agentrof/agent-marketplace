@@ -65,7 +65,7 @@ class GitHubProvider:
         raw = run_gh(
             self.root, "pr", "list", "--repo", self.repository, "--state", "all",
             "--head", head, "--base", base,
-            "--json", "number,url,state,isDraft,headRefName,baseRefName,headRepository,mergeCommit",
+            "--json", "number,url,state,isDraft,headRefName,headRefOid,baseRefName,baseRefOid,headRepository,mergeCommit",
         )
         try:
             value = json.loads(raw or "[]")
@@ -105,4 +105,3 @@ class GitHubProvider:
             "--delete-branch=false",
         )
         return {"url": url, "head": head_oid}
-

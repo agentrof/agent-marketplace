@@ -1,0 +1,18 @@
+{
+  "schema_version": 1,
+  "provider": "github",
+  "adapter": "delivery_provider.GitHubProvider",
+  "credential_source": "authenticated gh CLI or its environment-managed credential",
+  "forbidden_project_files": [".env", "workspace/config.json credentials", "provider tokens"],
+  "required_capabilities": {
+    "draft_pr": true,
+    "exact_head_lookup": true,
+    "merge_commit": true,
+    "squash_merge": false,
+    "rebase_merge": false,
+    "merge_queue_rewrites_head": false,
+    "automatic_head_deletion": false
+  },
+  "canonical_url": "https://github.com/<owner>/<repo>/pull/<positive-number>",
+  "unsupported_state": "fail closed with provider incident; never create a second Delivery PR"
+}

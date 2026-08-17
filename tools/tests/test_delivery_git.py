@@ -160,6 +160,24 @@ class DeliveryGitTests(unittest.TestCase):
             delivery_git.push_item(project, "DLV-001", "AUTH-01")
             integrated = delivery_git.integrate_item(project, "DLV-001", "AUTH-01")
             self.assertTrue(integrated["ok"])
+            integration_oid = delivery_git.remote_oid(
+                project, "origin", delivery_git.canonical_refs("DLV-001")["integration"]
+            )
+            review_args = type("Args", (), {
+                "docs": str(docs), "delivery": "DLV-001",
+                "reviewed_commit": integrated["integration"],
+                "reviewed_integration_commit": integration_oid,
+            })
+            delivery_compile.approve_review(review_args)
+            published = delivery_git.publish_delivery_review(project, "DLV-001")
+            self.assertTrue(published["ok"])
+            intent = delivery_git.prepare_pr_creation(project, "DLV-001")
+            self.assertEqual(intent["provider"], "github")
+            pr_url = "https://github.com/agentrof/example/pull/17"
+            record_args = type("Args", (), {"docs": str(docs), "delivery": "DLV-001", "url": pr_url})
+            delivery_compile.record_pr(record_args)
+            recorded = delivery_git.record_pr_remote(project, "DLV-001", pr_url)
+            self.assertEqual(recorded["pull_request"], "17")
             refs = subprocess.run(["git", "--git-dir", str(remote), "show-ref"], check=True, text=True, capture_output=True).stdout
             self.assertIn("refs/heads/agentrof/items/auth-01", refs)
             self.assertNotIn("refs/heads/agentrof/slots/001", refs)

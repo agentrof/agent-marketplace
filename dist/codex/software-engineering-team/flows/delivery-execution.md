@@ -19,6 +19,9 @@ Slot refs, elects a new writer epoch under exact leases and never allocates a
 second Slot.
 
 The flow ends in one Delivery Review, one final PR and provider-neutral merged
-evidence. Failed checks, target drift, review changes and process loss become
-explicit resumable states. Release Management is intentionally not part of
-this flow.
+evidence. The Git coordinator first publishes the approved Review, then
+publishes one durable PR-creation intent and records the provider URL as its
+exact descendant. Provider create/merge calls are adapter-owned and must
+requery the intent and reviewed Integration head before any external mutation.
+Failed checks, target drift, review changes and process loss become explicit
+resumable states. Release Management is intentionally not part of this flow.

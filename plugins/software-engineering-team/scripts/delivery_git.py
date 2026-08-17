@@ -19,6 +19,7 @@ import subprocess
 import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
+from urllib.parse import urlsplit
 
 
 DELIVERY_ID_RE = re.compile(r"^DLV-[0-9]{3,}$")
@@ -27,6 +28,7 @@ SLOT_RE = re.compile(r"^[0-9]{3,}$")
 EPOCH_RE = re.compile(r"^[A-Za-z0-9_-]{22}$")
 OID_RE = re.compile(r"^[0-9a-f]{40,64}$")
 RECEIPT_SCHEMA_VERSION = 1
+GITHUB_PR_RE = re.compile(r"^/([^/]+)/([^/]+)/pull/([1-9][0-9]*)$")
 
 
 def _fcntl_module():
@@ -284,6 +286,83 @@ def clear_verified_writer_receipt(main_worktree: Path, delivery_id: str,
         _fsync_directory(receipt_path.parent)
 
 
+def provider_receipt_paths(main_worktree: Path, delivery_id: str) -> tuple[Path, Path]:
+    validate_delivery_id(delivery_id)
+    base = runtime_root(main_worktree) / "provider-receipts"
+    name = f"pr-{delivery_id.lower()}.json"
+    return base / name, base / f"{name}.lock"
+
+
+def _validate_provider_receipt(receipt: dict) -> dict:
+    required = {"schema_version", "kind", "state", "delivery", "intent_oid",
+                "provider", "attempt", "url", "receipt_digest"}
+    if set(receipt) != required or receipt.get("schema_version") != 1 or receipt.get("kind") != "pr-create-v1":
+        raise RuntimeError("provider receipt schema is unsupported")
+    if receipt.get("state") not in {"prepared", "call_started", "verified"}:
+        raise RuntimeError("provider receipt state is invalid")
+    validate_delivery_id(str(receipt.get("delivery")))
+    if receipt.get("provider") != "github" or not EPOCH_RE.fullmatch(str(receipt.get("attempt"))):
+        raise RuntimeError("provider receipt provider or attempt is invalid")
+    if receipt.get("url") not in {"none", None}:
+        canonical_github_pr(str(receipt["url"]))
+    expected = dict(receipt)
+    digest = expected.pop("receipt_digest")
+    if digest != receipt_digest(expected):
+        raise RuntimeError("provider receipt digest is invalid")
+    return receipt
+
+
+def _write_provider_receipt_locked(path: Path, receipt: dict) -> dict:
+    value = dict(receipt)
+    value.pop("receipt_digest", None)
+    value["receipt_digest"] = receipt_digest(value)
+    _write_writer_receipt_locked(path, value)
+    return value
+
+
+def create_provider_receipt(main_worktree: Path, delivery_id: str,
+                            intent_oid: str, attempt: str) -> dict:
+    path, lock = provider_receipt_paths(main_worktree, delivery_id)
+    if not OID_RE.fullmatch(intent_oid) or not EPOCH_RE.fullmatch(attempt):
+        raise ValueError("provider receipt intent or attempt is invalid")
+    value = {"schema_version": 1, "kind": "pr-create-v1", "state": "prepared",
+             "delivery": delivery_id, "intent_oid": intent_oid, "provider": "github",
+             "attempt": attempt, "url": "none"}
+    with receipt_lock(lock):
+        if path.exists():
+            existing = _validate_provider_receipt(json.loads(path.read_text(encoding="utf-8")))
+            if (existing["intent_oid"], existing["attempt"]) != (intent_oid, attempt):
+                raise RuntimeError("a different provider receipt already exists")
+            return existing
+        return _validate_provider_receipt(_write_provider_receipt_locked(path, value))
+
+
+def mark_provider_call_started(main_worktree: Path, delivery_id: str,
+                               intent_oid: str, attempt: str) -> tuple[dict, bool]:
+    path, lock = provider_receipt_paths(main_worktree, delivery_id)
+    with receipt_lock(lock):
+        receipt = _validate_provider_receipt(json.loads(path.read_text(encoding="utf-8"))) if path.exists() else None
+        if receipt is None or (receipt["intent_oid"], receipt["attempt"]) != (intent_oid, attempt):
+            raise RuntimeError("provider receipt preimage is missing or stale")
+        if receipt["state"] in {"call_started", "verified"}:
+            return receipt, False
+        receipt["state"] = "call_started"
+        return _validate_provider_receipt(_write_provider_receipt_locked(path, receipt)), True
+
+
+def mark_provider_verified(main_worktree: Path, delivery_id: str,
+                           intent_oid: str, attempt: str, url: str) -> dict:
+    canonical_url, _ = canonical_github_pr(url)
+    path, lock = provider_receipt_paths(main_worktree, delivery_id)
+    with receipt_lock(lock):
+        receipt = _validate_provider_receipt(json.loads(path.read_text(encoding="utf-8"))) if path.exists() else None
+        if receipt is None or (receipt["intent_oid"], receipt["attempt"]) != (intent_oid, attempt):
+            raise RuntimeError("provider receipt preimage is missing or stale")
+        receipt["state"] = "verified"
+        receipt["url"] = canonical_url
+        return _validate_provider_receipt(_write_provider_receipt_locked(path, receipt))
+
+
 def materialize_item_worktree(main_worktree: Path, delivery_id: str, story_id: str,
                              candidate_oid: str) -> Path:
     """Create or verify the detached Item worktree after remote activation."""
@@ -456,6 +535,232 @@ def resolve_target(root: Path, remote: str) -> tuple[str, str]:
         raise RuntimeError("target branch cannot be resolved")
     oid = run_git(root, "rev-parse", f"refs/remotes/{remote}/{branch}")
     return branch, oid
+
+
+def canonical_github_pr(value: str) -> tuple[str, str]:
+    parsed = urlsplit(value)
+    match = GITHUB_PR_RE.fullmatch(parsed.path)
+    if (parsed.scheme != "https" or parsed.netloc != "github.com" or
+            parsed.query or parsed.fragment or parsed.username or parsed.port or
+            match is None):
+        raise ValueError("PR URL must be canonical https://github.com/<owner>/<repo>/pull/<number>")
+    owner, repo, number = match.group(1), match.group(2), match.group(3)
+    return f"https://github.com/{owner}/{repo}/pull/{number}", number
+
+
+def package_paths(root: Path, directory: Path, docs: Path) -> list[str]:
+    paths = [str(path.relative_to(root)) for path in directory.rglob("*") if path.is_file()]
+    map_path = docs / "maps" / "delivery.md"
+    if map_path.exists():
+        paths.append(str(map_path.relative_to(root)))
+    return sorted(set(paths))
+
+
+def assert_integrated_items(root: Path, remote: str, directory: Path,
+                            integration_oid: str, delivery_id: str) -> list[str]:
+    from delivery_compile import split_note
+    stories = []
+    for item_path in sorted(directory.glob("items/*/item.md")):
+        story = item_path.parent.name.upper()
+        item_ref = canonical_refs(delivery_id, story)["item"]
+        item_oid = remote_oid(root, remote, item_ref)
+        relative = str(item_path.relative_to(root))
+        item_props, _ = split_remote_note(root, item_oid, relative, split_note)
+        if item_props.get("status") != "integrated":
+            raise RuntimeError(f"Delivery Item is not integrated: {story}")
+        try:
+            run_git(root, "merge-base", "--is-ancestor", item_oid, integration_oid)
+        except RuntimeError as exc:
+            raise RuntimeError(f"Integration does not contain exact Item tip: {story}") from exc
+        stories.append(story)
+    if not stories:
+        raise RuntimeError("Delivery Review requires at least one integrated Item")
+    return stories
+
+
+def publish_delivery_review(project_root: Path, delivery_id: str,
+                            remote: str = "origin") -> dict:
+    """Publish one approved Delivery Review as a real Integration child."""
+    root = main_worktree(project_root.resolve())
+    from delivery_compile import docs_root, delivery_findings, split_note
+    docs = docs_root(root)
+    directory, findings = delivery_findings(docs, delivery_id)
+    if directory is None or findings:
+        raise RuntimeError("Delivery package is not portable: " + "; ".join(findings))
+    delivery_props, _ = split_note(directory / "delivery.md")
+    review_path = directory / "delivery-review.md"
+    if delivery_props.get("status") != "review" or not review_path.exists():
+        raise RuntimeError("publish-delivery-review requires an approved Delivery Review")
+    review_props, _ = split_note(review_path)
+    if review_props.get("status") != "approved":
+        raise RuntimeError("publish-delivery-review requires an approved review record")
+    refs = canonical_refs(delivery_id)
+    fence_oid = remote_oid(root, remote, refs["fence"])
+    integration_oid = remote_oid(root, remote, refs["integration"])
+    fence_message = commit_message(root, fence_oid)
+    if trailer(fence_message, "Record") != "project-fence-v1" or trailer(fence_message, "Mode") != "open":
+        raise RuntimeError("publish-delivery-review requires an open Fence")
+    stories = assert_integrated_items(root, remote, directory, integration_oid, delivery_id)
+    reviewed_parent = str(review_props.get("reviewed_integration_commit", "none"))
+    if reviewed_parent != integration_oid:
+        raise RuntimeError("Delivery Review reviewed_integration_commit is stale")
+    candidate = commit_tree(
+        root, integration_oid, package_paths(root, directory, docs),
+        f"Publish delivery review for {delivery_id}",
+        {"Record": "delivery-review-published-v1", "Protocol": "1", "Delivery": delivery_id,
+         "Reviewed-Integration": integration_oid, "Approval-Hash": str(review_props.get("approval_hash", "none")),
+         "Target": trailer(fence_message, "Target") or "none", "Cancellation-Intent-Hash": "none"},
+    )
+    fence_candidate = commit_tree(
+        root, fence_oid, [], "Fence project in open mode",
+        {"Record": "project-fence-v1", "Protocol": "1", "Mode": "open",
+         "Epoch": trailer(fence_message, "Epoch") or epoch_token(),
+         "Target": trailer(fence_message, "Target") or "none",
+         "Config-Hash": trailer(fence_message, "Config-Hash") or "none"},
+    )
+    atomic_push(root, remote, [(refs["fence"], fence_oid, fence_candidate),
+                               (refs["integration"], integration_oid, candidate)])
+    return {"ok": True, "delivery": delivery_id, "integration": candidate,
+            "fence": fence_candidate, "stories": stories, "refs": short_refs(delivery_id)}
+
+
+def prepare_pr_creation(project_root: Path, delivery_id: str,
+                        remote: str = "origin") -> dict:
+    """Publish the durable PR-create intent; this function never calls a provider."""
+    root = main_worktree(project_root.resolve())
+    refs = canonical_refs(delivery_id)
+    fence_oid = remote_oid(root, remote, refs["fence"])
+    integration_oid = remote_oid(root, remote, refs["integration"])
+    fence_message = commit_message(root, fence_oid)
+    integration_message = commit_message(root, integration_oid)
+    if trailer(integration_message, "Record") != "delivery-review-published-v1":
+        raise RuntimeError("PR creation requires a published Delivery Review")
+    if trailer(fence_message, "Mode") != "open":
+        raise RuntimeError("PR creation requires an open Fence")
+    attempt = epoch_token()
+    target = trailer(fence_message, "Target") or "none"
+    intent = commit_tree(
+        root, integration_oid, [], f"Prepare PR creation for {delivery_id}",
+        {"Record": "pr-creation-intent-v1", "Protocol": "1", "Delivery": delivery_id,
+         "Review-Head": integration_oid, "Target": target, "Provider": "github", "Attempt": attempt},
+    )
+    fence_candidate = commit_tree(
+        root, fence_oid, [], "Fence project in open mode",
+        {"Record": "project-fence-v1", "Protocol": "1", "Mode": "open",
+         "Epoch": trailer(fence_message, "Epoch") or epoch_token(),
+         "Target": target, "Config-Hash": trailer(fence_message, "Config-Hash") or "none"},
+    )
+    atomic_push(root, remote, [(refs["fence"], fence_oid, fence_candidate),
+                               (refs["integration"], integration_oid, intent)])
+    return {"ok": True, "delivery": delivery_id, "intent": intent,
+            "attempt": attempt, "provider": "github", "refs": short_refs(delivery_id)}
+
+
+def record_pr_remote(project_root: Path, delivery_id: str, url: str,
+                     remote: str = "origin") -> dict:
+    """Record a provider-verified PR URL as the exact intent child."""
+    root = main_worktree(project_root.resolve())
+    from delivery_compile import docs_root, find_delivery, split_note, frontmatter, content_hash
+    canonical_url, number = canonical_github_pr(url)
+    docs = docs_root(root)
+    directory = find_delivery(docs, delivery_id)
+    if directory is None:
+        raise RuntimeError("Delivery package not found")
+    review_path = directory / "delivery-review.md"
+    review_props, review_body = split_note(review_path)
+    if review_props.get("pull_request_url") != canonical_url:
+        raise RuntimeError("local Delivery Review URL does not match the requested PR")
+    refs = canonical_refs(delivery_id)
+    fence_oid = remote_oid(root, remote, refs["fence"])
+    integration_oid = remote_oid(root, remote, refs["integration"])
+    intent_message = commit_message(root, integration_oid)
+    if trailer(intent_message, "Record") != "pr-creation-intent-v1":
+        raise RuntimeError("record-pr requires the exact unmatched PR creation intent")
+    review_props["pull_request_url"] = canonical_url
+    review_props["source_hash"] = content_hash(review_props, review_body, exclude={"status", "approved_at_utc", "source_hash", "approval_hash"})
+    relative_review = str(review_path.relative_to(root))
+    candidate = commit_replacements(
+        root, integration_oid, {relative_review: frontmatter(review_props, review_body)},
+        f"Record PR for {delivery_id}",
+        {"Record": "pr-url-recorded-v1", "Protocol": "1", "Delivery": delivery_id,
+         "Intent": integration_oid, "Provider": "github", "Pull-Request": number,
+         "URL-Hash": "sha256:" + hashlib.sha256(canonical_url.encode("utf-8")).hexdigest()},
+    )
+    fence_message = commit_message(root, fence_oid)
+    fence_candidate = commit_tree(
+        root, fence_oid, [], "Fence project in open mode",
+        {"Record": "project-fence-v1", "Protocol": "1", "Mode": "open",
+         "Epoch": trailer(fence_message, "Epoch") or epoch_token(),
+         "Target": trailer(fence_message, "Target") or "none",
+         "Config-Hash": trailer(fence_message, "Config-Hash") or "none"},
+    )
+    atomic_push(root, remote, [(refs["fence"], fence_oid, fence_candidate),
+                               (refs["integration"], integration_oid, candidate)])
+    return {"ok": True, "delivery": delivery_id, "integration": candidate,
+            "fence": fence_candidate, "pull_request_url": canonical_url,
+            "pull_request": number, "refs": short_refs(delivery_id)}
+
+
+def open_pr(project_root: Path, delivery_id: str, remote: str = "origin") -> dict:
+    """Create or resume exactly one GitHub draft PR after a durable intent."""
+    root = main_worktree(project_root.resolve())
+    from delivery_compile import docs_root, find_delivery, split_note, record_pr
+    from delivery_provider import GitHubProvider, ProviderError
+    docs = docs_root(root)
+    directory = find_delivery(docs, delivery_id)
+    if directory is None:
+        raise RuntimeError("Delivery package not found")
+    delivery_props, _ = split_note(directory / "delivery.md")
+    review_path = directory / "delivery-review.md"
+    review_props, review_body = split_note(review_path)
+    refs = canonical_refs(delivery_id)
+    integration_oid = remote_oid(root, remote, refs["integration"])
+    integration_message = commit_message(root, integration_oid)
+    record_name = trailer(integration_message, "Record")
+    if record_name == "pr-url-recorded-v1":
+        url = str(review_props.get("pull_request_url", ""))
+        canonical_url, _ = canonical_github_pr(url)
+        return {"ok": True, "delivery": delivery_id, "pull_request_url": canonical_url,
+                "reused": True, "provider_call": False}
+    if record_name != "pr-creation-intent-v1":
+        raise RuntimeError("open-pr requires an unmatched PR creation intent")
+    attempt = trailer(integration_message, "Attempt")
+    if not attempt:
+        raise RuntimeError("PR creation intent has no Attempt")
+    provider = GitHubProvider(root, remote)
+    target_branch, _ = resolve_target(root, remote)
+    head = short_refs(delivery_id)["integration"]
+    existing = provider.exact_unmerged(head, target_branch)
+    if len(existing) > 1:
+        raise RuntimeError("multiple exact unmerged Delivery PRs exist")
+    receipt = create_provider_receipt(root, delivery_id, integration_oid, attempt)
+    if receipt["state"] == "verified" and receipt.get("url") not in {None, "none"}:
+        return {"ok": True, "delivery": delivery_id, "pull_request_url": receipt["url"],
+                "reused": True, "provider_call": False}
+    if existing:
+        pr = existing[0]
+        if str(pr.get("state", "")).upper() != "OPEN":
+            raise RuntimeError("exact Delivery PR is closed without merge; manual reopen is required")
+        url = pr.get("url")
+        if not isinstance(url, str):
+            raise ProviderError("GitHub exact PR has no URL")
+        provider.ensure_draft(url)
+        provider_call = False
+    else:
+        receipt, elected = mark_provider_call_started(root, delivery_id, integration_oid, attempt)
+        if not elected:
+            raise RuntimeError("DELIVERY_PR_UNCERTAIN: another process owns the provider call")
+        title_value = str(delivery_props.get("goal", delivery_id))
+        created = provider.create_draft(head, target_branch, title_value, review_body)
+        url = created["url"]
+        provider_call = True
+    canonical_url, _ = canonical_github_pr(url)
+    record_pr(type("Args", (), {"docs": str(docs), "delivery": delivery_id, "url": canonical_url}))
+    recorded = record_pr_remote(root, delivery_id, canonical_url, remote)
+    mark_provider_verified(root, delivery_id, integration_oid, attempt, canonical_url)
+    return {"ok": True, "delivery": delivery_id, "pull_request_url": canonical_url,
+            "provider_call": provider_call, "integration": recorded["integration"],
+            "fence": recorded["fence"], "refs": short_refs(delivery_id)}
 
 
 def reserve_delivery(project_root: Path, delivery_id: str, remote: str = "origin") -> dict:
@@ -1020,6 +1325,10 @@ def main(argv=None) -> int:
     takeover = sub.add_parser("takeover-item"); takeover.add_argument("--project-root", default="."); takeover.add_argument("--delivery", required=True); takeover.add_argument("--story", required=True); takeover.add_argument("--remote", default="origin"); takeover.add_argument("--confirm", action="store_true"); takeover.set_defaults(func="takeover")
     push_item_parser = sub.add_parser("push-item"); push_item_parser.add_argument("--project-root", default="."); push_item_parser.add_argument("--delivery", required=True); push_item_parser.add_argument("--story", required=True); push_item_parser.add_argument("--remote", default="origin"); push_item_parser.set_defaults(func="push-item")
     integrate = sub.add_parser("integrate-item"); integrate.add_argument("--project-root", default="."); integrate.add_argument("--delivery", required=True); integrate.add_argument("--story", required=True); integrate.add_argument("--remote", default="origin"); integrate.set_defaults(func="integrate")
+    publish_review = sub.add_parser("publish-delivery-review"); publish_review.add_argument("--project-root", default="."); publish_review.add_argument("--delivery", required=True); publish_review.add_argument("--remote", default="origin"); publish_review.set_defaults(func="publish-review")
+    prepare_pr = sub.add_parser("prepare-pr-creation"); prepare_pr.add_argument("--project-root", default="."); prepare_pr.add_argument("--delivery", required=True); prepare_pr.add_argument("--remote", default="origin"); prepare_pr.set_defaults(func="prepare-pr")
+    record_pr_parser = sub.add_parser("record-pr-remote"); record_pr_parser.add_argument("--project-root", default="."); record_pr_parser.add_argument("--delivery", required=True); record_pr_parser.add_argument("--url", required=True); record_pr_parser.add_argument("--remote", default="origin"); record_pr_parser.set_defaults(func="record-pr-remote")
+    open_pr_parser = sub.add_parser("open-pr"); open_pr_parser.add_argument("--project-root", default="."); open_pr_parser.add_argument("--delivery", required=True); open_pr_parser.add_argument("--remote", default="origin"); open_pr_parser.set_defaults(func="open-pr")
     args = parser.parse_args(argv)
     try:
         if args.func == "names":
@@ -1044,6 +1353,14 @@ def main(argv=None) -> int:
                 result = push_item(Path(args.project_root), args.delivery, args.story, args.remote)
             elif args.func == "integrate":
                 result = integrate_item(Path(args.project_root), args.delivery, args.story, args.remote)
+            elif args.func == "publish-review":
+                result = publish_delivery_review(Path(args.project_root), args.delivery, args.remote)
+            elif args.func == "prepare-pr":
+                result = prepare_pr_creation(Path(args.project_root), args.delivery, args.remote)
+            elif args.func == "record-pr-remote":
+                result = record_pr_remote(Path(args.project_root), args.delivery, args.url, args.remote)
+            elif args.func == "open-pr":
+                result = open_pr(Path(args.project_root), args.delivery, args.remote)
             else:
                 result = preflight(Path(args.project_root), args.delivery, args.story, args.slot)
     except (ValueError, RuntimeError) as exc:

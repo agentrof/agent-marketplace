@@ -340,6 +340,95 @@ def claim_items(project_root: Path, delivery_id: str, remote: str = "origin") ->
             "integration": marker, "refs": short_refs(delivery_id)}
 
 
+def remote_slot_oids(root: Path, remote: str) -> dict[str, str]:
+    output = run_git(root, "ls-remote", remote, "refs/heads/agentrof/slots/*")
+    result = {}
+    for line in output.splitlines():
+        parts = line.split()
+        if len(parts) == 2:
+            result[parts[1].removeprefix("refs/heads/agentrof/slots/")] = parts[0]
+    return result
+
+
+def project_max_parallel(root: Path) -> int:
+    config_path = root / "workspace" / "config.json"
+    try:
+        config = json.loads(config_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise RuntimeError(f"project config cannot be read: {exc}")
+    value = config.get("max_parallel")
+    if not isinstance(value, int) or isinstance(value, bool) or value <= 0:
+        raise RuntimeError("max_parallel must be configured before Item activation")
+    return value
+
+
+def start_item(project_root: Path, delivery_id: str, story_id: str,
+               remote: str = "origin") -> dict:
+    root = main_worktree(project_root.resolve())
+    from delivery_compile import docs_root, split_note, frontmatter, content_hash
+    docs = docs_root(root)
+    directory = find_delivery_dir_from_remote(root, remote, delivery_id)
+    if directory is None:
+        raise RuntimeError("local Delivery package is required for Item activation")
+    refs = canonical_refs(delivery_id, story_id)
+    fence_oid = remote_oid(root, remote, refs["fence"])
+    integration_oid = remote_oid(root, remote, refs["integration"])
+    item_oid = remote_oid(root, remote, refs["item"])
+    fence_message = commit_message(root, fence_oid)
+    if trailer(fence_message, "Record") != "project-fence-v1" or trailer(fence_message, "Mode") != "open":
+        raise RuntimeError("start-item requires an open Fence")
+    max_parallel = project_max_parallel(root)
+    occupied = remote_slot_oids(root, remote)
+    free = next((slot for slot in range(1, max_parallel + 1) if slot_key(slot) not in occupied), None)
+    if free is None:
+        raise RuntimeError("no global execution Slot is available")
+    slot = slot_key(free)
+    slot_ref = canonical_refs(delivery_id, story_id, slot)["slot"]
+    item_path = directory / "items" / story_key(story_id) / "item.md"
+    if not item_path.exists():
+        raise RuntimeError(f"missing local Item projection: {item_path}")
+    item_props, item_body = split_note(item_path)
+    if item_props.get("status") not in {"in_scope", "paused", "blocked"}:
+        raise RuntimeError("Item is not startable from its current status")
+    writer = epoch_token()
+    item_props["status"] = "active"
+    item_props["tags"] = [tag for tag in item_props.get("tags", []) if not str(tag).startswith("status/")] + ["status/active"]
+    item_props["source_hash"] = content_hash(item_props, item_body)
+    item_candidate = commit_replacements(
+        root, item_oid, {str(item_path.relative_to(root)): frontmatter(item_props, item_body)},
+        f"Activate {story_id} for {delivery_id}",
+        {"Record": "item-activation-v1", "Protocol": "1", "Delivery": delivery_id,
+         "Story": story_id, "Claim": item_oid, "Item-Plan-Hash": str(item_props.get("item_plan_hash", "none")),
+         "Slot": slot, "Writer-Epoch": writer},
+    )
+    integration_candidate = commit_tree(
+        root, integration_oid, [], f"Authorize Item {story_id} for {delivery_id}",
+        {"Record": "item-start-authorized-v1", "Protocol": "1", "Delivery": delivery_id,
+         "Story": story_id, "Plan-Hash": str(item_props.get("item_plan_hash", "none")),
+         "Item-Tip": item_candidate, "Target": trailer(fence_message, "Target") or "none",
+         "Slot": slot, "Writer-Epoch": writer},
+    )
+    fence_candidate = commit_tree(
+        root, fence_oid, [], f"Authorize Item {story_id} for {delivery_id}",
+        {"Record": "project-fence-v1", "Protocol": "1", "Mode": "open",
+         "Epoch": trailer(fence_message, "Epoch") or epoch_token(),
+         "Target": trailer(fence_message, "Target") or "none",
+         "Config-Hash": trailer(fence_message, "Config-Hash") or "none"},
+    )
+    atomic_push(root, remote, [(refs["fence"], fence_oid, fence_candidate),
+                               (refs["integration"], integration_oid, integration_candidate),
+                               (refs["item"], item_oid, item_candidate),
+                               (slot_ref, "", item_candidate)])
+    return {"ok": True, "delivery": delivery_id, "story": story_id, "slot": slot,
+            "writer_epoch": writer, "item": item_candidate, "integration": integration_candidate,
+            "fence": fence_candidate, "refs": short_refs(delivery_id, story_id, slot)}
+
+
+def find_delivery_dir_from_remote(root: Path, remote: str, delivery_id: str) -> Path | None:
+    from delivery_compile import docs_root, find_delivery
+    return find_delivery(docs_root(root), delivery_id)
+
+
 def main_worktree(root: Path) -> Path:
     common = Path(run_git(root, "rev-parse", "--git-common-dir"))
     if not common.is_absolute():
@@ -403,6 +492,7 @@ def main(argv=None) -> int:
     reserve = sub.add_parser("reserve-delivery"); reserve.add_argument("--project-root", default="."); reserve.add_argument("--delivery", required=True); reserve.add_argument("--remote", default="origin"); reserve.set_defaults(func="reserve")
     publish = sub.add_parser("publish-execution-plan"); publish.add_argument("--project-root", default="."); publish.add_argument("--delivery", required=True); publish.add_argument("--remote", default="origin"); publish.set_defaults(func="publish")
     claim = sub.add_parser("claim-items"); claim.add_argument("--project-root", default="."); claim.add_argument("--delivery", required=True); claim.add_argument("--remote", default="origin"); claim.set_defaults(func="claim")
+    start = sub.add_parser("start-item"); start.add_argument("--project-root", default="."); start.add_argument("--delivery", required=True); start.add_argument("--story", required=True); start.add_argument("--remote", default="origin"); start.set_defaults(func="start")
     args = parser.parse_args(argv)
     try:
         if args.func == "names":
@@ -415,6 +505,8 @@ def main(argv=None) -> int:
                 result = publish_execution_plan(Path(args.project_root), args.delivery, args.remote)
             elif args.func == "claim":
                 result = claim_items(Path(args.project_root), args.delivery, args.remote)
+            elif args.func == "start":
+                result = start_item(Path(args.project_root), args.delivery, args.story, args.remote)
             else:
                 result = preflight(Path(args.project_root), args.delivery, args.story, args.slot)
     except (ValueError, RuntimeError) as exc:

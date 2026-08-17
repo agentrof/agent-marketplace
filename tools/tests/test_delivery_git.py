@@ -54,7 +54,7 @@ class DeliveryGitTests(unittest.TestCase):
             subprocess.run(["git", "-C", str(project), "config", "user.name", "Test"], check=True)
             docs = project / "workspace" / "docs"
             (docs / "maps").mkdir(parents=True)
-            (project / "workspace" / "config.json").write_text(json.dumps({"doc_type_designations": {}}), encoding="utf-8")
+            (project / "workspace" / "config.json").write_text(json.dumps({"max_parallel": 1, "doc_type_designations": {}}), encoding="utf-8")
             subprocess.run(["git", "-C", str(project), "add", "."], check=True)
             subprocess.run(["git", "-C", str(project), "commit", "-qm", "init"], check=True)
             remote = project / "remote.git"
@@ -80,14 +80,14 @@ class DeliveryGitTests(unittest.TestCase):
             with self.assertRaises(RuntimeError):
                 delivery_git.reserve_delivery(project, "DLV-001")
 
-    def test_execution_publication_then_claim_creates_item_ref_without_slot(self):
+    def test_execution_publication_claim_and_start_use_global_slot(self):
         with tempfile.TemporaryDirectory() as temporary:
             project = Path(temporary)
             subprocess.run(["git", "init", "-q", "-b", "main", str(project)], check=True)
             subprocess.run(["git", "-C", str(project), "config", "user.email", "test@example.com"], check=True)
             subprocess.run(["git", "-C", str(project), "config", "user.name", "Test"], check=True)
             docs = project / "workspace" / "docs"; (docs / "maps").mkdir(parents=True)
-            (project / "workspace" / "config.json").write_text(json.dumps({"doc_type_designations": {}}), encoding="utf-8")
+            (project / "workspace" / "config.json").write_text(json.dumps({"max_parallel": 1, "doc_type_designations": {}}), encoding="utf-8")
             subprocess.run(["git", "-C", str(project), "add", "."], check=True); subprocess.run(["git", "-C", str(project), "commit", "-qm", "init"], check=True)
             remote = project / "remote.git"; subprocess.run(["git", "init", "-q", "--bare", str(remote)], check=True)
             subprocess.run(["git", "-C", str(project), "remote", "add", "origin", str(remote)], check=True); subprocess.run(["git", "-C", str(project), "push", "-q", "-u", "origin", "main"], check=True)
@@ -103,9 +103,11 @@ class DeliveryGitTests(unittest.TestCase):
             delivery_git.publish_execution_plan(project, "DLV-001")
             result = delivery_git.claim_items(project, "DLV-001")
             self.assertEqual(result["claims"], ["AUTH-01"])
+            activation = delivery_git.start_item(project, "DLV-001", "AUTH-01")
+            self.assertEqual(activation["slot"], "001")
             refs = subprocess.run(["git", "--git-dir", str(remote), "show-ref"], check=True, text=True, capture_output=True).stdout
             self.assertIn("refs/heads/agentrof/items/auth-01", refs)
-            self.assertNotIn("refs/heads/agentrof/slots/001", refs)
+            self.assertIn("refs/heads/agentrof/slots/001", refs)
 
 
 if __name__ == "__main__":

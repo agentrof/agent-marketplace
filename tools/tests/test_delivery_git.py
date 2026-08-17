@@ -141,6 +141,13 @@ class DeliveryGitTests(unittest.TestCase):
                 ).stdout.strip(),
                 activation["item"],
             )
+            paused = delivery_git.pause_item(project, "DLV-001", "AUTH-01")
+            self.assertEqual(paused["status"], "paused")
+            self.assertFalse(Path(activation["worktree"]).exists())
+            self.assertIsNone(delivery_git.read_writer_receipt(project, "DLV-001", "AUTH-01"))
+            resumed = delivery_git.resume_item(project, "DLV-001", "AUTH-01")
+            self.assertEqual(resumed["receipt"]["state"], "verified")
+            self.assertNotEqual(resumed["writer_epoch"], activation["writer_epoch"])
             transition = type("Args", (), {"docs": str(docs), "delivery": "DLV-001", "story": "AUTH-01", "to": "active"})
             delivery_compile.prepare_item_transition(transition)
             evidence = type("Args", (), {"docs": str(docs), "delivery": "DLV-001", "story": "AUTH-01", "reviewed_commit": "r1", "verified_commit": "r1"})

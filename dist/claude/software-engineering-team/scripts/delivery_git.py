@@ -264,6 +264,20 @@ def discard_pending_writer_receipt(main_worktree: Path, delivery_id: str,
         _fsync_directory(receipt_path.parent)
 
 
+def clear_verified_writer_receipt(main_worktree: Path, delivery_id: str,
+                                  story_id: str) -> None:
+    """Remove a verified local-writer receipt after a successful pause."""
+    receipt_path, lock_path = writer_receipt_paths(main_worktree, delivery_id, story_id)
+    with receipt_lock(lock_path):
+        if not receipt_path.exists():
+            return
+        receipt = _validate_receipt(json.loads(receipt_path.read_text(encoding="utf-8")))
+        if receipt["state"] != "verified":
+            raise RuntimeError("cannot clear an unverified writer receipt")
+        receipt_path.unlink()
+        _fsync_directory(receipt_path.parent)
+
+
 def materialize_item_worktree(main_worktree: Path, delivery_id: str, story_id: str,
                              candidate_oid: str) -> Path:
     """Create or verify the detached Item worktree after remote activation."""
@@ -279,6 +293,37 @@ def materialize_item_worktree(main_worktree: Path, delivery_id: str, story_id: s
         return path
     run_git(main_worktree, "worktree", "add", "--detach", str(path), candidate_oid)
     return path
+
+
+def remove_item_worktree(main_worktree: Path, delivery_id: str, story_id: str) -> None:
+    path = worktree_paths(main_worktree, delivery_id, story_id)["item"]
+    if not path.exists():
+        return
+    run_git(main_worktree, "worktree", "remove", str(path))
+
+
+def split_remote_note(root: Path, oid: str, relative_path: str,
+                      split_note_fn) -> tuple[dict, str]:
+    """Parse a tracked Markdown note from the exact remote Item tree."""
+    text = run_git(root, "show", f"{oid}:{relative_path}")
+    with tempfile.NamedTemporaryFile("w", encoding="utf-8", suffix=".md", delete=False) as temporary:
+        temporary.write(text)
+        temporary_path = Path(temporary.name)
+    try:
+        return split_note_fn(temporary_path)
+    finally:
+        temporary_path.unlink(missing_ok=True)
+
+
+def worktree_is_clean_and_at(root: Path, path: Path, expected_oid: str) -> None:
+    if not path.is_dir():
+        raise RuntimeError(f"Item worktree is missing: {path}")
+    head = run_git(root, "-C", str(path), "rev-parse", "HEAD")
+    if head != expected_oid:
+        raise RuntimeError("Item worktree HEAD differs from the remote Item tip")
+    dirty = run_git(root, "-C", str(path), "status", "--porcelain", "--untracked-files=all")
+    if dirty:
+        raise RuntimeError("DELIVERY_WORKTREE_UNSAFE: clean the Item worktree before pause")
 
 
 def run_git(root: Path, *args: str) -> str:
@@ -566,7 +611,7 @@ def project_max_parallel(root: Path) -> int:
 
 
 def start_item(project_root: Path, delivery_id: str, story_id: str,
-               remote: str = "origin") -> dict:
+               remote: str = "origin", allowed_statuses: set[str] | None = None) -> dict:
     root = main_worktree(project_root.resolve())
     from delivery_compile import docs_root, split_note, frontmatter, content_hash
     docs = docs_root(root)
@@ -590,8 +635,10 @@ def start_item(project_root: Path, delivery_id: str, story_id: str,
     item_path = directory / "items" / story_key(story_id) / "item.md"
     if not item_path.exists():
         raise RuntimeError(f"missing local Item projection: {item_path}")
-    item_props, item_body = split_note(item_path)
-    if item_props.get("status") not in {"in_scope", "paused", "blocked"}:
+    relative_item = str(item_path.relative_to(root))
+    item_props, item_body = split_remote_note(root, item_oid, relative_item, split_note)
+    allowed = {"in_scope", "paused", "blocked"} if allowed_statuses is None else allowed_statuses
+    if item_props.get("status") not in allowed:
         raise RuntimeError("Item is not startable from its current status")
     writer = epoch_token()
     item_props["status"] = "active"
@@ -644,6 +691,75 @@ def start_item(project_root: Path, delivery_id: str, story_id: str,
             "writer_epoch": writer, "item": item_candidate, "integration": integration_candidate,
             "fence": fence_candidate, "receipt": receipt, "worktree": str(worktree),
             "refs": short_refs(delivery_id, story_id, slot)}
+
+
+def pause_item(project_root: Path, delivery_id: str, story_id: str,
+               remote: str = "origin") -> dict:
+    """Pause an active Item only after proving its local worktree is flushable."""
+    root = main_worktree(project_root.resolve())
+    from delivery_compile import docs_root, split_note, frontmatter, content_hash
+    docs = docs_root(root)
+    directory = find_delivery_dir_from_remote(root, remote, delivery_id)
+    if directory is None:
+        raise RuntimeError("local Delivery package is required for Item pause")
+    refs = canonical_refs(delivery_id, story_id)
+    fence_oid = remote_oid(root, remote, refs["fence"])
+    item_oid = remote_oid(root, remote, refs["item"])
+    slots = remote_slot_oids(root, remote)
+    slot = next((key for key, oid in slots.items() if oid == item_oid), None)
+    if slot is None:
+        raise RuntimeError("pause-item requires one exact Item Slot pair")
+    slot_ref = f"refs/heads/agentrof/slots/{slot}"
+    worktree = worktree_paths(root, delivery_id, story_id)["item"]
+    worktree_is_clean_and_at(root, worktree, item_oid)
+    relative_item = str((directory / "items" / story_key(story_id) / "item.md").relative_to(root))
+    item_props, item_body = split_remote_note(root, item_oid, relative_item, split_note)
+    if item_props.get("status") not in {"active", "blocked"}:
+        raise RuntimeError("pause-item requires an active or blocked Item")
+    item_props["status"] = "paused"
+    item_props["tags"] = [tag for tag in item_props.get("tags", []) if not str(tag).startswith("status/")] + ["status/paused"]
+    item_props["source_hash"] = content_hash(item_props, item_body)
+    item_candidate = commit_replacements(
+        root, item_oid, {relative_item: frontmatter(item_props, item_body)},
+        f"Pause {story_id} for {delivery_id}",
+        {"Record": "item-quiesce-v1", "Protocol": "1", "Delivery": delivery_id,
+         "Story": story_id, "Kind": "pause", "Previous-Tip": item_oid, "Slot": slot},
+    )
+    fence_message = commit_message(root, fence_oid)
+    fence_candidate = commit_tree(
+        root, fence_oid, [], f"Fence project in open mode",
+        {"Record": "project-fence-v1", "Protocol": "1", "Mode": "open",
+         "Epoch": trailer(fence_message, "Epoch") or epoch_token(),
+         "Target": trailer(fence_message, "Target") or "none",
+         "Config-Hash": trailer(fence_message, "Config-Hash") or "none"},
+    )
+    atomic_push(root, remote, [(refs["fence"], fence_oid, fence_candidate),
+                               (refs["item"], item_oid, item_candidate),
+                               (slot_ref, item_oid, "")])
+    remove_item_worktree(root, delivery_id, story_id)
+    clear_verified_writer_receipt(root, delivery_id, story_id)
+    return {"ok": True, "delivery": delivery_id, "story": story_id,
+            "status": "paused", "item": item_candidate, "fence": fence_candidate,
+            "slot_released": slot_ref, "refs": short_refs(delivery_id, story_id)}
+
+
+def resume_item(project_root: Path, delivery_id: str, story_id: str,
+                remote: str = "origin") -> dict:
+    """Resume only a paused, slotless Item through the normal activation CAS."""
+    root = main_worktree(project_root.resolve())
+    refs = canonical_refs(delivery_id, story_id)
+    item_oid = remote_oid(root, remote, refs["item"])
+    from delivery_compile import docs_root, split_note, find_delivery
+    directory = find_delivery(docs_root(root), delivery_id)
+    if directory is None:
+        raise RuntimeError("local Delivery package is required for Item resume")
+    item_path = directory / "items" / story_key(story_id) / "item.md"
+    item_props, _ = split_remote_note(root, item_oid, str(item_path.relative_to(root)), split_note)
+    if item_props.get("status") != "paused":
+        raise RuntimeError("resume-item requires a paused remote Item")
+    if any(oid == item_oid for oid in remote_slot_oids(root, remote).values()):
+        raise RuntimeError("resume-item requires a slotless paused Item")
+    return start_item(root, delivery_id, story_id, remote, allowed_statuses={"paused"})
 
 
 def push_item(project_root: Path, delivery_id: str, story_id: str,
@@ -823,6 +939,8 @@ def main(argv=None) -> int:
     publish = sub.add_parser("publish-execution-plan"); publish.add_argument("--project-root", default="."); publish.add_argument("--delivery", required=True); publish.add_argument("--remote", default="origin"); publish.set_defaults(func="publish")
     claim = sub.add_parser("claim-items"); claim.add_argument("--project-root", default="."); claim.add_argument("--delivery", required=True); claim.add_argument("--remote", default="origin"); claim.set_defaults(func="claim")
     start = sub.add_parser("start-item"); start.add_argument("--project-root", default="."); start.add_argument("--delivery", required=True); start.add_argument("--story", required=True); start.add_argument("--remote", default="origin"); start.set_defaults(func="start")
+    pause = sub.add_parser("pause-item"); pause.add_argument("--project-root", default="."); pause.add_argument("--delivery", required=True); pause.add_argument("--story", required=True); pause.add_argument("--remote", default="origin"); pause.set_defaults(func="pause")
+    resume = sub.add_parser("resume-item"); resume.add_argument("--project-root", default="."); resume.add_argument("--delivery", required=True); resume.add_argument("--story", required=True); resume.add_argument("--remote", default="origin"); resume.set_defaults(func="resume")
     push_item_parser = sub.add_parser("push-item"); push_item_parser.add_argument("--project-root", default="."); push_item_parser.add_argument("--delivery", required=True); push_item_parser.add_argument("--story", required=True); push_item_parser.add_argument("--remote", default="origin"); push_item_parser.set_defaults(func="push-item")
     integrate = sub.add_parser("integrate-item"); integrate.add_argument("--project-root", default="."); integrate.add_argument("--delivery", required=True); integrate.add_argument("--story", required=True); integrate.add_argument("--remote", default="origin"); integrate.set_defaults(func="integrate")
     args = parser.parse_args(argv)
@@ -839,6 +957,10 @@ def main(argv=None) -> int:
                 result = claim_items(Path(args.project_root), args.delivery, args.remote)
             elif args.func == "start":
                 result = start_item(Path(args.project_root), args.delivery, args.story, args.remote)
+            elif args.func == "pause":
+                result = pause_item(Path(args.project_root), args.delivery, args.story, args.remote)
+            elif args.func == "resume":
+                result = resume_item(Path(args.project_root), args.delivery, args.story, args.remote)
             elif args.func == "push-item":
                 result = push_item(Path(args.project_root), args.delivery, args.story, args.remote)
             elif args.func == "integrate":

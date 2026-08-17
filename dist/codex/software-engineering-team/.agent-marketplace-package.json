@@ -1,5 +1,5 @@
 {
-  "build_id": "snapshot.cde8ada81b100ee207ebb63da8a468920dbff36de2112574a5e8fcae1656b75a",
+  "build_id": "snapshot.760447590426e6dfeb916afed08b3a3625f74541942a47a12d4299392d19e0ac",
   "component": "software-engineering-team",
   "files": {
     ".agent-marketplace-generated-distribution": "bc5e5ffd58e656c315fc4230e335b1acaaeba4b3a6871fc57e84144035567474",
@@ -36,7 +36,7 @@
     "scripts/backlog_compile.py": "c863e1b75459092f9c332284ee53d8e41c69d8e56f619f34daea3b8d7d365175",
     "scripts/contract_check.py": "91717c2c430f5c6b7aa5025c2f4444a50349e26c00e34ddf8646f2b8b1718875",
     "scripts/delivery_compile.py": "12279e3844d32890148769fd4e6232e3bd8e65394fcd31b1d9759920471a9443",
-    "scripts/delivery_git.py": "fad7f9d3ed6e360a576438039c4b44a7a234f6c00c90784261c5004fc8eae246",
+    "scripts/delivery_git.py": "86367ea0979622ae527182dea8ead21aff84f5822412fafdf33841f8470f9d93",
     "scripts/design_system_compile.py": "59d38d56ef3605e2deb9ea5eac8ccca0c578ffacc5858acbb1f476ed492a5e79",
     "scripts/experience_artifact_check.py": "d848b3f5d00cc2aaaf70ff41192c158fc29a7a3b08e2bf6e3ba0488059f4cdef",
     "scripts/experience_compile.py": "b002dc0741a8009dcaf167afbf6baf78802764c8df208f154f579c41ddf93590",
@@ -70,7 +70,7 @@
     "skill-content/configure/SKILL.md": "ca5973683d2fee5359174b6343938b330664be136e6554ab79651cb4b84cd65e",
     "skill-content/configure/references/config-contract.md": "3f5dd18cbb59493750b2585a2bfe743f0cec63143da1f2c8b53811237c6752dd",
     "skill-content/deliver/SKILL.md": "a4c4f7029fe1891ad463c12b77a2234f0b794432805e187fc1e6536b1ffb318c",
-    "skill-content/deliver/data/delivery-control-record-contract.json": "3442c8e18ee4722d7248eca5b2487e5788b3d0054dabdc46cf8ad86fae62b26e",
+    "skill-content/deliver/data/delivery-control-record-contract.json": "d9f346852fc92dc411fc2193cfd98ec6ef0430e9e8f7dd4eb930dc1f38b6e5cf",
     "skill-content/deliver/data/delivery-document-contract.json": "dcd5fc5e5e5322aa4e671660d0aead09762dbcff4408be555fbbfc5ecec5911d",
     "skill-content/deliver/data/delivery-migration-registry.json": "f64038305866281b869348757e6df7a14f23fbed19d2081a49625d68af4a07ac",
     "skill-content/deliver/data/delivery-protocol-1.json": "df67be261343f67e0e6e57d4280c3c2f16ea1ee791b3ac0ff133e43b4488508b",
@@ -259,6 +259,6 @@
   "schema_version": 2,
   "source_channel": "snapshot",
   "source_commit": "",
-  "source_ref": "snapshot.cde8ada81b100ee207ebb63da8a468920dbff36de2112574a5e8fcae1656b75a",
+  "source_ref": "snapshot.760447590426e6dfeb916afed08b3a3625f74541942a47a12d4299392d19e0ac",
   "version": "0.2.2"
 }

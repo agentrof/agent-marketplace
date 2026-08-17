@@ -142,8 +142,37 @@ class DeliveryGitTests(unittest.TestCase):
             temporary.cleanup()
 
     def test_target_reauthorization_is_fail_closed_without_zero_effect_proof(self):
-        with self.assertRaisesRegex(RuntimeError, "DELIVERY_TARGET_UPDATE_UNCERTAIN"):
+        with self.assertRaises(RuntimeError):
             delivery_git.reauthorize_target_update(Path("/tmp"))
+
+    def test_prepared_target_update_reauthorizes_atomically_after_target_drift(self):
+        temporary, project = self.make_project()
+        try:
+            acquired = delivery_git.begin_source_handoff(project, "sha256:" + "a" * 64)
+            head = subprocess.run(
+                ["git", "-C", str(project), "rev-parse", "HEAD"],
+                check=True, capture_output=True, text=True,
+            ).stdout.strip()
+            subprocess.run(["git", "-C", str(project), "branch", "handoff-carrier", head], check=True)
+            subprocess.run(["git", "-C", str(project), "push", "-q", "origin",
+                            "handoff-carrier:refs/heads/handoff-carrier"], check=True)
+            authorized = delivery_git.authorize_target_update(
+                project, "source_handoff", "sha256:" + "b" * 64, "origin",
+                "direct_target", "refs/heads/handoff-carrier", "direct",
+                head, head, "upstream",
+            )
+            (project / "target-drift.txt").write_text("target moved\n", encoding="utf-8")
+            subprocess.run(["git", "-C", str(project), "add", "target-drift.txt"], check=True)
+            subprocess.run(["git", "-C", str(project), "commit", "-qm", "advance target"], check=True)
+            subprocess.run(["git", "-C", str(project), "push", "-q", "origin", "main"], check=True)
+            reauthorized = delivery_git.reauthorize_target_update(project, "source_handoff", "none", "origin")
+            self.assertNotEqual(reauthorized["attempt"], authorized["attempt"])
+            self.assertEqual(reauthorized["receipt"]["state"], "prepared")
+            applied = delivery_git.apply_target_update(project, "source_handoff")
+            self.assertEqual(applied["receipt"]["state"], "verified")
+            self.assertEqual(delivery_git.finish_source_handoff(project)["mode"], "open")
+        finally:
+            temporary.cleanup()
 
     def test_scope_cancellation_projection_is_sorted_and_closed(self):
         stories = {

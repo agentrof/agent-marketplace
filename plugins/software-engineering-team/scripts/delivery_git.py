@@ -2244,15 +2244,106 @@ def configure_parallelism(project_root: Path, value: int, *, dry_run: bool = Fal
 
 def reauthorize_target_update(project_root: Path, mode: str = "source_handoff",
                               candidate_hash: str = "none", remote: str = "origin") -> dict:
-    """Refuse reauthorization unless the caller supplies a fresh zero-effect proof.
+    """Rebase one prepared target handoff under an exact Fence/carrier CAS.
 
-    The proof is deliberately not inferred from a transport error. A future
-    provider adapter may pass a validated proof and replace the immutable
-    carrier in the same Fence transaction; v1 remains fail-closed here.
+    This path is intentionally narrow: it is legal only while the previous
+    attempt is still ``prepared`` (therefore no external call could have
+    started), the target moved, and the existing carrier ref/PR is unchanged.
+    The new carrier is a fast-forward descendant of the old carrier head and
+    the Fence plus that exact carrier ref advance atomically.
     """
-    raise RuntimeError(
-        "DELIVERY_TARGET_UPDATE_UNCERTAIN: reauthorization requires a provider-validated zero-target-effect proof"
-    )
+    root = main_worktree(project_root.resolve())
+    _fence_ref, fence_oid, values = _fence_context(root, remote)
+    if values["Mode"] != mode or values["Target-Update-Intent"] == "none":
+        raise RuntimeError("DELIVERY_TARGET_UPDATE_UNCERTAIN: no matching target intent")
+    if candidate_hash not in {"none", values["Target-Update-Intent"]}:
+        raise ValueError("candidate_hash does not match the durable target intent")
+    old_attempt = values["Target-Update-Attempt"]
+    receipt_path, receipt_lock_path = target_receipt_paths(root, mode)
+    if not receipt_path.exists():
+        raise RuntimeError("DELIVERY_TARGET_UPDATE_UNCERTAIN: target receipt is missing")
+    with receipt_lock(receipt_lock_path):
+        old_receipt = _validate_target_receipt(json.loads(receipt_path.read_text(encoding="utf-8")))
+        if old_receipt["attempt"] != old_attempt or old_receipt["state"] != "prepared":
+            raise RuntimeError("DELIVERY_TARGET_UPDATE_UNCERTAIN: only an unspent prepared attempt can be reauthorized")
+        target_branch, target = resolve_target(root, remote)
+        old_base = values["Target-Carrier-Base"]
+        if target == old_base:
+            raise RuntimeError("DELIVERY_TARGET_UPDATE_UNCERTAIN: target did not advance")
+        carrier_ref = values["Target-Carrier-Ref"]
+        old_head = values["Target-Carrier-Head"]
+        if remote_oid(root, remote, carrier_ref) != old_head:
+            raise RuntimeError("DELIVERY_TARGET_CARRIER_INVALID: carrier ref moved before reauthorization")
+        target_ref = f"refs/heads/{target_branch}"
+        fetched_target = f"refs/remotes/{remote}/{target_branch}"
+        run_git(root, "fetch", "--no-tags", remote, f"{target_ref}:{fetched_target}")
+        carrier_candidate = merge_candidate(
+            root, old_head, target,
+            "Rebase target carrier",
+            {"Record": "target-carrier-reauthorization-v1", "Protocol": "1",
+             "Mode": mode, "Previous-Attempt": old_attempt,
+             "Previous-Target": old_base, "Target": target},
+        )
+        new_attempt = epoch_token()
+        values.update({
+            "Target": target, "Target-Update-Attempt": new_attempt,
+            "Attempt": new_attempt, "Target-Carrier-Head": carrier_candidate,
+            "Target-Carrier-Base": target,
+        })
+        if values["Target-Carrier-Kind"] == "github_pr":
+            from delivery_provider import GitHubProvider
+            repository = values["Target-Repository"].removeprefix("github:")
+            provider = GitHubProvider(root, remote)
+            if values["Target-Repository"] not in {"upstream", f"github:{provider.repository}"}:
+                raise RuntimeError("DELIVERY_TARGET_CARRIER_INVALID: carrier repository does not match the project remote")
+            number = values["Target-Carrier-Object"].removeprefix("pr:")
+            url = f"https://github.com/{repository}/pull/{number}"
+            observed = provider.inspect_pull_request(url)
+            head_name = carrier_ref.removeprefix("refs/heads/")
+            if (str(observed.get("state", "")).upper() != "OPEN" or not observed.get("isDraft")
+                    or observed.get("headRefName") != head_name
+                    or observed.get("headRefOid") != old_head
+                    or observed.get("baseRefName") != target_branch):
+                raise RuntimeError("DELIVERY_TARGET_CARRIER_INVALID: provider PR is not an unchanged draft carrier")
+        new_receipt = {
+            "schema_version": 1, "kind": "target-update-v1", "state": "prepared",
+            "mode": mode, "attempt": new_attempt, "fence_candidate": "pending",
+            "intent": values["Target-Update-Intent"],
+            "target_repository": values["Target-Repository"],
+            "carrier_kind": values["Target-Carrier-Kind"], "carrier_ref": carrier_ref,
+            "carrier_object": values["Target-Carrier-Object"],
+            "carrier_head": carrier_candidate, "carrier_base": target,
+        }
+        fence_candidate = _fence_child(root, fence_oid, values, "Reauthorize target update")
+        new_receipt["fence_candidate"] = fence_candidate
+        new_receipt["receipt_digest"] = receipt_digest(new_receipt)
+        _validate_target_receipt(new_receipt)
+        _write_provider_receipt_locked(receipt_path, new_receipt)
+        try:
+            atomic_push(root, remote, [
+                (_fence_ref, fence_oid, fence_candidate),
+                (carrier_ref, old_head, carrier_candidate),
+            ])
+        except Exception:
+            # Keep the old prepared receipt when the Fence/carrier lease was
+            # conclusively rejected; on an ambiguous transport, retain the
+            # new receipt and let a fresh clone reconcile the exact pair.
+            try:
+                observed_fence = remote_oid(root, remote, _fence_ref)
+                observed_carrier = remote_oid(root, remote, carrier_ref)
+            except Exception:
+                raise RuntimeError("DELIVERY_TARGET_UPDATE_UNCERTAIN: reauthorization response is ambiguous")
+            if observed_fence == fence_oid and observed_carrier == old_head:
+                _write_provider_receipt_locked(receipt_path, old_receipt)
+                raise RuntimeError("DELIVERY_TARGET_UPDATE_UNCERTAIN: reauthorization lease was rejected")
+            raise RuntimeError("DELIVERY_TARGET_UPDATE_UNCERTAIN: Fence/carrier pair is mixed")
+        if values["Target-Carrier-Kind"] == "github_pr":
+            observed = provider.inspect_pull_request(url)
+            if observed.get("headRefOid") != carrier_candidate or str(observed.get("state", "")).upper() != "OPEN":
+                raise RuntimeError("DELIVERY_TARGET_UPDATE_UNCERTAIN: provider carrier did not follow reauthorization")
+        return {"ok": True, "mode": mode, "attempt": new_attempt,
+                "target": target, "fence": fence_candidate,
+                "carrier": carrier_candidate, "receipt": new_receipt}
 
 
 def apply_target_update(project_root: Path, mode: str = "source_handoff",
@@ -2277,12 +2368,16 @@ def apply_target_update(project_root: Path, mode: str = "source_handoff",
     receipt = _validate_target_receipt(json.loads(receipt_path.read_text(encoding="utf-8")))
     if receipt["state"] == "verified":
         return {"ok": True, "mode": mode, "state": "verified", "target": values["Target"]}
-    if receipt["state"] != "call_started":
-        receipt = mark_target_call_started(root, mode, attempt)
     target_branch, target_before = resolve_target(root, remote)
     base = values["Target-Carrier-Base"]
     if target_before != base:
-        raise RuntimeError("DELIVERY_TARGET_UPDATE_UNCERTAIN: target moved before authorized mutation")
+        # No external mutation was elected yet: keep the exact prepared
+        # receipt so a fresh target-carrier attempt can be based safely.
+        if receipt["state"] == "prepared":
+            raise RuntimeError("DELIVERY_TARGET_UPDATE_UNCERTAIN: target moved before authorized mutation; reauthorize target update")
+        raise RuntimeError("DELIVERY_TARGET_UPDATE_UNCERTAIN: target moved after target mutation election")
+    if receipt["state"] != "call_started":
+        receipt = mark_target_call_started(root, mode, attempt)
     if carrier == "direct_target":
         target_ref = f"refs/heads/{target_branch}"
         push = subprocess.run(

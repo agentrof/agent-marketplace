@@ -1,7 +1,7 @@
 ---
 name: delivery-lanes
 description: Later-scope parallel delivery entry that currently reports the approved backlog boundary without creating runtime state.
-exposure: entry
+exposure: internal
 ---
 
 # Delivery Lanes

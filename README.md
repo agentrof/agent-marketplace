@@ -10,7 +10,7 @@ delivery-ready backlog.
 <!-- counts:start -->
 | Plugins | Agents | Entry skills | Knowledge skills |
 |---|---|---|---|
-| 1 | 14 | 13 | 15 |
+| 1 | 14 | 15 | 16 |
 <!-- counts:end -->
 
 Counts are maintained by `make counts`.

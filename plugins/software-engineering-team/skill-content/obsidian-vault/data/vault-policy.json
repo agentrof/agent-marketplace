@@ -9,6 +9,8 @@
     "system-architecture",
     "design-system",
     "experience-design",
+    "requirements",
+    "delivery",
     "backlog",
     "issues"
   ],
@@ -165,6 +167,46 @@
       "id": "issue-report",
       "query": "tag:#doc/issue-report",
       "rgb": 14513808
+    },
+    {
+      "id": "requirement",
+      "query": "tag:#doc/requirement",
+      "rgb": 9323693
+    },
+    {
+      "id": "definition-of-done",
+      "query": "tag:#doc/definition-of-done",
+      "rgb": 1482885
+    },
+    {
+      "id": "delivery",
+      "query": "tag:#doc/delivery",
+      "rgb": 2388387
+    },
+    {
+      "id": "execution-plan",
+      "query": "tag:#doc/execution-plan",
+      "rgb": 14059792
+    },
+    {
+      "id": "delivery-item",
+      "query": "tag:#doc/delivery-item",
+      "rgb": 2267476
+    },
+    {
+      "id": "code-review",
+      "query": "tag:#doc/code-review",
+      "rgb": 6000633
+    },
+    {
+      "id": "verification",
+      "query": "tag:#doc/verification",
+      "rgb": 1549705
+    },
+    {
+      "id": "delivery-review",
+      "query": "tag:#doc/delivery-review",
+      "rgb": 12154638
     }
   ],
   "hubs": [
@@ -315,7 +357,36 @@
     "package_hash": "text",
     "depends_on": "multitext",
     "dependency_refs": "multitext",
-    "scenario_refs": "multitext"
+    "scenario_refs": "multitext",
+    "request_kind": "text",
+    "urgency": "text",
+    "definition_of_done": "text",
+    "definition_of_done_source_hash": "text",
+    "definition_of_done_commit": "text",
+    "target_branch": "text",
+    "backlog_commit": "text",
+    "scope_hash": "text",
+    "plan_hash": "text",
+    "item_plan_hash": "text",
+    "target_impact_hash": "text",
+    "story_source_hash": "text",
+    "test_plan_source_hash": "text",
+    "integration_base_commit": "text",
+    "execution_after": "multitext",
+    "dependency_bindings": "multitext",
+    "waits_for": "multitext",
+    "waits_for_bindings": "multitext",
+    "path_claims": "multitext",
+    "contract_claims": "multitext",
+    "role_sequence": "multitext",
+    "reviewed_commit": "text",
+    "reviewed_integration_commit": "text",
+    "verified_commit": "text",
+    "cancellation_intent_hash": "text",
+    "cancellation_disposition": "text",
+    "cancellation_previous_tip": "text",
+    "pull_request_url": "text",
+    "approval_hash": "text"
   },
   "retired_managed_properties": [
     "locked",
@@ -366,7 +437,15 @@
       "criterion_refs",
       "revision",
       "approved_at_utc"
-    ]
+    ],
+    "requirements": ["request_kind", "urgency", "revision", "approved_at_utc", "source_hash"],
+    "definition_of_done": ["revision", "approved_at_utc", "source_hash", "definition_of_done_source_hash", "definition_of_done_commit"],
+    "delivery": ["goal", "definition_of_done", "definition_of_done_source_hash", "definition_of_done_commit", "target_branch", "backlog_commit", "scope_hash", "revision", "approved_at_utc", "source_hash"],
+    "execution_plan": ["revision", "plan_hash", "approved_at_utc", "source_hash"],
+    "delivery_item": ["story_source_hash", "test_plan_source_hash", "integration_base_commit", "item_plan_hash", "execution_after", "dependency_bindings", "waits_for", "waits_for_bindings", "path_claims", "contract_claims", "role_sequence", "source_hash"],
+    "code_review": ["item_plan_hash", "reviewed_commit", "source_hash"],
+    "verification": ["item_plan_hash", "verified_commit", "test_plan_source_hash", "source_hash"],
+    "delivery_review": ["plan_hash", "reviewed_commit", "reviewed_integration_commit", "approved_at_utc", "approval_hash", "source_hash"]
   },
   "fragment_graph_groups": {
     "base": ["navigation"],
@@ -375,7 +454,9 @@
     "system_architecture": ["decision", "system-living"],
     "design_system": ["design-master", "page-override"],
     "experience_design": ["experience", "journey", "screen"],
-    "backlog": ["backlog", "backlog-review", "epic", "epic-review", "story", "test-plan", "issue-report"]
+    "backlog": ["backlog", "backlog-review", "epic", "epic-review", "story", "test-plan", "issue-report"],
+    "requirements": ["requirement"],
+    "delivery": ["definition-of-done", "delivery", "execution-plan", "delivery-item", "code-review", "verification", "delivery-review"]
   },
   "extra_doc_types": [
     "moc",
@@ -403,7 +484,15 @@
     "epic-review",
     "story",
     "test-plan",
-    "issue-report"
+    "issue-report",
+    "requirement",
+    "definition-of-done",
+    "delivery",
+    "execution-plan",
+    "delivery-item",
+    "code-review",
+    "verification",
+    "delivery-review"
   ],
   "default_designations": {
     "backlog": "backlog",
@@ -412,7 +501,15 @@
     "epic_review": "epic review",
     "story": "story",
     "test_plan": "test plan",
-    "issue_report": "issue report"
+    "issue_report": "issue report",
+    "requirement": "requirement",
+    "definition_of_done": "definition of done",
+    "delivery": "delivery",
+    "execution_plan": "execution plan",
+    "delivery_item": "delivery item",
+    "code_review": "code review",
+    "verification": "verification",
+    "delivery_review": "delivery review"
   },
   "type_path_patterns": {
     "home": ["^home\\.md$"],
@@ -441,7 +538,15 @@
     "epic_review": ["^backlog/epics/[a-z0-9]+(?:-[a-z0-9]+)*/reviews/round-[0-9]+-epic-review\\.md$"],
     "story": ["^backlog/epics/[a-z0-9]+(?:-[a-z0-9]+)*/stories/[a-z0-9]+(?:-[a-z0-9]+)*/story\\.md$"],
     "test_plan": ["^backlog/epics/[a-z0-9]+(?:-[a-z0-9]+)*/stories/[a-z0-9]+(?:-[a-z0-9]+)*/test-plan\\.md$"],
-    "issue_report": ["^issues/[a-z0-9]+(?:-[a-z0-9]+)*\\.md$"]
+    "issue_report": ["^issues/[a-z0-9]+(?:-[a-z0-9]+)*\\.md$"],
+    "requirement": ["^requirements/req-[0-9]{3,}-[a-z0-9]+(?:-[a-z0-9]+)*\\.md$"],
+    "definition_of_done": ["^delivery/definition-of-done\\.md$"],
+    "delivery": ["^delivery/deliveries/dlv-[0-9]{3,}-[a-z0-9]+(?:-[a-z0-9]+)*/delivery\\.md$"],
+    "execution_plan": ["^delivery/deliveries/dlv-[0-9]{3,}-[a-z0-9]+(?:-[a-z0-9]+)*/execution-plan\\.md$"],
+    "delivery_item": ["^delivery/deliveries/dlv-[0-9]{3,}-[a-z0-9]+(?:-[a-z0-9]+)*/items/[a-z0-9]+(?:-[a-z0-9]+)*/item\\.md$"],
+    "code_review": ["^delivery/deliveries/dlv-[0-9]{3,}-[a-z0-9]+(?:-[a-z0-9]+)*/items/[a-z0-9]+(?:-[a-z0-9]+)*/code-review\\.md$"],
+    "verification": ["^delivery/deliveries/dlv-[0-9]{3,}-[a-z0-9]+(?:-[a-z0-9]+)*/items/[a-z0-9]+(?:-[a-z0-9]+)*/verification\\.md$"],
+    "delivery_review": ["^delivery/deliveries/dlv-[0-9]{3,}-[a-z0-9]+(?:-[a-z0-9]+)*/delivery-review\\.md$"]
   },
   "status_values": {
     "decision": ["draft", "proposed", "accepted", "rejected", "approved", "superseded"],
@@ -465,7 +570,15 @@
     "epic_review": ["draft", "changes_requested", "approved"],
     "story": ["planned"],
     "test_plan": ["draft", "approved", "superseded", "retired"],
-    "issue_report": ["draft", "approved", "filed"]
+    "issue_report": ["draft", "approved", "filed"],
+    "requirement": ["draft", "approved", "resolved_no_change", "superseded", "withdrawn"],
+    "definition_of_done": ["draft", "approved"],
+    "delivery": ["scope_proposed", "scope_approved", "execution_approved", "active", "review", "pr_handoff", "awaiting_merge", "merged", "cancelled"],
+    "execution_plan": ["draft", "approved", "changes_requested"],
+    "delivery_item": ["in_scope", "claimed", "active", "blocked", "paused", "integrated", "cancelled"],
+    "code_review": ["draft", "changes_requested", "approved"],
+    "verification": ["draft", "failed", "passed"],
+    "delivery_review": ["draft", "changes_requested", "approved"]
   },
   "backlog_contract": {
     "story_owner_roles": [

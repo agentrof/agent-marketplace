@@ -1938,6 +1938,97 @@ def approve(args) -> int:
     return 0
 
 
+def begin_revision(args) -> int:
+    """Open one incremental backlog revision without touching frozen stories.
+
+    Delivery-aware freeze inputs are supplied by the future coordinator as a
+    JSON snapshot. This offline compiler only validates the interface shape and
+    records the new root/review revision; it never invents live Git state.
+    """
+    docs = docs_root(args.docs)
+    record, errors = collect(docs)
+    errors.extend(approval_findings(record, docs))
+    if errors:
+        print(json.dumps({"ok": False, "errors": sorted(set(errors))}, indent=2,
+                         ensure_ascii=False, sort_keys=True))
+        return 1
+    snapshot = {}
+    if args.delivery_snapshot:
+        try:
+            snapshot = json.loads(Path(args.delivery_snapshot).read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            print(json.dumps({"ok": False, "errors": [f"invalid delivery snapshot: {exc}"]}, indent=2), file=sys.stderr)
+            return 1
+        if not isinstance(snapshot, dict):
+            print(json.dumps({"ok": False, "errors": ["delivery snapshot must be an object"]}, indent=2), file=sys.stderr)
+            return 1
+        for key in ("active_story_ids", "delivered_story_ids", "cancelled_story_ids"):
+            if key in snapshot and (not isinstance(snapshot[key], list)
+                                    or any(not isinstance(value, str) for value in snapshot[key])):
+                print(json.dumps({"ok": False, "errors": [f"{key} must be a list of story ids"]}, indent=2), file=sys.stderr)
+                return 1
+    backlog_path = docs / record["backlog"]["path"]
+    root_props, root_body = parse_front_matter(backlog_path)
+    old_revision = int(root_props.get("revision", 0) or 0)
+    revision = old_revision + 1
+    status_tag(root_props, "draft")
+    root_props["revision"] = revision
+    for key in ("approved_at_utc", "source_hash", "package_hash"):
+        root_props.pop(key, None)
+    backlog_path.write_text(front_matter(root_props, root_body), encoding="utf-8")
+
+    latest_review = latest(record["backlog_reviews"])
+    next_round = int(latest_review["props"].get("round", 0) or 0) + 1
+    review_props = dict(latest_review["props"])
+    review_props["round"] = next_round
+    review_props["status"] = "draft"
+    review_props["aliases"] = [f"BACKLOG-REVIEW-{next_round:03d}"]
+    for key in ("approved_at_utc", "source_hash"):
+        review_props.pop(key, None)
+    review_props["tags"] = [
+        tag for tag in values(review_props, "tags") if not tag.startswith("status/")
+    ] + ["status/draft"]
+    review_path = docs / "backlog" / "reviews" / f"round-{next_round}-backlog-review.md"
+    review_path.write_text(front_matter(review_props, latest_review["body"]), encoding="utf-8")
+    refreshed, render_errors = collect(docs)
+    if render_errors:
+        print(json.dumps({"ok": False, "errors": sorted(set(render_errors))}, indent=2,
+                         ensure_ascii=False, sort_keys=True))
+        return 1
+    render_backlog_navigation(refreshed, docs)
+    print(json.dumps({
+        "ok": True, "revision": revision, "review_round": next_round,
+        "frozen_story_ids": sorted(set(snapshot.get("active_story_ids", []))
+                                    | set(snapshot.get("delivered_story_ids", []))),
+        "cancelled_story_ids": sorted(set(snapshot.get("cancelled_story_ids", []))),
+        "backlog": str(backlog_path), "review": str(review_path),
+    }, indent=2, ensure_ascii=False, sort_keys=True))
+    return 0
+
+
+def revision_status(args) -> int:
+    docs = docs_root(args.docs)
+    record, errors = collect(docs)
+    if errors:
+        print(json.dumps({"ok": False, "errors": sorted(set(errors))}, indent=2,
+                         ensure_ascii=False, sort_keys=True))
+        return 1
+    backlog = record["backlog"]["props"]
+    reviews = sorted(record["backlog_reviews"], key=lambda item: int(item["props"].get("round", 0) or 0))
+    current = reviews[-1] if reviews else None
+    result = {
+        "ok": True,
+        "revision": int(backlog.get("revision", 0) or 0),
+        "backlog_status": backlog.get("status"),
+        "review_round": current["props"].get("round") if current else None,
+        "review_status": current["props"].get("status") if current else None,
+        "approved": backlog.get("status") == "approved" and bool(backlog.get("package_hash")),
+        "story_ids": sorted(item["props"].get("id") for item in record.get("stories", [])),
+    }
+    print(json.dumps(result, indent=2, ensure_ascii=False, sort_keys=True))
+    return 0
+
+
 def stub_epic(args) -> int:
     docs = docs_root(args.docs)
     if not SLUG_RE.fullmatch(args.slug):
@@ -2113,6 +2204,13 @@ def main(argv=None) -> int:
     command = sub.add_parser("approve")
     command.add_argument("--docs", default=None)
     command.set_defaults(func=approve)
+    command = sub.add_parser("begin-revision")
+    command.add_argument("--docs", default=None)
+    command.add_argument("--delivery-snapshot")
+    command.set_defaults(func=begin_revision)
+    command = sub.add_parser("revision-status")
+    command.add_argument("--docs", default=None)
+    command.set_defaults(func=revision_status)
     args = parser.parse_args(argv)
     return args.func(args)
 

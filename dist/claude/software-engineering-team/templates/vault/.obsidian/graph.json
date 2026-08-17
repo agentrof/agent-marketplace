@@ -195,6 +195,62 @@
         "a": 1,
         "rgb": 14513808
       }
+    },
+    {
+      "query": "tag:#doc/requirement",
+      "color": {
+        "a": 1,
+        "rgb": 9323693
+      }
+    },
+    {
+      "query": "tag:#doc/definition-of-done",
+      "color": {
+        "a": 1,
+        "rgb": 1482885
+      }
+    },
+    {
+      "query": "tag:#doc/delivery",
+      "color": {
+        "a": 1,
+        "rgb": 2388387
+      }
+    },
+    {
+      "query": "tag:#doc/execution-plan",
+      "color": {
+        "a": 1,
+        "rgb": 14059792
+      }
+    },
+    {
+      "query": "tag:#doc/delivery-item",
+      "color": {
+        "a": 1,
+        "rgb": 2267476
+      }
+    },
+    {
+      "query": "tag:#doc/code-review",
+      "color": {
+        "a": 1,
+        "rgb": 6000633
+      }
+    },
+    {
+      "query": "tag:#doc/verification",
+      "color": {
+        "a": 1,
+        "rgb": 1549705
+      }
+    },
+    {
+      "query": "tag:#doc/delivery-review",
+      "color": {
+        "a": 1,
+        "rgb": 12154638
+      }
     }
   ],
   "collapse-display": false,

@@ -1,0 +1,41 @@
+{
+  "schema_version": 1,
+  "document_types": {
+    "definition_of_done": {
+      "path": "workspace/docs/delivery/definition-of-done.md",
+      "statuses": ["draft", "approved"],
+      "required_properties": ["type", "id", "title", "status", "revision", "tags"]
+    },
+    "delivery": {
+      "path": "workspace/docs/delivery/deliveries/dlv-<digits>-<slug>/delivery.md",
+      "statuses": ["scope_proposed", "scope_approved", "execution_approved", "active", "review", "pr_handoff", "awaiting_merge", "merged", "cancelled"],
+      "required_properties": ["type", "id", "title", "status", "goal", "derives_from", "definition_of_done", "target_branch", "revision", "tags"]
+    },
+    "execution_plan": {
+      "path": "<delivery>/execution-plan.md",
+      "statuses": ["draft", "approved", "changes_requested"],
+      "required_properties": ["type", "id", "status", "derives_from", "revision", "tags"]
+    },
+    "delivery_item": {
+      "path": "<delivery>/items/<lower-story-id>/item.md",
+      "statuses": ["in_scope", "claimed", "active", "blocked", "paused", "integrated", "cancelled"],
+      "required_properties": ["type", "status", "derives_from", "related_to", "tags"]
+    },
+    "code_review": {
+      "path": "<item>/code-review.md",
+      "statuses": ["draft", "changes_requested", "approved"],
+      "required_properties": ["type", "id", "status", "derives_from", "item_plan_hash", "tags"]
+    },
+    "verification": {
+      "path": "<item>/verification.md",
+      "statuses": ["draft", "failed", "passed"],
+      "required_properties": ["type", "id", "status", "derives_from", "item_plan_hash", "tags"]
+    },
+    "delivery_review": {
+      "path": "<delivery>/delivery-review.md",
+      "statuses": ["draft", "changes_requested", "approved"],
+      "required_properties": ["type", "id", "status", "derives_from", "plan_hash", "reviewed_integration_commit", "approval_hash", "tags"]
+    }
+  },
+  "forbidden_runtime_properties": ["slot", "worktree", "assignee", "host", "session", "duration", "estimate", "velocity", "release"]
+}

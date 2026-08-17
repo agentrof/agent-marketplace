@@ -1,0 +1,21 @@
+{
+  "schema_version": 1,
+  "envelope": {
+    "required": ["schema_version", "ok", "mutation_state", "observations", "planned_mutations", "findings"],
+    "mutation_state": ["none", "complete", "partial", "uncertain"],
+    "observations": "sorted array of provider-neutral immutable facts",
+    "planned_mutations": "sorted array of semantic mutation descriptors",
+    "findings": "sorted stable codes with non-authoritative localized messages"
+  },
+  "hash": {
+    "algorithm": "sha256",
+    "projection": "canonical JSON excluding messages, paths outside project root and secrets",
+    "field": "mutation_plan_hash"
+  },
+  "finding_codes": [
+    "DELIVERY_SCOPE_STALE", "DELIVERY_PLAN_STALE", "DELIVERY_TARGET_DRIFT",
+    "DELIVERY_CLAIM_CONFLICT", "DELIVERY_SLOT_UNAVAILABLE", "DELIVERY_PR_UNCERTAIN",
+    "DELIVERY_PR_STATE_INVALID", "DELIVERY_COORDINATION_CORRUPT",
+    "DELIVERY_DESIGNATION_CHANGE_BLOCKED", "DELIVERY_WORKTREE_UNSAFE"
+  ]
+}

@@ -332,6 +332,18 @@ def blocked_handoff(intent: str, entry: str, stage: str, checks: dict,
 
 
 def inspect(root: Path, intent: str) -> dict:
+    if intent == "requirement":
+        try:
+            import requirement_route
+            return requirement_route.route(root / WORKSPACE / "docs")
+        except (ImportError, OSError, ValueError) as exc:
+            return {
+                "ok": False,
+                "intent": intent,
+                "next_entry": "requirement",
+                "reason": f"Requirement routing failed: {exc}",
+                "checks": {},
+            }
     work, config, conflicts = workspace(root)
     if conflicts:
         return {

@@ -34,7 +34,7 @@ REQUIRED_DIRS = (
     "apps", "environment", "demos", "sketches",
     "docs/business-analysis", "docs/solution-design",
     "docs/system-architecture", "docs/design-system/pages",
-    "docs/experience-design", "docs/backlog",
+    "docs/experience-design", "docs/requirements", "docs/delivery", "docs/backlog",
 )
 RUNTIME_PARTS = ("agent-marketplace", ".runtime")
 PRIOR_OWNER_SUFFIX = " plugin; change only through the configure entry"

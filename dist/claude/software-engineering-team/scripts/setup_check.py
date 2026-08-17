@@ -237,7 +237,7 @@ def closing(root: Path, workspace: str) -> list[str]:
         "apps", "environment", "demos", "sketches",
         "docs/business-analysis", "docs/solution-design",
         "docs/system-architecture", "docs/design-system/pages",
-        "docs/experience-design", "docs/backlog",
+        "docs/experience-design", "docs/requirements", "docs/delivery", "docs/backlog",
     )
     for relative in required:
         path = work / relative

@@ -14,6 +14,9 @@ both Item and Slot refs equal the candidate OID, then the coordinator
 materializes the detached Item worktree from that exact OID. A missing receipt
 does not change remote semantic status, but it denies local writer readiness
 until the exact remote activation is re-verified or explicitly taken over.
+Takeover is an explicit host-loss decision; it reuses the existing Item and
+Slot refs, elects a new writer epoch under exact leases and never allocates a
+second Slot.
 
 The flow ends in one Delivery Review, one final PR and provider-neutral merged
 evidence. Failed checks, target drift, review changes and process loss become

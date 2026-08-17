@@ -141,6 +141,11 @@ class DeliveryGitTests(unittest.TestCase):
                 ).stdout.strip(),
                 activation["item"],
             )
+            delivery_git.clear_verified_writer_receipt(project, "DLV-001", "AUTH-01")
+            delivery_git.remove_item_worktree(project, "DLV-001", "AUTH-01")
+            takeover = delivery_git.takeover_item(project, "DLV-001", "AUTH-01", confirm=True)
+            self.assertNotEqual(takeover["writer_epoch"], activation["writer_epoch"])
+            self.assertEqual(takeover["receipt"]["state"], "verified")
             paused = delivery_git.pause_item(project, "DLV-001", "AUTH-01")
             self.assertEqual(paused["status"], "paused")
             self.assertFalse(Path(activation["worktree"]).exists())

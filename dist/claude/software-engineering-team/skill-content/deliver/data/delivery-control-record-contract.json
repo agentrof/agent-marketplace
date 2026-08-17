@@ -8,6 +8,7 @@
     "claims_established_v1": ["Delivery", "Plan-Hash", "Target"],
     "item_claim_v1": ["Delivery", "Story", "Scope-Hash", "Plan-Hash"],
     "item_activation_v1": ["Delivery", "Story", "Writer-Epoch"],
+    "item_takeover_v1": ["Delivery", "Story", "Previous-Tip", "Item-Tip", "Slot", "Writer-Epoch"],
     "item_start_authorized_v1": ["Delivery", "Story", "Plan-Hash", "Item-Tip", "Target", "Slot", "Writer-Epoch"],
     "item_quiesce_v1": ["Delivery", "Story", "Kind", "Previous-Tip", "Slot"],
     "item_integration_v1": ["Delivery", "Story", "Item-Plan-Hash", "Reviewed-Commit"],

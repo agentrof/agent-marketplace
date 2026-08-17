@@ -201,7 +201,9 @@ def _write_writer_receipt_locked(receipt_path: Path, receipt: dict) -> None:
 
 def create_writer_receipt(main_worktree: Path, delivery_id: str, story_id: str,
                           slot: str, writer_epoch: str, item_ref: str,
-                          slot_ref: str, candidate_oid: str) -> dict:
+                          slot_ref: str, candidate_oid: str,
+                          *, allow_verified_replace: bool = False,
+                          expected_previous_oid: str | None = None) -> dict:
     """Persist a pending activation before the remote CAS is attempted."""
     if not EPOCH_RE.fullmatch(writer_epoch):
         raise ValueError("writer epoch must be exactly 22 base64url characters")
@@ -227,8 +229,12 @@ def create_writer_receipt(main_worktree: Path, delivery_id: str, story_id: str,
             existing = _validate_receipt(json.loads(receipt_path.read_text(encoding="utf-8")))
         if existing is not None:
             if existing["candidate_oid"] != candidate_oid:
-                raise RuntimeError("a different active writer receipt already exists")
-            return existing
+                if existing["state"] != "verified" or not allow_verified_replace:
+                    raise RuntimeError("a different active writer receipt already exists")
+                if expected_previous_oid is not None and existing["candidate_oid"] != expected_previous_oid:
+                    raise RuntimeError("takeover receipt does not match the previous writer tip")
+            elif existing["state"] == "pending" or not allow_verified_replace:
+                return existing
         _write_writer_receipt_locked(receipt_path, receipt)
     return _validate_receipt(json.loads(receipt_path.read_text(encoding="utf-8")))
 
@@ -762,6 +768,76 @@ def resume_item(project_root: Path, delivery_id: str, story_id: str,
     return start_item(root, delivery_id, story_id, remote, allowed_statuses={"paused"})
 
 
+def takeover_item(project_root: Path, delivery_id: str, story_id: str,
+                  remote: str = "origin", *, confirm: bool = False) -> dict:
+    """Take over one active Item after explicit host-loss confirmation."""
+    if not confirm:
+        raise RuntimeError("takeover requires explicit host-loss confirmation")
+    root = main_worktree(project_root.resolve())
+    from delivery_compile import docs_root, split_note, frontmatter, content_hash
+    docs = docs_root(root)
+    directory = find_delivery_dir_from_remote(root, remote, delivery_id)
+    if directory is None:
+        raise RuntimeError("local Delivery package is required for Item takeover")
+    refs = canonical_refs(delivery_id, story_id)
+    fence_oid = remote_oid(root, remote, refs["fence"])
+    integration_oid = remote_oid(root, remote, refs["integration"])
+    item_oid = remote_oid(root, remote, refs["item"])
+    slots = remote_slot_oids(root, remote)
+    slot = next((key for key, oid in slots.items() if oid == item_oid), None)
+    if slot is None:
+        raise RuntimeError("takeover requires one exact existing Item Slot pair")
+    slot_ref = f"refs/heads/agentrof/slots/{slot}"
+    relative_item = str((directory / "items" / story_key(story_id) / "item.md").relative_to(root))
+    item_props, item_body = split_remote_note(root, item_oid, relative_item, split_note)
+    if item_props.get("status") not in {"active", "blocked"}:
+        raise RuntimeError("takeover requires an active or blocked remote Item")
+    worktree = worktree_paths(root, delivery_id, story_id)["item"]
+    if worktree.exists():
+        worktree_is_clean_and_at(root, worktree, item_oid)
+        remove_item_worktree(root, delivery_id, story_id)
+    writer = epoch_token()
+    item_props["status"] = "active"
+    item_props["tags"] = [tag for tag in item_props.get("tags", []) if not str(tag).startswith("status/")] + ["status/active"]
+    item_props["source_hash"] = content_hash(item_props, item_body)
+    item_candidate = commit_replacements(
+        root, item_oid, {relative_item: frontmatter(item_props, item_body)},
+        f"Take over {story_id} for {delivery_id}",
+        {"Record": "item-takeover-v1", "Protocol": "1", "Delivery": delivery_id,
+         "Story": story_id, "Previous-Tip": item_oid, "Slot": slot, "Writer-Epoch": writer},
+    )
+    fence_message = commit_message(root, fence_oid)
+    integration_candidate = commit_tree(
+        root, integration_oid, [], f"Take over {story_id} for {delivery_id}",
+        {"Record": "item-takeover-v1", "Protocol": "1", "Delivery": delivery_id,
+         "Story": story_id, "Previous-Tip": item_oid, "Item-Tip": item_candidate,
+         "Slot": slot, "Writer-Epoch": writer},
+    )
+    fence_candidate = commit_tree(
+        root, fence_oid, [], "Fence project in open mode",
+        {"Record": "project-fence-v1", "Protocol": "1", "Mode": "open",
+         "Epoch": trailer(fence_message, "Epoch") or epoch_token(),
+         "Target": trailer(fence_message, "Target") or "none",
+         "Config-Hash": trailer(fence_message, "Config-Hash") or "none"},
+    )
+    create_writer_receipt(
+        root, delivery_id, story_id, slot, writer, refs["item"], slot_ref,
+        item_candidate, allow_verified_replace=True, expected_previous_oid=item_oid,
+    )
+    atomic_push(root, remote, [(refs["fence"], fence_oid, fence_candidate),
+                               (refs["integration"], integration_oid, integration_candidate),
+                               (refs["item"], item_oid, item_candidate),
+                               (slot_ref, item_oid, item_candidate)])
+    if remote_oid(root, remote, refs["item"]) != item_candidate or remote_oid(root, remote, slot_ref) != item_candidate:
+        raise RuntimeError("takeover refs did not converge to the receipt candidate")
+    receipt = promote_writer_receipt(root, delivery_id, story_id, item_candidate)
+    materialized = materialize_item_worktree(root, delivery_id, story_id, item_candidate)
+    return {"ok": True, "delivery": delivery_id, "story": story_id, "slot": slot,
+            "writer_epoch": writer, "item": item_candidate, "integration": integration_candidate,
+            "fence": fence_candidate, "receipt": receipt, "worktree": str(materialized),
+            "refs": short_refs(delivery_id, story_id, slot)}
+
+
 def push_item(project_root: Path, delivery_id: str, story_id: str,
               remote: str = "origin") -> dict:
     root = main_worktree(project_root.resolve())
@@ -941,6 +1017,7 @@ def main(argv=None) -> int:
     start = sub.add_parser("start-item"); start.add_argument("--project-root", default="."); start.add_argument("--delivery", required=True); start.add_argument("--story", required=True); start.add_argument("--remote", default="origin"); start.set_defaults(func="start")
     pause = sub.add_parser("pause-item"); pause.add_argument("--project-root", default="."); pause.add_argument("--delivery", required=True); pause.add_argument("--story", required=True); pause.add_argument("--remote", default="origin"); pause.set_defaults(func="pause")
     resume = sub.add_parser("resume-item"); resume.add_argument("--project-root", default="."); resume.add_argument("--delivery", required=True); resume.add_argument("--story", required=True); resume.add_argument("--remote", default="origin"); resume.set_defaults(func="resume")
+    takeover = sub.add_parser("takeover-item"); takeover.add_argument("--project-root", default="."); takeover.add_argument("--delivery", required=True); takeover.add_argument("--story", required=True); takeover.add_argument("--remote", default="origin"); takeover.add_argument("--confirm", action="store_true"); takeover.set_defaults(func="takeover")
     push_item_parser = sub.add_parser("push-item"); push_item_parser.add_argument("--project-root", default="."); push_item_parser.add_argument("--delivery", required=True); push_item_parser.add_argument("--story", required=True); push_item_parser.add_argument("--remote", default="origin"); push_item_parser.set_defaults(func="push-item")
     integrate = sub.add_parser("integrate-item"); integrate.add_argument("--project-root", default="."); integrate.add_argument("--delivery", required=True); integrate.add_argument("--story", required=True); integrate.add_argument("--remote", default="origin"); integrate.set_defaults(func="integrate")
     args = parser.parse_args(argv)
@@ -961,6 +1038,8 @@ def main(argv=None) -> int:
                 result = pause_item(Path(args.project_root), args.delivery, args.story, args.remote)
             elif args.func == "resume":
                 result = resume_item(Path(args.project_root), args.delivery, args.story, args.remote)
+            elif args.func == "takeover":
+                result = takeover_item(Path(args.project_root), args.delivery, args.story, args.remote, confirm=args.confirm)
             elif args.func == "push-item":
                 result = push_item(Path(args.project_root), args.delivery, args.story, args.remote)
             elif args.func == "integrate":

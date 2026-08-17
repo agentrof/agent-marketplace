@@ -51,8 +51,9 @@ behavior is host-neutral; Claude and Codex are packaging adapters.
     scope reservation, execution coordination, review, PR handoff and merge;
     Release Management remains a later scope.
 20. Delivery configuration fields remain optional before activation. Active
-    preparation limits and every configured optional field are validated; no
-    field is removed merely because its delivery consumer is deferred.
+    Requirement limits and every configured optional field are validated; no
+    field is removed merely because a later Release Management consumer is
+    out of scope.
 
 ## Ownership
 

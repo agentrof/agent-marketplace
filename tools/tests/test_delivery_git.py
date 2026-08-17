@@ -16,6 +16,27 @@ import delivery_compile  # noqa: E402
 
 
 class DeliveryGitTests(unittest.TestCase):
+    def make_project(self):
+        temporary = tempfile.TemporaryDirectory()
+        project = Path(temporary.name)
+        subprocess.run(["git", "init", "-q", "-b", "main", str(project)], check=True)
+        subprocess.run(["git", "-C", str(project), "config", "user.email", "test@example.com"], check=True)
+        subprocess.run(["git", "-C", str(project), "config", "user.name", "Test"], check=True)
+        (project / "workspace" / "docs").mkdir(parents=True)
+        (project / "workspace" / "config.json").write_text(
+            json.dumps({"team_id": "software-engineering-team", "doc_type_designations": {}}),
+            encoding="utf-8",
+        )
+        (project / "README.md").write_text("fixture\n", encoding="utf-8")
+        subprocess.run(["git", "-C", str(project), "add", "."], check=True)
+        subprocess.run(["git", "-C", str(project), "commit", "-qm", "init"], check=True)
+        remote = project / "remote.git"
+        subprocess.run(["git", "init", "-q", "--bare", str(remote)], check=True)
+        subprocess.run(["git", "-C", str(project), "remote", "add", "origin", str(remote)], check=True)
+        subprocess.run(["git", "-C", str(project), "push", "-q", "-u", "origin", "main"], check=True)
+        subprocess.run(["git", "--git-dir", str(remote), "symbolic-ref", "HEAD", "refs/heads/main"], check=True)
+        return temporary, project
+
     def test_refs_are_deterministic_and_slug_free(self):
         refs = delivery_git.short_refs("DLV-001", "AUTH-01", 1)
         self.assertEqual(refs, {
@@ -83,6 +104,29 @@ class DeliveryGitTests(unittest.TestCase):
                     "refs/heads/agentrof/items/auth-01",
                     "refs/heads/agentrof/slots/001", "b" * 40,
                 )
+
+    def test_source_handoff_intent_is_durable_and_abort_after_intent_is_blocked(self):
+        temporary, project = self.make_project()
+        try:
+            acquired = delivery_git.begin_source_handoff(project, "sha256:" + "a" * 64)
+            self.assertEqual(acquired["mode"], "source_handoff")
+            authorized = delivery_git.authorize_target_update(
+                project, "source_handoff", "sha256:" + "b" * 64,
+            )
+            self.assertEqual(authorized["target_update_intent"], "sha256:" + "b" * 64)
+            with self.assertRaises(RuntimeError):
+                delivery_git.abort_source_handoff(project)
+            finished = delivery_git.finish_source_handoff(project)
+            self.assertEqual(finished["mode"], "open")
+            _ref, fence_oid, values = delivery_git._fence_context(project, "origin")
+            self.assertEqual(values["Mode"], "open")
+            self.assertEqual(values["Target-Update-Intent"], "none")
+        finally:
+            temporary.cleanup()
+
+    def test_target_reauthorization_is_fail_closed_without_zero_effect_proof(self):
+        with self.assertRaisesRegex(RuntimeError, "DELIVERY_TARGET_UPDATE_UNCERTAIN"):
+            delivery_git.reauthorize_target_update(Path("/tmp"))
 
     def test_scope_cancellation_projection_is_sorted_and_closed(self):
         stories = {

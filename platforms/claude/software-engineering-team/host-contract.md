@@ -16,5 +16,7 @@
 - During setup or a package refresh, regenerate the host projection, run the
   generated project check and preserve authored vault files. The generator owns
   only portable instruction roots and local project memory.
-- Delivery and delivery-lane execution are deferred. Do not open a worktree
-  session until the canonical delivery contract is approved.
+- Delivery execution is available only through the exact public entries
+  `/delivery-plan`, `/execution-plan DLV-###` and `/deliver DLV-###`.
+  `/delivery-lanes` and `/develop` are retired compatibility routes and must
+  not create runtime state.

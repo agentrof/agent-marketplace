@@ -79,6 +79,10 @@ requirement_compile.py init --docs workspace/docs --slug <slug> \
   --urgency <low|normal|high|critical>
 requirement_compile.py check --docs workspace/docs --json
 requirement_compile.py approve --requirement <path>
+requirement_compile.py status --requirement <path> --json
+requirement_compile.py discard --requirement <path>
+requirement_compile.py supersede --requirement <old-path> \
+  --replacement <draft-path>
 requirement_compile.py render --docs workspace/docs
 requirement_route.py --project-root <root> [REQ-###|<new intake>] --json
 ```

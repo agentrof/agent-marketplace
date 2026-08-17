@@ -15,6 +15,7 @@ import hashlib
 import json
 import os
 import re
+import subprocess
 import sys
 import tempfile
 import unicodedata
@@ -35,6 +36,7 @@ DISPOSITIONS = {"required", "reuse", "not_applicable"}
 REQUEST_KINDS = {"feature", "defect", "technical"}
 URGENCIES = {"low", "normal", "high", "critical"}
 STATUSES = {"draft", "approved", "resolved_no_change", "superseded", "withdrawn"}
+TERMINAL_STATUSES = {"resolved_no_change", "superseded", "withdrawn"}
 MUTABLE_FIELDS = {"status", "approved_at_utc", "source_hash"}
 NAV_MARKER = "<!-- sec: nav -->"
 MAP_MARKER = "<!-- requirement_compile.py: generated requirements -->"
@@ -528,12 +530,24 @@ def transition_terminal(path: Path, status: str, reason: str,
                         evidence: list[str]) -> None:
     if status not in {"resolved_no_change", "withdrawn"}:
         raise ValueError("unsupported terminal Requirement transition")
-    findings = requirement_findings(path, require_approved=True)
+    props, body = split_note(path)
+    current = props.get("status")
+    if current not in {"draft", "approved"}:
+        raise ValueError("only a nonterminal draft or approved Requirement can transition")
+    if current == "draft" and status != "withdrawn":
+        raise ValueError("a draft Requirement may only be withdrawn")
+    if not reason.strip():
+        raise ValueError("a terminal transition requires a concrete reason")
+    if current == "draft":
+        if not is_committed(path):
+            raise ValueError("a draft Requirement must reach Git before withdrawal")
+    docs = path.parents[1]
+    identifier = str(props.get("id", ""))
+    if requirement_incorporated(docs, identifier):
+        raise ValueError("an incorporated Requirement cannot be withdrawn or resolved in place")
+    findings = requirement_findings(path, require_approved=(current == "approved"))
     if findings:
         raise ValueError("; ".join(findings))
-    props, body = split_note(path)
-    if props.get("status") != "approved":
-        raise ValueError("only an approved, unincorporated Requirement can transition")
     evidence_text = section_text(body, "Evidence and Constraints")
     prefix = evidence_text.rstrip()
     label = "Resolution" if status == "resolved_no_change" else "Withdrawal"
@@ -559,6 +573,98 @@ def transition_terminal(path: Path, status: str, reason: str,
     if closing:
         atomic_text(path, original)
         raise ValueError("terminal transition closing check failed: " + "; ".join(closing))
+
+
+def is_committed(path: Path) -> bool:
+    """Return whether the exact Requirement path has no uncommitted Git bytes."""
+    try:
+        root = Path(subprocess.check_output(
+            ["git", "rev-parse", "--show-toplevel"],
+            cwd=path.parent, text=True, stderr=subprocess.DEVNULL,
+        ).strip())
+    except (OSError, subprocess.CalledProcessError):
+        return False
+    result = subprocess.run(
+        ["git", "status", "--porcelain=v1", "--", str(path)],
+        cwd=root, text=True, capture_output=True, check=False,
+    )
+    return result.returncode == 0 and not result.stdout.strip()
+
+
+def discard_requirement(path: Path) -> None:
+    """Discard one exact uncommitted draft and regenerate its navigation map."""
+    props, _body = split_note(path)
+    if props.get("status") != "draft":
+        raise ValueError("only a draft Requirement can be discarded")
+    if is_committed(path):
+        raise ValueError("a committed draft must be withdrawn, not discarded")
+    docs = path.parents[1]
+    if requirement_incorporated(docs, str(props.get("id", ""))):
+        raise ValueError("a Requirement with downstream coverage cannot be discarded")
+    path.unlink()
+    render_navigation(docs)
+
+
+def supersede_requirement(old_path: Path, replacement_path: Path) -> None:
+    """Approve a relation-bound replacement and terminalize the old record atomically."""
+    old_props, old_body = split_note(old_path)
+    replacement_props, replacement_body = split_note(replacement_path)
+    if old_props.get("status") != "approved":
+        raise ValueError("only an approved Requirement can be superseded")
+    if replacement_props.get("status") != "draft":
+        raise ValueError("the replacement must be an exact reviewed draft")
+    if old_path == replacement_path:
+        raise ValueError("a Requirement cannot supersede itself")
+    old_id = str(old_props.get("id", ""))
+    relation = replacement_props.get("supersedes")
+    relation_values = relation if isinstance(relation, list) else [relation]
+    if not any(old_id == str(value) or old_path.stem in str(value)
+               for value in relation_values if value is not None):
+        raise ValueError("replacement must contain the approved supersedes relation before approval")
+    replacement_findings = requirement_findings(replacement_path)
+    if replacement_findings:
+        raise ValueError("replacement is not approvable: " + "; ".join(replacement_findings))
+    docs = old_path.parents[1]
+    if requirement_incorporated(docs, old_id):
+        # The old story set remains historically valid; backlog correction is
+        # a separate approved revision and must not be silently rewritten here.
+        pass
+    old_original = old_path.read_text(encoding="utf-8")
+    replacement_original = replacement_path.read_text(encoding="utf-8")
+    try:
+        approve_requirement(replacement_path)
+        replacement_props, replacement_body = split_note(replacement_path)
+        replacement_id = str(replacement_props.get("id", ""))
+        old_props["status"] = "superseded"
+        old_props["superseded_by"] = f"[[requirements/{replacement_path.stem}|{replacement_id}]]"
+        old_props["approved_at_utc"] = utc_now()
+        old_props["source_hash"] = semantic_hash(old_props, old_body)
+        old_props["tags"] = [
+            tag for tag in old_props.get("tags", [])
+            if isinstance(tag, str) and not tag.startswith("status/")
+        ] + ["status/superseded"]
+        atomic_text(old_path, render_note(old_props, old_body))
+        if requirement_findings(old_path, require_approved=True):
+            raise ValueError("superseded Requirement closing check failed")
+    except Exception:
+        atomic_text(old_path, old_original)
+        atomic_text(replacement_path, replacement_original)
+        raise
+    render_navigation(docs)
+
+
+def status_requirement(path: Path) -> dict:
+    props, _body = split_note(path)
+    docs = path.parents[1]
+    incorporated = requirement_incorporated(docs, str(props.get("id", "")))
+    return {
+        "ok": True,
+        "id": props.get("id"),
+        "status": props.get("status"),
+        "incorporated": incorporated,
+        "path": str(path),
+        "findings": requirement_findings(path, require_approved=props.get("status") in TERMINAL_STATUSES),
+    }
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -590,6 +696,14 @@ def main(argv: list[str] | None = None) -> int:
     withdraw.add_argument("--requirement", required=True)
     withdraw.add_argument("--reason", required=True)
     withdraw.add_argument("--evidence", action="append", default=[])
+    discard = sub.add_parser("discard")
+    discard.add_argument("--requirement", required=True)
+    supersede = sub.add_parser("supersede")
+    supersede.add_argument("--requirement", required=True)
+    supersede.add_argument("--replacement", required=True)
+    status = sub.add_parser("status")
+    status.add_argument("--requirement", required=True)
+    status.add_argument("--json", action="store_true")
     args = parser.parse_args(argv)
     try:
         if args.command == "init":
@@ -615,6 +729,23 @@ def main(argv: list[str] | None = None) -> int:
             )
             print(f"requirement_compile: {args.command} completed")
             return 0
+        if args.command == "discard":
+            discard_requirement(Path(args.requirement).resolve())
+            print(f"requirement_compile: discarded {args.requirement}")
+            return 0
+        if args.command == "supersede":
+            supersede_requirement(
+                Path(args.requirement).resolve(), Path(args.replacement).resolve()
+            )
+            print(f"requirement_compile: superseded {args.requirement}")
+            return 0
+        if args.command == "status":
+            payload = status_requirement(Path(args.requirement).resolve())
+            if args.json:
+                print(json.dumps(payload, ensure_ascii=False, indent=2))
+            else:
+                print(f"{payload['id']}: {payload['status']}")
+            return 0 if not payload["findings"] else 1
         docs = docs_root(args.docs)
         if args.render:
             render_navigation(docs)

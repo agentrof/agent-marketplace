@@ -1,9 +1,9 @@
 # Agent Marketplace
 
 Agent Marketplace ships one standalone, host-neutral Software Engineering Team
-for Claude Code and Codex. The team takes a greenfield project from Business
-Analysis through Solution Design, Design System, Experience Design and a
-delivery-ready backlog.
+for Claude Code and Codex. The team takes a user Requirement through the
+applicable analysis, design and backlog gates, then hands the approved backlog
+to the Delivery Flow.
 
 ## Catalog
 
@@ -33,16 +33,17 @@ tracked vault contract, ignored local Obsidian plugin projection, designation
 map, managed ignore block and portable gate. Claude and Codex use the same
 canonical workflows and project-local files.
 
-## Greenfield path
+## Requirement and Delivery path
 
 ```text
-setup -> business-analysis -> solution-design -> design-system
-       -> experience-design -> backlog-plan -> deliver (explicit)
+/setup -> /requirement -> required stages -> /backlog-plan
+        -> /delivery-plan -> /execution-plan -> /deliver
 ```
 
-The first four stages produce approved Git-tracked documents, which are their
-complete state. `backlog-plan` creates the tracked Obsidian backlog and stops
-before delivery activation.
+The Requirement record owns the impact matrix. Only required stages run, reuse
+must cite an approved current package, and `not_applicable` requires a concrete
+rationale. The approved backlog is the handoff to Delivery; no timebox,
+velocity or release state is created.
 
 ## Backlog layout
 
@@ -82,8 +83,8 @@ Marketplace package upgrades inspect one deterministic refresh plan, apply it
 with closing-gate rollback, then prove that no operation remains. Authored
 files, unknown project configuration and user-owned Obsidian knobs are
 preserved. Policy-owned keys and package-local plugin files converge before the
-tracked diff is committed. Delivery and delivery-lane runtime design is a
-separate scope.
+tracked diff is committed. Release Management is deliberately a later scope;
+`/delivery-lanes` is a retired compatibility entry.
 
 ## Quality
 

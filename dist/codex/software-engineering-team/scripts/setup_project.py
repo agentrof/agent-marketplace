@@ -825,8 +825,8 @@ class RefreshSnapshot:
 
 def next_entry(root: Path) -> str:
     result = subprocess.run([
-        sys.executable, str(Path(__file__).with_name("preparation_check.py")),
-        "status", "--project-root", str(root), "--json",
+        sys.executable, str(Path(__file__).with_name("requirement_route.py")),
+        "--project-root", str(root), "--json",
     ], capture_output=True, text=True, check=False)
     try:
         routed = json.loads(result.stdout)

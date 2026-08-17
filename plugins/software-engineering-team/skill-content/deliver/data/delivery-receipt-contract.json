@@ -28,5 +28,18 @@
     "lock": "exclusive sibling lock held across validation, atomic replacement and external-call election",
     "write": "same-directory temporary file, fsync, replace, parent-directory fsync",
     "source_of_truth": "remote control records; receipt grants local writer readiness only"
+  },
+  "provider_receipt": {
+    "kind": "pr-create-v1",
+    "path": ".agentrof/agent-marketplace/.runtime/provider-receipts/pr-<dlv-id>.json",
+    "lock_path": ".agentrof/agent-marketplace/.runtime/provider-receipts/pr-<dlv-id>.json.lock",
+    "states": ["prepared", "call_started", "verified"],
+    "required_fields": ["schema_version", "kind", "state", "delivery", "intent_oid", "provider", "attempt", "url", "receipt_digest"],
+    "call_started_rule": "exclusive exact-preimage transition persisted before provider mutation; response loss is requery-only"
+  },
+  "target_update_rule": {
+    "intent": "project-fence-v1 Target-Update-Intent and Attempt are durable before direct/provider target mutation",
+    "reauthorization": "only conclusive zero-target-effect permits a fresh Attempt",
+    "ambiguous_or_partial": "never blind-repeat; requery or manual incident"
   }
 }

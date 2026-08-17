@@ -13,7 +13,7 @@ the Requirement record.
 
 Advancing from a completed stage requires its approved subtree, stage map,
 vault home and `workspace/config.json` to be tracked, committed and clean.
-`preparation_check.py` scopes Git status to those paths. Draft work in the
+`requirement_route.py` scopes Git status to those paths. Draft work in the
 current stage and unrelated application files do not stop authoring.
 
 The idempotent setup bootstrap creates the workspace contract, project-local

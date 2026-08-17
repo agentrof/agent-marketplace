@@ -31,9 +31,10 @@ present they must satisfy this contract.
 - `terminology_language`: a non-empty language name, default English,
   governing names, technical terms, code, comments, commit messages, and PR
   bodies. File names, keys, ids, CLI output, and the machine layer stay English.
-- `max_parallel`: an optional positive integer until first Item activation;
+- `max_parallel`: an optional positive integer before first Item activation;
   it means the maximum simultaneously active Delivery Item count across this
-  project, hosts and machines. There is no default during activation.
+  project, hosts and machines. Once configured, decreases are not allowed in
+  v1 after any activation; the Fence coordinator serializes changes.
 - `scale`: optional enum `small`, `medium`, `large`, `x-large`, `xx-large`, or
   `enterprise`; absent means `small`. The business-analysis space schema's
   `scale_profiles` table defines the effective thresholds. Scale multiplies
@@ -99,8 +100,8 @@ Before the choice gate, state:
 
 - The current consumer of every field, whether the field affects preparation
   now or only future delivery, and whether absence is currently allowed.
-- Which role-to-skill bindings will change when delivery activates. Method
-  skills remain packaged while the delivery dispatcher is deferred.
+- Which role-to-skill bindings change when Delivery executes. Method skills
+  remain packaged and host-neutral; the Delivery coordinator owns execution.
 - What future packages do differently and any compatibility effect on existing
   work. For example, adding a document store makes the architect load both
   database skills and declare a store per entity.

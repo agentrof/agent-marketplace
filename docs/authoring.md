@@ -27,8 +27,9 @@ requirement -> business-analysis -> solution-design -> design-system -> experien
 Requirement Flow evaluates stage applicability, each required stage writes its
 own Markdown artifacts and runs its own compiler/checker, and backlog approval
 is the handoff to Delivery Flow. A stage is complete when its approved
-documents are tracked in Git. `preparation_check.py` only reads durable state
-and routes to the next explicit entry.
+documents are tracked in Git. `requirement_route.py` only reads durable state
+and routes to the next explicit entry; the legacy `preparation_check.py` is a
+compatibility helper for existing stage handoff checks, not the public router.
 
 ## Backlog contract
 

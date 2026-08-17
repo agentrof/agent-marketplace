@@ -2,6 +2,7 @@
 
 Spawn template: paste `{{constitution}}` into every role prompt.
 
-Parallel delivery lanes are a later scope. Until the delivery contract is
-approved, read the project-local backlog and stop without creating a lane,
-worktree lock or task record. The backlog and its test plans remain canonical.
+Execution Waves are compiler-derived views inside an Execution Plan. The old
+`/delivery-lanes` entry is retired and remains only as a compatibility route to
+`/delivery-plan`; it never creates a lane, worktree lock, task record or second
+source of truth.

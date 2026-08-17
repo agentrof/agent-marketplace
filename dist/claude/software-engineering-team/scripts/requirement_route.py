@@ -66,14 +66,13 @@ def route(docs: Path, argument: str | None = None) -> dict:
         props = read_props(path)
         status = props.get("status")
         if status == "draft":
-            actions = ["continue", "revise"]
+            actions = ["continue", "revise", "approve"]
             actions.append("withdraw" if is_committed(path) else "discard_draft")
         elif status == "approved":
-            actions = ["continue", "revise", "resolve_no_change"]
-            actions.append(
-                "supersede" if requirement_compile.requirement_incorporated(docs, identifier)
-                else "withdraw"
-            )
+            incorporated = requirement_compile.requirement_incorporated(docs, identifier)
+            actions = ["inspect", "supersede"]
+            if not incorporated:
+                actions = ["continue", "revise", "resolve_no_change", "withdraw", "supersede"]
         else:
             actions = {
             "resolved_no_change": ["inspect"],

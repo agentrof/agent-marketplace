@@ -4,9 +4,8 @@ Status: proposed product and implementation contract. This document is not
 authorization to implement the plan. Release Management is deliberately out
 of scope.
 
-The historical file name is retained while this proposal is reviewed. The
-implementation may rename it only after every canonical reference is updated
-in the same change.
+The canonical plan filename is `requirement-delivery-plan.md`. All live
+references use this name; the former sprint-oriented filename is retired.
 
 ## 1. Purpose and boundaries
 

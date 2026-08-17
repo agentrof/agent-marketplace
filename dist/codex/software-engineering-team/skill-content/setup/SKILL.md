@@ -71,13 +71,13 @@ tokens never land literally in a consuming project.
    runtime, host projections, local Obsidian UI state and the community-plugin
    projection. The contract JSON files and CSS snippet remain tracked,
    reviewable project changes.
-8. Run the portable vault gate and relevant compilers. CI materialization is a
-   delivery concern and remains deferred until its command derivation contract
-   is activated. Setup never emits a template with unresolved command
-   placeholders. The dormant CI template substitutions are defined in
-   [ci-bootstrap.md](references/ci-bootstrap.md).
+8. Run the portable vault gate and relevant Requirement compilers. Delivery
+   execution owns its own test and provider gates; setup never emits a
+   template with unresolved command placeholders. The CI template
+   substitutions remain documented in [ci-bootstrap.md](references/ci-bootstrap.md)
+   for the later Release Management boundary.
 9. Review and commit the exact tracked refresh diff before a workflow handoff.
    Report `requirement` as the next entry. `/requirement` evaluates the
    request-specific impact matrix and routes only the required stages and
-   backlog handoff; setup never infers greenfield/existing behavior.
+   backlog handoff; setup never infers routing from project age or origin.
    Start a fresh host session after setup.

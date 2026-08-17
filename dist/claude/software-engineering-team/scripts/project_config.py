@@ -193,8 +193,8 @@ def parse_value(raw: str) -> object:
 def has_workflow_state(config_path: Path) -> bool:
     docs = config_path.parent / "docs"
     roots = (
-        "business-analysis", "solution-design", "system-architecture",
-        "design-system", "experience-design", "backlog",
+        "requirements", "business-analysis", "solution-design", "system-architecture",
+        "design-system", "experience-design", "delivery", "backlog",
     )
     return any(
         any((docs / relative).rglob("*.md"))

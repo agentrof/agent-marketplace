@@ -1,12 +1,8 @@
-# Develop Flow
+# Develop Flow (retired compatibility entry)
 
 Spawn template: paste `{{constitution}}` into every role prompt.
 
-Delivery execution is intentionally deferred until its file-first contract is
-designed. This placeholder prevents an old stateful path from being invoked.
-
-## Current boundary
-
-Read the `obsidian-vault` skill, then read `workspace/docs/backlog/`, confirm the target story and its approved
-`test-plan.md`, then stop and report that delivery design is pending. Do not
-write execution state.
+The old `/develop` path is retired. Read the exact backlog story and route the
+user to `/delivery-plan`, `/execution-plan DLV-###` or `/deliver DLV-###` as
+appropriate. This compatibility entry never creates a branch, worktree, slot,
+task record or other runtime state.

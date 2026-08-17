@@ -22,6 +22,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from urllib.parse import urlsplit
 
+import delivery_result
+
 
 DELIVERY_ID_RE = re.compile(r"^DLV-[0-9]{3,}$")
 STORY_ID_RE = re.compile(r"^[A-Za-z][A-Za-z0-9]*-[0-9]{2,}$")
@@ -1567,6 +1569,265 @@ def revise_unclaimed_scope(project_root: Path, delivery_id: str,
             "refs": short_refs(delivery_id)}
 
 
+def _fence_context(root: Path, remote: str) -> tuple[str, str, dict[str, str]]:
+    """Read the current Fence tip and its closed control trailers."""
+    ref = canonical_refs("DLV-000")["fence"]
+    fence_oid = remote_oid(root, remote, ref)
+    message = commit_message(root, fence_oid)
+    if trailer(message, "Record") != "project-fence-v1":
+        raise RuntimeError("DELIVERY_FENCE_CORRUPT: current Fence record is unsupported")
+    protocol = trailer(message, "Protocol")
+    if protocol != "1":
+        raise RuntimeError("DELIVERY_PROTOCOL_UNSUPPORTED: Fence protocol is not 1")
+    values = {
+        key: trailer(message, key) or "none"
+        for key in ("Mode", "Epoch", "Target", "Config-Hash", "Source-Hash",
+                    "Barrier-Kind", "Barrier-Epoch", "Target-Update-Intent", "Attempt")
+    }
+    return ref, fence_oid, values
+
+
+def _fence_child(root: Path, fence_oid: str, values: dict[str, str], subject: str) -> str:
+    trailers = {
+        "Record": "project-fence-v1", "Protocol": "1",
+        "Mode": values.get("Mode", "open"), "Epoch": values.get("Epoch", epoch_token()),
+        "Target": values.get("Target", "none"), "Config-Hash": values.get("Config-Hash", "none"),
+        "Source-Hash": values.get("Source-Hash", "none"),
+        "Barrier-Kind": values.get("Barrier-Kind", "none"),
+        "Barrier-Epoch": values.get("Barrier-Epoch", "none"),
+        "Target-Update-Intent": values.get("Target-Update-Intent", "none"),
+        "Attempt": values.get("Attempt", "none"),
+    }
+    return commit_tree(root, fence_oid, [], subject, trailers)
+
+
+def begin_source_handoff(project_root: Path, source_hash: str = "none",
+                         remote: str = "origin") -> dict:
+    """Acquire the shared Fence for a source/configuration handoff."""
+    root = main_worktree(project_root.resolve())
+    if source_hash != "none" and not re.fullmatch(r"sha256:[0-9a-f]{64}", source_hash):
+        raise ValueError("source_hash must be none or a canonical sha256 digest")
+    ref = canonical_refs("DLV-000")["fence"]
+    try:
+        fence_oid = remote_oid(root, remote, ref)
+        current = commit_message(root, fence_oid)
+        values = {key: trailer(current, key) or "none" for key in
+                  ("Mode", "Epoch", "Target", "Config-Hash", "Barrier-Kind",
+                   "Barrier-Epoch", "Target-Update-Intent", "Attempt")}
+        if values["Mode"] != "open":
+            raise RuntimeError("DELIVERY_FENCE_MODE: source handoff requires an open Fence")
+        target = values["Target"]
+        if target == "none":
+            _branch, target = resolve_target(root, remote)
+        values.update({"Mode": "source_handoff", "Epoch": epoch_token(), "Target": target,
+                       "Source-Hash": source_hash, "Barrier-Kind": "none",
+                       "Barrier-Epoch": "none", "Target-Update-Intent": "none", "Attempt": "none"})
+        candidate = _fence_child(root, fence_oid, values, "Acquire source handoff Fence")
+        atomic_push(root, remote, [(ref, fence_oid, candidate)])
+    except RuntimeError as exc:
+        if "remote ref is absent" not in str(exc).lower() and "does not exist" not in str(exc).lower():
+            raise
+        _branch, target = resolve_target(root, remote)
+        values = {"Mode": "source_handoff", "Epoch": epoch_token(), "Target": target,
+                  "Config-Hash": "none", "Source-Hash": source_hash,
+                  "Barrier-Kind": "none", "Barrier-Epoch": "none",
+                  "Target-Update-Intent": "none", "Attempt": "none"}
+        candidate = commit_tree(root, target, [], "Acquire source handoff Fence", {
+            "Record": "project-fence-v1", "Protocol": "1", **values})
+        atomic_push(root, remote, [(ref, "", candidate)])
+        fence_oid = ""
+    return {"ok": True, "mode": "source_handoff", "fence": candidate,
+            "previous_fence": fence_oid, "source_hash": source_hash, "refs": {"fence": ref}}
+
+
+def authorize_target_update(project_root: Path, mode: str = "source_handoff",
+                            candidate_hash: str = "none", remote: str = "origin") -> dict:
+    """Install the durable target-update intent before an external target write."""
+    root = main_worktree(project_root.resolve())
+    ref, fence_oid, values = _fence_context(root, remote)
+    if values["Mode"] != mode:
+        raise RuntimeError(f"DELIVERY_FENCE_MODE: expected {mode}, found {values['Mode']}")
+    if values["Target-Update-Intent"] != "none":
+        raise RuntimeError("DELIVERY_TARGET_UPDATE_UNCERTAIN: target-update intent already exists")
+    if candidate_hash != "none" and not re.fullmatch(r"sha256:[0-9a-f]{64}", candidate_hash):
+        raise ValueError("candidate_hash must be none or a canonical sha256 digest")
+    values["Target-Update-Intent"] = candidate_hash
+    values["Attempt"] = epoch_token()
+    candidate = _fence_child(root, fence_oid, values, "Authorize target update")
+    atomic_push(root, remote, [(ref, fence_oid, candidate)])
+    return {"ok": True, "mode": mode, "fence": candidate,
+            "target_update_intent": candidate_hash, "attempt": values["Attempt"]}
+
+
+def finish_source_handoff(project_root: Path, remote: str = "origin") -> dict:
+    """Close a source/config handoff only after the target is observable."""
+    root = main_worktree(project_root.resolve())
+    ref, fence_oid, values = _fence_context(root, remote)
+    if values["Mode"] not in {"source_handoff", "configuring", "upgrade"}:
+        raise RuntimeError("DELIVERY_FENCE_MODE: no source handoff is active")
+    if values["Target-Update-Intent"] == "none":
+        raise RuntimeError("finish-source-handoff requires an authorized target-update intent")
+    _branch, target = resolve_target(root, remote)
+    values.update({"Mode": "open", "Epoch": epoch_token(), "Target": target,
+                   "Source-Hash": "none", "Barrier-Kind": "none", "Barrier-Epoch": "none",
+                   "Target-Update-Intent": "none", "Attempt": "none"})
+    candidate = _fence_child(root, fence_oid, values, "Finish source handoff")
+    atomic_push(root, remote, [(ref, fence_oid, candidate)])
+    return {"ok": True, "mode": "open", "fence": candidate, "target": target}
+
+
+def abort_source_handoff(project_root: Path, remote: str = "origin") -> dict:
+    """Abort only an acquired handoff whose external write never began."""
+    root = main_worktree(project_root.resolve())
+    ref, fence_oid, values = _fence_context(root, remote)
+    if values["Mode"] not in {"source_handoff", "configuring", "upgrade"}:
+        raise RuntimeError("DELIVERY_FENCE_MODE: no source handoff is active")
+    if values["Target-Update-Intent"] != "none":
+        raise RuntimeError("DELIVERY_TARGET_UPDATE_UNCERTAIN: abort is forbidden after target-update intent")
+    values.update({"Mode": "open", "Epoch": epoch_token(), "Source-Hash": "none",
+                   "Barrier-Kind": "none", "Barrier-Epoch": "none", "Attempt": "none"})
+    candidate = _fence_child(root, fence_oid, values, "Abort source handoff")
+    atomic_push(root, remote, [(ref, fence_oid, candidate)])
+    return {"ok": True, "mode": "open", "fence": candidate}
+
+
+def _barrier_transition(project_root: Path, kind: str, action: str,
+                        delivery_id: str | None = None, remote: str = "origin") -> dict:
+    """Install or release a lightweight barrier on existing coordination refs."""
+    root = main_worktree(project_root.resolve())
+    validate_delivery_id(delivery_id or "DLV-000") if delivery_id else None
+    fence_ref, fence_oid, values = _fence_context(root, remote)
+    integration_ref = canonical_refs(delivery_id)["integration"] if delivery_id else None
+    integration_oid = remote_oid(root, remote, integration_ref) if integration_ref else None
+    if action == "begin":
+        if values["Mode"] != "open" or values["Barrier-Kind"] != "none":
+            raise RuntimeError("DELIVERY_BARRIER_ACTIVE: an incompatible Fence barrier is already active")
+        epoch = epoch_token()
+        values.update({"Barrier-Kind": kind, "Barrier-Epoch": epoch,
+                       "Mode": "upgrade" if kind == "upgrade" else "open"})
+        fence_candidate = _fence_child(root, fence_oid, values, f"Begin {kind} barrier")
+        updates = [(fence_ref, fence_oid, fence_candidate)]
+        integration_candidate = None
+        if integration_ref:
+            integration_candidate = commit_tree(
+                root, integration_oid, [], f"Begin {kind} barrier for {delivery_id}",
+                {"Record": "delivery-barrier-v1", "Protocol": "1", "Delivery": delivery_id,
+                 "Barrier-Kind": kind, "Barrier-Epoch": epoch,
+                 "Cancellation-Intent-Hash": "none"},
+            )
+            updates.append((integration_ref, integration_oid, integration_candidate))
+        atomic_push(root, remote, updates)
+        return {"ok": True, "action": "begin", "barrier_kind": kind,
+                "barrier_epoch": epoch, "fence": fence_candidate,
+                "integration": integration_candidate}
+    if values["Barrier-Kind"] != kind or values["Barrier-Epoch"] == "none":
+        raise RuntimeError("DELIVERY_BARRIER_ACTIVE: requested barrier is not the current barrier")
+    if action == "abort" and kind == "cancellation":
+        raise RuntimeError("DELIVERY_CANCELLATION_INVALID: cancellation barriers are irreversible")
+    barrier_epoch = values["Barrier-Epoch"]
+    values.update({"Barrier-Kind": "none", "Barrier-Epoch": "none", "Mode": "open", "Epoch": epoch_token()})
+    fence_candidate = _fence_child(root, fence_oid, values, f"Release {kind} barrier")
+    updates = [(fence_ref, fence_oid, fence_candidate)]
+    integration_candidate = None
+    if integration_ref:
+        integration_candidate = commit_tree(
+            root, integration_oid, [], f"Release {kind} barrier for {delivery_id}",
+             {"Record": "delivery-barrier-release-v1", "Protocol": "1", "Delivery": delivery_id,
+             "Barrier-Kind": kind, "Barrier-Epoch": barrier_epoch,
+             "Target": values.get("Target", "none"), "Target-Impact-Hash": "none"},
+        )
+        updates.append((integration_ref, integration_oid, integration_candidate))
+    atomic_push(root, remote, updates)
+    return {"ok": True, "action": action, "barrier_kind": kind,
+            "fence": fence_candidate, "integration": integration_candidate}
+
+
+def begin_plan_revision(project_root: Path, delivery_id: str, remote: str = "origin") -> dict:
+    return _barrier_transition(project_root, "plan-revision", "begin", delivery_id, remote)
+
+
+def finish_plan_revision(project_root: Path, delivery_id: str, remote: str = "origin") -> dict:
+    return _barrier_transition(project_root, "plan-revision", "finish", delivery_id, remote)
+
+
+def abort_plan_revision(project_root: Path, delivery_id: str, remote: str = "origin") -> dict:
+    return _barrier_transition(project_root, "plan-revision", "abort", delivery_id, remote)
+
+
+def begin_upgrade(project_root: Path, delivery_id: str, remote: str = "origin") -> dict:
+    return _barrier_transition(project_root, "upgrade", "begin", delivery_id, remote)
+
+
+def finish_upgrade(project_root: Path, delivery_id: str, remote: str = "origin") -> dict:
+    return _barrier_transition(project_root, "upgrade", "finish", delivery_id, remote)
+
+
+def abort_upgrade(project_root: Path, delivery_id: str, remote: str = "origin") -> dict:
+    return _barrier_transition(project_root, "upgrade", "abort", delivery_id, remote)
+
+
+def configure_parallelism(project_root: Path, value: int, *, dry_run: bool = False,
+                          remote: str = "origin") -> dict:
+    """Set the single project-wide Delivery Item WIP value.
+
+    The configuration writer remains the owner of the tracked JSON. This
+    coordinator helper validates the just-in-time activation decision and
+    performs only that one field write; a remote-aware handoff can then carry
+    the resulting commit through the normal project policy.
+    """
+    if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
+        raise ValueError("max_parallel must be a positive integer")
+    root = main_worktree(project_root.resolve())
+    path = root / "workspace" / "config.json"
+    try:
+        config = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise RuntimeError(f"cannot read project config: {exc}") from exc
+    previous = config.get("max_parallel")
+    if isinstance(previous, int) and value < previous:
+        raise RuntimeError("max_parallel is monotonic in v1; decreases require a future config epoch")
+    if previous == value:
+        return {"ok": True, "changed": False, "max_parallel": value,
+                "next_entry": "/deliver", "dry_run": dry_run}
+    handoff = None
+    if not dry_run:
+        fence_ref = canonical_refs("DLV-000")["fence"]
+        if remote_has_ref(root, remote, fence_ref):
+            # Config changes compete with Delivery reservation/claim through
+            # the same Fence. The user commits the local config while this
+            # source_handoff is held, then finishes it after target handoff.
+            handoff = begin_source_handoff(root, "none", remote)
+    config["max_parallel"] = value
+    try:
+        if not dry_run:
+            from project_config import atomic
+            atomic(path, config)
+    except Exception:
+        if handoff is not None:
+            try:
+                abort_source_handoff(root, remote)
+            except Exception:
+                pass
+        raise
+    return {"ok": True, "changed": True, "max_parallel": value,
+            "previous": previous if isinstance(previous, int) else "none",
+            "next_entry": "/deliver", "dry_run": dry_run,
+            "handoff": handoff, "requires_target_handoff": handoff is not None}
+
+
+def reauthorize_target_update(project_root: Path, mode: str = "source_handoff",
+                              candidate_hash: str = "none", remote: str = "origin") -> dict:
+    """Refuse reauthorization unless the caller supplies a fresh zero-effect proof.
+
+    The proof is deliberately not inferred from a transport error. A future
+    provider adapter may pass a validated proof and replace the immutable
+    carrier in the same Fence transaction; v1 remains fail-closed here.
+    """
+    raise RuntimeError(
+        "DELIVERY_TARGET_UPDATE_UNCERTAIN: reauthorization requires a provider-validated zero-target-effect proof"
+    )
+
+
 def claim_items(project_root: Path, delivery_id: str, remote: str = "origin") -> dict:
     root = main_worktree(project_root.resolve())
     from delivery_compile import delivery_findings, docs_root, split_note, frontmatter, content_hash
@@ -2189,10 +2450,23 @@ def main(argv=None) -> int:
     names = sub.add_parser("names"); names.add_argument("--delivery", required=True); names.add_argument("--story"); names.add_argument("--slot"); names.set_defaults(func="names")
     check = sub.add_parser("preflight"); check.add_argument("--project-root", default="."); check.add_argument("--delivery", required=True); check.add_argument("--story"); check.add_argument("--slot"); check.set_defaults(func="preflight")
     reserve = sub.add_parser("reserve-delivery"); reserve.add_argument("--project-root", default="."); reserve.add_argument("--delivery", required=True); reserve.add_argument("--remote", default="origin"); reserve.set_defaults(func="reserve")
+    config = sub.add_parser("configure-parallelism"); config.add_argument("--project-root", default="."); config.add_argument("--value", type=int, required=True); config.add_argument("--dry-run", action="store_true"); config.add_argument("--remote", default="origin"); config.set_defaults(func="configure")
+    source_begin = sub.add_parser("begin-source-handoff"); source_begin.add_argument("--project-root", default="."); source_begin.add_argument("--source-hash", default="none"); source_begin.add_argument("--remote", default="origin"); source_begin.set_defaults(func="source-begin")
+    source_auth = sub.add_parser("authorize-target-update"); source_auth.add_argument("--project-root", default="."); source_auth.add_argument("--mode", choices=["source_handoff", "configuring", "upgrade"], default="source_handoff"); source_auth.add_argument("--candidate-hash", default="none"); source_auth.add_argument("--remote", default="origin"); source_auth.set_defaults(func="source-authorize")
+    source_reauth = sub.add_parser("reauthorize-target-update"); source_reauth.add_argument("--project-root", default="."); source_reauth.add_argument("--mode", choices=["source_handoff", "configuring", "upgrade"], default="source_handoff"); source_reauth.add_argument("--candidate-hash", default="none"); source_reauth.add_argument("--remote", default="origin"); source_reauth.set_defaults(func="source-reauthorize")
+    source_finish = sub.add_parser("finish-source-handoff"); source_finish.add_argument("--project-root", default="."); source_finish.add_argument("--remote", default="origin"); source_finish.set_defaults(func="source-finish")
+    source_abort = sub.add_parser("abort-source-handoff"); source_abort.add_argument("--project-root", default="."); source_abort.add_argument("--remote", default="origin"); source_abort.set_defaults(func="source-abort")
     publish = sub.add_parser("publish-execution-plan"); publish.add_argument("--project-root", default="."); publish.add_argument("--delivery", required=True); publish.add_argument("--remote", default="origin"); publish.set_defaults(func="publish")
     refresh = sub.add_parser("refresh-target"); refresh.add_argument("--project-root", default="."); refresh.add_argument("--delivery", required=True); refresh.add_argument("--remote", default="origin"); refresh.set_defaults(func="refresh")
     revise_scope = sub.add_parser("revise-unclaimed-scope"); revise_scope.add_argument("--project-root", default="."); revise_scope.add_argument("--delivery", required=True); revise_scope.add_argument("--remote", default="origin"); revise_scope.set_defaults(func="revise-scope")
     claim = sub.add_parser("claim-items"); claim.add_argument("--project-root", default="."); claim.add_argument("--delivery", required=True); claim.add_argument("--remote", default="origin"); claim.set_defaults(func="claim")
+    plan_begin = sub.add_parser("begin-plan-revision"); plan_begin.add_argument("--project-root", default="."); plan_begin.add_argument("--delivery", required=True); plan_begin.add_argument("--remote", default="origin"); plan_begin.set_defaults(func="plan-begin")
+    quiesce_delivery = sub.add_parser("quiesce-delivery"); quiesce_delivery.add_argument("--project-root", default="."); quiesce_delivery.add_argument("--delivery", required=True); quiesce_delivery.add_argument("--remote", default="origin"); quiesce_delivery.set_defaults(func="plan-begin")
+    plan_finish = sub.add_parser("finish-plan-revision"); plan_finish.add_argument("--project-root", default="."); plan_finish.add_argument("--delivery", required=True); plan_finish.add_argument("--remote", default="origin"); plan_finish.set_defaults(func="plan-finish")
+    plan_abort = sub.add_parser("abort-plan-revision"); plan_abort.add_argument("--project-root", default="."); plan_abort.add_argument("--delivery", required=True); plan_abort.add_argument("--remote", default="origin"); plan_abort.set_defaults(func="plan-abort")
+    upgrade_begin = sub.add_parser("quiesce-upgrade"); upgrade_begin.add_argument("--project-root", default="."); upgrade_begin.add_argument("--delivery", required=True); upgrade_begin.add_argument("--remote", default="origin"); upgrade_begin.set_defaults(func="upgrade-begin")
+    upgrade_finish = sub.add_parser("finish-upgrade"); upgrade_finish.add_argument("--project-root", default="."); upgrade_finish.add_argument("--delivery", required=True); upgrade_finish.add_argument("--remote", default="origin"); upgrade_finish.set_defaults(func="upgrade-finish")
+    upgrade_abort = sub.add_parser("abort-upgrade"); upgrade_abort.add_argument("--project-root", default="."); upgrade_abort.add_argument("--delivery", required=True); upgrade_abort.add_argument("--remote", default="origin"); upgrade_abort.set_defaults(func="upgrade-abort")
     start = sub.add_parser("start-item"); start.add_argument("--project-root", default="."); start.add_argument("--delivery", required=True); start.add_argument("--story", required=True); start.add_argument("--remote", default="origin"); start.set_defaults(func="start")
     block = sub.add_parser("block-item"); block.add_argument("--project-root", default="."); block.add_argument("--delivery", required=True); block.add_argument("--story", required=True); block.add_argument("--remote", default="origin"); block.set_defaults(func="block")
     unblock = sub.add_parser("unblock-item"); unblock.add_argument("--project-root", default="."); unblock.add_argument("--delivery", required=True); unblock.add_argument("--story", required=True); unblock.add_argument("--remote", default="origin"); unblock.set_defaults(func="unblock")
@@ -2209,6 +2483,10 @@ def main(argv=None) -> int:
     merge_pr_parser = sub.add_parser("merge-pr"); merge_pr_parser.add_argument("--project-root", default="."); merge_pr_parser.add_argument("--delivery", required=True); merge_pr_parser.add_argument("--remote", default="origin"); merge_pr_parser.set_defaults(func="merge-pr")
     invalidate_review = sub.add_parser("invalidate-delivery-review"); invalidate_review.add_argument("--project-root", default="."); invalidate_review.add_argument("--delivery", required=True); invalidate_review.add_argument("--finding-code", required=True); invalidate_review.add_argument("--finding-hash", required=True); invalidate_review.add_argument("--remote", default="origin"); invalidate_review.set_defaults(func="invalidate-review")
     cancel = sub.add_parser("cancel-delivery"); cancel.add_argument("--project-root", default="."); cancel.add_argument("--delivery", required=True); cancel.add_argument("--reason", required=True); cancel.add_argument("--remote", default="origin"); cancel.set_defaults(func="cancel")
+    verify = sub.add_parser("verify-merge"); verify.add_argument("--project-root", default="."); verify.add_argument("--delivery", required=True); verify.add_argument("--remote", default="origin"); verify.set_defaults(func="merge-pr")
+    reconcile = sub.add_parser("reconcile"); reconcile.add_argument("--project-root", default="."); reconcile.add_argument("--delivery", required=True); reconcile.add_argument("--remote", default="origin"); reconcile.set_defaults(func="reconcile")
+    board = sub.add_parser("board"); board.add_argument("--project-root", default="."); board.add_argument("--delivery", required=True); board.add_argument("--remote", default="origin"); board.set_defaults(func="board")
+    locate = sub.add_parser("locate"); locate.add_argument("--delivery", required=True); locate.add_argument("--story"); locate.add_argument("--slot"); locate.set_defaults(func="names")
     args = parser.parse_args(argv)
     try:
         if args.func == "names":
@@ -2217,6 +2495,18 @@ def main(argv=None) -> int:
         else:
             if args.func == "reserve":
                 result = reserve_delivery(Path(args.project_root), args.delivery, args.remote)
+            elif args.func == "configure":
+                result = configure_parallelism(Path(args.project_root), args.value, dry_run=args.dry_run, remote=args.remote)
+            elif args.func == "source-begin":
+                result = begin_source_handoff(Path(args.project_root), args.source_hash, args.remote)
+            elif args.func == "source-authorize":
+                result = authorize_target_update(Path(args.project_root), args.mode, args.candidate_hash, args.remote)
+            elif args.func == "source-reauthorize":
+                result = reauthorize_target_update(Path(args.project_root), args.mode, args.candidate_hash, args.remote)
+            elif args.func == "source-finish":
+                result = finish_source_handoff(Path(args.project_root), args.remote)
+            elif args.func == "source-abort":
+                result = abort_source_handoff(Path(args.project_root), args.remote)
             elif args.func == "publish":
                 result = publish_execution_plan(Path(args.project_root), args.delivery, args.remote)
             elif args.func == "refresh":
@@ -2225,6 +2515,18 @@ def main(argv=None) -> int:
                 result = revise_unclaimed_scope(Path(args.project_root), args.delivery, args.remote)
             elif args.func == "claim":
                 result = claim_items(Path(args.project_root), args.delivery, args.remote)
+            elif args.func == "plan-begin":
+                result = begin_plan_revision(Path(args.project_root), args.delivery, args.remote)
+            elif args.func == "plan-finish":
+                result = finish_plan_revision(Path(args.project_root), args.delivery, args.remote)
+            elif args.func == "plan-abort":
+                result = abort_plan_revision(Path(args.project_root), args.delivery, args.remote)
+            elif args.func == "upgrade-begin":
+                result = begin_upgrade(Path(args.project_root), args.delivery, args.remote)
+            elif args.func == "upgrade-finish":
+                result = finish_upgrade(Path(args.project_root), args.delivery, args.remote)
+            elif args.func == "upgrade-abort":
+                result = abort_upgrade(Path(args.project_root), args.delivery, args.remote)
             elif args.func == "start":
                 result = start_item(Path(args.project_root), args.delivery, args.story, args.remote)
             elif args.func == "block":
@@ -2257,12 +2559,17 @@ def main(argv=None) -> int:
                 result = invalidate_delivery_review(Path(args.project_root), args.delivery, args.finding_code, args.finding_hash, args.remote)
             elif args.func == "cancel":
                 result = cancel_delivery(Path(args.project_root), args.delivery, args.reason, args.remote)
+            elif args.func == "reconcile":
+                result = preflight(Path(args.project_root), args.delivery, None, None)
+            elif args.func == "board":
+                result = preflight(Path(args.project_root), args.delivery, None, None)
             else:
                 result = preflight(Path(args.project_root), args.delivery, args.story, args.slot)
     except (ValueError, RuntimeError) as exc:
         result = {"ok": False, "errors": [str(exc)]}
-    print(json.dumps(result, indent=2, ensure_ascii=False, sort_keys=True))
-    return 0 if result.get("ok") else 1
+    envelope = delivery_result.from_raw(args.command, result)
+    print(json.dumps(envelope, indent=2, ensure_ascii=False, sort_keys=True))
+    return 0 if envelope["ok"] else 1
 
 
 if __name__ == "__main__":

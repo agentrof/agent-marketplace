@@ -622,7 +622,9 @@ dependency_refs:
             refreshed = self.run_cli(
                 SETUP, "apply", "--project-root", str(project), "--json"
             )
-            self.assertEqual(json.loads(refreshed.stdout)["next_entry"], "deliver")
+            # Setup now hands every project to the unified Requirement Flow;
+            # the legacy preparation router below remains compatibility-only.
+            self.assertEqual(json.loads(refreshed.stdout)["next_entry"], "requirement")
 
             before = self.run_cli(
                 PREPARATION,

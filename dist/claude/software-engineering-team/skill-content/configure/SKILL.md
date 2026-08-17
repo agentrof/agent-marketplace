@@ -8,7 +8,7 @@ exposure: entry
 
 ## When to Use
 
-- Changing project origin, stack, commands, scale, language, limits or
+- Changing stack, commands, scale, language, limits, `max_parallel` or
   designations.
 - Repairing a local workspace contract after an intentional user change.
 

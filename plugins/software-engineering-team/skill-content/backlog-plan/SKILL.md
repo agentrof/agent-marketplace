@@ -20,7 +20,7 @@ approved. This entry prepares delivery, but it does not start delivery.
 
 ## Procedure
 
-1. Run `preparation_check.py status --project-root <root> --json`. Require the
+1. Run `requirement_route.py --project-root <root> REQ-### --json`. Require the
    response to route to `backlog-plan`; an earlier entry is a hard route.
 2. Read `flows/backlog-planning.md`, `product-planning` and the `obsidian-vault`
    skill completely; the vault policy is authoritative for paths and metadata.

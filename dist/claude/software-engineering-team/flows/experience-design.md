@@ -10,7 +10,7 @@ and required `SELF-CHECK` into every role prompt.
 ## Preconditions
 
 1. Confirm `workspace/config.json` is owned by the Software Engineering Team.
-2. Run `preparation_check.py status --project-root <root> --json`; the named
+2. Run `requirement_route.py --project-root <root> REQ-### --json`; the named
    predecessor must be `experience-design`.
 3. Run the Business Analysis approval gate for every referenced scope, the
    solution landscape checker, the design-system compiler and the scoped vault

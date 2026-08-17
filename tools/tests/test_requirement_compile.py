@@ -104,6 +104,57 @@ class RequirementCompilerTests(unittest.TestCase):
         self.assertEqual(exact["mode"], "exact")
         self.assertEqual(exact["requirement_id"], "REQ-001")
 
+    def test_route_exposes_state_valid_actions(self):
+        path = self.complete_draft()
+        draft = requirement_route.route(self.docs, "REQ-001")
+        self.assertIn("discard_draft", draft["actions"])
+        self.assertIn("approve", draft["actions"])
+        requirement_compile.approve_requirement(path)
+        approved = requirement_route.route(self.docs, "REQ-001")
+        self.assertIn("resolve_no_change", approved["actions"])
+        self.assertIn("supersede", approved["actions"])
+        requirement_compile.transition_terminal(
+            path, "resolved_no_change", "Already satisfied", []
+        )
+        terminal = requirement_route.route(self.docs, "REQ-001")
+        self.assertEqual(terminal["actions"], ["inspect"])
+
+    def test_discard_removes_only_an_uncommitted_draft(self):
+        path = self.complete_draft()
+        requirement_compile.discard_requirement(path)
+        self.assertFalse(path.exists())
+        self.assertNotIn("req-001-saml-access", (self.docs / "maps/requirements.md").read_text(encoding="utf-8"))
+
+    def test_supersede_requires_relation_and_terminalizes_old_record(self):
+        old = self.complete_draft()
+        requirement_compile.approve_requirement(old)
+        replacement = requirement_compile.create_requirement(
+            self.docs, "saml-access-v2", "Enterprise SAML access v2", "feature", "high", None, []
+        )
+        props, body = requirement_compile.split_note(replacement)
+        body = body.replace("TODO: state the requested change and who needs it.", "Use the revised SAML contract.")
+        body = body.replace("TODO: state the observable outcome and acceptance boundary.", "The revised assertion is accepted.")
+        body = body.replace("TODO: define included and excluded behavior.", "Include the revised assertion. Exclude provisioning.")
+        body = body.replace("TODO: record evidence, constraints and urgency rationale.", "The revised contract is approved.")
+        rows = "\n".join(
+            f"| {stage} | required | [[issues/identity-contract|Identity contract]] | The {stage} output constrains this change. |"
+            for stage in requirement_compile.STAGES
+        )
+        old_rows = "\n".join(
+            f"| {stage} | required |  | TODO: explain why this stage must change. |"
+            for stage in requirement_compile.STAGES
+        )
+        body = body.replace(old_rows, rows)
+        props["supersedes"] = f"[[requirements/{old.stem}|REQ-001]]"
+        replacement.write_text(requirement_compile.render_note(props, body), encoding="utf-8")
+        requirement_compile.render_navigation(self.docs)
+        requirement_compile.supersede_requirement(old, replacement)
+        old_props, _ = requirement_compile.split_note(old)
+        new_props, _ = requirement_compile.split_note(replacement)
+        self.assertEqual(old_props["status"], "superseded")
+        self.assertEqual(new_props["status"], "approved")
+        self.assertIn("superseded_by", old_props)
+
     def test_no_change_is_terminal_and_keeps_no_backlog_signal(self):
         path = self.complete_draft()
         requirement_compile.approve_requirement(path)

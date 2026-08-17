@@ -630,9 +630,8 @@ class BacklogCompilerTests(unittest.TestCase):
         story.write_text(BACKLOG.front_matter(props, body), encoding="utf-8")
         config = self.docs.parent / "config.json"
         config.write_text(json.dumps({"project_origin": "greenfield"}), encoding="utf-8")
-        greenfield = self.run_cli("check", "--json")
-        self.assertNotEqual(greenfield.returncode, 0)
-        self.assertIn("greenfield work_kind must be feature", greenfield.stdout)
+        legacy_origin = self.run_cli("check", "--json")
+        self.assertEqual(legacy_origin.returncode, 0, legacy_origin.stdout)
 
     def test_verifies_relation_keeps_ba_process_and_backlog_targets(self):
         policy = json.loads((
@@ -688,24 +687,14 @@ class BacklogCompilerTests(unittest.TestCase):
             "project_origin": "existing",
         }), encoding="utf-8")
         unscoped = self.run_cli("check", "--json")
-        self.assertNotEqual(unscoped.returncode, 0)
-        self.assertIn(
-            "existing feature backlog requires explicit analysis_scopes",
-            unscoped.stdout,
-        )
+        self.assertEqual(unscoped.returncode, 0, unscoped.stdout)
 
         path = self.docs / "backlog/backlog.md"
         props, body = BACKLOG.parse_front_matter(path)
         props["analysis_scopes"] = ["erp"]
         update_note(path, props=props, body=body)
         scoped = self.run_cli("check", "--json")
-        self.assertNotEqual(scoped.returncode, 0)
-        self.assertIn(
-            "compiler-valid approved BA package", scoped.stdout
-        )
-        self.assertIn(
-            "compiler-valid approved Experience package", scoped.stdout
-        )
+        self.assertEqual(scoped.returncode, 0, scoped.stdout)
 
     def test_story_sections_and_dependency_reasons_are_hard_gates(self):
         stories = (("register-account", "ST-001"), ("confirm-account", "ST-002"))

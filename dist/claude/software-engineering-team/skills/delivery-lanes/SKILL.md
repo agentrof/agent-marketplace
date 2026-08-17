@@ -1,6 +1,6 @@
 ---
 name: delivery-lanes
-description: Later-scope parallel delivery entry that currently reports the approved backlog boundary without creating runtime state.
+description: Retired compatibility stub; parallel lane orchestration is not a public entry.
 user-invocable: false
 ---
 

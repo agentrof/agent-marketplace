@@ -80,10 +80,10 @@ that gates WP-03").
   concrete reason and a concrete `revisit_trigger`. Free prose is not a
   disposition. A deferral missing any field is a silent drop and fails the
   coverage map.
-- In greenfield, every active AC and BR in every approved BA registry appears
-  exactly once: either a story covers it or the table defers it. Existing
-  projects apply that rule to explicitly selected values, or to every value in
-  root `analysis_scopes`; unrelated historical BA is not silently imported.
+- Every active AC and BR selected by the Requirement impact matrix appears
+  exactly once: either a story covers it or the table defers it. A root
+  `analysis_scopes` declaration may explicitly expand that selection; unrelated
+  historical BA is not silently imported.
   Overlap, wrong-owner/unknown links and uncovered identities fail.
 - Revisit the deferred list at every checkpoint: reinstate the item as a
   story, re-affirm its reason, or drop it by the owner's explicit

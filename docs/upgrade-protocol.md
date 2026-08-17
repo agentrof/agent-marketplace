@@ -26,15 +26,16 @@ configuration remain the source of truth.
    user-owned instruction companions through the separate host projection
    choice gate.
 5. Preserve configured designation wording and retired-value history. Setup
-   may add defaults for newly shipped document types, but never replaces an
-   existing project-selected designation. Adding a default writes only
+   may add defaults for newly shipped document types, but never replaces a
+   project-selected designation. Adding a default writes only
    `workspace/config.json`; setup never retitles authored notes as an implicit
    upgrade side effect. Intentional designation changes remain explicit
    configure/reconcile operations with their own reviewable plans.
 6. The compatibility `--workspace workspace` argument is accepted; every other
-   workspace value and every second managed vault is rejected. Omit `--origin`
-   during refresh so an existing classification is preserved. Repeated apply
-   with the same package and project must produce an empty inspect plan.
+   workspace value and every second managed vault is rejected. Legacy origin
+   input is removed during migration; Requirement Flow determines request
+   applicability. Repeated apply with the same package and project must
+   produce an empty inspect plan.
 7. Treat `workspace/docs/.obsidian/community-plugins.json` and each
    policy-owned `.obsidian/plugins/<id>/` directory as ignored local package
    projections. Refresh updates shipped files and removes package-retired
@@ -49,9 +50,9 @@ configuration remain the source of truth.
 Stage routing inspects Git only at a completed-stage handoff. The relevant
 config, approved subtree, home note and stage map must be tracked, committed and
 clean. Unrelated application work and the current draft stage are outside that
-path set and do not block active authoring. Existing projects without an
-approved, committed scoped backlog return to `backlog-plan`, never directly to
-delivery.
+path set and do not block active authoring. A request without an approved,
+committed backlog returns to Requirement Flow; an approved backlog proceeds to
+Delivery Flow.
 
 The project-local `.agentrof/agent-marketplace/.runtime/` directory is
 disposable and never participates in compatibility decisions. A refresh may

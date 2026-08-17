@@ -38,7 +38,6 @@ REQUIRED_DIRS = (
 )
 RUNTIME_PARTS = ("agent-marketplace", ".runtime")
 PRIOR_OWNER_SUFFIX = " plugin; change only through the configure entry"
-VALID_ORIGINS = {"greenfield", "existing"}
 JSON_PAYLOAD_FILES = (
     "app.json", "appearance.json", "core-plugins.json", "graph.json",
     "types.json", "community-plugins.json",
@@ -310,7 +309,7 @@ def expected_gate_bytes() -> bytes:
         return (root / ".github" / "agentrof" / "vault-gate.pyz").read_bytes()
 
 
-def desired_config(args, config_path: Path) -> tuple[dict, str, list[str]]:
+def desired_config(args, config_path: Path) -> tuple[dict, list[str]]:
     current = load_json(config_path)
     if current:
         owner = setup_owner(current)
@@ -320,7 +319,6 @@ def desired_config(args, config_path: Path) -> tuple[dict, str, list[str]]:
     else:
         config = {
             "team_id": TEAM,
-            "project_origin": "unclassified",
             "scale": args.scale,
             "output_language": args.output_language,
             "terminology_language": args.terminology_language,
@@ -336,23 +334,9 @@ def desired_config(args, config_path: Path) -> tuple[dict, str, list[str]]:
     config.setdefault("output_language", args.output_language)
     config.setdefault("terminology_language", args.terminology_language)
 
-    current_origin = str(config.get("project_origin", "unclassified"))
-    requested_origin = args.origin
-    if current_origin in VALID_ORIGINS:
-        if requested_origin and requested_origin != current_origin:
-            raise SetupError(
-                "project_origin is already classified as "
-                f"{current_origin}; use configure before changing it"
-            )
-        origin = current_origin
-    elif current_origin in {"", "unclassified"}:
-        origin = requested_origin or "greenfield"
-    else:
-        raise SetupError(
-            f"project_origin has unsupported value {current_origin!r}; "
-            "repair it through configure"
-        )
-    config["project_origin"] = origin
+    # The old project_origin field is a migration-only input. New and
+    # refreshed projects use the Requirement impact matrix instead.
+    config.pop("project_origin", None)
     errors = project_config.check(config)
     if errors:
         raise SetupError("invalid workspace config: " + "; ".join(errors))
@@ -360,7 +344,7 @@ def desired_config(args, config_path: Path) -> tuple[dict, str, list[str]]:
         key for key in set(current) | set(config)
         if current.get(key) != config.get(key) or (key in current) != (key in config)
     )
-    return config, origin, changed_fields
+    return config, changed_fields
 
 
 def alternate_workspaces(root: Path) -> list[str]:
@@ -420,7 +404,7 @@ def build_plan(args) -> dict:
             + f"; move its durable content under {WORKSPACE}/"
         )
 
-    config, origin, changed_fields = desired_config(args, config_path)
+    config, changed_fields = desired_config(args, config_path)
     payload_root, policy_path, policy = package_surfaces()
     operations: list[dict] = []
     blockers: list[str] = []
@@ -615,7 +599,6 @@ def build_plan(args) -> dict:
         "command": "inspect",
         "project_root": str(root),
         "workspace": workspace,
-        "project_origin": origin,
         "changes_required": bool(operations),
         "operations": operations,
         "blockers": blockers,
@@ -840,7 +823,7 @@ class RefreshSnapshot:
         self.temporary.cleanup()
 
 
-def next_entry(origin: str, root: Path) -> str:
+def next_entry(root: Path) -> str:
     result = subprocess.run([
         sys.executable, str(Path(__file__).with_name("preparation_check.py")),
         "status", "--project-root", str(root), "--json",
@@ -852,7 +835,7 @@ def next_entry(origin: str, root: Path) -> str:
     entry = routed.get("next_entry") if isinstance(routed, dict) else None
     if isinstance(entry, str) and entry:
         return entry
-    return "business-analysis" if origin == "greenfield" else "backlog-plan"
+    return "requirement"
 
 
 def _apply_plan_locked(args, plan: dict) -> tuple[int, dict]:
@@ -931,7 +914,6 @@ def _apply_plan_locked(args, plan: dict) -> tuple[int, dict]:
                 "command": "apply",
                 "project_root": str(root),
                 "workspace": args.workspace,
-                "project_origin": plan["project_origin"],
                 "plan": public_plan(plan),
                 "findings": findings,
                 "rolled_back": True,
@@ -943,14 +925,13 @@ def _apply_plan_locked(args, plan: dict) -> tuple[int, dict]:
             "command": "apply",
             "project_root": str(root),
             "workspace": args.workspace,
-            "project_origin": plan["project_origin"],
             "plan": public_plan(plan),
             "applied_operations": plan["operations"],
             "payload_files_copied": copied,
             "payload_files_reconciled": reconciled,
             "gitignore_changed": ignore_changed,
             "runtime_root": str(runtime),
-            "next_entry": next_entry(plan["project_origin"], root),
+            "next_entry": next_entry(root),
             "rolled_back": False,
         }
     except Exception as exc:
@@ -963,7 +944,6 @@ def _apply_plan_locked(args, plan: dict) -> tuple[int, dict]:
             "command": "apply",
             "project_root": str(root),
             "workspace": args.workspace,
-            "project_origin": plan["project_origin"],
             "plan": public_plan(plan),
             "error": str(exc),
             "rolled_back": True,
@@ -982,7 +962,6 @@ def apply_plan(args, _inspected_plan: dict | None = None) -> tuple[int, dict]:
                 "command": "apply",
                 "project_root": str(root),
                 "workspace": args.workspace,
-                "project_origin": plan["project_origin"],
                 "plan": public_plan(plan),
                 "findings": [
                     "refresh plan blocker: " + value
@@ -1032,7 +1011,6 @@ def main(argv=None) -> int:
         "--workspace", default=WORKSPACE, choices=(WORKSPACE,),
         help="compatibility option; the project workspace is always 'workspace'",
     )
-    parser.add_argument("--origin", choices=("greenfield", "existing"))
     parser.add_argument(
         "--scale",
         choices=("small", "medium", "large", "x-large", "xx-large", "enterprise"),

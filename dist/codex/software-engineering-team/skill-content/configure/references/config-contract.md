@@ -5,15 +5,14 @@ configuration change.
 
 ## Supported fields
 
-Preparation consumes `project_origin`, `scale`, both language fields,
+Requirement Flow consumes `scale`, both language fields,
 `doc_type_designations`, `doc_type_designation_history` and `limits`. Stack,
 database, command, source-directory and parallelism fields are retained for
 delivery. They are optional until delivery activation is designed; when
 present they must satisfy this contract.
 
-- `project_origin`: `greenfield` or `existing`. It may change only before any
-  durable preparation Markdown exists. A legacy `unclassified`
-  project may be classified exactly once.
+- `project_origin`: retired. Setup removes this legacy key during migration;
+  request-specific Requirement impact decides which preparation stages apply.
 - `backend_stack`: `python-fastapi`.
 - `frontend_stack`: `react-typescript`.
 - `environment_stack`: `docker-compose`.
@@ -32,8 +31,9 @@ present they must satisfy this contract.
 - `terminology_language`: a non-empty language name, default English,
   governing names, technical terms, code, comments, commit messages, and PR
   bodies. File names, keys, ids, CLI output, and the machine layer stay English.
-- `max_parallel`: an optional positive integer reserved to control the
-  delivery-lanes proposal cap after delivery activation; absent means 3.
+- `max_parallel`: an optional positive integer until first Item activation;
+  it means the maximum simultaneously active Delivery Item count across this
+  project, hosts and machines. There is no default during activation.
 - `scale`: optional enum `small`, `medium`, `large`, `x-large`, `xx-large`, or
   `enterprise`; absent means `small`. The business-analysis space schema's
   `scale_profiles` table defines the effective thresholds. Scale multiplies

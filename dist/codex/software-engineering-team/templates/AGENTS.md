@@ -37,10 +37,11 @@
 - `{{workspace}}/docs/backlog/`: tracked Obsidian backlog source. The nested
   epic, story, review and test-plan files are the durable preparation state.
 
-Greenfield preparation runs setup, business-analysis, solution-design,
-design-system, experience-design, and backlog-plan, then stops before explicit
-delivery. Existing projects route to the explicit delivery boundary through
-deliver. Do not activate delivery-lanes until its contract is approved.
+Requirement Flow evaluates the request impact matrix, runs only the required
+preparation stages, validates reused or not-applicable stages, and ends at
+backlog-plan unless the request resolves with no change. Delivery then starts
+only through its explicit Delivery Flow entry. Release Management remains out
+of scope for this package.
 
 ## Codex host
 

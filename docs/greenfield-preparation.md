@@ -1,15 +1,15 @@
-# Greenfield preparation
+# Requirement Flow
 
-The greenfield path is intentionally document-first:
+Requirement Flow is intentionally document-first and request-scoped:
 
 ```text
-setup -> business-analysis -> solution-design -> design-system
-       -> experience-design -> backlog-plan
+setup -> requirement -> required stages -> backlog-plan -> delivery-plan
 ```
 
-Each stage owns its documents, compiler and explicit user gate. Until
+Each required stage owns its documents, compiler and explicit user gate. Until
 `backlog-plan`, its approved Git-tracked documents are the complete stage
-state.
+state. Reused and not-applicable stages carry their evidence and rationale in
+the Requirement record.
 
 Advancing from a completed stage requires its approved subtree, stage map,
 vault home and `workspace/config.json` to be tracked, committed and clean.
@@ -24,5 +24,5 @@ scratch directory and Obsidian payload while preserving authored files. Its
 supporting roles per story, creates test plans with stable scenarios, runs
 mechanical checks, completes exact-set epic and cross-epic reviews, renders
 generated views and commits the result. It then reports
-`deliver` as the next explicit entry. Delivery lane design is deliberately
-outside this preparation contract.
+`deliver` as the next explicit entry. Release Management remains outside this
+contract.

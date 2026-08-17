@@ -136,29 +136,21 @@ class ProjectConfigTests(unittest.TestCase):
                     f"{field} lost its declared consumer {relative}",
                 )
 
-    def test_origin_can_change_only_before_workflow_documents_exist(self):
+    def test_origin_writer_is_retired_and_legacy_field_is_rejected(self):
         with tempfile.TemporaryDirectory() as temporary:
             project = Path(temporary)
             config = self.setup_config(project)
-            changed = self.run_script(
+            retired = self.run_script(
                 CONFIG, "set-origin", "--config", str(config),
                 "--origin", "existing",
             )
-            self.assertEqual(changed.returncode, 0, changed.stderr)
-            self.assertEqual(
-                json.loads(config.read_text(encoding="utf-8"))["project_origin"],
-                "existing",
-            )
-            backlog = project / "workspace/docs/backlog/backlog.md"
-            backlog.write_text("# Durable backlog\n", encoding="utf-8")
-            before = config.read_bytes()
-            rejected = self.run_script(
-                CONFIG, "set-origin", "--config", str(config),
-                "--origin", "greenfield",
-            )
-            self.assertEqual(rejected.returncode, 1)
-            self.assertIn("durable workflow documents", rejected.stderr)
-            self.assertEqual(config.read_bytes(), before)
+            self.assertEqual(retired.returncode, 2)
+            legacy = json.loads(config.read_text(encoding="utf-8"))
+            legacy["project_origin"] = "existing"
+            config.write_text(json.dumps(legacy) + "\n", encoding="utf-8")
+            checked = self.run_script(CONFIG, "check", "--config", str(config))
+            self.assertEqual(checked.returncode, 1)
+            self.assertIn("retired", checked.stdout)
 
 
 if __name__ == "__main__":

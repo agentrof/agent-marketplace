@@ -49,7 +49,7 @@ aliases:
 [[solution-design/landscape|Landscape]]
 ```
 
-Greenfield first run: Current states "Nothing built yet" plus any inherited constraints (hosting, organizational platforms); Target and Transition start empty and grow only from decision records.
+First-run landscape: Current states "Nothing built yet" plus any inherited constraints (hosting, organizational platforms); Target and Transition start empty and grow only from decision records.
 
 ## landscape.md
 

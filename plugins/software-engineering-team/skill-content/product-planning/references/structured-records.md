@@ -53,17 +53,18 @@ Every story also declares its intake kind:
 work_kind: feature
 ```
 
-`feature`, `defect` and `technical` are the complete vocabulary. A greenfield
-backlog accepts only `feature`; feature work always retains `criterion_refs`,
-`experience_refs`, at least one `uses_design` reference and a Solution Design
-`constrained_by` reference. An existing-project defect or technical story may
-omit those feature upstreams, but only when `related_to` names at
-least one approved or accepted source, issue or decision note. This exception
-is scoped intake evidence, not a way to weaken feature traceability.
+`feature`, `defect` and `technical` are the complete vocabulary. A story
+retains `criterion_refs`, `experience_refs`, at least one `uses_design`
+reference and a Solution Design `constrained_by` reference whenever its
+Requirement impact matrix marks those outputs as required or reused. A defect
+or technical story may omit those upstreams only when `related_to` names at
+least one approved or accepted source, issue or decision note and the matrix
+marks the upstream stage not applicable. This is scoped intake evidence, not a
+way to weaken feature traceability.
 
-An existing project's historical BA registries do not silently expand a scoped
-intake. By default, only explicitly selected story criteria/evidence are in
-scope; a root deferral cannot select its own scope. Put canonical
+Historical BA registries do not silently expand a scoped intake. By default,
+only explicitly selected story criteria/evidence are in scope; a root deferral
+cannot select its own scope. Put canonical
 `analysis_scopes` on `backlog.md` only to
 select a complete approved BA space or nested domain deliberately:
 
@@ -73,7 +74,8 @@ analysis_scopes:
 ```
 
 Every active approved AC and BR under a declared scope must then be covered or
-deferred exactly once, just like the full greenfield universe.
+deferred exactly once, using the same compiler rule as any selected Requirement
+scope.
 
 ## Dependency edges
 
@@ -189,13 +191,12 @@ Verdict
 revisit accountability cannot be assigned to an invented token.
 
 The link target is the approved owning acceptance/rule note, the alias is the
-registry-qualified identity, and the table pipe is escaped. For greenfield,
-across every active AC and BR in every approved BA registry, each identity is
-either covered by one or more stories or occurs once in this table. A shared
-criterion may support multiple delivery slices, but it cannot be both covered
-and deferred. Existing
-projects apply that equality to explicitly selected values, or to every value
-under root `analysis_scopes`. Overlap, unknown/wrong-owner links and uncovered
+registry-qualified identity, and the table pipe is escaped. Every selected
+active AC and BR in an approved BA registry is either covered by one or more
+stories or occurs once in this table. A shared criterion may support multiple
+delivery slices, but it cannot be both covered and deferred. A root
+`analysis_scopes` declaration expands that equality to a complete named scope.
+Overlap, unknown/wrong-owner links and uncovered
 identities fail. Every other review section contains section-labelled
 `Evidence [<section>]:` and `Conclusion [<section>]:` lines. Evidence cites at
 least one resolvable vault-absolute

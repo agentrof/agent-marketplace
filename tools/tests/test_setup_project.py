@@ -65,7 +65,7 @@ class SetupProjectTests(unittest.TestCase):
             first = self.run_script(SETUP, "--project-root", str(project), "--json")
             self.assertEqual(first.returncode, 0, first.stderr)
             payload = json.loads(first.stdout)
-            self.assertEqual(payload["next_entry"], "business-analysis")
+            self.assertEqual(payload["next_entry"], "requirement")
             runtime = project / ".agentrof" / "agent-marketplace" / ".runtime"
             self.assertEqual(Path(payload["runtime_root"]), runtime.resolve())
             self.assertTrue(runtime.is_dir())
@@ -158,7 +158,7 @@ class SetupProjectTests(unittest.TestCase):
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
             config = json.loads(config_path.read_text(encoding="utf-8"))
             self.assertEqual(config["team_id"], "software-engineering-team")
-            self.assertEqual(config["project_origin"], "greenfield")
+            self.assertNotIn("project_origin", config)
             self.assertEqual(config["custom_project_field"], "preserved")
             self.assertEqual(config["test_command"], "make test")
             self.assertEqual(config["source_dirs"], ["workspace/apps"])
@@ -171,11 +171,10 @@ class SetupProjectTests(unittest.TestCase):
             project = Path(temporary)
             subprocess.run(["git", "init", "-q", str(project)], check=True)
             first = self.run_script(
-                SETUP, "apply", "--project-root", str(project),
-                "--origin", "existing", "--json",
+                SETUP, "apply", "--project-root", str(project), "--json",
             )
             self.assertEqual(first.returncode, 0, first.stdout + first.stderr)
-            self.assertEqual(json.loads(first.stdout)["next_entry"], "backlog-plan")
+            self.assertEqual(json.loads(first.stdout)["next_entry"], "requirement")
 
             config_path = project / "workspace/config.json"
             config = json.loads(config_path.read_text(encoding="utf-8"))
@@ -270,16 +269,15 @@ class SetupProjectTests(unittest.TestCase):
             )
             self.assertEqual(applied.returncode, 0, applied.stdout + applied.stderr)
             payload = json.loads(applied.stdout)
-            self.assertEqual(payload["project_origin"], "existing")
-            self.assertEqual(payload["next_entry"], "backlog-plan")
+            self.assertEqual(payload["next_entry"], "requirement")
             routed = self.run_script(
                 PREPARATION, "route", "--project-root", str(project), "--json"
             )
             self.assertEqual(routed.returncode, 1)
-            self.assertEqual(json.loads(routed.stdout)["next_entry"], "backlog-plan")
+            self.assertEqual(json.loads(routed.stdout)["next_entry"], "requirement")
             self.assertEqual(authored.read_bytes(), authored_before)
             refreshed_config = json.loads(config_path.read_text(encoding="utf-8"))
-            self.assertEqual(refreshed_config["project_origin"], "existing")
+            self.assertNotIn("project_origin", refreshed_config)
             self.assertEqual(
                 refreshed_config["custom_project_field"], {"owner": "consumer"}
             )

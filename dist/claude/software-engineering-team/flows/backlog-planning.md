@@ -9,12 +9,11 @@ authoritative.
 
 ## 0. Preconditions
 
-- A greenfield project has approved Business Analysis, Solution Design, Design
-  System and Experience Design packages, and their compilers are green.
-- An existing project may instead enter with a bounded feature, defect or
-  technical intake. Feature work keeps the same approved BA and Experience
-  Design references. Defect and technical work carry approved or accepted
-  source, issue or decision evidence.
+- Requirement Flow has approved the request impact matrix. Every stage marked
+  `required` is approved/current, every `reuse` target is valid, and every
+  `not_applicable` row has its concrete rationale.
+- A feature, defect or technical intake carries the exact approved source,
+  issue or decision evidence selected by that impact matrix.
 - The user explicitly starts the backlog entry and reviews each authored
   package.
 - Preparation state comes only from the tracked documents and their checks.
@@ -51,16 +50,15 @@ have a concrete contribution in `Implementation Responsibilities`; the owner
 cannot be repeated there as a supporting role. Store team role identifiers,
 never people or runtime identities.
 
-Every story declares `work_kind: feature|defect|technical`. Greenfield
-backlogs accept only `feature`; its `criterion_refs`, `experience_refs`,
-`uses_design` and Solution Design `constrained_by` links remain mandatory. An
-existing project may use `defect` or `technical` only
-with at least one approved or accepted `related_to` source, issue or decision
-note. This is scoped intake evidence, not a replacement for feature
-traceability.
+Every story declares `work_kind: feature|defect|technical`. Its upstream links
+are required when the Requirement impact matrix says those outputs constrain
+the story. A defect or technical story may use approved or accepted `related_to`
+source, issue or decision evidence when those feature-stage outputs are not
+applicable. This is scoped intake evidence, not a replacement for traceability
+when a stage applies.
 
-An existing backlog normally scopes only the criteria and evidence explicitly
-selected by its stories and root review. Add canonical `analysis_scopes` to
+The backlog normally scopes only the criteria and evidence explicitly selected
+by its stories and root review. Add canonical `analysis_scopes` to
 `backlog.md` (`<space>` or `<space>#domains/<path>`) only when the whole named
 approved BA scope must receive an exact covered-or-deferred disposition.
 
@@ -153,14 +151,14 @@ approved.
 `criterion_ref` is an escaped-table,
 vault-absolute wikilink to the approved owning BA note, for example
 `[[business-analysis/erp/domains/inventory/rules/stock-rules\|erp:BR-INV-002]]`.
-For greenfield, the compiler derives every active AC and BR in every approved
-BA registry and requires the exact universe to be covered by one or more story
-`criterion_refs`, or represented once in this table, never both. A shared
-criterion may support multiple stories when the delivery slices are distinct.
-For existing projects, unrelated
-historical BA remains out of scope unless `backlog.md` explicitly declares
-`analysis_scopes`; a declared scope receives the same exact treatment. Unknown
-and uncovered values fail. Every non-deferral review lens uses an
+The compiler derives every active AC and BR in every approved BA registry when
+the Requirement impact matrix includes that scope and requires the exact
+universe to be covered by one or more story `criterion_refs`, or represented
+once in this table, never both. A shared criterion may support multiple stories
+when the delivery slices are distinct. Otherwise unrelated historical BA
+remains out of scope unless `backlog.md` explicitly declares `analysis_scopes`;
+a declared scope receives the same exact treatment. Unknown and uncovered
+values fail. Every non-deferral review lens uses an
 `Evidence [<section>]:` line with a resolvable vault note and a separate
 `Conclusion [<section>]:` line. Long
 generic approvals such as `the package was reviewed`, `looks good` or

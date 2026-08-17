@@ -16,18 +16,19 @@ wrappers are generated under `dist/` and are never edited by hand.
 - Keep the Software Engineering Team standalone and scope every operation to
   the current project checkout.
 
-## Greenfield authoring contract
+## Requirement Flow authoring contract
 
 The user moves through these durable document gates:
 
 ```text
-business-analysis -> solution-design -> design-system -> experience-design -> backlog-plan
+requirement -> business-analysis -> solution-design -> design-system -> experience-design -> backlog-plan -> delivery-plan -> execution-plan -> deliver
 ```
 
-Each stage writes its own Markdown artifacts and runs its own compiler/checker.
-Before the backlog exists, those approved documents are the complete stage
-state. A stage is complete when its approved documents are tracked in Git.
-`preparation_check.py` only reads those documents and routes to the next stage.
+Requirement Flow evaluates stage applicability, each required stage writes its
+own Markdown artifacts and runs its own compiler/checker, and backlog approval
+is the handoff to Delivery Flow. A stage is complete when its approved
+documents are tracked in Git. `preparation_check.py` only reads durable state
+and routes to the next explicit entry.
 
 ## Backlog contract
 
@@ -81,7 +82,8 @@ below it. The root review derives from the backlog and relates to the exact
 epic set. Approval is blocked until the root backlog, both review layers and
 every story test plan are approved. Test-plan scenarios may be marked
 `automation: required` or `manual`; required scenarios name their planned
-automation target. Delivery execution is a later scope.
+automation target. Delivery execution consumes the approved backlog and does
+not rewrite its source.
 
 Epic-review sections are Scope, Slicing, Criteria Coverage, Test Design,
 Dependencies, Role Ownership, Findings and Verdict. Root-review sections are

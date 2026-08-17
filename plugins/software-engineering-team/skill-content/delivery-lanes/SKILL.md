@@ -1,10 +1,10 @@
 ---
 name: delivery-lanes
-description: Later-scope parallel delivery entry that currently reports the approved backlog boundary without creating runtime state.
+description: Retired compatibility stub; parallel lane orchestration is not a public entry.
 exposure: internal
 ---
 
-# Delivery Lanes
+# Retired Delivery Lanes
 
 ## When to Use
 
@@ -12,6 +12,6 @@ exposure: internal
 
 ## Procedure
 
-1. Read the approved project backlog and target story test plans.
-2. Report that lane orchestration is not part of the preparation release.
+1. Do not expose this skill as a user entry.
+2. Route any legacy invocation to `/delivery-plan`.
 3. Write nothing and do not create a lane or worktree record.

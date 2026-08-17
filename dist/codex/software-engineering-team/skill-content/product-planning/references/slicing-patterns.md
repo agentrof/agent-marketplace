@@ -2,7 +2,7 @@
 
 How to cut an approved brief into stories. The unit throughout is
 the story: one review unit, independently revertable, a backlog entry
-with its own Definition of Done. It is not a sprint story; nothing here
+with its own Definition of Done. It is a Delivery Item; nothing here
 assumes iterations or estimates.
 
 Every worked example slices the same generic brief: at Acme Corp, members

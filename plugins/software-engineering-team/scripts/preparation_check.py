@@ -354,67 +354,32 @@ def inspect(root: Path, intent: str) -> dict:
         }
     if work is None:
         return {"ok": False, "intent": intent, "next_entry": "setup", "reason": "managed workspace config is missing", "checks": {}}
-    origin = str(config.get("project_origin", ""))
-    checks = {"project_origin": origin}
-    if origin not in {"greenfield", "existing"}:
-        return {"ok": False, "intent": intent, "next_entry": "configure", "reason": "project_origin must be classified", "checks": checks}
     docs = work / "docs"
-    checks.update({"business_analysis": any_approved_ba(docs), "solution_design": approved_solution(docs), "design_system": design_master(docs), "experience_design": approved_experience(docs)})
+    checks = {"business_analysis": any_approved_ba(docs), "solution_design": approved_solution(docs), "design_system": design_master(docs), "experience_design": approved_experience(docs)}
     backlog_approved, backlog_present = backlog_state(work)
     checks.update({"backlog_approved": backlog_approved, "backlog_present": backlog_present})
-    if origin == "existing":
-        if not backlog_approved:
-            return {
-                "ok": False, "intent": intent, "next_entry": "backlog-plan",
-                "reason": (
-                    "existing project delivery requires an approved scoped backlog"
-                    if backlog_present else
-                    "existing project has no approved scoped backlog"
-                ),
-                "checks": checks,
-            }
+    # Requirement Flow owns applicability and ordering. Once the approved
+    # backlog has completed its tracked handoff, the next explicit boundary is
+    # Delivery Flow; otherwise the unified Requirement entry remains the only
+    # route. No project-wide origin is inferred.
+    if backlog_approved:
         handoff = git_handoff(root, ["backlog"])
         if not handoff["ok"]:
-            return blocked_handoff(
-                intent, "backlog-plan", "backlog", checks, handoff
-            )
+            return blocked_handoff(intent, "deliver", "backlog", checks, handoff)
         checks["git_handoff"] = handoff
         return {
-            "ok": True, "intent": intent, "next_entry": "deliver",
-            "alternatives": ["delivery-lanes"],
-            "reason": "existing project scoped backlog is approved and committed",
+            "ok": True,
+            "intent": intent,
+            "next_entry": "deliver",
+            "alternatives": ["delivery-plan"],
+            "reason": "approved backlog is committed; Delivery Flow remains explicit",
             "checks": checks,
         }
-    route = (
-        ("business_analysis", "business-analysis", "business_analysis"),
-        ("solution_design", "solution-design", "solution_design"),
-        ("design_system", "design-system", "design_system"),
-        ("experience_design", "experience-design", "experience_design"),
-    )
-    completed: list[str] = []
-    for key, entry, stage in route:
-        if not checks[key]:
-            return {"ok": False, "intent": intent, "next_entry": entry, "reason": f"greenfield preparation stage {key} is incomplete", "checks": checks}
-        completed.append(stage)
-        handoff = git_handoff(root, completed)
-        if not handoff["ok"]:
-            return blocked_handoff(intent, entry, stage, checks, handoff)
-    if not backlog_present:
-        return {
-            "ok": False, "intent": intent, "next_entry": "backlog-plan",
-            "reason": "greenfield preparation is complete; backlog is not present",
-            "checks": checks,
-        }
-    if not backlog_approved:
-        return {"ok": False, "intent": intent, "next_entry": "backlog-plan", "reason": "backlog documents exist but cross-epic and epic approvals are incomplete", "checks": checks}
-    completed.append("backlog")
-    handoff = git_handoff(root, completed)
-    if not handoff["ok"]:
-        return blocked_handoff(
-            intent, "backlog-plan", "backlog", checks, handoff
-        )
-    checks["git_handoff"] = handoff
-    return {"ok": True, "intent": intent, "next_entry": "deliver", "alternatives": ["delivery-lanes"], "reason": "greenfield preparation is complete; delivery activation remains explicit", "checks": checks}
+    return {
+        "ok": False, "intent": intent, "next_entry": "requirement",
+        "reason": "Requirement Flow determines applicable stages and backlog eligibility",
+        "checks": checks,
+    }
 
 
 def main(argv=None) -> int:

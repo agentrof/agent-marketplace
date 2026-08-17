@@ -221,8 +221,6 @@ def closing(root: Path, workspace: str) -> list[str]:
     owner = marketplace_paths.team_from_config(config)
     if owner != TEAM:
         findings.append("config team_id mismatch")
-    if config.get("project_origin") not in {"greenfield", "existing"}:
-        findings.append("project_origin is not classified")
     findings.extend(f"config contract: {value}" for value in project_config.check(config))
     for candidate in sorted(root.glob("*/config.json")):
         if candidate.parent.name == WORKSPACE:

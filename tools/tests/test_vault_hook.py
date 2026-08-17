@@ -35,7 +35,6 @@ class VaultHookTests(unittest.TestCase):
         config = root / "workspace" / "config.json"
         config.write_text(json.dumps({
             "team_id": "software-engineering-team",
-            "project_origin": "greenfield",
             "scale": "small",
             "output_language": "English",
             "terminology_language": "English",

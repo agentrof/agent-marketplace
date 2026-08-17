@@ -553,8 +553,16 @@ def canonical_github_pr(value: str) -> tuple[str, str]:
     return f"https://github.com/{owner}/{repo}/pull/{number}", number
 
 
-def package_paths(root: Path, directory: Path, docs: Path) -> list[str]:
-    paths = [str(path.relative_to(root)) for path in directory.rglob("*") if path.is_file()]
+def package_paths(root: Path, directory: Path, docs: Path,
+                  include_items: bool = True) -> list[str]:
+    paths = []
+    for path in directory.rglob("*"):
+        if not path.is_file():
+            continue
+        relative_to_delivery = path.relative_to(directory).parts
+        if not include_items and relative_to_delivery and relative_to_delivery[0] == "items":
+            continue
+        paths.append(str(path.relative_to(root)))
     map_path = docs / "maps" / "delivery.md"
     if map_path.exists():
         paths.append(str(map_path.relative_to(root)))
@@ -610,7 +618,7 @@ def publish_delivery_review(project_root: Path, delivery_id: str,
     if reviewed_parent != integration_oid:
         raise RuntimeError("Delivery Review reviewed_integration_commit is stale")
     candidate = commit_tree(
-        root, integration_oid, package_paths(root, directory, docs),
+        root, integration_oid, package_paths(root, directory, docs, include_items=False),
         f"Publish delivery review for {delivery_id}",
         {"Record": "delivery-review-published-v1", "Protocol": "1", "Delivery": delivery_id,
          "Reviewed-Integration": integration_oid, "Approval-Hash": str(review_props.get("approval_hash", "none")),
@@ -1006,12 +1014,6 @@ def revert_merge_candidate(root: Path, base: str, merge_oid: str,
     if len(parents) < 2:
         raise RuntimeError(f"integrated Item tip is not a merge commit: {merge_oid}")
     first_parent = parents[0]
-    patch = subprocess.run(
-        ["git", "diff", "--binary", first_parent, merge_oid], cwd=root,
-        text=False, capture_output=True, check=False,
-    )
-    if patch.returncode:
-        raise RuntimeError(patch.stderr.decode("utf-8", "replace") or "cannot calculate Item revert")
     with tempfile.TemporaryDirectory(prefix="agentrof-revert-index-") as temporary:
         index = Path(temporary) / "index"
         env = os.environ.copy()
@@ -1020,13 +1022,51 @@ def revert_merge_candidate(root: Path, base: str, merge_oid: str,
                               text=True, capture_output=True, check=False)
         if read.returncode:
             raise RuntimeError(read.stderr.strip() or "cannot prepare cancellation revert index")
-        apply = subprocess.run(
-            ["git", "apply", "--cached", "--reverse", "--binary", "-"],
-            cwd=root, env=env, input=patch.stdout, capture_output=True, check=False,
+
+        def entry(tree: str, path: str) -> tuple[str, str] | None:
+            result = subprocess.run(
+                ["git", "ls-tree", tree, "--", path], cwd=root,
+                text=True, capture_output=True, check=False,
+            )
+            if result.returncode:
+                raise RuntimeError(result.stderr.strip() or "cannot inspect cancellation tree")
+            line = result.stdout.rstrip("\n")
+            if not line:
+                return None
+            metadata, _name = line.split("\t", 1)
+            mode, _kind, oid = metadata.split()
+            return mode, oid
+
+        changed = subprocess.run(
+            ["git", "diff", "--name-only", first_parent, merge_oid], cwd=root,
+            text=True, capture_output=True, check=False,
         )
-        if apply.returncode:
-            detail = apply.stderr.decode("utf-8", "replace") or "cancellation revert conflicts with current Integration"
-            raise RuntimeError(detail.strip())
+        if changed.returncode:
+            raise RuntimeError(changed.stderr.strip() or "cannot inspect Item merge")
+        for path in (value for value in changed.stdout.splitlines() if value):
+            parent_entry = entry(first_parent, path)
+            merge_entry = entry(merge_oid, path)
+            current_entry = entry(base, path)
+            if current_entry != merge_entry and current_entry != parent_entry:
+                raise RuntimeError(
+                    "cancellation revert conflicts with current Integration: "
+                    f"{path} (base={current_entry}, merge={merge_entry}, "
+                    f"parent={parent_entry})"
+                )
+            if parent_entry is None:
+                update = subprocess.run(
+                    ["git", "update-index", "--remove", "--", path],
+                    cwd=root, env=env, text=True, capture_output=True, check=False,
+                )
+            else:
+                mode, oid = parent_entry
+                update = subprocess.run(
+                    ["git", "update-index", "--add", "--cacheinfo",
+                     f"{mode},{oid},{path}"],
+                    cwd=root, env=env, text=True, capture_output=True, check=False,
+                )
+            if update.returncode:
+                raise RuntimeError(update.stderr.strip() or f"cannot apply cancellation revert: {path}")
         tree = subprocess.run(["git", "write-tree"], cwd=root, env=env,
                               text=True, capture_output=True, check=False)
         if tree.returncode:
@@ -1117,11 +1157,29 @@ def cancel_delivery(project_root: Path, delivery_id: str, reason: str,
          "Cancellation-Intent-Hash": intent_hash},
     )
 
-    integrated = [(story, context["item_oid"]) for story, context in contexts.items()
-                  if context["item_oid"] and context["props"].get("status") == "integrated"]
-    first_parent_order = {oid: index for index, oid in enumerate(
-        run_git(root, "rev-list", "--first-parent", integration_oid).splitlines())}
-    integrated.sort(key=lambda pair: first_parent_order.get(pair[1], 10**9))
+    first_parent_history = run_git(
+        root, "rev-list", "--first-parent", integration_oid
+    ).splitlines()
+    first_parent_order = {
+        oid: index for index, oid in enumerate(first_parent_history)
+    }
+    integrated = []
+    for story, context in contexts.items():
+        if not context["item_oid"] or context["props"].get("status") != "integrated":
+            continue
+        merge_oid = None
+        for candidate_oid in first_parent_history:
+            message = commit_message(root, candidate_oid)
+            if (trailer(message, "Record") == "item-integration-v1"
+                    and trailer(message, "Story") == story):
+                merge_oid = candidate_oid
+                break
+        if merge_oid is None:
+            raise RuntimeError(
+                f"Integration history has no exact Item merge for {story}"
+            )
+        integrated.append((story, merge_oid))
+    integrated.sort(key=lambda pair: first_parent_order[pair[1]])
     current = barrier
     revert_commits = []
     for story, item_oid in integrated:
@@ -1399,12 +1457,10 @@ def refresh_target(project_root: Path, delivery_id: str,
     overlaps = sorted(path for path in changed if path in claimed)
     if overlaps:
         raise RuntimeError("claimed_source_violation: target changed claimed paths " + ", ".join(overlaps))
-    relevant = []
-    for path in changed:
-        if path.startswith(str(directory.relative_to(root)) + "/"):
-            relevant.append(path)
-        elif path in {"workspace/docs/maps/delivery.md", "workspace/docs/definition-of-done.md"}:
-            relevant.append(path)
+    relevant = [
+        path for path in changed
+        if path in {"workspace/docs/maps/delivery.md", "workspace/docs/definition-of-done.md"}
+    ]
     merge = merge_candidate(
         root, integration_oid, target, f"Refresh target for {delivery_id}",
         {"Record": "target-refresh-v1", "Protocol": "1", "Delivery": delivery_id,
@@ -1444,10 +1500,14 @@ def refresh_target(project_root: Path, delivery_id: str,
     )
     atomic_push(root, remote, [(refs["fence"], fence_oid, fence_candidate),
                                (refs["integration"], integration_oid, final_candidate)])
+    _target_branch, observed_target = resolve_target(root, remote)
+    partial = observed_target != target
     return {"ok": True, "delivery": delivery_id, "changed": True, "target": target,
             "previous_target": previous_target, "paths": changed,
             "plan_invalidated": invalidated, "integration": final_candidate,
-            "fence": fence_candidate, "refs": short_refs(delivery_id)}
+            "fence": fence_candidate, "current_target": observed_target,
+            "partial": partial, "writer_ready": not partial,
+            "refs": short_refs(delivery_id)}
 
 
 def revise_unclaimed_scope(project_root: Path, delivery_id: str,
@@ -1593,6 +1653,12 @@ def start_item(project_root: Path, delivery_id: str, story_id: str,
     fence_message = commit_message(root, fence_oid)
     if trailer(fence_message, "Record") != "project-fence-v1" or trailer(fence_message, "Mode") != "open":
         raise RuntimeError("start-item requires an open Fence")
+    fence_target = trailer(fence_message, "Target")
+    if not fence_target or not OID_RE.fullmatch(fence_target):
+        raise RuntimeError("start-item requires a valid Fence target baseline")
+    _target_branch, target_before = resolve_target(root, remote)
+    if target_before != fence_target:
+        raise RuntimeError("target advanced; refresh the Delivery before Item activation")
     max_parallel = project_max_parallel(root)
     occupied = remote_slot_oids(root, remote)
     free = next((slot for slot in range(1, max_parallel + 1) if slot_key(slot) not in occupied), None)
@@ -1653,6 +1719,27 @@ def start_item(project_root: Path, delivery_id: str, story_id: str,
         raise
     if remote_oid(root, remote, refs["item"]) != item_candidate or remote_oid(root, remote, slot_ref) != item_candidate:
         raise RuntimeError("activation refs did not converge to the receipt candidate")
+    _target_branch, target_after = resolve_target(root, remote)
+    if target_after != fence_target:
+        paused_props = dict(item_props)
+        paused_props["status"] = "paused"
+        paused_props["tags"] = [tag for tag in paused_props.get("tags", [])
+                                  if not str(tag).startswith("status/")] + ["status/paused"]
+        paused_props["source_hash"] = content_hash(paused_props, item_body)
+        paused = commit_replacements(
+            root, item_candidate,
+            {str(item_path.relative_to(root)): frontmatter(paused_props, item_body)},
+            f"Quiesce {story_id} after target advance",
+            {"Record": "item-quiesce-v1", "Protocol": "1", "Delivery": delivery_id,
+             "Story": story_id, "Kind": "target-drift", "Previous-Tip": item_candidate,
+             "Slot": slot},
+        )
+        atomic_push(root, remote, [(refs["item"], item_candidate, paused),
+                                   (slot_ref, item_candidate, "")])
+        discard_pending_writer_receipt(root, delivery_id, story_id, item_candidate)
+        raise RuntimeError(
+            "target advanced after Item activation; Item was paused before worktree creation"
+        )
     receipt = promote_writer_receipt(root, delivery_id, story_id, item_candidate)
     worktree = materialize_item_worktree(root, delivery_id, story_id, item_candidate)
     return {"ok": True, "delivery": delivery_id, "story": story_id, "slot": slot,

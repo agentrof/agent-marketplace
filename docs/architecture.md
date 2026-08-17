@@ -47,9 +47,10 @@ behavior is host-neutral; Claude and Codex are packaging adapters.
     approval timestamps are not accepted as evidence.
 18. Distribution output under `dist/` is generated only by
     `tools/build_distributions.py`.
-19. Delivery and delivery-lane runtime is a later scope. This phase ends at a
-    committed, approved backlog and a deterministic handoff to delivery.
-20. Delivery configuration fields remain optional before that handoff. Active
+19. Requirement Flow ends at a committed, approved backlog. Delivery Flow owns
+    scope reservation, execution coordination, review, PR handoff and merge;
+    Release Management remains a later scope.
+20. Delivery configuration fields remain optional before activation. Active
     preparation limits and every configured optional field are validated; no
     field is removed merely because its delivery consumer is deferred.
 

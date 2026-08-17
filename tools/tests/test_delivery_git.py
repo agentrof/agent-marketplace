@@ -132,6 +132,7 @@ class DeliveryGitTests(unittest.TestCase):
             delivery_compile.approve_execution(scope)
             subprocess.run(["git", "-C", str(project), "add", "workspace/docs"], check=True); subprocess.run(["git", "-C", str(project), "commit", "-qm", "plan"], check=True); subprocess.run(["git", "-C", str(project), "push", "-q"], check=True)
             delivery_git.publish_execution_plan(project, "DLV-001")
+            delivery_git.refresh_target(project, "DLV-001")
             delivery_git.claim_items(project, "DLV-001")
             started = delivery_git.start_item(project, "DLV-001", "AUTH-01")
             cancelled = delivery_git.cancel_delivery(project, "DLV-001", "User stopped the Delivery")
@@ -215,6 +216,7 @@ class DeliveryGitTests(unittest.TestCase):
             delivery_compile.approve_execution(scope)
             subprocess.run(["git", "-C", str(project), "add", "workspace/docs"], check=True); subprocess.run(["git", "-C", str(project), "commit", "-qm", "plan"], check=True); subprocess.run(["git", "-C", str(project), "push", "-q"], check=True)
             delivery_git.publish_execution_plan(project, "DLV-001")
+            delivery_git.refresh_target(project, "DLV-001")
             result = delivery_git.claim_items(project, "DLV-001")
             self.assertEqual(result["claims"], ["AUTH-01"])
             activation = delivery_git.start_item(project, "DLV-001", "AUTH-01")
@@ -281,6 +283,18 @@ class DeliveryGitTests(unittest.TestCase):
             refs = subprocess.run(["git", "--git-dir", str(remote), "show-ref"], check=True, text=True, capture_output=True).stdout
             self.assertIn("refs/heads/agentrof/items/auth-01", refs)
             self.assertNotIn("refs/heads/agentrof/slots/001", refs)
+            cancelled = delivery_git.cancel_delivery(
+                project, "DLV-001", "Target no longer requires this Delivery"
+            )
+            self.assertEqual(cancelled["status"], "cancelled")
+            self.assertTrue(cancelled["reverts"])
+            self.assertEqual(
+                delivery_git.trailer(
+                    delivery_git.commit_message(project, cancelled["finalization"]),
+                    "Record",
+                ),
+                "cancellation-finalized-v1",
+            )
 
 
 if __name__ == "__main__":

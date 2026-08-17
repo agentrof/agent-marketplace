@@ -86,8 +86,8 @@ def exercise_package(team_root: Path, project: Path, env: dict[str, str]) -> Non
         sys.executable, str(setup), "apply", "--project-root", str(project),
         "--json",
     ], env))
-    if first.get("next_entry") != "business-analysis":
-        raise SmokeFailure("fresh setup did not route to business-analysis")
+    if first.get("next_entry") != "requirement":
+        raise SmokeFailure("fresh setup did not route to Requirement Flow")
     host = "claude" if (team_root / ".claude-plugin" / "plugin.json").is_file() \
         else "codex" if (team_root / ".codex-plugin" / "plugin.json").is_file() \
         else ""
@@ -161,8 +161,8 @@ def exercise_package(team_root: Path, project: Path, env: dict[str, str]) -> Non
         "--json",
     ], capture_output=True, text=True, env=env, check=False, timeout=60)
     payload = json.loads(routed.stdout)
-    if routed.returncode != 1 or payload.get("next_entry") != "business-analysis":
-        raise SmokeFailure("greenfield document router did not stop at business-analysis")
+    if routed.returncode != 1 or payload.get("next_entry") != "requirement":
+        raise SmokeFailure("document router did not remain at Requirement Flow")
 
 
 def codex_skill_names(env: dict[str, str], project: Path) -> set[str]:

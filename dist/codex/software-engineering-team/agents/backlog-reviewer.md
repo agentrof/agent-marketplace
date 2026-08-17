@@ -36,11 +36,12 @@ Stay read-only and challenge the complete project-local backlog package.
    direction, cycles, release ordering, shared contracts, deferred criteria,
    global test coverage, findings and verdict.
 4. Reconstruct criterion-to-scenario coverage independently and verify every
-   dependency reason and every supporting-role responsibility. For greenfield
-   work, compare story assignment plus linked deferrals to the complete
-   approved BA criterion/rule universe. For existing work, use only declared
-   `analysis_scopes`, or the explicit evidence bound to a defect/technical
-   story. Reject unknown, overlapping and uncovered identities.
+   dependency reason and every supporting-role responsibility. Compare story
+   assignment plus linked deferrals to the complete approved BA criterion/rule
+   universe selected by the Requirement impact matrix. Use only declared
+   `analysis_scopes` or explicit evidence bound to a defect/technical story
+   when the matrix excludes a broader scope. Reject unknown, overlapping and
+   uncovered identities.
 5. Verify the `work_kind` source contract. Feature work carries the full
    preparation lineage; defect and technical work cite approved issue,
    decision or constrained evidence and every scenario maps to a declared

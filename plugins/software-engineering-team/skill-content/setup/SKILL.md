@@ -25,11 +25,10 @@ tokens never land literally in a consuming project.
    scripts/setup_project.py inspect --project-root <root> --json
    ```
 
-   Present its pre-mutation operation list. On first setup only, pass
-   `--origin <greenfield|existing>` when the default `greenfield`
-   classification is not correct. Omit `--origin` on every refresh because a
-   classified origin is preserved. Origin changes go through `configure`, not
-   package refresh.
+   Present its pre-mutation operation list. Setup has no project-origin mode;
+   Requirement Flow determines which stages apply for each request. A legacy
+   `project_origin` key is shown as a deletion in the migration diff and is
+   never copied into refreshed config.
 2. Resolve any reported blocker, then run:
 
    ```text
@@ -78,9 +77,7 @@ tokens never land literally in a consuming project.
    placeholders. The dormant CI template substitutions are defined in
    [ci-bootstrap.md](references/ci-bootstrap.md).
 9. Review and commit the exact tracked refresh diff before a workflow handoff.
-   Report `business-analysis -> solution-design -> design-system ->
-   experience-design -> backlog-plan` for greenfield. An existing project goes
-   to `backlog-plan` until its scoped backlog is approved and committed; it does
-   not bypass planning into delivery. `preparation_check.py` checks only config
-   and completed-stage paths, so unrelated active authoring does not block.
+   Report `requirement` as the next entry. `/requirement` evaluates the
+   request-specific impact matrix and routes only the required stages and
+   backlog handoff; setup never infers greenfield/existing behavior.
    Start a fresh host session after setup.

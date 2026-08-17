@@ -165,10 +165,6 @@ def title_of(path: Path, fallback: str) -> str:
     return fallback
 
 
-def project_origin(docs: Path) -> str:
-    return str(project_config(docs).get("project_origin", "greenfield"))
-
-
 def backlog_contract() -> dict:
     try:
         policy = json.loads(POLICY_PATH.read_text(encoding="utf-8"))
@@ -1091,8 +1087,6 @@ def collect(docs: Path) -> tuple[dict, list[str]]:
             work_kind = str(story_props.get("work_kind", ""))
             if work_kind not in WORK_KINDS:
                 errors.append(f"{story_rel} work_kind must be feature, defect, or technical")
-            if project_origin(docs) != "existing" and work_kind != "feature":
-                errors.append(f"{story_rel} greenfield work_kind must be feature")
             for key, refs in (("criterion_refs", criteria),
                               ("experience_refs", experience),
                               ("uses_design", design_refs),
@@ -1234,7 +1228,6 @@ def collect(docs: Path) -> tuple[dict, list[str]]:
 
     errors.extend(review_coverage_findings(record, docs))
     errors.extend(global_criterion_coverage_findings(record, docs))
-    errors.extend(existing_feature_package_findings(record, docs))
     return record, sorted(set(errors))
 
 
@@ -1348,13 +1341,19 @@ def global_criterion_coverage_findings(record: dict, docs: Path) -> list[str]:
         )
         errors.extend(findings)
     scopes = values(record["backlog"]["props"], "analysis_scopes")
-    if project_origin(docs) == "existing" and not scopes:
-        universe = {key: {} for key in covered}
-    elif project_origin(docs) == "existing":
+    if scopes:
         universe, scope_errors = scoped_ba_universe(docs, scopes)
         errors.extend(scope_errors)
     else:
-        universe = approved_ba_universe(docs, errors)
+        # Requirement Flow selects the BA universe for feature work. Evidence
+        # only defect/technical slices do not inherit every historical BA
+        # criterion merely because an approved registry exists.
+        has_feature_story = any(
+            story["work_kind"] == "feature" for story in record["stories"]
+        )
+        universe = approved_ba_universe(docs, errors) if has_feature_story else {}
+        if not universe:
+            universe = {key: {} for key in covered}
     unknown_covered = sorted(covered - set(universe))
     if unknown_covered:
         errors.append("story criterion_refs contain values outside the approved BA universe: "
@@ -1381,89 +1380,6 @@ def compiler_command_ok(command: list[str]) -> bool:
         ).returncode == 0
     except (OSError, subprocess.TimeoutExpired):
         return False
-
-
-def existing_feature_package_findings(record: dict, docs: Path) -> list[str]:
-    """Bind existing-project feature intake to approved compiler packages."""
-    if project_origin(docs) != "existing":
-        return []
-    feature_stories = [
-        story for story in record["stories"] if story["work_kind"] == "feature"
-    ]
-    if not feature_stories:
-        return []
-    errors: list[str] = []
-    scopes = values(record["backlog"]["props"], "analysis_scopes")
-    if not scopes:
-        return [
-            "existing feature backlog requires explicit analysis_scopes"
-        ]
-    script_dir = Path(__file__).resolve().parent
-    spaces = {
-        match.group("space") for value in scopes
-        if (match := ANALYSIS_SCOPE_RE.fullmatch(value)) is not None
-    }
-    for space in sorted(spaces):
-        if not compiler_command_ok([
-            sys.executable, str(script_dir / "ba_compile.py"), "check",
-            "--space", str(docs / "business-analysis" / space),
-            "--vault-root", str(docs), "--gate", "approval", "--json",
-        ]):
-            errors.append(
-                "existing feature backlog requires a compiler-valid approved "
-                f"BA package for analysis scope {space}"
-            )
-    programs: set[str] = set()
-    for story in feature_stories:
-        for value in story["experience_refs"]:
-            parsed = split_wikilink(value)
-            parts = PurePosixPath(parsed[0]).parts if parsed is not None else ()
-            if len(parts) >= 3 and parts[:2] == (
-                    "experience-design", "programs"):
-                programs.add(parts[2])
-            else:
-                errors.append(
-                    f"{story['id']} experience_ref is not owned by an "
-                    "Experience program package"
-                )
-    for program in sorted(programs):
-        if not compiler_command_ok([
-            sys.executable, str(script_dir / "experience_compile.py"),
-            "check", "--root", str(docs / "experience-design"),
-            "--program", program.upper(), "--gate", "--json",
-        ]):
-            errors.append(
-                "existing feature backlog requires a compiler-valid approved "
-                f"Experience package for program {program}"
-            )
-    solution = docs / "solution-design"
-    landscape = solution / "landscape.md"
-    engagement_paths = sorted((solution / "engagements").glob("*.md"))
-    engagements_approved = bool(engagement_paths) and all(
-        "Status: approved " in path.read_text(encoding="utf-8")
-        for path in engagement_paths
-    )
-    if (not landscape.is_file() or note_status_and_type(landscape)[0] != "approved"
-            or not engagements_approved or not compiler_command_ok([
-                sys.executable, str(script_dir / "landscape_check.py"),
-                "--tree", str(solution),
-            ])):
-        errors.append(
-            "existing feature backlog requires a compiler-valid approved "
-            "Solution Design package"
-        )
-    design = docs / "design-system"
-    master = design / "MASTER.md"
-    if (not master.is_file() or note_status_and_type(master)[0] != "approved"
-            or not compiler_command_ok([
-                sys.executable, str(script_dir / "design_system_compile.py"),
-                "check", "--root", str(design),
-            ])):
-        errors.append(
-            "existing feature backlog requires a compiler-valid approved "
-            "Design System package"
-        )
-    return errors
 
 
 def package_paths(record: dict, docs: Path) -> list[Path]:

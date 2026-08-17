@@ -15,8 +15,9 @@ Produce an approved, compiler-backed experience baseline without implementing pr
 
 ## Procedure
 
-1. Read `workspace/config.json`; require `project_origin`, an approved BA scope,
-   an approved solution landscape and `workspace/docs/design-system/MASTER.md`.
+1. Read `workspace/config.json`; require the Requirement Flow impact matrix to
+   mark Experience Design as `required`, an approved BA scope, an approved
+   solution landscape and `workspace/docs/design-system/MASTER.md`.
    Run `preparation_check.py status --project-root <root> --json` and stop at
    the entry it names when an earlier stage is incomplete.
 2. Load the canonical flow at `flows/experience-design.md`, the

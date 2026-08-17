@@ -682,10 +682,7 @@ dependency_refs:
             project = root / "project"
             project.mkdir()
             subprocess.run(["git", "init", "-q", str(project)], check=True)
-            self.run_cli(
-                SETUP, "--project-root", str(project), "--origin", "existing",
-                "--json",
-            )
+            self.run_cli(SETUP, "--project-root", str(project), "--json")
             docs = project / "workspace/docs"
             ba_space = self.seed_business_analysis(docs)
             self.seed_solution_design(docs)

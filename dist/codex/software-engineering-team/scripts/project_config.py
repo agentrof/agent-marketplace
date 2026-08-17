@@ -14,7 +14,6 @@ import marketplace_paths
 
 
 TEAM = "software-engineering-team"
-ALLOWED_ORIGINS = {"greenfield", "existing"}
 ALLOWED_SCALES = {
     "small", "medium", "large", "x-large", "xx-large", "enterprise",
 }
@@ -123,8 +122,8 @@ def check(config: dict) -> list[str]:
     owner = marketplace_paths.team_from_config(config)
     if owner != TEAM:
         errors.append(f"team_id must be {TEAM}")
-    if config.get("project_origin") not in ALLOWED_ORIGINS:
-        errors.append("project_origin must be greenfield or existing")
+    if "project_origin" in config:
+        errors.append("project_origin is retired; run setup apply to remove it")
     if config.get("scale", "small") not in ALLOWED_SCALES:
         errors.append("unsupported scale")
     for field in ("output_language", "terminology_language"):
@@ -222,11 +221,6 @@ def main(argv=None) -> int:
     p = sub.add_parser("check")
     p.add_argument("--config", required=True)
     p.add_argument("--json", action="store_true")
-    p = sub.add_parser("set-origin")
-    p.add_argument("--config", required=True)
-    p.add_argument("--origin", required=True, choices=sorted(ALLOWED_ORIGINS))
-    p.add_argument("--dry-run", action="store_true")
-    p.add_argument("--json", action="store_true")
     p = sub.add_parser("set")
     p.add_argument("--config", required=True)
     p.add_argument("--field", required=True, choices=sorted(ORDINARY_FIELDS))
@@ -256,19 +250,7 @@ def main(argv=None) -> int:
     before: object
     after: object
     proposed = dict(config)
-    if args.command == "set-origin":
-        before = config.get("project_origin")
-        if before and before != "unclassified" and before != args.origin:
-            if has_workflow_state(path):
-                print(
-                    "project_config: project_origin cannot change after durable "
-                    "workflow documents exist",
-                    file=sys.stderr,
-                )
-                return 1
-        after = args.origin
-        proposed["project_origin"] = after
-    elif args.command == "set":
+    if args.command == "set":
         before = config.get(args.field)
         after = parse_value(args.value)
         proposed[args.field] = after

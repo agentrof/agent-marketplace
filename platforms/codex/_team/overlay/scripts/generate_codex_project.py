@@ -226,7 +226,7 @@ def materialize(
     )
     if result["choice_requests"]:
         raise ValueError(
-            "project instruction migration choice required: "
+            "project instruction reconciliation choice required: "
             + json.dumps(result["choice_requests"], sort_keys=True)
         )
     changes: dict[Path, str | None] = result["changes"]
@@ -270,7 +270,7 @@ def main() -> int:
         default="apply",
     )
     parser.add_argument("--project-root", type=Path, required=True)
-    parser.add_argument("--workspace", default="workspace")
+    parser.set_defaults(workspace=project_instructions.CANONICAL_WORKSPACE)
     parser.add_argument("--choice", action="append", default=[])
     parser.add_argument("--seed-user-files", action="store_true")
     parser.add_argument("--scope", choices=("all", "tracked", "local"), default="all")

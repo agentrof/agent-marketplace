@@ -85,7 +85,7 @@ assumption ledger, the non-functional budgets, and the tree they live in.
 ## References
 
 - [space-standard](references/space-standard.md): the analysis-space standard: node model, document types, id scheme, lifecycle, formatting, rename runbook, worked example. Read when creating a space, adding a document type, or unsure how a doc must be shaped.
-- [decomposition](references/decomposition.md): domain split proposals (owner-approved), promotion thresholds, the fact-routing test, session resume protocol. Read when a topic spans more than one domain, a node crosses its growth thresholds, or deciding where a new fact lives.
+- [decomposition](references/decomposition.md): explicitly approved domain split proposals, promotion thresholds, the fact-routing test, session resume protocol. Read when a topic spans more than one domain, a node crosses its growth thresholds, or deciding where a new fact lives.
 - [elicitation](references/elicitation.md): question sequences per technique, challenge-then-confirm mechanics, assumption ledger format. Read when planning a questioning round or closing a brief.
 - [modeling](references/modeling.md): decision-table and state-machine methods worked end to end, Given/When/Then smells, traceability conventions. Read when a rule cluster or lifecycle resists one-sentence BRs.
 - [nfr-elicitation](references/nfr-elicitation.md): per-category question sets, quantification table, budgets handoff contract. Read when eliciting or writing the non-functional budgets subsection.

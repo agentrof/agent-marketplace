@@ -4,7 +4,6 @@
   "stable_base": "998f75935a8204251f90d889cfdcf5a747a789d7",
   "main_source": "c8edb51d89d53fb7409f2f78702edb08c94bdc8a",
   "impacts": {
-    "project-management-office": "patch",
     "software-engineering-team": "patch"
   },
   "summaries": [

@@ -15,12 +15,13 @@
   recipes, seed scenarios, and its command contract.
 - `{{workspace}}/demos/` and `{{workspace}}/sketches/`: outward demos and
   design exploration previews.
-- `.agentrof/agent-marketplace/.runtime/plan/`: gitignored plan drafts.
-- `.agentrof/agent-marketplace/.runtime/work-orders/`: gitignored work-order
-  snapshots owned by the current worktree. Durable delivery state stays in
-  PMO.
+- `<git-root>/.agentrof/agent-marketplace/.runtime/`: project-local runtime
+  scratch and generated caches. It is never a shared or global database.
+- `{{workspace}}/docs/backlog/`: tracked Obsidian backlog source. The nested
+  epic, story, review and test-plan files are the durable Requirement state.
 
-Greenfield preparation runs setup, business-analysis, solution-design,
-design-system, experience-design, and backlog-plan, then stops before explicit
-delivery. Existing projects start scoped feature work through deliver. Use
-delivery-lanes only after preparation is approved.
+Requirement Flow evaluates the request impact matrix, runs only the required
+Requirement stages, validates reused or not-applicable stages, and ends at
+backlog-plan unless the request resolves with no change. Delivery then starts
+only through its explicit Delivery Flow entry. Release Management remains out
+of scope for this package.

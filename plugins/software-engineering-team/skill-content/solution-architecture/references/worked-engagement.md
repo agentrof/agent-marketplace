@@ -108,9 +108,13 @@ row at the next render-decisions run:
 
 Transition gains a step citing SD-007 (an aliased wikilink, escaped-pipe in table cells): adopt event distribution before the fulfillment story lands; precondition: none.
 
-## One challenge finding and its disposition
+## One live challenge finding and its disposition
 
-Round 1, cost-and-lock-in lens: "Egress cost is ASSUMED and the verdict's 3-year horizon depends on it; no source named." Disposition: fix; the risk moved onto SD-007 as a named risk with a first-invoice verification note, and the matrix cell now marks the assumption explicitly. Recorded in reviews/order-event-distribution-round-1.md.
+The read-only cost-and-lock-in challenger found that egress cost was assumed
+while the verdict depended on a three-year horizon. The Solution Architect
+fixed the candidate: SD-007 now carries the risk and first-invoice revisit
+trigger, and the matrix cell labels the assumption. The corrected decision and
+engagement are durable; the challenger response is not another project file.
 
 ## Why this is the bar
 

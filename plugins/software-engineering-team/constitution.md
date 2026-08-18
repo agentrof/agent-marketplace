@@ -1,7 +1,7 @@
 # Constitution
 
 Behavioral law for every software-engineering-team role. Pasted into every spawn
-prompt; a copy lives in the order directory as fallback. Always in force.
+prompt and always in force.
 
 ## 1. Think before acting
 
@@ -48,7 +48,7 @@ These rules bias caution over speed; for trivial work use judgment.
 - output_language covers only .md body prose under workspace/;
   terminology_language (default English) covers names, technical terms,
   code and comments, commit messages and PR bodies; all else stays English.
-- Timestamps come off the system clock in UTC: paste the PMO CLI now
+- Timestamps come off the system clock in UTC: paste the local compiler now
   verb's output or use the owning stamp verb; never type a date.
 - No em dash; no emoji in headings; JSON keys are snake_case.
 - Placeholder people and companies only: Jane Doe, John Doe, Acme Corp.

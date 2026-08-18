@@ -7,6 +7,7 @@ import argparse
 import ast
 import importlib.util
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -18,6 +19,8 @@ from pathlib import Path
 COMPILER_SCRIPTS = (
     "vault_check.py", "ba_compile.py", "landscape_check.py",
     "experience_compile.py", "experience_artifact_check.py",
+    "design_system_compile.py", "backlog_compile.py", "issue_compile.py",
+    "marketplace_paths.py",
 )
 DATA_PATHS = (
     "skill-content/obsidian-vault/data",
@@ -78,26 +81,57 @@ def team_resolver(root: Path):
     return module.team_from_config
 
 
-def workspace_for(project_root: Path, root: Path) -> Path:
+def workspace_for(project_root: Path, root: Path) -> tuple[Path, list[str]]:
     resolve_team = team_resolver(root)
-    candidates = [project_root / "workspace"]
-    candidates.extend(sorted(path.parent for path in project_root.glob(
-        "*/config.json")))
-    for workspace in candidates:
+    workspace = project_root / "workspace"
+    findings = []
+    try:
+        config = json.loads(
+            (workspace / "config.json").read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        config = {}
+    if resolve_team(config) != "software-engineering-team":
+        findings.append("canonical workspace/config.json is missing or not owned by the team")
+    for candidate in sorted(project_root.glob("*/config.json")):
+        if candidate.parent == workspace:
+            continue
         try:
             config = json.loads(
-                (workspace / "config.json").read_text(encoding="utf-8"))
+                candidate.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError):
             continue
         if resolve_team(config) == "software-engineering-team":
-            return workspace
-    return project_root / "workspace"
+            findings.append(
+                "non-canonical managed workspace: "
+                + candidate.parent.relative_to(project_root).as_posix()
+            )
+    return workspace, findings
+
+
+def frontmatter_status(path: Path) -> str:
+    try:
+        lines = path.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return ""
+    if not lines or lines[0].strip() != "---":
+        return ""
+    for line in lines[1:]:
+        if line.strip() == "---":
+            break
+        if line.startswith("status:"):
+            return line.partition(":")[2].strip().strip("\"'")
+    return ""
 
 
 def gate(project_root: Path, root: Path) -> dict:
-    docs = workspace_for(project_root, root) / "docs"
+    workspace, workspace_findings = workspace_for(project_root, root)
+    docs = workspace / "docs"
     scripts = root / "scripts"
-    results = [run([
+    results = [{
+        "name": "workspace-contract", "ok": not workspace_findings,
+        "returncode": 1 if workspace_findings else 0,
+        "stdout": "\n".join(workspace_findings), "stderr": "",
+    }, run([
         sys.executable, str(scripts / "vault_check.py"), "check",
         "--vault", str(docs), "--json",
     ], "closed-vault-schema-and-relations")]
@@ -116,6 +150,12 @@ def gate(project_root: Path, root: Path) -> dict:
             sys.executable, str(scripts / "landscape_check.py"),
             "--tree", str(solution),
         ], "solution-design"))
+    design_system = docs / "design-system"
+    if (design_system / "MASTER.md").is_file():
+        results.append(run([
+            sys.executable, str(scripts / "design_system_compile.py"),
+            "check", "--root", str(design_system),
+        ], "design-system"))
     experience = docs / "experience-design"
     programs = experience / "programs"
     if programs.is_dir():
@@ -126,6 +166,24 @@ def gate(project_root: Path, root: Path) -> dict:
                     "check", "--root", str(experience), "--program",
                     program.name.upper(), "--gate", "--json",
                 ], f"experience-design:{program.name}"))
+    backlog = docs / "backlog" / "backlog.md"
+    if backlog.is_file():
+        command = [
+            sys.executable, str(scripts / "backlog_compile.py"), "check",
+            "--docs", str(docs), "--json",
+        ]
+        approved = frontmatter_status(backlog) == "approved"
+        if approved:
+            command.insert(-1, "--approved")
+        results.append(run(
+            command, "backlog:approved" if approved else "backlog:draft"
+        ))
+    issues = docs / "issues"
+    if issues.is_dir() and any(issues.glob("*.md")):
+        results.append(run([
+            sys.executable, str(scripts / "issue_compile.py"), "check",
+            "--docs", str(docs),
+        ], "issue-reports"))
     return {
         "ok": all(item["ok"] for item in results),
         "project_root": str(project_root), "vault": str(docs),
@@ -168,16 +226,29 @@ def cmd_install(args) -> int:
             source = root / relative
             if source.is_dir():
                 shutil.copytree(source, staging / relative)
-        temporary_zip = destination.with_suffix(".tmp")
-        with zipfile.ZipFile(temporary_zip, "w", zipfile.ZIP_DEFLATED) as archive:
-            for path in sorted(staging.rglob("*")):
-                if path.is_file():
-                    info = zipfile.ZipInfo(path.relative_to(staging).as_posix())
-                    info.date_time = (1980, 1, 1, 0, 0, 0)
-                    info.external_attr = 0o644 << 16
-                    archive.writestr(info, path.read_bytes(),
-                                     compress_type=zipfile.ZIP_DEFLATED)
-        temporary_zip.replace(destination)
+        descriptor, raw_temporary = tempfile.mkstemp(
+            prefix=".vault-gate.", suffix=".tmp", dir=destination.parent
+        )
+        os.close(descriptor)
+        temporary_zip = Path(raw_temporary)
+        try:
+            with zipfile.ZipFile(
+                temporary_zip, "w", zipfile.ZIP_DEFLATED
+            ) as archive:
+                for path in sorted(staging.rglob("*")):
+                    if path.is_file():
+                        info = zipfile.ZipInfo(path.relative_to(staging).as_posix())
+                        info.date_time = (1980, 1, 1, 0, 0, 0)
+                        info.external_attr = 0o644 << 16
+                        archive.writestr(
+                            info, path.read_bytes(),
+                            compress_type=zipfile.ZIP_DEFLATED,
+                        )
+            with temporary_zip.open("rb") as handle:
+                os.fsync(handle.fileno())
+            os.replace(temporary_zip, destination)
+        finally:
+            temporary_zip.unlink(missing_ok=True)
     destination.chmod(0o755)
     print(destination)
     return 0

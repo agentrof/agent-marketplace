@@ -1,6 +1,6 @@
 ---
 name: challenge-review
-description: Knowledge skill for the analysis challenge loop. Loaded by the business-analysis entry and its challenger and expert roles; not user-facing.
+description: Read-only adversarial review method for project-local analysis and solution documents.
 user-invocable: false
 ---
 

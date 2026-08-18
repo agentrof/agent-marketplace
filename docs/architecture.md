@@ -1,189 +1,67 @@
 # Architecture
 
-The invariants this marketplace is built on. Detail lives in
-[authoring.md](authoring.md) and [orchestration.md](orchestration.md);
-this file is the map and must stay short.
-
-## Product thesis
-
-A catalog of CURATED TEAMS, not a parts store. Each plugin is a complete,
-tested, end-to-end team; users install a team and run at the goal. Parts
-are not sold separately: agents and knowledge skills are encapsulated
-behind a small user surface of entry skills. Supported stacks are fixed
-and tested; new stacks are added by the maintainer as a skills folder plus
-a config enum value plus tests. One plugin is not a team:
-project-management-office is the shared operations backbone every team plugin
-depends on. Claude resolves it through plugin dependencies. Codex users install
-it explicitly before a team; marketplace default policy is advisory and never
-the dependency contract.
+This repository ships one standalone Software Engineering Team. Its canonical
+behavior is host-neutral; Claude and Codex are packaging adapters.
 
 ## Invariants
 
-1. **Machine-enforced or not a rule.** Every content rule lives in
-   `tools/validate.py` with a fixture that proves it fires. CI runs
-   `make check` on every push and pull request; one finding is red. There
-   are no exception files, allowlists or temporary waivers. High-risk
-   cross-host sub-contracts carry named adversarial cases, and public PMO
-   command and dashboard route registries stay in lockstep with executable
-   tests so a new surface cannot merge without a declared contract.
-2. **Roles versus knowledge.** Agents are platform-independent role
-   constitutions (Principles, Boundaries, Approach, Output Contract) with
-   zero technology nouns. All technology and method knowledge lives in
-   skills with progressive disclosure: a thin SKILL.md decision surface
-   and depth in references/. Each agent declares a machine-readable
-   `output_contract` (`prose` or `structured`); this states how the role
-   returns results so a composer can refuse pairing a prose persona with
-   schema forcing, and does not by itself stop the harness-side stall
-   (anthropics/claude-code#79395).
-3. **Encapsulation.** Entry skills are the only user surface. Canonical
-   skills declare `exposure: entry` or `exposure: internal`; each host build
-   maps that neutral declaration to its native discovery policy. Knowledge
-   skills stay internal. Agents are passive and run only when a flow spawns them.
-4. **Zero duplication.** Each fact exists once: shared method in a process
-   skill, stack specifics inside the stack skill, shared flow bodies in
-   flows/ files that entries delegate to.
-5. **Derived counts are computed.** `tools/counts.py` injects counts into
-   the single README marker block; `--check` is the CI drift gate. Numbers
-   next to component nouns anywhere else fail validation.
-6. **Output scoping.** Durable team outputs land under the consuming project's
-   workspace. Transient plan and work-order snapshots live only under the
-   owning checkout's `.agentrof/agent-marketplace/.runtime/`, anchored at its
-   git root and ignored. Home paths, temp paths and absolute paths are banned
-   output targets; plugin directories are read-only product content.
-7. **Files over conversation memory.** Durable knowledge exits through git
-   channels: code, pull request bodies, analysis spaces with their
-   compiler-generated views, living architecture documents, design
-   system, demo packages, and the generated decision logs; delivery
-   state lives in the PMO database, read through its CLI. There are no
-   project-memory tiers or mind maps; a missing-context problem is a
-   step-contract bug. The bounded consumer `memory/` surface carries owner
-   collaboration preferences and the Agent Marketplace memory contract, not
-   delivery truth or project architecture.
-8. **One constitution.** Behavioral law lives in a single constitution file
-   per plugin, pasted into every spawn prompt with an order-directory copy
-   as fallback. Never per-agent copies, never an on-demand skill.
-9. **Single-writer operations backbone.** Process state (projects, epics,
-   stories, tasks with attempt history, dependency edges, DoD records,
-   work orders, findings, audit events) lives in the project-management-office plugin's central
-   database in the user-level data directory, written ONLY through the
-   project-management-office CLI. Agentrof owns the vendor home and Agent Marketplace owns
-   its nested product home. Spawned agents never touch it; project-management-office's hooks record spawn/stop
-   mechanics through the same CLI and a guard hook denies direct file
-   writes. What must be reviewable in git is rendered from the database
-   as generated views, never hand-written. The web dashboard is a READER:
-   it opens the database read-only (mode=ro), exposes GET routes only,
-   and scans the plugin catalog from the filesystem; it never writes.
-10. **One clock.** Every timestamp in a durable artifact comes off the
-   system clock in UTC through a script (the project-management-office
-   CLI's `now` verb or the owning stamp verb), never out of the model's
-   memory. Mechanical layers, not instructions, carry the rule: the CLI
-   fills every database column itself, work-order init rejects stale key
-   prefixes, the compilers reject future dates, a validator rule bans
-   naive clock calls in plugin scripts, and the guard hook denies
-   hand-typed stamp dates at write time.
-11. **One lexicon, two axes.** output_language localizes only .md body
-   prose under workspace/; terminology_language (default English)
-   carries names, technical terms, code and comments, commits and PR
-   bodies; the machine layer is fixed English. Mechanical layers, not
-   instructions, carry the rule: the guard hook denies non-ASCII paths
-   and branch names always, and non-ASCII commit and PR payloads
-   unless terminology_language is configured non-English; the analysis
-   compiler, landscape checker and contract checker enforce identifier
-   positions as ASCII shapes.
-12. **Two hosts, one semantic contract.** `plugins/` contains only
-   host-neutral canonical skills, agents, flows, scripts and templates.
-   Platform manifests, contracts and overlays live under `platforms/`.
-   Generated Claude and Codex distributions contain metadata and pointers,
-   never forked workflow bodies.
-   Project instructions are composed in a fixed order from PMO
-   `common.md`, the team's `team.md`, and one host `_team` `host.md` delta.
-   No platform may carry a per-team AGENTS or CLAUDE template. The generated
-   common and team sections are identical across hosts.
-   Host adapters map gates, native agent spawning, hook payloads and session
-   boundaries while preserving the same PMO lifecycle and safety outcome.
-13. **Every team requires a ready PMO.** Claude manifests declare PMO as a
-   native dependency. Codex installation documents PMO before the team because
-   Codex manifests do not declare plugin dependencies. Both host contracts
-   require the PMO-ready session signal before mutation. PMO records readiness
-   against the host session id; the shared team PreToolUse guard denies Write,
-   Edit, apply_patch and Bash when that session record is absent or unhealthy.
-   This stops local mutation when PMO is missing, disabled, untrusted or failed
-   to bootstrap. The scaffolder emits this mechanical contract and the validator
-   rejects any team that drops it.
-14. **One delivery team owns one project.** PMO remains the shared backbone,
-   but workspace/config.json and setup-generated project agents may name only
-   one team. A second team stops before mutation. This preserves bare native
-   agent ids across hosts without collisions in Codex's project-wide
-   .codex/agents namespace.
-15. **One upgrade protocol across hosts.** Plugin updates may change runtime
-   compatibility, but normal work never guesses whether the project is ready.
-   PMO derives status from package provenance, cross-host versions, database
-   schema, project UUID, component versions, and managed-surface hashes. A
-   required upgrade locks normal marketplace mutation on both hosts. Ordered
-   checksummed migrations operate on a candidate database and declared
-   whole-file managed project surfaces only; plans are fingerprint-bound,
-   journaled, recoverable,
-   and require a fresh session after success. Remote-backed projects remain
-   locked on the PMO-prepared upgrade branch until the configured target branch
-   contains the exact managed upgrade identity. Active PMO work in any project
-   blocks preparation. Dead locks are reclaimed only from a same-host process
-   proven absent; session records do not determine upgrade readiness.
-   User-owned code and content are outside the writer set.
-16. **Tracked contract, local environment.** The current nested contract in
-   `<workspace>/config.json` is the portable project baseline. It pins exact
-   component version and paired build identity and hashes its canonical
-   payload. Root `.agentrof`, `.codex`, and `.claude` directories are ignored.
-   Setup reconciles those machine-local surfaces after clone or pull; project
-   upgrade changes Git once, while every other machine performs only local
-   reconciliation. Both tracked root instruction files are generated from
-   either host so a clone never depends on which host performed setup.
-17. **Preparation is distinct from activation.** Greenfield work closes
-   analysis, solution, design system, release experience and baseline backlog
-   as separate owner-gated stages. Deterministic preparation routing names the
-   next entry. An approved backlog is applied atomically but does not activate
-   delivery. Existing-project features reuse the same stages in scoped mode and
-   execute only the approved feature set and owner-approved prerequisites.
-18. **Marketplace channels are closed snapshots.** A marketplace ref resolves
-   its catalog and both host packages from the same checkout through relative
-   sources. `main` is an explicit development preview, `stable` is the moving
-   released channel, and a `vX.Y.Z` tag is immutable. Public install and smoke
-   paths pin `stable`; a catalog may never redirect packages to another channel.
+1. Every enforceable rule is validated by `tools/validate.py` and `make check`.
+2. Roles contain behavior and boundaries; domain knowledge lives in skills.
+3. Entry skills are the only user surface. Internal skills are not user-facing.
+4. Durable project truth is tracked files, never conversation memory.
+5. Business Analysis, Solution Design, Design System and Experience Design are
+   self-contained document workflows. Their approved Git-tracked artifacts are
+   their complete state before backlog creation.
+6. One standalone Software Engineering Team owns one project checkout.
+7. The project-local runtime is
+   `<git-root>/.agentrof/agent-marketplace/.runtime/` and contains only ignored,
+   disposable scratch and cache files. Deleting it cannot change project truth.
+8. The vault root is `workspace/docs/`. Its policy, designations, graph colors,
+   maps and typed front matter are project-local and versioned with the project.
+   No second workspace path is valid.
+9. The backlog source is `workspace/docs/backlog/`. Its nested epic, story,
+   review and test-plan Markdown files are canonical.
+10. `backlog_compile.py` is a deterministic compiler. It produces disposable
+    `_generated/registry.json`, `board.md`, `dependency-map.md` and
+    `test-coverage.md` views and never imports a second source of truth.
+11. An epic review derives from its epic and verifies the exact child story
+    and test-plan set, including intra-epic dependencies. A root review derives
+    from the backlog, relates to the exact epic set and covers cross-epic
+    overlap, cycles, ordering and coverage.
+12. Every story has a sibling `test-plan.md`. Criteria and rules map to stable
+    scenarios; automation-required scenarios name an executable-test target.
+13. Every story has exactly one accountable implementation owner and may name
+    supporting implementation roles with concrete body responsibilities.
+    Runtime identities are not backlog properties.
+14. Backlog approval checks structural coverage, exact relation sets and
+    review approval. Test execution, JUnit evidence and release readiness are
+    delivery concerns.
+15. File names are stable slugs; membership is path-derived. A story does not
+    duplicate its epic relationship in front matter.
+16. Designation display values are project config data with one reconcile
+    writer and may follow project language settings. Canonical backlog type
+    keys are `backlog`, `backlog-review`, `epic`, `epic-review`, `story` and
+    `test-plan`; the team also reserves `issue-report` for tracked defects and
+    improvements. Type keys, graph queries and graph colors are shipped policy.
+17. Timestamps written by compilers come from UTC system time. User-authored
+    approval timestamps are not accepted as evidence.
+18. Distribution output under `dist/` is generated only by
+    `tools/build_distributions.py`.
+19. Requirement Flow ends at a committed, approved backlog. Delivery Flow owns
+    scope reservation, execution coordination, review, PR handoff and merge;
+    Release Management remains a later scope.
+20. Delivery configuration fields remain optional before activation. Active
+    Requirement limits and every configured optional field are validated; no
+    field is removed merely because a later Release Management consumer is
+    out of scope.
 
-## Repository layout
+The normative Requirement and Delivery lifecycle is documented in
+[requirement-delivery-protocol.md](requirement-delivery-protocol.md).
 
-- `.claude-plugin/marketplace.json`: the Claude catalog registry.
-- `.agents/plugins/marketplace.json`: the Codex catalog and install policy.
-- `versions.json`: the single cross-host stable version registry.
-- `product.json`: the vendor and product namespace, home and host-cache registry.
-- `.changes/`: pending release-impact declarations, one per normal pull request.
-- `plugins/<team>/`: host-neutral canonical content. Full skills live in
-  `skill-content/`; ordered compatibility contracts live in `migrations/`;
-  every delivery-team migration manifest declares the same current project
-  contract version, which generates the shared runtime and test policy;
-  agent frontmatter uses neutral exposure and reasoning enums. Every team owns
-  exactly one `templates/project-instructions/team.md` fragment.
-- `plugins/project-management-office/templates/project-instructions/common.md`:
-  the canonical project contract shared by all teams and hosts. PMO also owns
-  the managed memory template and the one-time user memory seeds.
-- `platforms/<host>/<team>/`: host manifest, contract and overlay source;
-  `platforms/shared/` contains runtime adapters used by both hosts. `_team`
-  overlays are generated into every non-PMO plugin, so new teams inherit the
-  same PMO guard and project generators without copied source. Each host's
-  `_team` overlay owns its single project-instruction `host.md` delta.
-- `dist/<host>/<team>/`: generated self-contained distributions; never edit
-  them by hand.
-- `.release/stable.json`: generated release-PR provenance used to reject stale
-  or mismatched publication attempts.
-- `plugins/project-management-office/`: the operations backbone (central
-  database CLI, hooks, the Control Tower launcher entry and its read-only
-  web dashboard); a dependency of every team plugin, never a team itself.
-- `docs/`: this map, the authoring guide, orchestration spec and greenfield
-  preparation contract.
-- `tools/`: validator, host-surface generators, counts injector, scaffolder
-  and their tests;
-  `tools/data/models.json` (reasoning levels) and `tools/data/limits.json`
-  (authoring size caps) are the policy files, validated like any other
-  policy artifact.
-- `memory/`: maintainer rules; excluded from all tooling.
-- Research material stays out of shipped content and leaves the default
-  branch at release.
+## Ownership
+
+- `plugins/software-engineering-team/`: canonical workflows, agents, skills,
+  compilers and templates.
+- `platforms/`: Claude/Codex manifests and host overlays.
+- `workspace/docs/`: consuming project's Obsidian vault and backlog.
+- `tools/`: build, validation, release and scaffolding contracts.

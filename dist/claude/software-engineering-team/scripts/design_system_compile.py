@@ -11,6 +11,12 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 HASH_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
+RELATION_BLOCK_RE = re.compile(
+    r"\n*## Related knowledge "
+    r"<!-- sec: relations:generated:start -->.*?"
+    r"<!-- sec: relations:generated:end -->\s*",
+    re.DOTALL,
+)
 MACHINE_FIELDS = {
     "status", "approved_at_utc", "baseline_hash", "supersedes_hash",
 }
@@ -50,6 +56,10 @@ def rewrite_frontmatter(path: Path, updates: dict, removals: set[str]) -> None:
     written: set[str] = set()
     for raw in lines[1:end]:
         stripped = raw.strip()
+        if stripped.startswith("- status/") and "status" in updates:
+            prefix = raw[:len(raw) - len(raw.lstrip())]
+            output.append(f"{prefix}- status/{updates['status']}")
+            continue
         if ":" not in stripped or stripped.startswith("- "):
             output.append(raw)
             continue
@@ -73,12 +83,21 @@ def normalized_master(path: Path) -> bytes:
     kept = ["---"]
     for raw in lines[1:end]:
         stripped = raw.strip()
+        if stripped.startswith("- status/"):
+            continue
         key = stripped.split(":", 1)[0].strip() if ":" in stripped else ""
         if key in MACHINE_FIELDS:
             continue
         kept.append(raw)
     kept.extend(lines[end:])
     return ("\n".join(kept).rstrip() + "\n").encode()
+
+
+def without_generated_relations(content: bytes) -> bytes:
+    text = content.decode("utf-8")
+    if "<!-- sec: relations:generated:start -->" not in text:
+        return content
+    return (RELATION_BLOCK_RE.sub("\n\n", text).rstrip() + "\n").encode()
 
 
 def baseline_hash(root: Path) -> str:
@@ -88,10 +107,9 @@ def baseline_hash(root: Path) -> str:
             raise ValueError(f"symlinked Design System note: {path}")
         digest.update(path.relative_to(root).as_posix().encode())
         digest.update(b"\0")
-        digest.update(
-            normalized_master(path) if path.name == "MASTER.md"
+        content = normalized_master(path) if path.name == "MASTER.md" \
             else path.read_bytes()
-        )
+        digest.update(without_generated_relations(content))
         digest.update(b"\0")
     return "sha256:" + digest.hexdigest()
 
@@ -101,7 +119,7 @@ def findings(root: Path) -> list[str]:
     if not master.is_file():
         return ["MASTER.md is missing"]
     try:
-        fields, _lines, _end = parse_frontmatter(master)
+        fields, lines, end = parse_frontmatter(master)
     except (OSError, ValueError) as exc:
         return [str(exc)]
     result: list[str] = []
@@ -110,6 +128,10 @@ def findings(root: Path) -> list[str]:
     status = fields.get("status")
     if status not in {"draft", "approved"}:
         result.append("MASTER.md status must be draft or approved")
+    status_tags = [raw.strip()[2:] for raw in lines[1:end]
+                   if raw.strip().startswith("- status/")]
+    if status in {"draft", "approved"} and status_tags != [f"status/{status}"]:
+        result.append("MASTER.md must carry exactly one status tag matching status")
     revision = fields.get("revision")
     if not isinstance(revision, int) or revision < 1:
         result.append("MASTER.md revision must be a positive integer")

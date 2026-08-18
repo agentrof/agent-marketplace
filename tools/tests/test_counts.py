@@ -12,8 +12,6 @@ sys.path.insert(0, str(TESTS_DIR))
 sys.path.insert(0, str(TESTS_DIR.parent))
 
 import counts  # noqa: E402
-import fixtures  # noqa: E402
-
 README = """# Fixture Marketplace
 
 Intro text.
@@ -30,7 +28,22 @@ class CountsTests(unittest.TestCase):
     def make_root(self) -> Path:
         self.tmp = tempfile.TemporaryDirectory()
         root = Path(self.tmp.name)
-        fixtures.make_valid_root(root)
+        plugin = root / "plugins" / "sample-team"
+        (plugin / "agents").mkdir(parents=True)
+        (plugin / "agents" / "developer.md").write_text(
+            "# Developer\n", encoding="utf-8"
+        )
+        entry = plugin / "skill-content" / "entry-skill"
+        entry.mkdir(parents=True)
+        (entry / "SKILL.md").write_text(
+            "---\nname: entry-skill\nexposure: entry\n---\n", encoding="utf-8"
+        )
+        knowledge = plugin / "skill-content" / "knowledge-skill"
+        knowledge.mkdir(parents=True)
+        (knowledge / "SKILL.md").write_text(
+            "---\nname: knowledge-skill\nexposure: knowledge\n---\n",
+            encoding="utf-8",
+        )
         (root / "README.md").write_text(README, encoding="utf-8")
         return root
 
@@ -41,9 +54,9 @@ class CountsTests(unittest.TestCase):
     def test_compute_counts_from_tree(self):
         root = self.make_root()
         computed = counts.compute(root)
-        self.assertEqual(computed["plugins"], 2)
+        self.assertEqual(computed["plugins"], 1)
         self.assertEqual(computed["agents"], 1)
-        self.assertEqual(computed["entry_skills"], 3)
+        self.assertEqual(computed["entry_skills"], 1)
         self.assertEqual(computed["knowledge_skills"], 1)
 
     def test_inject_rewrites_only_marker_block(self):
@@ -54,7 +67,7 @@ class CountsTests(unittest.TestCase):
         self.assertNotIn("stale", new)
         self.assertIn("Intro text.", new)
         self.assertIn("Outro text.", new)
-        self.assertIn("| 2 | 1 | 3 | 1 |", new)
+        self.assertIn("| 1 | 1 | 1 | 1 |", new)
 
     def test_check_detects_drift(self):
         root = self.make_root()
@@ -65,7 +78,7 @@ class CountsTests(unittest.TestCase):
         _, same = counts.inject(root / "README.md", block)
         self.assertEqual(fresh, same)
         # Hand-edit a number inside the block -> drift.
-        tampered = fresh.replace("| 2 | 1 | 3 | 1 |", "| 9 | 9 | 9 | 9 |")
+        tampered = fresh.replace("| 1 | 1 | 1 | 1 |", "| 9 | 9 | 9 | 9 |")
         (root / "README.md").write_text(tampered, encoding="utf-8")
         old, new = counts.inject(root / "README.md", block)
         self.assertNotEqual(old, new, "hand-edited counts must register as drift")

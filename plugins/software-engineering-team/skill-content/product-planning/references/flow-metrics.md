@@ -3,8 +3,8 @@
 [conditional] Read only when the owner asks for schedule forecasting
 ("when will this be done", "how long is the rest"). These concepts are NOT
 used for backlog ordering in this flow: ordering is dependency order plus
-risk-adjusted value ([prioritization](prioritization.md)), there are no
-sprints, and no estimate field exists in any artifact. A forecast request
+risk-adjusted value ([prioritization](prioritization.md)), there are no fixed-duration
+planning cycles, and no estimate field exists in any artifact. A forecast request
 gates nothing; answer it and leave the backlog ordered as it is.
 
 ## The Three Concepts

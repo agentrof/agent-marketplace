@@ -1,39 +1,38 @@
 ---
 name: configure
-description: The single change gate for machine-managed project configuration. Use when changing stack, commands, source directories, origin, scale, limits, output language, terminology language, or document type designations.
+description: The single change gate for project configuration and document-type designations.
 exposure: entry
 ---
 
 # Configure
 
-Route every config change through this gate. Never hand-edit
-`workspace/config.json`.
-
 ## When to Use
 
-- Use when changing the project's stack, commands, source directories,
-  origin, scale, limits, language policy, parallelism, or designations.
+- Changing stack, commands, scale, language, limits, `max_parallel` or
+  designations.
+- Repairing a local workspace contract after an intentional user change.
 
 ## Procedure
 
-1. Read `workspace/config.json`. If missing, route to setup and stop. Run PMO
-   `resume-info --project-key <key>`; refuse while a work order is `running` or
-   `waiting_gate` because it owns a config snapshot. Remind the owner that the
-   file is machine-managed and this gate is its only supported writer.
-2. Interpret the request as concrete key changes. Read
-   [config-contract.md](references/config-contract.md) completely before
-   validating or presenting impact. Refuse unsupported values with the
-   contract's exact reason.
-3. Handle `project_origin` only through its owner. Before registration run
-   `project_config.py set-origin`. After a project contract exists run PMO
-   `project classify-origin --project-key <key> --project-root <root> --origin
-   <choice>` so config, fingerprint, and audit state move together.
-4. Present the contract's impact analysis before writing. Ask apply or reject
-   through the choice gate, putting the impact and tradeoff in the option
-   descriptions. Designation changes use the dry-run plan from
-   `vault_check.py reconcile-designations`; present locked and residual records
-   exactly as specified in the reference.
-5. On approval, execute designation changes through
-   `reconcile-designations`, never Write/Edit. For every other supported key,
-   update `workspace/config.json` and no other file. Run the required checks,
-   show new findings, and confirm the exact diff. On rejection, write nothing.
+1. Read `workspace/config.json`. If missing, route to setup. Never hand-edit
+   machine-managed keys.
+2. Read `references/config-contract.md`. Identify each requested field's
+   current consumer and state the behavioral impact before proposing a write.
+3. For ordinary fields other than `max_parallel`, run `project_config.py set
+   --dry-run --json`. Delivery fields remain optional before delivery
+   activation, but configured values must already be valid. `max_parallel` is
+   different: preview and apply it through the internal
+   `delivery_git.py configure-parallelism` coordinator so its project Fence
+   handoff competes with active Delivery claims. Never use the raw config
+   writer to change or unset `max_parallel` after a Delivery Fence exists.
+4. For designation or language changes, run `vault_check.py
+   reconcile-designations --dry-run --json`, present the complete title, H1,
+   alias impact, then request approval. Language changes do
+   not silently translate existing designation values.
+5. On approval, run the owning writer, `project_config.py check`,
+   `vault_check.py check-designations` and the scoped vault gate. A changed
+   `max_parallel` remains in `configuring` until its normal target handoff
+   completes; do not start, claim or resume an Item while that Fence is held.
+   On rejection, write nothing.
+6. Confirm the exact Git diff. Configuration changes update only their
+   declared project-local surfaces.

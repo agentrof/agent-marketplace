@@ -1,62 +1,48 @@
 ---
 name: challenge-review
-description: Knowledge skill for the analysis challenge loop. Loaded by the business-analysis entry and its challenger and expert roles; not user-facing.
+description: Read-only adversarial review method for project-local analysis and solution documents.
 exposure: internal
 ---
 
 # Challenge Review
 
-The adversarial refinement loop for analysis spaces: who challenges,
-with what context, how findings return, and how they enter the space.
+Use fresh, read-only perspectives to expose missing evidence before a
+document gate. Findings return to the owning workflow, not to a durable review
+history. The approved canonical documents are the lasting evidence.
 
 ## When to Use
-- Loaded by the business-analysis entry before a domain gate, and by the
-  analysis-challenger and domain-expert roles it spawns.
+
+- A Business Analysis domain or solution-design engagement is approaching an
+  approval gate.
+- An earlier challenge left blocking findings that need targeted re-review.
 
 ## The Loop
 
-1. Cast the panel: pick lenses from the lens bank sized to the domain,
-   and cast topic-specific expert profiles; record both in the round
-   record with a one-line why each.
-2. Fan out: one fresh-context, read-only spawn per lens or profile
-   (analysis-challenger role; domain-expert for named questions). Every
-   spawn prompt carries the constitution body, read from the file
-   printed by "$RUN" path "$TEAM" constitution.md (dispatcher per the
-   develop flow's state contract) and pasted verbatim:
-   {{constitution}}
-3. Triage: the analyst, the space's single writer, disposes every
-   finding: covered / fix / assumption / question / rejected, each with
-   its resolving target ids; the round record holds the full table.
-4. Audit the burial paths: one fresh-context spawn re-judges only the
-   covered and rejected dispositions against their cited evidence;
-   disagreements are flagged in the record and surface at the gate.
-5. Apply fixes, run the compiler's check and render, close the record
-   locked. Verdict converged means zero blocking findings this round.
-6. Rounds: 1 is mandatory per domain; run another only while the last
-   round produced blocking findings; hard cap from the space schema
-   (default 3; a project limits override may change it); residue
-   becomes open questions at the gate. Cross-domain lenses run once at space level
-   before the space closes.
+1. Select proportionate lenses from the lens bank and topic experts; include
+   each lens and its reason in that reviewer's explicit input.
+2. Give each challenger only the named files, the constitution and its lens.
+   Never pass conversation history or an interpretation of the author intent.
+3. Wait for every reviewer in the selected panel before writer action. The
+   owning persona triages returned findings as `fix`, `covered`, `assumption`,
+   `question` or `rejected`, always against concrete evidence.
+4. Write accepted resolutions only into their canonical owning documents.
+   Convert uncertain facts into the stage's existing assumption, open-question
+   or decision structure; do not persist reviewer output as an audit log.
+5. Run the owning compiler and vault check, then re-run only the affected
+   read-only challenge while blocking evidence gaps remain. The final compiler
+   approval is the durable gate evidence.
 
 ## Core Rules
 
-- Context isolation is the point: challengers get FILES ONLY (the target
-  subtree read fully; the space overview, glossary and generated
-  registry summary-only), never the authoring conversation. DON'T brief
-  a challenger on what the analysis "means"; the documents must carry it.
-- Spawned members are read-only by constitution and by capability; every
-  space write in the loop is the analyst's.
-- Severity travels untouched: the challenger's blocking/minor verdict is
-  recorded as returned. A blocking finding forces the next round even
-  when fixed this round; fresh eyes verify fixes.
-- Expert output enters the space only as assumption rows (source
-  labeled), open questions, or draft edits awaiting the gate; a proposal
-  becomes a fact only through the owner's ruling.
-- DON'T pad rounds: a small domain takes a small panel (the lens bank
-  names the floor); zero findings is a legal, welcome round.
+- Challengers are read-only. The owning persona is the single writer.
+- Severity is preserved from the challenge response.
+- Mechanical findings cannot be rejected as stylistic.
+- Small scopes still receive proportionate scrutiny; no filler reviews.
+- Reviewers return findings only. The owning persona is responsible for every
+  canonical edit and waits for all parallel readers before writing.
 
 ## References
 
-- [lens-bank](references/lens-bank.md): the standard lenses with their question stems and panel sizing. Read when casting a round's panel.
-- [expert-casting](references/expert-casting.md): how to write a grounded expert profile for a topic and what to ask it. Read when a domain needs practitioner knowledge the owner cannot supply.
-- [triage](references/triage.md): disposition semantics, the triage audit, and the round record's shape. Read when findings return from a round or when closing a record.
+- [lens-bank](references/lens-bank.md): standard lenses and panel sizing. Read when selecting a challenge panel.
+- [expert-casting](references/expert-casting.md): grounded practitioner questions. Read when a named domain question needs an expert.
+- [triage](references/triage.md): live finding disposition and durable-resolution rules. Read when challenge findings return.

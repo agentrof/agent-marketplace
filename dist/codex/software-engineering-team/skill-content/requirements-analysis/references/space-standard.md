@@ -6,8 +6,7 @@ markdown documents. Authored files are the single source of truth;
 everything derived (index, registries, backlinks, status, question board)
 is generated into <space>/_generated/ by the compiler and protected
 against hand edits. The compiler
-(ba_compile.py, run through the dispatcher per the develop flow's
-state contract) reads its taxonomy from the
+(ba_compile.py) reads its taxonomy from the
 schema data file shipped with the business-analysis skill; this reference
 explains the standard to a human and to the analyst persona. When the two
 ever disagree, the schema and the compiler win: a rule that is not
@@ -26,10 +25,10 @@ machine-checked is not a rule.
   layer labels the graph. Typed content carries its type as the
   schema's English filename suffix (filename_suffix per doc type); the
   compiler refuses a typed file without its suffix, and the vault
-  checker's migrate --rename repairs nonconforming names and rewrites
+  checker's normalize --rename repairs nonconforming names and rewrites
   referrers.
 - Content folders inside any node, created only when non-empty:
-  processes/, entities/, rules/, acceptance/, decisions/, reviews/.
+  processes/, entities/, rules/, acceptance/, decisions/.
 - Cross-domain concerns live ONLY at the root, one home each:
   glossary.md, actors.md, budgets.md,
   integrations/. A domain may carry its own budgets.md for
@@ -92,7 +91,6 @@ separate id key.
 | actor_roster | actors.md (root) | AS, OQ | actors, roles, permission vocabulary |
 | budget_set | budgets.md (root or domain) | AS, OQ | all six non-functional categories, empty ones written as "none stated, confirmed" |
 | integration | integrations/<slug>-integration.md (root) | AS, OQ | carries system_name and direction; exchange, failure semantics, ownership |
-| challenge_record | reviews/round-<n>-review.md | CH | round files with the review suffix (space rounds: space-round-<n>-review.md); the challenge loop's audit record; see the challenge-review skill |
 
 Required sections carry language-neutral anchors so the checker never
 parses translated heading text: the H2 text is free (it follows the
@@ -126,7 +124,7 @@ without at least one process, one rule_set and one acceptance_set.
 ## Ids
 
 Format: KIND-CODE-NNN (BR-INV-004, AC-FIN-012, OQ-ERP-003). KIND is one
-of BR, AC, AS, OQ, DEC, CH. CODE is the nearest enclosing node's code:
+of BR, AC, AS, OQ, DEC. CODE is the nearest enclosing node's code:
 2 to 4 uppercase letters, declared once in the node overview's
 frontmatter, unique across the whole space. LEG is reserved.
 
@@ -134,7 +132,7 @@ frontmatter, unique across the whole space. LEG is reserved.
   English snake_case headers of its kind, in the section its kind owns.
   A rule stated in a paragraph does not exist for the registry.
 - Minting discipline: BR only in rule_set docs, AC only in
-  acceptance_set, DEC only in decision, CH only in challenge_record;
+  acceptance_set, DEC only in decision;
   AS and OQ in any authored doc's Assumptions / Open Questions tables.
 - Ids are permanent. A number is never reused and never renumbered;
   retirement is a row status. Moving a doc between domains re-mints its
@@ -151,12 +149,12 @@ frontmatter, unique across the whole space. LEG is reserved.
   ```
 
   TABLE CELLS in schema-declared id-citation columns (cites, affects,
-  blocks, targets, verify) carry the SAME link in escaped-pipe form
+  blocks, verify) carry the SAME link in escaped-pipe form
   (`[[path\|BR-INV-001]]`); the compiler normalizes cells back to bare
   ids for the registry and statement hashes, so cell rewrites never
   change machine identity, and a bare id left in a citation cell is an
-  error the vault checker's migrate verb rewrites.
-- AS and OQ rows carry opened_on dates, pasted from the PMO CLI's
+  error the vault checker's normalize verb rewrites.
+- AS and OQ rows carry opened_on dates, pasted from the local compiler's
   `now --date` output (never typed from memory; the compiler rejects a
   future date); the compiler flags open rows older than the schema
   threshold. The assumption-aging principle is machine-checked, not
@@ -171,15 +169,17 @@ row, a dead link, or a missing section.
 
 Computed roll-ups (never authored): node status is the minimum over its
 subtree; FOUNDATION APPROVED means space.md, glossary.md,
-actors.md and budgets.md are approved; a domain is
-BUILDABLE when the foundation is approved, its subtree is approved, its
-challenge gate is satisfied and every id it cites across domain lines
-has an approved owner.
+actors.md and budgets.md are approved; a domain is BUILDABLE when the
+foundation is approved, its subtree is approved, live read-only challenge has
+no blocking finding, and every id it cites across domain lines has an approved
+owner. Challenge results are resolved into the owning documents, not stored as
+a separate review history.
 
 The minimal approvable unit is the domain node. Downstream flows read
 buildability per domain: a demo touching only inventory does not wait
-for the payroll analysis. The whole-space gate additionally requires the
-space-level challenge round when child domains exist.
+for the payroll analysis. The whole-space workflow additionally runs a fresh
+cross-domain challenge when child domains exist; final approval still depends
+only on the resolved canonical documents and their checks.
 
 ## Formatting
 
@@ -239,21 +239,20 @@ space-level challenge round when child domains exist.
   A retired doc leaves the map the same way. The space's FIRST content
   also materializes the map seed and adds the home map line (the
   business-analysis entry owns that duty).
-- The vault checker runs at every gate alongside the compiler; frozen
-  docs are passed as repeated --exclude flags and surface as named
-  warnings, never silently skipped.
-- Deterministic format repairs go through the vault checker's migrate
-  verb. Migrate is format-only and sanctioned on approved docs: it never
+- The vault checker runs at every gate alongside the compiler. Repeated
+  `--exclude` flags are permitted only for an explicitly reviewed repair
+  scope and surface as named warnings; exclusion is not durable state.
+- Deterministic format repairs go through the vault checker's `normalize`
+  verb. Normalize is format-only and sanctioned on approved docs: it never
   touches status and never stamps.
 
 ## Rename and restructure runbook
 
 1. Renames are grammar work, not grep work: run the vault checker's
-   `migrate --rename --dry-run --json` for the plan (each source -> target
-   pair with its referrer count; renames whose referrers include a
-   frozen path are listed as blocked_by_frozen_referrer and stay
-   deferred until release).
-2. Execute `migrate --rename`: it renames and rewrites every referrer
+   `normalize --rename --dry-run --json` for the plan (each source -> target
+   pair with its referrer count; renames whose referrers include an explicitly
+   excluded path are listed as `blocked_by_excluded_path`).
+2. Execute `normalize --rename`: it renames and rewrites every referrer
    across the whole vault (body links, frontmatter values, map rows)
    in one operation; already-compliant files are skipped.
 3. Moving a doc between nodes is still a manual move first: relocate

@@ -92,13 +92,6 @@
       }
     },
     {
-      "query": "tag:#doc/challenge-record",
-      "color": {
-        "a": 1,
-        "rgb": 10394916
-      }
-    },
-    {
       "query": "tag:#doc/landscape",
       "color": {
         "a": 1,
@@ -152,6 +145,111 @@
       "color": {
         "a": 1,
         "rgb": 9741240
+      }
+    },
+    {
+      "query": "tag:#doc/backlog",
+      "color": {
+        "a": 1,
+        "rgb": 11032055
+      }
+    },
+    {
+      "query": "tag:#doc/backlog-review",
+      "color": {
+        "a": 1,
+        "rgb": 16007006
+      }
+    },
+    {
+      "query": "tag:#doc/epic",
+      "color": {
+        "a": 1,
+        "rgb": 3900150
+      }
+    },
+    {
+      "query": "tag:#doc/epic-review",
+      "color": {
+        "a": 1,
+        "rgb": 16096779
+      }
+    },
+    {
+      "query": "tag:#doc/story",
+      "color": {
+        "a": 1,
+        "rgb": 1357990
+      }
+    },
+    {
+      "query": "tag:#doc/test-plan",
+      "color": {
+        "a": 1,
+        "rgb": 2278750
+      }
+    },
+    {
+      "query": "tag:#doc/issue-report",
+      "color": {
+        "a": 1,
+        "rgb": 14513808
+      }
+    },
+    {
+      "query": "tag:#doc/requirement",
+      "color": {
+        "a": 1,
+        "rgb": 9323693
+      }
+    },
+    {
+      "query": "tag:#doc/definition-of-done",
+      "color": {
+        "a": 1,
+        "rgb": 1482885
+      }
+    },
+    {
+      "query": "tag:#doc/delivery",
+      "color": {
+        "a": 1,
+        "rgb": 2388387
+      }
+    },
+    {
+      "query": "tag:#doc/execution-plan",
+      "color": {
+        "a": 1,
+        "rgb": 14059792
+      }
+    },
+    {
+      "query": "tag:#doc/delivery-item",
+      "color": {
+        "a": 1,
+        "rgb": 2267476
+      }
+    },
+    {
+      "query": "tag:#doc/code-review",
+      "color": {
+        "a": 1,
+        "rgb": 6000633
+      }
+    },
+    {
+      "query": "tag:#doc/verification",
+      "color": {
+        "a": 1,
+        "rgb": 1549705
+      }
+    },
+    {
+      "query": "tag:#doc/delivery-review",
+      "color": {
+        "a": 1,
+        "rgb": 12154638
       }
     }
   ],

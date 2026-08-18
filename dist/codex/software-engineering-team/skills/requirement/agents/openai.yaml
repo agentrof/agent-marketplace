@@ -1,0 +1,6 @@
+interface:
+  display_name: "Requirement"
+  short_description: "Start the Requirement guided workflow"
+  default_prompt: "Use $software-engineering-team:requirement to start this workflow."
+policy:
+  allow_implicit_invocation: false

@@ -2,7 +2,7 @@
 
 How to cut an approved brief into stories. The unit throughout is
 the story: one review unit, independently revertable, a backlog entry
-with its own Definition of Done. It is not a sprint story; nothing here
+with its own Definition of Done. It is a Delivery Item; nothing here
 assumes iterations or estimates.
 
 Every worked example slices the same generic brief: at Acme Corp, members
@@ -139,7 +139,7 @@ The slice is not a story when:
   observable, never into a grab-bag.
 - Merge two stories only when they cite the same brief criterion and
   neither is verifiable alone; propose the merge at a checkpoint (splits
-  and merges need owner approval, never happen silently).
+  and merges need project decision authority approval, never happen silently).
 - Never merge across concerns to shorten the backlog; two concerns stay
   two stories even when both are small.
 

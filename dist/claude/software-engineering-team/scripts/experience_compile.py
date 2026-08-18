@@ -257,7 +257,7 @@ def experience_parent(note: Path, root: Path) -> Path | None:
             return parent_domain
         return note.parent.parent.parent / "space.md"
     if any(value in parts for value in (
-            "journeys", "flows", "screens", "artifacts", "reviews")):
+            "journeys", "flows", "screens", "artifacts")):
         owner = note.parent.parent
         return owner_note_for(owner)
     return None
@@ -417,7 +417,7 @@ def record_from(path: Path, release: Path, schema: dict) -> tuple[dict | None, l
     doc_type = str(fm.get("type", ""))
     if doc_type not in {
         "release", "experience-space", "experience-domain", "journey",
-        "flow-set", "screen", "challenge-record", "artifact-manifest",
+        "flow-set", "screen", "artifact-manifest",
     }:
         return None, [Finding(rel, "document_type", f"unsupported type {doc_type!r}")]
     schema_type = doc_type.replace("-", "_")
@@ -834,7 +834,6 @@ def compile_program(directory: Path, schema: dict) -> tuple[dict, list[Finding]]
         releases.append({
             "release_id": release_id,
             "status": str(release_fm.get("status", "")),
-            "challenge_status": str(release_fm.get("challenge_status", "")),
             "inherits": str(compiled.get("inherits", "")),
             "registry_hash": str(compiled.get("registry_hash", "")),
         })
@@ -933,10 +932,7 @@ def cmd_init_release(args) -> int:
             program_fm["status"] = "draft"
             if prior_hash:
                 program_fm["supersedes_registry_hash"] = prior_hash
-            for key in (
-                "approved_at_utc", "registry_hash", "challenge_status",
-                "challenge_hash",
-            ):
+            for key in ("approved_at_utc", "registry_hash"):
                 program_fm.pop(key, None)
             tags = program_fm.get("tags", [])
             if isinstance(tags, list):
@@ -955,7 +951,7 @@ def cmd_init_release(args) -> int:
         if args.constrained_by:
             fields["constrained_by"] = args.constrained_by
         write_note(note, fields, args.title or args.release, "Release scope, experience delta and gate record.")
-    for child in ("spaces", "journeys", "screens", "artifacts", "reviews", GENERATED):
+    for child in ("spaces", "journeys", "screens", "artifacts", GENERATED):
         (directory / child).mkdir(exist_ok=True)
     print(directory)
     return 0
@@ -1096,12 +1092,8 @@ def cmd_check(args) -> int:
                 findings.append(Finding("program.md", "program_gate", "program status is not approved"))
             elif gate_fm.get("registry_hash") != registry.get("registry_hash"):
                 findings.append(Finding("program.md", "program_gate", "approved program registry hash is stale"))
-            if gate_fm.get("challenge_status") != "approved" \
-                    or not str(gate_fm.get("challenge_hash", "")).startswith("sha256:"):
-                findings.append(Finding("program.md", "challenge_gate", "approved challenge evidence is missing"))
             for release in registry.get("releases", []):
-                if release.get("status") != "approved" \
-                        or release.get("challenge_status") != "approved":
+                if release.get("status") != "approved":
                     findings.append(Finding(
                         f"releases/{str(release.get('release_id', '')).lower()}/release.md",
                         "release_gate",
@@ -1138,8 +1130,6 @@ def cmd_check(args) -> int:
         if gate_fm.get("status") == "approved" \
                 and gate_fm.get("registry_hash") != registry.get("registry_hash"):
             findings.append(Finding("release.md", "release_gate", "approved release registry hash is stale"))
-        if gate_fm.get("challenge_status") != "approved" or not str(gate_fm.get("challenge_hash", "")).startswith("sha256:"):
-            findings.append(Finding("release.md", "challenge_gate", "approved challenge evidence is missing"))
         if not (release / GENERATED / "effective-registry.json").is_file():
             findings.append(Finding(f"{GENERATED}/effective-registry.json", "generated_freshness", "render is required before gate"))
     if args.json and not findings:
@@ -1249,10 +1239,6 @@ def cmd_stamp(args) -> int:
     if fm.get("status") == "approved":
         return fail(f"{'program' if is_program else 'release'} is already approved")
     fm["status"] = "approved"
-    if not args.challenge_hash.startswith("sha256:"):
-        return fail("stamp requires the compiler-verified challenge hash", 2)
-    fm["challenge_status"] = "approved"
-    fm["challenge_hash"] = args.challenge_hash
     tags = fm.get("tags", [])
     if isinstance(tags, list):
         fm["tags"] = [value for value in tags
@@ -1474,8 +1460,6 @@ def build_parser() -> argparse.ArgumentParser:
             p.add_argument("--gate", action="store_true"); p.add_argument("--changed", action="store_true"); p.add_argument("--json", action="store_true")
         if name == "resolve":
             p.add_argument("--id", required=True); p.add_argument("--revision", type=int)
-        if name == "stamp":
-            p.add_argument("--challenge-hash", required=True)
         p.set_defaults(func=handler)
     p = sub.add_parser("diff"); p.add_argument("--previous", required=True); p.add_argument("--current", required=True); p.set_defaults(func=cmd_diff)
     for name, handler in (

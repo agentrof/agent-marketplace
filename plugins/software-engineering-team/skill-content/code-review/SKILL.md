@@ -56,7 +56,7 @@ DON'T inflate to look thorough or deflate to pass the gate.
 ## Single Evolving Record
 
 One finding set per review loop, evolving across re-reviews. The
-canonical copy lives in the orchestrator's PMO database; the spawn
+canonical copy lives in the orchestrator's tracked project documents; the spawn
 prompt hands you the currently open findings, and your reply returns the
 updated set for the orchestrator to record.
 

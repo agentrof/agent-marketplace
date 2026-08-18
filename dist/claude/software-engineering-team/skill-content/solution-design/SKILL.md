@@ -1,39 +1,48 @@
 ---
 name: solution-design
-description: Interactive end-to-end solution design for technologies, platforms, products, topology, methods, integration, orchestration, and sustainability. Use for landscape-level decisions and debates, never per-story implementation design.
+description: Interactive, file-first solution landscape and decision workflow after approved Business Analysis and before Design System, Experience Design and backlog planning.
 exposure: entry
 ---
 
 # Solution Design
 
-Run one conversational solution-architect session over the living
-`workspace/docs/solution-design/` tree. Record every accepted verdict as a
-decision; nothing decided may remain only in conversation.
+Maintain one project-level solution landscape under
+`workspace/docs/solution-design/`. Every accepted technology, boundary,
+integration, method and sustainability verdict becomes a linked Markdown
+decision. Nothing decided remains only in conversation.
 
 ## When to Use
 
-- Use for landscape-level technology, platform, product, topology, method,
-  integration, orchestration, or sustainability decisions.
-- Do not use for per-story design; develop step 1 owns those deltas.
+- Business Analysis has an approved scope and the project needs landscape or
+  architecture decisions.
+- A later product change revisits an existing solution decision.
 
 ## Procedure
 
-1. Read [engagement-session.md](references/engagement-session.md) completely
-   before starting or resuming a solution-design session. It owns preflight,
-   grounding, engagement workflow, challenge, gate, PMO pulse, and scope.
-2. Adopt the solution-architect role in this conversation, never as a spawn.
-   Read the team constitution and the `solution-architect` agent contract
-   through the dispatcher. Load its bound `solution-architecture` and
-   `obsidian-vault` skills, including every reference selected by the session
-   protocol.
-3. Work one engagement topic at a time. Keep a single living landscape,
-   append-only engagement history, atomic decision notes, recorded review
-   rounds, typed traceability, and an immediately rendered decision index.
-4. Run the mandatory fresh-context, read-only challenge round before the
-   choice gate. Triage every finding as fix, reject with reason, or defer with
-   a named gate note.
-5. Run every mechanical gate in the session protocol. Ask Approve, Request
-   changes, or Pause through the choice gate. On approval, stamp through the
-   owning verbs, fold the verdict into the landscape, render relations and
-   navigation, update the map/home edge, append the PMO pulse, and commit the
-   complete tree.
+1. Read `references/engagement-session.md`, the team constitution, the
+   `solution-architecture` skill and the `obsidian-vault` skill. Confirm the
+   local workspace config belongs to the Software Engineering Team.
+2. Run the Business Analysis approval gate for every cited scope, then run:
+
+   ```text
+   landscape_check.py --tree workspace/docs/solution-design
+   vault_check.py check --vault workspace/docs --scope solution-design --json
+   ```
+
+   Run the packaged scripts.
+
+   A missing or failing predecessor routes back to Business Analysis. The
+   approved documents are the complete stage state.
+3. Work one kebab-case engagement topic at a time. Record framing, constraints,
+   options, rejected alternatives, verdict, affected components and exact
+   traceability links in `engagements/` and `decisions/`.
+4. Run a fresh read-only challenge panel before the project decision gate.
+   Apply accepted resolutions to the canonical documents, then re-run only
+   affected readers until no blocking evidence gap remains. Reviewer replies
+   are transient input, not files. Render the decision index, relations and
+   navigation after each accepted change.
+5. Ask the owner to Approve, Request changes or Pause through the host choice
+   gate. On approval, stamp the engagement with its compiler, update the
+   landscape and maps, run the complete checks, and commit the tree.
+6. When the landscape is approved, report `design-system` as the next entry.
+   This skill never creates implementation tasks or delivery state.

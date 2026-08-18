@@ -1,10 +1,11 @@
 # Graph and Payload
 
-The committed `.obsidian/` payload makes every clone of the vault open
-the same way: same link format, same labels, same graph clusters, same
-property types, same brand. Setup materializes it from `templates/vault/`
-per-file, only where missing; the vault check asserts the
-contract-bearing keys.
+The tracked `.obsidian/` contract files make every clone of the vault open with
+the same link format, graph clusters, property types and brand. Setup
+materializes missing files from `templates/vault/` and refreshes only the
+policy-owned keys in existing JSON, preserving unasserted user knobs. The
+community-plugin enable list and vendored plugin directory are a separate,
+gitignored local package projection recreated on each machine.
 
 The whole `workspace/docs/` directory is the vault. Every subtree participates
 in the same global graph, backlinks index and local graph. A Solution decision
@@ -12,7 +13,7 @@ can cite Business Analysis, an Experience screen can cite that decision and
 Design System, and an ADR can cite the screen. Folder boundaries do not limit
 Obsidian link resolution.
 
-## Committed files and their sentinels
+## Tracked contract files and local projection
 
 - `app.json`: `useMarkdownLinks: false`, `newLinkFormat: "absolute"`,
   `alwaysUpdateLinks: true`, `attachmentFolderPath` = the policy
@@ -22,11 +23,12 @@ Obsidian link resolution.
 - `core-plugins.json`: the core set with the bases plugin off in this
   generation; base-file views are off because hubs must be markdown
   notes: only real wikilinks draw edges.
-- `community-plugins.json`: exactly the policy's vetted
-  `community_plugins` set, today the front-matter title display plugin
-  vendored under `plugins/`. Anything not on the policy list stays
-  banned; the payload check holds the enable list, the vendored
-  directory and the policy in parity.
+- `community-plugins.json`: a gitignored package projection containing exactly
+  the policy's vetted `community_plugins` set, today the front-matter title
+  display plugin vendored under `plugins/`. Anything not on the policy list
+  stays banned. Refresh updates changed package files and removes assets retired
+  from a policy-owned plugin directory, while leaving unrelated plugin
+  directories alone.
 - `graph.json`: the GLOBAL graph's committed contract: its search
   filter and ordered color groups mirror the policy's `graph_search`
   and named `graph_color_groups`. Each policy record binds a stable id,
@@ -40,15 +42,19 @@ Obsidian link resolution.
   restores drift, so property types never fork per machine.
 - `snippets/brand.css` (enabled via `appearance.json`): house accent,
   heading and callout colors and graph variables, in light AND dark
-  theme selectors; no layout overrides.
+  theme selectors; no layout overrides. The stylesheet is package-owned and
+  refreshes byte-for-byte. Refresh also ensures `enabledCssSnippets` contains
+  `brand`, while preserving every other snippet and project-selected
+  `appearance.json` knob.
 
 ## The vendored title plugin
 
 Graph, explorer, search and tab labels come from each note's `title`
 frontmatter, not its filename, through ONE vetted community plugin:
-the front-matter title plugin, pinned at release 4.1.1 and vendored
-verbatim (`manifest.json`, `main.js`, our `data.json`, its LICENSE)
-under `templates/vault/.obsidian/plugins/`. The plugin is GPL-3.0
+  the front-matter title plugin, pinned at release 4.1.1 and vendored
+  verbatim (`manifest.json`, `main.js`, our `data.json`, its LICENSE)
+  under the package's `templates/vault/.obsidian/plugins/`. Setup projects that
+  directory into the consuming vault as ignored local runtime. The plugin is GPL-3.0
 licensed (not MIT); it ships with its license text intact as an
 independent aggregated component beside this plugin's own content, so
 its copyleft binds the vendored bundle only.
@@ -84,7 +90,7 @@ the queries, first match wins. Every type in the taxonomy owns a color:
 
 - One `tag:#doc/<type-kebab>` group per doc type, across all trees:
   space, domain, glossary, actor-roster, budget-set, entity, process,
-  rule-set, acceptance-set, decision, challenge-record, integration,
+  rule-set, acceptance-set, decision, integration,
   landscape, engagement, design-master, page-override.
 - `tag:#doc/moc OR tag:#doc/home`: the navigation layer as one group.
 - Completeness is machine-guarded: the marketplace validator errors on
@@ -112,10 +118,10 @@ knowledge.
 
 `workspace.json`, `workspace-mobile.json` and `.trash/` are the
 gitignored UI state. New vaults receive the standard palette exactly.
-Later color edits in an existing `graph.json` are treated as user
-overrides and the migrate verb preserves them. Run
-`"$RUN" run "$TEAM" scripts/vault_check.py standardize-graph-colors --vault workspace/docs`
-to discard those overrides and restore every standard color. Global-graph
+Policy-owned graph color groups and search always converge during project
+refresh. Other graph keys remain user overrides. Run the packaged
+`vault_check.py standardize-graph-colors --vault workspace/docs` to restore the
+standard colors explicitly during vault repair. Global-graph
 forces beyond the committed groups and search, and every local-graph
 setting, are per-user; teach owners the local graph (depth 1-2) as the
 daily tool and the global graph as the onboarding and QA view.

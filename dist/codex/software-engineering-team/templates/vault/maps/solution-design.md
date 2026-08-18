@@ -7,9 +7,8 @@ tags:
 
 # Solution Design
 
-The landscape, its engagements, review rounds and the generated
-decision index. The solution architect curates this map at every gate;
-locked review rounds get their inbound edge here, decision notes get
-theirs from the index rows.
+The landscape, its engagements and the generated decision index. The Solution
+Architect curates this map at every gate; decision notes receive their inbound
+edge from the index rows.
 
 No tree yet. The solution-design entry births it and adds the links.

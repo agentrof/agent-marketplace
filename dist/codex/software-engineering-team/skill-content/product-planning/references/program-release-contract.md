@@ -1,25 +1,15 @@
-# Program and Release Plan Contract
+# Experience References in the Backlog
 
-The transient JSON plan is compiler input. PMO is the only durable writer.
+Approved Experience Design notes remain the source for journeys, screens and
+release boundaries; stories link to those notes from ordinary front matter or
+the acceptance section.
 
-- `program_id`, ordered releases, epics and stories use stable IDs. Every epic
-  has a goal. Every story has one epic and one release.
-- Every release names its exact effective Experience Design registry path and
-  hash. Backward cross-release dependencies are invalid.
-- Criteria are qualified as `<space>:<criterion-id>`. Migrated unverified
-  criteria alone use `legacy:<criterion-id>`.
-- Every story carries one delivery owner, a supporting-role list, solution and
-  budget refs, structured DoR and DoD lists, and exact UX refs such as
-  `PRG-001:SCR-001@r2` when `ui` is true.
-- A dependency is `{item, reason}` and points to consumed output. SHARES is
-  `{left, right, subject}` for a shared contract that is not an ordering edge.
-- Deferred stories carry reason, owner and revisit trigger. No criterion is
-  silently dropped.
-- Feature mode declares `execution_set`: requested feature stories plus only
-  user-approved unfinished transitive prerequisites. Completed prerequisites
-  remain outside it. Active and completed story contracts are immutable.
-- The plan declares every expected domain gate. Reviewer, domain,
-  reconciliation and program decisions are append-only PMO records tied to the
-  current plan hash. Approval and atomic apply do not activate a release.
-- Reviewer-driven draft changes are new revisions of the same active plan.
-  Prior gate decisions stay in history and cannot approve the new hash.
+- Keep stable IDs and exact vault paths for every cited experience artifact.
+- Do not cite an unapproved or superseded experience revision.
+- A story that is deferred records an owner and revisit trigger in its own
+  Markdown.
+- A story's `criterion_refs`, `experience_refs`, `depends_on`, `uses_design`
+  and `constrained_by` are vault-absolute wikilinks checked by the backlog
+  compiler; no hidden import step fills missing values.
+- Backlog approval prepares Delivery Scope. It does not activate a release or
+  reserve a Delivery.

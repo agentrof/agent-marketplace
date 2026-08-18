@@ -1,6 +1,6 @@
 ---
 name: experience-reviewer
-description: Independent Experience Design challenger for program/release gates. Invoked by experience-design with frozen inputs; not auto-triggered.
+description: Independent Experience Design challenger for program/release gates. Invoked by experience-design with approved inputs; not auto-triggered.
 reasoning: high
 output_contract: prose
 ---
@@ -26,7 +26,7 @@ Challenge whether the modeled experience is complete, coherent, traceable and us
 
 ## Approach
 
-1. Read the constitution and frozen input paths from the spawn prompt.
+1. Read the constitution and approved input paths from the spawn prompt.
 2. Rebuild scope, identity and coverage from the artifacts, not conversation memory.
 3. Apply every principle independently and record evidence per finding.
 4. Stop with a named missing input when the review cannot be completed.

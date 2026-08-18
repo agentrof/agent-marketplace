@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Mechanical post-step artifact check for the develop flow.
+"""Mechanical post-step artifact check for document workflows.
 
 The artifact must exist, be non-empty, and carry every required section
 heading. This turns the flow's post-step check into a script with an exit

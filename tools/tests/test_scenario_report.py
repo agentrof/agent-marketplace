@@ -68,6 +68,50 @@ class ScenarioReportMatching(unittest.TestCase):
         self.assertEqual(code, 0)
         self.assertIn('"verdict": "PASS"', out)
 
+    def test_canonical_qualified_rule_criterion_and_story_scenario_ids(self):
+        brief = (
+            "- [[business-analysis/erp/acceptance|erp:AC-INV-001]]\n"
+            "- [[business-analysis/erp/rules|erp:BR-INV-002]]\n"
+            "## ST-007-TS-003\n"
+        )
+        xml = junit([
+            "test_receipt[erp:AC-INV-001]",
+            "test_stock_rule[ERP:BR-INV-002]",
+            "test_boundary[ST-007-TS-003]",
+        ])
+        code, out = self.run_report(brief, xml)
+        self.assertEqual(code, 0, out)
+        self.assertIn("| ERP:AC-INV-001", out)
+        self.assertIn("| ERP:BR-INV-002", out)
+        self.assertIn("| ST-007-TS-003", out)
+
+    def test_qualified_identity_does_not_create_a_second_bare_row(self):
+        code, out = self.run_report(
+            "[[business-analysis/erp/acceptance|erp:AC-INV-001]]\n",
+            junit(["test_receipt[erp:AC-INV-001]"]),
+        )
+        self.assertEqual(code, 0, out)
+        rows = [line for line in out.splitlines() if line.startswith("| ERP:")]
+        self.assertEqual(len(rows), 1)
+        self.assertNotIn("| AC-INV-001", out)
+
+    def test_qualified_test_tag_does_not_satisfy_an_unqualified_identity(self):
+        code, out = self.run_report(
+            "- AC-INV-001\n",
+            junit(["test_receipt[erp:AC-INV-001]"]),
+        )
+        self.assertEqual(code, 1, out)
+        self.assertIn("| AC-INV-001", out)
+        self.assertIn("NO-TEST", out)
+
+    def test_scenario_identity_uses_the_backlog_story_id_grammar(self):
+        code, out = self.run_report(
+            "## AUTH-01-TS-003\n",
+            junit(["test_authorization[AUTH-01-TS-003]"]),
+        )
+        self.assertEqual(code, 0, out)
+        self.assertIn("| AUTH-01-TS-003", out)
+
     def test_determinism(self):
         brief = "- BR-001: rule.\n- AC-001: criterion.\n"
         xml = junit(["test_a[BR-001]"])

@@ -7,7 +7,6 @@ import argparse
 import hashlib
 import json
 import re
-import sys
 from html.parser import HTMLParser
 from pathlib import Path
 from urllib.parse import urlparse

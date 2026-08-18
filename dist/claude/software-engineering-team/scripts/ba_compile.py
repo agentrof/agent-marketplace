@@ -12,7 +12,7 @@ project's workspace/config.json may relax thresholds over those shipped
 defaults (a scale level plus per-key limits; precedence limits > scale >
 shipped), every finding names its effective value and source, and the
 volume warnings form an advisory class: split PROPOSALS grouped in
-status.md, acted on only with explicit owner approval.
+status.md, acted on only with explicit project decision authority approval.
 
 Subcommands:
   init          create a new space skeleton
@@ -53,6 +53,12 @@ ABSOLUTE_PATH_RE = re.compile(r"(?:^|[\s\"'`(=])(?:/Users/|/home/|[A-Za-z]:\\\\|
 LINK_RE = re.compile(r"\[([^\]]+)\]\(([^)\s]+)(?:\s+\"[^\"]*\")?\)")
 # Vault wikilink grammar, shared with vault_check (single parsing home).
 WIKILINK_RE = re.compile(r"(?P<embed>!?)\[\[(?P<inner>[^\[\]\n]+?)\]\]")
+GENERATED_BODY_BLOCKS = (
+    ("## Related knowledge <!-- sec: relations:generated:start -->",
+     "<!-- sec: relations:generated:end -->"),
+    ("## Contents <!-- sec: structural:generated:start -->",
+     "<!-- sec: structural:generated:end -->"),
+)
 INLINE_CODE_RE = re.compile(r"`[^`]*`")
 
 
@@ -87,7 +93,7 @@ def normalize_cell(cell: str) -> str:
     return WIKILINK_RE.sub(collapse, cell).strip()
 SEC_RE = re.compile(r"<!--\s*sec:\s*([a-z_]+)\s*-->")
 DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
-NAMESPACED_ID_RE = re.compile(r"\b(BR|AC|AS|OQ|DEC|CH)-([A-Z]{2,4})-(\d{3,})\b")
+NAMESPACED_ID_RE = re.compile(r"\b(BR|AC|AS|OQ|DEC)-([A-Z]{2,4})-(\d{3,})\b")
 BARE_ID_RE = re.compile(r"\b(BR|AC|AS|OQ|DEC)-(\d{3,})\b")
 
 
@@ -118,24 +124,6 @@ def root_file_rels(schema: dict) -> list[str]:
             for t in ("space", "glossary", "actor_roster", "budget_set")]
 
 
-def _format_re(fmt: str) -> re.Pattern:
-    pattern = re.escape(fmt).replace(re.escape("{n}"), r"(\d+)")
-    return re.compile(f"^{pattern}$")
-
-
-def round_file_re(schema: dict) -> re.Pattern:
-    return _format_re(schema["challenge"]["round_file_format"])
-
-
-def space_round_file_re(schema: dict) -> re.Pattern:
-    return _format_re(schema["challenge"]["space_round_file_format"])
-
-
-def round_file_name(schema: dict, scope: str, n: int | str) -> str:
-    key = ("space_round_file_format" if scope == "space"
-           else "round_file_format")
-    return schema["challenge"][key].format(n=n)
-
 # Every check id this compiler can emit. The test suite's builder registry
 # stays in lockstep with this tuple: a check without a firing fixture
 # cannot merge (same doctrine as tools/validate.py).
@@ -143,7 +131,7 @@ CHECK_IDS = (
     "space_layout", "frontmatter_schema", "status_legality",
     "required_sections", "summary_caps", "content_bans", "dead_links",
     "id_format", "id_unique", "id_minting", "id_links", "row_schema",
-    "semantic_links", "approval_preconditions", "challenge_record",
+    "semantic_links", "approval_preconditions",
     "br_uncited", "thresholds", "aging", "gate_approval",
     "generated_freshness", "future_dates", "identifier_shape",
     "diagram_identifiers",
@@ -247,6 +235,22 @@ def parse_frontmatter(text: str) -> tuple[dict, int, str | None]:
             continue
         return fm, i + 1, f"unparseable frontmatter line: {stripped[:40]}"
     return fm, 1, "unterminated frontmatter block"
+
+
+def mask_generated_body_blocks(text: str) -> str:
+    """Blank compiler-owned blocks while preserving authored line numbers."""
+    lines = text.splitlines()
+    masked = list(lines)
+    for start, end in GENERATED_BODY_BLOCKS:
+        active = False
+        for index, line in enumerate(lines):
+            if line.strip() == start:
+                active = True
+            if active:
+                masked[index] = ""
+            if active and line.strip() == end:
+                active = False
+    return "\n".join(masked)
 
 
 def heading_has_emoji(line: str) -> bool:
@@ -518,7 +522,7 @@ def scan_space(space_dir: Path, schema: dict) -> tuple[Space, list[Finding]]:
                 "move the file or fix the type")
         doc = Doc(rel=rel, abs_path=file_path, fm=fm, fm_end=fm_end,
                   doc_type=doc_type, node=node_rel,
-                  lines=text.splitlines())
+                  lines=mask_generated_body_blocks(text).splitlines())
         parse_doc_body(doc)
         space.docs[rel] = doc
 
@@ -623,7 +627,7 @@ def collect_ids(space: Space, findings: list[Finding]) -> None:
                                 f"bare id {m_bare.group(0)} in citation"
                                 f" column '{column}'",
                                 "citation cells carry escaped-pipe wikilinks"
-                                " to the owning doc; vault_check.py migrate"
+                                " to the owning doc; vault_check.py normalize"
                                 " rewrites this class"))
                     id_value = row["id"]
                     m = NAMESPACED_ID_RE.fullmatch(id_value)
@@ -777,7 +781,7 @@ def run_checks(space: Space, base: list[Finding], gate: bool = False,
                 err(rel, 1, "future_dates",
                     f"approved_at {doc.fm['approved_at']} is in the future",
                     "stamps come from the clock: ba_compile.py approve, or"
-                    " paste pmo_cli.py now --date output")
+                    " paste UTC timestamp now --date output")
 
         h1s = [h for h in doc.headings if h[1] == 1]
         if len(h1s) != 1:
@@ -828,7 +832,7 @@ def run_checks(space: Space, base: list[Finding], gate: bool = False,
                     err(rel, lineno, "dead_links",
                         f"vault-internal citation uses a markdown link: {target}",
                         "cite vault content as a vault-absolute wikilink"
-                        " (vault_check.py migrate rewrites this class)")
+                        " (vault_check.py normalize rewrites this class)")
                     continue
             if not resolved.exists():
                 err(rel, lineno, "dead_links",
@@ -903,12 +907,12 @@ def run_checks(space: Space, base: list[Finding], gate: bool = False,
                         err(rel, info["line"], "row_schema",
                             f"{id_value} opened_on is not a YYYY-MM-DD date",
                             "stamp the date the row was opened from the"
-                            " clock: paste pmo_cli.py now --date output")
+                            " clock: paste UTC timestamp now --date output")
                     elif stamp > today:
                         err(rel, info["line"], "future_dates",
                             f"{id_value} opened_on {row['opened_on']} is in"
                             " the future",
-                            "stamps come from the clock: paste pmo_cli.py"
+                            "stamps come from the clock: paste UTC timestamp"
                             " now --date output")
                     elif row.get("status") == "open":
                         age = (today - stamp).days
@@ -943,9 +947,6 @@ def run_checks(space: Space, base: list[Finding], gate: bool = False,
                         "answer, confirm, strike or defer every open row"
                         " before approval")
 
-        if doc.doc_type == "challenge_record":
-            check_challenge_record(space, doc, findings)
-
     check_semantic_links(space, findings)
     check_identifier_language(space, findings)
     check_thresholds(space, findings, warn)
@@ -954,74 +955,6 @@ def run_checks(space: Space, base: list[Finding], gate: bool = False,
     if gate:
         run_gate_checks(space, findings, gate_node)
     return findings
-
-
-def check_challenge_record(space: Space, doc: Doc, findings: list[Finding]) -> None:
-    schema = space.schema
-    rel = doc.rel
-
-    def err(line, message, fix):
-        findings.append(Finding("error", rel, line, "challenge_record", message, fix))
-
-    scope = str(doc.fm.get("review_scope", ""))
-    if scope not in schema["row_enums"]["challenge_review_scope"]:
-        err(1, f"review_scope '{scope}' not in enum", "domain or space")
-    verdict = str(doc.fm.get("verdict", ""))
-    if verdict not in schema["row_enums"]["challenge_verdict"]:
-        err(1, f"verdict '{verdict}' not in enum", "converged or continue")
-    round_no = doc.fm.get("round")
-    max_rounds = schema["challenge"]["max_rounds"]
-    rounds_prov = limit_provenance(schema, "challenge_max_rounds")
-    rounds_note = f" (max_rounds{rounds_prov})" if rounds_prov else ""
-    if not isinstance(round_no, int) or not 1 <= round_no <= max_rounds:
-        err(1, f"round '{round_no}' outside 1..{max_rounds}{rounds_note}",
-            "the loop is capped; residue goes to the gate as open questions")
-        round_no = None
-    name = Path(rel).name
-    m = (space_round_file_re(schema).match(name) if scope == "space"
-         else round_file_re(schema).match(name))
-    if not m:
-        expected = round_file_name(schema, scope, "N")
-        err(1, f"filename '{name}' does not match its review_scope '{scope}'",
-            f"round records here are named {expected} (schema-driven)")
-    elif round_no is not None and int(m.group(1)) != round_no:
-        err(1, f"filename round {m.group(1)} disagrees with frontmatter round"
-            f" {round_no}", "the filename carries the round number")
-    if scope == "space" and doc.node != "":
-        err(1, "space-scope record outside the space root",
-            "space rounds live in the root reviews/ folder")
-
-    blocking = 0
-    dispositions = schema["row_enums"]["ch_disposition"]
-    severities = schema["row_enums"]["ch_severity"]
-    for id_value, info in space.ids.items():
-        if info["doc"] != rel or info["kind"] != "CH":
-            continue
-        row = info["row"]
-        if row.get("severity", "") not in severities:
-            err(info["line"], f"{id_value} severity '{row.get('severity', '')}'"
-                f" not in {severities}", "the challenger's verdict, never downgraded")
-        if row.get("severity") == "blocking":
-            blocking += 1
-        disposition = row.get("disposition", "").strip()
-        if disposition not in dispositions:
-            err(info["line"], f"{id_value} disposition '{disposition}' not in"
-                f" {dispositions}", "triage disposes every finding")
-        elif disposition != "rejected" and not row.get("targets", "").strip():
-            err(info["line"], f"{id_value} disposition '{disposition}' names no"
-                " target ids", "covered/fix/assumption/question cite what resolves them")
-        elif disposition == "rejected" and not row.get("targets", "").strip():
-            err(info["line"], f"{id_value} rejection carries no reason",
-                "a rejection states its reason in the targets cell")
-    if verdict == "converged" and blocking:
-        err(1, f"verdict is converged but the round holds {blocking} blocking"
-            " finding(s)", "converged means zero blocking findings this round")
-    if doc.fm.get("locked") is True and doc_status(doc) != "approved":
-        err(1, "locked record is not approved",
-            "closing a round approves and locks it in the same write")
-    if doc_status(doc) == "approved" and doc.fm.get("locked") is not True:
-        err(1, "closed (approved) record is not locked",
-            "set locked: true in the closing write; audit history is immutable")
 
 
 def check_identifier_language(space: Space, findings: list[Finding]) -> None:
@@ -1205,7 +1138,7 @@ def check_thresholds(space: Space, findings: list[Finding], warn) -> None:
              f" {th['space_docs_warn']}"
              f"{limit_provenance(space.schema, 'space_docs_warn')})",
              "propose splitting the topic into multiple spaces; a space split"
-             " needs explicit owner approval")
+             " needs explicit project decision authority approval")
     if total_bytes > th["space_bytes_warn"]:
         warn(space_rel, 1, "thresholds",
              f"split proposal: space totals {total_bytes} bytes (warn at"
@@ -1216,8 +1149,7 @@ def check_thresholds(space: Space, findings: list[Finding], warn) -> None:
 
     for node_rel in sorted(space.nodes):
         own = [d for d in space.docs.values() if d.node == node_rel]
-        direct = [d for d in own if d.doc_type not in
-                  ("space", "domain", "challenge_record")]
+        direct = [d for d in own if d.doc_type not in ("space", "domain")]
         overview_rel = node_overview_rel(space.schema, node_rel)
         if len(direct) > th["node_direct_docs_warn"]:
             warn(overview_rel, 1, "thresholds",
@@ -1255,7 +1187,7 @@ def check_thresholds(space: Space, findings: list[Finding], warn) -> None:
                      f" {th['process_doc_lines_warn']}"
                      f"{limit_provenance(space.schema, 'process_doc_lines_warn')})",
                      "a split proposal: offer a split by workflow stage or"
-                     " variant; owner approval required")
+                     " variant; project decision authority approval required")
             if d.doc_type == "rule_set":
                 count = sum(1 for i in space.ids.values()
                             if i["doc"] == d.rel and i["kind"] == "BR"
@@ -1266,7 +1198,7 @@ def check_thresholds(space: Space, findings: list[Finding], warn) -> None:
                          f" {th['rules_per_set_warn']}"
                          f"{limit_provenance(space.schema, 'rules_per_set_warn')})",
                          "a split proposal: offer a split by governed target;"
-                         " owner approval required")
+                         " project decision authority approval required")
             if d.doc_type == "acceptance_set":
                 count = sum(1 for i in space.ids.values()
                             if i["doc"] == d.rel and i["kind"] == "AC"
@@ -1277,7 +1209,7 @@ def check_thresholds(space: Space, findings: list[Finding], warn) -> None:
                          f" (warn at {th['criteria_per_set_warn']}"
                          f"{limit_provenance(space.schema, 'criteria_per_set_warn')})",
                          "a split proposal: offer a split by flow (main versus"
-                         " exceptions); owner approval required")
+                         " exceptions); project decision authority approval required")
 
         processes = [d for d in own if d.doc_type == "process"]
         if len(processes) >= 2:
@@ -1316,7 +1248,7 @@ def check_thresholds(space: Space, findings: list[Finding], warn) -> None:
                      "split proposal: node's processes touch disjoint"
                      " entity clusters",
                      "the clusters may be separate domains; offer the"
-                     " split, owner approval required")
+                     " split, project decision authority approval required")
 
 
 def check_br_citations(space: Space, findings: list[Finding],
@@ -1350,47 +1282,6 @@ def doc_in_node(space: Space, rel: str, node_rel: str) -> bool:
     return doc.node == node_rel or doc.node.startswith(node_rel + "/")
 
 
-def content_nodes(space: Space) -> list[str]:
-    result = []
-    for node_rel in sorted(space.nodes):
-        own = [d for d in space.docs.values()
-               if d.node == node_rel and d.doc_type in
-               ("process", "entity", "rule_set", "acceptance_set", "integration")]
-        if own:
-            result.append(node_rel)
-    return result
-
-
-def latest_record(space: Space, node_rel: str, scope: str) -> Doc | None:
-    best: Doc | None = None
-    best_round = 0
-    for doc in space.docs.values():
-        if doc.doc_type != "challenge_record" or doc.node != node_rel:
-            continue
-        if str(doc.fm.get("review_scope", "")) != scope:
-            continue
-        round_no = doc.fm.get("round")
-        if isinstance(round_no, int) and round_no > best_round:
-            best, best_round = doc, round_no
-    return best
-
-
-def record_satisfies_gate(space: Space, record: Doc | None) -> str | None:
-    """Return None when the record satisfies the gate, else the reason."""
-    max_rounds = space.schema["challenge"]["max_rounds"]
-    rounds_prov = limit_provenance(space.schema, "challenge_max_rounds")
-    rounds_note = f" (max_rounds{rounds_prov})" if rounds_prov else ""
-    if record is None:
-        return "no challenge record exists"
-    if record.fm.get("locked") is not True:
-        return f"{record.rel} is not closed (locked)"
-    if str(record.fm.get("verdict")) != "converged" \
-            and record.fm.get("round") != max_rounds:
-        return (f"{record.rel} is not converged and is not the final round"
-                f" {max_rounds}{rounds_note}")
-    return None
-
-
 def run_gate_checks(space: Space, findings: list[Finding], gate_node: str) -> None:
     def err(path, line, message, fix):
         findings.append(Finding("error", path, line, "gate_approval", message, fix))
@@ -1412,26 +1303,7 @@ def run_gate_checks(space: Space, findings: list[Finding], gate_node: str) -> No
             err(rel, 1, f"gate-blocking doc is {doc_status(doc)}, not approved",
                 "approve or supersede every gate-blocking doc in the subtree")
 
-    subtree_nodes = [n for n in content_nodes(space)
-                     if gate_node == "" or n == gate_node
-                     or n.startswith(gate_node + "/")]
-    for node_rel in subtree_nodes:
-        overview = node_overview_rel(space.schema, node_rel)
-        reason = record_satisfies_gate(space, latest_record(space, node_rel, "domain"))
-        if reason:
-            err(overview, 1, f"challenge gate unsatisfied: {reason}",
-                "run the challenge loop and close a converged (or final) round")
-
-    has_domains = len(space.nodes) > 1
-    if gate_node == "" and has_domains:
-        reason = record_satisfies_gate(space, latest_record(space, "", "space"))
-        if reason:
-            err(space_overview_rel(space.schema), 1,
-                f"space-level challenge gate unsatisfied: {reason}",
-                "run the cross-domain round before closing the space")
-
-    for folder, type_name in (("processes", "process"), ("rules", "rule_set"),
-                              ("acceptance", "acceptance_set")):
+    for type_name in ("process", "rule_set", "acceptance_set"):
         exists = any(doc_in_node(space, rel, gate_node)
                      and space.docs[rel].doc_type == type_name
                      for rel in space.docs)
@@ -1590,8 +1462,7 @@ def render_views(space: Space, warnings: list[Finding]) -> dict[str, str]:
         if space.nodes[node_rel]:
             lines.append(f"| {space.nodes[node_rel]} | {node_rel or '(root)'} |")
     for kind, heading in (("BR", "Business Rules"), ("AC", "Acceptance Criteria"),
-                          ("AS", "Assumptions"), ("DEC", "Decisions"),
-                          ("CH", "Challenge Findings")):
+                          ("AS", "Assumptions"), ("DEC", "Decisions")):
         ids = sorted((i for i in space.ids if space.ids[i]["kind"] == kind),
                      key=id_sort_key)
         if not ids:
@@ -1615,15 +1486,11 @@ def render_views(space: Space, warnings: list[Finding]) -> dict[str, str]:
 
     def semantic_hash(doc: Document) -> str:
         text = doc.abs_path.read_text(encoding="utf-8")
-        for start, end in (
-            ("## Related knowledge <!-- sec: relations:generated:start -->",
-             "<!-- sec: relations:generated:end -->"),
-            ("## Contents <!-- sec: structural:generated:start -->",
-             "<!-- sec: structural:generated:end -->"),
-        ):
+        for start, end in GENERATED_BODY_BLOCKS:
             text = re.sub(r"\n*" + re.escape(start) + r".*?"
-                          + re.escape(end) + r"\n*", "\n", text,
+                          + re.escape(end) + r"\n*", "\n\n", text,
                           flags=re.DOTALL)
+        text = text.rstrip() + "\n"
         return "sha256:" + hashlib.sha256(text.encode("utf-8")).hexdigest()
 
     registry = {"schema_version": space.schema["schema_version"],
@@ -1692,26 +1559,10 @@ def render_views(space: Space, warnings: list[Finding]) -> dict[str, str]:
         if sum(counts.values()):
             lines.append(f"| {type_name} | {counts['draft']} | {counts['in_review']} |"
                          f" {counts['approved']} | {counts['superseded']} |")
-    lines += ["", "## Challenge coverage", "",
-              "| node | rounds | last_verdict | open_blocking |",
-              "|---|---|---|---|"]
-    for node_rel in content_nodes(space):
-        records = [d for d in space.docs.values()
-                   if d.doc_type == "challenge_record" and d.node == node_rel
-                   and str(d.fm.get("review_scope")) == "domain"]
-        last = latest_record(space, node_rel, "domain")
-        open_blocking = 0
-        if last is not None:
-            for i, info in space.ids.items():
-                if info["doc"] == last.rel and info["kind"] == "CH" \
-                        and info["row"].get("severity") == "blocking":
-                    open_blocking += 1
-        lines.append(f"| {node_rel or '(root)'} | {len(records)} |"
-                     f" {last.fm.get('verdict') if last else ''} | {open_blocking} |")
     if advisories:
         lines += ["", "## Advisories: split proposals", "",
                   "Proposals, not instructions: a domain or space splits only",
-                  "on explicit owner approval, asked through a choice gate;",
+                  "on explicit project decision authority approval, asked through a choice gate;",
                   "a declined proposal is recorded as a",
                   "deferral row in the node's open questions.", ""]
         for w in sorted(advisories, key=lambda f: (f.path, f.line, f.check)):
@@ -1800,7 +1651,6 @@ def load_schema(path: Path) -> dict:
 
 # Flat limits-namespace keys that live outside the thresholds block.
 STRUCTURAL_LIMIT_TARGETS = {
-    "challenge_max_rounds": ("challenge", "max_rounds"),
     "summary_max_lines_space": ("summary_max_lines", "space"),
     "summary_max_lines_default": ("summary_max_lines", "default"),
 }
@@ -1982,9 +1832,9 @@ def write_stub(schema: dict, path: Path, doc_type: str, title: str,
 
 def next_ids(space: Space, code: str) -> dict[str, str]:
     result = {}
-    for kind in ("BR", "AC", "AS", "OQ", "DEC", "CH"):
+    for kind in ("BR", "AC", "AS", "OQ", "DEC"):
         highest = 0
-        for id_value, info in space.ids.items():
+        for id_value in space.ids:
             m = NAMESPACED_ID_RE.fullmatch(id_value)
             if m and m.group(1) == kind and m.group(2) == code:
                 highest = max(highest, int(m.group(3)))
@@ -2093,10 +1943,6 @@ def cmd_stub(args, schema: dict) -> int:
         if args.type == "space":
             extra["code"] = args.code or ""
             aliases = [args.code] if args.code else None
-    elif args.type == "challenge_record":
-        name = round_file_name(schema, args.review_scope, args.round)
-        base = space_dir / node if node else space_dir
-        target = base / loc["folder"] / name
     elif args.type == "decision":
         if not args.slug:
             print("ba_compile: FAIL: folder docs need --slug", file=sys.stderr)
@@ -2138,10 +1984,6 @@ def cmd_stub(args, schema: dict) -> int:
     if args.type == "integration":
         extra["system_name"] = args.slug or ""
         extra["direction"] = args.direction
-    if args.type == "challenge_record":
-        extra["round"] = args.round
-        extra["review_scope"] = args.review_scope
-        extra["verdict"] = "continue"
     if target.exists():
         print(f"ba_compile: FAIL: {target} already exists", file=sys.stderr)
         return 1
@@ -2196,10 +2038,9 @@ def restamp_frontmatter(text: str, stamps: dict) -> str | None:
 
 
 def cmd_approve(args, schema: dict) -> int:
-    """Approve a doc: the script stamps status, the UTC date and (for
-    challenge records) verdict + locked in one write, then re-runs the
-    checks; a doc the compiler rejects is restored untouched. The model
-    never types the date."""
+    """Approve a doc: the script stamps status and the UTC date, then
+    re-runs the checks; a doc the compiler rejects is restored untouched.
+    The model never types the date."""
     space_dir = Path(args.space)
     vault_root = require_vault_root(args)
     if vault_root is None:
@@ -2222,21 +2063,10 @@ def cmd_approve(args, schema: dict) -> int:
               " approval follows review, flip the doc to in_review first",
               file=sys.stderr)
         return 1
-    if doc.doc_type == "challenge_record" and not args.verdict:
-        print("ba_compile: FAIL: a challenge record closes with --verdict",
-              file=sys.stderr)
-        return 2
-    if args.verdict and doc.doc_type != "challenge_record":
-        print("ba_compile: FAIL: --verdict applies only to challenge"
-              " records", file=sys.stderr)
-        return 2
     target = doc.abs_path
     original = target.read_text(encoding="utf-8")
     today = utc_today().isoformat()
     stamps: dict = {"status": "approved", "approved_at": today}
-    if doc.doc_type == "challenge_record":
-        stamps["verdict"] = args.verdict
-        stamps["locked"] = "true"
     updated = restamp_frontmatter(original, stamps)
     if updated is None:
         print(f"ba_compile: FAIL: {rel} has no parseable frontmatter block",
@@ -2257,8 +2087,7 @@ def cmd_approve(args, schema: dict) -> int:
         print(f"ba_compile: FAIL: {rel} does not pass the checks as"
               " approved; original restored", file=sys.stderr)
         return 1
-    closed = f", verdict {args.verdict}, locked" if args.verdict else ""
-    print(f"ba_compile: approved {rel} (approved_at {today}{closed})")
+    print(f"ba_compile: approved {rel} (approved_at {today})")
     return 0
 
 
@@ -2378,8 +2207,6 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--governs", default="")
     p.add_argument("--verifies", default="")
     p.add_argument("--direction", default="outbound")
-    p.add_argument("--round", type=int, default=1)
-    p.add_argument("--review-scope", default="domain")
 
     p = sub.add_parser("check")
     p.add_argument("--space", required=True)
@@ -2392,7 +2219,6 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--space", required=True)
     p.add_argument("--vault-root", default="", dest="vault_root")
     p.add_argument("--doc", required=True)
-    p.add_argument("--verdict", default="")
     p.add_argument("--json", action="store_true")
 
     p = sub.add_parser("render")

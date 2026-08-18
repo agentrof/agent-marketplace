@@ -13,11 +13,22 @@ workspace/docs/            the vault root (open THIS in the vault app)
   maps/                    one map note per content-bearing subtree
   business-analysis/       analysis spaces (space standard governs)
     shop/                  a space: space.md, glossary.md, actors.md,
-                           budgets.md, domains/, decisions/, reviews/,
+                           budgets.md, domains/, decisions/,
                            _generated/
   solution-design/         landscape, engagements, decisions/, index
   system-architecture/     living documents, decisions/, index
   design-system/           MASTER and page overrides
+  backlog/                 delivery backlog, nested by epic
+    backlog.md             canonical project backlog hub
+    reviews/               cross-epic backlog reviews
+    epics/<epic-slug>/     one epic package per folder
+      epic.md              epic hub and scope
+      reviews/             reviews of the epic and every child story
+      stories/<story-slug>/
+        story.md           story scope, criteria and delivery metadata
+        test-plan.md       executable/manual scenario design for the story
+  issues/                  approved issue and improvement reports
+    <issue-slug>.md
   api/                     generated schema exports (non-note subtree)
   _attachments/            embedded binaries only
   .obsidian/               committed payload + local UI state
@@ -34,9 +45,9 @@ policy, never ad hoc.
   `space.md`, `glossary.md`, `actors.md`, `budgets.md`; every domain
   folder holds its own `domain.md`
   (`domains/inventory/domain.md`, nested
-  `domains/finance/domains/accounts-payable/domain.md`); review
-  records are `round-<n>-review.md` (space-level rounds
-  `space-round-<n>-review.md`).
+  `domains/finance/domains/accounts-payable/domain.md`). Live challenge
+  feedback is resolved into canonical records and is not stored as a BA
+  review-round file.
 - Typed content carries its type as the schema's English filename
   suffix: `<slug>-rules.md`, `<slug>-acceptance.md`,
   `<slug>-process.md`, `<slug>-entity.md`, `<slug>-decision.md`,
@@ -46,7 +57,7 @@ policy, never ad hoc.
 - Basenames repeat freely across folders (every domain holds a
   `domain.md`); only a policy-banned generic basename where a
   meaningful slug is due is a per-file error, so a scoped gate repairs
-  its own subtree. Renames go through `migrate --rename`, which renames
+  its own subtree. Renames go through `normalize --rename`, which renames
   per the grammar and rewrites every referrer in one operation.
 
 ## Home and maps
@@ -66,9 +77,12 @@ policy, never ad hoc.
   rows. Every policy hub MUST have an inbound link from its subtree
   map (`map_coverage`); the producing persona updates the map in the
   same session that creates, renames or retires docs.
-- Delivery state (the backlog, the quality ledger) lives in the PMO
-  database and is read through the PMO CLI; the vault holds knowledge,
-  never delivery views, and the graph carries no delivery nodes.
+- Delivery input is canonical Markdown in `backlog/` and is
+  versioned with the project. The compiler derives registry, board, dependency
+  and coverage views under `backlog/_generated/`; these views are disposable
+  and never hand-edited. Execution results belong to the later delivery flow,
+  while story test plans are authored before delivery and are required for
+  backlog approval.
 
 ## Nav sections
 

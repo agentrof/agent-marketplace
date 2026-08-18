@@ -49,7 +49,7 @@ Schema-declared id-citation columns (cites, affects, blocks, targets,
 verify) carry the SAME escaped-pipe wikilink form, targeting the doc
 that mints the id: `[[business-analysis/shop/domains/inventory/rules/stock-item-lifecycle-rules\|BR-INV-001]]`.
 The compiler normalizes citation cells back to bare ids for the registry.
-A bare id left in a citation cell is an error the `migrate` verb rewrites.
+A bare id left in a citation cell is an error the `normalize` verb rewrites.
 The ONE place a bare id stays legal is its mint: the id
 column of the owning row, where a wikilink is the error instead.
 
@@ -63,14 +63,15 @@ column of the owning row, where a wikilink is the error instead.
 ## Renames
 
 Headless renames are owned by the checker, not by the vault app or a
-manual grep: `vault_check.py migrate --rename [--dry-run] [--json]` builds
+manual grep: `vault_check.py normalize --rename [--dry-run] [--json]` builds
 the grammar-driven rename map (plain named files, type-suffixed content
 notes; already-compliant files are skipped), then renames and
 rewrites every referrer across the WHOLE vault (body links, frontmatter
 values, map rows) in one operation, even when `--scope` narrows the
 map; generated views are re-rendered by their owning verbs afterwards.
-A rename whose referrers include a frozen path is VETOED and reported
-as `blocked_by_frozen_referrer` with the blocking paths; `--dry-run`
+A rename whose referrers include an explicitly excluded repair-scope path is
+vetoed and reported as `blocked_by_excluded_path` with the blocking paths;
+`--dry-run`
 prints each source -> target pair with its referrer count for the gate
 conversation. Decision notes are never renamed after acceptance; the
 alias and the generated index absorb discoverability.

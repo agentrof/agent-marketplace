@@ -1,6 +1,6 @@
 ---
 name: organize-docs
-description: On-demand reorganization of the whole workspace docs vault. Full-width audit, an owner-gated rename batch, deterministic migration, re-rendered generated views and in-session curation, closing on a green re-check. The vault librarian; scoped stewardship at each docs gate stays where it is.
+description: Repair and curate the tracked project-local Obsidian documentation vault.
 disable-model-invocation: true
 ---
 
@@ -8,4 +8,4 @@ disable-model-invocation: true
 
 # Organize Docs
 
-Read `${CLAUDE_PLUGIN_ROOT}/host-contract.md` and `${CLAUDE_PLUGIN_ROOT}/skill-content/organize-docs/SKILL.md` completely. Follow the canonical skill as the authoritative workflow and the host contract as its platform adapter. Before any workflow step inside a Git repository, run `project environment-status --project-root <git-root> --json` through the PMO launcher. A non-current environment permits only setup, upgrade, or recovery guidance.
+Read `${CLAUDE_PLUGIN_ROOT}/host-contract.md` and `${CLAUDE_PLUGIN_ROOT}/skill-content/organize-docs/SKILL.md` completely. Follow the canonical skill as the authoritative workflow and the host contract as its platform adapter. Before changing a project, confirm the workspace config and local docs contract are present; setup is the only entry that may create them.

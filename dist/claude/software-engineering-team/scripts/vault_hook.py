@@ -8,21 +8,22 @@ Two moments, one law (the obsidian-vault skill):
   in a table-row wikilink, or an inline flow-list tags:/aliases: value
   never reaches disk, regardless of which agent writes. Content-only
   regexes, zero vault I/O. The one exception is workspace/config.json:
-  its designation keys are machine-managed with a single writer (the
-  reconcile-designations verb, a subprocess this hook never sees), so
-  ANY tool-level change to them is denied, which needs one disk read.
+  team-owned keys have subprocess writers this hook never sees, so any
+  tool-level change to them is denied, which needs one disk read.
 - post (PostToolUse, Write|Edit): after a write lands under the vault,
   run vault_check's --changed fast path and surface its findings to the
   writing session immediately, so link and metadata duties are repaired
   in-session instead of at a distant gate. Gates stay the hard barrier.
-- register (SessionStart): record this plugin's install root in the
-  shared plugin_roots registry the marketplace_run dispatcher resolves
-  from; env-free (the root comes from this file's own location).
+- register (SessionStart): perform no global registration. The hook runs from
+  its installed team package and all mutable inventory remains under the
+  current project's ignored `.agentrof/` runtime.
 
 The normalize shim gives both moments one payload shape (canonical tool
-name, per-file write targets). File operations through the shell (moves,
-deletes) bypass Write/Edit hooks by nature; the next --changed write or
-gate-time vault_check surfaces them. Stdlib only.
+name, per-file write targets). Bash pre/post snapshots guard both vault
+inventory and the machine-managed projection of workspace/config.json.
+The inventory stays in the project runtime. A private, short-lived recovery
+capsule outside the command's project tree lets post restore the config even
+when that command removes its project-local snapshot. Stdlib only.
 """
 
 from __future__ import annotations
@@ -37,9 +38,9 @@ import shlex
 import shutil
 import sys
 import tempfile
+import time
 from pathlib import Path
 
-import team_guard
 import vault_check
 try:
     import experience_compile
@@ -57,21 +58,27 @@ TOOL_NAME_CANON = {
 
 PATCH_HEADER_RE = re.compile(r"^\*\*\* (Add|Update|Delete) File: (.+)$")
 
-# Machine-managed config keys with a single sanctioned writer (the
-# vault_check.py reconcile-designations verb). The verb writes via
-# subprocess and never traverses PreToolUse, so the deny below needs no
-# handshake: no Write/Edit call ever changes these keys legitimately.
+# Team-owned config keys have one of two sanctioned subprocess writers:
+# project_config.py for ordinary fields and reconcile-designations for display
+# wording. Neither traverses PreToolUse, so direct Write/Edit changes are denied.
 CONFIG_GUARD_KEYS = (
-    "project_origin", "doc_type_designations", "doc_type_designation_history",
+    "team_id", "scale", "output_language",
+    "terminology_language", "backend_stack", "frontend_stack",
+    "environment_stack", "databases", "test_command", "mutation_command",
+    "env_command", "source_dirs", "max_parallel", "limits",
+    "doc_type_designations", "doc_type_designation_history",
 )
 
 CONFIG_GUARD_MESSAGE = (
-    "project_origin, doc_type_designations and its history ledger are"
-    " machine-managed; their single writers are setup project_config.py, PMO"
-    " project classify-origin and"
-    " vault_check.py reconcile-designations, driven by setup/configure."
-    " Setup and organize-docs mint through the same verb."
-    " Direct edits desynchronize the project contract.")
+    "team-owned workspace config fields are machine-managed; their writers are"
+    " setup, project_config.py and vault_check.py reconcile-designations."
+    " Direct edits desynchronize the workspace config.")
+
+SHELL_ASSIGNMENT_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=.*$")
+PYTHON_COMMAND_RE = re.compile(r"^python(?:3(?:[.][0-9]+)?)?$")
+SANCTIONED_PROJECT_CONFIG_COMMANDS = {"set", "unset"}
+SANCTIONED_SHELL_ASSIGNMENTS = {"PYTHONDONTWRITEBYTECODE": "1"}
+RECOVERY_TTL_SECONDS = 24 * 60 * 60
 
 # A relative markdown link that is not http(s)/mailto/anchor/root form.
 MD_LINK_RE = re.compile(
@@ -85,13 +92,19 @@ EXPERIENCE_MACHINE_FIELD_RE = re.compile(
 DESIGN_SYSTEM_MACHINE_FIELD_RE = re.compile(
     r"(?m)^\s*(status|revision|approved_at_utc|baseline_hash|"
     r"supersedes_hash):")
+BACKLOG_MACHINE_FIELD_RE = re.compile(
+    r"(?m)^\s*(approved_at_utc|source_hash|package_hash|approval_hash):")
+BACKLOG_APPROVED_STATE_RE = re.compile(
+    r"(?m)^\s*(?:status:\s*[\"']?approved[\"']?\s*$|"
+    r"-\s*[\"']?status/approved[\"']?\s*$)"
+)
 EXPERIENCE_PATHS = (
     re.compile(r"^experience-design/experience\.md$"),
     re.compile(r"^experience-design/programs/prg-[0-9]+/program\.md$"),
     re.compile(r"^experience-design/programs/prg-[0-9]+/releases/rel-[0-9]+/release\.md$"),
     re.compile(r"^experience-design/programs/prg-[0-9]+/releases/rel-[0-9]+/spaces/[a-z0-9-]+/space\.md$"),
     re.compile(r"^experience-design/programs/prg-[0-9]+/releases/rel-[0-9]+/spaces/[a-z0-9-]+/(?:domains/[a-z0-9-]+/)+domain\.md$"),
-    re.compile(r"^experience-design/programs/prg-[0-9]+/releases/rel-[0-9]+/(?:spaces/[a-z0-9-]+/(?:domains/[a-z0-9-]+/)*)?(?:journeys/[a-z0-9-]+-journey|screens/[a-z0-9-]+-screen|flows/[a-z0-9-]+-flows|reviews/[a-z0-9-]+-review|artifacts/[a-z0-9-]+-artifact)\.md$"),
+    re.compile(r"^experience-design/programs/prg-[0-9]+/releases/rel-[0-9]+/(?:spaces/[a-z0-9-]+/(?:domains/[a-z0-9-]+/)*)?(?:journeys/[a-z0-9-]+-journey|screens/[a-z0-9-]+-screen|flows/[a-z0-9-]+-flows|artifacts/[a-z0-9-]+-artifact)\.md$"),
 )
 
 
@@ -229,13 +242,8 @@ def normalize(payload: dict) -> dict:
     return out
 
 
-def data_dir() -> Path:
-    return team_guard.data_dir()
-
-
 def register() -> int:
-    """Register through the PMO-owned launcher when it is available."""
-    team_guard.register(team_guard.plugin_name())
+    """SessionStart is informational; no global registration is required."""
     return 0
 
 
@@ -315,7 +323,7 @@ def is_workspace_config(file_path: str, written: dict) -> bool:
             candidates.append(json.loads(str(written.get("content") or "")))
         except Exception:
             pass
-    managed = {"team_id", "project_key", *CONFIG_GUARD_KEYS}
+    managed = {"team_id", *CONFIG_GUARD_KEYS}
     return path.parent.name == "workspace" or any(
         isinstance(value, dict) and managed & set(value) for value in candidates
     )
@@ -365,8 +373,9 @@ def guarded_spans(text: str) -> list[tuple[int, int]]:
 
 
 def config_guard(tool_input: dict, file_path: str) -> int:
-    """Deny any tool-level change to the guarded designation keys, mint
-    included: introduction over an absent key is a change. Writes are
+    """Deny any tool-level change to team-owned config keys, mint included.
+
+    Introduction over an absent key is a change. Writes are
     diffed subtree-against-disk (a Write changing only other config keys
     passes); Edits are fragments the final JSON cannot be rebuilt from,
     so any fragment naming a guarded key or landing inside its on-disk
@@ -594,6 +603,11 @@ def pre_target(written: dict) -> int:
     rel = vault_relative(file_path)
     if rel is None:
         return 0
+    if rel.startswith("backlog/_generated/"):
+        return deny(
+            "backlog/_generated files are compiler-owned; run"
+            " backlog_compile.py check --render"
+        )
     if rel.startswith(("maps/_relations/", "maps/_navigation/")):
         return deny(
             "inverse relation catalogs are compiler-owned; run"
@@ -655,6 +669,30 @@ def pre_target(written: dict) -> int:
         content = written_content(written) + "\n" + str(written.get("old_string") or "")
         if EXPERIENCE_MACHINE_FIELD_RE.search(content):
             return deny("Experience Design approval, revision hash and timestamp fields are machine-managed; use render/stamp")
+    if rel.startswith("backlog/") and rel.endswith(".md"):
+        proposed = written_content(written)
+        removed = str(written.get("old_string") or "")
+        content = proposed + "\n" + removed
+        if BACKLOG_MACHINE_FIELD_RE.search(content):
+            return deny(
+                "Backlog approval timestamps and hashes are machine-managed;"
+                " use backlog_compile.py"
+            )
+        approval_transition = bool(BACKLOG_APPROVED_STATE_RE.search(content))
+        if "content" in written and Path(file_path).is_file():
+            try:
+                current = Path(file_path).read_text(encoding="utf-8")
+            except OSError:
+                current = ""
+            approval_transition = approval_transition or (
+                bool(BACKLOG_APPROVED_STATE_RE.search(current))
+                != bool(BACKLOG_APPROVED_STATE_RE.search(proposed))
+            )
+        if approval_transition:
+            return deny(
+                "Backlog transitions into or out of approved status are"
+                " machine-managed; use backlog_compile.py approve"
+            )
     if not rel.endswith(".md"):
         return 0
     content = written_content(written)
@@ -662,7 +700,7 @@ def pre_target(written: dict) -> int:
         return deny(
             "tags:/aliases: as an inline flow list; the vault contract is a"
             " block list (key:, then one '- item' line per value).")
-    for lineno, line in outside_fences(content):
+    for _lineno, line in outside_fences(content):
         for match in MD_LINK_RE.finditer(line):
             target = match.group(1).split("#", 1)[0]
             if not target:
@@ -736,75 +774,222 @@ def post_target(file_path: str) -> int:
     return 0
 
 
-def shell_vault(payload: dict) -> Path | None:
+def shell_project(payload: dict) -> Path:
     cwd = Path(str(payload.get("cwd") or ".")).resolve()
     for parent in (cwd, *cwd.parents):
-        candidate = parent / "workspace" / "docs"
-        if candidate.is_dir():
-            return candidate
+        workspace = parent / "workspace"
+        if (workspace / "docs").is_dir() \
+                or (workspace / "config.json").is_file():
+            return parent
+        if (parent / ".git").exists():
+            return parent
+    return cwd
+
+
+def shell_vault(payload: dict) -> Path | None:
+    candidate = shell_project(payload) / "workspace" / "docs"
+    return candidate if candidate.is_dir() else None
+
+
+def _cli_path(value: str, cwd: Path) -> Path | None:
+    if not value or "$" in value:
+        return None
+    path = Path(value).expanduser()
+    return (path if path.is_absolute() else cwd / path).resolve()
+
+
+def _installed_script_path(value: str, cwd: Path, name: str) -> Path | None:
+    expanded = os.path.expandvars(value)
+    candidate = _cli_path(expanded, cwd)
+    if candidate is None:
+        return None
+    # In a built host distribution vault_hook and the writers are siblings.
+    # Source-tree tests run the uncomposed overlay, so fall back to the
+    # canonical directory that supplied the imported vault_check module.
+    sibling = (Path(__file__).resolve().parent / name).resolve()
+    expected = sibling if sibling.is_file() else (
+        Path(vault_check.__file__).resolve().parent / name
+    ).resolve()
+    return candidate if candidate == expected else None
+
+
+def _option_value(args: list[str], option: str) -> str:
+    if args.count(option) != 1:
+        return ""
+    index = args.index(option)
+    return args[index + 1] if index + 1 < len(args) else ""
+
+
+def has_shell_composition(command: str) -> bool:
+    """Detect shell composition outside quotes; quoted config values are data."""
+    quote = ""
+    escaped = False
+    index = 0
+    while index < len(command):
+        char = command[index]
+        if escaped:
+            escaped = False
+        elif quote == "'":
+            if char == "'":
+                quote = ""
+        elif quote == '"':
+            if char == "\\":
+                escaped = True
+            elif char == '"':
+                quote = ""
+            elif char == "`" or command[index:index + 2] == "$(":
+                return True
+        elif char == "\\":
+            escaped = True
+        elif char in ("'", '"'):
+            quote = char
+        elif char in "\n\r;|&<>`" or command[index:index + 2] == "$(":
+            return True
+        index += 1
+    return bool(quote or escaped)
+
+
+def sanctioned_config_writer(payload: dict, config_path: Path) -> bool:
+    """Recognize one direct, scoped config writer and no shell composition."""
+    command = str(payload.get("tool_input", {}).get("command") or "").strip()
+    if not command or has_shell_composition(command):
+        return False
+    try:
+        tokens = shlex.split(command, posix=True)
+    except ValueError:
+        return False
+    while tokens and SHELL_ASSIGNMENT_RE.fullmatch(tokens[0]):
+        name, value = tokens.pop(0).split("=", 1)
+        if SANCTIONED_SHELL_ASSIGNMENTS.get(name) != value:
+            return False
+    if len(tokens) < 2 or not PYTHON_COMMAND_RE.fullmatch(
+            Path(tokens[0]).name):
+        return False
+    cwd = Path(str(payload.get("cwd") or ".")).resolve()
+    script = Path(tokens[1]).name
+    if _installed_script_path(tokens[1], cwd, script) is None:
+        return False
+    args = tokens[2:]
+    project = config_path.parent.parent.resolve()
+    vault = project / "workspace" / "docs"
+    if script == "setup_project.py":
+        target = _cli_path(_option_value(args, "--project-root"), cwd)
+        return target == project
+    if script == "project_config.py":
+        if not args or args[0] not in SANCTIONED_PROJECT_CONFIG_COMMANDS:
+            return False
+        target = _cli_path(_option_value(args, "--config"), cwd)
+        return target == config_path.resolve()
+    if script == "vault_check.py":
+        index = 0
+        while index < len(args) and args[index] == "--policy":
+            index += 2
+        if index >= len(args) or args[index] != "reconcile-designations":
+            return False
+        target = _cli_path(_option_value(args, "--vault"), cwd)
+        return target == vault.resolve()
+    return False
+
+
+def guarded_config_hash(text: str | None, exists: bool) -> str:
+    if not exists:
+        projection: dict = {"state": "missing"}
+    else:
+        try:
+            parsed = json.loads(text or "")
+        except json.JSONDecodeError:
+            parsed = None
+        if not isinstance(parsed, dict):
+            projection = {
+                "state": "invalid",
+                "raw_sha256": hashlib.sha256(
+                    (text or "").encode("utf-8")
+                ).hexdigest(),
+            }
+        else:
+            projection = {
+                "state": "object",
+                "values": {
+                    key: {"present": key in parsed, "value": parsed.get(key)}
+                    for key in CONFIG_GUARD_KEYS
+                },
+            }
+    encoded = json.dumps(
+        projection, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+    ).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def read_config_snapshot(path: Path) -> dict:
+    if not path.exists():
+        return {
+            "path": str(path), "exists": False, "text": "", "mode": 0,
+            "guard_hash": guarded_config_hash(None, False),
+        }
+    try:
+        text = path.read_text(encoding="utf-8")
+        mode = path.stat().st_mode & 0o777
+    except (OSError, UnicodeError) as exc:
+        return {"path": str(path), "exists": True, "read_error": str(exc)}
+    return {
+        "path": str(path), "exists": True, "text": text, "mode": mode,
+        "guard_hash": guarded_config_hash(text, True),
+    }
+
+
+def restore_config(snapshot: dict, expected_path: Path) -> str | None:
+    recorded = Path(str(snapshot.get("path") or ""))
+    try:
+        expected_path = expected_path.resolve()
+        if recorded.resolve() != expected_path:
+            return "recovery snapshot names a non-canonical config path"
+    except (OSError, RuntimeError) as exc:
+        return str(exc)
+    path = expected_path
+    try:
+        if not snapshot.get("exists"):
+            path.unlink(missing_ok=True)
+            sync_directory(path.parent)
+            return None
+        path.parent.mkdir(parents=True, exist_ok=True)
+        fd, temporary = tempfile.mkstemp(
+            prefix=f".{path.name}.restore-", dir=str(path.parent)
+        )
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as handle:
+                handle.write(str(snapshot.get("text") or ""))
+                handle.flush()
+                os.fsync(handle.fileno())
+            mode = snapshot.get("mode")
+            os.chmod(temporary, mode if isinstance(mode, int) else 0o644)
+            os.replace(temporary, path)
+            sync_directory(path.parent)
+        finally:
+            try:
+                Path(temporary).unlink()
+            except FileNotFoundError:
+                pass
+    except OSError as exc:
+        return str(exc)
     return None
 
 
+def sync_directory(path: Path) -> None:
+    """Best-effort durability after an atomic replace or unlink."""
+    try:
+        descriptor = os.open(path, os.O_RDONLY)
+    except OSError:
+        return
+    try:
+        os.fsync(descriptor)
+    except OSError:
+        pass
+    finally:
+        os.close(descriptor)
+
+
 def registration_guard(payload: dict) -> int:
-    """Registration is the irreversible fresh-setup boundary. Refuse it
-    until the complete designation map already matches the shipped taxonomy."""
-    tool_input = payload.get("tool_input")
-    command = ""
-    if isinstance(tool_input, dict):
-        command = str(tool_input.get("command", tool_input.get("cmd", "")))
-    try:
-        tokens = shlex.split(command, posix=True)
-        if tokens and Path(tokens[0]).name in {"bash", "sh", "zsh"}:
-            command_index = next(
-                (index + 1 for index, token in enumerate(tokens[:-1])
-                 if token in {"-c", "-lc"}),
-                None,
-            )
-            if command_index is not None:
-                tokens = shlex.split(tokens[command_index], posix=True)
-    except ValueError:
-        return deny(
-            "cannot verify setup order for the project registration command;"
-            " use a directly parseable project register invocation")
-    registration_index = next(
-        (index for index in range(len(tokens) - 1)
-         if tokens[index:index + 2] == ["project", "register"]),
-        None,
-    )
-    if registration_index is None:
-        return 0
-    launcher_tokens = tokens[:registration_index]
-    if not any("pmo" in Path(token).name.casefold()
-               for token in launcher_tokens):
-        return 0
-    config_value = ""
-    for index, token in enumerate(tokens):
-        if token == "--stamp-config" and index + 1 < len(tokens):
-            config_value = tokens[index + 1]
-            break
-        if token.startswith("--stamp-config="):
-            config_value = token.split("=", 1)[1]
-            break
-    if not config_value or "$" in config_value or "`" in config_value:
-        return deny(
-            "PMO project registration requires a resolved --stamp-config path"
-            " so setup order can be verified")
-    config_path = Path(config_value)
-    if not config_path.is_absolute():
-        config_path = Path(str(payload.get("cwd") or ".")) / config_path
-    try:
-        config = json.loads(config_path.read_text(encoding="utf-8"))
-        policy = vault_check.load_policy(vault_check.DEFAULT_POLICY)
-    except (OSError, json.JSONDecodeError) as exc:
-        return deny(f"cannot verify designation contract before PMO project"
-                    f" registration: {exc}")
-    issues = vault_check.designation_config_issues(config, policy)
-    if issues:
-        detail = "; ".join(issue["message"] for issue in issues)
-        return deny(
-            "PMO project registration is out of order: mint and verify the"
-            " complete designation map first with reconcile-designations and"
-            f" check-designations. Current detail: {detail}")
+    """Project configuration is validated by its owning setup command."""
     return 0
 
 
@@ -814,59 +999,317 @@ def vault_inventory(root: Path) -> dict[str, str]:
         if not path.is_file():
             continue
         rel = path.relative_to(root).as_posix()
-        if rel in {".obsidian/workspace.json",
-                   ".obsidian/workspace-mobile.json"} \
-                or rel.startswith(".trash/"):
+        # App session files, trash and the ignored policy-owned community
+        # plugin projection are not authored vault state. Setup owns their
+        # convergence; package refresh must not widen into an authored gate.
+        if rel in {
+            ".obsidian/workspace.json",
+            ".obsidian/workspace-mobile.json",
+            ".obsidian/community-plugins.json",
+        } or rel.startswith((".obsidian/plugins/", ".trash/")):
             continue
         result[rel] = hashlib.sha256(path.read_bytes()).hexdigest()
     return result
 
 
+def canonical_json(value: dict) -> str:
+    return json.dumps(
+        value, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+    )
+
+
+def guard_binding(payload: dict) -> str:
+    command = str(payload.get("tool_input", {}).get("command") or "")
+    event = ""
+    for key in ("tool_use_id", "tool_call_id", "event_id"):
+        if payload.get(key):
+            event = str(payload[key])
+            break
+    value = {
+        "project": str(shell_project(payload).resolve()),
+        "session_id": str(payload.get("session_id") or "unknown"),
+        "event": event or hashlib.sha256(command.encode("utf-8")).hexdigest(),
+    }
+    return hashlib.sha256(canonical_json(value).encode("utf-8")).hexdigest()
+
+
 def inventory_path(payload: dict) -> Path:
     session = str(payload.get("session_id") or "unknown")
-    safe = re.sub(r"[^A-Za-z0-9_.-]", "_", session)
-    return data_dir() / "vault-inventory" / f"{safe}.json"
+    safe = re.sub(r"[^A-Za-z0-9_.-]", "_", session)[:80]
+    project = shell_project(payload)
+    name = f"{safe}-{guard_binding(payload)[:16]}.json"
+    return (project / ".agentrof" / "agent-marketplace" / ".runtime"
+            / "vault-inventory" / name)
+
+
+def recovery_root() -> Path:
+    user = getattr(os, "getuid", lambda: 0)()
+    return Path(tempfile.gettempdir()) / f"agentrof-vault-hook-{user}"
+
+
+def recovery_path(payload: dict) -> Path:
+    return recovery_root() / f"{guard_binding(payload)}.json"
+
+
+def cleanup_stale_recovery(root: Path) -> None:
+    cutoff = time.time() - RECOVERY_TTL_SECONDS
+    try:
+        candidates = list(root.glob("*.json"))
+    except OSError:
+        return
+    for candidate in candidates:
+        try:
+            if candidate.is_file() and candidate.stat().st_mtime < cutoff:
+                candidate.unlink()
+        except OSError:
+            continue
+
+
+def prepare_recovery_root() -> Path:
+    root = recovery_root()
+    root.mkdir(mode=0o700, parents=True, exist_ok=True)
+    if root.is_symlink() or not root.is_dir():
+        raise OSError("config recovery root is not a private directory")
+    os.chmod(root, 0o700)
+    cleanup_stale_recovery(root)
+    return root
+
+
+def atomic_replace_text(path: Path, text: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, temporary = tempfile.mkstemp(prefix=f".{path.name}.",
+                                      dir=str(path.parent))
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            handle.write(text)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.chmod(temporary, 0o600)
+        os.replace(temporary, path)
+        sync_directory(path.parent)
+    finally:
+        Path(temporary).unlink(missing_ok=True)
+
+
+def atomic_create_text(path: Path, text: str) -> None:
+    """Publish a fully-written capsule only when this event has no owner."""
+    fd, temporary = tempfile.mkstemp(prefix=".recovery-", dir=str(path.parent))
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            handle.write(text)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.chmod(temporary, 0o600)
+        os.link(temporary, path, follow_symlinks=False)
+        sync_directory(path.parent)
+    finally:
+        Path(temporary).unlink(missing_ok=True)
+
+
+def valid_config_snapshot(snapshot: object, expected_path: Path) -> bool:
+    if not isinstance(snapshot, dict):
+        return False
+    try:
+        recorded = Path(str(snapshot.get("path") or "")).resolve()
+        expected = expected_path.resolve()
+    except (OSError, RuntimeError):
+        return False
+    if recorded != expected:
+        return False
+    exists = snapshot.get("exists")
+    if not isinstance(exists, bool):
+        return False
+    text = snapshot.get("text")
+    if not isinstance(text, str):
+        return False
+    mode = snapshot.get("mode")
+    if not isinstance(mode, int) or not 0 <= mode <= 0o7777:
+        return False
+    expected_hash = guarded_config_hash(text if exists else None, exists)
+    return snapshot.get("guard_hash") == expected_hash
+
+
+def load_json_file(path: Path) -> tuple[dict | None, bytes | None, str]:
+    try:
+        raw = path.read_bytes()
+        value = json.loads(raw.decode("utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+        return None, None, str(exc)
+    if not isinstance(value, dict):
+        return None, raw, "snapshot root is not an object"
+    return value, raw, ""
+
+
+def load_recovery(payload: dict, expected_path: Path) \
+        -> tuple[dict | None, str]:
+    envelope, _, error = load_json_file(recovery_path(payload))
+    if envelope is None:
+        return None, error
+    state = envelope.get("state")
+    if not isinstance(state, dict):
+        return None, "recovery state is missing"
+    digest = hashlib.sha256(canonical_json(state).encode("utf-8")).hexdigest()
+    if envelope.get("state_sha256") != digest:
+        return None, "recovery state checksum does not match"
+    if state.get("binding") != guard_binding(payload):
+        return None, "recovery state belongs to another Bash event"
+    if not valid_config_snapshot(state.get("config"), expected_path):
+        return None, "recovery config snapshot is invalid"
+    return state, ""
+
+
+def cleanup_guard_state(primary: Path, recovery: Path) -> None:
+    for path in (primary, recovery):
+        try:
+            path.unlink(missing_ok=True)
+        except OSError:
+            pass
+    try:
+        recovery.parent.rmdir()
+    except OSError:
+        pass
 
 
 def shell_snapshot(payload: dict) -> int:
     root = shell_vault(payload)
     path = inventory_path(payload)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    value = {"vault": str(root) if root else "",
-             "inventory": vault_inventory(root) if root else {}}
-    path.write_text(json.dumps(value, sort_keys=True), encoding="utf-8")
+    config_path = shell_project(payload) / "workspace" / "config.json"
+    config = read_config_snapshot(config_path)
+    if config.get("read_error"):
+        return deny(
+            "workspace/config.json could not be snapshotted before Bash;"
+            " refusing a command whose config effects could not be restored"
+        )
+    value = {
+        "vault": str(root) if root else "",
+        "inventory": vault_inventory(root) if root else {},
+        "config": config,
+        "config_writer_allowed": sanctioned_config_writer(
+            payload, config_path
+        ),
+    }
+    primary_text = canonical_json(value)
+    state = {
+        "binding": guard_binding(payload),
+        "config": config,
+        "config_writer_allowed": value["config_writer_allowed"],
+        "primary_sha256": hashlib.sha256(
+            primary_text.encode("utf-8")
+        ).hexdigest(),
+    }
+    capsule = canonical_json({
+        "state": state,
+        "state_sha256": hashlib.sha256(
+            canonical_json(state).encode("utf-8")
+        ).hexdigest(),
+    })
+    recovery = recovery_path(payload)
+    try:
+        prepare_recovery_root()
+        atomic_create_text(recovery, capsule)
+    except FileExistsError:
+        return deny(
+            "a Bash guard already owns this session/event identity;"
+            " refusing to overwrite its recovery state"
+        )
+    except OSError as exc:
+        return deny(f"Bash config recovery capsule could not be created: {exc}")
+    try:
+        atomic_replace_text(path, primary_text)
+    except OSError as exc:
+        recovery.unlink(missing_ok=True)
+        return deny(f"Bash vault inventory could not be snapshotted: {exc}")
     return 0
 
 
 def shell_verify(payload: dict) -> int:
     path = inventory_path(payload)
+    recovery = recovery_path(payload)
+    expected_config = shell_project(payload) / "workspace" / "config.json"
+    before, primary_raw, primary_error = load_json_file(path)
+    recovery_state, recovery_error = load_recovery(payload, expected_config)
+    integrity_error = ""
+    if recovery_state is not None:
+        primary_hash = hashlib.sha256(primary_raw or b"").hexdigest()
+        if before is None:
+            integrity_error = "project-local vault snapshot is missing or unreadable"
+        elif primary_hash != recovery_state.get("primary_sha256"):
+            integrity_error = "project-local vault snapshot was tampered with"
+            before = None
+        config_before = recovery_state["config"]
+        writer_allowed = bool(recovery_state.get("config_writer_allowed"))
+    else:
+        integrity_error = (
+            "config recovery capsule is missing or unreadable"
+            + (f": {recovery_error}" if recovery_error else "")
+        )
+        config_before = before.get("config") if isinstance(before, dict) else None
+        if not valid_config_snapshot(config_before, expected_config):
+            config_before = None
+        writer_allowed = bool(
+            before.get("config_writer_allowed")
+        ) if isinstance(before, dict) else False
     try:
-        before = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        return deny("Bash vault inventory is missing or unreadable")
-    path.unlink(missing_ok=True)
-    root_value = str(before.get("vault", ""))
-    if not root_value:
+        if isinstance(config_before, dict):
+            config_after = read_config_snapshot(expected_config)
+            changed = (
+                config_after.get("guard_hash")
+                != config_before.get("guard_hash")
+            )
+            if changed and not writer_allowed:
+                restore_error = restore_config(config_before, expected_config)
+                if restore_error:
+                    message = (
+                        "Bash changed machine-managed workspace/config.json"
+                        f" values; restore failed: {restore_error}"
+                    )
+                else:
+                    message = (
+                        "Bash changed machine-managed workspace/config.json"
+                        " values; the original config was restored. Use"
+                        " setup_project.py, project_config.py or vault_check.py"
+                        " reconcile-designations"
+                    )
+                if integrity_error:
+                    message += f"; {integrity_error}"
+                return deny(message)
+        if integrity_error:
+            detail = f" ({primary_error})" if primary_error else ""
+            return deny(
+                f"Bash guard state failed closed: {integrity_error}{detail};"
+                " vault effects could not be verified"
+            )
+        if not isinstance(before, dict):
+            return deny("Bash vault inventory is missing or unreadable")
+        root_value = str(before.get("vault", ""))
+        if not root_value:
+            return 0
+        root = Path(root_value)
+        old = before.get("inventory", {})
+        new = vault_inventory(root) if root.is_dir() else {}
+        changed = sorted(key for key in set(old) | set(new)
+                         if old.get(key) != new.get(key))
+        if not changed:
+            return 0
+        deleted = [key for key in changed if key not in new]
+        checks = [None] if deleted else [
+            key for key in changed if key.endswith(".md")
+        ]
+        for impacted in checks:
+            argv = ["check", "--vault", str(root)]
+            if impacted is not None:
+                argv.extend(("--impact", impacted))
+            buffer = io.StringIO()
+            with contextlib.redirect_stdout(buffer):
+                code = vault_check.main(argv)
+            if code:
+                sys.stderr.write(buffer.getvalue())
+                return deny(
+                    "Bash changed vault inventory and left its scoped vault"
+                    " check red; repair or restore the changed paths")
         return 0
-    root = Path(root_value)
-    old = before.get("inventory", {})
-    new = vault_inventory(root) if root.is_dir() else {}
-    changed = sorted(key for key in set(old) | set(new)
-                     if old.get(key) != new.get(key))
-    if not changed:
-        return 0
-    argv = ["check", "--vault", str(root)]
-    if len(changed) == 1:
-        argv.extend(("--impact", changed[0]))
-    buffer = io.StringIO()
-    with contextlib.redirect_stdout(buffer):
-        code = vault_check.main(argv)
-    if code:
-        sys.stderr.write(buffer.getvalue())
-        return deny(
-            "Bash changed vault inventory and left the full/impact gate red;"
-            " repair or restore the changed paths")
-    return 0
+    finally:
+        cleanup_guard_state(path, recovery)
 
 
 def main() -> int:

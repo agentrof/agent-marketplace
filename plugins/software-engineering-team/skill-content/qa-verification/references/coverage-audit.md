@@ -1,10 +1,17 @@
 # Coverage Audit
 
-The audit answers one question deterministically: does every acceptance criterion and business rule have at least one passing test? It is a set intersection, not an opinion.
+The audit answers one question deterministically: does every planned acceptance
+criterion, business rule and story scenario have at least one passing test? It
+is a set intersection, not an opinion.
 
 ## Inputs
 
-- The brief documents containing requirement ids. Recognized id forms: `BR-###` (business rule) and `AC-###` (acceptance criterion). Ids are extracted verbatim; the audit never infers unlabeled requirements, so an untagged requirement in the brief is itself a finding (escalate to have it labeled).
+- Approved story test plans containing canonical identities. Recognized forms
+  are qualified or unqualified `BR` and `AC` identities, including
+  `inventory:BR-STOCK-001`, and story scenarios shaped
+  `<story-id>-TS-###`, such as `AUTH-01-TS-003`.
+  Identities are extracted verbatim; the audit never infers an unlabeled
+  requirement or scenario.
 - The suite results in JUnit XML, produced by running the configured suite command with its XML reporter enabled.
 
 ## Matrix Schema
@@ -13,8 +20,8 @@ One row per requirement id, in brief order:
 
 | Id | Requirement summary | Mapped tests | Result |
 |---|---|---|---|
-| BR-001 | No duplicate emails | test_create_user_duplicate_email_returns_conflict | PASS |
-| AC-004 | Login issues a token | (none) | NO-TEST |
+| INVENTORY:BR-STOCK-001 | No duplicate stock item | test_duplicate_stock_item | PASS |
+| ST-004-TS-002 | Login issues a token | (none) | NO-TEST |
 
 Result values:
 
@@ -28,18 +35,24 @@ Any NO-TEST or FAIL row fails the audit. There is no PARTIAL and no justified-ga
 
 A test maps to a requirement when the requirement id appears in the test's identity, in one of two stack-appropriate forms:
 
-- **Marker in the server suite.** The test framework's marker or metadata mechanism attaches the id, and the JUnit reporter renders it either into the test name or into a `<property>` element on the test case. Example rendered name: `test_transfer_rejected_when_account_frozen[BR-012]`.
-- **Name prefix in the client suite.** The test title carries the bracketed id as a prefix: `[AC-003] shows field errors on invalid submit`.
+- **Marker in the server suite.** The test framework's marker or metadata
+  mechanism attaches the exact qualified requirement or scenario identity,
+  and the JUnit reporter renders it either into the test name or into a
+  `<property>` element. Example: `test_transfer_rejected[accounts:BR-TRF-012]`.
+- **Name prefix in the client suite.** The test title carries the bracketed
+  identity as a prefix: `[ST-003-TS-004] shows field errors on invalid submit`.
 
 Both forms reduce to the same rule the script applies: the literal id string, matched case-insensitively, present in the test case name, class name, or property values. One test may cover several ids; list it in every matching row.
 
 ## Running the Audit
 
 ```
-"$RUN" run "$TEAM" skill-content/qa-verification/scripts/scenario_report.py \
-  --brief workspace/docs/user-stories.md workspace/docs/business-rules.md \
+scenario_report.py \
+  --brief workspace/docs/backlog/epics/accounts/stories/login/test-plan.md \
   --junit results-server.xml results-client.xml
 ```
+
+Run the packaged `skill-content/qa-verification/scripts/scenario_report.py`.
 
 Multiple briefs and multiple JUnit files are merged. The script prints the matrix, then a machine-readable summary line, and exits nonzero when any NO-TEST or FAIL row exists. Paste the matrix into the verification record unedited.
 

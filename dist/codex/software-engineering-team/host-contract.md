@@ -1,15 +1,22 @@
 # Host Contract
 
-- Run state-changing entries only in Codex Code or Default mode. In Plan mode, stop before mutation and ask the user to switch modes.
-- The shared `team_guard.py` PreToolUse hook mechanically requires the PMO session-ready record before Write, Edit, apply_patch, or Bash. Keep the exact context check `AGENT_MARKETPLACE_PMO_READY: project-management-office` as the user-facing diagnostic. If it is absent, run `codex plugin list --json` as a read-only diagnostic and stop. If PMO is missing, show `codex plugin add project-management-office@agent-marketplace`; if it is installed but disabled, ask the user to enable it in Plugins; if it is installed and enabled, ask the user to inspect and trust Project Management Office and this team plugin through `/hooks`, then start a new task. If trusted hooks still do not produce the ready line, direct the user to the PMO hook log. State that no files or project state were changed.
-- One delivery team owns a project. Stop without mutation when workspace/config.json or Agent Marketplace-owned project agents name another team.
-- Map every canonical dispatcher `run` or `path` call to the registered Codex package by inserting `--host codex` immediately after the verb. This is required when both host packages are installed.
-- After the ready check, resolve the PMO launcher. If it is absent, stop because PMO bootstrap did not complete; never continue against a stale or partial backbone.
-- When the canonical workflow says `spawn`, use the matching project-scoped custom agent from `.codex/agents/`. Open the PMO task before spawning, wait for every required agent, then close the PMO task after validating its output.
-- Dispatch independent roles in parallel and wait for all of them before synthesis. Never allow parallel writers to edit overlapping files.
-- Present every canonical choice gate through `request_user_input`, preserving
-  the options, recommendation and tradeoffs. Use it only at those gate sites;
-  do not turn ordinary conversation into a popup sequence.
-- During fresh setup, apply the same PMO-ready gate before any write. Run `"$RUN" run --host codex "$TEAM" scripts/generate_codex_project.py check --scope all --project-root <git-root> --workspace <chosen-workspace-name> --seed-user-files`, present every returned migration choice, then run `apply --scope all` with the exact approved `--choice <id>=<option>` values and `--seed-user-files`. The generator owns both portable tracked roots, `AGENTS.md` and `CLAUDE.md`, shared Agent Marketplace memory, and the ignored Agent Marketplace-marked `.codex/agents/*.toml` projection. It seeds both user companions, `me.md`, and `profile.md` only when missing and never rewrites them later. Tell the user to start a fresh task/session so the instructions and agents load.
-- For delivery-lane handoffs, open a new App task on the worktree or an interactive CLI session in that worktree.
-- Successful completion means the same durable state, gates, artifacts, and PR outcome as every supported host; host-specific UI is not part of the contract.
+- Run state-changing entries only in Codex Code or Default mode. In Plan mode,
+  stop before mutation and ask the user to switch modes.
+- `team_guard.py` only announces the installed team at session start. It never
+  registers global state or blocks project work. `vault_hook.py` protects only
+  compiler-owned fields and immediately checks changed vault documents.
+- One Software Engineering Team owns a project. There is no shared project
+  state service or cross-project work key.
+- Resolve every canonical "packaged script" reference relative to the installed
+  plugin root and invoke the resulting file directly. No shared dispatcher or
+  second plugin is involved.
+- Use `request_user_input` only at declared choice gates, preserving options,
+  recommendation and tradeoffs.
+- When the canonical workflow says `spawn`, use the matching project-scoped
+  custom agent from `.codex/agents/` and wait for every required agent before
+  synthesis. Never run overlapping writers concurrently.
+- During setup or a package refresh, regenerate the host projection, run the
+  generated project check and preserve authored vault files. The generator owns
+  only portable instruction roots and local project memory.
+- Delivery execution is available only through the exact public entries
+  `/delivery-plan`, `/execution-plan DLV-###` and `/deliver DLV-###`.

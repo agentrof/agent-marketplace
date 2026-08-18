@@ -1,0 +1,49 @@
+name: Bug report
+description: Report a reproducible defect in the marketplace, package or workflow.
+title: "bug: "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Do not include credentials, private project content or security-sensitive details.
+        Use the Security vulnerability link for those reports.
+  - type: input
+    id: version
+    attributes:
+      label: Package or commit version
+      description: Include the installed package version or exact commit.
+    validations:
+      required: true
+  - type: dropdown
+    id: host
+    attributes:
+      label: Host
+      options:
+        - Claude Code
+        - Codex
+        - Both
+        - Repository tooling
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Minimal reproduction
+      description: List the smallest safe commands, inputs and project state that reproduce the issue.
+      placeholder: |
+        1. ...
+        2. ...
+        3. ...
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected and actual behavior
+    validations:
+      required: true
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Safe evidence
+      description: Include sanitized logs, error output or a minimal fixture. Remove secrets.

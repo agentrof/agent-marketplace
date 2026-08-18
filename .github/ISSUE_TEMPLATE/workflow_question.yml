@@ -1,0 +1,30 @@
+name: Workflow question
+description: Ask for help using an existing Requirement, Delivery or host workflow.
+title: "question: "
+body:
+  - type: dropdown
+    id: area
+    attributes:
+      label: Workflow area
+      options:
+        - Setup
+        - Requirement Flow
+        - Backlog planning
+        - Delivery Flow
+        - Package upgrade
+        - Claude Code host
+        - Codex host
+    validations:
+      required: true
+  - type: textarea
+    id: goal
+    attributes:
+      label: Intended outcome
+      description: State what you are trying to accomplish and the exact point where the documented flow is unclear.
+    validations:
+      required: true
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Safe context
+      description: Provide sanitized commands, package version and relevant documentation links. Remove private content and secrets.

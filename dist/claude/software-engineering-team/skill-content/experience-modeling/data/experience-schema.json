@@ -20,7 +20,6 @@
     "journey": {"suffix": "-journey.md", "directory": "journeys"},
     "flow_set": {"suffix": "-flows.md", "directory": "flows"},
     "screen": {"suffix": "-screen.md", "directory": "screens"},
-    "challenge_record": {"suffix": "-review.md", "directory": "reviews"},
     "artifact_manifest": {"suffix": "-artifact.md", "directory": "artifacts"}
   },
   "limits": {

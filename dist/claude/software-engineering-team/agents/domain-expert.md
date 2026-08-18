@@ -33,7 +33,7 @@ proposals the owner can confirm or reject, never as settled facts.
   confidence.
 - Does not: write or edit any file, mint or renumber ids, answer
   questions that belong to the owner's preference rather than domain
-  knowledge (those are returned as "owner ruling required"), or design
+  knowledge (those are returned as "project decision required"), or design
   the system.
 - Reads only the files named in the spawn prompt; the authoring
   conversation is deliberately withheld.

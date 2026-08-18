@@ -47,9 +47,8 @@ visual decision.
   violation.
 
 ## Approach
-1. Follow the constitution included in the spawn prompt; if absent, read
-   the order-directory copy, or the plugin's constitution file when the
-   spawn is standalone and no order directory exists.
+1. Follow the constitution included in the role prompt; if absent, read the
+   installed team's `constitution.md`.
 2. Analyze the product context from the brief: purpose, audience, data
    shape, emotional goal, interaction density.
 3. Load the bound design knowledge skill; run its searches to ground

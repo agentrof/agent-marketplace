@@ -29,6 +29,10 @@ for documentation, test, and CI changes with no stable release effect. Do not
 edit `versions.json` in a normal pull request. If the check is green locally,
 it is green in CI.
 
+Security findings do not belong in public issues, pull requests or commit
+messages. Use the repository's [private vulnerability reporting form](https://github.com/agentrof/agent-marketplace/security/advisories/new)
+and follow [SECURITY.md](SECURITY.md).
+
 ## Component model
 
 - Agents are platform-independent roles: short constitutions with fixed
@@ -42,7 +46,9 @@ it is green in CI.
 
 The full contracts, caps and templates live in [docs/authoring.md](docs/authoring.md);
 the invariants behind them in [docs/architecture.md](docs/architecture.md); the
-orchestration model in [docs/orchestration.md](docs/orchestration.md).
+orchestration model in [docs/orchestration.md](docs/orchestration.md); and the
+current lifecycle and Git protocol in
+[docs/requirement-delivery-protocol.md](docs/requirement-delivery-protocol.md).
 
 ## Add a knowledge skill: walkthrough
 

@@ -1,21 +1,25 @@
 #!/usr/bin/env python3
-"""Fail-closed fresh setup preflight and closing contract verifier."""
+"""Fail-closed project refresh preflight and closing contract verifier."""
 
 from __future__ import annotations
 
 import argparse
-import hashlib
 import json
 import subprocess
 import sys
 from pathlib import Path
 
 import marketplace_paths
+import project_config
+import vault_check
 
 START = "# agent-marketplace:software-engineering-team:gitignore:start"
 END = "# agent-marketplace:software-engineering-team:gitignore:end"
 TEAM = "software-engineering-team"
-PROJECT_CONTRACT_VERSION = marketplace_paths.CURRENT_PROJECT_CONTRACT_VERSION
+WORKSPACE = "workspace"
+RUNTIME_PARTS = ("agent-marketplace", ".runtime")
+FORBIDDEN_RUNTIME_NAMES = {"project.json", "backlog.json"}
+FORBIDDEN_RUNTIME_SUFFIXES = {".db", ".sqlite", ".sqlite3"}
 
 
 def read(path: Path):
@@ -23,6 +27,11 @@ def read(path: Path):
         return json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
         return None
+
+
+def setup_owner(config: dict) -> str:
+    """Resolve ownership from the canonical project configuration."""
+    return marketplace_paths.team_from_config(config)
 
 
 def local_roots() -> tuple[str, ...]:
@@ -43,6 +52,46 @@ def local_roots() -> tuple[str, ...]:
     raise ValueError("project-local root policy is missing")
 
 
+def runtime_root(root: Path) -> Path:
+    return root / local_roots()[0] / Path(*RUNTIME_PARTS)
+
+
+def runtime_findings(root: Path) -> list[str]:
+    """The owned local tree contains only one disposable runtime directory."""
+    findings: list[str] = []
+    runtime = runtime_root(root)
+    owned_root = runtime.parent
+    runtime_chain = (owned_root.parent, owned_root, runtime)
+    symlink = next((path for path in runtime_chain if path.is_symlink()), None)
+    if symlink is not None:
+        return [
+            "project-local runtime path is symlinked: "
+            + symlink.relative_to(root).as_posix()
+        ]
+    if not runtime.is_dir():
+        findings.append(
+            "missing project-local runtime: .agentrof/agent-marketplace/.runtime"
+        )
+    if owned_root.is_dir():
+        for path in sorted(owned_root.iterdir()):
+            if path.name != ".runtime":
+                findings.append(
+                    "only .runtime may exist in the owned local tree: "
+                    + path.relative_to(root).as_posix()
+                )
+    if runtime.is_dir():
+        for path in sorted(runtime.rglob("*")):
+            if not path.is_file():
+                continue
+            if path.name in FORBIDDEN_RUNTIME_NAMES \
+                    or path.suffix.casefold() in FORBIDDEN_RUNTIME_SUFFIXES:
+                findings.append(
+                    "database or canonical state is forbidden in runtime: "
+                    + path.relative_to(root).as_posix()
+                )
+    return findings
+
+
 def managed_block(workspace: str) -> str:
     return "\n".join((START, *(f"/{value}/" for value in local_roots()),
                       f"{workspace}/junit-*.xml",
@@ -60,28 +109,26 @@ def managed_block(workspace: str) -> str:
 
 
 def preflight(root: Path, workspace: str) -> list[str]:
-    config = read(root / workspace / "config.json")
-    state = read(root / ".agentrof" / "agent-marketplace" / "project.json")
+    config_path = root / workspace / "config.json"
+    config = read(config_path)
     findings = []
+    for candidate in sorted(root.glob("*/config.json")):
+        if candidate.parent.name == WORKSPACE:
+            continue
+        value = read(candidate)
+        if isinstance(value, dict) and setup_owner(value) == TEAM:
+            findings.append(
+                "non-canonical managed workspace: "
+                + candidate.parent.relative_to(root).as_posix()
+            )
+    if not config_path.exists():
+        return findings
     if isinstance(config, dict):
-        contract = config.get("agent_marketplace", {})
-        owner = marketplace_paths.team_from_config(config)
+        owner = setup_owner(config)
         if owner and owner != TEAM:
             findings.append(f"foreign managed-team trace: {owner}")
-        if config.get("project_key") and (
-            not isinstance(contract, dict)
-            or contract.get("contract_version") != PROJECT_CONTRACT_VERSION
-        ):
-            findings.append("keyed config must use Agent Marketplace Upgrade")
-        elif (
-            isinstance(contract, dict)
-            and contract.get("contract_version") == PROJECT_CONTRACT_VERSION
-        ):
-            findings.append(
-                "existing project contract must use environment reconciliation"
-            )
-    if state is not None:
-        findings.append("existing project contract must use Agent Marketplace Upgrade")
+    if not isinstance(config, dict):
+        findings.append("workspace config is missing or invalid")
     return findings
 
 
@@ -115,6 +162,45 @@ def designation_findings(work: Path) -> list[str]:
             + (f": {detail}" if detail else "")]
 
 
+def payload_findings(work: Path) -> list[str]:
+    """Validate only the Obsidian payload, never active authored notes."""
+    docs = work / "docs"
+    if not docs.is_dir():
+        return []
+    try:
+        policy = vault_check.load_policy(vault_check.DEFAULT_POLICY)
+        policy = vault_check.effective_policy(policy, docs)
+        vault = vault_check.build_vault(docs, policy)
+        findings = []
+        vault_check.check_obsidian_payload(
+            vault, findings, vault_check.DEFAULT_PAYLOAD,
+            require_local_projection=True,
+        )
+        stale = vault_check.payload_reconcile_updates(
+            docs, policy, vault_check.DEFAULT_PAYLOAD
+        )
+        stale_deletions = vault_check.payload_reconcile_deletions(
+            docs, policy, vault_check.DEFAULT_PAYLOAD
+        )
+    except (OSError, ValueError, json.JSONDecodeError) as exc:
+        return [f"managed vault payload check failed: {exc}"]
+    messages = [
+        f"managed vault payload: {finding.path}: {finding.message}"
+        for finding in findings if finding.severity == "error"
+    ]
+    messages.extend(
+        "managed vault payload is stale: "
+        + path.relative_to(work.parent).as_posix()
+        for path in sorted(stale, key=lambda value: str(value))
+    )
+    messages.extend(
+        "managed vault payload has stale package-local content: "
+        + path.relative_to(work.parent).as_posix()
+        for path in stale_deletions
+    )
+    return list(dict.fromkeys(messages))
+
+
 def closing(root: Path, workspace: str) -> list[str]:
     work = root / workspace
     config = read(work / "config.json")
@@ -122,28 +208,24 @@ def closing(root: Path, workspace: str) -> list[str]:
     if not isinstance(config, dict):
         findings.append("workspace config is missing or invalid")
         config = {}
-    state = config.get("agent_marketplace", {}) if isinstance(config, dict) else {}
-    owner = state.get("team_id", "") if isinstance(state, dict) else ""
+    owner = marketplace_paths.team_from_config(config)
     if owner != TEAM:
         findings.append("config team_id mismatch")
-    if config.get("project_origin") not in {"greenfield", "existing"}:
-        findings.append("project_origin is not classified")
-    if not config.get("project_key"):
-        findings.append("PMO registration has not stamped project_key")
-    if (
-        not isinstance(state, dict)
-        or state.get("contract_version") != PROJECT_CONTRACT_VERSION
-    ):
-        findings.append(
-            f"project contract version is not {PROJECT_CONTRACT_VERSION}"
-        )
-    elif not state.get("contract_sha256"):
-        findings.append("project contract hash is missing")
+    findings.extend(f"config contract: {value}" for value in project_config.check(config))
+    for candidate in sorted(root.glob("*/config.json")):
+        if candidate.parent.name == WORKSPACE:
+            continue
+        value = read(candidate)
+        if isinstance(value, dict) and marketplace_paths.team_from_config(value) == TEAM:
+            findings.append(
+                "non-canonical managed workspace: "
+                + candidate.parent.relative_to(root).as_posix()
+            )
     required = (
         "apps", "environment", "demos", "sketches",
         "docs/business-analysis", "docs/solution-design",
         "docs/system-architecture", "docs/design-system/pages",
-        "docs/experience-design",
+        "docs/experience-design", "docs/requirements", "docs/delivery", "docs/backlog",
     )
     for relative in required:
         path = work / relative
@@ -175,6 +257,21 @@ def closing(root: Path, workspace: str) -> list[str]:
             "local runtime or projection files are force-added: "
             + ", ".join(tracked_local.stdout.splitlines())
         )
+    tracked_plugins = subprocess.run(
+        [
+            "git", "ls-files", "--",
+            f"{workspace}/docs/.obsidian/community-plugins.json",
+            f"{workspace}/docs/.obsidian/plugins",
+        ],
+        cwd=root, capture_output=True, text=True, check=False,
+    )
+    if tracked_plugins.returncode != 0:
+        findings.append("local Obsidian plugin projection tracking check failed")
+    elif tracked_plugins.stdout.strip():
+        findings.append(
+            "package-projected local Obsidian plugin files are tracked: "
+            + ", ".join(tracked_plugins.stdout.splitlines())
+        )
     for relative in (
         "docs/.obsidian/app.json", "docs/.obsidian/appearance.json",
         "docs/.obsidian/core-plugins.json", "docs/.obsidian/graph.json",
@@ -182,27 +279,12 @@ def closing(root: Path, workspace: str) -> list[str]:
     ):
         if not (work / relative).is_file():
             findings.append(f"missing managed vault payload: {workspace}/{relative}")
+    findings.extend(runtime_findings(root))
+    findings.extend(payload_findings(work))
     findings.extend(designation_findings(work))
     portable_gate = root / ".github" / "agentrof" / "vault-gate.pyz"
     if not portable_gate.is_file():
         findings.append("repository-portable vault gate is missing")
-    if isinstance(state, dict):
-        payload = dict(state)
-        expected_hash = str(payload.pop("contract_sha256", ""))
-        actual_hash = hashlib.sha256(json.dumps(
-            payload, sort_keys=True, separators=(",", ":")
-        ).encode()).hexdigest()
-        if expected_hash != actual_hash:
-            findings.append("project contract hash mismatch")
-        components = state.get("components", {})
-        if not isinstance(components, dict) or not all(
-            isinstance(value, dict) and value.get("version") and value.get("build_id")
-            for value in components.values()
-        ):
-            findings.append("component version and build baselines are missing")
-        surfaces = state.get("managed_surfaces", {})
-        if not isinstance(surfaces, dict) or not any(":" in key for key in surfaces):
-            findings.append("host-managed project surfaces are missing")
     return findings
 
 
@@ -210,7 +292,7 @@ def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("command", choices=["preflight", "check"])
     parser.add_argument("--project-root", required=True)
-    parser.add_argument("--workspace", default="workspace")
+    parser.set_defaults(workspace=WORKSPACE)
     parser.add_argument("--json", action="store_true")
     args = parser.parse_args(argv)
     root = Path(args.project_root).resolve()

@@ -1,6 +1,6 @@
 ---
 name: business-analysis
-description: Interactive business analysis. The analyst persona runs a multi-turn discovery conversation and grows one approved analysis space per topic; the space is the precondition every build and design flow stands on.
+description: Interactive, compiler-backed business analysis that produces one approved project-local analysis space before solution, design and backlog work.
 disable-model-invocation: true
 ---
 
@@ -8,4 +8,4 @@ disable-model-invocation: true
 
 # Business Analysis
 
-Read `${CLAUDE_PLUGIN_ROOT}/host-contract.md` and `${CLAUDE_PLUGIN_ROOT}/skill-content/business-analysis/SKILL.md` completely. Follow the canonical skill as the authoritative workflow and the host contract as its platform adapter. Before any workflow step inside a Git repository, run `project environment-status --project-root <git-root> --json` through the PMO launcher. A non-current environment permits only setup, upgrade, or recovery guidance.
+Read `${CLAUDE_PLUGIN_ROOT}/host-contract.md` and `${CLAUDE_PLUGIN_ROOT}/skill-content/business-analysis/SKILL.md` completely. Follow the canonical skill as the authoritative workflow and the host contract as its platform adapter. Before changing a project, confirm the workspace config and local docs contract are present; setup is the only entry that may create them.

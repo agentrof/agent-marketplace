@@ -110,10 +110,10 @@ The persona mandates the close; these are its mechanics.
 
 1. Run the completeness and consistency sweeps first (the persona's own
    checklist), silently; their findings feed the challenge list.
-2. Challenge round: present each finding as a claim with a proposed
+2. Challenge pass: present each finding as a claim with a proposed
    resolution, not as an open-ended question. "The brief says nothing
    about X; I intend to write BR-021 as Y; confirm or correct." Ask only
-   where the answer changes the brief either way; batch the round to the
+   where the answer changes the brief either way; batch the questions to the
    few highest-stakes items, never a checklist recital.
 3. Steelman before challenging an owner decision: state the strongest
    case for it in one sentence, then the risk that argues against it.

@@ -62,7 +62,7 @@ Grouped by severity (Critical, High, Medium, Low). Each finding:
 | 1 | <date> | FAIL: <blocking findings> | implement |
 | 2 | <date> | PASS | sign-off |
 
-Each Date cell is the pasted output of the PMO CLI's `now --date`
+Each Date cell is the pasted output of the local compiler's `now --date`
 (system clock, UTC), never a remembered date.
 
 ## Verdict

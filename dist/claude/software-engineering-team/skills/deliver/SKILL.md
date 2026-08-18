@@ -1,6 +1,6 @@
 ---
 name: deliver
-description: The software-engineering-team front door for real work. The user states an ask; it is classified as atomic or large, confirmed in one line, and driven to a pull request through the develop flow.
+description: Resume one exact Delivery, execute its approved Items and close one Delivery Review.
 disable-model-invocation: true
 ---
 
@@ -8,4 +8,4 @@ disable-model-invocation: true
 
 # Deliver
 
-Read `${CLAUDE_PLUGIN_ROOT}/host-contract.md` and `${CLAUDE_PLUGIN_ROOT}/skill-content/deliver/SKILL.md` completely. Follow the canonical skill as the authoritative workflow and the host contract as its platform adapter. Before any workflow step inside a Git repository, run `project environment-status --project-root <git-root> --json` through the PMO launcher. A non-current environment permits only setup, upgrade, or recovery guidance.
+Read `${CLAUDE_PLUGIN_ROOT}/host-contract.md` and `${CLAUDE_PLUGIN_ROOT}/skill-content/deliver/SKILL.md` completely. Follow the canonical skill as the authoritative workflow and the host contract as its platform adapter. Before changing a project, confirm the workspace config and local docs contract are present; setup is the only entry that may create them.

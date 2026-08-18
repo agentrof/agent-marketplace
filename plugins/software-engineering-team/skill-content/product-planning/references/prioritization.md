@@ -1,6 +1,6 @@
 # Risk-Adjusted Sequencing
 
-Step-by-step ordering for the backlog in the PMO database (item order
+Step-by-step ordering for the backlog in the tracked project documents (item order
 records the sequence; item list --json reads it back). Two passes: the
 dependency pass decides first, the value-and-risk weighing orders whatever
 the dependency pass leaves free. No estimate field exists in any artifact,
@@ -74,10 +74,17 @@ that gates WP-03").
 - must/should/deferred is the whole scope vocabulary at the backlog gate
   (the must-should-could scheme is the lineage, paraphrased); both "could"
   and "won't" land as deferred.
-- Every deferred item enters the deferred list with the criterion it
-  defers and a written reason: "deferred: BR-013 delegation, no absent
-  approvers expected before the second release". A deferral without a
-  reason is a silent drop and fails the coverage map.
+- Every deferred item enters the root backlog review's `Deferred Criteria`
+  table with a vault-absolute link to its approved owning note (the table pipe
+  escaped and registry-qualified identity as alias), a stable `owner_role`, a
+  concrete reason and a concrete `revisit_trigger`. Free prose is not a
+  disposition. A deferral missing any field is a silent drop and fails the
+  coverage map.
+- Every active AC and BR selected by the Requirement impact matrix appears
+  exactly once: either a story covers it or the table defers it. A root
+  `analysis_scopes` declaration may explicitly expand that selection; unrelated
+  historical BA is not silently imported.
+  Overlap, wrong-owner/unknown links and uncovered identities fail.
 - Revisit the deferred list at every checkpoint: reinstate the item as a
   story, re-affirm its reason, or drop it by the owner's explicit
   decision. A deferred list untouched across two checkpoints is a smell,

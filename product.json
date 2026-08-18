@@ -3,14 +3,14 @@
   "vendor": {
     "id": "agentrof",
     "display_name": "Agentrof",
-    "home_env": "AGENTROF_HOME",
-    "default_home_dir": ".agentrof"
+    "home_env": "AGENT_MARKETPLACE_HOME",
+    "default_home_dir": ".agent-marketplace"
   },
   "product": {
     "id": "agent-marketplace",
     "display_name": "Agent Marketplace",
     "home_env": "AGENT_MARKETPLACE_HOME",
-    "home_subdir": "agent-marketplace"
+    "home_subdir": ""
   },
   "hosts": {
     "claude": {

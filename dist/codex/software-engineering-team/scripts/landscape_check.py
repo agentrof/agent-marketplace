@@ -18,10 +18,11 @@ Verifies over workspace/docs/solution-design/:
 Stamp mode (--stamp-engagement <slug> --status ... [--reason ...])
 rewrites an engagement's Status line with the current UTC date, then
 falls through to the full check; when the check fails, the stamp is
-rolled back, so a stamp can never leave an inconsistent tree. It only
-replaces a valid open/parked Status line: closed engagements (approved,
-superseded) are append-only, and a Summary without a Status line is a
-doc defect to fix first. The model never types the date.
+rolled back, so a stamp can never leave an inconsistent tree. It replaces a
+valid Status line, including reopening an approved or superseded engagement;
+Git carries the history and no pre-backlog lock state is created. A Summary
+without a Status line is a doc defect to fix first. The model never types the
+date.
 
 Stdlib only. Exit 0 clean, 1 on findings, 2 on usage errors.
 """
@@ -101,14 +102,6 @@ def stamp_engagement(tree: Path, slug: str, status: str,
               " body line is not a valid Status line; fix the doc before"
               " stamping", file=sys.stderr)
         return 2, None, None
-    current = lines[target_idx].strip()
-    if current.startswith("Status: approved") \
-            or current.startswith("Status: superseded"):
-        print(f"landscape_check: engagements/{doc.name} is closed"
-              f" ({current}); closed engagements are append-only, a"
-              " reopened topic gets a new engagement (-2 suffix)",
-              file=sys.stderr)
-        return 1, None, None
     lines[target_idx] = line
     doc.write_text("\n".join(lines) + "\n", encoding="utf-8")
     print(f"landscape_check: stamped engagements/{doc.name}: {line}")

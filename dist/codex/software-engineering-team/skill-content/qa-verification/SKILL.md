@@ -10,7 +10,14 @@ Verification, not authorship. The QA role never writes or modifies product code 
 
 ## When to Use
 
-Load when verifying a delivered increment against its brief: acceptance criteria (AC-###), business rules (BR-###), and edge cases. This skill defines HOW to verify. WHAT the stack-specific checks look like comes from each stack skill bound to the change: also load their references/qa-checklist.md files before planning. Not for authoring tests, fixing bugs, or reviewing code style (the review role owns style).
+Load when verifying a delivered increment against its approved story test plan:
+qualified acceptance criteria (`<space>:AC-<CODE>-###`), qualified business
+rules (`<space>:BR-<CODE>-###`), stable story scenarios
+(`<story-id>-TS-###`) and
+edge cases. This skill defines HOW to verify. WHAT the stack-specific checks
+look like comes from each stack skill bound to the change: also load their
+`references/qa-checklist.md` files before planning. Not for authoring tests,
+fixing bugs, or reviewing code style (the review role owns style).
 
 ## Test Plan Categories
 
@@ -22,15 +29,21 @@ Classify every planned check into exactly one category. A plan missing any categ
 
 ## Coverage Audit
 
-- Cross every AC-### and BR-### id from the brief with the test tags in the suite results. The product is a matrix: one row per id, mapped tests, result.
+- Cross every qualified AC/BR identity and every stable story-scenario identity
+  from the approved test plan with the test tags in the suite results. The
+  product is a matrix: one row per identity, mapped tests, result.
 - A row with no mapped test is NO-TEST. That is a deterministic finding, never a judgment call, and it fails the audit.
-- Run the audit mechanically: `"$RUN" run "$TEAM" skill-content/qa-verification/scripts/scenario_report.py --brief <brief.md> --junit <results.xml>`. Exit code 1 means gaps exist.
+- Run the audit mechanically with the packaged
+  `skill-content/qa-verification/scripts/scenario_report.py --brief <test-plan.md>
+  --junit <results.xml>`. Exit code 1 means gaps exist.
 - [coverage-audit](references/coverage-audit.md): tagging conventions per suite type and the full matrix schema. Read when building the matrix or when a mapped-test lookup is ambiguous.
 - [test-design](references/test-design.md): partition, boundary, decision-table, and pairwise methods for deriving the minimal expected test set per requirement. Read when auditing whether a covered id is covered enough (one mapped test, untested partitions).
 
 ## Command Indirection
 
-- DO read the test-suite command, the environment command (env_command: verbs `up`, `down`, `seed <scenario>`, `logs`, `url <service>`) and the mutation command from `workspace/config.json`.
+- DO read `test_command`, `env_command` (verbs `up`, `down`,
+  `seed <scenario>`, `logs`, `url <service>`) and `mutation_command` from
+  `workspace/config.json`.
 - DON'T hardcode tool invocations or ports. This skill is stack-agnostic; the configured commands are the only entry points.
 - DO record the exact commands executed in the report, so the run is reproducible.
 - The suite is hermetic: the test and mutation commands never depend on a standing environment; a suite found depending on one is a blocking finding (waiver semantics in the environment stack skill's Hermetic Suite Rule).
@@ -65,7 +78,7 @@ Automated green is necessary, not sufficient. After the suite passes, stand the 
 
 ## Report
 
-Maintain ONE evolving verification record per increment: coverage matrix, suite results, live results, findings by severity, verdict. Its canonical copy is the orchestrator's PMO database: the spawn prompt hands you the currently open findings, your reply returns the full record (the orchestrator persists findings, coverage rows and budget verdicts from it). Update the same finding ids across iterations; never fork parallel reports.
+Maintain ONE evolving verification record per increment: coverage matrix, suite results, live results, findings by severity, verdict. Its canonical copy is the orchestrator's tracked project documents: the spawn prompt hands you the currently open findings, your reply returns the full record (the orchestrator persists findings, coverage rows and budget verdicts from it). Update the same finding ids across iterations; never fork parallel reports.
 
 - [report-format](references/report-format.md): the record skeleton and per-section update rules. Read when creating or updating the verification record.
 

@@ -45,14 +45,13 @@ aliases:
 
 ## Type designations
 
-The title's closing designation is now MECHANICAL. The canonical
-ENGLISH table below is minted per project into config.json's
-`doc_type_designations` map (type-kebab -> designation) in the
-output_language, owner-approved. The checker holds each typed note's
-title against that DATA: the designation at a word boundary under an
-NFKC+casefold fold, and a challenge-record title also its round number
-as a standalone token. Map absent or config unreadable warns per note
-naming the mint duty, never a silent pass; only the English table ships.
+The title's closing designation is mechanical. The English default table below
+is minted per project into config.json's `doc_type_designations` map
+(type-kebab -> designation). Display wording may follow the project's output
+language, terminology language, or an explicitly approved mixture. The checker
+holds each typed note's title against that data at a word boundary under an
+NFKC+casefold fold. Map absence or unreadable config warns per note naming the
+mint duty, never a silent pass; only the English default table ships.
 
 The map is mutable with memory, never hand-edited. Its single writer,
 for mint and change alike, is `vault_check.py reconcile-designations`
@@ -64,11 +63,8 @@ then transitions every affected title and byte-matching H1 source -> target
 double suffix survives), sweeps wikilink aliases byte-equal to the source
 title, and re-renders the generated views. The `designation_drift`
 check holds titles against the ledger: a retired value closing a title
-is an error (mechanically fixable), a mid-title stranding or a
-non-closing designation warns. Locked records are skipped by default
-and always report warnings, never errors: the owner-approved relabel
-(`--include-locked`, title and H1 only, one PMO audit event per record)
-is the sanctioned path, and a declined relabel stays a named residual.
+is an error (mechanically fixable), while a mid-title stranding or a
+non-closing designation warns.
 An adopted vault with stale titles and no ledger states its prior value
 explicitly via `--from` (never recorded: it was not a configured
 value).
@@ -85,12 +81,18 @@ value).
 | rule-set | rules |
 | acceptance-set | acceptance criteria |
 | decision | decision |
-| challenge-record | review round |
 | integration | integration |
 | landscape | landscape |
 | engagement | engagement |
 | design-master | design master |
 | page-override | page override |
+| backlog | product backlog |
+| backlog-review | backlog review |
+| epic | epic |
+| epic-review | epic review |
+| story | story |
+| test-plan | test plan |
+| issue-report | issue report |
 | experience | experience |
 | program | program |
 | release | release |
@@ -116,9 +118,6 @@ generic English (render the designation into the output_language):
 - `entities/customer-entity.md` holds `title: Customer entity`.
 - `decisions/order-events-decision.md` holds
   `title: Order event distribution decision`, alias `SD-007`.
-- Review rounds follow `<scope name> <review-round designation> <n>`:
-  `reviews/round-2-review.md` holds `title: Payments review round 2`.
-
 In every case the H1 repeats the title byte-for-byte.
 
 ## Shapes
@@ -133,7 +132,7 @@ In every case the H1 repeats the title byte-for-byte.
   denies a hand-typed value.
 - The policy types every key: text (`code`, `scope`, `review_scope`,
   `verdict`, `system_name`, `direction`, ...), number (`round`),
-  checkbox (`locked`), date (`approved_at`, `decided_at`), list
+  date (`approved_at`, `decided_at`), list
   (`tags`, `aliases`, `governs`, `verifies`). A value of the wrong
   shape is a `frontmatter_props` error.
 
@@ -150,7 +149,7 @@ governs:
 
 - `governs` and `verifies` are ALWAYS block lists, one quoted wikilink
   per `- item` line, even for a single target: the property panel
-  holds one value type per key. The `migrate` verb lifts a scalar into
+  holds one value type per key. The `normalize` verb lifts a scalar into
   a one-item list.
 - The supersede chain is bidirectional (`supersedes` on the younger,
   `superseded_by` on the older) and is written by `stamp-decision` in

@@ -159,7 +159,7 @@ class ReleaseRepositoryTests(unittest.TestCase):
     def test_changed_plugin_requires_the_same_component(self):
         with mock.patch.object(release, "changed_paths", return_value=[
             ("A", ".changes/docs.json"),
-            ("M", f"plugins/{fixtures.PLUGIN}/flows/develop.md"),
+            ("M", f"plugins/{fixtures.PLUGIN}/flows/backlog-planning.md"),
         ]):
             self.write_changeset("docs", {})
             with self.assertRaisesRegex(release.ReleaseError, fixtures.PLUGIN):
@@ -169,7 +169,7 @@ class ReleaseRepositoryTests(unittest.TestCase):
         with mock.patch.object(release, "changed_paths", return_value=[
             ("A", ".changes/fixture.json"),
             ("A", "versions.json"),
-            ("M", f"plugins/{fixtures.PLUGIN}/flows/develop.md"),
+            ("M", f"plugins/{fixtures.PLUGIN}/flows/backlog-planning.md"),
         ]):
             release.check_pr_changeset(
                 self.root, "origin/main", allow_bootstrap=True
@@ -215,6 +215,51 @@ class ReleaseRepositoryTests(unittest.TestCase):
         ]):
             with self.assertRaisesRegex(release.ReleaseError, "release-owned"):
                 release.check_pr_changeset(self.root, "origin/main")
+
+    def test_plugin_retirement_may_only_prune_release_registries(self):
+        current_versions = release.load_versions(self.root)
+        base_versions = json.loads(json.dumps(current_versions))
+        base_versions["plugins"]["retired-team"] = "1.2.3"
+        base_stable = {
+            "schema_version": 1,
+            "version": current_versions["marketplace"],
+            "stable_base": "a" * 40,
+            "main_source": "b" * 40,
+            "impacts": {
+                fixtures.PLUGIN: "patch",
+                "retired-team": "minor",
+            },
+            "summaries": ["Prior release."],
+        }
+        current_stable = json.loads(json.dumps(base_stable))
+        del current_stable["impacts"]["retired-team"]
+        release.write_json(self.root / ".release" / "stable.json", current_stable)
+        self.write_changeset("retire-team", {
+            release.MARKETPLACE_COMPONENT: "minor",
+        })
+
+        def at_ref(_root, _ref, path):
+            return base_versions if path == "versions.json" else base_stable
+
+        changed = [
+            ("A", ".changes/retire-team.json"),
+            ("M", "versions.json"),
+            ("M", ".release/stable.json"),
+            ("D", "plugins/retired-team/constitution.md"),
+        ]
+        with mock.patch.object(release, "changed_paths", return_value=changed), \
+                mock.patch.object(release, "json_at_ref", side_effect=at_ref):
+            release.check_pr_changeset(self.root, "origin/main")
+
+        tampered = json.loads(json.dumps(current_versions))
+        tampered["plugins"][fixtures.PLUGIN] = "9.9.9"
+        self.assertEqual(
+            release.retirement_registry_delta(base_versions, tampered), set()
+        )
+        current_stable["summaries"] = ["Rewritten history."]
+        self.assertFalse(release.stable_retirement_cleanup(
+            base_stable, current_stable, {"retired-team"}
+        ))
 
     def test_changesets_already_on_stable_do_not_enter_next_release(self):
         self.write_changeset("new-patch", {fixtures.PLUGIN: "patch"})

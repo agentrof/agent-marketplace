@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
-"""Deterministic coverage audit: requirement ids vs JUnit test results.
+"""Deterministic coverage audit: planned identities vs JUnit test results.
 
-Extracts BR-### and AC-### ids from brief markdown files, maps them to test
-cases in JUnit XML files (id present in the test name, class name, or property
-values, case-insensitive), and prints a coverage matrix with PASS/FAIL/NO-TEST
-per id plus a machine-readable summary line.
+Extracts canonical qualified or unqualified BA identities and story-scenario
+identities from planned Markdown files, maps them to test cases in JUnit XML
+files (identity present in the test name, class name, or property values,
+case-insensitive), and prints a coverage matrix with PASS/FAIL/NO-TEST per
+identity plus a machine-readable summary line.
 
 Exit code 0 when every id has at least one passing, non-skipped test and no
 mapped test failed; exit code 1 when any NO-TEST or FAIL row exists; exit
@@ -22,11 +23,17 @@ import sys
 import xml.etree.ElementTree as ET
 from pathlib import Path
 
-ID_RE = re.compile(r"\b(?:BR|AC)-\d+\b", re.IGNORECASE)
+ID_RE = re.compile(
+    r"(?<![A-Za-z0-9_:-])(?:"
+    r"(?:[a-z0-9]+(?:-[a-z0-9]+)*:)?(?:BR|AC)-(?:[A-Z0-9]+-)*[0-9]+"
+    r"|[A-Z][A-Z0-9]*-[0-9]{2,}-TS-[0-9]+"
+    r")(?![A-Za-z0-9_-])",
+    re.IGNORECASE,
+)
 
 
 def extract_ids(brief_paths: list[Path]) -> list[str]:
-    """Return requirement ids in first-seen order, normalized to upper case."""
+    """Return planned identities in first-seen order, normalized to upper case."""
     seen: dict[str, None] = {}
     for path in brief_paths:
         text = path.read_text(encoding="utf-8", errors="replace")
@@ -87,7 +94,10 @@ def build_matrix(ids: list[str], tests: list[tuple[str, str, str]]):
     """
     rows = []
     for req_id in ids:
-        needle = re.compile(rf"\b{re.escape(req_id)}\b", re.IGNORECASE)
+        needle = re.compile(
+            rf"(?<![A-Za-z0-9_:-]){re.escape(req_id)}(?![A-Za-z0-9_-])",
+            re.IGNORECASE,
+        )
         mapped = [(n, s) for n, ident, s in tests if needle.search(ident)]
         live = [(n, s) for n, s in mapped if s != "skipped"]
         if not live:
@@ -117,7 +127,7 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument(
         "--brief", nargs="+", required=True, type=Path, metavar="MD",
-        help="markdown file(s) containing BR-### / AC-### ids",
+        help="markdown file(s) containing qualified AC/BR or story scenario ids",
     )
     parser.add_argument(
         "--junit", nargs="+", required=True, type=Path, metavar="XML",
@@ -126,7 +136,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--json-out", type=Path, default=None, metavar="JSON",
         help="also write the matrix rows and summary as JSON (the shape"
-             " the PMO CLI's coverage import consumes)",
+             " the backlog coverage compiler consumes)",
     )
     args = parser.parse_args(argv)
 
@@ -137,7 +147,8 @@ def main(argv: list[str] | None = None) -> int:
 
     ids = extract_ids(args.brief)
     if not ids:
-        print("error: no BR-### or AC-### ids found in the brief(s)", file=sys.stderr)
+        print("error: no AC/BR or story scenario ids found in the brief(s)",
+              file=sys.stderr)
         return 2
 
     tests = collect_tests(args.junit)

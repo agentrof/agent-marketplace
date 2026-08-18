@@ -103,6 +103,13 @@ class ReleaseWorkflowContracts(unittest.TestCase):
         text = self.text("validate.yml")
         self.assertIn("permissions:\n  contents: read", text)
         self.assertIn("tools/release.py build-info", text)
+        self.assertEqual(
+            text.count(
+                "actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6"
+            ),
+            4,
+        )
+        self.assertGreaterEqual(text.count('python-version: "3.9"'), 2)
         self.assertIn("actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6", text)
         self.assertIn("dist/claude", text)
         self.assertIn("dist/codex", text)
@@ -124,6 +131,22 @@ class ReleaseWorkflowContracts(unittest.TestCase):
                 discoverability = path.read_text(encoding="utf-8")
                 self.assertIn("SECURITY.md", discoverability)
                 self.assertIn("security/advisories/new", discoverability)
+
+    def test_community_governance_surface_is_complete(self):
+        required = {
+            "CODE_OF_CONDUCT.md": ("Expected behavior", "Enforcement"),
+            "SUPPORT.md": ("issue forms", "SECURITY.md"),
+            ".github/PULL_REQUEST_TEMPLATE.md": ("Verification", "release-impact changeset"),
+            ".github/ISSUE_TEMPLATE/config.yml": ("blank_issues_enabled: false", "Security vulnerability"),
+            ".github/ISSUE_TEMPLATE/bug_report.yml": ("Minimal reproduction", "Safe evidence"),
+            ".github/ISSUE_TEMPLATE/feature_request.yml": ("Acceptance criteria", "non-goals"),
+            ".github/ISSUE_TEMPLATE/workflow_question.yml": ("Workflow area", "Intended outcome"),
+        }
+        for relative, markers in required.items():
+            with self.subTest(path=relative):
+                text = (REPO / relative).read_text(encoding="utf-8")
+                for marker in markers:
+                    self.assertIn(marker, text)
 
     def test_real_host_smoke_uses_versions_from_the_tracked_policy(self):
         payload = json.loads((REPO / "tools/data/host-cli-versions.json").read_text(encoding="utf-8"))

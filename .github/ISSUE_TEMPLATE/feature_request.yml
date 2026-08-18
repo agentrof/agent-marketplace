@@ -1,0 +1,30 @@
+name: Improvement proposal
+description: Propose a bounded, evidence-backed improvement.
+title: "proposal: "
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem and affected workflow
+      description: Explain the observable problem, who it affects and why the current behavior is insufficient.
+    validations:
+      required: true
+  - type: textarea
+    id: outcome
+    attributes:
+      label: Proposed outcome and non-goals
+      description: Describe the result users should observe and what is deliberately out of scope.
+    validations:
+      required: true
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Evidence or alternatives considered
+      description: Link to relevant package, workflow or project evidence. Do not include secrets.
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance criteria
+      description: List independently verifiable outcomes.
+    validations:
+      required: true

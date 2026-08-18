@@ -2301,6 +2301,103 @@ def check_limits_config_shape(tree: Tree, findings: list[Finding]) -> None:
         ))
 
 
+DELIVERY_CONTRACT_ROOT = Path(
+    "plugins/software-engineering-team/skill-content/deliver/data"
+)
+DELIVERY_CONTRACT_FILES = {
+    "delivery-control-record-contract.json",
+    "delivery-document-contract.json",
+    "delivery-migration-registry.json",
+    "delivery-protocol-1.json",
+    "delivery-provider-contract.json",
+    "delivery-receipt-contract.json",
+    "delivery-result-contract.json",
+}
+
+
+def check_delivery_contract_shape(
+    tree: Tree, findings: list[Finding]
+) -> None:
+    """Keep every shipped Delivery contract required and mechanically owned."""
+    root = tree.root / DELIVERY_CONTRACT_ROOT
+    actual = {
+        path.name for path in root.glob("*.json") if path.is_file()
+    } if root.is_dir() else set()
+    if actual != DELIVERY_CONTRACT_FILES:
+        findings.append(Finding(
+            "error", DELIVERY_CONTRACT_ROOT.as_posix(), 1,
+            "delivery_contract_shape",
+            "Delivery contract file set differs from the closed registry: "
+            f"missing={sorted(DELIVERY_CONTRACT_FILES - actual)}, "
+            f"extra={sorted(actual - DELIVERY_CONTRACT_FILES)}",
+            "restore the exact canonical Delivery contract set",
+        ))
+        return
+
+    contracts: dict[str, dict] = {}
+    for name in sorted(DELIVERY_CONTRACT_FILES):
+        path = root / name
+        try:
+            value = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            findings.append(Finding(
+                "error", rel(tree, path), 1, "delivery_contract_shape",
+                f"Delivery contract is not valid JSON: {exc}",
+                "restore a valid JSON object",
+            ))
+            continue
+        if not isinstance(value, dict):
+            findings.append(Finding(
+                "error", rel(tree, path), 1, "delivery_contract_shape",
+                "Delivery contract root must be an object",
+                "replace the root value with the declared contract object",
+            ))
+            continue
+        contracts[name] = value
+    if set(contracts) != DELIVERY_CONTRACT_FILES:
+        return
+
+    provider = contracts["delivery-provider-contract.json"]
+    receipt = contracts["delivery-receipt-contract.json"]
+    protocol = contracts["delivery-protocol-1.json"]
+    migration = contracts["delivery-migration-registry.json"]
+    records = contracts["delivery-control-record-contract.json"]
+    result = contracts["delivery-result-contract.json"]
+    problems = []
+    if provider.get("schema_version") != 1 \
+            or provider.get("provider") != "github" \
+            or provider.get("adapter") != "delivery_provider.GitHubProvider":
+        problems.append("provider identity or schema is invalid")
+    if receipt.get("schema_version") != 1 \
+            or receipt.get("kind") != "item-writer-v1" \
+            or receipt.get("states") != ["pending", "verified"]:
+        problems.append("writer receipt identity or states are invalid")
+    if receipt.get("provider_receipt", {}).get("kind") != "pr-create-v1" \
+            or receipt.get("target_update_receipt", {}).get("kind") \
+            != "target-update-v1":
+        problems.append("provider or target-update receipt identity is invalid")
+    if protocol.get("protocol_version") != "delivery-protocol-1" \
+            or protocol.get("merge_policy") \
+            != "merge-commit-only; squash and rebase fail closed":
+        problems.append("protocol version or merge policy is invalid")
+    if migration.get("to_protocol") != protocol.get("protocol_version") \
+            or migration.get("unknown_protocol_policy") != "fail_closed":
+        problems.append("migration registry does not close protocol v1")
+    record_names = set(records.get("records", {}))
+    if records.get("unknown_record_policy") != "fail_closed" \
+            or record_names != set(records.get("subjects", {})):
+        problems.append("control-record and subject registries differ")
+    codes = result.get("finding_codes", [])
+    if not isinstance(codes, list) or len(codes) != len(set(codes)):
+        problems.append("result finding-code registry is not a unique list")
+    for problem in problems:
+        findings.append(Finding(
+            "error", DELIVERY_CONTRACT_ROOT.as_posix(), 1,
+            "delivery_contract_shape", problem,
+            "align the canonical Delivery contracts with the runtime protocol",
+        ))
+
+
 def check_product_namespace(tree: Tree, findings: list[Finding]) -> None:
     """The vendor identity and product runtime namespace stay distinct."""
     if tree.product is None:
@@ -2428,6 +2525,7 @@ CHECKS = {
     "vault_wiring": check_vault_wiring,
     "model_config_shape": check_model_config_shape,
     "limits_config_shape": check_limits_config_shape,
+    "delivery_contract_shape": check_delivery_contract_shape,
     "product_namespace": check_product_namespace,
 }
 

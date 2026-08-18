@@ -77,7 +77,7 @@ policy, never ad hoc.
   rows. Every policy hub MUST have an inbound link from its subtree
   map (`map_coverage`); the producing persona updates the map in the
   same session that creates, renames or retires docs.
-- Delivery preparation state is canonical Markdown in `backlog/` and is
+- Delivery input is canonical Markdown in `backlog/` and is
   versioned with the project. The compiler derives registry, board, dependency
   and coverage views under `backlog/_generated/`; these views are disposable
   and never hand-edited. Execution results belong to the later delivery flow,

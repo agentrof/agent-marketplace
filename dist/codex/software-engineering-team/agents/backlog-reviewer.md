@@ -43,7 +43,7 @@ Stay read-only and challenge the complete project-local backlog package.
    when the matrix excludes a broader scope. Reject unknown, overlapping and
    uncovered identities.
 5. Verify the `work_kind` source contract. Feature work carries the full
-   preparation lineage; defect and technical work cite approved issue,
+   Requirement lineage; defect and technical work cite approved issue,
    decision or constrained evidence and every scenario maps to a declared
    source.
 6. Require an explicit decision for empty, boundary, invalid-input,

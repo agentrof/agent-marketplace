@@ -448,7 +448,7 @@ class BacklogCompilerTests(unittest.TestCase):
         self.assertNotEqual(wrong_owner.returncode, 0)
         self.assertIn("criterion erp:AC-INV-002 belongs to", wrong_owner.stdout)
 
-    def test_greenfield_global_coverage_fails_closed_on_bad_registry(self):
+    def test_global_coverage_fails_closed_on_bad_registry(self):
         self.make_package()
         registry = self.docs / "business-analysis/erp/_generated/registry.json"
         registry.write_text("{not-json", encoding="utf-8")

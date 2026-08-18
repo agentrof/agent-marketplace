@@ -56,7 +56,7 @@ Delivery Flow.
 
 The project-local `.agentrof/agent-marketplace/.runtime/` directory is
 disposable and never participates in compatibility decisions. A refresh may
-recreate it without changing preparation state.
+recreate it without changing Requirement or Delivery state.
 
 ## Version and build identity
 
@@ -64,11 +64,21 @@ recreate it without changing preparation state.
   only writer that bumps `versions.json`; host manifests expose that semantic
   plugin version.
 - Each generated package carries `.agent-marketplace-package.json` with a
-  deterministic snapshot `build_id`, source provenance and file hashes. This
-  metadata verifies the package; it is not project state.
+  deterministic snapshot `build_id`, source provenance, file hashes and the
+  closed `delivery_protocol` read/write capability. This metadata verifies the
+  package and selects compatible Delivery record adapters; it is not project
+  state.
 - Setup never copies a package version or build ID into project configuration,
-  and upgrade never compares an old project build ID with a new one. There is
-  therefore no compatibility lock, migration chain or durable upgrade ledger.
+  and upgrade never compares an old project build ID with a new one. Active
+  Delivery compatibility is proven from package metadata plus the remote Fence
+  and control-record protocol, without a project upgrade ledger.
 - `doc_type_designation_history` is not an upgrade ledger. It contains only
   retired project-selected display values used to find stale titles after an
   explicit designation rename.
+
+When open Deliveries exist, setup acquires the project Fence in `upgrade` mode,
+quiesces active Items, validates every Integration and Item control record with
+the advertised protocol adapters, applies only package-owned schema changes,
+and releases all Delivery barriers atomically before returning the Fence to
+`open`. A semantic conflict, unknown record version or incompatible adapter
+fails before authored content or Delivery work is changed.

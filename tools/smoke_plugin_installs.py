@@ -72,7 +72,7 @@ def installed_root(inventory: dict | list, host: str) -> Path:
 def exercise_package(team_root: Path, project: Path, env: dict[str, str]) -> None:
     setup = team_root / "scripts" / "setup_project.py"
     check = team_root / "scripts" / "setup_check.py"
-    route = team_root / "scripts" / "preparation_check.py"
+    route = team_root / "scripts" / "requirement_route.py"
     for path in (setup, check, route, team_root / "scripts" / "backlog_compile.py"):
         if not path.is_file():
             raise SmokeFailure(f"installed package is missing {path.relative_to(team_root)}")
@@ -157,7 +157,7 @@ def exercise_package(team_root: Path, project: Path, env: dict[str, str]) -> Non
     portable = project / ".github" / "agentrof" / "vault-gate.pyz"
     run([sys.executable, str(portable), "check", "--project-root", str(project), "--json"], env)
     routed = subprocess.run([
-        sys.executable, str(route), "route", "--project-root", str(project),
+        sys.executable, str(route), "--project-root", str(project),
         "--json",
     ], capture_output=True, text=True, env=env, check=False, timeout=60)
     payload = json.loads(routed.stdout)

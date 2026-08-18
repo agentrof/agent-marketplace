@@ -42,5 +42,5 @@ repairs documentation only.
 - Durable documentation remains inside the tracked project vault. Local
   scratch state stays disposable.
 - Never rewrite approved meaning without an explicit owner decision.
-- Do not create or modify delivery artifacts; backlog preparation ends at the
+- Do not create or modify Delivery artifacts; Backlog Planning ends at the
   approved Markdown backlog and its test plans.

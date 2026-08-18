@@ -82,6 +82,30 @@ class ValidatorContractTests(unittest.TestCase):
             path.write_text(json.dumps(policy, indent=2) + "\n", encoding="utf-8")
             self.assertIn("vault_policy_shape", self.checks(root))
 
+    def test_delivery_contract_set_and_merge_policy_are_validated(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = self.fixture(temporary)
+            data = (
+                root / "plugins/software-engineering-team/skill-content/"
+                "deliver/data"
+            )
+            receipt = data / "delivery-receipt-contract.json"
+            receipt.unlink()
+            self.assertIn("delivery_contract_shape", self.checks(root))
+
+        with tempfile.TemporaryDirectory() as temporary:
+            root = self.fixture(temporary)
+            protocol_path = (
+                root / "plugins/software-engineering-team/skill-content/"
+                "deliver/data/delivery-protocol-1.json"
+            )
+            protocol = json.loads(protocol_path.read_text(encoding="utf-8"))
+            protocol["merge_policy"] = "provider default"
+            protocol_path.write_text(
+                json.dumps(protocol, indent=2) + "\n", encoding="utf-8"
+            )
+            self.assertIn("delivery_contract_shape", self.checks(root))
+
 
 if __name__ == "__main__":
     unittest.main()

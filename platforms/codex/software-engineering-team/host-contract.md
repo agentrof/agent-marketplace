@@ -20,5 +20,3 @@
   only portable instruction roots and local project memory.
 - Delivery execution is available only through the exact public entries
   `/delivery-plan`, `/execution-plan DLV-###` and `/deliver DLV-###`.
-  `/delivery-lanes` and `/develop` are retired compatibility routes and must
-  not create runtime state.

@@ -1,6 +1,6 @@
 ---
 name: backlog-plan
-description: User-gated preparation entry that turns approved analysis, solution, design-system and experience documents into a project-local nested Markdown backlog with epic reviews, story test plans and reproducible coverage views.
+description: User-gated Requirement Flow entry that turns approved analysis, solution-design, design-system and experience-design evidence into a project-local nested Markdown backlog with epic reviews, story test plans and reproducible coverage views.
 exposure: entry
 ---
 
@@ -73,5 +73,5 @@ approved. This entry prepares delivery, but it does not start delivery.
    `_generated/registry.json`, `board.md`, `dependency-map.md` and
    `test-coverage.md`, and verifies the resulting package hash. Commit the
    tracked docs.
-9. Stop with `deliver` as the next explicit entry. Backlog approval is not
+9. Stop with `delivery-plan` as the next explicit entry. Backlog approval is not
    delivery activation.

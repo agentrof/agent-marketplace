@@ -102,7 +102,7 @@ The `Coverage Classes` table contains exactly `empty`, `boundary`,
 multiple classes, but none may remain unclassified. A missing class, unknown
 scenario, orphan scenario or unexplained exclusion fails the compiler.
 
-The preparation trace ends at planned verification:
+The Requirement trace ends at planned verification:
 
 ```text
 criterion or rule -> scenario -> automation target
@@ -176,7 +176,7 @@ backlog_compile.py check --docs <workspace>/docs --approved --render --json
 Approval stamps the package, root backlog, epics, reviews and test plans while
 stories remain `planned`. Commit `workspace/docs/backlog/` and the updated
 `workspace/config.json` in the same project change. Report the package hash
-and exact generated views. Stop and route to `deliver`; do not create delivery
+and exact generated views. Stop and route to `delivery-plan`; do not create Delivery
 state in this flow.
 
 Human-facing authored titles use the project's configured document-type

@@ -1,11 +1,9 @@
-"""End-to-end contract for a greenfield project reaching delivery readiness."""
+"""End-to-end contract for approved Requirement evidence reaching backlog readiness."""
 
 from __future__ import annotations
 
 import hashlib
 import json
-import shutil
-import stat
 import subprocess
 import sys
 import tempfile
@@ -24,10 +22,9 @@ DESIGN_SYSTEM = SCRIPTS / "design_system_compile.py"
 EXPERIENCE = SCRIPTS / "experience_compile.py"
 BACKLOG = SCRIPTS / "backlog_compile.py"
 VAULT = SCRIPTS / "vault_check.py"
-PREPARATION = SCRIPTS / "preparation_check.py"
 
 
-class GreenfieldFlowTests(unittest.TestCase):
+class RequirementFlowTests(unittest.TestCase):
     def run_cli(
         self,
         script: Path,
@@ -296,7 +293,7 @@ tags:
 
 Status: approved 2025-01-01
 
-The greenfield target needs no additional structural decision.
+The Requirement target needs no additional structural decision.
 
 ## Framing
 
@@ -558,7 +555,7 @@ dependency_refs:
             "--json",
         )
 
-    def test_greenfield_project_routes_to_delivery_from_tracked_documents(self):
+    def test_approved_project_documents_survive_setup_refresh(self):
         with tempfile.TemporaryDirectory() as temporary:
             project = Path(temporary)
             subprocess.run(["git", "init", "-q", str(project)], check=True)
@@ -614,7 +611,7 @@ dependency_refs:
             subprocess.run(
                 ["git", "-c", "user.name=Agentrof Test",
                  "-c", "user.email=agentrof-test@example.invalid",
-                 "commit", "-qm", "Approve greenfield preparation"],
+                 "commit", "-qm", "Approve Requirement Flow documents"],
                 cwd=project, check=True,
             )
             active_work = project / "workspace/apps/in-progress.py"
@@ -622,118 +619,7 @@ dependency_refs:
             refreshed = self.run_cli(
                 SETUP, "apply", "--project-root", str(project), "--json"
             )
-            # Setup now hands every project to the unified Requirement Flow;
-            # the legacy preparation router below remains compatibility-only.
             self.assertEqual(json.loads(refreshed.stdout)["next_entry"], "requirement")
-
-            before = self.run_cli(
-                PREPARATION,
-                "route",
-                "--project-root",
-                str(project),
-                "--intent",
-                "deliver",
-                "--json",
-            )
-            before_payload = json.loads(before.stdout)
-            self.assertTrue(before_payload["ok"])
-            self.assertEqual(before_payload["next_entry"], "deliver")
-            self.assertTrue(all(
-                before_payload["checks"][key]
-                for key in (
-                    "business_analysis",
-                    "solution_design",
-                    "design_system",
-                    "experience_design",
-                    "backlog_present",
-                    "backlog_approved",
-                )
-            ))
-
-            config_path = project / "workspace/config.json"
-            config_before = config_path.read_bytes()
-            config = json.loads(config_before)
-            config["handoff_probe"] = "uncommitted"
-            config_path.write_text(
-                json.dumps(config, indent=2) + "\n", encoding="utf-8"
-            )
-            blocked = subprocess.run([
-                sys.executable, str(PREPARATION), "route", "--project-root",
-                str(project), "--intent", "deliver", "--json",
-            ], cwd=ROOT, capture_output=True, text=True, check=False)
-            self.assertEqual(blocked.returncode, 1, blocked.stdout + blocked.stderr)
-            blocked_payload = json.loads(blocked.stdout)
-            self.assertIn("Git handoff is incomplete", blocked_payload["reason"])
-            config_path.write_bytes(config_before)
-
-            shutil.rmtree(project / ".agentrof")
-            after = self.run_cli(
-                PREPARATION,
-                "route",
-                "--project-root",
-                str(project),
-                "--intent",
-                "deliver",
-                "--json",
-            )
-            self.assertEqual(json.loads(after.stdout), before_payload)
-
-    def test_existing_feature_requires_and_hands_off_complete_upstream_packages(self):
-        with tempfile.TemporaryDirectory() as temporary:
-            root = Path(temporary)
-            project = root / "project"
-            project.mkdir()
-            subprocess.run(["git", "init", "-q", str(project)], check=True)
-            self.run_cli(SETUP, "--project-root", str(project), "--json")
-            docs = project / "workspace/docs"
-            ba_space = self.seed_business_analysis(docs)
-            self.seed_solution_design(docs)
-            self.seed_design_system(docs)
-            self.seed_experience_design(docs, ba_space)
-            self.seed_backlog(docs, ("erp#domains/inventory",))
-            self.run_cli(VAULT, "render-relations", "--vault", str(docs))
-            self.run_cli(VAULT, "check", "--vault", str(docs), "--json")
-
-            subprocess.run(["git", "add", "--all"], cwd=project, check=True)
-            subprocess.run(
-                ["git", "-c", "user.name=Agentrof Test",
-                 "-c", "user.email=agentrof-test@example.invalid",
-                 "commit", "-qm", "Approve existing feature scope"],
-                cwd=project, check=True,
-            )
-            routed = self.run_cli(
-                PREPARATION, "route", "--project-root", str(project),
-                "--intent", "deliver", "--json",
-            )
-            self.assertEqual(json.loads(routed.stdout)["next_entry"], "deliver")
-
-            registry = docs / "business-analysis/erp/_generated/registry.json"
-            before_mode = stat.S_IMODE(registry.stat().st_mode)
-            registry.chmod(before_mode | stat.S_IXUSR)
-            blocked = subprocess.run(
-                [sys.executable, str(PREPARATION), "route", "--project-root",
-                 str(project), "--intent", "deliver", "--json"],
-                cwd=ROOT, capture_output=True, text=True, check=False,
-            )
-            self.assertEqual(blocked.returncode, 1, blocked.stdout)
-            self.assertIn("Git handoff is incomplete", blocked.stdout)
-            registry.chmod(before_mode)
-
-            clone = root / "clone"
-            subprocess.run(
-                ["git", "clone", "-q", str(project), str(clone)], check=True
-            )
-            portable = clone / ".github/agentrof/vault-gate.pyz"
-            self.run_cli(
-                portable, "check", "--project-root", str(clone), "--json"
-            )
-            cloned_route = self.run_cli(
-                PREPARATION, "route", "--project-root", str(clone),
-                "--intent", "deliver", "--json",
-            )
-            self.assertEqual(
-                json.loads(cloned_route.stdout)["next_entry"], "deliver"
-            )
 
 
 if __name__ == "__main__":

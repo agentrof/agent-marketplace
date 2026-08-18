@@ -28,8 +28,7 @@ Requirement Flow evaluates stage applicability, each required stage writes its
 own Markdown artifacts and runs its own compiler/checker, and backlog approval
 is the handoff to Delivery Flow. A stage is complete when its approved
 documents are tracked in Git. `requirement_route.py` only reads durable state
-and routes to the next explicit entry; the legacy `preparation_check.py` is a
-compatibility helper for existing stage handoff checks, not the public router.
+and routes to the next explicit entry.
 
 ## Backlog contract
 
@@ -108,8 +107,9 @@ make check
 Package upgrades run `setup_project.py inspect`, `apply` and `check`, preserve
 authored Markdown and user-owned configuration, and roll back setup-owned
 writes when the closing check fails. Completed-stage routing requires only its
-relevant docs and config to be committed and clean. Any future delivery upgrade
-policy must keep this file-first, project-local boundary.
+relevant docs and config to be committed and clean. Delivery upgrade policy
+keeps this file-first, project-local boundary. The complete refresh
+sequence and compatibility rules live in [upgrade-protocol.md](upgrade-protocol.md).
 
 ## Validation expectations
 

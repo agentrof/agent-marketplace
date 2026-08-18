@@ -84,6 +84,10 @@ class SingleTeamDistributionTests(unittest.TestCase):
                     encoding="utf-8"
                 )
             )
+            self.assertEqual(
+                provenance["delivery_protocol"],
+                build_distributions.DELIVERY_PROTOCOL_CAPABILITY,
+            )
             snapshots.append({
                 key: provenance[key] for key in (
                     "build_id",

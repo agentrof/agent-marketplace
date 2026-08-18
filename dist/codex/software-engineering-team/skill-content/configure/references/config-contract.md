@@ -8,11 +8,11 @@ configuration change.
 Requirement Flow consumes `scale`, both language fields,
 `doc_type_designations`, `doc_type_designation_history` and `limits`. Stack,
 database, command, source-directory and parallelism fields are retained for
-delivery. They are optional until delivery activation is designed; when
+Delivery. They are optional until first Item activation; when
 present they must satisfy this contract.
 
 - `project_origin`: retired. Setup removes this legacy key during migration;
-  request-specific Requirement impact decides which preparation stages apply.
+  request-specific Requirement impact decides which Requirement stages apply.
 - `backend_stack`: `python-fastapi`.
 - `frontend_stack`: `react-typescript`.
 - `environment_stack`: `docker-compose`.
@@ -98,7 +98,7 @@ with a full check and name every residual.
 
 Before the choice gate, state:
 
-- The current consumer of every field, whether the field affects preparation
+- The current consumer of every field, whether the field affects Requirement Flow
   now or only future delivery, and whether absence is currently allowed.
 - Which role-to-skill bindings change when Delivery executes. Method skills
   remain packaged and host-neutral; the Delivery coordinator owns execution.

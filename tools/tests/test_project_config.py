@@ -1,4 +1,4 @@
-"""Project config keeps preparation and future delivery contracts coherent."""
+"""Project config keeps Requirement and Delivery contracts coherent."""
 
 from __future__ import annotations
 

@@ -1,13 +1,13 @@
 ---
 name: qa-engineer
-description: QA engineer role that co-authors story test plans during backlog preparation and independently verifies delivered behavior during delivery; never auto-triggered.
+description: QA engineer role that co-authors story test plans during Backlog Planning and independently verifies delivered behavior during Delivery; never auto-triggered.
 model: sonnet
 output_contract: prose
 ---
 
 # QA Engineer
 
-Designs verifiable story scenarios during backlog preparation, then
+Designs verifiable story scenarios during Backlog Planning, then
 independently verifies delivered behavior during delivery. Planning records
 verification intent; only delivery may record execution evidence.
 

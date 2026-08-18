@@ -13,8 +13,14 @@ PLUGIN = ROOT / "plugins" / "software-engineering-team"
 
 
 class DeliveryProtocolTests(unittest.TestCase):
+    DATA = PLUGIN / "skill-content/deliver/data"
+
+    @classmethod
+    def load_contract(cls, name: str) -> dict:
+        return json.loads((cls.DATA / name).read_text(encoding="utf-8"))
+
     def test_result_and_record_registries_are_closed_and_unique(self):
-        result = json.loads((PLUGIN / "skill-content/deliver/data/delivery-result-contract.json").read_text())
+        result = self.load_contract("delivery-result-contract.json")
         def no_duplicates(pairs):
             out = {}
             for key, value in pairs:
@@ -23,7 +29,7 @@ class DeliveryProtocolTests(unittest.TestCase):
                 out[key] = value
             return out
         records = json.loads(
-            (PLUGIN / "skill-content/deliver/data/delivery-control-record-contract.json").read_text(),
+            (self.DATA / "delivery-control-record-contract.json").read_text(),
             object_pairs_hook=no_duplicates,
         )
         codes = result["finding_codes"]
@@ -33,6 +39,45 @@ class DeliveryProtocolTests(unittest.TestCase):
         self.assertEqual(len(records["records"]), len(set(records["records"])))
         self.assertEqual(records["unknown_record_policy"], "fail_closed")
         self.assertEqual(set(records["records"]), set(records["subjects"]))
+
+    def test_provider_and_receipt_contracts_match_runtime_surface(self):
+        provider = self.load_contract("delivery-provider-contract.json")
+        receipt = self.load_contract("delivery-receipt-contract.json")
+        provider_source = (PLUGIN / "scripts/delivery_provider.py").read_text(
+            encoding="utf-8"
+        )
+        coordinator_source = (PLUGIN / "scripts/delivery_git.py").read_text(
+            encoding="utf-8"
+        )
+
+        self.assertEqual(provider["provider"], "github")
+        self.assertEqual(provider["adapter"], "delivery_provider.GitHubProvider")
+        self.assertTrue(provider["required_capabilities"]["merge_commit"])
+        self.assertFalse(provider["required_capabilities"]["squash_merge"])
+        self.assertFalse(provider["required_capabilities"]["rebase_merge"])
+        self.assertFalse(provider["branch_lifecycle"]["request_head_deletion"])
+        self.assertIn("class GitHubProvider", provider_source)
+        self.assertIn('"--delete-branch=false"', provider_source)
+
+        self.assertEqual(receipt["kind"], "item-writer-v1")
+        self.assertEqual(receipt["states"], ["pending", "verified"])
+        self.assertEqual(receipt["provider_receipt"]["kind"], "pr-create-v1")
+        self.assertEqual(
+            receipt["target_update_receipt"]["kind"], "target-update-v1"
+        )
+        for literal in ("item-writer-v1", "pr-create-v1", "target-update-v1"):
+            self.assertIn(literal, coordinator_source)
+
+    def test_protocol_and_migration_registry_are_closed(self):
+        protocol = self.load_contract("delivery-protocol-1.json")
+        migration = self.load_contract("delivery-migration-registry.json")
+        self.assertEqual(protocol["protocol_version"], "delivery-protocol-1")
+        self.assertEqual(
+            protocol["merge_policy"],
+            "merge-commit-only; squash and rebase fail closed",
+        )
+        self.assertEqual(migration["to_protocol"], protocol["protocol_version"])
+        self.assertEqual(migration["unknown_protocol_policy"], "fail_closed")
 
     def test_coordinator_exposes_planned_internal_verbs(self):
         source = (PLUGIN / "scripts/delivery_git.py").read_text(encoding="utf-8")
@@ -53,7 +98,12 @@ class DeliveryProtocolTests(unittest.TestCase):
             root = ROOT / "dist" / host / "software-engineering-team"
             self.assertTrue((root / "flows/requirement.md").is_file())
             self.assertTrue((root / "scripts/delivery_result.py").is_file())
-            self.assertTrue((root / "skill-content/deliver/data/delivery-result-contract.json").is_file())
+            for name in (
+                "delivery-result-contract.json",
+                "delivery-provider-contract.json",
+                "delivery-receipt-contract.json",
+            ):
+                self.assertTrue((root / "skill-content/deliver/data" / name).is_file())
 
 
 if __name__ == "__main__":

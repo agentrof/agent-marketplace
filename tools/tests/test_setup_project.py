@@ -14,7 +14,7 @@ ROOT = Path(__file__).resolve().parents[2]
 SETUP = ROOT / "plugins" / "software-engineering-team" / "scripts" / "setup_project.py"
 CHECK = ROOT / "plugins" / "software-engineering-team" / "scripts" / "setup_check.py"
 BACKLOG = ROOT / "plugins" / "software-engineering-team" / "scripts" / "backlog_compile.py"
-PREPARATION = ROOT / "plugins" / "software-engineering-team" / "scripts" / "preparation_check.py"
+REQUIREMENT_ROUTE = ROOT / "plugins" / "software-engineering-team" / "scripts" / "requirement_route.py"
 SCRIPTS = SETUP.parent
 if str(SCRIPTS) not in sys.path:
     sys.path.insert(0, str(SCRIPTS))
@@ -98,12 +98,12 @@ class SetupProjectTests(unittest.TestCase):
             )
             self.assertEqual(portable.returncode, 0, portable.stderr)
             before = self.run_script(
-                PREPARATION, "status", "--project-root", str(project), "--json"
+                REQUIREMENT_ROUTE, "--project-root", str(project), "--json"
             )
             self.assertEqual(before.returncode, 1, before.stderr)
             shutil.rmtree(project / ".agentrof")
             after = self.run_script(
-                PREPARATION, "status", "--project-root", str(project), "--json"
+                REQUIREMENT_ROUTE, "--project-root", str(project), "--json"
             )
             self.assertEqual(after.returncode, 1, after.stderr)
             self.assertEqual(json.loads(after.stdout), json.loads(before.stdout))
@@ -271,7 +271,7 @@ class SetupProjectTests(unittest.TestCase):
             payload = json.loads(applied.stdout)
             self.assertEqual(payload["next_entry"], "requirement")
             routed = self.run_script(
-                PREPARATION, "route", "--project-root", str(project), "--json"
+                REQUIREMENT_ROUTE, "--project-root", str(project), "--json"
             )
             self.assertEqual(routed.returncode, 1)
             self.assertEqual(json.loads(routed.stdout)["next_entry"], "requirement")

@@ -159,7 +159,7 @@ class ReleaseRepositoryTests(unittest.TestCase):
     def test_changed_plugin_requires_the_same_component(self):
         with mock.patch.object(release, "changed_paths", return_value=[
             ("A", ".changes/docs.json"),
-            ("M", f"plugins/{fixtures.PLUGIN}/flows/develop.md"),
+            ("M", f"plugins/{fixtures.PLUGIN}/flows/backlog-planning.md"),
         ]):
             self.write_changeset("docs", {})
             with self.assertRaisesRegex(release.ReleaseError, fixtures.PLUGIN):
@@ -169,7 +169,7 @@ class ReleaseRepositoryTests(unittest.TestCase):
         with mock.patch.object(release, "changed_paths", return_value=[
             ("A", ".changes/fixture.json"),
             ("A", "versions.json"),
-            ("M", f"plugins/{fixtures.PLUGIN}/flows/develop.md"),
+            ("M", f"plugins/{fixtures.PLUGIN}/flows/backlog-planning.md"),
         ]):
             release.check_pr_changeset(
                 self.root, "origin/main", allow_bootstrap=True

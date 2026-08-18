@@ -76,7 +76,7 @@ CONFIG_GUARD_MESSAGE = (
 
 SHELL_ASSIGNMENT_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=.*$")
 PYTHON_COMMAND_RE = re.compile(r"^python(?:3(?:[.][0-9]+)?)?$")
-SANCTIONED_PROJECT_CONFIG_COMMANDS = {"set", "unset", "set-origin"}
+SANCTIONED_PROJECT_CONFIG_COMMANDS = {"set", "unset"}
 SANCTIONED_SHELL_ASSIGNMENTS = {"PYTHONDONTWRITEBYTECODE": "1"}
 RECOVERY_TTL_SECONDS = 24 * 60 * 60
 

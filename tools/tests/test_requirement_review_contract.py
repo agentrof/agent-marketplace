@@ -1,4 +1,4 @@
-"""Static contracts for transient, read-only preparation review."""
+"""Static contracts for transient, read-only Requirement review."""
 
 from __future__ import annotations
 
@@ -14,7 +14,7 @@ def read(relative: str) -> str:
     return (TEAM / relative).read_text(encoding="utf-8")
 
 
-class PreparationReviewContracts(unittest.TestCase):
+class RequirementReviewContracts(unittest.TestCase):
     def test_backlog_reviewer_is_read_only_and_returns_structured_findings(self):
         reviewer = read("agents/backlog-reviewer.md")
         self.assertIn("tools: Read, Grep, Glob", reviewer)

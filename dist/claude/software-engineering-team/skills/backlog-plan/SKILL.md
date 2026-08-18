@@ -1,6 +1,6 @@
 ---
 name: backlog-plan
-description: User-gated preparation entry that turns approved analysis, solution, design-system and experience documents into a project-local nested Markdown backlog with epic reviews, story test plans and reproducible coverage views.
+description: User-gated Requirement Flow entry that turns approved analysis, solution-design, design-system and experience-design evidence into a project-local nested Markdown backlog with epic reviews, story test plans and reproducible coverage views.
 disable-model-invocation: true
 ---
 

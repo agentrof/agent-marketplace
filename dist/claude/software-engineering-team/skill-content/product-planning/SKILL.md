@@ -80,7 +80,7 @@ adjacent-regression. A class is `covered` by existing scenario IDs or
 classify the exact scenario set; scenarios may appear in multiple rows but none
 may be orphaned.
 
-Backlog preparation never records suite output, test results, story completion
+Backlog Planning never records suite output, test results, story completion
 or release readiness.
 
 ## Review

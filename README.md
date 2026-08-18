@@ -10,7 +10,7 @@ to the Delivery Flow.
 <!-- counts:start -->
 | Plugins | Agents | Entry skills | Knowledge skills |
 |---|---|---|---|
-| 1 | 14 | 15 | 16 |
+| 1 | 14 | 15 | 15 |
 <!-- counts:end -->
 
 Counts are maintained by `make counts`.
@@ -83,8 +83,7 @@ Marketplace package upgrades inspect one deterministic refresh plan, apply it
 with closing-gate rollback, then prove that no operation remains. Authored
 files, unknown project configuration and user-owned Obsidian knobs are
 preserved. Policy-owned keys and package-local plugin files converge before the
-tracked diff is committed. Release Management is deliberately a later scope;
-`/delivery-lanes` is a retired compatibility entry.
+tracked diff is committed. Release Management is deliberately a later scope.
 
 ## Quality
 

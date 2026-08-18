@@ -18,10 +18,10 @@
 - `<git-root>/.agentrof/agent-marketplace/.runtime/`: project-local runtime
   scratch and generated caches. It is never a shared or global database.
 - `{{workspace}}/docs/backlog/`: tracked Obsidian backlog source. The nested
-  epic, story, review and test-plan files are the durable preparation state.
+  epic, story, review and test-plan files are the durable Requirement state.
 
 Requirement Flow evaluates the request impact matrix, runs only the required
-preparation stages, validates reused or not-applicable stages, and ends at
+Requirement stages, validates reused or not-applicable stages, and ends at
 backlog-plan unless the request resolves with no change. Delivery then starts
 only through its explicit Delivery Flow entry. Release Management remains out
 of scope for this package.

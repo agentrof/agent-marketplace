@@ -334,8 +334,6 @@ def stable_retirement_cleanup(
 def check_pr_changeset(root: Path, base: str, allow_bootstrap: bool = False) -> None:
     changed = changed_paths(root, base)
     added = [path for status, path in changed if status == "A" and path.startswith(".changes/") and path.endswith(".json")]
-    if not added:
-        raise ReleaseError("every normal pull request must add a .changes/*.json file")
     versions = load_versions(root)
     selected = [item for item in load_changesets(root, versions) if item.path.relative_to(root).as_posix() in added]
     declared = {component for item in selected for component in item.components}
@@ -366,6 +364,8 @@ def check_pr_changeset(root: Path, base: str, allow_bootstrap: bool = False) -> 
         and version_registry_is_bootstrapped
         and version_is_bootstrap
     )
+    if not added and not bootstrap:
+        raise ReleaseError("every normal pull request must add a .changes/*.json file")
     retired: set[str] = set()
     registry_retirement = False
     stable_retirement = False
@@ -395,7 +395,9 @@ def check_pr_changeset(root: Path, base: str, allow_bootstrap: bool = False) -> 
     }
     changed_existing_changesets = {
         path for status, path in changed
-        if path.startswith(".changes/") and path.endswith(".json") and status != "A"
+        if path.startswith(".changes/") and path.endswith(".json")
+        and status != "A"
+        and not (bootstrap and status == "D")
     }
     if protected:
         raise ReleaseError(

@@ -184,14 +184,24 @@ class ReleaseRepositoryTests(unittest.TestCase):
 
     def test_bootstrap_reset_may_replace_release_owned_state(self):
         with mock.patch.object(release, "changed_paths", return_value=[
-            ("A", ".changes/fixture.json"),
             ("M", "versions.json"),
             ("M", "CHANGELOG.md"),
             ("D", ".release/stable.json"),
+            ("D", ".changes/historical-release.json"),
         ]):
             release.check_pr_changeset(
                 self.root, "origin/main", allow_bootstrap=True
             )
+
+    def test_bootstrap_reset_still_rejects_changeset_rewrites(self):
+        with mock.patch.object(release, "changed_paths", return_value=[
+            ("M", "versions.json"),
+            ("M", ".changes/historical-release.json"),
+        ]):
+            with self.assertRaisesRegex(release.ReleaseError, "existing changesets"):
+                release.check_pr_changeset(
+                    self.root, "origin/main", allow_bootstrap=True
+                )
 
     def test_verify_bootstrap_rejects_prior_stable_provenance(self):
         fixtures.write(

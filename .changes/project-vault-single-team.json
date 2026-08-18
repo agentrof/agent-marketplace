@@ -1,7 +1,0 @@
-{
-  "summary": "Replace the retired management plugin and database-backed project state with one standalone Software Engineering Team and a Git-tracked Obsidian project vault.",
-  "components": {
-    "agent-marketplace": "minor",
-    "software-engineering-team": "minor"
-  }
-}

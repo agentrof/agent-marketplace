@@ -11,11 +11,11 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parents[2]
 PINNED_ACTIONS = {
     "actions/checkout": ("fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09", "v5"),
-    "actions/setup-python": ("ece7cb06caefa5fff74198d8649806c4678c61a1", "v6"),
-    "actions/setup-node": ("a0853c24544627f65ddf259abe73b1d18a591444", "v5"),
-    "actions/upload-artifact": ("b7c566a772e6b6bfb58ed0dc250532a479d7789f", "v6"),
-    "github/codeql-action/init": ("988661ebb5e81487b3fb31b2185d2856c0a10679", "v4"),
-    "github/codeql-action/analyze": ("988661ebb5e81487b3fb31b2185d2856c0a10679", "v4"),
+    "actions/setup-python": ("5fda3b95a4ea91299a34e894583c3862153e4b97", "v7.0.0"),
+    "actions/setup-node": ("820762786026740c76f36085b0efc47a31fe5020", "v7.0.0"),
+    "actions/upload-artifact": ("043fb46d1a93c77aae656e7c1c64a875d1fc6a0a", "v7.0.1"),
+    "github/codeql-action/init": ("ff2f1c621b7f889edc0d3c761ac2e6a3f8cdb0dd", "v4"),
+    "github/codeql-action/analyze": ("ff2f1c621b7f889edc0d3c761ac2e6a3f8cdb0dd", "v4"),
 }
 ACTION_USE_RE = re.compile(
     r"uses:\s+([A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+(?:/[A-Za-z0-9_.-]+)?)"
@@ -105,12 +105,12 @@ class ReleaseWorkflowContracts(unittest.TestCase):
         self.assertIn("tools/release.py build-info", text)
         self.assertEqual(
             text.count(
-                "actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6"
+                "actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0"
             ),
             4,
         )
         self.assertGreaterEqual(text.count('python-version: "3.9"'), 2)
-        self.assertIn("actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6", text)
+        self.assertIn("actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1", text)
         self.assertIn("dist/claude", text)
         self.assertIn("dist/codex", text)
 
@@ -224,13 +224,13 @@ class ReleaseWorkflowContracts(unittest.TestCase):
             "stale-major": "- uses: actions/checkout@v4 # v4\n",
             "unapproved-ref": "- uses: actions/setup-python@deadbeef\n",
             "job-node-20": (
-                "- uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5\n"
+                "- uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0\n"
                 "  with:\n"
                 "    node-version: \"20\"\n"
                 "    package-manager-cache: false\n"
             ),
             "implicit-cache": (
-                "- uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5\n"
+                "- uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0\n"
                 "  with:\n"
                 "    node-version: \"24\"\n"
             ),

@@ -29,6 +29,10 @@ for documentation, test, and CI changes with no stable release effect. Do not
 edit `versions.json` in a normal pull request. If the check is green locally,
 it is green in CI.
 
+Security findings do not belong in public issues, pull requests or commit
+messages. Use the repository's [private vulnerability reporting form](https://github.com/agentrof/agent-marketplace/security/advisories/new)
+and follow [SECURITY.md](SECURITY.md).
+
 ## Component model
 
 - Agents are platform-independent roles: short constitutions with fixed

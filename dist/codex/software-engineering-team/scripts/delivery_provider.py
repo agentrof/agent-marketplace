@@ -104,6 +104,26 @@ class GitHubProvider:
                 if item.get("headRefName") == head and item.get("baseRefName") == base
                 and str(item.get("state", "")).upper() != "MERGED"]
 
+    def require_green_checks(self, pull_request: dict) -> None:
+        """Fail closed unless every provider-reported required check succeeded.
+
+        Delivery does not infer a green provider state from a mergeable PR or
+        branch protection alone. GitHub's rollup is the provider evidence
+        available to both a normal merge and clean-clone recovery, so an absent,
+        pending, neutral or failed entry cannot authorize the merge call.
+        """
+        checks = pull_request.get("statusCheckRollup")
+        if not isinstance(checks, list) or not checks:
+            raise ProviderError("GitHub required checks are absent")
+        for check in checks:
+            if not isinstance(check, dict):
+                raise ProviderError("GitHub required check response is malformed")
+            status = str(check.get("status") or check.get("state") or "").upper()
+            conclusion = str(check.get("conclusion") or "").upper()
+            name = str(check.get("name") or check.get("context") or "unnamed check")
+            if status not in {"COMPLETED", "SUCCESS"} or conclusion != "SUCCESS":
+                raise ProviderError(f"GitHub required check is not green: {name}")
+
     def create_draft(self, head: str, base: str, title: str, body: str) -> dict:
         result = run_gh(
             self.root, "pr", "create", "--repo", self.repository,

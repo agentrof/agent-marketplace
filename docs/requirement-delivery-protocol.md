@@ -195,11 +195,20 @@ verified remote Item. A missing receipt denies local writer readiness. Explicit
 takeover elects a new epoch on the existing Item and Slot refs; it never
 allocates a second Slot.
 
-Product and test changes stay on the Item branch. Integration accepts an Item
-only when its current Code Review is approved, Verification passed, evidence
-hashes bind the exact reviewed tip and aggregate checks pass after the latest
-Integration parent. Each successful integration produces one merge commit and
-releases the Slot atomically.
+Product and test changes stay on the Item branch. Before approving evidence,
+the active Item worktree must be clean and its real `HEAD` becomes both the
+reviewed and verified commit; callers cannot supply an arbitrary commit ID.
+The subsequent Item push accepts only a committed change after the active
+remote Item, refuses Delivery control-file changes in that product commit and
+allows uncommitted changes solely to the generated Code Review and Verification
+records. It creates an `item-evidence-v1` child whose direct parent is that
+exact product/test commit, then advances both Item and Slot together.
+
+Integration reads the Item, Code Review and Verification records from the
+remote Item tip, not from the primary worktree. It accepts an Item only when
+those records are approved/current and bind the exact direct product/test
+parent. Each successful integration produces one merge commit and releases the
+Slot atomically.
 
 ## Delivery Review and PR
 

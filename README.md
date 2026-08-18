@@ -96,3 +96,10 @@ make check
 
 runs validation, deterministic distribution generation, counts, release
 surface checks and focused tests.
+
+## Security
+
+Report vulnerabilities only through the repository's
+[private vulnerability reporting form](https://github.com/agentrof/agent-marketplace/security/advisories/new).
+Do not include security details in public issues, pull requests or commit
+messages. See [SECURITY.md](SECURITY.md) for scope and disclosure guidance.

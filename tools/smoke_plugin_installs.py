@@ -73,9 +73,16 @@ def exercise_package(team_root: Path, project: Path, env: dict[str, str]) -> Non
     setup = team_root / "scripts" / "setup_project.py"
     check = team_root / "scripts" / "setup_check.py"
     route = team_root / "scripts" / "requirement_route.py"
-    for path in (setup, check, route, team_root / "scripts" / "backlog_compile.py"):
+    delivery_compile = team_root / "scripts" / "delivery_compile.py"
+    delivery_git = team_root / "scripts" / "delivery_git.py"
+    for path in (
+        setup, check, route, team_root / "scripts" / "backlog_compile.py",
+        delivery_compile, delivery_git, team_root / "scripts" / "delivery_provider.py",
+    ):
         if not path.is_file():
             raise SmokeFailure(f"installed package is missing {path.relative_to(team_root)}")
+    for script in (delivery_compile, delivery_git):
+        run([sys.executable, str(script), "--help"], env)
     inspected = json.loads(run([
         sys.executable, str(setup), "inspect", "--project-root", str(project),
         "--json",

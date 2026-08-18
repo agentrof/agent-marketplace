@@ -2,6 +2,17 @@ name: release-hosts
 
 on:
   workflow_dispatch:
+  pull_request:
+    paths:
+      - '.agents/**'
+      - '.claude-plugin/**'
+      - '.github/workflows/release-hosts.yml'
+      - 'Makefile'
+      - 'platforms/**'
+      - 'plugins/**'
+      - 'product.json'
+      - 'tools/**'
+      - 'versions.json'
   schedule:
     - cron: "17 4 * * 1"
 
@@ -13,16 +24,22 @@ jobs:
     runs-on: macos-latest
     timeout-minutes: 25
     steps:
-      - uses: actions/checkout@v5
-      - uses: actions/setup-python@v6
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
         with:
           python-version: "3.x"
-      - uses: actions/setup-node@v5
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
         with:
           node-version: "24"
           package-manager-cache: false
-      - name: Install current host CLIs
-        run: npm install --global @anthropic-ai/claude-code @openai/codex
+      - name: Install pinned host CLIs
+        run: |
+          set -euo pipefail
+          claude_version="$(python3 -c 'import json; print(json.load(open("tools/data/host-cli-versions.json"))["claude_code"])')"
+          codex_version="$(python3 -c 'import json; print(json.load(open("tools/data/host-cli-versions.json"))["codex"])')"
+          npm install --global "@anthropic-ai/claude-code@${claude_version}" "@openai/codex@${codex_version}"
+          claude --version | grep -F "${claude_version}"
+          codex --version | grep -F "${codex_version}"
       - name: Record host versions
         run: |
           claude --version

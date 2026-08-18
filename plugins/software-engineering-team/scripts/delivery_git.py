@@ -540,6 +540,63 @@ def worktree_is_clean_and_at(root: Path, path: Path, expected_oid: str) -> None:
         raise RuntimeError("DELIVERY_WORKTREE_UNSAFE: clean the Item worktree before pause")
 
 
+def worktree_head(root: Path, path: Path) -> str:
+    if not path.is_dir():
+        raise RuntimeError(f"Item worktree is missing: {path}")
+    head = run_git(root, "-C", str(path), "rev-parse", "HEAD")
+    if not OID_RE.fullmatch(head):
+        raise RuntimeError("Item worktree has no valid HEAD")
+    return head
+
+
+def is_ancestor(root: Path, ancestor: str, descendant: str) -> bool:
+    result = subprocess.run(
+        ["git", "merge-base", "--is-ancestor", ancestor, descendant], cwd=root,
+        text=True, capture_output=True, check=False,
+    )
+    if result.returncode == 0:
+        return True
+    if result.returncode == 1:
+        return False
+    raise RuntimeError(result.stderr.strip() or "cannot compare Git ancestry")
+
+
+def worktree_pending_paths(root: Path, path: Path) -> set[str]:
+    """Return every tracked or untracked path not yet committed in one Item worktree."""
+    tracked = run_git(root, "-C", str(path), "diff", "--name-only", "HEAD")
+    untracked = run_git(root, "-C", str(path), "ls-files", "--others", "--exclude-standard")
+    return {value for value in (tracked.splitlines() + untracked.splitlines()) if value}
+
+
+def advance_worktree_to_candidate(root: Path, path: Path, candidate_oid: str) -> None:
+    """Move a worktree only after proving the candidate already contains its bytes."""
+    if worktree_pending_paths(root, path):
+        comparison = subprocess.run(
+            ["git", "-C", str(path), "diff", "--quiet", candidate_oid, "--"],
+            text=True, capture_output=True, check=False,
+        )
+        if comparison.returncode == 1:
+            raise RuntimeError("published Item candidate does not contain the current worktree bytes")
+        if comparison.returncode:
+            raise RuntimeError(comparison.stderr.strip() or "cannot compare Item worktree to candidate")
+    run_git(root, "-C", str(path), "reset", "--hard", candidate_oid)
+
+
+def active_writer_receipt(root: Path, delivery_id: str, story_id: str,
+                          item_oid: str, slot_ref: str) -> dict:
+    """Prove this machine still owns the active remote Item/Slot pair."""
+    receipt = read_writer_receipt(root, delivery_id, story_id)
+    refs = canonical_refs(delivery_id, story_id)
+    if receipt is None or receipt.get("state") != "verified":
+        raise RuntimeError("push-item requires this machine's verified Item writer receipt")
+    if receipt.get("item_ref") != refs["item"] or receipt.get("slot_ref") != slot_ref:
+        raise RuntimeError("Item writer receipt does not match the current Item Slot pair")
+    candidate = str(receipt.get("candidate_oid", ""))
+    if not is_ancestor(root, candidate, item_oid):
+        raise RuntimeError("Item writer receipt is stale against the remote Item tip")
+    return receipt
+
+
 def run_git(root: Path, *args: str) -> str:
     result = subprocess.run(["git", *args], cwd=root, text=True,
                             capture_output=True, check=False)
@@ -1090,6 +1147,13 @@ def merge_pr(project_root: Path, delivery_id: str, remote: str = "origin") -> di
         head_now = remote_oid(root, remote, refs["integration"])
         if head_now != integration_oid:
             raise RuntimeError("Integration advanced after PR review; re-run Delivery Review")
+        current = provider.inspect_pull_request(canonical_url)
+        if (str(current.get("state", "")).upper() != "OPEN" or current.get("isDraft")
+                or current.get("headRefName") != short_refs(delivery_id)["integration"]
+                or current.get("baseRefName") != target_branch
+                or current.get("headRefOid") != integration_oid):
+            raise ProviderError("Delivery PR changed before the merge call")
+        provider.require_green_checks(current)
         provider.merge_commit(canonical_url, integration_oid)
         refreshed = [item for item in provider.list_pull_requests(short_refs(delivery_id)["integration"], target_branch)
                      if str(item.get("url", "")) == canonical_url]
@@ -1098,6 +1162,7 @@ def merge_pr(project_root: Path, delivery_id: str, remote: str = "origin") -> di
         merged = refreshed[0]
     if str(merged.get("state", "")).upper() != "MERGED":
         raise ProviderError("provider PR is not merged")
+    provider.require_green_checks(merged)
     merge_value = merged.get("mergeCommit")
     merge_oid = merge_value.get("oid") if isinstance(merge_value, dict) else merge_value
     if not isinstance(merge_oid, str) or not OID_RE.fullmatch(merge_oid):
@@ -1553,7 +1618,8 @@ def reserve_delivery(project_root: Path, delivery_id: str, remote: str = "origin
     fence_oid = commit_tree(
         root, target_oid, [], f"Open Agentrof Fence for {delivery_id}",
         {"Record": "project-fence-v1", "Protocol": "1", "Mode": "open",
-         "Epoch": epoch_token(), "Target": target_oid, "Config-Hash": "none"},
+         "Epoch": epoch_token(), "Target": target_oid,
+         "Config-Hash": governed_config_hash(root)},
     )
     push_args = ["push", "--atomic", remote,
                  f"--force-with-lease={refs['fence']}:",
@@ -2335,6 +2401,17 @@ def apply_target_update(project_root: Path, mode: str = "source_handoff",
     target_branch, target_before = resolve_target(root, remote)
     base = values["Target-Carrier-Base"]
     if target_before != base:
+        # A direct push can be accepted by the remote while its response is
+        # lost locally. The authorized candidate is an exact target tip in
+        # that case, so reconstruct the durable local receipt instead of
+        # treating the normal response-loss path as target drift.
+        if (carrier == "direct_target" and
+                target_before == values["Target-Carrier-Head"]):
+            verified = mark_target_verified(root, mode, attempt)
+            return {"ok": True, "mode": mode, "carrier": carrier,
+                    "target": f"refs/heads/{target_branch}",
+                    "target_oid": target_before, "receipt": verified,
+                    "recovered": True}
         # No external mutation was elected yet: keep the exact prepared
         # receipt so a fresh target-carrier attempt can be based safely.
         if receipt["state"] == "prepared":
@@ -2446,15 +2523,35 @@ def remote_slot_oids(root: Path, remote: str) -> dict[str, str]:
     return result
 
 
-def project_max_parallel(root: Path) -> int:
+def governed_config_hash(root: Path) -> str:
+    """Hash the one configuration field that fences Item activation in v1."""
     config_path = root / "workspace" / "config.json"
     try:
         config = json.loads(config_path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as exc:
-        raise RuntimeError(f"project config cannot be read: {exc}")
+        raise RuntimeError(f"project config cannot be read: {exc}") from exc
+    value = config.get("max_parallel")
+    if value is None:
+        return "none"
+    if not isinstance(value, int) or isinstance(value, bool) or value <= 0:
+        raise RuntimeError("max_parallel must be a positive integer when configured")
+    return "sha256:" + hashlib.sha256(
+        _canonical_json({"max_parallel": value}).encode("utf-8")
+    ).hexdigest()
+
+
+def project_max_parallel(root: Path, expected_hash: str | None = None) -> int:
+    config_path = root / "workspace" / "config.json"
+    try:
+        config = json.loads(config_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise RuntimeError(f"project config cannot be read: {exc}") from exc
     value = config.get("max_parallel")
     if not isinstance(value, int) or isinstance(value, bool) or value <= 0:
         raise RuntimeError("max_parallel must be configured before Item activation")
+    observed_hash = governed_config_hash(root)
+    if expected_hash is not None and expected_hash != observed_hash:
+        raise RuntimeError("max_parallel differs from the governed Fence configuration baseline")
     return value
 
 
@@ -2478,7 +2575,7 @@ def start_item(project_root: Path, delivery_id: str, story_id: str,
     _target_branch, target_before = resolve_target(root, remote)
     if target_before != fence_target:
         raise RuntimeError("target advanced; refresh the Delivery before Item activation")
-    max_parallel = project_max_parallel(root)
+    max_parallel = project_max_parallel(root, trailer(fence_message, "Config-Hash") or "none")
     occupied = remote_slot_oids(root, remote)
     free = next((slot for slot in range(1, max_parallel + 1) if slot_key(slot) not in occupied), None)
     if free is None:
@@ -2836,11 +2933,17 @@ def takeover_item(project_root: Path, delivery_id: str, story_id: str,
 
 def push_item(project_root: Path, delivery_id: str, story_id: str,
               remote: str = "origin") -> dict:
+    """Publish one Item's real product/test commit plus its exact evidence.
+
+    The primary worktree is deliberately only a coordinator.  Product bytes and
+    code-review/verification evidence are read from the active Item worktree,
+    then attached to the remote Item ref as a single fast-forward child.
+    """
     root = main_worktree(project_root.resolve())
     from delivery_compile import split_note, frontmatter, content_hash
     directory = find_delivery_dir_from_remote(root, remote, delivery_id)
     if directory is None:
-        raise RuntimeError("local Delivery package is required for Item push")
+        raise RuntimeError("local Delivery package path is required for Item push")
     refs = canonical_refs(delivery_id, story_id)
     item_oid = remote_oid(root, remote, refs["item"])
     slots = remote_slot_oids(root, remote)
@@ -2848,12 +2951,31 @@ def push_item(project_root: Path, delivery_id: str, story_id: str,
     if slot is None:
         raise RuntimeError("Item and Slot refs diverge; refuse active writer push")
     slot_ref = f"refs/heads/agentrof/slots/{slot}"; slot_oid = slots[slot]
-    item_path = directory / "items" / story_key(story_id) / "item.md"
+    receipt = active_writer_receipt(root, delivery_id, story_id, item_oid, slot_ref)
+    relative_delivery = directory.relative_to(root)
+    worktree = worktree_paths(root, delivery_id, story_id)["item"]
+    product_tip = worktree_head(root, worktree)
+    if product_tip == item_oid or not is_ancestor(root, item_oid, product_tip):
+        raise RuntimeError("push-item requires a committed product/test change after the active remote Item tip")
+    relative_item = str(relative_delivery / "items" / story_key(story_id) / "item.md")
+    relative_review = str(relative_delivery / "items" / story_key(story_id) / "code-review.md")
+    relative_verification = str(relative_delivery / "items" / story_key(story_id) / "verification.md")
+    committed_changes = set(run_git(root, "diff", "--name-only", item_oid, product_tip).splitlines())
+    delivery_prefix = str(relative_delivery).rstrip("/") + "/"
+    if not committed_changes or any(path.startswith(delivery_prefix) for path in committed_changes):
+        raise RuntimeError("product/test commits may not edit Delivery control files")
+    pending = worktree_pending_paths(root, worktree)
+    allowed_pending = {relative_review, relative_verification}
+    if not pending.issubset(allowed_pending):
+        unexpected = ", ".join(sorted(pending - allowed_pending))
+        raise RuntimeError(f"DELIVERY_WORKTREE_UNSAFE: commit or remove non-evidence changes before push: {unexpected}")
+    item_path = worktree / relative_item
     if not item_path.exists():
-        raise RuntimeError(f"missing local Item projection: {item_path}")
+        raise RuntimeError(f"missing Item worktree projection: {item_path}")
     item_props, item_body = split_note(item_path)
-    if item_props.get("status") != "active":
-        raise RuntimeError("push-item requires an active local Item projection")
+    remote_item_props, _ = split_remote_note(root, item_oid, relative_item, split_note)
+    if remote_item_props.get("status") != "active" or item_props.get("status") != "active":
+        raise RuntimeError("push-item requires an active remote Item projection")
     review = item_path.parent / "code-review.md"
     verification = item_path.parent / "verification.md"
     if not review.exists() or not verification.exists():
@@ -2862,19 +2984,39 @@ def push_item(project_root: Path, delivery_id: str, story_id: str,
     verification_props, verification_body = split_note(verification)
     if review_props.get("status") != "approved" or verification_props.get("status") != "passed":
         raise RuntimeError("push-item requires approved code review and passed verification")
+    if review_props.get("reviewed_commit") != product_tip or verification_props.get("verified_commit") != product_tip:
+        raise RuntimeError("Item evidence must bind the exact committed product/test tip")
+    if review_props.get("item_plan_hash") != item_props.get("item_plan_hash") or verification_props.get("item_plan_hash") != item_props.get("item_plan_hash"):
+        raise RuntimeError("Item evidence does not bind the active Item plan hash")
+    if review_props.get("source_hash") != content_hash(review_props, review_body):
+        raise RuntimeError("code review source_hash is stale")
+    if verification_props.get("source_hash") != content_hash(verification_props, verification_body):
+        raise RuntimeError("verification source_hash is stale")
     item_props["source_hash"] = content_hash(item_props, item_body)
     replacements = {
-        str(item_path.relative_to(root)): frontmatter(item_props, item_body),
-        str(review.relative_to(root)): frontmatter(review_props, review_body),
-        str(verification.relative_to(root)): frontmatter(verification_props, verification_body),
+        relative_item: frontmatter(item_props, item_body),
+        relative_review: frontmatter(review_props, review_body),
+        relative_verification: frontmatter(verification_props, verification_body),
     }
-    candidate = commit_replacements(root, item_oid, replacements, f"Update Item {story_id}", {})
+    candidate = commit_replacements(
+        root, product_tip, replacements, f"Update Item {story_id}",
+        {"Record": "item-evidence-v1", "Protocol": "1", "Delivery": delivery_id,
+         "Story": story_id, "Previous-Tip": item_oid, "Product-Tip": product_tip,
+         "Reviewed-Commit": product_tip, "Verified-Commit": product_tip,
+         "Item-Plan-Hash": str(item_props.get("item_plan_hash", "none")),
+         "Writer-Epoch": str(receipt["writer_epoch"]), "Slot": slot},
+    )
     atomic_push(root, remote, [(refs["item"], item_oid, candidate), (slot_ref, slot_oid, candidate)])
-    return {"ok": True, "delivery": delivery_id, "story": story_id, "item": candidate, "slot": candidate}
+    if remote_oid(root, remote, refs["item"]) != candidate or remote_oid(root, remote, slot_ref) != candidate:
+        raise RuntimeError("Item evidence refs did not converge to the published candidate")
+    advance_worktree_to_candidate(root, worktree, candidate)
+    return {"ok": True, "delivery": delivery_id, "story": story_id, "item": candidate,
+            "slot": candidate, "product_tip": product_tip, "writer_epoch": receipt["writer_epoch"]}
 
 
 def integrate_item(project_root: Path, delivery_id: str, story_id: str,
                   remote: str = "origin") -> dict:
+    """Seal and merge only evidence that is already on the remote Item branch."""
     root = main_worktree(project_root.resolve())
     from delivery_compile import split_note, frontmatter, content_hash
     directory = find_delivery_dir_from_remote(root, remote, delivery_id)
@@ -2888,24 +3030,45 @@ def integrate_item(project_root: Path, delivery_id: str, story_id: str,
     if slot is None:
         raise RuntimeError("Item and Slot refs diverge; refuse integration")
     slot_ref = f"refs/heads/agentrof/slots/{slot}"; slot_oid = slots[slot]
-    item_path = directory / "items" / story_key(story_id) / "item.md"
-    item_props, item_body = split_note(item_path)
+    active_writer_receipt(root, delivery_id, story_id, item_oid, slot_ref)
+    worktree = worktree_paths(root, delivery_id, story_id)["item"]
+    worktree_is_clean_and_at(root, worktree, item_oid)
+    relative_delivery = directory.relative_to(root)
+    relative_item = str(relative_delivery / "items" / story_key(story_id) / "item.md")
+    relative_review = str(relative_delivery / "items" / story_key(story_id) / "code-review.md")
+    relative_verification = str(relative_delivery / "items" / story_key(story_id) / "verification.md")
+    item_props, item_body = split_remote_note(root, item_oid, relative_item, split_note)
     if item_props.get("status") != "active":
         raise RuntimeError("integrate-item requires an active Item")
-    review = item_path.parent / "code-review.md"; verification = item_path.parent / "verification.md"
-    review_props, _ = split_note(review); verification_props, _ = split_note(verification)
+    review_props, review_body = split_remote_note(root, item_oid, relative_review, split_note)
+    verification_props, verification_body = split_remote_note(root, item_oid, relative_verification, split_note)
     if review_props.get("status") != "approved" or verification_props.get("status") != "passed":
         raise RuntimeError("integrate-item requires approved code review and passed verification")
+    parents = run_git(root, "show", "-s", "--format=%P", item_oid).split()
+    if len(parents) != 1 or not OID_RE.fullmatch(parents[0]):
+        raise RuntimeError("integrate-item requires one exact Item evidence parent")
+    product_tip = parents[0]
+    if review_props.get("reviewed_commit") != product_tip or verification_props.get("verified_commit") != product_tip:
+        raise RuntimeError("integrate-item evidence does not bind the published product/test tip")
+    if review_props.get("item_plan_hash") != item_props.get("item_plan_hash") or verification_props.get("item_plan_hash") != item_props.get("item_plan_hash"):
+        raise RuntimeError("integrate-item evidence does not bind the Item plan hash")
+    if review_props.get("source_hash") != content_hash(review_props, review_body):
+        raise RuntimeError("integrate-item code review source_hash is stale")
+    if verification_props.get("source_hash") != content_hash(verification_props, verification_body):
+        raise RuntimeError("integrate-item verification source_hash is stale")
+    if not is_ancestor(root, item_oid, product_tip) and not is_ancestor(root, product_tip, item_oid):
+        raise RuntimeError("integrate-item Item evidence ancestry is invalid")
     item_props["status"] = "integrated"
     item_props["tags"] = [tag for tag in item_props.get("tags", []) if not str(tag).startswith("status/")] + ["status/integrated"]
     item_props["integration_base_commit"] = integration_oid
     item_props["source_hash"] = content_hash(item_props, item_body)
     seal = commit_replacements(root, item_oid,
-                               {str(item_path.relative_to(root)): frontmatter(item_props, item_body)},
+                               {relative_item: frontmatter(item_props, item_body)},
                                f"Seal Item {story_id} for {delivery_id}",
                                {"Record": "item-integration-v1", "Protocol": "1", "Delivery": delivery_id,
                                 "Story": story_id, "Item-Plan-Hash": str(item_props.get("item_plan_hash", "none")),
-                                "Reviewed-Tip": item_oid, "Integration-Parent": integration_oid})
+                                "Reviewed-Tip": item_oid, "Product-Tip": product_tip,
+                                "Integration-Parent": integration_oid})
     integration_candidate = merge_candidate(root, integration_oid, seal,
                                             f"Integrate Item {story_id} for {delivery_id}",
                                             {"Record": "item-integration-v1", "Protocol": "1", "Delivery": delivery_id,

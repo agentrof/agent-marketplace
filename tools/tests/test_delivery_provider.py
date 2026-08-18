@@ -89,6 +89,24 @@ class DeliveryProviderTests(unittest.TestCase):
                         response["url"], "a" * 40
                     )
 
+    def test_required_checks_must_be_complete_and_successful(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            subprocess.run(["git", "init", "-q", str(root)], check=True)
+            subprocess.run(["git", "-C", str(root), "remote", "add", "origin", "https://github.com/agentrof/example.git"], check=True)
+            provider = delivery_provider.GitHubProvider(root)
+            provider.require_green_checks({
+                "statusCheckRollup": [{"name": "tests", "status": "COMPLETED", "conclusion": "SUCCESS"}],
+            })
+            for check in (
+                {"name": "tests", "status": "IN_PROGRESS", "conclusion": None},
+                {"name": "tests", "status": "COMPLETED", "conclusion": "FAILURE"},
+            ):
+                with self.assertRaises(delivery_provider.ProviderError):
+                    provider.require_green_checks({"statusCheckRollup": [check]})
+            with self.assertRaises(delivery_provider.ProviderError):
+                provider.require_green_checks({"statusCheckRollup": []})
+
 
 if __name__ == "__main__":
     unittest.main()

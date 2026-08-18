@@ -5,12 +5,57 @@ from __future__ import annotations
 import ast
 import json
 import re
+import subprocess
 import sys
 import unittest
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 PLUGIN = ROOT / "plugins" / "software-engineering-team"
+COORDINATOR_COMMANDS = {
+    "names",
+    "preflight",
+    "reserve-delivery",
+    "configure-parallelism",
+    "begin-source-handoff",
+    "authorize-target-update",
+    "apply-target-update",
+    "reauthorize-target-update",
+    "finish-source-handoff",
+    "abort-source-handoff",
+    "publish-execution-plan",
+    "refresh-target",
+    "revise-unclaimed-scope",
+    "claim-items",
+    "begin-plan-revision",
+    "quiesce-delivery",
+    "finish-plan-revision",
+    "abort-plan-revision",
+    "quiesce-upgrade",
+    "upgrade-target-merge",
+    "finish-upgrade",
+    "abort-upgrade",
+    "start-item",
+    "block-item",
+    "unblock-item",
+    "reopen-item",
+    "pause-item",
+    "resume-item",
+    "takeover-item",
+    "push-item",
+    "integrate-item",
+    "publish-delivery-review",
+    "prepare-pr-creation",
+    "record-pr-remote",
+    "open-pr",
+    "merge-pr",
+    "invalidate-delivery-review",
+    "cancel-delivery",
+    "verify-merge",
+    "reconcile",
+    "board",
+    "locate",
+}
 
 
 class DeliveryProtocolTests(unittest.TestCase):
@@ -80,11 +125,14 @@ class DeliveryProtocolTests(unittest.TestCase):
         self.assertEqual(provider["provider"], "github")
         self.assertEqual(provider["adapter"], "delivery_provider.GitHubProvider")
         self.assertTrue(provider["required_capabilities"]["merge_commit"])
+        self.assertTrue(provider["required_capabilities"]["required_checks_green"])
         self.assertFalse(provider["required_capabilities"]["squash_merge"])
         self.assertFalse(provider["required_capabilities"]["rebase_merge"])
         self.assertFalse(provider["branch_lifecycle"]["request_head_deletion"])
         self.assertIn("class GitHubProvider", provider_source)
         self.assertIn('"--delete-branch=false"', provider_source)
+        self.assertIn("def require_green_checks", provider_source)
+        self.assertIn("provider.require_green_checks(current)", coordinator_source)
 
         self.assertEqual(receipt["kind"], "item-writer-v1")
         self.assertEqual(receipt["states"], ["pending", "verified"])
@@ -131,19 +179,28 @@ class DeliveryProtocolTests(unittest.TestCase):
         for flow in sorted((PLUGIN / "flows").glob("*.md")):
             self.assertIn(f"flows/{flow.name}", skill_text, flow.name)
 
-    def test_coordinator_exposes_planned_internal_verbs(self):
+    def test_coordinator_exposes_closed_internal_verb_set(self):
         source = (PLUGIN / "scripts/delivery_git.py").read_text(encoding="utf-8")
-        required = {
-            "configure-parallelism", "begin-source-handoff", "authorize-target-update",
-            "reauthorize-target-update", "finish-source-handoff", "abort-source-handoff",
-            "begin-plan-revision", "finish-plan-revision", "abort-plan-revision",
-            "quiesce-upgrade", "upgrade-target-merge", "finish-upgrade", "abort-upgrade", "publish-execution-plan",
-            "refresh-target", "claim-items", "start-item", "pause-item", "resume-item",
-            "takeover-item", "publish-delivery-review", "invalidate-delivery-review",
-            "open-pr", "merge-pr", "cancel-delivery",
-        }
-        for command in required:
-            self.assertIn(f'sub.add_parser("{command}")', source, command)
+        declared = set(re.findall(r'sub\.add_parser\("([^"]+)"\)', source))
+        self.assertEqual(declared, COORDINATOR_COMMANDS)
+
+        parser_functions = set(re.findall(r'set_defaults\(func="([^"]+)"\)', source))
+        dispatched = set(re.findall(r'args\.func == "([^"]+)"', source))
+        self.assertTrue(parser_functions <= dispatched | {"names", "preflight"})
+
+    def test_every_internal_verb_renders_help_without_project_mutation(self):
+        script = PLUGIN / "scripts/delivery_git.py"
+        for command in sorted(COORDINATOR_COMMANDS):
+            with self.subTest(command=command):
+                completed = subprocess.run(
+                    [sys.executable, str(script), command, "--help"],
+                    text=True,
+                    capture_output=True,
+                    check=False,
+                    timeout=20,
+                )
+                self.assertEqual(completed.returncode, 0, completed.stderr)
+                self.assertIn(command, completed.stdout)
 
     def test_both_host_distributions_contain_the_new_canonical_flow_and_contract(self):
         for host in ("claude", "codex"):

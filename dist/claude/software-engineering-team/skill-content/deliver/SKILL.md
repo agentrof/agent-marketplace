@@ -26,6 +26,12 @@ verbs are internal coordinator operations and are not public entry syntax.
 Read the approved `delivery.md`, `execution-plan.md`, Item records, code
 reviews and verification records. The execution flow owns resumable Item
 work, serialized integration, one aggregate Delivery Review and one final PR.
+Item evidence is authored only in the active Item worktree: approval derives
+the reviewed and verified OID from its real clean `HEAD`, then the coordinator
+publishes that committed product/test change with its review and verification
+records. Do not copy evidence from the primary worktree or supply an arbitrary
+commit identifier. Integration validates the remote Item tip and its exact
+product/test parent before it can merge.
 Cancellation is a deliberate exception inside the same entry. `/deliver
 DLV-###` first renders an exact read-only cancellation preview when the user
 chooses cancellation. The internal `cancel-delivery` coordinator records the
@@ -37,8 +43,10 @@ Integration, Item and Slot tips.
 The PR handoff uses `prepare-pr-creation`, `open-pr` and `merge-pr` internally:
 the provider adapter must make the exact reviewed head ready, use a merge
 commit with an exact head lease and prove that the resulting merge commit is
-in the target ancestry before reporting `merged`. Squash, rebase and a
-different PR are never accepted as closure evidence.
+in the target ancestry before reporting `merged`. Every provider-reported
+required check must be complete and successful immediately before the merge
+call and in merged evidence. Squash, rebase and a different PR are never
+accepted as closure evidence.
 Release management is deliberately out of scope. No command may infer a
 status from a branch name alone; the compiler and verified remote evidence are
 the source of semantic truth.

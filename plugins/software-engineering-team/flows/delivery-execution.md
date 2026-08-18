@@ -18,6 +18,16 @@ Takeover is an explicit host-loss decision; it reuses the existing Item and
 Slot refs, elects a new writer epoch under exact leases and never allocates a
 second Slot.
 
+After implementation, the Item worktree must be clean. Evidence approval
+derives both reviewed and verified commits from that worktree's real `HEAD`;
+it never accepts caller-supplied commit text. The only permitted uncommitted
+files after approval are that Item's `code-review.md` and `verification.md`.
+`push-item` attaches those records to the committed product/test tip as one
+`item-evidence-v1` child and advances Item plus Slot together. It rejects a
+product commit that edits Delivery control files. `integrate-item` reads the
+evidence from the remote Item ref and requires that its exact direct parent is
+the reviewed and verified product/test tip.
+
 The flow ends in one Delivery Review, one final PR and provider-neutral merged
 evidence. The Git coordinator first publishes the approved Review, then
 publishes one durable PR-creation intent and records the provider URL as its

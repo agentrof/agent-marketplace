@@ -35,10 +35,28 @@ class HostSmokeContracts(unittest.TestCase):
                     os.environ.copy(),
                 )
 
+    def test_installed_package_smoke_requires_delivery_entrypoints(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary) / "package"
+            root.mkdir()
+            for relative in (
+                "scripts/setup_project.py", "scripts/setup_check.py",
+                "scripts/requirement_route.py", "scripts/backlog_compile.py",
+                "scripts/delivery_compile.py", "scripts/delivery_git.py",
+                "scripts/delivery_provider.py",
+            ):
+                path = root / relative
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text("", encoding="utf-8")
+            with self.assertRaisesRegex(smoke.SmokeFailure, "delivery_compile.py"):
+                (root / "scripts/delivery_compile.py").unlink()
+                smoke.exercise_package(root, Path(temporary) / "project", os.environ.copy())
+
     def test_real_host_workflow_runs_the_install_smoke(self):
         workflow = (ROOT / ".github/workflows/release-hosts.yml").read_text(
             encoding="utf-8"
         )
+        self.assertIn("pull_request:", workflow)
         self.assertIn("tools/smoke_plugin_installs.py --channel checkout", workflow)
 
 

@@ -13,11 +13,13 @@ import hashlib
 import json
 import os
 import re
+import subprocess
 import tempfile
 from datetime import datetime, timezone
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 from ba_compile import parse_frontmatter
+import backlog_compile
 
 
 DELIVERY_ID_RE = re.compile(r"^DLV-[0-9]{3,}$")
@@ -54,6 +56,15 @@ SECTIONS = {
 }
 DOD_SECTIONS = ("Commands", "Evidence Rules", "Quality Gates", "Navigation")
 MUTABLE = {"status", "approved_at_utc", "source_hash", "approval_hash", "pull_request_url"}
+SOURCE_ITEM_FIELDS = (
+    "story_id", "story_path", "story_source_hash", "test_plan_path",
+    "test_plan_source_hash", "owner_role", "supporting_roles",
+)
+DOD_SOURCE_FIELDS = (
+    "definition_of_done_path", "definition_of_done_revision",
+    "definition_of_done_source_hash",
+)
+GIT_OID_RE = re.compile(r"^[0-9a-f]{40,64}$")
 
 
 def atomic_text(path: Path, text: str) -> None:
@@ -197,6 +208,157 @@ def find_delivery(docs: Path, identifier: str) -> Path | None:
     return None
 
 
+def approved_backlog_sources(docs: Path, story_ids: list[str]) -> tuple[dict[str, dict], dict, list[str]]:
+    """Resolve the exact approved Story/Test Plan snapshots a Delivery may use.
+
+    Delivery is deliberately a consumer of the canonical backlog.  It must not
+    accept caller-provided hashes or treat a generated registry as a source of
+    truth, so this resolver checks the authored package and its approval stamps
+    before exposing one selected Story.
+    """
+    errors: list[str] = []
+    if not story_ids:
+        return {}, {}, ["Delivery must select at least one backlog Story"]
+    if any(not isinstance(value, str) or not STORY_RE.fullmatch(value) for value in story_ids):
+        return {}, {}, ["story ids must be stable project IDs"]
+    if len(story_ids) != len(set(story_ids)):
+        return {}, {}, ["Delivery cannot select the same Story more than once"]
+    try:
+        record, findings = backlog_compile.collect(docs)
+    except (OSError, RuntimeError, ValueError) as exc:
+        return {}, {}, [f"approved backlog cannot be read: {exc}"]
+    errors.extend(findings)
+    if record.get("backlog") is None:
+        errors.append("approved backlog is missing")
+    elif not errors:
+        errors.extend(backlog_compile.approval_findings(record, docs))
+    if errors:
+        return {}, {}, sorted(set(f"approved backlog: {error}" for error in errors))
+
+    stories = {str(story["id"]): story for story in record["stories"]}
+    story_by_path = {
+        str(story["path"]).removesuffix(".md"): str(story["id"])
+        for story in record["stories"]
+    }
+    selected: dict[str, dict] = {}
+    for story_id in story_ids:
+        story = stories.get(story_id)
+        if story is None:
+            errors.append(f"selected Story is absent from approved backlog: {story_id}")
+            continue
+        props = story["props"]
+        test_props = story["test_props"]
+        story_hash = props.get("source_hash")
+        test_hash = test_props.get("source_hash")
+        if not isinstance(story_hash, str) or not story_hash:
+            errors.append(f"{story_id} has no approved Story source_hash")
+        if not isinstance(test_hash, str) or not test_hash:
+            errors.append(f"{story_id} has no approved Test Plan source_hash")
+        owner = props.get("owner_role")
+        if not isinstance(owner, str) or not owner:
+            errors.append(f"{story_id} has no accountable implementation owner")
+        dependencies = []
+        for target in story.get("dependency_targets", []):
+            dependency = story_by_path.get(str(target))
+            if dependency is None:
+                errors.append(f"{story_id} has an unresolved approved dependency: {target}")
+            else:
+                dependencies.append(dependency)
+        selected[story_id] = {
+            "story_id": story_id,
+            "story_path": str(story["path"]),
+            "story_source_hash": story_hash,
+            "test_plan_path": str(story["test_plan"]),
+            "test_plan_source_hash": test_hash,
+            "owner_role": owner,
+            "supporting_roles": backlog_compile.values(props, "supporting_roles"),
+            "depends_on": sorted(set(dependencies)),
+        }
+    if errors:
+        return {}, {}, sorted(set(errors))
+    backlog_props = record["backlog"]["props"]
+    snapshot = {
+        "backlog_path": str(record["backlog"]["path"]),
+        "backlog_package_hash": str(backlog_props.get("package_hash", "")),
+    }
+    return selected, snapshot, []
+
+
+def approved_dod_source(docs: Path) -> tuple[dict, list[str]]:
+    """Return the one current approved Definition of Done snapshot."""
+    path = delivery_root(docs) / "definition-of-done.md"
+    errors = check_dod(path)
+    if errors:
+        return {}, [f"Definition of Done: {error}" for error in errors]
+    props, _ = split_note(path)
+    if props.get("status") != "approved":
+        return {}, ["Definition of Done must be approved"]
+    source_hash = props.get("source_hash")
+    if not isinstance(source_hash, str) or not source_hash:
+        return {}, ["approved Definition of Done has no source_hash"]
+    revision = props.get("revision")
+    if not isinstance(revision, int) or revision < 1:
+        return {}, ["approved Definition of Done has an invalid revision"]
+    return {
+        "definition_of_done_path": str(path.relative_to(docs)),
+        "definition_of_done_revision": revision,
+        "definition_of_done_source_hash": source_hash,
+    }, []
+
+
+def delivery_source_findings(docs: Path, root: Path, delivery_props: dict) -> tuple[dict[str, dict], list[str]]:
+    """Prove that a nonterminal Delivery still consumes its approved inputs."""
+    item_paths = sorted(root.glob("items/*/item.md"))
+    errors: list[str] = []
+    if not item_paths:
+        return {}, ["Delivery must contain at least one Item"]
+    item_records: list[tuple[Path, dict]] = []
+    for item_path in item_paths:
+        try:
+            item_props, _ = split_note(item_path)
+        except (OSError, ValueError) as exc:
+            errors.append(f"{item_path}: {exc}")
+            continue
+        story_id = item_props.get("story_id")
+        if not isinstance(story_id, str) or not story_id:
+            errors.append(f"{item_path} has no story_id")
+            continue
+        item_records.append((item_path, item_props))
+    story_ids = [props.get("story_id") for _, props in item_records]
+    if len(story_ids) != len(set(story_ids)):
+        errors.append("Delivery Item story_id values must be unique")
+    if errors:
+        return {}, sorted(set(errors))
+
+    sources, backlog_snapshot, source_errors = approved_backlog_sources(
+        docs, [str(story_id) for story_id in story_ids]
+    )
+    errors.extend(source_errors)
+    dod, dod_errors = approved_dod_source(docs)
+    errors.extend(dod_errors)
+    if errors:
+        return {}, sorted(set(errors))
+
+    if delivery_props.get("backlog_path") != backlog_snapshot["backlog_path"]:
+        errors.append("Delivery backlog_path does not identify the canonical backlog")
+    if delivery_props.get("backlog_package_hash") != backlog_snapshot["backlog_package_hash"]:
+        errors.append("Delivery backlog_package_hash is stale against the approved backlog")
+    for key in DOD_SOURCE_FIELDS:
+        if delivery_props.get(key) != dod[key]:
+            errors.append(f"Delivery {key} is stale against the approved Definition of Done")
+
+    for item_path, item_props in item_records:
+        story_id = str(item_props["story_id"])
+        source = sources[story_id]
+        for key in SOURCE_ITEM_FIELDS:
+            if item_props.get(key) != source[key]:
+                errors.append(f"{item_path} {key} is stale against approved Story {story_id}")
+        expected_source = [story_id]
+        if item_props.get("derives_from") != expected_source:
+            errors.append(f"{item_path} derives_from must contain only {story_id}")
+    return sources, sorted(set(errors))
+
+
 def link(path: str, label: str) -> str:
     return f"[[{path}|{label}]]"
 
@@ -324,17 +486,21 @@ def init_delivery(args) -> int:
     if root.exists():
         print(json.dumps({"ok": False, "errors": [f"Delivery already exists: {root}"]}))
         return 1
-    dod_link = link("delivery/definition-of-done", "Definition of Done")
     stories = list(args.story or [])
-    if any(not STORY_RE.fullmatch(value) for value in stories):
-        print(json.dumps({"ok": False, "errors": ["story ids must be stable project IDs"]}))
+    sources, backlog_snapshot, source_errors = approved_backlog_sources(docs, stories)
+    dod_snapshot, dod_errors = approved_dod_source(docs)
+    errors = sorted(set(source_errors + dod_errors))
+    if errors:
+        print(json.dumps({"ok": False, "errors": errors}, indent=2, ensure_ascii=False))
         return 2
     root.mkdir(parents=True)
     item_links = [link(f"delivery/deliveries/{root.name}/items/{id_slug(story)}/item", story) for story in stories]
+    dod_link = link(dod_snapshot["definition_of_done_path"].removesuffix(".md"), "Definition of Done")
     props = {"type": "delivery", "id": identifier, "title": title(args.goal, designation(docs, "delivery", "delivery")),
              "status": "scope_proposed", "owner_role": "product_owner", "goal": args.goal,
              "derives_from": item_links, "definition_of_done": dod_link,
              "target_branch": args.target_branch, "revision": 1,
+             **backlog_snapshot, **dod_snapshot,
              "aliases": [identifier], "tags": ["doc/delivery", "status/scope-proposed"]}
     body = body_for("delivery", props["title"], {
         "Goal": args.goal, "Observable Outcome": args.outcome or "Define the observable result.",
@@ -347,10 +513,15 @@ def init_delivery(args) -> int:
     atomic_text(root / "delivery.md", frontmatter(props, body))
     for story in stories:
         item = root / "items" / id_slug(story) / "item.md"
+        source = sources[story]
         item_props = {"type": "delivery-item", "title": title(story, designation(docs, "delivery-item", "delivery item")),
                       "status": "in_scope", "derives_from": [story], "related_to": [identifier],
-                      "story_source_hash": args.story_source_hash or "pending",
-                      "test_plan_source_hash": args.test_plan_source_hash or "pending",
+                      **{key: source[key] for key in SOURCE_ITEM_FIELDS},
+                      "depends_on": source["depends_on"],
+                      "execution_after": [], "dependency_bindings": [],
+                      "waits_for": [], "waits_for_bindings": [],
+                      "path_claims": [], "contract_claims": [],
+                      "role_sequence": [source["owner_role"], *source["supporting_roles"], "code_reviewer", "qa_engineer"],
                       "tags": ["doc/delivery-item", "status/in-scope"]}
         atomic_text(item, frontmatter(item_props, body_for("item", item_props["title"], {
             "Delivery Scope": identifier, "Navigation": link(f"delivery/deliveries/{root.name}/delivery", identifier),
@@ -390,6 +561,12 @@ def delivery_findings(docs: Path, identifier: str) -> tuple[Path | None, list[st
         plan_props, plan_body = split_note(plan)
         if plan_props.get("type") != "execution-plan": errors.append("execution-plan.md type must be execution-plan")
         errors.extend(f"execution-plan.md missing section: {name}" for name in sorted(set(SECTIONS["execution-plan"]) - sections(plan_body)))
+    # Closed Deliveries preserve their pinned historical source baseline. Every
+    # mutable Delivery phase must instead prove that its selected Story/Test
+    # Plan and Definition of Done are still the exact approved source bytes.
+    if props.get("status") not in {"merged", "cancelled"}:
+        _, source_errors = delivery_source_findings(docs, root, props)
+        errors.extend(source_errors)
     return root, sorted(set(errors))
 
 
@@ -431,6 +608,100 @@ def approve_scope(args) -> int:
     print(json.dumps({"ok": True, "id": props["id"], "scope_hash": props["scope_hash"]}, indent=2)); return 0
 
 
+def _string_list(value: object, label: str, errors: list[str]) -> list[str]:
+    if not isinstance(value, list) or any(not isinstance(item, str) or not item.strip() for item in value):
+        errors.append(f"{label} must be a list of non-empty strings")
+        return []
+    return [item.strip() for item in value]
+
+
+def _is_normalized_claim(value: str) -> bool:
+    if not value or value.startswith("/") or "\\" in value:
+        return False
+    path = PurePosixPath(value)
+    return value == path.as_posix() and all(part not in {"", ".", ".."} for part in path.parts)
+
+
+def execution_plan_findings(root: Path, sources: dict[str, dict]) -> list[str]:
+    """Validate the authored Item topology before execution approval.
+
+    The Delivery compiler owns hashes and rendered plan summaries. People own
+    the topology, claims and role sequence, so approval rejects omitted or
+    contradictory execution intent rather than silently inventing defaults.
+    """
+    errors: list[str] = []
+    selected = set(sources)
+    graph: dict[str, set[str]] = {}
+    path_owners: dict[str, str] = {}
+    contract_owners: dict[str, str] = {}
+    for item_path in sorted(root.glob("items/*/item.md")):
+        props, _ = split_note(item_path)
+        story_id = str(props.get("story_id", ""))
+        if story_id not in sources:
+            errors.append(f"{item_path} does not resolve to a selected approved Story")
+            continue
+        source = sources[story_id]
+        after = _string_list(props.get("execution_after"), f"{story_id} execution_after", errors)
+        waits_for = _string_list(props.get("waits_for"), f"{story_id} waits_for", errors)
+        paths = _string_list(props.get("path_claims"), f"{story_id} path_claims", errors)
+        contracts = _string_list(props.get("contract_claims"), f"{story_id} contract_claims", errors)
+        roles = _string_list(props.get("role_sequence"), f"{story_id} role_sequence", errors)
+        if not paths and not contracts:
+            errors.append(f"{story_id} needs at least one exact path_claim or contract_claim")
+        if len(after) != len(set(after)):
+            errors.append(f"{story_id} execution_after contains duplicate Story IDs")
+        if story_id in after:
+            errors.append(f"{story_id} cannot execute after itself")
+        unknown_after = sorted(set(after) - selected)
+        if unknown_after:
+            errors.append(f"{story_id} execution_after targets outside this Delivery: {', '.join(unknown_after)}")
+        graph[story_id] = set(after)
+        required_internal = set(source["depends_on"]) & selected
+        missing_internal = sorted(required_internal - set(after))
+        if missing_internal:
+            errors.append(f"{story_id} execution_after omits approved dependencies: {', '.join(missing_internal)}")
+        required_external = set(source["depends_on"]) - selected
+        missing_external = sorted(required_external - set(waits_for))
+        if missing_external:
+            errors.append(f"{story_id} waits_for omits external approved dependencies: {', '.join(missing_external)}")
+        expected_roles = [source["owner_role"], *source["supporting_roles"], "code_reviewer", "qa_engineer"]
+        if roles != expected_roles:
+            errors.append(
+                f"{story_id} role_sequence must be owner/supporting roles followed by code_reviewer and qa_engineer"
+            )
+        if len(roles) != len(set(roles)):
+            errors.append(f"{story_id} role_sequence contains duplicate roles")
+        for claim in paths:
+            if not _is_normalized_claim(claim):
+                errors.append(f"{story_id} path_claim is not normalized: {claim}")
+                continue
+            previous = path_owners.setdefault(claim, story_id)
+            if previous != story_id:
+                errors.append(f"path_claim {claim} is owned by both {previous} and {story_id}")
+        for claim in contracts:
+            previous = contract_owners.setdefault(claim, story_id)
+            if previous != story_id:
+                errors.append(f"contract_claim {claim} is owned by both {previous} and {story_id}")
+
+    visiting: set[str] = set()
+    visited: set[str] = set()
+
+    def visit(story_id: str) -> bool:
+        if story_id in visiting:
+            return True
+        if story_id in visited:
+            return False
+        visiting.add(story_id)
+        cycle = any(visit(dependency) for dependency in graph.get(story_id, set()))
+        visiting.remove(story_id)
+        visited.add(story_id)
+        return cycle
+
+    if any(visit(story_id) for story_id in sorted(graph)):
+        errors.append("Delivery execution_after graph contains a cycle")
+    return sorted(set(errors))
+
+
 def approve_execution(args) -> int:
     docs = docs_root(args.docs)
     root, findings = delivery_findings(docs, args.delivery)
@@ -445,20 +716,35 @@ def approve_execution(args) -> int:
     items = sorted(root.glob("items/*/item.md"))
     if not items:
         print(json.dumps({"ok": False, "errors": ["Execution Plan requires at least one Item"]}, indent=2)); return 1
+    sources, source_errors = delivery_source_findings(docs, root, props)
+    plan_errors = source_errors + execution_plan_findings(root, sources)
+    if plan_errors:
+        print(json.dumps({"ok": False, "errors": sorted(set(plan_errors))}, indent=2)); return 1
     item_ids = []
+    item_graph: list[str] = []
+    role_sequences: list[str] = []
+    path_claims: list[str] = []
+    contract_claims: list[str] = []
+    item_hashes: list[str] = []
     for item_path in items:
         item_props, item_body = split_note(item_path)
-        story = item_path.parent.name.upper()
+        story = str(item_props["story_id"])
         item_ids.append(story)
-        item_props.setdefault("execution_after", [])
-        item_props.setdefault("dependency_bindings", [])
-        item_props.setdefault("waits_for", [])
-        item_props.setdefault("waits_for_bindings", [])
-        item_props.setdefault("path_claims", [])
-        item_props.setdefault("contract_claims", [])
-        item_props.setdefault("role_sequence", ["code_reviewer", "qa_engineer"])
+        item_props["dependency_bindings"] = sorted(
+            set(sources[story]["depends_on"]) & set(item_props["execution_after"])
+        )
+        item_props["waits_for_bindings"] = sorted(
+            set(sources[story]["depends_on"]) - set(item_props["execution_after"])
+        )
         item_props["item_plan_hash"] = content_hash(item_props, item_body, exclude=MUTABLE | {"item_plan_hash"})
         atomic_text(item_path, frontmatter(item_props, item_body))
+        item_hashes.append(f"{story}:{item_props['item_plan_hash']}")
+        item_graph.append(
+            f"{story} after " + (", ".join(item_props["execution_after"]) or "none")
+        )
+        role_sequences.append(f"{story}: " + " -> ".join(item_props["role_sequence"]))
+        path_claims.extend(f"{story}: {claim}" for claim in item_props["path_claims"])
+        contract_claims.extend(f"{story}: {claim}" for claim in item_props["contract_claims"])
         for kind, filename, status in (("code-review", "code-review.md", "draft"), ("verification", "verification.md", "draft")):
             evidence = item_path.parent / filename
             if not evidence.exists():
@@ -469,9 +755,23 @@ def approve_execution(args) -> int:
                 atomic_text(evidence, frontmatter(ev_props, body_for("item", ev_props["title"], {"Navigation": link(str(item_path.relative_to(docs)), story)})))
     plan_path = root / "execution-plan.md"
     plan_props = {"type": "execution-plan", "id": f"{props['id']}-EXEC", "title": title(props.get("goal", props["id"]), designation(docs, "execution-plan", "execution plan")),
-                  "status": "approved", "revision": 1, "derives_from": [link(str(path.relative_to(docs)), props["id"])],
+                  "status": "approved", "revision": 1, "scope_hash": props["scope_hash"],
+                  "item_plan_hashes": sorted(item_hashes),
+                  "derives_from": [link(str(path.relative_to(docs)), props["id"])],
                   "tags": ["doc/execution-plan", "status/approved"]}
-    plan_body = body_for("execution-plan", plan_props["title"], {"Item Graph": ", ".join(item_ids), "Integration Order": ", ".join(item_ids), "Navigation": link(str(path.relative_to(docs)), props["id"])})
+    plan_body = body_for("execution-plan", plan_props["title"], {
+        "Preconditions": "Approved backlog Story/Test Plan snapshots and the pinned Definition of Done are current.",
+        "Item Graph": "\n".join(f"- {row}" for row in item_graph),
+        "Execution Waves": "Execution follows the acyclic Item Graph; independent Items may activate only within the global Slot cap.",
+        "Role Sequences": "\n".join(f"- {row}" for row in role_sequences),
+        "Path Claims": "\n".join(f"- {row}" for row in path_claims),
+        "Contract Claims": "\n".join(f"- {row}" for row in contract_claims) or "- none",
+        "Integration Order": " -> ".join(item_ids),
+        "Verification Strategy": "Each Item must bind review and verification to its exact worktree product commit before integration.",
+        "Failure and Recovery": "A stale source snapshot, target conflict or missing verified writer receipt blocks activation and requires the named recovery path.",
+        "Approval": "Execution approval binds this plan hash and the exact Item plan hashes listed in front matter.",
+        "Navigation": link(str(path.relative_to(docs)), props["id"]),
+    })
     plan_props["plan_hash"] = content_hash(plan_props, plan_body, exclude=MUTABLE | {"plan_hash"})
     plan_props["approved_at_utc"] = utc_now()
     plan_props["source_hash"] = content_hash(plan_props, plan_body)
@@ -535,8 +835,49 @@ def check_item_ready(args) -> int:
     print(json.dumps({"ok": not errors, "errors": errors}, indent=2)); return 0 if not errors else 1
 
 
+def item_worktree_head(worktree: Path) -> tuple[str, list[str]]:
+    """Return a clean Item worktree HEAD without trusting caller-provided OIDs."""
+    try:
+        top = subprocess.run(
+            ["git", "-C", str(worktree), "rev-parse", "--show-toplevel"],
+            text=True, capture_output=True, check=False,
+        )
+        if top.returncode:
+            raise RuntimeError(top.stderr.strip() or "not a Git worktree")
+        if Path(top.stdout.strip()).resolve() != worktree.resolve():
+            raise RuntimeError("worktree must be the Item worktree root")
+        head = subprocess.run(
+            ["git", "-C", str(worktree), "rev-parse", "HEAD"],
+            text=True, capture_output=True, check=False,
+        )
+        if head.returncode or not GIT_OID_RE.fullmatch(head.stdout.strip()):
+            raise RuntimeError(head.stderr.strip() or "Item worktree has no valid HEAD")
+        dirty = subprocess.run(
+            ["git", "-C", str(worktree), "status", "--porcelain", "--untracked-files=all"],
+            text=True, capture_output=True, check=False,
+        )
+        if dirty.returncode:
+            raise RuntimeError(dirty.stderr.strip() or "cannot inspect Item worktree")
+    except OSError as exc:
+        raise RuntimeError(f"cannot inspect Item worktree: {exc}") from exc
+    return head.stdout.strip(), [line for line in dirty.stdout.splitlines() if line]
+
+
 def approve_item_evidence(args) -> int:
-    docs = docs_root(args.docs)
+    worktree_value = getattr(args, "worktree", None)
+    if not isinstance(worktree_value, str) or not worktree_value.strip():
+        print(json.dumps({"ok": False, "errors": ["an Item worktree is required"]}, indent=2)); return 2
+    worktree = Path(worktree_value).resolve()
+    docs = docs_root(worktree)
+    requested_docs = docs_root(args.docs)
+    try:
+        head, dirty = item_worktree_head(worktree)
+    except RuntimeError as exc:
+        print(json.dumps({"ok": False, "errors": [str(exc)]}, indent=2)); return 2
+    if str(getattr(args, "docs", ".")) not in {"", "."} and requested_docs != docs:
+        print(json.dumps({"ok": False, "errors": ["--docs must resolve inside the active Item worktree"]}, indent=2)); return 2
+    if dirty:
+        print(json.dumps({"ok": False, "errors": ["commit or remove all Item worktree changes before approving evidence"]}, indent=2)); return 2
     root = find_delivery(docs, args.delivery)
     item = root / "items" / id_slug(args.story) / "item.md" if root else None
     if item is None or not item.exists():
@@ -548,10 +889,10 @@ def approve_item_evidence(args) -> int:
     item_props, _ = split_note(item)
     review_props, review_body = split_note(review)
     verification_props, verification_body = split_note(verification)
-    reviewed = args.reviewed_commit
-    verified = args.verified_commit
-    if not reviewed or not verified:
-        print(json.dumps({"ok": False, "errors": ["reviewed and verified commits are required"]}, indent=2)); return 2
+    if item_props.get("status") != "active":
+        print(json.dumps({"ok": False, "errors": ["Item evidence requires an active Item worktree"]}, indent=2)); return 2
+    reviewed = head
+    verified = head
     review_props["status"] = "approved"; review_props["reviewed_commit"] = reviewed
     review_props["item_plan_hash"] = item_props.get("item_plan_hash", "none")
     review_props["source_hash"] = content_hash(review_props, review_body)
@@ -562,7 +903,8 @@ def approve_item_evidence(args) -> int:
     verification_props["tags"] = [tag for tag in verification_props.get("tags", []) if not str(tag).startswith("status/")] + ["status/passed"]
     atomic_text(review, frontmatter(review_props, review_body))
     atomic_text(verification, frontmatter(verification_props, verification_body))
-    print(json.dumps({"ok": True, "story": args.story, "reviewed_commit": reviewed, "verified_commit": verified}, indent=2)); return 0
+    print(json.dumps({"ok": True, "story": args.story, "reviewed_commit": reviewed,
+                      "verified_commit": verified, "worktree": str(worktree)}, indent=2)); return 0
 
 
 def approve_review(args) -> int:
@@ -570,6 +912,13 @@ def approve_review(args) -> int:
     root = find_delivery(docs, args.delivery)
     if root is None:
         print(json.dumps({"ok": False, "errors": ["Delivery not found"]}, indent=2)); return 1
+    reviewed_commit = getattr(args, "reviewed_commit", None)
+    reviewed_integration = getattr(args, "reviewed_integration_commit", None)
+    if (not isinstance(reviewed_commit, str) or not GIT_OID_RE.fullmatch(reviewed_commit)
+            or not isinstance(reviewed_integration, str) or not GIT_OID_RE.fullmatch(reviewed_integration)):
+        print(json.dumps({"ok": False, "errors": [
+            "review approval requires exact reviewed_commit and reviewed_integration_commit Git OIDs"
+        ]}, indent=2)); return 2
     delivery_path_value = root / "delivery.md"
     delivery_props, _ = split_note(delivery_path_value)
     review_path = root / "delivery-review.md"
@@ -577,8 +926,8 @@ def approve_review(args) -> int:
                     "title": title(delivery_props.get("goal", args.delivery), designation(docs, "delivery-review", "delivery review")),
                     "status": "approved", "derives_from": [link(str(delivery_path_value.relative_to(docs)), args.delivery)],
                     "plan_hash": delivery_props.get("plan_hash", "none"),
-                    "reviewed_commit": args.reviewed_commit or "none",
-                    "reviewed_integration_commit": args.reviewed_integration_commit or "none",
+                    "reviewed_commit": reviewed_commit,
+                    "reviewed_integration_commit": reviewed_integration,
                     "approved_at_utc": utc_now(), "tags": ["doc/delivery-review", "status/approved"]}
     review_body = body_for("delivery-review", review_props["title"], {"Goal Outcome": delivery_props.get("goal", ""), "Verdict": "Approved for PR handoff.", "Navigation": link(str(delivery_path_value.relative_to(docs)), args.delivery)})
     review_props["approval_hash"] = content_hash(review_props, review_body, exclude=MUTABLE | {"approval_hash"})
@@ -615,7 +964,7 @@ def main(argv=None) -> int:
     sub.choices["begin-dod-revision"].set_defaults(func=begin_dod_revision)
     sub.choices["check-dod"].set_defaults(func=check_dod_cmd)
     sub.choices["approve-dod"].set_defaults(func=approve_dod)
-    init = sub.add_parser("init"); init.add_argument("--id"); init.add_argument("--slug"); init.add_argument("--goal", required=True); init.add_argument("--outcome"); init.add_argument("--target-branch", default="main"); init.add_argument("--story", action="append"); init.add_argument("--story-source-hash"); init.add_argument("--test-plan-source-hash"); init.set_defaults(func=init_delivery)
+    init = sub.add_parser("init"); init.add_argument("--id"); init.add_argument("--slug"); init.add_argument("--goal", required=True); init.add_argument("--outcome"); init.add_argument("--target-branch", default="main"); init.add_argument("--story", action="append"); init.set_defaults(func=init_delivery)
     for name, func in (("check", check_delivery), ("approve-scope", approve_scope), ("approve-execution", approve_execution), ("status", status)):
         cmd = sub.add_parser(name); cmd.add_argument("--delivery", required=True); cmd.set_defaults(func=func)
     sub.add_parser("render").set_defaults(func=render)
@@ -626,10 +975,10 @@ def main(argv=None) -> int:
     ready.add_argument("--delivery", required=True); ready.add_argument("--story", required=True); ready.set_defaults(func=check_item_ready)
     evidence = sub.add_parser("approve-item-evidence")
     evidence.add_argument("--delivery", required=True); evidence.add_argument("--story", required=True)
-    evidence.add_argument("--reviewed-commit", required=True); evidence.add_argument("--verified-commit", required=True)
+    evidence.add_argument("--worktree", required=True)
     evidence.set_defaults(func=approve_item_evidence)
     review = sub.add_parser("approve-review")
-    review.add_argument("--delivery", required=True); review.add_argument("--reviewed-commit"); review.add_argument("--reviewed-integration-commit"); review.set_defaults(func=approve_review)
+    review.add_argument("--delivery", required=True); review.add_argument("--reviewed-commit", required=True); review.add_argument("--reviewed-integration-commit", required=True); review.set_defaults(func=approve_review)
     pr = sub.add_parser("record-pr")
     pr.add_argument("--delivery", required=True); pr.add_argument("--url", required=True); pr.set_defaults(func=record_pr)
     args = parser.parse_args(argv)

@@ -189,6 +189,16 @@ class ReleaseWorkflowContracts(unittest.TestCase):
                     rf"(?ms)^  {re.escape(job)}:\n.*?^    timeout-minutes: {minutes}$",
                 )
 
+    def test_validation_workflows_cancel_superseded_runs(self):
+        expected = (
+            "concurrency:\n"
+            "  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}\n"
+            "  cancel-in-progress: true"
+        )
+        for workflow in ("validate.yml", "codeql.yml", "release-hosts.yml"):
+            with self.subTest(workflow=workflow):
+                self.assertIn(expected, self.text(workflow))
+
     def test_workflow_actions_are_allowlisted_and_sha_pinned(self):
         workflow_root = REPO / ".github" / "workflows"
         workflows = sorted({

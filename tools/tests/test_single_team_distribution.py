@@ -8,6 +8,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 
 TESTS_DIR = Path(__file__).resolve().parent
@@ -114,8 +115,12 @@ class SingleTeamDistributionTests(unittest.TestCase):
                     )
                     self.assertEqual(packaged.read_bytes(), expected)
                     continue
-                for path in sorted(candidate for candidate in canonical.rglob("*")
-                                   if candidate.is_file()):
+                for path in sorted(
+                    candidate
+                    for candidate in canonical.rglob("*")
+                    if candidate.is_file()
+                    and not build_distributions.is_python_cache(candidate)
+                ):
                     expected = path.read_bytes()
                     if b"\0" not in expected:
                         expected = expected.replace(b"\r\n", b"\n").replace(
@@ -168,12 +173,31 @@ class SingleTeamDistributionTests(unittest.TestCase):
 
     def test_python_runtime_caches_never_enter_distributions(self):
         cache = self.root / "plugins" / fixtures.PLUGIN / "scripts/__pycache__"
-        cache.mkdir()
+        cache.mkdir(exist_ok=True)
         (cache / "probe.cpython-39.pyc").write_bytes(b"cache")
         output = self.root / "cache-build"
         build_distributions.build(self.root, output)
         self.assertEqual(list(output.rglob("__pycache__")), [])
         self.assertEqual(list(output.rglob("*.pyc")), [])
+
+    def test_fixture_copy_ignores_python_runtime_caches(self):
+        with tempfile.TemporaryDirectory() as source_dir, \
+                tempfile.TemporaryDirectory() as target_dir:
+            source_root = Path(source_dir)
+            plugin_root = source_root / "plugins" / fixtures.PLUGIN
+            script = plugin_root / "scripts" / "runner.py"
+            script.parent.mkdir(parents=True)
+            script.write_text("print('fixture')\n", encoding="utf-8")
+            cache = script.parent / "__pycache__"
+            cache.mkdir()
+            (cache / "runner.cpython-39.pyc").write_bytes(b"cache")
+
+            with mock.patch.object(fixtures, "REAL_REPOSITORY", source_root):
+                fixtures.copy(f"plugins/{fixtures.PLUGIN}", Path(target_dir))
+
+            copied = Path(target_dir) / "plugins" / fixtures.PLUGIN
+            self.assertTrue((copied / "scripts/runner.py").is_file())
+            self.assertFalse((copied / "scripts/__pycache__").exists())
 
     def test_agent_metadata_is_projected_for_each_host(self):
         canonical = self.root / "plugins" / fixtures.PLUGIN / "agents"

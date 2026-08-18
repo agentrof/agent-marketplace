@@ -26,7 +26,11 @@ def copy(relative: str, root: Path) -> None:
     target = root / relative
     target.parent.mkdir(parents=True, exist_ok=True)
     if source.is_dir():
-        shutil.copytree(source, target)
+        shutil.copytree(
+            source,
+            target,
+            ignore=build_distributions.ignore_python_cache,
+        )
     else:
         shutil.copy2(source, target)
 

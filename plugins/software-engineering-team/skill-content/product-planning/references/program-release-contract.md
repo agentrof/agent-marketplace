@@ -11,5 +11,5 @@ the acceptance section.
 - A story's `criterion_refs`, `experience_refs`, `depends_on`, `uses_design`
   and `constrained_by` are vault-absolute wikilinks checked by the backlog
   compiler; no hidden import step fills missing values.
-- Backlog approval prepares delivery scope. It does not activate a release or
-  create a delivery lane.
+- Backlog approval prepares Delivery Scope. It does not activate a release or
+  reserve a Delivery.

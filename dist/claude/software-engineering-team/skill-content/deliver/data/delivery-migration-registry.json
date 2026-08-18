@@ -1,9 +1,0 @@
-{
-  "schema_version": 1,
-  "from_protocol": "delivery-protocol-0",
-  "to_protocol": "delivery-protocol-1",
-  "semantic_migration": "never auto-apply",
-  "schema_only_migrations": [],
-  "old_host_policy": "read only when the adapter declares compatibility",
-  "unknown_protocol_policy": "fail_closed"
-}

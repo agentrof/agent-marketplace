@@ -12,10 +12,10 @@ inputs, not project state. A later review layer starts only after the prior
 layer's writes and deterministic checks are green. Each host uses its native
 agent invocation and wait mechanism without changing these semantics.
 
-Preparation is a linear, user-gated sequence. Each stage commits its approved
-documents before the next stage begins. The backlog compiler is the only
-machine that derives backlog indexes. All durable changes are ordinary Git
-changes in the project workspace.
+Requirement Flow is a linear, user-gated sequence. Each required stage commits
+its approved documents before the next stage begins. The backlog compiler is
+the only machine that derives backlog indexes. All durable changes are
+ordinary Git changes in the project workspace.
 
 Host adapters preserve semantics: Claude uses namespaced agents and
 `AskUserQuestion`; Codex uses project-local agents and `request_user_input`.

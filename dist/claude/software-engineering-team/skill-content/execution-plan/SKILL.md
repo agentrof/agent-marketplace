@@ -15,6 +15,8 @@ exposure: entry
 Use `/execution-plan DLV-###` with an exact Delivery ID. The command is not a
 candidate selector and cannot resume by free text.
 
+Read `flows/execution-planning.md` completely before compiling topology.
+
 The Software Architect compiles the canonical topology into each Item's
 `item.md`: `execution_after`, dependency and cross-Delivery bindings,
 `path_claims`, `contract_claims` and `role_sequence`. The

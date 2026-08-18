@@ -717,7 +717,7 @@ class SubcommandTests(unittest.TestCase):
         run(["init", "--space", str(space), "--title", "Topic", "--code", "TOP"])
         code, _, err = run([
             "stub", "--space", str(space), "--type", "challenge_record",
-            "--title", "Legacy review",
+            "--title", "Malformed review",
         ])
         self.assertEqual(code, 2)
         self.assertIn("unknown type 'challenge_record'", err)

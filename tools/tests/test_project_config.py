@@ -120,7 +120,6 @@ class ProjectConfigTests(unittest.TestCase):
         for field in fields:
             self.assertIn(field, help_result.stdout)
             self.assertIn(f"`{field}`", contract)
-        self.assertNotIn("`model_overrides`", contract)
         consumers = {
             "limits": ["scripts/ba_compile.py", "scripts/experience_compile.py",
                        "scripts/vault_check.py"],
@@ -135,23 +134,6 @@ class ProjectConfigTests(unittest.TestCase):
                     field, (plugin / relative).read_text(encoding="utf-8"),
                     f"{field} lost its declared consumer {relative}",
                 )
-
-    def test_origin_writer_is_retired_and_legacy_field_is_rejected(self):
-        with tempfile.TemporaryDirectory() as temporary:
-            project = Path(temporary)
-            config = self.setup_config(project)
-            retired = self.run_script(
-                CONFIG, "set-origin", "--config", str(config),
-                "--origin", "existing",
-            )
-            self.assertEqual(retired.returncode, 2)
-            legacy = json.loads(config.read_text(encoding="utf-8"))
-            legacy["project_origin"] = "existing"
-            config.write_text(json.dumps(legacy) + "\n", encoding="utf-8")
-            checked = self.run_script(CONFIG, "check", "--config", str(config))
-            self.assertEqual(checked.returncode, 1)
-            self.assertIn("retired", checked.stdout)
-
 
 if __name__ == "__main__":
     unittest.main()

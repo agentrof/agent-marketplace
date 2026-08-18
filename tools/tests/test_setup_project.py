@@ -128,44 +128,6 @@ class SetupProjectTests(unittest.TestCase):
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
             self.assertTrue(json.loads(result.stdout)["ok"])
 
-    def test_setup_converges_retired_config_without_a_migration_runner(self):
-        with tempfile.TemporaryDirectory() as temporary:
-            project = Path(temporary)
-            subprocess.run(["git", "init", "-q", str(project)], check=True)
-            workspace = project / "workspace"
-            workspace.mkdir()
-            config_path = workspace / "config.json"
-            config_path.write_text(json.dumps({
-                "agent_marketplace": {
-                    "team_id": "software-engineering-team",
-                    "project_contract_version": 5,
-                    "vault": {"status": "active"},
-                },
-                "managed_by": (
-                    "software-engineering-team plugin; change only through "
-                    "the configure entry"
-                ),
-                "project_origin": "greenfield",
-                "model_overrides": {"backend_developer": "retired"},
-                "test_command": "make test",
-                "source_dirs": ["workspace/apps"],
-                "custom_project_field": "preserved",
-            }) + "\n", encoding="utf-8")
-
-            result = self.run_script(
-                SETUP, "--project-root", str(project), "--json"
-            )
-            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-            config = json.loads(config_path.read_text(encoding="utf-8"))
-            self.assertEqual(config["team_id"], "software-engineering-team")
-            self.assertNotIn("project_origin", config)
-            self.assertEqual(config["custom_project_field"], "preserved")
-            self.assertEqual(config["test_command"], "make test")
-            self.assertEqual(config["source_dirs"], ["workspace/apps"])
-            self.assertNotIn("agent_marketplace", config)
-            self.assertNotIn("managed_by", config)
-            self.assertNotIn("model_overrides", config)
-
     def test_refresh_inspect_check_apply_converges_and_preserves_project_data(self):
         with tempfile.TemporaryDirectory() as temporary:
             project = Path(temporary)
@@ -217,7 +179,7 @@ class SetupProjectTests(unittest.TestCase):
             )
             plugin_main.write_text("stale package projection\n", encoding="utf-8")
             plugin_orphan = plugin_main.parent / "removed-after-package-n.js"
-            plugin_orphan.write_text("obsolete package asset\n", encoding="utf-8")
+            plugin_orphan.write_text("unshipped package asset\n", encoding="utf-8")
             unrelated_plugin = obsidian / "plugins/user-unrelated/keep.js"
             unrelated_plugin.parent.mkdir()
             unrelated_plugin.write_text("consumer plugin\n", encoding="utf-8")
@@ -277,7 +239,6 @@ class SetupProjectTests(unittest.TestCase):
             self.assertEqual(json.loads(routed.stdout)["next_entry"], "requirement")
             self.assertEqual(authored.read_bytes(), authored_before)
             refreshed_config = json.loads(config_path.read_text(encoding="utf-8"))
-            self.assertNotIn("project_origin", refreshed_config)
             self.assertEqual(
                 refreshed_config["custom_project_field"], {"owner": "consumer"}
             )
@@ -388,7 +349,7 @@ class SetupProjectTests(unittest.TestCase):
             self.assertEqual(setup.returncode, 0, setup.stdout + setup.stderr)
             config_path = project / "workspace/config.json"
             config = json.loads(config_path.read_text(encoding="utf-8"))
-            config["model_overrides"] = {"retired": "value"}
+            config["custom_project_field"] = {"preserve": True}
             config_path.write_text(
                 json.dumps(config, indent=4) + "\n", encoding="utf-8"
             )
@@ -435,7 +396,7 @@ class SetupProjectTests(unittest.TestCase):
             authored = project / "workspace/docs/project-notes/concurrent.md"
 
             args = argparse.Namespace(
-                project_root=str(project), workspace="workspace", origin=None,
+                project_root=str(project), workspace="workspace",
                 scale="small", output_language="English",
                 terminology_language="English", command="apply", json=True,
             )
@@ -623,29 +584,12 @@ class SetupProjectTests(unittest.TestCase):
             alternate.mkdir()
             (alternate / "config.json").write_text(json.dumps({
                 "team_id": "software-engineering-team",
-                "project_origin": "greenfield",
             }) + "\n", encoding="utf-8")
             result = self.run_script(
                 SETUP, "--project-root", str(project), "--json"
             )
             self.assertEqual(result.returncode, 1)
             self.assertIn("non-canonical managed workspace", result.stderr)
-
-    def test_workspace_compatibility_flag_accepts_only_canonical_value(self):
-        with tempfile.TemporaryDirectory() as temporary:
-            project = Path(temporary)
-            subprocess.run(["git", "init", "-q", str(project)], check=True)
-            accepted = self.run_script(
-                SETUP, "--project-root", str(project),
-                "--workspace", "workspace", "--json",
-            )
-            self.assertEqual(accepted.returncode, 0, accepted.stderr)
-            rejected = self.run_script(
-                SETUP, "--project-root", str(project),
-                "--workspace", "other", "--json",
-            )
-            self.assertEqual(rejected.returncode, 2)
-            self.assertIn("invalid choice", rejected.stderr)
 
     def test_setup_check_rejects_database_state_in_runtime(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -732,7 +676,7 @@ class SetupProjectTests(unittest.TestCase):
                 vault / ".obsidian/plugins/fixture-plugin"
             )
             (target_plugin / "file-now.js").mkdir(parents=True)
-            (target_plugin / "file-now.js/obsolete.js").write_text(
+            (target_plugin / "file-now.js/unshipped.js").write_text(
                 "old directory shape\n", encoding="utf-8"
             )
             (target_plugin / "directory-now").write_text(

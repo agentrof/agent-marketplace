@@ -25,10 +25,8 @@ tokens never land literally in a consuming project.
    scripts/setup_project.py inspect --project-root <root> --json
    ```
 
-   Present its pre-mutation operation list. Setup has no project-origin mode;
-   Requirement Flow determines which stages apply for each request. A legacy
-   `project_origin` key is shown as a deletion in the migration diff and is
-   never copied into refreshed config.
+   Present its pre-mutation operation list. Requirement Flow determines which
+   stages apply for each request; setup does not infer request routing.
 2. Resolve any reported blocker, then run:
 
    ```text
@@ -79,5 +77,5 @@ tokens never land literally in a consuming project.
 9. Review and commit the exact tracked refresh diff before a workflow handoff.
    Report `requirement` as the next entry. `/requirement` evaluates the
    request-specific impact matrix and routes only the required stages and
-   backlog handoff; setup never infers routing from project age or origin.
+   backlog handoff; setup never infers routing from repository history.
    Start a fresh host session after setup.

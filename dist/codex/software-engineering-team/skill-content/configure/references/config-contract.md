@@ -11,8 +11,6 @@ database, command, source-directory and parallelism fields are retained for
 Delivery. They are optional until first Item activation; when
 present they must satisfy this contract.
 
-- `project_origin`: retired. Setup removes this legacy key during migration;
-  request-specific Requirement impact decides which Requirement stages apply.
 - `backend_stack`: `python-fastapi`.
 - `frontend_stack`: `react-typescript`.
 - `environment_stack`: `docker-compose`.

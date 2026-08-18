@@ -48,7 +48,6 @@ class IssueReportTests(unittest.TestCase):
         )
         (workspace / "config.json").write_text(json.dumps({
             "team_id": "software-engineering-team",
-            "project_origin": "greenfield",
             "doc_type_designations": {"issue-report": designation},
         }), encoding="utf-8")
         return docs

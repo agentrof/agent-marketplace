@@ -45,6 +45,9 @@ must cite an approved current package, and `not_applicable` requires a concrete
 rationale. The approved backlog is the handoff to Delivery; no timebox,
 velocity or release state is created.
 
+The current lifecycle and Git coordination contract is documented in
+[docs/requirement-delivery-protocol.md](docs/requirement-delivery-protocol.md).
+
 ## Backlog layout
 
 ```text

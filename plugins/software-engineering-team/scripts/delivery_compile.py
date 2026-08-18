@@ -13,7 +13,6 @@ import hashlib
 import json
 import os
 import re
-import sys
 import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
@@ -325,8 +324,6 @@ def init_delivery(args) -> int:
     if root.exists():
         print(json.dumps({"ok": False, "errors": [f"Delivery already exists: {root}"]}))
         return 1
-    dod = delivery_root(docs) / "definition-of-done.md"
-    dod_props = split_note(dod)[0] if dod.exists() else {}
     dod_link = link("delivery/definition-of-done", "Definition of Done")
     stories = list(args.story or [])
     if any(not STORY_RE.fullmatch(value) for value in stories):

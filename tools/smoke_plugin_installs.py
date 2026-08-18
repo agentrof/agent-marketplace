@@ -98,12 +98,12 @@ def exercise_package(team_root: Path, project: Path, env: dict[str, str]) -> Non
         raise SmokeFailure(f"installed package is missing {generator.name}")
     generator_args = [
         sys.executable, str(generator), "apply", "--project-root", str(project),
-        "--workspace", "workspace", "--seed-user-files", "--scope", "all",
+        "--seed-user-files", "--scope", "all",
     ]
     run(generator_args, env)
     run([
         sys.executable, str(generator), "check", "--project-root", str(project),
-        "--workspace", "workspace", "--scope", "all",
+        "--scope", "all",
     ], env)
     sentinel = project / "workspace" / "user-authored.md"
     sentinel.write_text("# User-owned package refresh sentinel\n", encoding="utf-8")

@@ -55,6 +55,9 @@ behavior is host-neutral; Claude and Codex are packaging adapters.
     field is removed merely because a later Release Management consumer is
     out of scope.
 
+The normative Requirement and Delivery lifecycle is documented in
+[requirement-delivery-protocol.md](requirement-delivery-protocol.md).
+
 ## Ownership
 
 - `plugins/software-engineering-team/`: canonical workflows, agents, skills,

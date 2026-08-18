@@ -1,7 +1,7 @@
 # CI Bootstrap
 
-This is the deferred delivery activation contract. Preparation setup does not
-materialize CI. After the delivery contract is approved, when the repository
+This is the deferred Delivery activation contract. Project setup does not
+materialize CI. After the Delivery contract is approved, when the repository
 has no PR-triggered test workflow in its CI directory (`.github/workflows/` on
 GitHub), offer to add the packaged `templates/ci-tests.yml` file.
 
@@ -24,5 +24,5 @@ literally to a consuming repository.
   when an up-then-down probe passes now. Otherwise omit the job, note that a
   later setup run will append it, and treat its later absence as a gap once
   the probe passes.
-- Keep dependency audit. Route advisories through the deliver entry as a
+- Keep dependency audit. Route advisories through the Deliver entry as a
   fix-atomic lockfile bump.

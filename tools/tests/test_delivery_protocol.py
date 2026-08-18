@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import ast
 import json
 import re
 import sys
@@ -40,6 +41,32 @@ class DeliveryProtocolTests(unittest.TestCase):
         self.assertEqual(records["unknown_record_policy"], "fail_closed")
         self.assertEqual(set(records["records"]), set(records["subjects"]))
 
+    def test_runtime_record_emitters_match_the_closed_registry(self):
+        source = (PLUGIN / "scripts/delivery_git.py").read_text(encoding="utf-8")
+        tree = ast.parse(source)
+        emitted: dict[str, list[set[str]]] = {}
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Dict):
+                continue
+            values = {
+                key.value: value
+                for key, value in zip(node.keys, node.values)
+                if isinstance(key, ast.Constant) and isinstance(key.value, str)
+            }
+            record = values.get("Record")
+            if not isinstance(record, ast.Constant) or not isinstance(record.value, str):
+                continue
+            fields = set(values) - {"Record", "Protocol"}
+            emitted.setdefault(record.value.replace("-", "_"), []).append(fields)
+
+        contract = self.load_contract("delivery-control-record-contract.json")
+        registered = contract["records"]
+        self.assertEqual(set(emitted), set(registered))
+        for record, variants in emitted.items():
+            allowed = set(registered[record])
+            for fields in variants:
+                self.assertLessEqual(fields, allowed, record)
+
     def test_provider_and_receipt_contracts_match_runtime_surface(self):
         provider = self.load_contract("delivery-provider-contract.json")
         receipt = self.load_contract("delivery-receipt-contract.json")
@@ -68,16 +95,41 @@ class DeliveryProtocolTests(unittest.TestCase):
         for literal in ("item-writer-v1", "pr-create-v1", "target-update-v1"):
             self.assertIn(literal, coordinator_source)
 
-    def test_protocol_and_migration_registry_are_closed(self):
+    def test_protocol_contract_is_closed(self):
         protocol = self.load_contract("delivery-protocol-1.json")
-        migration = self.load_contract("delivery-migration-registry.json")
         self.assertEqual(protocol["protocol_version"], "delivery-protocol-1")
         self.assertEqual(
             protocol["merge_policy"],
             "merge-commit-only; squash and rebase fail closed",
         )
-        self.assertEqual(migration["to_protocol"], protocol["protocol_version"])
-        self.assertEqual(migration["unknown_protocol_policy"], "fail_closed")
+
+    def test_public_protocol_entries_equal_canonical_entry_skills(self):
+        protocol = (ROOT / "docs/requirement-delivery-protocol.md").read_text(
+            encoding="utf-8"
+        )
+        public_block = protocol.split("## Public entry surface", 1)[1].split(
+            "```text", 1
+        )[1].split("```", 1)[0]
+        documented = {
+            line.strip().removeprefix("/")
+            for line in public_block.splitlines()
+            if line.strip().startswith("/")
+        }
+        canonical = set()
+        for path in (PLUGIN / "skill-content").glob("*/SKILL.md"):
+            text = path.read_text(encoding="utf-8")
+            header = text.split("---", 2)[1]
+            if re.search(r"(?m)^exposure:\s*entry\s*$", header):
+                canonical.add(path.parent.name)
+        self.assertEqual(documented, canonical)
+
+    def test_every_canonical_flow_has_an_explicit_skill_reader(self):
+        skill_text = "\n".join(
+            path.read_text(encoding="utf-8")
+            for path in sorted((PLUGIN / "skill-content").glob("*/SKILL.md"))
+        )
+        for flow in sorted((PLUGIN / "flows").glob("*.md")):
+            self.assertIn(f"flows/{flow.name}", skill_text, flow.name)
 
     def test_coordinator_exposes_planned_internal_verbs(self):
         source = (PLUGIN / "scripts/delivery_git.py").read_text(encoding="utf-8")

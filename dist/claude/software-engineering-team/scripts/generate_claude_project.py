@@ -71,10 +71,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("action", choices=("inspect", "check", "apply"))
     parser.add_argument("--project-root", type=Path, required=True)
-    parser.add_argument(
-        "--workspace", default="workspace", choices=("workspace",),
-        help="compatibility option; the project workspace is canonical",
-    )
+    parser.set_defaults(workspace=project_instructions.CANONICAL_WORKSPACE)
     parser.add_argument("--choice", action="append", default=[])
     parser.add_argument("--seed-user-files", action="store_true")
     parser.add_argument("--scope", choices=("all", "tracked", "local"), default="all")

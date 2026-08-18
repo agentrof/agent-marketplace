@@ -63,8 +63,6 @@ class PackageRefreshAcceptanceTests(unittest.TestCase):
             "apply",
             "--project-root",
             str(project),
-            "--workspace",
-            "workspace",
             "--seed-user-files",
             "--scope",
             "all",
@@ -213,8 +211,6 @@ class PackageRefreshAcceptanceTests(unittest.TestCase):
             "check",
             "--project-root",
             str(project),
-            "--workspace",
-            "workspace",
             "--scope",
             "all",
         )
@@ -230,8 +226,6 @@ class PackageRefreshAcceptanceTests(unittest.TestCase):
             "apply",
             "--project-root",
             str(project),
-            "--workspace",
-            "workspace",
             "--scope",
             "all",
         )
@@ -308,8 +302,6 @@ class PackageRefreshAcceptanceTests(unittest.TestCase):
             "check",
             "--project-root",
             str(project),
-            "--workspace",
-            "workspace",
             "--scope",
             "all",
         )
@@ -337,8 +329,6 @@ class PackageRefreshAcceptanceTests(unittest.TestCase):
             "apply",
             "--project-root",
             str(project),
-            "--workspace",
-            "workspace",
             "--scope",
             "all",
         )

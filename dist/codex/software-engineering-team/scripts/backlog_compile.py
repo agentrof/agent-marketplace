@@ -11,11 +11,10 @@ import argparse
 import hashlib
 import json
 import re
-import subprocess
 import sys
 import unicodedata
 from datetime import datetime, timezone
-from pathlib import Path, PurePosixPath
+from pathlib import Path
 
 try:
     import vault_check
@@ -1373,15 +1372,6 @@ def global_criterion_coverage_findings(record: dict, docs: Path) -> list[str]:
     return errors
 
 
-def compiler_command_ok(command: list[str]) -> bool:
-    try:
-        return subprocess.run(
-            command, capture_output=True, text=True, check=False, timeout=180
-        ).returncode == 0
-    except (OSError, subprocess.TimeoutExpired):
-        return False
-
-
 def package_paths(record: dict, docs: Path) -> list[Path]:
     relatives = [record["backlog"]["path"]]
     relatives += [review["path"] for review in record["backlog_reviews"]]
@@ -1482,7 +1472,7 @@ def ensure_home_map(docs: Path) -> None:
 
 
 def normalize_backlog_map_aliases(path: Path, backlog_title: str) -> None:
-    """Remove the legacy map alias that can steal the backlog title."""
+    """Remove map aliases that conflict with the canonical backlog title."""
     if not path.is_file():
         return
     props, body = parse_front_matter(path)

@@ -100,7 +100,6 @@ class PortableVaultGateTests(unittest.TestCase):
             alternate.mkdir()
             (alternate / "config.json").write_text(json.dumps({
                 "team_id": "software-engineering-team",
-                "project_origin": "greenfield",
             }) + "\n", encoding="utf-8")
             payload = self.run_gate(gate, project)
             result = next(item for item in payload["results"]

@@ -7,7 +7,7 @@ is a set intersection, not an opinion.
 ## Inputs
 
 - Approved story test plans containing canonical identities. Recognized forms
-  are qualified or legacy-unqualified `BR` and `AC` identities, including
+  are qualified or unqualified `BR` and `AC` identities, including
   `inventory:BR-STOCK-001`, and story scenarios shaped
   `<story-id>-TS-###`, such as `AUTH-01-TS-003`.
   Identities are extracted verbatim; the audit never infers an unlabeled

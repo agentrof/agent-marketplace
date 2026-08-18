@@ -19,10 +19,6 @@ HEADER_RE = re.compile(
     r"([a-z0-9]+(?:-[a-z0-9]+)*) for (codex|claude|shared); "
     r"do not edit by hand -->$"
 )
-LEGACY_START_RE = re.compile(
-    r"<!-- agent-marketplace:([a-z0-9]+(?:-[a-z0-9]+)*):"
-    r"(codex|claude):start -->"
-)
 CHOICE_OPTIONS = ["preserve", "discard", "abort"]
 
 
@@ -88,37 +84,6 @@ def rendered_template(plugin_root: Path, host: str, workspace: str) -> str:
     if text.splitlines()[0] != expected:
         raise ProjectInstructionError(f"project template has invalid owner header: {path}")
     return text.replace("{{workspace}}", workspace).rstrip() + "\n"
-
-
-def state_surfaces(project_root: Path) -> dict[str, str]:
-    """Legacy surface ledgers are retired; generated headers prove ownership."""
-    del project_root
-    return {}
-
-
-def legacy_block(text: str, team: str, host: str) -> tuple[str, str] | None:
-    starts = list(LEGACY_START_RE.finditer(text))
-    foreign = sorted({
-        match.group(1) for match in starts
-        if (match.group(1), match.group(2)) != (team, host)
-    })
-    if foreign:
-        raise ProjectInstructionError(
-            "project already carries another Agent Marketplace team block: "
-            + ", ".join(foreign)
-        )
-    start_marker = f"<!-- agent-marketplace:{team}:{host}:start -->"
-    end_marker = f"<!-- agent-marketplace:{team}:{host}:end -->"
-    start_count, end_count = text.count(start_marker), text.count(end_marker)
-    if start_count == 0 and end_count == 0:
-        return None
-    if start_count != 1 or end_count != 1:
-        raise ProjectInstructionError(
-            f"{host} project instructions have incomplete or duplicate legacy markers"
-        )
-    left = text.index(start_marker)
-    right = text.index(end_marker, left) + len(end_marker)
-    return text[left:right], text[:left] + text[right:]
 
 
 def user_seed(host: str) -> str:
@@ -200,12 +165,6 @@ def resolve_reconciliation(
         changes[companion] = candidate
 
 
-def surface_expected(
-    surfaces: dict[str, str], host: str, key: str,
-) -> str:
-    return surfaces.get(key if key.startswith("shared:") else f"{host}:{key}", "")
-
-
 def plan_project_files(
     project_root: Path,
     plugin_root: Path,
@@ -228,16 +187,11 @@ def plan_project_files(
     target = rendered_template(plugin_root, host, workspace)
     changes: dict[Path, str | None] = {}
     requests: list[dict] = []
-    surfaces = state_surfaces(project_root)
     root_key = root_name
-    legacy_key = f"{root_name}#agent-marketplace"
-    expected_root = surface_expected(surfaces, host, root_key)
-    expected_legacy = surface_expected(surfaces, host, legacy_key)
-    host_is_new = not expected_root and not expected_legacy
+    host_is_new = not existing
 
     header = existing.splitlines()[0] if existing else ""
     header_match = HEADER_RE.fullmatch(header)
-    legacy = legacy_block(existing, team, host) if existing else None
     reconciliation_source = ""
     reconciliation_reason = ""
     if header_match:
@@ -245,17 +199,6 @@ def plan_project_files(
             raise ProjectInstructionError(
                 f"{root_name} belongs to {header_match.group(1)}/{header_match.group(2)}"
             )
-        if expected_root and sha256_text(existing) != expected_root:
-            reconciliation_source = existing
-            reconciliation_reason = "managed_drift"
-    elif legacy is not None:
-        block, remainder = legacy
-        if expected_legacy and sha256_text(block) != expected_legacy:
-            reconciliation_source = existing
-            reconciliation_reason = "managed_drift"
-        elif remainder.strip():
-            reconciliation_source = remainder
-            reconciliation_reason = "legacy_user_content"
     elif existing.strip():
         reconciliation_source = existing
         reconciliation_reason = "unmanaged_content"
@@ -310,15 +253,11 @@ def plan_project_files(
     )
     memory_existing = read_regular(memory_target)
     memory_key = f"shared:{workspace}/memory/agent-marketplace.md"
-    expected_memory = surfaces.get(memory_key, "")
     memory_header = memory_existing.splitlines()[0] if memory_existing else ""
     memory_owned = memory_header == generated_header(
         "software-engineering-team", "shared"
     )
-    memory_drift = bool(
-        expected_memory and sha256_text(memory_existing) != expected_memory
-    )
-    if memory_existing.strip() and (not memory_owned or memory_drift):
+    if memory_existing.strip() and not memory_owned:
         memory_user_seed = read_regular(
             plugin_root / "templates" / "memory" / "me.md"
         )
@@ -327,7 +266,7 @@ def plan_project_files(
         resolve_reconciliation(
             request_id="shared.memory.agent-marketplace",
             surface=f"{workspace}/memory/agent-marketplace.md",
-            reason="managed_drift" if memory_drift else "unmanaged_content",
+            reason="unmanaged_content",
             source=memory_existing,
             companion=memory_root / "me.md",
             choices=choices,
@@ -353,7 +292,6 @@ def plan_project_files(
     current_surfaces = owned_surfaces(project_root, team, host, workspace)
     target_surfaces = dict(current_surfaces)
     target_surfaces[root_key] = sha256_text(target)
-    target_surfaces.pop(legacy_key, None)
     if host == "codex":
         target_surfaces["AGENTS.override.md#reserved-absence"] = "absent"
     target_surfaces[memory_key] = sha256_text(memory_rendered)
@@ -438,10 +376,6 @@ def owned_surfaces(
         header = text.splitlines()[0]
         if header == generated_header(team, host):
             result[root_name] = sha256_text(text)
-        else:
-            legacy = legacy_block(text, team, host)
-            if legacy is not None:
-                result[f"{root_name}#agent-marketplace"] = sha256_text(legacy[0])
     if host == "codex":
         override = project_root / "AGENTS.override.md"
         if override.exists() or override.is_symlink():

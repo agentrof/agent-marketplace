@@ -23,7 +23,7 @@ Checkbox assertions for reviewing server-side code. Every unchecked box is a fin
 - [ ] No `Any` without an explicit justification comment
 - [ ] Enum types for fixed value sets (status, roles, permissions)
 - [ ] Optional types paired with proper None guards
-- [ ] Modern generic syntax (`list[str]`, `dict[str, int]`) not the legacy typing aliases
+- [ ] Modern generic syntax (`list[str]`, `dict[str, int]`) instead of typing-module aliases
 - [ ] Protocols or type variables used for generic abstractions where they earn their keep
 
 ## Error Handling

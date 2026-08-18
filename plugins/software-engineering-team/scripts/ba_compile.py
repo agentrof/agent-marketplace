@@ -1303,8 +1303,7 @@ def run_gate_checks(space: Space, findings: list[Finding], gate_node: str) -> No
             err(rel, 1, f"gate-blocking doc is {doc_status(doc)}, not approved",
                 "approve or supersede every gate-blocking doc in the subtree")
 
-    for folder, type_name in (("processes", "process"), ("rules", "rule_set"),
-                              ("acceptance", "acceptance_set")):
+    for type_name in ("process", "rule_set", "acceptance_set"):
         exists = any(doc_in_node(space, rel, gate_node)
                      and space.docs[rel].doc_type == type_name
                      for rel in space.docs)
@@ -1835,7 +1834,7 @@ def next_ids(space: Space, code: str) -> dict[str, str]:
     result = {}
     for kind in ("BR", "AC", "AS", "OQ", "DEC"):
         highest = 0
-        for id_value, info in space.ids.items():
+        for id_value in space.ids:
             m = NAMESPACED_ID_RE.fullmatch(id_value)
             if m and m.group(1) == kind and m.group(2) == code:
                 highest = max(highest, int(m.group(3)))

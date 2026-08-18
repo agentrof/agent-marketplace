@@ -40,7 +40,6 @@ import json
 import os
 import re
 import shutil
-import subprocess
 import sys
 import tempfile
 import unicodedata
@@ -377,15 +376,6 @@ def designation_present(title: str, designation: str) -> bool:
         return False
     pattern = r"(?<![^\W\d_])" + re.escape(fold(designation))
     return re.search(pattern, fold(title)) is not None
-
-
-def peel_trailing_token(title: str, token: str) -> str | None:
-    """The title without its trailing whitespace-delimited token when
-    that token byte-equals `token`, else None. Raw-offset slicing."""
-    matches = list(re.finditer(r"\S+", title))
-    if not matches or matches[-1].group(0) != token:
-        return None
-    return title[:matches[-1].start()].rstrip()
 
 
 def designation_tail_span(title: str, designation: str,
@@ -3122,7 +3112,7 @@ def payload_reconcile(root: Path, policy: dict,
     """Apply the policy-owned payload refresh without replacing user knobs."""
     updates = payload_reconcile_updates(root, policy, payload_src)
     deletions = payload_reconcile_deletions(root, policy, payload_src)
-    # Wrong-shaped ancestors and obsolete package assets must disappear before
+    # Wrong-shaped ancestors and unshipped package assets must disappear before
     # byte updates are written. This supports both file -> directory and
     # directory -> file changes between package versions.
     for path in deletions:

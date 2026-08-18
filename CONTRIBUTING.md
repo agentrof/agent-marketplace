@@ -42,7 +42,9 @@ it is green in CI.
 
 The full contracts, caps and templates live in [docs/authoring.md](docs/authoring.md);
 the invariants behind them in [docs/architecture.md](docs/architecture.md); the
-orchestration model in [docs/orchestration.md](docs/orchestration.md).
+orchestration model in [docs/orchestration.md](docs/orchestration.md); and the
+current lifecycle and Git protocol in
+[docs/requirement-delivery-protocol.md](docs/requirement-delivery-protocol.md).
 
 ## Add a knowledge skill: walkthrough
 

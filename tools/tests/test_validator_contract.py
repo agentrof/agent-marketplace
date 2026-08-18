@@ -40,21 +40,7 @@ class ValidatorContractTests(unittest.TestCase):
             root = self.fixture(temporary)
             database = root / "plugins/software-engineering-team/cache.sqlite"
             database.write_bytes(b"fixture")
-            self.assertIn("retired_operations_residue", self.checks(root))
-
-    def test_retired_pmo_vocabulary_is_rejected(self):
-        with tempfile.TemporaryDirectory() as temporary:
-            root = self.fixture(temporary)
-            note = root / "plugins/software-engineering-team/flows/obsolete.md"
-            note.write_text("# PMO Control Tower\n", encoding="utf-8")
-            self.assertIn("retired_operations_residue", self.checks(root))
-
-    def test_retired_vault_migrate_command_is_rejected(self):
-        with tempfile.TemporaryDirectory() as temporary:
-            root = self.fixture(temporary)
-            note = root / "plugins/software-engineering-team/flows/obsolete.md"
-            note.write_text("Run `vault_check.py migrate`.\n", encoding="utf-8")
-            self.assertIn("retired_operations_residue", self.checks(root))
+            self.assertIn("packaged_state_files", self.checks(root))
 
     def test_plugin_dependency_is_rejected(self):
         with tempfile.TemporaryDirectory() as temporary:

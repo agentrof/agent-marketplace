@@ -607,8 +607,11 @@ def discard_requirement(path: Path) -> None:
 
 def supersede_requirement(old_path: Path, replacement_path: Path) -> None:
     """Approve a relation-bound replacement and terminalize the old record atomically."""
+    docs = old_path.parents[1]
+    if replacement_path.parents[1] != docs:
+        raise ValueError("old and replacement Requirements must belong to the same project vault")
     old_props, old_body = split_note(old_path)
-    replacement_props, replacement_body = split_note(replacement_path)
+    replacement_props, _ = split_note(replacement_path)
     if old_props.get("status") != "approved":
         raise ValueError("only an approved Requirement can be superseded")
     if replacement_props.get("status") != "draft":
@@ -624,16 +627,11 @@ def supersede_requirement(old_path: Path, replacement_path: Path) -> None:
     replacement_findings = requirement_findings(replacement_path)
     if replacement_findings:
         raise ValueError("replacement is not approvable: " + "; ".join(replacement_findings))
-    docs = old_path.parents[1]
-    if requirement_incorporated(docs, old_id):
-        # The old story set remains historically valid; backlog correction is
-        # a separate approved revision and must not be silently rewritten here.
-        pass
     old_original = old_path.read_text(encoding="utf-8")
     replacement_original = replacement_path.read_text(encoding="utf-8")
     try:
         approve_requirement(replacement_path)
-        replacement_props, replacement_body = split_note(replacement_path)
+        replacement_props, _ = split_note(replacement_path)
         replacement_id = str(replacement_props.get("id", ""))
         old_props["status"] = "superseded"
         old_props["superseded_by"] = f"[[requirements/{replacement_path.stem}|{replacement_id}]]"

@@ -62,7 +62,7 @@ PATCH_HEADER_RE = re.compile(r"^\*\*\* (Add|Update|Delete) File: (.+)$")
 # project_config.py for ordinary fields and reconcile-designations for display
 # wording. Neither traverses PreToolUse, so direct Write/Edit changes are denied.
 CONFIG_GUARD_KEYS = (
-    "team_id", "project_origin", "scale", "output_language",
+    "team_id", "scale", "output_language",
     "terminology_language", "backend_stack", "frontend_stack",
     "environment_stack", "databases", "test_command", "mutation_command",
     "env_command", "source_dirs", "max_parallel", "limits",
@@ -700,7 +700,7 @@ def pre_target(written: dict) -> int:
         return deny(
             "tags:/aliases: as an inline flow list; the vault contract is a"
             " block list (key:, then one '- item' line per value).")
-    for lineno, line in outside_fences(content):
+    for _lineno, line in outside_fences(content):
         for match in MD_LINK_RE.finditer(line):
             target = match.group(1).split("#", 1)[0]
             if not target:

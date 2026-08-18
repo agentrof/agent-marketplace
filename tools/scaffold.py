@@ -274,12 +274,11 @@ def new_plugin(root: Path, name: str) -> None:
         claude_contract = CLAUDE_TEAM_CONTRACT
         (claude_platform / "host-contract.md").write_text(
             claude_contract, encoding="utf-8")
-        if True:
-            claude_hooks = claude_platform / "overlay" / "hooks" / "hooks.json"
-            claude_hooks.parent.mkdir(parents=True)
-            claude_hooks.write_text(
-                json.dumps(CLAUDE_TEAM_HOOKS, indent=2) + "\n", encoding="utf-8"
-            )
+        claude_hooks = claude_platform / "overlay" / "hooks" / "hooks.json"
+        claude_hooks.parent.mkdir(parents=True)
+        claude_hooks.write_text(
+            json.dumps(CLAUDE_TEAM_HOOKS, indent=2) + "\n", encoding="utf-8"
+        )
         marketplace.setdefault("plugins", []).append({
             "name": name,
             "source": release_tool.channel_source("claude", name),
@@ -299,12 +298,11 @@ def new_plugin(root: Path, name: str) -> None:
         codex_contract = CODEX_TEAM_CONTRACT
         (codex_platform / "host-contract.md").write_text(
             codex_contract, encoding="utf-8")
-        if True:
-            codex_hooks = codex_platform / "overlay" / "hooks" / "hooks.json"
-            codex_hooks.parent.mkdir(parents=True)
-            codex_hooks.write_text(
-                json.dumps(CODEX_TEAM_HOOKS, indent=2) + "\n", encoding="utf-8"
-            )
+        codex_hooks = codex_platform / "overlay" / "hooks" / "hooks.json"
+        codex_hooks.parent.mkdir(parents=True)
+        codex_hooks.write_text(
+            json.dumps(CODEX_TEAM_HOOKS, indent=2) + "\n", encoding="utf-8"
+        )
         codex_marketplace.setdefault("plugins", []).append({
             "name": name,
             "source": release_tool.channel_source("codex", name),

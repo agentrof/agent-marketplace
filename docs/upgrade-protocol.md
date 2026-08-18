@@ -31,11 +31,9 @@ configuration remain the source of truth.
    `workspace/config.json`; setup never retitles authored notes as an implicit
    upgrade side effect. Intentional designation changes remain explicit
    configure/reconcile operations with their own reviewable plans.
-6. The compatibility `--workspace workspace` argument is accepted; every other
-   workspace value and every second managed vault is rejected. Legacy origin
-   input is removed during migration; Requirement Flow determines request
-   applicability. Repeated apply with the same package and project must
-   produce an empty inspect plan.
+6. `workspace/` is the only managed workspace and every second managed vault
+   is rejected. Requirement Flow determines request applicability. Repeated
+   apply with the same package and project must produce an empty inspect plan.
 7. Treat `workspace/docs/.obsidian/community-plugins.json` and each
    policy-owned `.obsidian/plugins/<id>/` directory as ignored local package
    projections. Refresh updates shipped files and removes package-retired

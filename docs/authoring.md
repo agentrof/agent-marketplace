@@ -30,6 +30,9 @@ is the handoff to Delivery Flow. A stage is complete when its approved
 documents are tracked in Git. `requirement_route.py` only reads durable state
 and routes to the next explicit entry.
 
+The complete current lifecycle, Delivery tree and Git coordination contract is
+defined in [requirement-delivery-protocol.md](requirement-delivery-protocol.md).
+
 ## Backlog contract
 
 The canonical tree is:

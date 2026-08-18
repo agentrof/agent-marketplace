@@ -287,7 +287,6 @@ class BacklogCompilerTests(unittest.TestCase):
 
     def test_stub_titles_use_project_designations(self):
         config = {
-            "project_origin": "greenfield",
             "doc_type_designations": {
                 "backlog": "ürün birikimi",
                 "backlog-review": "birikim incelemesi",
@@ -342,7 +341,6 @@ class BacklogCompilerTests(unittest.TestCase):
 
     def test_turkish_designation_uses_dotted_initial_i(self):
         config = {
-            "project_origin": "greenfield",
             "output_language": "Turkish",
             "doc_type_designations": {
                 "backlog": "iş listesi",
@@ -543,10 +541,7 @@ class BacklogCompilerTests(unittest.TestCase):
                       checked.stdout)
         self.assertIn("untouched Given stub", checked.stdout)
 
-    def test_existing_defect_uses_explicit_evidence_without_feature_upstreams(self):
-        (self.docs.parent / "config.json").write_text(json.dumps({
-            "project_origin": "existing",
-        }), encoding="utf-8")
+    def test_defect_uses_explicit_evidence_without_feature_upstreams(self):
         issue = self.docs / "issues/account-regression.md"
         write_note(
             issue,
@@ -628,11 +623,6 @@ class BacklogCompilerTests(unittest.TestCase):
 
         props["related_to"] = [evidence]
         story.write_text(BACKLOG.front_matter(props, body), encoding="utf-8")
-        config = self.docs.parent / "config.json"
-        config.write_text(json.dumps({"project_origin": "greenfield"}), encoding="utf-8")
-        legacy_origin = self.run_cli("check", "--json")
-        self.assertEqual(legacy_origin.returncode, 0, legacy_origin.stdout)
-
     def test_verifies_relation_keeps_ba_process_and_backlog_targets(self):
         policy = json.loads((
             ROOT / "plugins/software-engineering-team/skill-content/"
@@ -681,11 +671,8 @@ class BacklogCompilerTests(unittest.TestCase):
         result = self.run_cli("check", "--json")
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
-    def test_existing_feature_requires_scoped_compiler_bound_upstreams(self):
+    def test_feature_requires_scoped_compiler_bound_upstreams(self):
         self.make_package()
-        (self.docs.parent / "config.json").write_text(json.dumps({
-            "project_origin": "existing",
-        }), encoding="utf-8")
         unscoped = self.run_cli("check", "--json")
         self.assertEqual(unscoped.returncode, 0, unscoped.stdout)
 

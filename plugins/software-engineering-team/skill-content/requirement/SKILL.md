@@ -15,6 +15,7 @@ exposure: entry
 
 Before any docs operation, read the `obsidian-vault` skill. Its path,
 frontmatter, designation and generated-view rules are authoritative.
+Read `flows/requirement.md` completely before dispatching the first stage.
 
 ## Procedure
 
@@ -80,6 +81,8 @@ requirement_compile.py init --docs workspace/docs --slug <slug> \
 requirement_compile.py check --docs workspace/docs --json
 requirement_compile.py approve --requirement <path>
 requirement_compile.py status --requirement <path> --json
+requirement_compile.py resolve-no-change --requirement <path> --reason <reason>
+requirement_compile.py withdraw --requirement <path> --reason <reason>
 requirement_compile.py discard --requirement <path>
 requirement_compile.py supersede --requirement <old-path> \
   --replacement <draft-path>

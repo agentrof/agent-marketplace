@@ -946,7 +946,7 @@ def check_single_team_contract(tree: Tree, findings: list[Finding]) -> None:
         long_description = str(
             (codex_manifest.get("interface") or {}).get("longDescription", "")
         )
-        if "requires project management office" in long_description.lower():
+        if "requires centralized project governance" in long_description.lower():
             problems.append("Codex visible description must not require another plugin")
         claude_contract = read_text(claude_contract_path) \
             if claude_contract_path.is_file() else ""
@@ -988,31 +988,11 @@ def check_single_team_contract(tree: Tree, findings: list[Finding]) -> None:
             ))
 
 
-RETIRED_OPERATIONS_RE = re.compile(
-    r"project-management-office|\bPMO\b|control[- _]?tower|pmo_cli|"
-    r"pmo_dashboard|hook_guard_db|marketplace_run\.py|agentrof\.db|"
-    r"\bwork[- ]order(?:s)?\b|(?:import|from)\s+sqlite3\b|"
-    r"\bproject[_ -]key(?:s)?\b|AGENTROF_HOME|"
-    r"(?:~|\$HOME|\$\{HOME\})/\.agentrof\b|"
-    r"challenge[_ -]record|challenge[_ -]round|audit[_ -]history|"
-    r"blocked_by_frozen_referrer|space-round-[0-9]+-review|"
-    r"\b(?:locked|challenge_status|challenge_hash)\s*:|"
-    r"\bMigrate is format-only\b|vault_check\.py\s+migrate\b",
-    re.IGNORECASE,
-)
-RETIRED_OPERATIONS_PATH_RE = re.compile(
-    r"(?:^|/)(?:project-management-office|control-tower)(?:/|$)|"
-    r"(?:^|/)(?:pmo_(?:cli|dashboard)|hook_guard_db|marketplace_run)\.py$|"
-    r"(?:^|/)(?:challenge[_-]record|challenge[_-]round|audit[_-]history)"
-    r"(?:[./_-]|$)",
-    re.IGNORECASE,
-)
+PACKAGED_STATE_SUFFIXES = {".db", ".sqlite", ".sqlite3"}
 
 
-def check_retired_operations_residue(
-    tree: Tree, findings: list[Finding]
-) -> None:
-    """The standalone team carries no retired operations runtime surface."""
+def check_packaged_state_files(tree: Tree, findings: list[Finding]) -> None:
+    """Tracked and distributed product surfaces contain no state database."""
     roots = (
         tree.plugins_dir,
         tree.root / "platforms",
@@ -1027,46 +1007,13 @@ def check_retired_operations_residue(
         for path in sorted(candidate for candidate in root.rglob("*")
                            if candidate.is_file()):
             relative = rel(tree, path)
-            retired_path = RETIRED_OPERATIONS_PATH_RE.search(relative)
-            if retired_path is not None:
+            if path.suffix.casefold() in PACKAGED_STATE_SUFFIXES:
                 findings.append(Finding(
                     "error", relative, 1,
-                    "retired_operations_residue",
-                    "retired operations component path remains",
-                    "remove the obsolete team, dashboard, runtime or history "
-                    "component",
-                ))
-                continue
-            if path.suffix.casefold() in {".db", ".sqlite", ".sqlite3"}:
-                findings.append(Finding(
-                    "error", relative, 1,
-                    "retired_operations_residue",
-                    "database file remains in a packaged or release surface",
+                    "packaged_state_files",
+                    "state database is present in a packaged or release surface",
                     "remove runtime state from tracked and distributed files",
                 ))
-                continue
-            try:
-                text = path.read_text(encoding="utf-8")
-            except (OSError, UnicodeDecodeError):
-                continue
-            match = RETIRED_OPERATIONS_RE.search(text)
-            if match is None:
-                continue
-            findings.append(Finding(
-                "error", relative,
-                text[:match.start()].count("\n") + 1,
-                "retired_operations_residue",
-                f"retired operations surface remains: {match.group(0)}",
-                "remove the obsolete runtime, dependency, launcher or prose",
-            ))
-    migration_tree = tree.plugins_dir / "software-engineering-team" / "migrations"
-    if migration_tree.exists():
-        findings.append(Finding(
-            "error", rel(tree, migration_tree), 1,
-            "retired_operations_residue",
-            "obsolete project-contract migration catalog remains",
-            "use idempotent setup and checks instead of a migration engine",
-        ))
 
 
 def _walk_keys(obj: object, path: str, out: list[tuple[str, str]]) -> None:
@@ -1308,7 +1255,6 @@ def check_naive_clock(tree: Tree, findings: list[Finding]) -> None:
                     ))
 
 
-LEGACY_DISPATCH_RE = re.compile(r"\$RUN|marketplace_run\.py")
 PACKAGED_SCRIPT_REF_RE = re.compile(
     r"(?<![A-Za-z0-9_./-])((?:scripts|skill-content/[a-z0-9-]+/scripts)"
     r"/[A-Za-z0-9_./-]+\.py)"
@@ -1317,17 +1263,10 @@ DIRECT_SCRIPT_REF_RE = re.compile(r"\bpython3?\s+scripts/[A-Za-z0-9_./-]+\.py\b"
 
 
 def check_script_references(tree: Tree, findings: list[Finding]) -> None:
-    """Packaged script references resolve without a shared dispatcher."""
+    """Packaged script references resolve from the installed plugin root."""
     for plugin in plugin_dirs(tree):
         for path in sorted(plugin.rglob("*.md")):
             for lineno, line in enumerate(read_text(path).splitlines(), start=1):
-                if LEGACY_DISPATCH_RE.search(line):
-                    findings.append(Finding(
-                        "error", rel(tree, path), lineno, "script_references",
-                        "legacy shared dispatcher reference",
-                        "refer to the packaged plugin-relative script; the host"
-                        " wrapper resolves its installed root",
-                    ))
                 if DIRECT_SCRIPT_REF_RE.search(line):
                     findings.append(Finding(
                         "error", rel(tree, path), lineno, "script_references",
@@ -1448,12 +1387,12 @@ def check_project_instruction_contract(
         if not team.is_file():
             problems.append(f"{plugin.name} lacks templates/project-instructions/team.md")
         for host, filename in (("claude", "CLAUDE.md"), ("codex", "AGENTS.md")):
-            legacy = (
+            fork = (
                 tree.root / "platforms" / host / plugin.name / "overlay"
                 / "templates" / filename
             )
-            if legacy.exists():
-                problems.append(f"{legacy.relative_to(tree.root)} is a per-team host fork")
+            if fork.exists():
+                problems.append(f"{fork.relative_to(tree.root)} is a per-team host fork")
             generated = tree.root / "dist" / host / plugin.name / "templates" / filename
             if not generated.is_file():
                 problems.append(f"generated {host}/{plugin.name}/{filename} is missing")
@@ -2307,7 +2246,6 @@ DELIVERY_CONTRACT_ROOT = Path(
 DELIVERY_CONTRACT_FILES = {
     "delivery-control-record-contract.json",
     "delivery-document-contract.json",
-    "delivery-migration-registry.json",
     "delivery-protocol-1.json",
     "delivery-provider-contract.json",
     "delivery-receipt-contract.json",
@@ -2360,7 +2298,6 @@ def check_delivery_contract_shape(
     provider = contracts["delivery-provider-contract.json"]
     receipt = contracts["delivery-receipt-contract.json"]
     protocol = contracts["delivery-protocol-1.json"]
-    migration = contracts["delivery-migration-registry.json"]
     records = contracts["delivery-control-record-contract.json"]
     result = contracts["delivery-result-contract.json"]
     problems = []
@@ -2380,9 +2317,6 @@ def check_delivery_contract_shape(
             or protocol.get("merge_policy") \
             != "merge-commit-only; squash and rebase fail closed":
         problems.append("protocol version or merge policy is invalid")
-    if migration.get("to_protocol") != protocol.get("protocol_version") \
-            or migration.get("unknown_protocol_policy") != "fail_closed":
-        problems.append("migration registry does not close protocol v1")
     record_names = set(records.get("records", {}))
     if records.get("unknown_record_policy") != "fail_closed" \
             or record_names != set(records.get("subjects", {})):
@@ -2438,61 +2372,6 @@ def check_product_namespace(tree: Tree, findings: list[Finding]) -> None:
                 "regenerate it from the canonical product contract",
             ))
 
-    old_prefix = "AGENT" + "ROF_"
-    allowed_vendor_home = old_prefix + "HOME"
-    old_project_status_value = "PROJECT_" + "UPGRADE_PR_PENDING"
-    forbidden_literals = (
-        "agent" + "rof.db",
-        "agent" + "rof_run.py",
-        ".agent" + "rof-package.json",
-        ".agent" + "rof-generated-distribution",
-        ".agent" + "rof/project.json",
-        "#agent" + "rof",
-        "<!-- agent" + "rof:",
-        "Generated by Agent" + "rof",
-        "agent" + "rof_writer",
-        "agent" + "rof team gate",
-        "agent" + "rof-issue-desk",
-        "agent" + "rof_smoke",
-        "agent" + "rof_vault_hook",
-        "agent" + "rof-dist-build",
-        "agent" + "rof-project-adapter",
-        "agent" + "rof-claude-smoke",
-        "agent" + "rof-codex-smoke",
-        "agent" + "rof-checkout-marketplace",
-    )
-    old_env = re.compile(rf"{old_prefix}(?!HOME\b)[A-Z0-9_]+")
-    old_project_status = re.compile(
-        rf"(?<!AGENT_MARKETPLACE_){old_project_status_value}\b"
-    )
-    old_shell_home = "${" + allowed_vendor_home + ":-$HOME/.agent-marketplace}/bin"
-    direct_vendor_bin = re.compile(
-        rf"Path\([^\n]*{allowed_vendor_home}[^\n]*\)\s*/\s*[\"']bin[\"']"
-    )
-    for path in sorted(candidate for candidate in tree.root.rglob("*") if candidate.is_file()):
-        if any(part in {".git", "memory", "__pycache__"} for part in path.parts) \
-                or path.suffix in {".pyc", ".pyo"}:
-            continue
-        try:
-            text = path.read_text(encoding="utf-8")
-        except (OSError, UnicodeDecodeError):
-            continue
-        match = old_env.search(text)
-        project_match = old_project_status.search(text)
-        token = match.group(0) if match else (
-            project_match.group(0) if project_match else next(
-                (value for value in forbidden_literals if value in text), ""
-            )
-        )
-        if not token and (old_shell_home in text or direct_vendor_bin.search(text)):
-            token = "direct vendor-home bin path"
-        if token:
-            line = text[:text.find(token)].count("\n") + 1 if token in text else 1
-            findings.append(Finding(
-                "error", rel(tree, path), line, "product_namespace",
-                f"legacy product namespace remains: {token}",
-                "use Agent Marketplace runtime names; reserve Agentrof for vendor identity",
-            ))
 CHECKS = {
     "frontmatter_shape": check_frontmatter_shape,
     "agent_name": check_agent_name,
@@ -2508,7 +2387,7 @@ CHECKS = {
     "registration": check_registration,
     "distribution_packaging": check_distribution_packaging,
     "single_team_contract": check_single_team_contract,
-    "retired_operations_residue": check_retired_operations_residue,
+    "packaged_state_files": check_packaged_state_files,
     "json_hygiene": check_json_hygiene,
     "orchestrator_integrity": check_orchestrator_integrity,
     "choice_gate": check_choice_gate,

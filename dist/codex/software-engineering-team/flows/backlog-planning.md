@@ -16,7 +16,7 @@ authoritative.
   issue or decision evidence selected by that impact matrix.
 - The user explicitly starts the backlog entry and reviews each authored
   package.
-- Preparation state comes only from the tracked documents and their checks.
+- Requirement state comes only from the tracked documents and their checks.
 
 ## 1. Materialize the backlog tree
 

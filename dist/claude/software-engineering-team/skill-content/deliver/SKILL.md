@@ -13,6 +13,8 @@ exposure: entry
 - Use to resume implementation, integrate Items and complete the one Delivery
   Review and PR handoff.
 
+Read `flows/delivery-execution.md` completely before changing Delivery state.
+
 ## Invocation
 
 Use `/deliver DLV-###` for the exact Delivery and `/deliver DLV-### status`

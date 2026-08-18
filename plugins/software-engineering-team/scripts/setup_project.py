@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """Inspect, check or apply one convergent project-local team refresh.
 
-The default command remains ``apply`` for package compatibility. ``inspect``
-produces the exact managed-surface plan without changing the project, ``check``
-verifies the installed project contract, and ``apply`` executes the inspected
-plan with rollback when the closing check does not pass.
+``inspect`` produces the exact managed-surface plan without changing the
+project, ``check`` verifies the installed project contract, and ``apply``
+executes the inspected plan with rollback when the closing check does not pass.
+Omitting the command runs ``apply``.
 """
 
 from __future__ import annotations
@@ -37,7 +37,6 @@ REQUIRED_DIRS = (
     "docs/experience-design", "docs/requirements", "docs/delivery", "docs/backlog",
 )
 RUNTIME_PARTS = ("agent-marketplace", ".runtime")
-PRIOR_OWNER_SUFFIX = " plugin; change only through the configure entry"
 JSON_PAYLOAD_FILES = (
     "app.json", "appearance.json", "core-plugins.json", "graph.json",
     "types.json", "community-plugins.json",
@@ -97,17 +96,8 @@ def load_json(path: Path) -> dict:
 
 
 def setup_owner(config: dict) -> str:
-    """Recognize current ownership plus the two retired setup inputs."""
-    owner = marketplace_paths.team_from_config(config)
-    if owner:
-        return owner
-    contract = config.get("agent_marketplace")
-    if isinstance(contract, dict):
-        return str(contract.get("team_id", "")).strip()
-    prior = str(config.get("managed_by", "")).strip()
-    if prior.endswith(PRIOR_OWNER_SUFFIX):
-        return prior[:-len(PRIOR_OWNER_SUFFIX)]
-    return ""
+    """Resolve ownership from the canonical project configuration."""
+    return marketplace_paths.team_from_config(config)
 
 
 def git_root(project: Path) -> Path:
@@ -236,14 +226,6 @@ def proposed_gitignore(root: Path, workspace: str) -> tuple[str, str]:
     return current, updated
 
 
-def update_gitignore(root: Path, workspace: str) -> bool:
-    current, updated = proposed_gitignore(root, workspace)
-    if updated == current:
-        return False
-    atomic_text(root / ".gitignore", updated)
-    return True
-
-
 def run_checked(argv: list[str], label: str) -> str:
     result = subprocess.run(argv, capture_output=True, text=True, check=False)
     if result.returncode:
@@ -324,19 +306,11 @@ def desired_config(args, config_path: Path) -> tuple[dict, list[str]]:
             "terminology_language": args.terminology_language,
         }
 
-    config.pop("agent_marketplace", None)
-    config.pop("model_overrides", None)
-    prior_owner = str(config.get("managed_by", "")).strip()
-    if prior_owner in {TEAM, TEAM + PRIOR_OWNER_SUFFIX}:
-        config.pop("managed_by", None)
     config["team_id"] = TEAM
     config.setdefault("scale", args.scale)
     config.setdefault("output_language", args.output_language)
     config.setdefault("terminology_language", args.terminology_language)
 
-    # The old project_origin field is a migration-only input. New and
-    # refreshed projects use the Requirement impact matrix instead.
-    config.pop("project_origin", None)
     errors = project_config.check(config)
     if errors:
         raise SetupError("invalid workspace config: " + "; ".join(errors))
@@ -841,7 +815,6 @@ def next_entry(root: Path) -> str:
 def _apply_plan_locked(args, plan: dict) -> tuple[int, dict]:
     root = Path(plan["project_root"])
     workspace_root = root / args.workspace
-    vault_root = workspace_root / "docs"
     snapshot = RefreshSnapshot(root, args.workspace, plan)
     copied = 0
     reconciled = 0
@@ -1007,10 +980,7 @@ def main(argv=None) -> int:
         default="apply",
     )
     parser.add_argument("--project-root", required=True)
-    parser.add_argument(
-        "--workspace", default=WORKSPACE, choices=(WORKSPACE,),
-        help="compatibility option; the project workspace is always 'workspace'",
-    )
+    parser.set_defaults(workspace=WORKSPACE)
     parser.add_argument(
         "--scale",
         choices=("small", "medium", "large", "x-large", "xx-large", "enterprise"),

@@ -21,7 +21,7 @@ Sub-partitioning combines them: range by month, hash within the month, when a si
 - The partition key must appear in the dominant query predicates or pruning never happens and every query fans out to all partitions.
 - Include the partition key in the primary key and any UNIQUE constraint; global uniqueness across partitions is not enforceable declaratively.
 - Foreign keys FROM a partitioned table are restricted in most engines; plan integrity via application checks or triggers and document that as an ADR.
-- Use declarative partitioning. Do NOT build partitioning on table inheritance; it is the legacy mechanism with none of the pruning guarantees.
+- Use declarative partitioning. Do NOT build partitioning on table inheritance; it lacks the current pruning guarantees.
 
 ## Lifecycle Management
 

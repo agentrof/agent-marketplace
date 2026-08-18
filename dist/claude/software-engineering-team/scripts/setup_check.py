@@ -18,7 +18,6 @@ END = "# agent-marketplace:software-engineering-team:gitignore:end"
 TEAM = "software-engineering-team"
 WORKSPACE = "workspace"
 RUNTIME_PARTS = ("agent-marketplace", ".runtime")
-PRIOR_OWNER_SUFFIX = " plugin; change only through the configure entry"
 FORBIDDEN_RUNTIME_NAMES = {"project.json", "backlog.json"}
 FORBIDDEN_RUNTIME_SUFFIXES = {".db", ".sqlite", ".sqlite3"}
 
@@ -31,17 +30,8 @@ def read(path: Path):
 
 
 def setup_owner(config: dict) -> str:
-    """Recognize current ownership plus the two retired setup inputs."""
-    owner = marketplace_paths.team_from_config(config)
-    if owner:
-        return owner
-    contract = config.get("agent_marketplace")
-    if isinstance(contract, dict):
-        return str(contract.get("team_id", "")).strip()
-    prior = str(config.get("managed_by", "")).strip()
-    if prior.endswith(PRIOR_OWNER_SUFFIX):
-        return prior[:-len(PRIOR_OWNER_SUFFIX)]
-    return ""
+    """Resolve ownership from the canonical project configuration."""
+    return marketplace_paths.team_from_config(config)
 
 
 def local_roots() -> tuple[str, ...]:
@@ -302,10 +292,7 @@ def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("command", choices=["preflight", "check"])
     parser.add_argument("--project-root", required=True)
-    parser.add_argument(
-        "--workspace", default=WORKSPACE, choices=(WORKSPACE,),
-        help="compatibility option; the project workspace is always 'workspace'",
-    )
+    parser.set_defaults(workspace=WORKSPACE)
     parser.add_argument("--json", action="store_true")
     args = parser.parse_args(argv)
     root = Path(args.project_root).resolve()

@@ -122,8 +122,6 @@ def check(config: dict) -> list[str]:
     owner = marketplace_paths.team_from_config(config)
     if owner != TEAM:
         errors.append(f"team_id must be {TEAM}")
-    if "project_origin" in config:
-        errors.append("project_origin is retired; run setup apply to remove it")
     if config.get("scale", "small") not in ALLOWED_SCALES:
         errors.append("unsupported scale")
     for field in ("output_language", "terminology_language"):
@@ -156,8 +154,6 @@ def check(config: dict) -> list[str]:
             errors.append("source_dirs values must be unique")
     if "max_parallel" in config and not positive_integer(config["max_parallel"]):
         errors.append("max_parallel must be a positive integer")
-    if "model_overrides" in config:
-        errors.append("model_overrides is retired and must be removed")
     if "limits" in config:
         limits = config["limits"]
         if not isinstance(limits, dict):
@@ -188,18 +184,6 @@ def parse_value(raw: str) -> object:
         return json.loads(raw)
     except json.JSONDecodeError:
         return raw
-
-
-def has_workflow_state(config_path: Path) -> bool:
-    docs = config_path.parent / "docs"
-    roots = (
-        "requirements", "business-analysis", "solution-design", "system-architecture",
-        "design-system", "experience-design", "delivery", "backlog",
-    )
-    return any(
-        any((docs / relative).rglob("*.md"))
-        for relative in roots if (docs / relative).is_dir()
-    )
 
 
 def write_result(path: Path, before: object, after: object,

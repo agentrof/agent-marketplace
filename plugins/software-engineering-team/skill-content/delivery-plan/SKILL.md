@@ -17,6 +17,8 @@ Use `/delivery-plan "<goal>"` for a new local proposal. Use
 entry never fuzzy-resumes an older Delivery and never creates a branch,
 worktree, slot or remote ref by itself.
 
+Read `flows/delivery-planning.md` completely before creating the proposal.
+
 ## Required order
 
 1. Confirm the approved backlog, the exact story and test-plan links, and the

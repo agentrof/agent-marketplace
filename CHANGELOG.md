@@ -8,3 +8,7 @@
 
 - Move operational contracts and delivery governance out of project config into approved vault records.
 - Establish Solution-owned deployable topology, Delivery-owned System Architecture, and living process-owned Experience packages.
+
+## 2.0.0
+
+- Remove designation metadata and migrate projects to a closed, resilient configuration contract.

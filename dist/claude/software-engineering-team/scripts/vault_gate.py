@@ -18,9 +18,10 @@ from pathlib import Path
 
 COMPILER_SCRIPTS = (
     "vault_check.py", "ba_compile.py", "landscape_check.py",
-    "experience_compile.py", "experience_artifact_check.py",
+    "experience_compile.py", "experience_artifact_check.py", "architecture_compile.py",
     "design_system_compile.py", "backlog_compile.py", "issue_compile.py",
-    "marketplace_paths.py",
+    "requirement_compile.py", "requirement_route.py", "stage_package.py",
+    "operation_compile.py", "delivery_governance.py", "marketplace_paths.py",
 )
 DATA_PATHS = (
     "skill-content/obsidian-vault/data",
@@ -156,16 +157,53 @@ def gate(project_root: Path, root: Path) -> dict:
             sys.executable, str(scripts / "design_system_compile.py"),
             "check", "--root", str(design_system),
         ], "design-system"))
+    operation = docs / "operation"
+    for kind, filename in (("verification", "verification-contract.md"),
+                           ("environment", "environment-contract.md")):
+        if (operation / filename).is_file():
+            results.append(run([
+                sys.executable, str(scripts / "operation_compile.py"), "check",
+                "--kind", kind, "--docs", str(docs), "--json",
+            ], f"operation:{kind}"))
+    governance = docs / "delivery" / "governance" / "governance.md"
+    if governance.is_file():
+        results.append(run([
+            sys.executable, str(scripts / "delivery_governance.py"), "check",
+            "--docs", str(docs), "--json",
+        ], "delivery-governance"))
     experience = docs / "experience-design"
-    programs = experience / "programs"
-    if programs.is_dir():
-        for program in sorted(programs.glob("prg-*")):
-            if (program / "program.md").is_file():
+    legacy_experience = experience / "baselines"
+    if legacy_experience.exists():
+        results.append({"name": "legacy-experience-hard-cut", "ok": False, "returncode": 1,
+                        "stdout": "legacy experience-design/baselines tree is forbidden", "stderr": ""})
+    packages = experience / "experiences"
+    if packages.is_dir():
+        for package in sorted(path for path in packages.iterdir() if path.is_dir()):
+            if package.name.startswith("exp-"):
+                results.append({"name": f"retired-experience-prefix:{package.name}", "ok": False,
+                                "returncode": 1,
+                                "stdout": "Experience process slugs must not use the retired exp- prefix", "stderr": ""})
+            if (package / "experience.md").is_file():
                 results.append(run([
                     sys.executable, str(scripts / "experience_compile.py"),
-                    "check", "--root", str(experience), "--program",
-                    program.name.upper(), "--gate", "--json",
-                ], f"experience-design:{program.name}"))
+                    "check", "--experience-root", str(package), "--gate", "--json",
+                ], f"experience:{package.name}"))
+    requirements = docs / "requirements"
+    if requirements.is_dir() and any(requirements.glob("req-*.md")):
+        results.append(run([
+            sys.executable, str(scripts / "requirement_compile.py"), "check",
+            "--docs", str(docs), "--json",
+        ], "requirements"))
+    architecture = docs / "system-architecture"
+    legacy_architecture = [name for name in ("api-contract.md", "data-model.md", "threat-model.md", "environment.md") if (architecture / name).exists()]
+    if legacy_architecture:
+        results.append({"name": "legacy-system-architecture-hard-cut", "ok": False, "returncode": 1,
+                        "stdout": "legacy root architecture records are forbidden: " + ", ".join(legacy_architecture), "stderr": ""})
+    if (architecture / "architecture.md").is_file():
+        results.append(run([
+            sys.executable, str(scripts / "architecture_compile.py"), "check",
+            "--docs", str(docs), "--json",
+        ], "system-architecture"))
     backlog = docs / "backlog" / "backlog.md"
     if backlog.is_file():
         command = [

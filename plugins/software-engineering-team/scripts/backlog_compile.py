@@ -21,6 +21,10 @@ try:
 except ImportError:  # direct library use outside the packaged scripts dir
     vault_check = None
 
+import requirement_compile
+import requirement_route
+import stage_package
+
 
 ID_RE = re.compile(r"^[A-Z][A-Z0-9]*-[0-9]{2,}$")
 SLUG_RE = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
@@ -397,6 +401,198 @@ def validate_upstream_ref(docs: Path, value: str, label: str,
     if allowed_types and type_name not in allowed_types:
         errors.append(f"{label} targets unsupported type {type_name}: {target}")
     return parsed
+
+
+def planning_package_findings(docs: Path, props: dict,
+                              path: str) -> tuple[str, list[str], list[str]]:
+    """Validate the optional Requirement/manual planning contract.
+
+    Existing backlog packages may omit ``planning_mode`` while they are being
+    authored. Once declared, the mode makes the upstream package boundary
+    explicit and fail-closed.
+    """
+    mode = str(props.get("planning_mode", "")).strip().casefold()
+    errors: list[str] = []
+    refs = values(props, "input_package_refs")
+    if mode not in {"", "manual", "requirement"}:
+        errors.append(f"{path} planning_mode must be manual or requirement")
+        return mode, refs, errors
+    if not mode:
+        if props.get("status") == "approved" or props.get("legacy_contract"):
+            # Read-only historical backlog packages remain inspectable. Their
+            # first begin-revision must select a modern intake mode.
+            return mode, refs, errors
+        errors.append(f"{path} planning_mode is mandatory for a new or revised backlog")
+        return mode, refs, errors
+    if mode == "manual":
+        if props.get("requirement_ref") or props.get("implements"):
+            errors.append(f"{path} manual planning must not declare a Requirement")
+        bindings = values(props, "input_bindings")
+        if bindings:
+            refs = []
+            expected: dict[str, list[str]] = {}
+            for binding in bindings:
+                stage, separator, remainder = binding.partition("|")
+                reference, separator2, digest = remainder.partition("|")
+                if (not separator or not separator2 or not reference
+                        or not digest.startswith("sha256:")):
+                    errors.append(f"{path} input_binding must be stage|exact-ref|sha256")
+                    continue
+                if stage not in {"business-analysis", "solution-design", "design-system", "experience-design"}:
+                    errors.append(f"{path} input_binding has unsupported stage {stage}")
+                    continue
+                expected.setdefault(stage, []).append(reference)
+                refs.append(reference)
+                _receipt, verify_errors = stage_package.verify(
+                    docs, stage, reference, digest, require_committed=True,
+                    require_strict_current=True)
+                errors.extend(f"{path} input binding: {error}"
+                              for error in verify_errors)
+        else:
+            # Mode-bearing historical packages remain readable. New manual
+            # packages must carry compiler-owned hash bindings.
+            if props.get("status") == "approved" or props.get("legacy_contract"):
+                expected = {}
+                for value in refs:
+                    target = value[2:-2].split("|", 1)[0] if value.startswith("[[") and value.endswith("]]" ) else value
+                    stage = manual_stage_for_ref(target)
+                    if not stage:
+                        errors.append(f"{path} input package targets an unsupported subtree: {target}")
+                        continue
+                    expected.setdefault(stage, []).append(target)
+                    _receipt, verify_errors = stage_package.verify(docs, stage, target,
+                                                                    require_committed=True)
+                    errors.extend(f"{path} input package: {error}"
+                                  for error in verify_errors)
+            else:
+                expected = {}
+                errors.append(f"{path} manual planning needs compiler-owned input_bindings")
+        for stage, references in expected.items():
+            if stage != "experience-design" and len(references) != 1:
+                errors.append(f"{path} manual planning needs exactly one {stage} input package")
+                continue
+        missing = sorted({"business-analysis", "solution-design", "design-system", "experience-design"} - set(expected))
+        if missing:
+            errors.append(f"{path} manual planning is missing input packages: {', '.join(missing)}")
+    elif mode == "requirement":
+        requirement = str(props.get("requirement_ref", "")).strip()
+        if not requirement:
+            errors.append(f"{path} requirement planning needs requirement_ref")
+        elif not re.fullmatch(r"REQ-[0-9]{3,}", requirement):
+            errors.append(f"{path} requirement_ref must be REQ-###")
+        else:
+            requirement_paths = sorted((docs / "requirements").glob(
+                f"req-{int(requirement[4:]):03d}-*.md"))
+            if len(requirement_paths) != 1:
+                errors.append(f"{path} requirement_ref is not uniquely resolvable: {requirement}")
+            else:
+                status, type_name = note_status_and_type(requirement_paths[0])
+                if type_name != "requirement" or status != "approved":
+                    errors.append(f"{path} requirement_ref is not an approved Requirement: {requirement}")
+                else:
+                    routing = requirement_route.route(docs, requirement)
+                    if routing.get("action") != "backlog":
+                        errors.append(f"{path} Requirement is not ready for backlog: {routing.get('action', 'requirement')}")
+                    try:
+                        req_props, req_body = requirement_compile.split_note(requirement_paths[0])
+                        results = requirement_compile.stage_results(req_body)
+                        for stage, disposition, _refs, _why in requirement_compile.impact_rows(req_body):
+                            if disposition == "not_applicable":
+                                continue
+                            receipts = results.get(stage, [])
+                            if stage != "experience-design" and len(receipts) != 1:
+                                errors.append(f"{path} Requirement {stage} needs exactly one receipt")
+                            if stage == "experience-design" and not receipts:
+                                errors.append(f"{path} Requirement experience-design needs one or more receipts")
+                            for result_ref, result_hash in receipts:
+                                _receipt, verify_errors = stage_package.verify(
+                                    docs, stage, result_ref, result_hash,
+                                    require_committed=True)
+                                errors.extend(f"{path} Requirement {stage} receipt: {error}" for error in verify_errors)
+                    except (OSError, ValueError) as exc:
+                        errors.append(f"{path} cannot read Requirement Stage Results: {exc}")
+    return mode, refs, errors
+
+
+def manual_stage_for_ref(reference: str) -> str:
+    if reference.startswith("business-analysis/"):
+        return "business-analysis"
+    if reference == "solution-design/landscape":
+        return "solution-design"
+    if reference == "design-system/MASTER":
+        return "design-system"
+    if re.fullmatch(r"[a-z0-9]+(?:-[a-z0-9]+)*@r[1-9][0-9]*", reference):
+        return "experience-design"
+    return ""
+
+
+def resolve_manual_input_bindings(docs: Path, raw_refs: list[str],
+                                  label: str) -> tuple[list[str], list[str]]:
+    """Resolve user selections once and persist only exact receipt hashes."""
+    errors: list[str] = []
+    rows: list[tuple[str, str, str]] = []
+    for raw in raw_refs:
+        target = raw.strip()
+        if target.startswith("[[") and target.endswith("]]" ):
+            target = target[2:-2].split("|", 1)[0].split("#", 1)[0]
+        stage = manual_stage_for_ref(target)
+        if not stage:
+            errors.append(f"{label} input package targets an unsupported subtree: {target}")
+            continue
+        receipt, verify_errors = stage_package.verify(docs, stage, target,
+                                                       require_committed=True,
+                                                       require_strict_current=True)
+        errors.extend(f"{label} input package: {error}" for error in verify_errors)
+        if receipt is not None and not verify_errors:
+            rows.append((stage, str(receipt["result_ref"]), str(receipt["package_hash"])))
+    grouped: dict[str, list[tuple[str, str, str]]] = {}
+    for row in rows:
+        grouped.setdefault(row[0], []).append(row)
+    for stage in ("business-analysis", "solution-design", "design-system"):
+        if len(grouped.get(stage, [])) != 1:
+            errors.append(f"{label} manual planning needs exactly one {stage} input package")
+    if not grouped.get("experience-design"):
+        errors.append(f"{label} manual planning needs one or more experience-design input packages")
+    if len(rows) != len(set(rows)):
+        errors.append(f"{label} input package selection contains duplicates")
+    return [f"{stage}|{ref}|{digest}" for stage, ref, digest in sorted(rows)], sorted(set(errors))
+
+
+def validate_experience_ref(docs: Path, value: str, label: str,
+                            errors: list[str]) -> None:
+    """Resolve a living ``experience:ID@rN`` ref through its registry."""
+    match = re.fullmatch(
+        r"([a-z0-9]+(?:-[a-z0-9]+)*):(JRN|FLW|SCR|STA|TRN)-[0-9]{3,}@r([1-9][0-9]*)",
+        value,
+    )
+    if match is None:
+        errors.append(f"{label} must be an exact <experience>:<stable-id>@rN reference")
+        return
+    identifier = match.group(1)
+    stable_id = value.split(":", 1)[1].split("@", 1)[0]
+    revision = int(match.group(3))
+    try:
+        import experience_compile
+        package = experience_compile.resolve_package(docs / "experience-design", identifier)
+    except (ImportError, ValueError) as exc:
+        errors.append(f"{label} owning Experience is not uniquely resolvable: {identifier} ({exc})")
+        return
+    try:
+        registry, findings = experience_compile.compile_package(package, gate=False)
+    except (OSError, ValueError) as exc:
+        errors.append(f"{label} owning Experience registry is missing: {exc}")
+        return
+    if findings:
+        errors.extend(f"{label} owning Experience: {finding}" for finding in findings)
+        return
+    props, _body = parse_front_matter(package / "experience.md")
+    if props.get("status") != "approved" or props.get("registry_hash") != registry.get("registry_hash"):
+        errors.append(f"{label} owning Experience is not approved/current")
+        return
+    records = [item for item in registry.get("records", []) if isinstance(item, dict)
+               and item.get("id") == stable_id and item.get("revision") == revision]
+    if len(records) != 1 or records[0].get("record_state") != "active":
+        errors.append(f"{label} does not resolve to one active effective record")
 
 
 def headings(body: str) -> set[str]:
@@ -931,9 +1127,13 @@ def collect(docs: Path) -> tuple[dict, list[str]]:
                                   contract))
     if "assignee" in props:
         errors.append("backlog/backlog.md must not contain assignee")
+    planning_mode, input_refs, planning_errors = planning_package_findings(
+        docs, props, "backlog/backlog.md")
+    errors.extend(planning_errors)
     record["backlog"] = {"path": root_note.relative_to(docs).as_posix(),
                          "id": note_id(props, "BACKLOG"), "props": props,
-                         "body": root_body}
+                         "body": root_body, "planning_mode": planning_mode,
+                         "input_package_refs": input_refs}
 
     rounds: set[int] = set()
     reviews_dir = root / "reviews"
@@ -1084,6 +1284,24 @@ def collect(docs: Path) -> tuple[dict, list[str]]:
             design_refs = values(story_props, "uses_design")
             constraint_refs = values(story_props, "constrained_by")
             work_kind = str(story_props.get("work_kind", ""))
+            implements = values(story_props, "implements")
+            planning_mode = str(record["backlog"].get("planning_mode", ""))
+            current_revision = int(record["backlog"]["props"].get("revision", 1) or 1)
+            introduced = int(story_props.get("introduced_in_revision", 0) or 0)
+            origin_mode = str(story_props.get("origin_mode", ""))
+            if planning_mode and introduced == current_revision:
+                if origin_mode != planning_mode:
+                    errors.append(f"{story_rel} origin_mode must match current planning_mode")
+                if planning_mode == "manual" and implements:
+                    errors.append(f"{story_rel} manual planning must not declare implements")
+                if planning_mode == "requirement":
+                    root_requirement = str(record["backlog"]["props"].get("requirement_ref", ""))
+                    if implements != [root_requirement]:
+                        errors.append(f"{story_rel} must implement exact current Requirement {root_requirement}")
+            elif planning_mode and (introduced <= 0 or not origin_mode):
+                # Historical records stay readable, but every new contract
+                # record identifies its intake without rewriting history.
+                errors.append(f"{story_rel} needs origin_mode and introduced_in_revision")
             if work_kind not in WORK_KINDS:
                 errors.append(f"{story_rel} work_kind must be feature, defect, or technical")
             for key, refs in (("criterion_refs", criteria),
@@ -1112,10 +1330,13 @@ def collect(docs: Path) -> tuple[dict, list[str]]:
             for value in criteria:
                 validate_criterion_ref(docs, value, f"{story_rel} criterion_ref", errors)
             for value in experience:
-                validate_upstream_ref(
-                    docs, value, f"{story_rel} experience_ref",
-                    ("experience-design/",), set(contract["experience_ref_types"]),
-                    errors)
+                if planning_mode:
+                    validate_experience_ref(docs, value, f"{story_rel} experience_ref", errors)
+                else:
+                    validate_upstream_ref(
+                        docs, value, f"{story_rel} experience_ref",
+                        ("experience-design/",), set(),
+                        errors)
             for key, roots, types in (
                 ("uses_design", ("design-system/",), {"design-master", "page-override"}),
                 ("constrained_by", ("solution-design/", "system-architecture/"), set()),
@@ -1179,6 +1400,7 @@ def collect(docs: Path) -> tuple[dict, list[str]]:
                 "test_body": test_body, "scenario_ids": ids,
                 "criteria": criteria, "experience_refs": experience,
                 "work_kind": work_kind,
+                "implements": implements,
                 "dependency_targets": dependency_targets,
             }
             epic["stories"].append(story)
@@ -1557,6 +1779,7 @@ def render(record: dict, docs: Path) -> None:
     payload = {
         "schema_version": 2,
         "package_hash": record["backlog"]["props"].get("package_hash", ""),
+        "planning_mode": record["backlog"].get("planning_mode", ""),
         "backlog": {"id": record["backlog"]["id"],
                     "path": record["backlog"]["path"],
                     "status": record["backlog"]["props"].get("status")},
@@ -1576,6 +1799,7 @@ def render(record: dict, docs: Path) -> None:
              "scenario_ids": story["scenario_ids"],
              "criterion_refs": story["criteria"],
              "experience_refs": story["experience_refs"],
+             "implements": story.get("implements", []),
              "depends_on": values(story["props"], "depends_on")}
             for story in record["stories"]
         ],
@@ -1616,6 +1840,33 @@ def render(record: dict, docs: Path) -> None:
                         f"{len(story['scenario_ids'])} | {required} |")
     (out / "test-coverage.md").write_text(
         "\n".join(coverage) + "\n", encoding="utf-8")
+    if record["backlog"].get("planning_mode") == "manual":
+        rows = [GENERATED_MAP_MARKER, "# Input Package Coverage", "",
+                "| package reference | status | current-revision story links |", "|---|---|---|"]
+        refs = list(record["backlog"].get("input_package_refs", []))
+        if not refs:
+            for story in record["stories"]:
+                refs.extend(story["experience_refs"])
+                refs.extend(values(story["props"], "uses_design"))
+                refs.extend(values(story["props"], "constrained_by"))
+        revision = int(record["backlog"]["props"].get("revision", 1) or 1)
+        current = [story for story in record["stories"]
+                   if int(story["props"].get("introduced_in_revision", 0) or 0) == revision]
+        for value in sorted(set(refs)):
+            parsed = split_wikilink(value)
+            target = parsed[0] if parsed else value
+            status = "unknown"
+            try:
+                status = str(note_status_and_type(docs / f"{target}.md")[0]) or "unknown"
+            except (OSError, ValueError):
+                pass
+            linked = sum(value in values(story["props"], "experience_refs")
+                         or value in values(story["props"], "uses_design")
+                         or value in values(story["props"], "constrained_by")
+                         for story in current)
+            rows.append(f"| {value} | {status} | {linked} |")
+        (out / "input-package-coverage.md").write_text(
+            "\n".join(rows) + "\n", encoding="utf-8")
 
 
 def review_body(title: str, sections: list[str]) -> str:
@@ -1652,6 +1903,37 @@ def coverage_class_table() -> str:
 
 def init(args) -> int:
     docs = docs_root(args.docs)
+    planning_mode = getattr(args, "planning_mode", "")
+    requirement_ref = getattr(args, "requirement_ref", "")
+    input_ref = list(getattr(args, "input_ref", []) or [])
+    if planning_mode == "manual" and (requirement_ref or len(input_ref) < 4):
+        print("backlog_compile: manual init needs BA, Solution, Design and one or more Experience --input-ref values and no Requirement", file=sys.stderr)
+        return 2
+    if planning_mode == "requirement" and (not requirement_ref or input_ref):
+        print("backlog_compile: requirement init needs --requirement-ref and no --input-ref", file=sys.stderr)
+        return 2
+    input_bindings: list[str] = []
+    if planning_mode == "manual":
+        input_bindings, binding_errors = resolve_manual_input_bindings(
+            docs, input_ref, "backlog/backlog.md")
+        if binding_errors:
+            print(json.dumps({"ok": False, "errors": binding_errors},
+                             indent=2, ensure_ascii=False), file=sys.stderr)
+            return 1
+    # Resolve all upstreams before creating the backlog directory.  A failed
+    # selection must not leave a half-created manual or Requirement package.
+    if planning_mode:
+        candidate_props = {"planning_mode": planning_mode}
+        if requirement_ref:
+            candidate_props["requirement_ref"] = requirement_ref
+        if input_bindings:
+            candidate_props["input_bindings"] = input_bindings
+        _mode, _refs, preflight = planning_package_findings(
+            docs, candidate_props, "backlog/backlog.md")
+        if preflight:
+            print(json.dumps({"ok": False, "errors": sorted(set(preflight))},
+                             indent=2, ensure_ascii=False), file=sys.stderr)
+            return 1
     root = docs / "backlog"
     (root / "reviews").mkdir(parents=True, exist_ok=True)
     (root / "epics").mkdir(parents=True, exist_ok=True)
@@ -1678,6 +1960,19 @@ def init(args) -> int:
     for path, text in files.items():
         if not path.exists():
             path.write_text(text, encoding="utf-8")
+    root_note = root / "backlog.md"
+    props, body = parse_front_matter(root_note)
+    if planning_mode:
+        props["planning_mode"] = planning_mode
+    else:
+        # Internal legacy readers may materialize an old package for
+        # verification. Public CLI creation always requires planning_mode.
+        props["legacy_contract"] = True
+    if requirement_ref:
+        props["requirement_ref"] = requirement_ref
+    if input_bindings:
+        props["input_bindings"] = input_bindings
+    root_note.write_text(front_matter(props, body), encoding="utf-8")
     map_path = docs / "maps" / "backlog.md"
     map_path.parent.mkdir(parents=True, exist_ok=True)
     if not map_path.is_file():
@@ -1875,10 +2170,32 @@ def begin_revision(args) -> int:
                 return 1
     backlog_path = docs / record["backlog"]["path"]
     root_props, root_body = parse_front_matter(backlog_path)
+    if args.planning_mode == "manual" and (args.requirement_ref or len(args.input_ref) < 4):
+        print(json.dumps({"ok": False, "errors": ["manual revision needs BA, Solution, Design and one or more Experience --input-ref values and no Requirement"]}, indent=2), file=sys.stderr)
+        return 2
+    if args.planning_mode == "requirement" and (not args.requirement_ref or args.input_ref):
+        print(json.dumps({"ok": False, "errors": ["requirement revision needs --requirement-ref and no --input-ref values"]}, indent=2), file=sys.stderr)
+        return 2
+    input_bindings: list[str] = []
+    if args.planning_mode == "manual":
+        input_bindings, binding_errors = resolve_manual_input_bindings(
+            docs, list(args.input_ref), "backlog/backlog.md")
+        if binding_errors:
+            print(json.dumps({"ok": False, "errors": binding_errors},
+                             indent=2, ensure_ascii=False), file=sys.stderr)
+            return 1
     old_revision = int(root_props.get("revision", 0) or 0)
     revision = old_revision + 1
     status_tag(root_props, "draft")
     root_props["revision"] = revision
+    root_props["planning_mode"] = args.planning_mode
+    root_props.pop("requirement_ref", None)
+    root_props.pop("input_package_refs", None)
+    root_props.pop("input_bindings", None)
+    if args.planning_mode == "requirement":
+        root_props["requirement_ref"] = args.requirement_ref
+    else:
+        root_props["input_bindings"] = input_bindings
     for key in ("approved_at_utc", "source_hash", "package_hash"):
         root_props.pop(key, None)
     backlog_path.write_text(front_matter(root_props, root_body), encoding="utf-8")
@@ -1999,6 +2316,17 @@ def stub_story(args) -> int:
     evidence = list(args.evidence_ref or [])
     design_refs = list(args.uses_design or [])
     constraint_refs = list(args.constrained_by or [])
+    implements = list(getattr(args, "implements", None) or [])
+    backlog_props, _backlog_body = parse_front_matter(docs / "backlog" / "backlog.md")
+    planning_mode = str(backlog_props.get("planning_mode", ""))
+    if planning_mode not in {"manual", "requirement"} and not backlog_props.get("legacy_contract"):
+        print("backlog_compile: initialize or revise backlog with a planning_mode first", file=sys.stderr)
+        return 2
+    if planning_mode == "requirement":
+        implements = [str(backlog_props.get("requirement_ref", ""))]
+    elif implements:
+        print("backlog_compile: manual stories cannot implement a Requirement", file=sys.stderr)
+        return 2
     story = root / "story.md"
     if not story.exists():
         scope = args.scope or "Describe the smallest valuable behavior."
@@ -2023,9 +2351,13 @@ def stub_story(args) -> int:
             "criterion_refs": criteria, "experience_refs": experience,
             "uses_design": design_refs,
             "constrained_by": constraint_refs,
+            "origin_mode": planning_mode,
+            "introduced_in_revision": int(backlog_props.get("revision", 1) or 1),
             "derives_from": [epic_link],
             "tags": ["doc/story", "status/planned"], "aliases": [story_id],
         }
+        if implements:
+            story_props["implements"] = implements
         if evidence:
             story_props["related_to"] = evidence
         story.write_text(front_matter(
@@ -2074,6 +2406,9 @@ def main(argv=None) -> int:
     sub = parser.add_subparsers(dest="command", required=True)
     command = sub.add_parser("init")
     command.add_argument("--docs", default=None)
+    command.add_argument("--planning-mode", choices=("manual", "requirement"), required=True)
+    command.add_argument("--requirement-ref", default="")
+    command.add_argument("--input-ref", action="append", default=[])
     command.set_defaults(func=init)
     command = sub.add_parser("stub-epic")
     command.add_argument("slug")
@@ -2095,6 +2430,7 @@ def main(argv=None) -> int:
     command.add_argument("--evidence-ref", action="append")
     command.add_argument("--uses-design", action="append")
     command.add_argument("--constrained-by", action="append")
+    command.add_argument("--implements", action="append")
     command.set_defaults(func=stub_story)
     command = sub.add_parser("check")
     command.add_argument("--docs", default=None)
@@ -2113,6 +2449,9 @@ def main(argv=None) -> int:
     command = sub.add_parser("begin-revision")
     command.add_argument("--docs", default=None)
     command.add_argument("--delivery-snapshot")
+    command.add_argument("--planning-mode", choices=("manual", "requirement"), required=True)
+    command.add_argument("--requirement-ref", default="")
+    command.add_argument("--input-ref", action="append", default=[])
     command.set_defaults(func=begin_revision)
     command = sub.add_parser("revision-status")
     command.add_argument("--docs", default=None)

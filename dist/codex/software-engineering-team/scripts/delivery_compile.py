@@ -20,6 +20,7 @@ from pathlib import Path, PurePosixPath
 
 from ba_compile import parse_frontmatter
 import backlog_compile
+import operation_compile
 
 
 DELIVERY_ID_RE = re.compile(r"^DLV-[0-9]{3,}$")
@@ -59,6 +60,10 @@ MUTABLE = {"status", "approved_at_utc", "source_hash", "approval_hash", "pull_re
 SOURCE_ITEM_FIELDS = (
     "story_id", "story_path", "story_source_hash", "test_plan_path",
     "test_plan_source_hash", "owner_role", "supporting_roles",
+)
+OPERATION_BINDING_FIELDS = (
+    "verification_contract_ref", "verification_contract_hash",
+    "environment_contract_ref", "environment_contract_hash",
 )
 DOD_SOURCE_FIELDS = (
     "definition_of_done_path", "definition_of_done_revision",
@@ -273,6 +278,7 @@ def approved_backlog_sources(docs: Path, story_ids: list[str]) -> tuple[dict[str
             "owner_role": owner,
             "supporting_roles": backlog_compile.values(props, "supporting_roles"),
             "depends_on": sorted(set(dependencies)),
+            "work_kind": str(story.get("work_kind", "")),
         }
     if errors:
         return {}, {}, sorted(set(errors))
@@ -304,6 +310,44 @@ def approved_dod_source(docs: Path) -> tuple[dict, list[str]]:
         "definition_of_done_revision": revision,
         "definition_of_done_source_hash": source_hash,
     }, []
+
+
+def operation_contract_snapshot(docs: Path, kind: str) -> tuple[dict, list[str]]:
+    """Resolve one approved Operation Contract without trusting caller input.
+
+    Operation is deliberately not a product-stage dependency.  It becomes
+    mandatory only when a Delivery turns a Story into executable code work.
+    The source hash is therefore pinned on the Delivery Item and checked again
+    at every activation boundary.
+    """
+    receipt, errors = operation_compile.check_contract(docs, kind)
+    if errors or not receipt.get("current"):
+        return {}, [f"approved current {kind} contract is required: " + "; ".join(errors)]
+    return {
+        f"{kind}_contract_ref": f"operation/{kind}-contract",
+        f"{kind}_contract_hash": str(receipt["source_hash"]),
+    }, []
+
+
+def item_operation_findings(docs: Path, props: dict) -> list[str]:
+    """Validate compiler-owned Operation bindings for one executable Item."""
+    errors: list[str] = []
+    runtime = props.get("runtime_required", False)
+    if not isinstance(runtime, bool):
+        errors.append("runtime_required must be boolean")
+        return errors
+    verification, verification_errors = operation_contract_snapshot(docs, "verification")
+    errors.extend(verification_errors)
+    if verification and any(props.get(key) != value for key, value in verification.items()):
+        errors.append("Verification Contract binding is stale or missing")
+    if runtime:
+        environment, environment_errors = operation_contract_snapshot(docs, "environment")
+        errors.extend(environment_errors)
+        if environment and any(props.get(key) != value for key, value in environment.items()):
+            errors.append("Environment Contract binding is stale or missing")
+    elif props.get("environment_contract_ref") or props.get("environment_contract_hash"):
+        errors.append("non-runtime Item must not bind an Environment Contract")
+    return sorted(set(errors))
 
 
 def delivery_source_findings(docs: Path, root: Path, delivery_props: dict) -> tuple[dict[str, dict], list[str]]:
@@ -521,6 +565,9 @@ def init_delivery(args) -> int:
                       "execution_after": [], "dependency_bindings": [],
                       "waits_for": [], "waits_for_bindings": [],
                       "path_claims": [], "contract_claims": [],
+                      "runtime_required": False,
+                      "architecture_impact": "not_applicable", "architecture_components": [],
+                      "architecture_record_kinds": [], "architecture_reason": "No architecture delta is currently required.",
                       "role_sequence": [source["owner_role"], *source["supporting_roles"], "code_reviewer", "qa_engineer"],
                       "tags": ["doc/delivery-item", "status/in-scope"]}
         atomic_text(item, frontmatter(item_props, body_for("item", item_props["title"], {
@@ -567,6 +614,13 @@ def delivery_findings(docs: Path, identifier: str) -> tuple[Path | None, list[st
     if props.get("status") not in {"merged", "cancelled"}:
         _, source_errors = delivery_source_findings(docs, root, props)
         errors.extend(source_errors)
+    if props.get("status") in {"execution_approved", "active", "review", "pr_handoff", "awaiting_merge"}:
+        for item_path in item_paths:
+            try:
+                item_props, _item_body = split_note(item_path)
+            except (OSError, ValueError):
+                continue
+            errors.extend(f"{item_path}: {error}" for error in item_operation_findings(docs, item_props))
     return root, sorted(set(errors))
 
 
@@ -622,7 +676,7 @@ def _is_normalized_claim(value: str) -> bool:
     return value == path.as_posix() and all(part not in {"", ".", ".."} for part in path.parts)
 
 
-def execution_plan_findings(root: Path, sources: dict[str, dict]) -> list[str]:
+def execution_plan_findings(root: Path, sources: dict[str, dict], docs: Path) -> list[str]:
     """Validate the authored Item topology before execution approval.
 
     The Delivery compiler owns hashes and rendered plan summaries. People own
@@ -646,6 +700,12 @@ def execution_plan_findings(root: Path, sources: dict[str, dict]) -> list[str]:
         paths = _string_list(props.get("path_claims"), f"{story_id} path_claims", errors)
         contracts = _string_list(props.get("contract_claims"), f"{story_id} contract_claims", errors)
         roles = _string_list(props.get("role_sequence"), f"{story_id} role_sequence", errors)
+        architecture_impact = str(props.get("architecture_impact", ""))
+        architecture_components = _string_list(props.get("architecture_components"), f"{story_id} architecture_components", errors)
+        architecture_kinds = _string_list(props.get("architecture_record_kinds"), f"{story_id} architecture_record_kinds", errors)
+        architecture_reason = str(props.get("architecture_reason", "")).strip()
+        if not isinstance(props.get("runtime_required", False), bool):
+            errors.append(f"{story_id} runtime_required must be boolean")
         if not paths and not contracts:
             errors.append(f"{story_id} needs at least one exact path_claim or contract_claim")
         if len(after) != len(set(after)):
@@ -664,7 +724,36 @@ def execution_plan_findings(root: Path, sources: dict[str, dict]) -> list[str]:
         missing_external = sorted(required_external - set(waits_for))
         if missing_external:
             errors.append(f"{story_id} waits_for omits external approved dependencies: {', '.join(missing_external)}")
-        expected_roles = [source["owner_role"], *source["supporting_roles"], "code_reviewer", "qa_engineer"]
+        if architecture_impact not in {"required", "not_applicable"}:
+            errors.append(f"{story_id} architecture_impact must be required or not_applicable")
+        if not architecture_reason:
+            errors.append(f"{story_id} architecture_reason is required")
+        if architecture_impact == "required":
+            if not architecture_components or not architecture_kinds:
+                errors.append(f"{story_id} architecture impact requires component and record-kind claims")
+            try:
+                import architecture_compile
+                available = architecture_compile.solution_components(docs)
+                unknown = sorted(set(architecture_components) - set(available))
+                if unknown:
+                    errors.append(f"{story_id} architecture components are absent from current Solution topology: {', '.join(unknown)}")
+                built_paths = [str(available[component].get("code_path", ""))
+                               for component in architecture_components
+                               if available.get(component, {}).get("sourcing") == "build"]
+                if paths and built_paths and any(
+                        not any(path == code_path or path.startswith(code_path + "/")
+                                for code_path in built_paths)
+                        for path in paths):
+                    errors.append(f"{story_id} path_claims must stay below the selected built component code_path")
+                if paths and not built_paths:
+                    errors.append(f"{story_id} external-only architecture impact cannot claim project source paths")
+            except (ImportError, ValueError) as exc:
+                errors.append(f"{story_id} architecture impact cannot resolve the current Solution catalog: {exc}")
+            expected_roles = ["software_architect", source["owner_role"], *source["supporting_roles"], "code_reviewer", "qa_engineer"]
+        else:
+            if architecture_components or architecture_kinds:
+                errors.append(f"{story_id} non-applicable architecture impact cannot declare architecture claims")
+            expected_roles = [source["owner_role"], *source["supporting_roles"], "code_reviewer", "qa_engineer"]
         if roles != expected_roles:
             errors.append(
                 f"{story_id} role_sequence must be owner/supporting roles followed by code_reviewer and qa_engineer"
@@ -699,6 +788,15 @@ def execution_plan_findings(root: Path, sources: dict[str, dict]) -> list[str]:
 
     if any(visit(story_id) for story_id in sorted(graph)):
         errors.append("Delivery execution_after graph contains a cycle")
+    # Operation contracts are intentionally checked only at execution approval.
+    # Bindings themselves are written below, after this preflight proves the
+    # current source contracts are approved and current.
+    _verification, verification_errors = operation_contract_snapshot(docs, "verification")
+    errors.extend(verification_errors)
+    if any(split_note(path)[0].get("runtime_required", False)
+           for path in sorted(root.glob("items/*/item.md"))):
+        _environment, environment_errors = operation_contract_snapshot(docs, "environment")
+        errors.extend(environment_errors)
     return sorted(set(errors))
 
 
@@ -717,7 +815,7 @@ def approve_execution(args) -> int:
     if not items:
         print(json.dumps({"ok": False, "errors": ["Execution Plan requires at least one Item"]}, indent=2)); return 1
     sources, source_errors = delivery_source_findings(docs, root, props)
-    plan_errors = source_errors + execution_plan_findings(root, sources)
+    plan_errors = source_errors + execution_plan_findings(root, sources, docs)
     if plan_errors:
         print(json.dumps({"ok": False, "errors": sorted(set(plan_errors))}, indent=2)); return 1
     item_ids = []
@@ -726,6 +824,9 @@ def approve_execution(args) -> int:
     path_claims: list[str] = []
     contract_claims: list[str] = []
     item_hashes: list[str] = []
+    operation_hashes: list[str] = []
+    verification_binding, _ = operation_contract_snapshot(docs, "verification")
+    environment_binding, _ = operation_contract_snapshot(docs, "environment")
     for item_path in items:
         item_props, item_body = split_note(item_path)
         story = str(item_props["story_id"])
@@ -736,6 +837,12 @@ def approve_execution(args) -> int:
         item_props["waits_for_bindings"] = sorted(
             set(sources[story]["depends_on"]) - set(item_props["execution_after"])
         )
+        item_props.update(verification_binding)
+        if item_props.get("runtime_required"):
+            item_props.update(environment_binding)
+        else:
+            item_props.pop("environment_contract_ref", None)
+            item_props.pop("environment_contract_hash", None)
         item_props["item_plan_hash"] = content_hash(item_props, item_body, exclude=MUTABLE | {"item_plan_hash"})
         atomic_text(item_path, frontmatter(item_props, item_body))
         item_hashes.append(f"{story}:{item_props['item_plan_hash']}")
@@ -745,6 +852,11 @@ def approve_execution(args) -> int:
         role_sequences.append(f"{story}: " + " -> ".join(item_props["role_sequence"]))
         path_claims.extend(f"{story}: {claim}" for claim in item_props["path_claims"])
         contract_claims.extend(f"{story}: {claim}" for claim in item_props["contract_claims"])
+        operation_hashes.append(
+            f"{story}: verification={item_props['verification_contract_hash']}"
+            + (f", environment={item_props['environment_contract_hash']}"
+               if item_props.get("runtime_required") else "")
+        )
         for kind, filename, status in (("code-review", "code-review.md", "draft"), ("verification", "verification.md", "draft")):
             evidence = item_path.parent / filename
             if not evidence.exists():
@@ -757,15 +869,16 @@ def approve_execution(args) -> int:
     plan_props = {"type": "execution-plan", "id": f"{props['id']}-EXEC", "title": title(props.get("goal", props["id"]), designation(docs, "execution-plan", "execution plan")),
                   "status": "approved", "revision": 1, "scope_hash": props["scope_hash"],
                   "item_plan_hashes": sorted(item_hashes),
+                  "operation_contract_hashes": sorted(operation_hashes),
                   "derives_from": [link(str(path.relative_to(docs)), props["id"])],
                   "tags": ["doc/execution-plan", "status/approved"]}
     plan_body = body_for("execution-plan", plan_props["title"], {
-        "Preconditions": "Approved backlog Story/Test Plan snapshots and the pinned Definition of Done are current.",
+        "Preconditions": "Approved backlog Story/Test Plan snapshots, the pinned Definition of Done and the exact Operation Contract hashes are current.",
         "Item Graph": "\n".join(f"- {row}" for row in item_graph),
         "Execution Waves": "Execution follows the acyclic Item Graph; independent Items may activate only within the global Slot cap.",
         "Role Sequences": "\n".join(f"- {row}" for row in role_sequences),
         "Path Claims": "\n".join(f"- {row}" for row in path_claims),
-        "Contract Claims": "\n".join(f"- {row}" for row in contract_claims) or "- none",
+        "Contract Claims": "\n".join(f"- {row}" for row in [*contract_claims, *operation_hashes]) or "- none",
         "Integration Order": " -> ".join(item_ids),
         "Verification Strategy": "Each Item must bind review and verification to its exact worktree product commit before integration.",
         "Failure and Recovery": "A stale source snapshot, target conflict or missing verified writer receipt blocks activation and requires the named recovery path.",

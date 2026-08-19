@@ -9,7 +9,7 @@ asserts nothing about that behavior.
 
 ## Running the gate
 
-- The command comes from `workspace/config.json` `mutation_command`; the
+- The command comes from the approved Verification Contract's `mutation_command`; the
   project's setup configured a runner per stack and verified it runs.
   Never hardcode a tool.
 - Scope: the code-owned files this story changed, never the whole tree.

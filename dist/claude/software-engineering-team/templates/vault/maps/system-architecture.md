@@ -7,9 +7,10 @@ tags:
 
 # System Architecture
 
-The living documents (data model, api contract, threat model,
-environment pointer) and the generated record index. The architect's
-flow updates this map at the merge checkpoint; individual decision
-notes get their inbound edges from the index rows.
+Delivery-owned architecture root, component hubs and generated registry. The
+Software Architect materializes it only inside an active Delivery Item; nested
+modules and facets remain reachable through parent navigation rather than
+inflating this map.
 
-No documents yet. The first Solution Design change adds the links.
+No architecture delta yet. The first Delivery Item that requires architecture
+creates the root and affected component hubs.

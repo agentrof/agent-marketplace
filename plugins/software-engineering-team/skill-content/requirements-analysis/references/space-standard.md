@@ -80,7 +80,7 @@ separate id key.
 
 | type | lives at | mints | notes |
 |---|---|---|---|
-| space | space.md | AS, OQ | carries code:, the space head summary (30 lines max), purpose, domain map, out of scope |
+| space | space.md | AS, OQ | carries code:, a concise space head summary, purpose, domain map, out of scope |
 | domain | domains/<d>/domain.md | AS, OQ | carries code:; mission, boundaries, process map, data notes; nesting repeats the same plain name |
 | process | processes/<slug>-process.md | AS, OQ | actors, trigger, main flow, exception flows |
 | entity | entities/<slug>-entity.md | AS, OQ | fields (a table whose first column is the fixed `field` identifier column), lifecycle, propagation semantics |
@@ -98,10 +98,9 @@ project's output language), the marker is fixed English:
 
     ## <free heading in the output language> <!-- sec: rules -->
 
-Head summary: the lines between the H1 and the first H2. Cap: 30 lines
-for the space overview (the brief contract's summary survives here), 10
-lines for every other doc (schema defaults; a project limits override
-may change them).
+Head summary: the lines between the H1 and the first H2. Keep it concise so
+the brief remains navigable, but no line count is a compiler gate or project
+configuration value.
 
 ## The distributed brief contract
 

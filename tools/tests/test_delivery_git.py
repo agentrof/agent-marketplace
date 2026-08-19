@@ -15,11 +15,20 @@ sys.path.insert(0, str(ROOT / "plugins" / "software-engineering-team" / "scripts
 sys.path.insert(0, str(ROOT / "tools" / "tests"))
 import delivery_git  # noqa: E402
 import delivery_compile  # noqa: E402
+import delivery_governance  # noqa: E402
+import operation_compile  # noqa: E402
 from backlog_fixture import make_approved_backlog  # noqa: E402
 
 
 class DeliveryGitTests(unittest.TestCase):
+    def approve_governance(self, docs: Path, max_parallel: int = 1) -> None:
+        initialized = type("Args", (), {"docs": str(docs), "max_parallel": max_parallel})
+        self.assertEqual(delivery_governance.init(initialized), 0)
+        approved = type("Args", (), {"docs": str(docs)})
+        self.assertEqual(delivery_governance.approve(approved), 0)
+
     def author_execution_topology(self, docs: Path, delivery: str = "DLV-001") -> None:
+        self.approve_verification_contract(docs)
         root = delivery_compile.find_delivery(docs, delivery)
         self.assertIsNotNone(root)
         item = root / "items" / "auth-01" / "item.md"
@@ -27,6 +36,20 @@ class DeliveryGitTests(unittest.TestCase):
         props["path_claims"] = ["src/auth.py"]
         props["contract_claims"] = ["auth:session"]
         delivery_compile.atomic_text(item, delivery_compile.frontmatter(props, body))
+
+    def approve_verification_contract(self, docs: Path) -> None:
+        path = docs / "operation" / "verification-contract.md"
+        if path.exists():
+            return
+        args = type("Args", (), {
+            "docs": str(docs), "kind": "verification",
+            "constrained_by": ["solution-design/decisions/fixture-api"],
+        })
+        self.assertEqual(operation_compile.init(args), 0)
+        props, body = operation_compile.parse(path)
+        props["test_command"] = "make test"
+        operation_compile.atomic_text(path, operation_compile.render(props, body))
+        self.assertEqual(operation_compile.approve(args), 0)
 
     def commit_item_product_change(self, worktree: str, content: str) -> str:
         path = Path(worktree) / "src" / "auth.py"
@@ -57,9 +80,12 @@ class DeliveryGitTests(unittest.TestCase):
         subprocess.run(["git", "-C", str(project), "config", "user.name", "Test"], check=True)
         (project / "workspace" / "docs").mkdir(parents=True)
         (project / "workspace" / "config.json").write_text(
-            json.dumps({"team_id": "software-engineering-team", "doc_type_designations": {}}),
+            json.dumps({"schema_version": 1, "team_id": "software-engineering-team",
+                        "output_language": "English", "terminology_language": "English",
+                        "doc_type_designations": {}, "doc_type_designation_history": {}}),
             encoding="utf-8",
         )
+        self.approve_governance(project / "workspace" / "docs")
         (project / "README.md").write_text("fixture\n", encoding="utf-8")
         subprocess.run(["git", "-C", str(project), "add", "."], check=True)
         subprocess.run(["git", "-C", str(project), "commit", "-qm", "init"], check=True)
@@ -74,11 +100,7 @@ class DeliveryGitTests(unittest.TestCase):
         """Build one real remote Delivery through its durable PR intent."""
         temporary, project = self.make_project()
         docs = project / "workspace" / "docs"
-        (docs / "maps").mkdir(parents=True)
-        config_path = project / "workspace" / "config.json"
-        config = json.loads(config_path.read_text(encoding="utf-8"))
-        config["max_parallel"] = 1
-        config_path.write_text(json.dumps(config), encoding="utf-8")
+        (docs / "maps").mkdir(parents=True, exist_ok=True)
         make_approved_backlog(docs)
         subprocess.run(["git", "-C", str(project), "add", "workspace"], check=True)
         subprocess.run(["git", "-C", str(project), "commit", "-qm", "approved backlog"], check=True)
@@ -297,6 +319,34 @@ class DeliveryGitTests(unittest.TestCase):
         finally:
             temporary.cleanup()
 
+    def test_quiescent_v1_fence_upgrades_to_governed_v2(self):
+        temporary, project = self.make_project()
+        try:
+            target = delivery_git.remote_oid(project, "origin", "refs/heads/main")
+            v1 = delivery_git.commit_tree(
+                project, target, [], "Open legacy Agentrof Fence", {
+                    "Record": "project-fence-v1", "Protocol": "1", "Mode": "open",
+                    "Epoch": delivery_git.epoch_token(), "Target": target,
+                    "Config-Hash": "none", "Source-Kind": "none", "Source-Intent": "none",
+                    "Target-Update-Intent": "none", "Target-Update-Attempt": "none",
+                    "Target-Repository": "none", "Target-Carrier-Kind": "none",
+                    "Target-Carrier-Ref": "none", "Target-Carrier-Object": "none",
+                    "Target-Carrier-Head": "none", "Target-Carrier-Base": "none",
+                    "Upgrade-Phase": "none", "Upgrade-Contract": "none", "Handoff-Target": "none",
+                    "Barrier-Kind": "none", "Barrier-Epoch": "none",
+                },
+            )
+            fence = delivery_git.canonical_refs("DLV-000")["fence"]
+            delivery_git.atomic_push(project, "origin", [(fence, "", v1)])
+            preview = delivery_git.upgrade_fence_v1(project, dry_run=True)
+            self.assertTrue(preview["changed"])
+            result = delivery_git.upgrade_fence_v1(project)
+            message = delivery_git.commit_message(project, result["fence"])
+            self.assertEqual(delivery_git.trailer(message, "Record"), "project-fence-v2")
+            self.assertEqual(delivery_git.trailer(message, "Governance-Hash"), delivery_git.governed_governance_hash(project))
+        finally:
+            temporary.cleanup()
+
     def test_target_reauthorization_is_fail_closed_without_zero_effect_proof(self):
         with self.assertRaises(RuntimeError):
             delivery_git.reauthorize_target_update(Path("/tmp"))
@@ -418,7 +468,8 @@ class DeliveryGitTests(unittest.TestCase):
             subprocess.run(["git", "-C", str(project), "config", "user.email", "test@example.com"], check=True)
             subprocess.run(["git", "-C", str(project), "config", "user.name", "Test"], check=True)
             docs = project / "workspace" / "docs"; (docs / "maps").mkdir(parents=True)
-            (project / "workspace" / "config.json").write_text(json.dumps({"max_parallel": 1, "doc_type_designations": {}}), encoding="utf-8")
+            (project / "workspace" / "config.json").write_text(json.dumps({"schema_version": 1, "team_id": "software-engineering-team", "output_language": "English", "terminology_language": "English", "doc_type_designations": {}, "doc_type_designation_history": {}}), encoding="utf-8")
+            self.approve_governance(docs)
             make_approved_backlog(docs)
             subprocess.run(["git", "-C", str(project), "add", "."], check=True)
             subprocess.run(["git", "-C", str(project), "commit", "-qm", "init"], check=True)
@@ -461,7 +512,8 @@ class DeliveryGitTests(unittest.TestCase):
             subprocess.run(["git", "-C", str(project), "config", "user.name", "Test"], check=True)
             docs = project / "workspace" / "docs"
             (docs / "maps").mkdir(parents=True)
-            (project / "workspace" / "config.json").write_text(json.dumps({"max_parallel": 1, "doc_type_designations": {}}), encoding="utf-8")
+            (project / "workspace" / "config.json").write_text(json.dumps({"schema_version": 1, "team_id": "software-engineering-team", "output_language": "English", "terminology_language": "English", "doc_type_designations": {}, "doc_type_designation_history": {}}), encoding="utf-8")
+            self.approve_governance(docs)
             make_approved_backlog(docs)
             subprocess.run(["git", "-C", str(project), "add", "."], check=True)
             subprocess.run(["git", "-C", str(project), "commit", "-qm", "init"], check=True)
@@ -484,9 +536,9 @@ class DeliveryGitTests(unittest.TestCase):
             self.assertTrue(result["ok"])
             self.assertEqual(
                 delivery_git.trailer(
-                    delivery_git.commit_message(project, result["fence"]), "Config-Hash"
+                    delivery_git.commit_message(project, result["fence"]), "Governance-Hash"
                 ),
-                delivery_git.governed_config_hash(project),
+                delivery_git.governed_governance_hash(project),
             )
             (project / "README.md").write_text("target moved\n", encoding="utf-8")
             subprocess.run(["git", "-C", str(project), "add", "README.md"], check=True)
@@ -513,7 +565,8 @@ class DeliveryGitTests(unittest.TestCase):
             subprocess.run(["git", "-C", str(project), "config", "user.email", "test@example.com"], check=True)
             subprocess.run(["git", "-C", str(project), "config", "user.name", "Test"], check=True)
             docs = project / "workspace" / "docs"; (docs / "maps").mkdir(parents=True)
-            (project / "workspace" / "config.json").write_text(json.dumps({"max_parallel": 1, "doc_type_designations": {}}), encoding="utf-8")
+            (project / "workspace" / "config.json").write_text(json.dumps({"schema_version": 1, "team_id": "software-engineering-team", "output_language": "English", "terminology_language": "English", "doc_type_designations": {}, "doc_type_designation_history": {}}), encoding="utf-8")
+            self.approve_governance(docs)
             make_approved_backlog(docs)
             subprocess.run(["git", "-C", str(project), "add", "."], check=True); subprocess.run(["git", "-C", str(project), "commit", "-qm", "init"], check=True)
             remote = project / "remote.git"; subprocess.run(["git", "init", "-q", "--bare", str(remote)], check=True)
@@ -532,14 +585,15 @@ class DeliveryGitTests(unittest.TestCase):
             delivery_git.refresh_target(project, "DLV-001")
             result = delivery_git.claim_items(project, "DLV-001")
             self.assertEqual(result["claims"], ["AUTH-01"])
-            config_path = project / "workspace" / "config.json"
-            config = json.loads(config_path.read_text(encoding="utf-8"))
-            config["max_parallel"] = 2
-            config_path.write_text(json.dumps(config), encoding="utf-8")
-            with self.assertRaisesRegex(RuntimeError, "governed Fence configuration baseline"):
+            governance = docs / "delivery" / "governance" / "governance.md"
+            before_governance = governance.read_text(encoding="utf-8")
+            governance.write_text(before_governance.replace("max_parallel: 1", "max_parallel: 2"), encoding="utf-8")
+            with self.assertRaisesRegex(RuntimeError, "(?i)governance"):
                 delivery_git.start_item(project, "DLV-001", "AUTH-01")
-            config["max_parallel"] = 1
-            config_path.write_text(json.dumps(config), encoding="utf-8")
+            governance.write_text(before_governance, encoding="utf-8")
+            receipt, errors = delivery_governance.status(docs)
+            self.assertEqual(errors, [])
+            self.assertTrue(receipt.get("current"), receipt)
             activation = delivery_git.start_item(project, "DLV-001", "AUTH-01")
             self.assertEqual(activation["slot"], "001")
             self.assertEqual(activation["receipt"]["state"], "verified")

@@ -59,7 +59,7 @@ Keep a record under a page. A record nobody reads protects nobody.
 
 ## Record Files and the Generated Index
 
-- One note per record at system-architecture/decisions/<kebab-slug>-decision.md.
+- Place each record at the lowest common ancestor: root decisions live at `system-architecture/decisions/<kebab-slug>-decision.md`; single-component or module decisions live under that component/module's `decisions/` directory.
   Its H1 equals the title; one `ADR-###` frontmatter alias owns the id.
   The id never enters the filename, title or H1.
 - Frontmatter contract: `type: decision`, `title`, `status`,
@@ -69,7 +69,7 @@ Keep a record under a page. A record nobody reads protects nobody.
   mirror (`doc/decision` plus `status/<status>`), and `aliases` holding
   the bare id (`- ADR-042`).
 - The supersede chain lives in quoted vault-absolute wikilink keys
-  (`supersedes: "[[system-architecture/decisions/offset-pagination-decision]]"`,
+  (`supersedes: "[[system-architecture/decisions/offset-pagination-decision|offset pagination decision]]"`,
   `superseded_by` on the older note); stamp-decision writes both ends in
   one operation, and an empty relation is an absent key, never an empty
   string.

@@ -7,8 +7,9 @@ tags:
 
 # Solution Design
 
-The landscape, its engagements and the generated decision index. The Solution
-Architect curates this map at every gate; decision notes receive their inbound
-edge from the index rows.
+The approved deployable topology, component catalog, engagements and generated
+decision index. The Solution Architect curates this map at every gate; each
+component hub and decision receives an inbound edge from this map or index.
 
-No tree yet. The solution-design entry births it and adds the links.
+No topology yet. The solution-design entry records owner-approved component
+boundaries and adds the links.

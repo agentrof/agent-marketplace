@@ -5,7 +5,7 @@ The consuming project's workspace/docs/ is one vault: wikilinked notes,
 typed frontmatter, map hubs and a managed app payload. Every rule the
 obsidian-vault skill states is enforced here; a rule without a check is
 not a rule. Variation points (subtrees, map notes, tag namespaces, id
-grammars, peer range, generated surfaces, property types) come from the
+grammars, generated surfaces, property types) come from the
 skill's data/vault-policy.json, including the named graph palette, rather
 than hard-coded values.
 
@@ -239,14 +239,63 @@ def normalize_vault_rel(raw: str) -> str:
 
 
 def is_hub(policy: dict, rel: str) -> bool:
+    parts = rel.split("/")
+    if (len(parts) >= 3 and parts[0] == "business-analysis"
+            and parts[-1] in {"space.md", "domain.md"}):
+        if len(parts) == 3 and parts[-1] == "space.md":
+            return True
+        trail = parts[2:-1]
+        if parts[-1] == "domain.md" and len(trail) >= 2 \
+                and all(trail[index] == "domains" for index in range(0, len(trail), 2)):
+            return True
+    parts = rel.split("/")
+    if (parts[0:2] == ["solution-design", "components"]
+            and len(parts) == 4 and parts[-1] == "component.md"):
+        return True
+    if rel == "solution-design/landscape.md":
+        return True
+    if (parts[0:2] == ["experience-design", "experiences"]
+            and len(parts) == 4 and parts[-1] == "experience.md"):
+        return True
+    if rel == "system-architecture/architecture.md":
+        return True
+    if (parts[0:2] == ["system-architecture", "components"]
+            and parts[-1] in {"component.md", "module.md"}):
+        return True
     return any(glob_match(entry.get("note", ""), rel)
                for entry in policy.get("hubs", []))
+
+
+def is_map_hub(policy: dict, rel: str) -> bool:
+    """A map links only stable subtree entry hubs, never every nested module."""
+    if not is_hub(policy, rel):
+        return False
+    parts = rel.split("/")
+    if parts[0:2] == ["system-architecture", "components"]:
+        return parts[-1] == "component.md"
+    return True
 
 
 def resolve_hub(policy: dict, index: set, rel: str) -> str | None:
     """The deepest EXISTING hub note covering rel, or None. Index-aware:
     a hub file that is not in the current index cannot be a nav target,
     so rename and retarget compose in either order."""
+    parts = rel.split("/")
+    if len(parts) >= 3 and parts[0] == "business-analysis":
+        directory = parts[:-1]
+        for size in range(len(directory), 1, -1):
+            candidate_dir = "/".join(directory[:size])
+            for name in ("domain.md", "space.md"):
+                candidate = f"{candidate_dir}/{name}"
+                if candidate != rel and candidate in index and is_hub(policy, candidate):
+                    return candidate
+    directory = rel.split("/")[:-1]
+    for size in range(len(directory), 0, -1):
+        ancestor = "/".join(directory[:size])
+        for name in ("module.md", "component.md", "experience.md", "architecture.md", "landscape.md"):
+            candidate = f"{ancestor}/{name}"
+            if candidate != rel and candidate in index and is_hub(policy, candidate):
+                return candidate
     entries = sorted(policy.get("hubs", []),
                      key=lambda e: -len(e.get("covers", "").split("/")))
     for entry in entries:
@@ -478,27 +527,9 @@ def relation_specs(policy: dict) -> dict:
 
 
 def effective_policy(policy: dict, vault_root: Path) -> dict:
-    """A copied policy with the project's nav-peer limits merged over the
-    shipped values (workspace/config.json limits block; the workspace is
-    the vault root's parent). Fail-soft: an invalid value or an
-    inconsistent pair (min above max) drops both overrides. Attaches the
-    runtime-only _limit_provenance map like ba_compile's schema merge."""
-    merged = dict(policy)
-    provenance: dict[str, str] = {}
-    limits = ba_compile.load_project_config(vault_root).get("limits")
-    if isinstance(limits, dict):
-        for key in ("nav_peer_min", "nav_peer_max"):
-            value = limits.get(key)
-            if (isinstance(value, int) and not isinstance(value, bool)
-                    and value >= 0):
-                merged[key] = value
-                provenance[key] = "project override"
-    if merged.get("nav_peer_min", 0) > merged.get("nav_peer_max", 0):
-        for key in ("nav_peer_min", "nav_peer_max"):
-            merged[key] = policy[key]
-            provenance.pop(key, None)
-    merged["_limit_provenance"] = provenance
-    return merged
+    """Return a private policy copy without project-config overrides."""
+    del vault_root
+    return dict(policy)
 
 
 def load_designations(vault_root: Path) -> dict | None:
@@ -701,10 +732,8 @@ def check_vault_layout(vault: Vault, findings: list[Finding]) -> None:
         elif (not rel.endswith(".md")
               and not (top == "experience-design"
                        and re.fullmatch(
-                           r"experience-design/programs/prg-[0-9]+/releases/"
-                           r"rel-[0-9]+/(?:spaces/[^/]+/(?:domains/[^/]+/)*)?"
-                           r"artifacts/[a-z0-9]+(?:-[a-z0-9]+)*-preview\.html",
-                           rel))
+                           r"experience-design/experiences/[a-z0-9]+(?:-[a-z0-9]+)*/artifacts/"
+                           r"[a-z0-9]+(?:-[a-z0-9]+)*-preview\.html", rel))
               and top not in {
                 p.rstrip("/").split("/")[0]
                 for p in policy.get("generated_subtrees", [])}):
@@ -1094,7 +1123,7 @@ def check_map_coverage(vault: Vault, findings: list[Finding]) -> None:
     maps_dir = policy["maps_dir"]
     for rel in sorted(vault.notes):
         note = vault.notes[rel]
-        if note.generated or not is_hub(policy, rel):
+        if note.generated or not is_map_hub(policy, rel):
             continue
         map_rel = f"{maps_dir}/{rel.split('/')[0]}.md"
         map_note = vault.notes.get(map_rel)
@@ -1219,11 +1248,6 @@ def check_nav_footer(vault: Vault, findings: list[Finding]) -> None:
     policy = vault.policy
     maps_dir = policy["maps_dir"]
     exempt = {policy["home_file"]}
-    peer_min = policy["nav_peer_min"]
-    peer_max = policy["nav_peer_max"]
-    subtree_counts: dict[str, int] = {}
-    for note in authored(vault):
-        subtree_counts[note.subtree] = subtree_counts.get(note.subtree, 0) + 1
     for note in authored(vault):
         if note.rel in exempt or note.subtree == maps_dir or not note.subtree:
             continue
@@ -1254,20 +1278,6 @@ def check_nav_footer(vault: Vault, findings: list[Finding]) -> None:
                 " first (hubs and uncovered notes keep the subtree map),"
                 " peers after"))
             continue
-        peers = [t for (_, t) in links[1:] if f"{t}.md" in vault.index]
-        if note.subtree == "experience-design":
-            continue  # the experience compiler owns graph closure and map reachability
-        floor = min(peer_min, max(subtree_counts.get(note.subtree, 1) - 1, 0))
-        if not floor <= len(peers) <= peer_max:
-            overridden = policy.get("_limit_provenance") or {}
-            prov = (": project override"
-                    if ("nav_peer_min" in overridden
-                        or "nav_peer_max" in overridden) else "")
-            findings.append(Finding(
-                "error", note.rel, nav_line, "nav_footer",
-                f"nav section has {len(peers)} resolving peer links"
-                f" (policy range {floor}-{peer_max}{prov})",
-                "link the contextual peers a reader would jump to next"))
 
 
 def property_type_ok(value, expected: str) -> bool:
@@ -1447,14 +1457,25 @@ def relation_identity_owners(vault: Vault) -> dict[str, str]:
             owners.setdefault(scope, note.rel)
         ident = note.fm.get("id")
         revision = note.fm.get("revision")
-        program = note.fm.get("program_id")
         if isinstance(ident, str) and isinstance(revision, int):
-            if not isinstance(program, str):
-                match = re.search(r"/programs/(prg-[0-9]+)/", note.rel)
-                program = match.group(1).upper() if match else ""
-            if program:
-                owners.setdefault(f"{str(program).upper()}:{ident}@r{revision}",
-                                  note.rel)
+            match = re.match(r"experience-design/experiences/([a-z0-9]+(?:-[a-z0-9]+)*)/", note.rel)
+            if match:
+                owners.setdefault(f"{match.group(1)}:{ident}@r{revision}", note.rel)
+        architecture_id = note.fm.get("record_id")
+        component = note.fm.get("component_ref")
+        if isinstance(architecture_id, str) and isinstance(revision, int):
+            if architecture_id.startswith("CON-"):
+                owners.setdefault(f"ARC:{architecture_id}@r{revision}", note.rel)
+            elif isinstance(component, str) and component:
+                owners.setdefault(f"ARC:{component}:{architecture_id}@r{revision}", note.rel)
+        if kebab(str(note.fm.get("type", ""))) == "solution-component":
+            component_id = note.fm.get("component_id")
+            if isinstance(component_id, str) and component_id:
+                owners.setdefault(f"solution-component:{component_id}", note.rel)
+        if note.rel == "solution-design/landscape.md":
+            owners.setdefault("solution-design/landscape", note.rel)
+        if note.rel == "design-system/MASTER.md":
+            owners.setdefault("design-system/MASTER", note.rel)
     ba_root = vault.root / "business-analysis"
     if ba_root.is_dir():
         for registry_path in sorted(ba_root.glob("*/_generated/registry.json")):
@@ -1480,13 +1501,17 @@ def relation_edges(vault: Vault) -> list[RelationEdge]:
             if not isinstance(values, list):
                 continue
             for value in values:
-                if not (isinstance(value, str) and value.startswith("[[")
-                        and value.endswith("]]")):
+                if isinstance(value, str) and value.startswith("[[") and value.endswith("]]" ):
+                    target, _anchor, alias = split_wikilink(value[2:-2])
+                    target_rel = f"{target}.md"
+                elif isinstance(value, str):
+                    target_rel = relation_identity_owners(vault).get(value, "")
+                    alias = value
+                else:
                     continue
-                target, _anchor, alias = split_wikilink(value[2:-2])
-                if target and alias and f"{target}.md" in vault.notes:
+                if target_rel and alias and target_rel in vault.notes:
                     edges.append(RelationEdge(
-                        note.rel, f"{target}.md", key, alias.strip()))
+                        note.rel, target_rel, key, alias.strip()))
     return sorted(edges, key=lambda item: (
         item.target, item.key, item.source, item.alias))
 
@@ -1507,17 +1532,26 @@ def check_relation_contract(vault: Vault, findings: list[Finding]) -> None:
                     " list item"))
                 continue
             for value in values:
-                if not (isinstance(value, str) and value.startswith("[[")
-                        and value.endswith("]]")):
+                semantic_types = {"experience", "journey", "flow-set", "screen", "state", "transition", "architecture-component", "architecture-module", "interface-contract", "data-model", "threat-model", "runtime-view", "reliability-view", "observability-view", "architecture-connection"}
+                note_type = kebab(str(note.fm.get("type", "")))
+                if (isinstance(value, str) and note_type in semantic_types
+                        and value in owners):
+                    target_rel = owners[value]
+                    target_note = vault.notes.get(target_rel)
+                    target = target_rel.removesuffix(".md")
+                    alias = value
+                elif not (isinstance(value, str) and value.startswith("[[")
+                          and value.endswith("]]")):
                     findings.append(Finding(
                         "error", note.rel, 1, "frontmatter_props",
                         f"relation '{key}' contains a non-wikilink value",
                         "typed relations contain only quoted vault-absolute"
                         " wikilinks"))
                     continue
-                target, _anchor, alias = split_wikilink(value[2:-2])
-                target_rel = f"{target}.md" if target else ""
-                target_note = vault.notes.get(target_rel)
+                else:
+                    target, _anchor, alias = split_wikilink(value[2:-2])
+                    target_rel = f"{target}.md" if target else ""
+                    target_note = vault.notes.get(target_rel)
                 if not target or target_note is None or target_note.generated:
                     findings.append(Finding(
                         "error", note.rel, 1, "frontmatter_props",
@@ -1557,8 +1591,11 @@ def check_relation_contract(vault: Vault, findings: list[Finding]) -> None:
                     if owner == target_rel and (
                         re.fullmatch(r"(?:SD|ADR)-[0-9]{3,}", identity)
                         or re.fullmatch(
-                            r"PRG-[0-9]{3,}:(?:JRN|FLW|SCR|STA|TRN)-"
-                            r"[0-9]{3,}@r[1-9][0-9]*", identity))
+                            r"[a-z0-9]+(?:-[a-z0-9]+)*:(?:JRN|FLW|SCR|STA|TRN)-"
+                            r"[0-9]{3,}@r[1-9][0-9]*", identity
+                        ) or re.fullmatch(
+                            r"ARC:(?:[a-z0-9]+(?:-[a-z0-9]+)*:)?(?:MOD|IFC|DAT|THR|RUN|REL|OBS|CON)-[0-9]{3,}@r[1-9][0-9]*",
+                            identity))
                 }
                 if target_identities and alias not in target_identities:
                     findings.append(Finding(
@@ -1599,12 +1636,16 @@ def relation_source_alias(note: Note) -> str:
     ident = note.fm.get("id")
     revision = note.fm.get("revision")
     if isinstance(ident, str) and isinstance(revision, int):
-        program = str(note.fm.get("program_id", ""))
-        if not program:
-            match = re.search(r"/programs/(prg-[0-9]+)/", note.rel)
-            program = match.group(1).upper() if match else ""
-        if program:
-            return f"{program.upper()}:{ident}@r{revision}"
+        match = re.match(r"experience-design/experiences/([a-z0-9]+(?:-[a-z0-9]+)*)/", note.rel)
+        if match:
+            return f"{match.group(1)}:{ident}@r{revision}"
+    record_id = note.fm.get("record_id")
+    component = note.fm.get("component_ref")
+    if isinstance(record_id, str) and isinstance(revision, int):
+        if record_id.startswith("CON-"):
+            return f"ARC:{record_id}@r{revision}"
+        if isinstance(component, str) and component:
+            return f"ARC:{component}:{record_id}@r{revision}"
     title = note.fm.get("title")
     if isinstance(title, str) and title:
         return title
@@ -1998,6 +2039,10 @@ def check_obsidian_payload(vault: Vault, findings: list[Finding],
                            payload_dir: Path | None,
                            require_local_projection: bool = False) -> None:
     policy = vault.policy
+    for error in graph_type_coverage_errors(policy):
+        findings.append(Finding(
+            "error", "vault-policy.json", 1, "obsidian_payload", error,
+            "assign every active document type to exactly one policy graph group"))
     obsidian = vault.root / ".obsidian"
     for name in PAYLOAD_FILES:
         if not (obsidian / name).is_file():
@@ -2864,6 +2909,29 @@ def graph_group_specs(policy: dict) -> list[dict]:
 def graph_group_queries(policy: dict) -> list[str]:
     return [str(group.get("query", ""))
             for group in graph_group_specs(policy)]
+
+
+def graph_type_coverage_errors(policy: dict) -> list[str]:
+    """Require every active authored type to have one graph color owner."""
+    owners: dict[str, list[str]] = {
+        doc_type: []
+        for doc_type in known_doc_types(policy) - set(NAV_DOC_TYPES)
+    }
+    for group in graph_group_specs(policy):
+        group_id = str(group.get("id", ""))
+        for doc_type in re.findall(r"tag:#doc/([a-z0-9-]+)",
+                                   str(group.get("query", ""))):
+            if doc_type in owners:
+                owners[doc_type].append(group_id)
+    errors = []
+    for doc_type, groups in sorted(owners.items()):
+        if not groups:
+            errors.append(f"active document type '{doc_type}' has no graph color group")
+        elif len(groups) != 1:
+            errors.append(
+                f"active document type '{doc_type}' has multiple graph color groups: "
+                + ", ".join(groups))
+    return errors
 
 
 def group_color(policy: dict, query: str) -> dict:

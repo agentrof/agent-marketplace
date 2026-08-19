@@ -21,7 +21,9 @@ configuration remain the source of truth.
    all setup-managed targets during this short window; no portable filesystem
    primitive can conditionally replace against an uncooperative writer. Check
    rejects any operation still required.
-4. Preserve authored documents, unknown project configuration fields and
+4. Preserve authored documents and valid retained project configuration fields;
+   setup removes unknown or retired configuration keys as part of the closed
+   schema replacement.
    user-owned Obsidian knobs. Refresh only policy-asserted JSON keys. Preserve
    user-owned instruction companions through the separate host projection
    choice gate.
@@ -74,9 +76,11 @@ recreate it without changing Requirement or Delivery state.
   retired project-selected display values used to find stale titles after an
   explicit designation rename.
 
-When open Deliveries exist, setup acquires the project Fence in `upgrade` mode,
-quiesces active Items, validates every Integration and Item control record with
-the advertised protocol adapters, applies only package-owned schema changes,
-and releases all Delivery barriers atomically before returning the Fence to
-`open`. A semantic conflict, unknown record version or incompatible adapter
-fails before authored content or Delivery work is changed.
+When open Deliveries exist, the Delivery coordinator acquires the project Fence
+in `upgrade` mode, quiesces active Items, validates every Integration and Item
+control record with the advertised protocol adapters, applies only
+package-owned schema changes, and releases all Delivery barriers atomically
+before returning the Fence to `open`. Setup never performs a remote mutation.
+If it discovers a protocol-1 Fence, complete the coordinator's
+`upgrade-fence-v1` migration after all Slots are free and after Governance is
+approved; protocol-1 state is otherwise readable only for that conversion.

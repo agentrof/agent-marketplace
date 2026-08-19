@@ -36,18 +36,10 @@ Judgment signals, each with the question that tests it:
 - Compliance boundary: a regulation names a subset (payroll,
   e-invoicing) whose rules change on an external schedule.
 
-Mechanical triggers (the compiler's advisory class: warnings labeled
-"split proposal", grouped under Advisories in _generated/status.md,
-each naming its effective threshold and its source: shipped default,
-scale level, or project override). A fired trigger is a PROPOSAL,
-never an instruction: present it through a choice gate;
-the owner either approves the split or the decline is recorded as a
-written deferral in the node's open questions:
-
-- A node's direct content docs exceed the schema threshold.
-- A node's rule_sets or its active BR count exceed their thresholds.
-- The node's processes touch two entity clusters with no shared entity
-  (the compiler computes this from links and reports disjoint clusters).
+No document count, rule count, nesting depth or line count automatically
+nominates a split. A split remains a human decision grounded in the semantic
+signals above. When a process no longer has a coherent owner or lifecycle,
+record the split rationale and obtain the owner's explicit approval.
 
 When a domain splits out: move its docs, re-mint their ids under the new
 code per the space standard's runbook, and record the split as a
@@ -55,9 +47,9 @@ decision doc naming what moved and why.
 
 ## When a process doc splits
 
-- Over the line threshold, more than three exception flows, or more
-  than two diagrams: split by workflow stage (goods-receipt versus
-  put-away) or by variant (standard versus consignment receipt).
+- Split by workflow stage (goods-receipt versus put-away) or variant
+  (standard versus consignment receipt) when one process is no longer a
+  comprehensible coherent flow.
 - A process spanning two domains does not pick a side: it moves to the
   deepest common ancestor node (usually the root) and links into both
   domains' entities and rules.
@@ -69,8 +61,8 @@ Promote it to entities/<slug>.md when ANY of these holds:
 
 - it has lifecycle states (the constitution's data-lifecycle mandate
   then also requires a state machine and a lifecycle rule_set);
-- two or more process docs reference it;
-- five or more of its fields are referenced by any rule;
+- it is referenced from more than one independent process context;
+- its fields participate in rules owned by distinct business concerns;
 - any of its fields freeze at issue time or propagate on update
   (propagation semantics need the propagation section).
 
@@ -80,10 +72,10 @@ explicitly, successor named.
 ## Rule_set and acceptance_set cuts
 
 - One rule_set per governed target: one entity lifecycle, one process's
-  constraints, one decision-table cluster. Above the per-set threshold
-  or with two unrelated governs targets: split by target.
-- One acceptance_set per process doc by default; above the per-set
-  threshold: split main flow versus exceptions. Cross-entity scenarios
+  constraints, one decision-table cluster. Split by target when concerns are
+  unrelated.
+- One acceptance_set per process doc by default; split main flow versus
+  exceptions when the scenarios serve distinct business outcomes. Cross-entity scenarios
   live at the deepest common ancestor node.
 
 ## Where does a new fact live? (the routing test)

@@ -39,6 +39,10 @@ verification intent; only delivery may record execution evidence.
   are findings routed to the owning developer); change requirements
   (requirement gaps escalate to the owner); claim a planned scenario ran; or
   verify beyond the current scope.
+- In `/configure operation verification`, owns the Verification Contract
+  draft, revision and approval preparation. It records commands only after
+  their accepted Solution decision bindings are explicit; it never places
+  those commands in config.
 
 ## Approach
 1. Follow the constitution included in the role prompt and load the bound
@@ -56,7 +60,7 @@ verification intent; only delivery may record execution evidence.
    equivalence or edge class is a plan gap.
 5. Run the coverage audit. Every criterion, rule and planned partition maps to
    a tagged test; each NO-TEST row is a finding for the owning developer.
-6. Run the configured suite and mutation command. Record exact results;
+6. Run the approved Verification Contract suite and mutation command. Record exact results;
    retries, unexplained skips and surviving changed-line mutants are findings.
 7. Verify the fresh running environment with the skill's live protocol,
    including an end-to-end process and its required propagation and

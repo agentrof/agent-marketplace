@@ -52,14 +52,30 @@ workspace/docs/
 ├── requirements/req-<digits>-<slug>.md
 ├── business-analysis/
 ├── solution-design/
+│   ├── landscape.md
+│   ├── components/<component-id>/component.md
+│   └── _generated/{component-catalog,capability-registry,topology}.json
 ├── system-architecture/
+│   ├── architecture.md
+│   ├── components/<component-id>/{component.md,modules/,interfaces/,data/,security/,runtime/,reliability/,observability/,decisions/}
+│   ├── connections/
+│   ├── _ledger/
+│   └── _generated/
 ├── design-system/
-├── experience-design/
+├── experience-design/experiences/<primary-process-slug>/
+│   ├── experience.md
+│   ├── {journeys,flows,screens,states,transitions,artifacts}/
+│   ├── _ledger/
+│   └── _generated/
+├── operation/
+│   ├── verification-contract.md
+│   └── environment-contract.md
 ├── backlog/
 │   ├── backlog.md
 │   ├── reviews/
 │   └── epics/<epic>/stories/<story>/{story.md,test-plan.md}
 └── delivery/
+    ├── governance/governance.md
     ├── definition-of-done.md
     └── deliveries/dlv-<digits>-<slug>/
         ├── delivery.md
@@ -141,6 +157,11 @@ Approval is local. `publish-execution-plan` is the only network writer for the
 approved plan and creates no Item worktree or execution slot. Claims begin only
 after the published plan and target baseline are verified remotely.
 
+Execution approval pins the approved Verification Contract on every Item. An
+Item marked `runtime_required: true` additionally pins the approved
+Environment Contract. Contract hash drift blocks Item start, resume, reopen and
+takeover; Operation remains outside Requirement and product-stage routing.
+
 ## Git topology
 
 The canonical remote refs are:
@@ -169,16 +190,21 @@ and do not authorize product edits.
 ## Fence and execution slots
 
 The project Fence serializes cross-machine changes that must not race:
-Delivery reservation, governed configuration, source handoff, plan barriers,
+Delivery reservation, governed Delivery Governance handoff, source handoff, plan barriers,
 upgrade and provider target mutation. Every mutation uses exact observed OIDs
 and an atomic remote transaction. A lost lease changes no semantic ref.
 
-`max_parallel` is the optional project-wide maximum number of simultaneously
-active Items. Slot refs `001..N` enforce that limit across Deliveries, hosts and
+Approved Delivery Governance owns `max_parallel`, the hard project-wide maximum
+number of simultaneously active Items. Slot refs `001..N` enforce that limit across Deliveries, hosts and
 machines. Activation advances the Item and selected Slot to the same candidate
 OID. Normal Item writes advance both refs together. Pause or integration
 deletes the Slot under an exact lease. A Slot is coordination evidence, not a
 schedule or backlog property.
+
+A protocol-1 Fence is accepted only by the dedicated quiescent migration path.
+It must be open with every Slot free; `upgrade-fence-v1` writes the
+protocol-2 Fence with the current approved Governance hash. No new Item
+mutation is legal until that conversion succeeds.
 
 ## Item execution
 
@@ -212,7 +238,7 @@ Slot atomically.
 
 ## Delivery Review and PR
 
-After every Item is integrated, the aggregate gate runs the configured tests,
+After every Item is integrated, the aggregate gate runs the approved Verification Contract tests,
 portable vault gate and Delivery checks on the exact Integration head. The one
 Delivery Review records outcome, deviations, evidence, unfinished scope and
 follow-up decisions. Its approval binds the reviewed Integration commit.
@@ -251,7 +277,7 @@ review evidence or integration bases.
 ## Setup and package upgrade
 
 Setup uses one convergent `inspect`, `apply`, `check` planner. It preserves
-authored Markdown, unknown project configuration and user-owned Obsidian
+authored Markdown, retained closed-schema configuration values and user-owned Obsidian
 settings while converging package-owned files and policy keys. Open Deliveries
 are quiesced behind the Fence before a package upgrade changes Delivery
 contracts. The detailed sequence is defined in

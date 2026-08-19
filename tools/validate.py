@@ -1527,71 +1527,6 @@ def check_ba_schema_shape(tree: Tree, findings: list[Finding]) -> None:
                         f" already claimed by {seen_prefixes[section]}",
                         "each id kind mints in its own section token")
                 seen_prefixes[section] = kind
-            # The scale ladder and its key sets are optional blocks
-            # (consumer schemas may omit them); when shipped they must be
-            # well-formed, or the compiler's merge degrades silently.
-            profiles = schema.get("scale_profiles")
-            if profiles is not None:
-                if not (isinstance(profiles, list) and profiles
-                        and all(isinstance(p, dict) for p in profiles)):
-                    err("scale_profiles must be a non-empty list of objects",
-                        "the scale ladder is schema data: one object per"
-                        " level")
-                else:
-                    levels = [p.get("level") for p in profiles]
-                    if (len(set(levels)) != len(levels)
-                            or not all(isinstance(lv, str) and lv
-                                       for lv in levels)):
-                        err("scale_profiles levels must be unique non-empty"
-                            " strings",
-                            "each ladder entry names one level exactly once")
-                    valid_rows = all(
-                        isinstance(p.get("multiplier"), int)
-                        and not isinstance(p.get("multiplier"), bool)
-                        and p["multiplier"] >= 1
-                        and isinstance(p.get("nesting_bonus"), int)
-                        and not isinstance(p.get("nesting_bonus"), bool)
-                        and p["nesting_bonus"] >= 0
-                        for p in profiles)
-                    if not valid_rows:
-                        err("scale_profiles entries must carry integer"
-                            " multiplier >= 1 and nesting_bonus >= 0",
-                            "levels only ever relax thresholds")
-                    else:
-                        if (profiles[0].get("multiplier") != 1
-                                or profiles[0].get("nesting_bonus") != 0):
-                            err("the first scale profile must be the 1x"
-                                " baseline (multiplier 1, nesting_bonus 0)",
-                                "the shipped thresholds ARE the smallest"
-                                " level; the ladder only climbs")
-                        multipliers = [p["multiplier"] for p in profiles]
-                        bonuses = [p["nesting_bonus"] for p in profiles]
-                        if (multipliers != sorted(multipliers)
-                                or bonuses != sorted(bonuses)):
-                            err("scale_profiles must be ordered smallest to"
-                                " largest (non-decreasing multiplier and"
-                                " nesting_bonus)",
-                                "the ladder reads in climbing order")
-            thresholds = schema.get("thresholds") or {}
-            for key_list in ("scaled_thresholds", "nesting_thresholds"):
-                names = schema.get(key_list)
-                if names is None:
-                    continue
-                if not (isinstance(names, list)
-                        and all(isinstance(n, str) for n in names)):
-                    err(f"{key_list} must be a list of threshold key names",
-                        "the which-keys-scale sets are data, never Python")
-                    continue
-                for name in names:
-                    if name not in thresholds:
-                        err(f"{key_list} names unknown threshold '{name}'",
-                            "every scaled key is a real thresholds key")
-            overlap = (set(schema.get("scaled_thresholds") or [])
-                       & set(schema.get("nesting_thresholds") or []))
-            if overlap:
-                err("thresholds cannot be both scaled and nesting:"
-                    f" {sorted(overlap)}",
-                    "a key multiplies or steps, never both")
 
 
 def _under_plugin_templates(tree: Tree, path: Path) -> bool:
@@ -1840,14 +1775,6 @@ def check_vault_policy_shape(tree: Tree, findings: list[Finding]) -> None:
                                for s in namespaces)):
                 err("tag_namespaces must be a non-empty list of kebab-case names",
                     "the tag vocabulary is closed; declare its namespaces")
-            peer_min = policy.get("nav_peer_min")
-            peer_max = policy.get("nav_peer_max")
-            if (not isinstance(peer_min, int) or not isinstance(peer_max, int)
-                    or isinstance(peer_min, bool) or isinstance(peer_max, bool)
-                    or not 0 <= peer_min <= peer_max):
-                err("nav_peer_min/nav_peer_max must be integers with"
-                    " 0 <= min <= max",
-                    "the nav footer peer range is policy, not prose")
             trees = policy.get("decision_trees")
             if not isinstance(trees, dict):
                 err("decision_trees must be an object",

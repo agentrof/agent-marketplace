@@ -6,7 +6,9 @@ exposure: internal
 
 # QA Verification
 
-Verification, not authorship. The QA role never writes or modifies product code or tests; it checks that the tests OTHERS wrote cover the requirements, that they pass for the right reason, and that the running application behaves.
+Verification, not authorship. QA never writes or modifies product code or tests; it checks that others' tests cover requirements, pass for the right reason, and prove the running application behaves.
+
+Load `obsidian-vault` before Operation Contract work.
 
 ## When to Use
 
@@ -41,10 +43,13 @@ Classify every planned check into exactly one category. A plan missing any categ
 
 ## Command Indirection
 
-- DO read `test_command`, `env_command` (verbs `up`, `down`,
-  `seed <scenario>`, `logs`, `url <service>`) and `mutation_command` from
-  `workspace/config.json`.
-- DON'T hardcode tool invocations or ports. This skill is stack-agnostic; the configured commands are the only entry points.
+- DO read `test_command`, `mutation_command` and dependency-audit disposition
+  from the approved `workspace/docs/operation/verification-contract.md`.
+  Read the runtime verbs (`up`, `down`, `seed <scenario>`, `logs`,
+  `url <service>`) from the approved Environment Contract when live runtime
+  verification is required.
+- DON'T hardcode tool invocations or ports. These approved contracts are the
+  only project entry points.
 - DO record the exact commands executed in the report, so the run is reproducible.
 - The suite is hermetic: the test and mutation commands never depend on a standing environment; a suite found depending on one is a blocking finding (waiver semantics in the environment stack skill's Hermetic Suite Rule).
 - The mutation gate is mandatory on code stories: run the mutation command scoped to the story's changed code-owned files (environment-owned paths are verified by the live protocol, not by mutants); a surviving mutant in changed lines is a finding, a missing mutation_command on a code story is a blocking finding. Method: [mutation](references/mutation.md). Read when running the mutation gate or judging a survivor.
@@ -72,7 +77,7 @@ A check is green only when it would fail for the right reason. Before trusting a
 
 ## Live Runtime Verification
 
-Automated green is necessary, not sufficient. After the suite passes, stand the environment up fresh with the configured environment command, seeded with a named scenario, and walk every navigable surface: console audit, network audit, render audit, interaction audit, service-log audit, each with explicit FAIL conditions and per-surface PASS/FAIL records. Tear the environment down when the protocol (and the design verification that reuses it) is done.
+Automated green is necessary, not sufficient. After the suite passes, stand the environment up fresh with the approved Environment Contract, seed a named scenario, and walk every navigable surface: console audit, network audit, render audit, interaction audit, service-log audit, each with explicit FAIL conditions and per-surface PASS/FAIL records. Tear the environment down when the protocol (and the design verification that reuses it) is done.
 
 - [runtime-protocol](references/runtime-protocol.md): the step-by-step live protocol with FAIL conditions per audit. Read when starting the live runtime pass.
 
@@ -91,7 +96,7 @@ Maintain ONE evolving verification record per increment: coverage matrix, suite 
 PASS requires ALL of:
 
 - Coverage matrix has zero NO-TEST rows and zero FAIL rows (scenario_report exit code 0).
-- Full suite passes via the configured command.
+- Full suite passes via the approved Verification Contract command.
 - Runtime protocol completed with zero Critical and zero High findings.
 - Every finding above Low is resolved or explicitly waived by a human.
 
@@ -100,7 +105,7 @@ FAIL if ANY of:
 - Any AC or BR id lacks a mapped test.
 - Any test fails, errors, or passes for the wrong reason.
 - Any runtime CRITICAL or FAIL condition observed.
-- Suite command missing, or env_command missing when the live protocol must run (escalate; do not improvise commands).
+- Verification Contract missing, or Environment Contract missing when the live protocol must run (escalate; do not improvise commands).
 
 Rules:
 

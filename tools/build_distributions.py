@@ -73,6 +73,7 @@ CANONICAL_COMPONENTS = {
     "templates",
 }
 REPOSITORY_DIRECTORIES = {
+    ".agentrof",
     ".changes",
     ".agents",
     ".claude",

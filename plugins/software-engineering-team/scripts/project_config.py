@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Single writer and checker for team-owned project configuration fields."""
+"""Single writer and validator for the closed project bootstrap config."""
 
 from __future__ import annotations
 
@@ -8,40 +8,22 @@ import json
 import os
 import sys
 import tempfile
-from pathlib import Path, PurePosixPath
+from pathlib import Path
 
 import marketplace_paths
 
 
 TEAM = "software-engineering-team"
-ALLOWED_SCALES = {
-    "small", "medium", "large", "x-large", "xx-large", "enterprise",
+SCHEMA_VERSION = 1
+CONFIG_FIELDS = {
+    "schema_version",
+    "team_id",
+    "output_language",
+    "terminology_language",
+    "doc_type_designations",
+    "doc_type_designation_history",
 }
-STACK_FIELDS = {
-    "backend_stack": {"python-fastapi"},
-    "frontend_stack": {"react-typescript"},
-    "environment_stack": {"docker-compose"},
-}
-COMMAND_FIELDS = {"test_command", "mutation_command", "env_command"}
-ORDINARY_FIELDS = {
-    "scale", "output_language", "terminology_language", *STACK_FIELDS,
-    "databases", *COMMAND_FIELDS, "source_dirs", "max_parallel", "limits",
-}
-OPTIONAL_FIELDS = {
-    *STACK_FIELDS, "databases", *COMMAND_FIELDS, "source_dirs",
-    "max_parallel", "limits",
-}
-LIMIT_KEYS = {
-    "node_direct_docs_warn", "rule_sets_per_node_warn",
-    "active_br_per_node_warn", "rules_per_set_warn",
-    "criteria_per_set_warn", "process_doc_lines_warn",
-    "open_row_age_days_warn", "space_docs_warn", "space_bytes_warn",
-    "nesting_warn_depth", "nesting_fail_depth",
-    "summary_max_lines_space", "summary_max_lines_default",
-    "nav_peer_min", "nav_peer_max", "experience_flows_per_set",
-    "experience_transitions_per_set", "experience_screens_per_leaf_domain",
-}
-NONNEGATIVE_LIMIT_KEYS = {"nav_peer_min", "nav_peer_max"}
+ORDINARY_FIELDS = {"output_language", "terminology_language"}
 
 
 def load(path: Path) -> dict:
@@ -66,116 +48,43 @@ def atomic(path: Path, value: dict) -> None:
         temporary.unlink(missing_ok=True)
 
 
-def positive_integer(value: object, *, allow_zero: bool = False) -> bool:
-    return (
-        isinstance(value, int) and not isinstance(value, bool)
-        and (value >= 0 if allow_zero else value > 0)
-    )
+def _string_map(value: object, field: str, errors: list[str]) -> None:
+    if not isinstance(value, dict):
+        errors.append(f"{field} must be an object")
+        return
+    for key, item in sorted(value.items()):
+        if not isinstance(key, str) or not key.strip():
+            errors.append(f"{field} keys must be non-empty strings")
+        if not isinstance(item, str) or not item.strip():
+            errors.append(f"{field}.{key} must be a non-empty string")
 
 
-def valid_relative_path(value: object) -> bool:
-    if not isinstance(value, str) or not value.strip() or "\\" in value:
-        return False
-    path = PurePosixPath(value)
-    return not path.is_absolute() and value == path.as_posix() \
-        and all(part not in {"", ".", ".."} for part in path.parts)
-
-
-def effective_limit_pairs(config: dict) -> tuple[tuple[int, int], tuple[int, int]]:
-    """Resolve paired limits after shipped defaults, scale, then overrides."""
-    plugin = Path(__file__).resolve().parents[1]
-    space_schema = json.loads((
-        plugin / "skill-content" / "business-analysis" / "data"
-        / "space-schema.json"
-    ).read_text(encoding="utf-8"))
-    vault_policy = json.loads((
-        plugin / "skill-content" / "obsidian-vault" / "data"
-        / "vault-policy.json"
-    ).read_text(encoding="utf-8"))
-    thresholds = space_schema["thresholds"]
-    nesting_warn = int(thresholds["nesting_warn_depth"])
-    nesting_fail = int(thresholds["nesting_fail_depth"])
-    scale = config.get("scale", "small")
-    profile = next(
-        (row for row in space_schema.get("scale_profiles", [])
-         if row.get("level") == scale),
-        {},
-    )
-    bonus = profile.get("nesting_bonus", 0)
-    if isinstance(bonus, int) and not isinstance(bonus, bool) and bonus >= 0:
-        nesting_warn += bonus
-        nesting_fail += bonus
-    nav_min = int(vault_policy["nav_peer_min"])
-    nav_max = int(vault_policy["nav_peer_max"])
-    limits = config.get("limits")
-    if isinstance(limits, dict):
-        nesting_warn = limits.get("nesting_warn_depth", nesting_warn)
-        nesting_fail = limits.get("nesting_fail_depth", nesting_fail)
-        nav_min = limits.get("nav_peer_min", nav_min)
-        nav_max = limits.get("nav_peer_max", nav_max)
-    return (nesting_warn, nesting_fail), (nav_min, nav_max)
+def _history_map(value: object, errors: list[str]) -> None:
+    if not isinstance(value, dict):
+        errors.append("doc_type_designation_history must be an object")
+        return
+    for key, entries in sorted(value.items()):
+        if not isinstance(key, str) or not key.strip():
+            errors.append("doc_type_designation_history keys must be non-empty strings")
+        if not isinstance(entries, list):
+            errors.append(f"doc_type_designation_history.{key} must be a list")
 
 
 def check(config: dict) -> list[str]:
-    """Validate active fields and any optional delivery field that is set."""
+    """Validate the team-owned, intentionally narrow bootstrap surface."""
     errors: list[str] = []
-    owner = marketplace_paths.team_from_config(config)
-    if owner != TEAM:
+    for field in sorted(set(config) - CONFIG_FIELDS):
+        errors.append(f"config contains unknown or retired field: {field}")
+    if config.get("schema_version") != SCHEMA_VERSION:
+        errors.append(f"schema_version must be {SCHEMA_VERSION}")
+    if marketplace_paths.team_from_config(config) != TEAM:
         errors.append(f"team_id must be {TEAM}")
-    if config.get("scale", "small") not in ALLOWED_SCALES:
-        errors.append("unsupported scale")
     for field in ("output_language", "terminology_language"):
         value = config.get(field)
         if not isinstance(value, str) or not value.strip():
             errors.append(f"{field} must be a non-empty string")
-    for field, allowed in STACK_FIELDS.items():
-        if field in config and config[field] not in allowed:
-            errors.append(f"{field} must be one of: {', '.join(sorted(allowed))}")
-    if "databases" in config:
-        databases = config["databases"]
-        if not isinstance(databases, list) or not databases:
-            errors.append("databases must be a non-empty list")
-        elif any(value not in {"sql", "nosql"} for value in databases):
-            errors.append("databases values must be sql or nosql")
-        elif len(databases) != len(set(databases)):
-            errors.append("databases values must be unique")
-    for field in sorted(COMMAND_FIELDS):
-        if field in config and (
-            not isinstance(config[field], str) or not config[field].strip()
-        ):
-            errors.append(f"{field} must be a non-empty command string")
-    if "source_dirs" in config:
-        values = config["source_dirs"]
-        if not isinstance(values, list) or not values:
-            errors.append("source_dirs must be a non-empty list")
-        elif any(not valid_relative_path(value) for value in values):
-            errors.append("source_dirs must contain normalized repository-relative paths")
-        elif len(values) != len(set(values)):
-            errors.append("source_dirs values must be unique")
-    if "max_parallel" in config and not positive_integer(config["max_parallel"]):
-        errors.append("max_parallel must be a positive integer")
-    if "limits" in config:
-        limits = config["limits"]
-        if not isinstance(limits, dict):
-            errors.append("limits must be an object")
-        else:
-            for key in sorted(set(limits) - LIMIT_KEYS):
-                errors.append(f"limits contains unknown key: {key}")
-            for key, value in sorted(limits.items()):
-                if key in LIMIT_KEYS and not positive_integer(
-                    value, allow_zero=key in NONNEGATIVE_LIMIT_KEYS
-                ):
-                    qualifier = "non-negative" if key in NONNEGATIVE_LIMIT_KEYS else "positive"
-                    errors.append(f"limits.{key} must be a {qualifier} integer")
-            try:
-                (warn, fail), (minimum, maximum) = effective_limit_pairs(config)
-            except (OSError, KeyError, TypeError, ValueError, json.JSONDecodeError):
-                errors.append("shipped limit defaults are missing or invalid")
-            else:
-                if isinstance(warn, int) and isinstance(fail, int) and warn >= fail:
-                    errors.append("effective nesting_warn_depth must be lower than nesting_fail_depth")
-                if isinstance(minimum, int) and isinstance(maximum, int) and minimum > maximum:
-                    errors.append("effective nav_peer_min must not exceed nav_peer_max")
+    _string_map(config.get("doc_type_designations"), "doc_type_designations", errors)
+    _history_map(config.get("doc_type_designation_history"), errors)
     return errors
 
 
@@ -211,11 +120,6 @@ def main(argv=None) -> int:
     p.add_argument("--value", required=True)
     p.add_argument("--dry-run", action="store_true")
     p.add_argument("--json", action="store_true")
-    p = sub.add_parser("unset")
-    p.add_argument("--config", required=True)
-    p.add_argument("--field", required=True, choices=sorted(OPTIONAL_FIELDS))
-    p.add_argument("--dry-run", action="store_true")
-    p.add_argument("--json", action="store_true")
     args = parser.parse_args(argv)
     path = Path(args.config).resolve()
     try:
@@ -231,17 +135,10 @@ def main(argv=None) -> int:
             for value in errors:
                 print(f"ERROR {path}:1 [project_config] {value}")
         return 1 if errors else 0
-    before: object
-    after: object
+    before = config.get(args.field)
+    after = parse_value(args.value)
     proposed = dict(config)
-    if args.command == "set":
-        before = config.get(args.field)
-        after = parse_value(args.value)
-        proposed[args.field] = after
-    else:
-        before = config.get(args.field)
-        after = None
-        proposed.pop(args.field, None)
+    proposed[args.field] = after
     errors = check(proposed)
     if errors:
         for value in errors:

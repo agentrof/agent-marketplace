@@ -50,10 +50,10 @@ behavior is host-neutral; Claude and Codex are packaging adapters.
 19. Requirement Flow ends at a committed, approved backlog. Delivery Flow owns
     scope reservation, execution coordination, review, PR handoff and merge;
     Release Management remains a later scope.
-20. Delivery configuration fields remain optional before activation. Active
-    Requirement limits and every configured optional field are validated; no
-    field is removed merely because a later Release Management consumer is
-    out of scope.
+20. `workspace/config.json` is a closed bootstrap contract. Technology and
+    datastore choices belong to accepted Solution decisions, commands belong
+    to Operation Contracts, and the hard Delivery concurrency guard belongs to
+    approved Delivery Governance under `workspace/docs/delivery/governance/`.
 
 The normative Requirement and Delivery lifecycle is documented in
 [requirement-delivery-protocol.md](requirement-delivery-protocol.md).

@@ -20,7 +20,9 @@ workflow mode is created.
    owns the UTC approval stamp, semantic source hash and status tag.
 4. Run only `required` stages in dependency order. `reuse` resolves to an
    approved current package; `not_applicable` has no evidence refs and keeps a
-   concrete rationale. Every stage entry checks the same prerequisites.
+   concrete rationale. Every stage entry checks the same prerequisites. Each
+   completed stage writes a compiler-owned Stage Results receipt with its exact
+   result reference and hash; Stage Results are excluded from the semantic hash.
 5. Recheck the Requirement after every stage handoff. Semantic impact changes
    invalidate approval and require a new approval before downstream work.
 6. Run Backlog Planning only when all required stage packages are current and

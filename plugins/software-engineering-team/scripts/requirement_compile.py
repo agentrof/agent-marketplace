@@ -23,6 +23,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from ba_compile import parse_frontmatter
+import stage_package
 
 
 TEAM = "software-engineering-team"
@@ -37,7 +38,7 @@ REQUEST_KINDS = {"feature", "defect", "technical"}
 URGENCIES = {"low", "normal", "high", "critical"}
 STATUSES = {"draft", "approved", "resolved_no_change", "superseded", "withdrawn"}
 TERMINAL_STATUSES = {"resolved_no_change", "superseded", "withdrawn"}
-MUTABLE_FIELDS = {"status", "approved_at_utc", "source_hash"}
+MUTABLE_FIELDS = {"status", "approved_at_utc", "source_hash", "stage_results_hash"}
 NAV_MARKER = "<!-- sec: nav -->"
 MAP_MARKER = "<!-- requirement_compile.py: generated requirements -->"
 REQUIRED_SECTIONS = (
@@ -190,7 +191,12 @@ def section_text(body: str, heading: str) -> str:
 
 
 def authored_body(body: str) -> str:
-    return body.split(NAV_MARKER, 1)[0].rstrip() + "\n"
+    value = body.split(NAV_MARKER, 1)[0]
+    value = re.sub(
+        r"(?ms)^## Stage Results(?:\s+<!--.*?-->)?\s*\n.*?(?=^## |\Z)",
+        "", value,
+    )
+    return value.rstrip() + "\n"
 
 
 def semantic_hash(props: dict, body: str) -> str:
@@ -208,6 +214,94 @@ def semantic_hash(props: dict, body: str) -> str:
         ensure_ascii=False, sort_keys=True, separators=(",", ":"),
     )
     return "sha256:" + hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+def stage_results(body: str) -> dict[str, list[tuple[str, str]]]:
+    match = re.search(r"(?ms)^## Stage Results(?:\s+<!--.*?-->)?\s*\n(.*?)(?=^## |\Z)", body)
+    section = match.group(1).strip() if match else ""
+    results: dict[str, list[tuple[str, str]]] = {}
+    for line in section.splitlines():
+        if not line.startswith("|") or line.lstrip().startswith("|---"):
+            continue
+        cells = split_cells(line)
+        if len(cells) == 3 and cells[0].casefold() != "stage":
+            stage, reference, digest = (cell.strip() for cell in cells)
+            if stage in STAGES and reference and digest:
+                results.setdefault(stage, []).append((reference, digest))
+    return results
+
+
+def stage_results_body(body: str, results: dict[str, list[tuple[str, str]]]) -> str:
+    rows = ["## Stage Results <!-- compiler-owned -->", "", "| stage | result_ref | result_hash |", "|---|---|---|"]
+    for stage in STAGES:
+        entries = results.get(stage, [])
+        if entries:
+            rows.extend(f"| {stage} | {reference} | {digest} |"
+                        for reference, digest in entries)
+        else:
+            rows.append(f"| {stage} |  |  |")
+    generated = "\n".join(rows) + "\n\n"
+    pattern = r"(?ms)^## Stage Results(?:\s+<!--.*?-->)?\s*\n.*?(?=^## |\Z)"
+    if re.search(pattern, body):
+        body = re.sub(pattern, generated, body)
+    else:
+        marker = "## Navigation <!-- sec: nav -->"
+        body = body.replace(marker, generated + marker, 1)
+    return body
+
+
+def bind_stage(path: Path, stage: str, result_refs: list[str] | str,
+               expected_hash: str = "") -> None:
+    """Write one compiler-owned receipt after resolving the exact package.
+
+    A result is never accepted merely because a note at a similar path is
+    approved.  The shared resolver owns the stage/type/path/hash contract.
+    Rebinding a predecessor invalidates every downstream receipt.
+    """
+    if stage not in STAGES:
+        raise ValueError(f"unknown stage: {stage}")
+    props, body = split_note(path)
+    if props.get("status") != "approved":
+        raise ValueError("Stage Results can only bind to an approved Requirement")
+    raw_refs = [result_refs] if isinstance(result_refs, str) else result_refs
+    targets = []
+    for raw in raw_refs:
+        target = raw.strip()
+        if target.startswith("[[") and target.endswith("]]" ):
+            target = target[2:-2].split("|", 1)[0]
+        if target:
+            targets.append(target)
+    if not targets or len(set(targets)) != len(targets):
+        raise ValueError("bind-stage needs one or more unique result references")
+    rows = {row[0]: row for row in impact_rows(body)}
+    disposition, reuse_refs = rows[stage][1], rows[stage][2]
+    if disposition == "not_applicable":
+        raise ValueError(f"{stage} is not_applicable and cannot receive a receipt")
+    if disposition == "reuse" and set(targets) != set(reuse_refs):
+        raise ValueError(f"{stage} reuse receipt set must match Stage Impact references")
+    if stage != "experience-design" and len(targets) != 1:
+        raise ValueError(f"{stage} accepts exactly one package receipt")
+    docs = path.parents[1]
+    receipts = []
+    for target in targets:
+        receipt, errors = stage_package.verify(
+            docs, stage, target, expected_hash, require_committed=True,
+        )
+        if errors or receipt is None:
+            raise ValueError("; ".join(errors or ["invalid stage package"]))
+        receipts.append(receipt)
+    results = stage_results(body)
+    results[stage] = [(str(receipt["result_ref"]), str(receipt["package_hash"]))
+                      for receipt in receipts]
+    # A changed predecessor invalidates every dependent receipt, even where
+    # their old hash happened to match coincidentally.
+    for downstream in STAGES[STAGES.index(stage) + 1:]:
+        results.pop(downstream, None)
+    body = stage_results_body(body, results)
+    props["stage_results_hash"] = "sha256:" + hashlib.sha256(
+        json.dumps(results, sort_keys=True, separators=(",", ":")).encode()
+    ).hexdigest()
+    atomic_text(path, render_note(props, body))
 
 
 def split_cells(line: str) -> list[str]:
@@ -251,6 +345,11 @@ def impact_rows(body: str) -> list[tuple[str, str, list[str], str]]:
             match.group(1).split("|", 1)[0].split("#", 1)[0].strip()
             for match in WIKILINK_RE.finditer(cells[2])
         ]
+        # A Stage Impact receipt is an exact package ref, not necessarily a
+        # vault link.  Keep plain canonical refs machine-readable too.
+        raw_refs = cells[2].strip()
+        if not refs and raw_refs and raw_refs not in {"-", "—", "none", "n/a"}:
+            refs = [value.strip() for value in cells[2].split(",") if value.strip()]
         rows.append((cells[0], cells[1], refs, cells[3]))
     return rows
 
@@ -381,8 +480,10 @@ def requirement_findings(path: Path, require_approved: bool = False) -> list[str
             seen.add(stage)
             if disposition not in DISPOSITIONS:
                 findings.append(f"invalid disposition for {stage}: {disposition}")
-            if disposition in {"required", "reuse"} and not refs:
-                findings.append(f"{stage} {disposition} requires at least one evidence reference")
+            if disposition == "required" and refs:
+                findings.append(f"{stage} required must have an empty reuse_refs set")
+            if disposition == "reuse" and (not refs or (stage != "experience-design" and len(refs) != 1)):
+                findings.append(f"{stage} reuse requires one package reference, or one-or-more Experience packages")
             if disposition == "not_applicable" and refs:
                 findings.append(f"{stage} not_applicable must have an empty evidence set")
             if not rationale.strip() or PLACEHOLDER_RE.search(rationale):
@@ -390,6 +491,21 @@ def requirement_findings(path: Path, require_approved: bool = False) -> list[str
         missing = sorted(set(STAGES) - seen)
         if missing:
             findings.append("Stage Impact is missing: " + ", ".join(missing))
+        by_stage = {stage: disposition for stage, disposition, _refs, _why in rows}
+        prerequisites = {
+            "solution-design": ("business-analysis",),
+            "design-system": ("business-analysis", "solution-design"),
+            "experience-design": ("business-analysis", "solution-design", "design-system"),
+        }
+        for dependent, parents in prerequisites.items():
+            if by_stage.get(dependent) != "not_applicable":
+                absent = [parent for parent in parents
+                          if by_stage.get(parent) == "not_applicable"]
+                if absent:
+                    findings.append(
+                        f"{dependent} cannot apply while prerequisite stage(s) are not_applicable: "
+                        + ", ".join(absent)
+                    )
     if NAV_MARKER not in body or "[[maps/requirements|Requirements]]" not in body.split(NAV_MARKER, 1)[1]:
         findings.append("Navigation must start from maps/requirements")
     if status in {"approved", "resolved_no_change", "superseded", "withdrawn"} or require_approved:
@@ -399,6 +515,13 @@ def requirement_findings(path: Path, require_approved: bool = False) -> list[str
             findings.append("approved_at_utc must be a UTC timestamp")
         if props.get("source_hash") != semantic_hash(props, body):
             findings.append("approved source_hash is stale")
+    results = stage_results(body)
+    if props.get("stage_results_hash"):
+        expected_results_hash = "sha256:" + hashlib.sha256(
+            json.dumps(results, sort_keys=True, separators=(",", ":")).encode()
+        ).hexdigest()
+        if props.get("stage_results_hash") != expected_results_hash:
+            findings.append("stage_results_hash is stale")
     return findings
 
 
@@ -437,7 +560,7 @@ def requirement_incorporated(docs: Path, identifier: str) -> bool:
             props, _ = split_note(story)
         except (OSError, ValueError):
             continue
-        links = props.get("derives_from", [])
+        links = props.get("implements", [])
         if not isinstance(links, list):
             continue
         if any(isinstance(value, str) and needle in value for value in links):
@@ -492,8 +615,12 @@ def create_requirement(docs: Path, slug: str, title: str, request_kind: str,
         "## Scope and Non-Goals\n\nTODO: define included and excluded behavior.\n\n"
         "## Evidence and Constraints\n\nTODO: record evidence, constraints and urgency rationale.\n\n"
         "## Stage Impact\n\n"
-        "| stage | disposition | evidence_refs | rationale |\n"
+        "| stage | disposition | reuse_refs | rationale |\n"
         "|---|---|---|---|\n" + rows + "\n\n"
+        "## Stage Results <!-- compiler-owned -->\n\n"
+        "| stage | result_ref | result_hash |\n"
+        "|---|---|---|\n"
+        + "\n".join(f"| {stage} |  |  |" for stage in STAGES) + "\n\n"
         "## Navigation <!-- sec: nav -->\n\n"
         "- [[maps/requirements|Requirements]]\n"
     )
@@ -524,6 +651,26 @@ def approve_requirement(path: Path) -> None:
     if closing:
         atomic_text(path, original)
         raise ValueError("approval closing check failed: " + "; ".join(closing))
+
+
+def begin_revision(path: Path) -> None:
+    """Open a semantic Requirement revision and invalidate every receipt."""
+    props, body = split_note(path)
+    if props.get("status") != "approved":
+        raise ValueError("only an approved Requirement can begin a revision")
+    findings = requirement_findings(path, require_approved=True)
+    if findings:
+        raise ValueError("cannot revise invalid Requirement: " + "; ".join(findings))
+    props["status"] = "draft"
+    props["revision"] = int(props.get("revision", 1) or 1) + 1
+    for key in ("approved_at_utc", "source_hash", "stage_results_hash"):
+        props.pop(key, None)
+    props["tags"] = [
+        tag for tag in props.get("tags", [])
+        if isinstance(tag, str) and not tag.startswith("status/")
+    ] + ["status/draft"]
+    body = stage_results_body(body, {})
+    atomic_text(path, render_note(props, body))
 
 
 def transition_terminal(path: Path, status: str, reason: str,
@@ -702,6 +849,15 @@ def main(argv: list[str] | None = None) -> int:
     status = sub.add_parser("status")
     status.add_argument("--requirement", required=True)
     status.add_argument("--json", action="store_true")
+    bind = sub.add_parser("bind-stage")
+    bind.add_argument("--requirement", required=True)
+    bind.add_argument("--stage", choices=STAGES, required=True)
+    bind.add_argument("--result-ref", action="append", required=True)
+    bind.add_argument("--expected-hash", default="")
+    # Kept as a compatibility spelling, but never trusted over resolver output.
+    bind.add_argument("--result-hash", default="")
+    revision = sub.add_parser("begin-revision")
+    revision.add_argument("--requirement", required=True)
     args = parser.parse_args(argv)
     try:
         if args.command == "init":
@@ -744,6 +900,15 @@ def main(argv: list[str] | None = None) -> int:
             else:
                 print(f"{payload['id']}: {payload['status']}")
             return 0 if not payload["findings"] else 1
+        if args.command == "bind-stage":
+            bind_stage(Path(args.requirement).resolve(), args.stage,
+                       args.result_ref, args.expected_hash or args.result_hash)
+            print(f"requirement_compile: bound {args.stage}")
+            return 0
+        if args.command == "begin-revision":
+            begin_revision(Path(args.requirement).resolve())
+            print(f"requirement_compile: began revision for {args.requirement}")
+            return 0
         docs = docs_root(args.docs)
         if args.render:
             render_navigation(docs)

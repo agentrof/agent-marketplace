@@ -39,7 +39,9 @@ Every evaluation scores its options against all six dimensions; a skipped dimens
 
 1. **Requirement fit:** which cited requirements and quantified budgets the option satisfies, misses or exceeds.
 2. **Sustainability and operability:** who runs it, how it fails, how it is observed, what keeps it healthy in year two.
-3. **Team capability:** what the team can build and operate today within its configured stacks; learning cost is a real cost.
+3. **Team capability:** what the team can build and operate today with the
+   accepted component technology decisions and available method skills;
+   learning cost is a real cost.
 4. **Cost and lock-in:** acquisition, run-rate trajectory, and what leaving costs; pricing-model risk is named.
 5. **Security and compliance:** trust boundaries the option moves, data it holds, obligations it creates.
 6. **Evolution and exit:** the named exit path; a component that cannot be replaced or retired was never evaluated, only adopted.
@@ -47,7 +49,9 @@ Every evaluation scores its options against all six dimensions; a skipped dimens
 ## Verdict Rules
 
 - Every verdict names its strongest rejected alternative; "no alternative exists" is a claim that must be defended, not a default.
-- Build, buy or integrate is explicit per component. Built components stay within the configured stacks; a verdict needing a new stack routes to the configure entry and arrives as a maintainer release, never as a silent exception.
+- Build, buy or integrate is explicit per component. A built component names
+  its accepted technology decision; a new choice is evaluated and accepted in
+  Solution Design, never introduced as a silent exception.
 - Prefer boring proven pieces; novelty buys its place with a named, measured advantage.
 - Unquantified constraints escalate to the owner; an assumed number is a defect in the record.
 - Decision records follow the software-architecture skill's decision-records mechanics (Y-statement or full record; supersede, never edit); solution decisions live as individual notes under the tree's decisions/ directory, and decision-log.md is the generated index.

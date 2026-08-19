@@ -16,7 +16,7 @@ workspace/docs/            the vault root (open THIS in the vault app)
                            budgets.md, domains/, decisions/,
                            _generated/
   solution-design/         landscape, engagements, decisions/, index
-  system-architecture/     living documents, decisions/, index
+  system-architecture/     Delivery-owned architecture root, component/module facets, decisions/, ledger and generated registry
   design-system/           MASTER and page overrides
   backlog/                 delivery backlog, nested by epic
     backlog.md             canonical project backlog hub

@@ -12,19 +12,39 @@ authoritative.
 - Requirement Flow has approved the request impact matrix. Every stage marked
   `required` is approved/current, every `reuse` target is valid, and every
   `not_applicable` row has its concrete rationale.
+- Manual mode may start from a strict-current BA scope, solution landscape,
+  Design System MASTER and one or more living Experience packages without a Requirement. In that
+  mode the root package records `Input Package Coverage` rather than
+  Requirement Coverage.
 - A feature, defect or technical intake carries the exact approved source,
   issue or decision evidence selected by that impact matrix.
 - The user explicitly starts the backlog entry and reviews each authored
   package.
-- Requirement state comes only from the tracked documents and their checks.
+- Requirement state, when present, comes only from the tracked documents and
+  their checks.
 
 ## 1. Materialize the backlog tree
 
 Run the packaged backlog compiler:
 
 ```text
-backlog_compile.py init --docs <workspace>/docs
+backlog_compile.py init --docs <workspace>/docs --planning-mode requirement --requirement-ref REQ-###
 ```
+
+For a manual chain, initialize with the exact approved input package refs:
+
+```text
+backlog_compile.py init --docs <workspace>/docs --planning-mode manual \\
+  --input-ref "business-analysis/<space>/space" \\
+  --input-ref "[[solution-design/landscape|Solution landscape]]" \\
+  --input-ref "[[design-system/MASTER|Design Master]]" \\
+  --input-ref "checkout@r3"
+```
+
+The compiler validates those four strict-current package families and renders
+`backlog/_generated/input-package-coverage.md`. Requirement mode instead
+records `requirement_ref: REQ-###`; stories carry `implements: REQ-###` and
+the Requirement Stage Results receipt is required before approval.
 
 The root contains `backlog.md` and `reviews/`. Each epic is a folder with an
 `epic.md`, `reviews/`, and `stories/`. Each story folder contains exactly
@@ -62,7 +82,7 @@ by its stories and root review. Add canonical `analysis_scopes` to
 `backlog.md` (`<space>` or `<space>#domains/<path>`) only when the whole named
 approved BA scope must receive an exact covered-or-deferred disposition.
 
-Use vault-absolute wikilinks for `criterion_refs`, `experience_refs`,
+Use exact `<experience>:<ID>@rN` values such as `checkout:SCR-001@r2` for `experience_refs`; use vault-absolute wikilinks for `criterion_refs`,
 `derives_from`, `depends_on`, `uses_design` and `constrained_by`. Criterion
 links target the approved owning note and carry its BA registry-qualified
 criterion or rule identity as the alias.
@@ -137,7 +157,7 @@ Only after every epic package and review is green, invoke one fresh
 `backlog-reviewer` with the root backlog, every epic and the exact expected
 `derives_from` and `related_to` sets. Wait for its return. The Product Owner
 then writes the root review note and any source fixes. The root review covers
-cross-epic overlap, dependency direction, cycles, release ordering, shared
+cross-epic overlap, dependency direction, cycles, delivery sequencing, shared
 contracts, deferred criteria, global test coverage, findings and verdict.
 
 Use the current host's agent invocation and wait mechanism; no host-specific

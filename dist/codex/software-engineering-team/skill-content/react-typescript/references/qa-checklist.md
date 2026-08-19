@@ -99,4 +99,4 @@ Run for every interactive component (details in [accessibility](accessibility.md
 
 - [ ] Every business rule in scope has at least one `[BR-###]`-tagged test
 - [ ] The rule-to-test matrix has no untested rows without a written justification
-- [ ] Suite runs use the configured test command; e2e runs target an environment stood up through the configured environment command; results recorded per category above
+- [ ] Suite runs use the approved Verification Contract command; e2e runs target an environment stood up through the approved Environment Contract; results recorded per category above

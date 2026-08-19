@@ -54,7 +54,9 @@ Read `flows/requirement.md` completely before dispatching the first stage.
 5. Re-run the Requirement compiler after each stage handoff. A semantic impact
    change returns the Requirement to draft and requires a new approval. Stage
    approvals remain the existing stage compilers' gates; this entry does not
-   duplicate their authoring logic.
+   duplicate their authoring logic. Bind each approved package with
+   `requirement_compile.py bind-stage`; the compiler writes the Stage Results
+   receipt and excludes it from the Requirement semantic hash.
 
 6. Route to `/backlog-plan` only when the Requirement is approved, all required
    stage packages are approved/current, all reuse targets and N/A rows remain

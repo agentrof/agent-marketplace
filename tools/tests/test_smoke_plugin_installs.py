@@ -35,13 +35,16 @@ class HostSmokeContracts(unittest.TestCase):
                     os.environ.copy(),
                 )
 
-    def test_installed_package_smoke_requires_delivery_entrypoints(self):
+    def test_installed_package_smoke_requires_product_and_delivery_entrypoints(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary) / "package"
             root.mkdir()
             for relative in (
                 "scripts/setup_project.py", "scripts/setup_check.py",
                 "scripts/requirement_route.py", "scripts/backlog_compile.py",
+                "scripts/stage_package.py", "scripts/ba_compile.py",
+                "scripts/landscape_check.py", "scripts/design_system_compile.py",
+                "scripts/experience_compile.py", "scripts/architecture_compile.py",
                 "scripts/delivery_compile.py", "scripts/delivery_git.py",
                 "scripts/delivery_provider.py",
             ):

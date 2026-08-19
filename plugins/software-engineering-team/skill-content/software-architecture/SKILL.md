@@ -6,13 +6,29 @@ exposure: internal
 
 # Software Architecture
 
-Decision rules for evolving the living architecture documents: structure, boundaries, contract conventions, budgets, and cross-cutting choices, one delta at a time.
+Decision rules for Delivery-owned System Architecture: component/module/facet
+records, boundaries, contract conventions, budgets, and cross-cutting choices,
+one active Delivery Item delta at a time.
 
 ## When to Use
 
-Load for every architecture-delta step: system structure, module boundaries, interface contract conventions, non-functional budgets, and cross-cutting decisions (authorization, consistency, caching, resilience, observability). Upstream, the solution-architecture skill's recorded landscape decisions bind every delta: when the spawn inputs include the solution-design landscape and decision index, deltas conform to their verdicts, and a delta that must contradict one escalates instead of deviating. Do NOT load for store schema detail; the sql-database-design and nosql-database-design siblings own that. Do NOT load for implementation; realization lives in the bound stack skills.
+Load only for an active Delivery Item whose `architecture_impact` is required.
+Materialize `workspace/docs/system-architecture/` adaptively with
+`architecture_compile.py`: root, exact Solution component hubs, recursive
+modules and only the needed interface/data/security/runtime/reliability/
+observability facets. Upstream accepted Solution component decisions bind every
+delta; a contradiction escalates instead of deviating. Do NOT load for store
+schema detail; the sql-database-design and nosql-database-design siblings own
+that. Do NOT load for implementation; realization lives in component-selected
+method skills.
+Read `obsidian-vault`; its taxonomy and ledger rules govern docs mutations.
 
-Living-document hygiene: each living document carries a head summary and section index, maintained with every delta; reads are summary-first, full sections only where the delta touches. A head that no longer matches its body is a defect of the delta that changed it.
+Each root, component hub and leaf record carries Delivery Item provenance,
+stable identity and revision. Existing records change only through
+`begin-revision --item-ref`; ledger snapshots are durable and generated
+registries are disposable. Decisions and standards declare `affected_scopes`;
+the compiler derives their lowest common ancestor path. Cross-component
+connections live at the architecture root.
 
 Vault traceability is typed and cross-subtree. Living docs and ADRs use
 `derives_from`, `implements`, `satisfies` and `constrained_by` to cite the
@@ -24,17 +40,21 @@ journeys, screens and solution boundaries. Story identity remains a raw
 are aliased wikilinks. Run the
 relation renderer after each architecture delta.
 
-## Style Selection
+## Topology Application
 
-- The default verdict is a modular monolith: one repo, one backend app, one frontend app, module boundaries enforced inside the codebase. Any departure is a minted decision note, never a preference.
-- Styles are guard rails, never menus. DON'T choose service decomposition or command-query separation without a named forcing symptom recorded in a decision note. "We might need to scale later" is a prediction, not a symptom.
+- Solution Design is the sole owner of the project topology: app count,
+  component boundaries, sourcing, names and selected technologies. This skill
+  never selects a default topology or changes it.
+- Apply the accepted component catalog exactly. If a Delivery Item exposes a
+  missing boundary or a topology contradiction, stop and return it to Solution
+  Design with the concrete forcing evidence.
+- Architectural styles are guard rails inside an accepted built component,
+  never a menu for changing component topology. Do not introduce a service,
+  backend or frontend app without an approved Solution revision.
 
-| Observed forcing symptom | Style to consider |
-|---|---|
-| Two module groups need independent deploy cadence and separate owners already enforce the seam | Service decomposition, extracting that seam only |
-| A quantified read budget cannot be met by the write-shaped model | Command-query separation for that module only |
-| A workflow outlives any single request and must survive restarts | Event-driven handoff at that seam |
-| Domain rules are entangled with transport or storage imports and tests demand infrastructure | Ports and adapters inside the affected module |
+Use service decomposition only for an already-owned independent deploy seam;
+use CQRS for a quantified read-model limit; use event handoff for durable
+restartable workflows; and use ports/adapters when domain rules leak imports.
 
 ## Boundary Method
 

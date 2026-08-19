@@ -57,7 +57,7 @@ class RequirementCompilerTests(unittest.TestCase):
         rows = []
         for stage in requirement_compile.STAGES:
             rows.append(
-                f"| {stage} | required | [[issues/identity-contract|Identity contract]] | The {stage} output constrains this change. |"
+                f"| {stage} | required |  | The {stage} output constrains this change. |"
             )
         old = "\n".join(
             f"| {stage} | required |  | TODO: explain why this stage must change. |"
@@ -137,7 +137,7 @@ class RequirementCompilerTests(unittest.TestCase):
         body = body.replace("TODO: define included and excluded behavior.", "Include the revised assertion. Exclude provisioning.")
         body = body.replace("TODO: record evidence, constraints and urgency rationale.", "The revised contract is approved.")
         rows = "\n".join(
-            f"| {stage} | required | [[issues/identity-contract|Identity contract]] | The {stage} output constrains this change. |"
+            f"| {stage} | required |  | The {stage} output constrains this change. |"
             for stage in requirement_compile.STAGES
         )
         old_rows = "\n".join(

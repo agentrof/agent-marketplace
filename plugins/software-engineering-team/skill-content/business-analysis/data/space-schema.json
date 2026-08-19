@@ -1,5 +1,5 @@
 {
-  "schema_version": 3,
+  "schema_version": 4,
   "statuses": [
     "draft",
     "in_review",
@@ -48,12 +48,12 @@
       "direction",
       "scope",
       "tags",
-      "aliases"
+      "aliases",
+      "package_status",
+      "package_hash",
+      "package_approved_at_utc",
+      "package_contract_version"
     ]
-  },
-  "summary_max_lines": {
-    "space": 30,
-    "default": 10
   },
   "nfr_categories": [
     "performance",
@@ -395,64 +395,5 @@
       "outbound",
       "bidirectional"
     ]
-  },
-  "thresholds": {
-    "nesting_warn_depth": 4,
-    "nesting_fail_depth": 5,
-    "node_direct_docs_warn": 108,
-    "rule_sets_per_node_warn": 54,
-    "active_br_per_node_warn": 540,
-    "rules_per_set_warn": 135,
-    "criteria_per_set_warn": 108,
-    "process_doc_lines_warn": 1350,
-    "open_row_age_days_warn": 14,
-    "space_docs_warn": 1800,
-    "space_bytes_warn": 13500000
-  },
-  "scale_profiles": [
-    {
-      "level": "small",
-      "multiplier": 1,
-      "nesting_bonus": 0
-    },
-    {
-      "level": "medium",
-      "multiplier": 3,
-      "nesting_bonus": 1
-    },
-    {
-      "level": "large",
-      "multiplier": 9,
-      "nesting_bonus": 2
-    },
-    {
-      "level": "x-large",
-      "multiplier": 45,
-      "nesting_bonus": 3
-    },
-    {
-      "level": "xx-large",
-      "multiplier": 225,
-      "nesting_bonus": 4
-    },
-    {
-      "level": "enterprise",
-      "multiplier": 1125,
-      "nesting_bonus": 5
-    }
-  ],
-  "scaled_thresholds": [
-    "node_direct_docs_warn",
-    "rule_sets_per_node_warn",
-    "active_br_per_node_warn",
-    "rules_per_set_warn",
-    "criteria_per_set_warn",
-    "process_doc_lines_warn",
-    "space_docs_warn",
-    "space_bytes_warn"
-  ],
-  "nesting_thresholds": [
-    "nesting_warn_depth",
-    "nesting_fail_depth"
-  ]
+  }
 }

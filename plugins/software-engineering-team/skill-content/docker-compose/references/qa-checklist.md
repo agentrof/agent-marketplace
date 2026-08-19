@@ -1,6 +1,6 @@
 # Docker Compose QA Checklist
 
-Assertions for verifying a story with environment impact. Run against the configured environment command (env_command) only; never invent commands. Every failed assertion is a finding with severity per the verification skill's table.
+Assertions for verifying a story with environment impact. Run against the approved Environment Contract command only; never invent commands. Every failed assertion is a finding with severity per the verification skill's table.
 
 ## From-Scratch Cycle
 

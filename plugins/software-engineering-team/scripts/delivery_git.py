@@ -22,6 +22,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from urllib.parse import urlsplit
 
+import delivery_governance
+
 import delivery_result
 
 
@@ -32,13 +34,13 @@ EPOCH_RE = re.compile(r"^[A-Za-z0-9_-]{22}$")
 OID_RE = re.compile(r"^[0-9a-f]{40,64}$")
 RECEIPT_SCHEMA_VERSION = 1
 GITHUB_PR_RE = re.compile(r"^/([^/]+)/([^/]+)/pull/([1-9][0-9]*)$")
-FENCE_MODES = {"open", "source_handoff", "configuring", "upgrade"}
+FENCE_MODES = {"open", "source_handoff", "governance", "upgrade"}
 SOURCE_KINDS = {"none", "requirement_supersession", "backlog_revision",
                 "designation_reconciliation"}
 CARRIER_KINDS = {"none", "github_pr", "direct_target"}
 UPGRADE_PHASES = {"none", "acquired", "target_handoff"}
 FENCE_CANONICAL_KEYS = (
-    "Mode", "Epoch", "Target", "Config-Hash", "Source-Kind", "Source-Intent",
+    "Mode", "Epoch", "Target", "Governance-Hash", "Source-Kind", "Source-Intent",
     "Target-Update-Intent", "Target-Update-Attempt", "Target-Repository",
     "Target-Carrier-Kind", "Target-Carrier-Ref", "Target-Carrier-Object",
     "Target-Carrier-Head", "Target-Carrier-Base", "Upgrade-Phase",
@@ -379,7 +381,7 @@ def mark_provider_verified(main_worktree: Path, delivery_id: str,
 
 
 def target_receipt_paths(main_worktree: Path, mode: str) -> tuple[Path, Path]:
-    if mode not in {"source_handoff", "configuring", "upgrade"}:
+    if mode not in {"source_handoff", "governance", "upgrade"}:
         raise ValueError("target receipt mode is unsupported")
     base = runtime_root(main_worktree) / "target-update-receipts"
     name = f"{mode}.json"
@@ -396,7 +398,7 @@ def _validate_target_receipt(receipt: dict) -> dict:
         raise RuntimeError("target update receipt schema is unsupported")
     if receipt["state"] not in {"prepared", "call_started", "verified"}:
         raise RuntimeError("target update receipt state is invalid")
-    if receipt["mode"] not in {"source_handoff", "configuring", "upgrade"}:
+    if receipt["mode"] not in {"source_handoff", "governance", "upgrade"}:
         raise RuntimeError("target update receipt mode is invalid")
     _validate_epoch(str(receipt["attempt"]), "target update attempt")
     if not OID_RE.fullmatch(str(receipt["fence_candidate"])):
@@ -724,7 +726,7 @@ def _validate_fence_values(values: dict[str, str]) -> dict[str, str]:
     _validate_epoch(values["Epoch"])
     if not OID_RE.fullmatch(values["Target"]):
         raise RuntimeError("DELIVERY_FENCE_CORRUPT: Target must be an object ID")
-    _validate_hash_or_none(values["Config-Hash"], "Config-Hash")
+    _validate_hash_or_none(values["Governance-Hash"], "Governance-Hash")
     if values["Source-Kind"] not in SOURCE_KINDS:
         raise RuntimeError("DELIVERY_FENCE_CORRUPT: Source-Kind is unsupported")
     _validate_hash_or_none(values["Source-Intent"], "Source-Intent")
@@ -787,7 +789,7 @@ def atomic_push(root: Path, remote: str, updates: list[tuple[str, str, str]]) ->
 
 def _normalise_control_trailers(trailers: dict[str, str]) -> dict[str, str]:
     """Complete the canonical Fence projection at the commit boundary."""
-    if trailers.get("Record") != "project-fence-v1":
+    if trailers.get("Record") != "project-fence-v2":
         return trailers
     value = dict(trailers)
     for key in FENCE_CANONICAL_KEYS:
@@ -891,7 +893,7 @@ def publish_delivery_review(project_root: Path, delivery_id: str,
     fence_oid = remote_oid(root, remote, refs["fence"])
     integration_oid = remote_oid(root, remote, refs["integration"])
     fence_message = commit_message(root, fence_oid)
-    if trailer(fence_message, "Record") != "project-fence-v1" or trailer(fence_message, "Mode") != "open":
+    if trailer(fence_message, "Record") != "project-fence-v2" or trailer(fence_message, "Mode") != "open":
         raise RuntimeError("publish-delivery-review requires an open Fence")
     stories = assert_integrated_items(root, remote, directory, integration_oid, delivery_id)
     reviewed_parent = str(review_props.get("reviewed_integration_commit", "none"))
@@ -906,10 +908,10 @@ def publish_delivery_review(project_root: Path, delivery_id: str,
     )
     fence_candidate = commit_tree(
         root, fence_oid, [], "Fence project in open mode",
-        {"Record": "project-fence-v1", "Protocol": "1", "Mode": "open",
+        {"Record": "project-fence-v2", "Protocol": "2", "Mode": "open",
          "Epoch": trailer(fence_message, "Epoch") or epoch_token(),
          "Target": trailer(fence_message, "Target") or "none",
-         "Config-Hash": trailer(fence_message, "Config-Hash") or "none"},
+         "Governance-Hash": trailer(fence_message, "Governance-Hash") or "none"},
     )
     atomic_push(root, remote, [(refs["fence"], fence_oid, fence_candidate),
                                (refs["integration"], integration_oid, candidate)])
@@ -939,9 +941,9 @@ def prepare_pr_creation(project_root: Path, delivery_id: str,
     )
     fence_candidate = commit_tree(
         root, fence_oid, [], "Fence project in open mode",
-        {"Record": "project-fence-v1", "Protocol": "1", "Mode": "open",
+        {"Record": "project-fence-v2", "Protocol": "2", "Mode": "open",
          "Epoch": trailer(fence_message, "Epoch") or epoch_token(),
-         "Target": target, "Config-Hash": trailer(fence_message, "Config-Hash") or "none"},
+         "Target": target, "Governance-Hash": trailer(fence_message, "Governance-Hash") or "none"},
     )
     atomic_push(root, remote, [(refs["fence"], fence_oid, fence_candidate),
                                (refs["integration"], integration_oid, intent)])
@@ -982,10 +984,10 @@ def record_pr_remote(project_root: Path, delivery_id: str, url: str,
     fence_message = commit_message(root, fence_oid)
     fence_candidate = commit_tree(
         root, fence_oid, [], "Fence project in open mode",
-        {"Record": "project-fence-v1", "Protocol": "1", "Mode": "open",
+        {"Record": "project-fence-v2", "Protocol": "2", "Mode": "open",
          "Epoch": trailer(fence_message, "Epoch") or epoch_token(),
          "Target": trailer(fence_message, "Target") or "none",
-         "Config-Hash": trailer(fence_message, "Config-Hash") or "none"},
+         "Governance-Hash": trailer(fence_message, "Governance-Hash") or "none"},
     )
     atomic_push(root, remote, [(refs["fence"], fence_oid, fence_candidate),
                                (refs["integration"], integration_oid, candidate)])
@@ -1047,10 +1049,10 @@ def open_pr(project_root: Path, delivery_id: str, remote: str = "origin") -> dic
         )
         fence_candidate = commit_tree(
             root, fence_oid, [], "Fence project in open mode",
-            {"Record": "project-fence-v1", "Protocol": "1", "Mode": "open",
+            {"Record": "project-fence-v2", "Protocol": "2", "Mode": "open",
              "Epoch": trailer(fence_message, "Epoch") or epoch_token(),
              "Target": trailer(fence_message, "Target") or "none",
-             "Config-Hash": trailer(fence_message, "Config-Hash") or "none"},
+             "Governance-Hash": trailer(fence_message, "Governance-Hash") or "none"},
         )
         atomic_push(root, remote, [(refs["fence"], fence_oid, fence_candidate),
                                    (refs["integration"], integration_oid, adoption_intent)])
@@ -1227,10 +1229,10 @@ def invalidate_delivery_review(project_root: Path, delivery_id: str,
     )
     fence_candidate = commit_tree(
         root, fence_oid, [], "Fence project in open mode",
-        {"Record": "project-fence-v1", "Protocol": "1", "Mode": "open",
+        {"Record": "project-fence-v2", "Protocol": "2", "Mode": "open",
          "Epoch": trailer(fence_message, "Epoch") or epoch_token(),
          "Target": trailer(fence_message, "Target") or "none",
-         "Config-Hash": trailer(fence_message, "Config-Hash") or "none"},
+         "Governance-Hash": trailer(fence_message, "Governance-Hash") or "none"},
     )
     atomic_push(root, remote, [(refs["fence"], fence_oid, fence_candidate),
                                (refs["integration"], integration_oid, candidate)])
@@ -1566,9 +1568,9 @@ def cancel_delivery(project_root: Path, delivery_id: str, reason: str,
     )
     fence_candidate = commit_tree(
         root, fence_oid, [], "Fence project in open mode",
-        {"Record": "project-fence-v1", "Protocol": "1", "Mode": "open",
+        {"Record": "project-fence-v2", "Protocol": "2", "Mode": "open",
          "Epoch": trailer(fence_message, "Epoch") or epoch_token(), "Target": target,
-         "Config-Hash": trailer(fence_message, "Config-Hash") or "none"},
+         "Governance-Hash": trailer(fence_message, "Governance-Hash") or "none"},
     )
     updates = [(refs["fence"], fence_oid, fence_candidate),
                (refs["integration"], integration_oid, review)]
@@ -1617,9 +1619,9 @@ def reserve_delivery(project_root: Path, delivery_id: str, remote: str = "origin
     )
     fence_oid = commit_tree(
         root, target_oid, [], f"Open Agentrof Fence for {delivery_id}",
-        {"Record": "project-fence-v1", "Protocol": "1", "Mode": "open",
+        {"Record": "project-fence-v2", "Protocol": "2", "Mode": "open",
          "Epoch": epoch_token(), "Target": target_oid,
-         "Config-Hash": governed_config_hash(root)},
+         "Governance-Hash": governed_governance_hash(root)},
     )
     push_args = ["push", "--atomic", remote,
                  f"--force-with-lease={refs['fence']}:",
@@ -1651,7 +1653,7 @@ def publish_execution_plan(project_root: Path, delivery_id: str,
     fence_oid = remote_oid(root, remote, refs["fence"])
     integration_oid = remote_oid(root, remote, refs["integration"])
     fence_message = commit_message(root, fence_oid)
-    if trailer(fence_message, "Record") != "project-fence-v1" or trailer(fence_message, "Mode") != "open":
+    if trailer(fence_message, "Record") != "project-fence-v2" or trailer(fence_message, "Mode") != "open":
         raise RuntimeError("publish-execution-plan requires an open Fence")
     package = [str(path.relative_to(root)) for path in directory.rglob("*") if path.is_file()]
     integration_candidate = commit_tree(
@@ -1663,8 +1665,8 @@ def publish_execution_plan(project_root: Path, delivery_id: str,
     epoch = trailer(fence_message, "Epoch") or epoch_token()
     fence_candidate = commit_tree(
         root, fence_oid, [], f"Publish execution plan for {delivery_id}",
-        {"Record": "project-fence-v1", "Protocol": "1", "Mode": "open", "Epoch": epoch,
-         "Target": trailer(fence_message, "Target") or "none", "Config-Hash": trailer(fence_message, "Config-Hash") or "none"},
+        {"Record": "project-fence-v2", "Protocol": "2", "Mode": "open", "Epoch": epoch,
+         "Target": trailer(fence_message, "Target") or "none", "Governance-Hash": trailer(fence_message, "Governance-Hash") or "none"},
     )
     atomic_push(root, remote, [(refs["fence"], fence_oid, fence_candidate),
                                (refs["integration"], integration_oid, integration_candidate)])
@@ -1719,7 +1721,7 @@ def refresh_target(project_root: Path, delivery_id: str,
     fence_oid = remote_oid(root, remote, refs["fence"])
     integration_oid = remote_oid(root, remote, refs["integration"])
     fence_message = commit_message(root, fence_oid)
-    if trailer(fence_message, "Record") != "project-fence-v1" or trailer(fence_message, "Mode") != "open":
+    if trailer(fence_message, "Record") != "project-fence-v2" or trailer(fence_message, "Mode") != "open":
         raise RuntimeError("target-refresh requires an open Fence")
     previous_target = trailer(fence_message, "Target")
     if not previous_target or not OID_RE.fullmatch(previous_target):
@@ -1785,9 +1787,9 @@ def refresh_target(project_root: Path, delivery_id: str,
         )
     fence_candidate = commit_tree(
         root, fence_oid, [], "Refresh project target",
-        {"Record": "project-fence-v1", "Protocol": "1", "Mode": "open",
+        {"Record": "project-fence-v2", "Protocol": "2", "Mode": "open",
          "Epoch": trailer(fence_message, "Epoch") or epoch_token(), "Target": target,
-         "Config-Hash": trailer(fence_message, "Config-Hash") or "none"},
+         "Governance-Hash": trailer(fence_message, "Governance-Hash") or "none"},
     )
     atomic_push(root, remote, [(refs["fence"], fence_oid, fence_candidate),
                                (refs["integration"], integration_oid, final_candidate)])
@@ -1846,9 +1848,9 @@ def revise_unclaimed_scope(project_root: Path, delivery_id: str,
     )
     fence_candidate = commit_tree(
         root, fence_oid, [], "Fence project in open mode",
-        {"Record": "project-fence-v1", "Protocol": "1", "Mode": "open",
+        {"Record": "project-fence-v2", "Protocol": "2", "Mode": "open",
          "Epoch": trailer(fence_message, "Epoch") or epoch_token(), "Target": target,
-         "Config-Hash": trailer(fence_message, "Config-Hash") or "none"},
+         "Governance-Hash": trailer(fence_message, "Governance-Hash") or "none"},
     )
     atomic_push(root, remote, [(refs["fence"], fence_oid, fence_candidate),
                                (refs["integration"], integration_oid, candidate)])
@@ -1863,11 +1865,11 @@ def _fence_context(root: Path, remote: str) -> tuple[str, str, dict[str, str]]:
     ref = canonical_refs("DLV-000")["fence"]
     fence_oid = remote_oid(root, remote, ref)
     message = commit_message(root, fence_oid)
-    if trailer(message, "Record") != "project-fence-v1":
+    if trailer(message, "Record") != "project-fence-v2":
         raise RuntimeError("DELIVERY_FENCE_CORRUPT: current Fence record is unsupported")
     protocol = trailer(message, "Protocol")
-    if protocol != "1":
-        raise RuntimeError("DELIVERY_PROTOCOL_UNSUPPORTED: Fence protocol is not 1")
+    if protocol != "2":
+        raise RuntimeError("DELIVERY_PROTOCOL_UNSUPPORTED: Fence protocol is not 2; migrate the Fence before new mutations")
     values = {key: trailer(message, key) or "none" for key in FENCE_CANONICAL_KEYS}
     values["Barrier-Kind"] = trailer(message, "Barrier-Kind") or "none"
     values["Barrier-Epoch"] = trailer(message, "Barrier-Epoch") or "none"
@@ -1886,7 +1888,7 @@ def _fence_child(root: Path, fence_oid: str, values: dict[str, str], subject: st
         raise RuntimeError("DELIVERY_FENCE_CORRUPT: open Fence requires a target")
     _validate_fence_values(canonical)
     trailers = {
-        "Record": "project-fence-v1", "Protocol": "1", **canonical,
+        "Record": "project-fence-v2", "Protocol": "2", **canonical,
         "Barrier-Kind": values.get("Barrier-Kind", "none"),
         "Barrier-Epoch": values.get("Barrier-Epoch", "none"),
     }
@@ -1904,10 +1906,7 @@ def begin_source_handoff(project_root: Path, source_hash: str = "none",
         raise ValueError("source_hash must be none or a canonical sha256 digest")
     ref = canonical_refs("DLV-000")["fence"]
     try:
-        fence_oid = remote_oid(root, remote, ref)
-        current = commit_message(root, fence_oid)
-        values = {key: trailer(current, key) or "none" for key in
-                  (*FENCE_CANONICAL_KEYS, "Barrier-Kind", "Barrier-Epoch")}
+        _checked_ref, fence_oid, values = _fence_context(root, remote)
         if values["Mode"] != "open":
             raise RuntimeError("DELIVERY_FENCE_MODE: source handoff requires an open Fence")
         target = values["Target"]
@@ -1925,12 +1924,12 @@ def begin_source_handoff(project_root: Path, source_hash: str = "none",
             raise
         _branch, target = resolve_target(root, remote)
         values = {"Mode": "source_handoff", "Epoch": epoch_token(), "Target": target,
-                  "Config-Hash": "none", "Source-Kind": source_kind,
+                  "Governance-Hash": "none", "Source-Kind": source_kind,
                   "Source-Intent": source_hash,
                   "Barrier-Kind": "none", "Barrier-Epoch": "none",
                   "Target-Update-Intent": "none", "Target-Update-Attempt": "none"}
         candidate = commit_tree(root, target, [], "Acquire source handoff Fence", {
-            "Record": "project-fence-v1", "Protocol": "1", **values})
+            "Record": "project-fence-v2", "Protocol": "2", **values})
         atomic_push(root, remote, [(ref, "", candidate)])
         fence_oid = ""
     return {"ok": True, "mode": "source_handoff", "fence": candidate,
@@ -2003,7 +2002,7 @@ def finish_source_handoff(project_root: Path, remote: str = "origin") -> dict:
     """Close a source/config handoff only after the target is observable."""
     root = main_worktree(project_root.resolve())
     ref, fence_oid, values = _fence_context(root, remote)
-    if values["Mode"] not in {"source_handoff", "configuring", "upgrade"}:
+    if values["Mode"] not in {"source_handoff", "governance", "upgrade"}:
         raise RuntimeError("DELIVERY_FENCE_MODE: no source handoff is active")
     if values["Target-Update-Intent"] == "none":
         raise RuntimeError("finish-source-handoff requires an authorized target-update intent")
@@ -2040,7 +2039,7 @@ def abort_source_handoff(project_root: Path, remote: str = "origin") -> dict:
     """Abort only an acquired handoff whose external write never began."""
     root = main_worktree(project_root.resolve())
     ref, fence_oid, values = _fence_context(root, remote)
-    if values["Mode"] not in {"source_handoff", "configuring", "upgrade"}:
+    if values["Mode"] not in {"source_handoff", "governance", "upgrade"}:
         raise RuntimeError("DELIVERY_FENCE_MODE: no source handoff is active")
     if values["Target-Update-Intent"] != "none":
         raise RuntimeError("DELIVERY_TARGET_UPDATE_UNCERTAIN: abort is forbidden after target-update intent")
@@ -2197,79 +2196,108 @@ def upgrade_target_merge(project_root: Path, delivery_id: str,
             "upgrade_contract": values["Upgrade-Contract"]}
 
 
-def begin_configuring(project_root: Path, desired_hash: str, remote: str = "origin") -> dict:
-    """Acquire the project Fence for a governed configuration handoff."""
+def begin_applying_governance(project_root: Path, desired_hash: str, remote: str = "origin") -> dict:
+    """Acquire the project Fence for an approved Governance handoff."""
     root = main_worktree(project_root.resolve())
     if not re.fullmatch(r"sha256:[0-9a-f]{64}", desired_hash):
-        raise ValueError("desired configuration hash must be canonical")
+        raise ValueError("desired governance hash must be canonical")
     ref, fence_oid, values = _fence_context(root, remote)
     if values["Mode"] != "open" or values["Target-Update-Intent"] != "none":
-        raise RuntimeError("DELIVERY_FENCE_MODE: configuration requires an open, unoccupied Fence")
+        raise RuntimeError("DELIVERY_FENCE_MODE: governance requires an open, unoccupied Fence")
     values.update({
-        "Mode": "configuring", "Epoch": epoch_token(), "Config-Hash": desired_hash,
+        "Mode": "governance", "Epoch": epoch_token(), "Governance-Hash": desired_hash,
         "Source-Kind": "none", "Source-Intent": "none",
         "Target-Repository": "none", "Target-Carrier-Kind": "none",
         "Target-Carrier-Ref": "none", "Target-Carrier-Object": "none",
         "Target-Carrier-Head": "none", "Target-Carrier-Base": "none",
         "Upgrade-Phase": "none", "Upgrade-Contract": "none", "Handoff-Target": "none",
     })
-    candidate = _fence_child(root, fence_oid, values, "Begin configuration handoff")
+    candidate = _fence_child(root, fence_oid, values, "Begin governance handoff")
     atomic_push(root, remote, [(ref, fence_oid, candidate)])
-    return {"ok": True, "mode": "configuring", "fence": candidate,
-            "config_hash": desired_hash}
+    return {"ok": True, "mode": "governance", "fence": candidate,
+            "governance_hash": desired_hash}
 
 
-def configure_parallelism(project_root: Path, value: int, *, dry_run: bool = False,
-                          remote: str = "origin") -> dict:
-    """Set the single project-wide Delivery Item WIP value.
+def apply_governance(project_root: Path, *, dry_run: bool = False,
+                     remote: str = "origin") -> dict:
+    """Bind an already-approved Governance revision to the live Fence.
 
-    The configuration writer remains the owner of the tracked JSON. This
-    coordinator helper validates the just-in-time activation decision and
-    performs only that one field write; a remote-aware handoff can then carry
-    the resulting commit through the normal project policy.
+    This command never edits Governance. Reducing the slot ceiling is safe
+    only once every allocated slot lies inside the new range.
     """
-    if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
-        raise ValueError("max_parallel must be a positive integer")
     root = main_worktree(project_root.resolve())
-    path = root / "workspace" / "config.json"
-    try:
-        config = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError) as exc:
-        raise RuntimeError(f"cannot read project config: {exc}") from exc
-    previous = config.get("max_parallel")
-    if isinstance(previous, int) and value < previous:
-        raise RuntimeError("max_parallel is monotonic in v1; decreases require a future config epoch")
-    if previous == value:
-        return {"ok": True, "changed": False, "max_parallel": value,
-                "next_entry": "/deliver", "dry_run": dry_run}
-    handoff = None
-    if not dry_run:
-        fence_ref = canonical_refs("DLV-000")["fence"]
-        if remote_has_ref(root, remote, fence_ref):
-            desired = "sha256:" + hashlib.sha256(
-                _canonical_json({"max_parallel": value}).encode("utf-8")
-            ).hexdigest()
-            # Config changes compete with Delivery reservation/claim through
-            # the same Fence. The user commits the local config while this
-            # configuring handoff is held, then finishes it after target
-            # handoff.
-            handoff = begin_configuring(root, desired, remote)
-    config["max_parallel"] = value
-    try:
-        if not dry_run:
-            from project_config import atomic
-            atomic(path, config)
-    except Exception:
-        if handoff is not None:
-            try:
-                abort_source_handoff(root, remote)
-            except Exception:
-                pass
-        raise
-    return {"ok": True, "changed": True, "max_parallel": value,
-            "previous": previous if isinstance(previous, int) else "none",
-            "next_entry": "/deliver", "dry_run": dry_run,
-            "handoff": handoff, "requires_target_handoff": handoff is not None}
+    governance, errors = delivery_governance.status(root / "workspace" / "docs")
+    if errors or not governance.get("current"):
+        raise RuntimeError("apply-governance requires approved/current Delivery Governance: " + "; ".join(errors))
+    value = governance["max_parallel"]
+    desired = governance["governance_hash"]
+    fence_ref = canonical_refs("DLV-000")["fence"]
+    if not remote_has_ref(root, remote, fence_ref):
+        return {"ok": True, "changed": False, "governance_hash": desired,
+                "max_parallel": value, "requires_target_handoff": False}
+    occupied = remote_slot_oids(root, remote)
+    if any(int(slot) > value for slot in occupied if SLOT_RE.fullmatch(slot)):
+        raise RuntimeError("cannot lower max_parallel while an out-of-range Slot is allocated")
+    _ref, _oid, fence = _fence_context(root, remote)
+    if fence["Governance-Hash"] == desired:
+        return {"ok": True, "changed": False, "governance_hash": desired,
+                "max_parallel": value, "requires_target_handoff": False}
+    if dry_run:
+        return {"ok": True, "changed": True, "dry_run": True,
+                "governance_hash": desired, "max_parallel": value,
+                "requires_target_handoff": True}
+    handoff = begin_applying_governance(root, desired, remote)
+    return {"ok": True, "changed": True, "governance_hash": desired,
+            "max_parallel": value, "handoff": handoff,
+            "requires_target_handoff": True}
+
+
+def upgrade_fence_v1(project_root: Path, *, dry_run: bool = False,
+                     remote: str = "origin") -> dict:
+    """Perform the one-way, quiescent v1-to-v2 Fence conversion.
+
+    The old Fence is read only for this migration.  It cannot carry a new Item
+    mutation: an open Fence with no allocated slots is the only safe source
+    state.  Governance is read from its approved vault contract, never from a
+    CLI argument or retired config field.
+    """
+    root = main_worktree(project_root.resolve())
+    ref = canonical_refs("DLV-000")["fence"]
+    fence_oid = remote_oid(root, remote, ref)
+    message = commit_message(root, fence_oid)
+    if trailer(message, "Record") != "project-fence-v1" or trailer(message, "Protocol") != "1":
+        raise RuntimeError("upgrade-fence-v1 requires an exact protocol-1 Fence")
+    if trailer(message, "Mode") != "open":
+        raise RuntimeError("v1 Fence must be quiesced in open mode before migration")
+    if remote_slot_oids(root, remote):
+        raise RuntimeError("v1 Fence migration requires every Delivery Slot to be free")
+    target = trailer(message, "Target") or "none"
+    if not OID_RE.fullmatch(target):
+        raise RuntimeError("v1 Fence target is invalid")
+    prior_epoch = trailer(message, "Epoch") or epoch_token()
+    _validate_epoch(prior_epoch)
+    governance, errors = delivery_governance.status(root / "workspace" / "docs")
+    if errors or not governance.get("current"):
+        raise RuntimeError("upgrade-fence-v1 requires approved/current Delivery Governance: " + "; ".join(errors))
+    desired = str(governance["governance_hash"])
+    if dry_run:
+        return {"ok": True, "changed": True, "from_protocol": 1,
+                "to_protocol": 2, "governance_hash": desired,
+                "requires_target_handoff": False}
+    values = {
+        "Mode": "open", "Epoch": epoch_token(), "Target": target,
+        "Governance-Hash": desired, "Source-Kind": "none", "Source-Intent": "none",
+        "Target-Update-Intent": "none", "Target-Update-Attempt": "none",
+        "Target-Repository": "none", "Target-Carrier-Kind": "none",
+        "Target-Carrier-Ref": "none", "Target-Carrier-Object": "none",
+        "Target-Carrier-Head": "none", "Target-Carrier-Base": "none",
+        "Upgrade-Phase": "none", "Upgrade-Contract": "none", "Handoff-Target": "none",
+        "Barrier-Kind": "none", "Barrier-Epoch": "none",
+    }
+    candidate = _fence_child(root, fence_oid, values, "Upgrade Delivery Fence protocol to v2")
+    atomic_push(root, remote, [(ref, fence_oid, candidate)])
+    return {"ok": True, "changed": True, "from_protocol": 1,
+            "to_protocol": 2, "fence": candidate, "governance_hash": desired}
 
 
 def reauthorize_target_update(project_root: Path, mode: str = "source_handoff",
@@ -2478,7 +2506,7 @@ def claim_items(project_root: Path, delivery_id: str, remote: str = "origin") ->
     fence_oid = remote_oid(root, remote, refs["fence"])
     integration_oid = remote_oid(root, remote, refs["integration"])
     fence_message = commit_message(root, fence_oid)
-    if trailer(fence_message, "Record") != "project-fence-v1" or trailer(fence_message, "Mode") != "open":
+    if trailer(fence_message, "Record") != "project-fence-v2" or trailer(fence_message, "Mode") != "open":
         raise RuntimeError("claim-items requires an open Fence")
     marker = commit_tree(root, integration_oid, [], f"Establish claims for {delivery_id}",
                          {"Record": "claims-established-v1", "Protocol": "1", "Delivery": delivery_id,
@@ -2486,10 +2514,10 @@ def claim_items(project_root: Path, delivery_id: str, remote: str = "origin") ->
                           "Plan-Hash": str(delivery_props.get("plan_hash", "none"))})
     updates = [(refs["fence"], fence_oid, commit_tree(
         root, fence_oid, [], f"Establish claims for {delivery_id}",
-        {"Record": "project-fence-v1", "Protocol": "1", "Mode": "open",
+        {"Record": "project-fence-v2", "Protocol": "2", "Mode": "open",
          "Epoch": trailer(fence_message, "Epoch") or epoch_token(),
          "Target": trailer(fence_message, "Target") or "none",
-         "Config-Hash": trailer(fence_message, "Config-Hash") or "none"})),
+         "Governance-Hash": trailer(fence_message, "Governance-Hash") or "none"})),
                (refs["integration"], integration_oid, marker)]
     stories = []
     for item_path in sorted(directory.glob("items/*/item.md")):
@@ -2523,36 +2551,57 @@ def remote_slot_oids(root: Path, remote: str) -> dict[str, str]:
     return result
 
 
-def governed_config_hash(root: Path) -> str:
-    """Hash the one configuration field that fences Item activation in v1."""
-    config_path = root / "workspace" / "config.json"
-    try:
-        config = json.loads(config_path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError) as exc:
-        raise RuntimeError(f"project config cannot be read: {exc}") from exc
-    value = config.get("max_parallel")
-    if value is None:
-        return "none"
-    if not isinstance(value, int) or isinstance(value, bool) or value <= 0:
-        raise RuntimeError("max_parallel must be a positive integer when configured")
-    return "sha256:" + hashlib.sha256(
-        _canonical_json({"max_parallel": value}).encode("utf-8")
-    ).hexdigest()
+def governed_governance_hash(root: Path) -> str:
+    """Return the current approved Governance hash, or none before activation."""
+    value, errors = delivery_governance.status(root / "workspace" / "docs")
+    if errors:
+        if any(error.startswith("missing delivery governance:") for error in errors):
+            return "none"
+        raise RuntimeError("Delivery Governance is invalid: " + "; ".join(errors))
+    if not value.get("current"):
+        raise RuntimeError("Delivery Governance must be approved/current")
+    return str(value["governance_hash"])
 
 
 def project_max_parallel(root: Path, expected_hash: str | None = None) -> int:
-    config_path = root / "workspace" / "config.json"
-    try:
-        config = json.loads(config_path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError) as exc:
-        raise RuntimeError(f"project config cannot be read: {exc}") from exc
-    value = config.get("max_parallel")
-    if not isinstance(value, int) or isinstance(value, bool) or value <= 0:
-        raise RuntimeError("max_parallel must be configured before Item activation")
-    observed_hash = governed_config_hash(root)
+    receipt, errors = delivery_governance.status(root / "workspace" / "docs")
+    if errors or not receipt.get("current"):
+        raise RuntimeError("approved/current Delivery Governance is required before Item activation")
+    value = receipt.get("max_parallel")
+    observed_hash = governed_governance_hash(root)
     if expected_hash is not None and expected_hash != observed_hash:
-        raise RuntimeError("max_parallel differs from the governed Fence configuration baseline")
+        raise RuntimeError("Delivery Governance differs from the governed Fence baseline")
     return value
+
+
+def require_item_operation_bindings(root: Path, item_props: dict) -> None:
+    """Fail closed when executable work lost its approved Operation receipt."""
+    from delivery_compile import item_operation_findings
+    findings = item_operation_findings(root / "workspace" / "docs", item_props)
+    if findings:
+        raise RuntimeError("Item Operation Contract bindings are invalid: " + "; ".join(findings))
+
+
+def require_item_architecture_binding(worktree: Path, item_props: dict,
+                                      story_id: str) -> None:
+    """Require a compiler-stamped Architecture delta only when planned."""
+    impact = str(item_props.get("architecture_impact", "not_applicable"))
+    if impact == "not_applicable":
+        return
+    if impact != "required":
+        raise RuntimeError("Item architecture_impact is invalid")
+    expected = str(item_props.get("architecture_delta_hash", ""))
+    if not expected.startswith("sha256:"):
+        raise RuntimeError("architecture-impact Item lacks architecture_delta_hash")
+    try:
+        import architecture_compile
+        docs = worktree / "workspace" / "docs"
+        delta = architecture_compile.current_item_delta(
+            docs / "system-architecture", story_id)
+        if expected != delta.get("architecture_delta_hash"):
+            raise RuntimeError("architecture_delta_hash is stale")
+    except (ImportError, OSError, ValueError) as exc:
+        raise RuntimeError("Item Architecture binding is invalid: " + str(exc)) from exc
 
 
 def start_item(project_root: Path, delivery_id: str, story_id: str,
@@ -2567,7 +2616,7 @@ def start_item(project_root: Path, delivery_id: str, story_id: str,
     integration_oid = remote_oid(root, remote, refs["integration"])
     item_oid = remote_oid(root, remote, refs["item"])
     fence_message = commit_message(root, fence_oid)
-    if trailer(fence_message, "Record") != "project-fence-v1" or trailer(fence_message, "Mode") != "open":
+    if trailer(fence_message, "Record") != "project-fence-v2" or trailer(fence_message, "Mode") != "open":
         raise RuntimeError("start-item requires an open Fence")
     fence_target = trailer(fence_message, "Target")
     if not fence_target or not OID_RE.fullmatch(fence_target):
@@ -2575,7 +2624,7 @@ def start_item(project_root: Path, delivery_id: str, story_id: str,
     _target_branch, target_before = resolve_target(root, remote)
     if target_before != fence_target:
         raise RuntimeError("target advanced; refresh the Delivery before Item activation")
-    max_parallel = project_max_parallel(root, trailer(fence_message, "Config-Hash") or "none")
+    max_parallel = project_max_parallel(root, trailer(fence_message, "Governance-Hash") or "none")
     occupied = remote_slot_oids(root, remote)
     free = next((slot for slot in range(1, max_parallel + 1) if slot_key(slot) not in occupied), None)
     if free is None:
@@ -2590,6 +2639,7 @@ def start_item(project_root: Path, delivery_id: str, story_id: str,
     allowed = {"in_scope", "paused", "blocked"} if allowed_statuses is None else allowed_statuses
     if item_props.get("status") not in allowed:
         raise RuntimeError("Item is not startable from its current status")
+    require_item_operation_bindings(root, item_props)
     writer = epoch_token()
     item_props["status"] = "active"
     item_props["tags"] = [tag for tag in item_props.get("tags", []) if not str(tag).startswith("status/")] + ["status/active"]
@@ -2610,10 +2660,10 @@ def start_item(project_root: Path, delivery_id: str, story_id: str,
     )
     fence_candidate = commit_tree(
         root, fence_oid, [], f"Authorize Item {story_id} for {delivery_id}",
-        {"Record": "project-fence-v1", "Protocol": "1", "Mode": "open",
+        {"Record": "project-fence-v2", "Protocol": "2", "Mode": "open",
          "Epoch": trailer(fence_message, "Epoch") or epoch_token(),
          "Target": trailer(fence_message, "Target") or "none",
-         "Config-Hash": trailer(fence_message, "Config-Hash") or "none"},
+         "Governance-Hash": trailer(fence_message, "Governance-Hash") or "none"},
     )
     receipt = create_writer_receipt(
         root, delivery_id, story_id, slot, writer, refs["item"], slot_ref,
@@ -2742,6 +2792,7 @@ def reopen_item(project_root: Path, delivery_id: str, story_id: str,
     props, body = split_remote_note(root, item_oid, relative_item, split_note)
     if props.get("status") != "integrated":
         raise RuntimeError("reopen-item requires an integrated Item")
+    require_item_operation_bindings(root, props)
     props["status"] = "active"
     props["tags"] = [tag for tag in props.get("tags", []) if not str(tag).startswith("status/")] + ["status/active"]
     props["integration_base_commit"] = integration_oid
@@ -2769,10 +2820,10 @@ def reopen_item(project_root: Path, delivery_id: str, story_id: str,
     slot_ref = canonical_refs(delivery_id, story_id, slot)["slot"]
     fence_candidate = commit_tree(
         root, fence_oid, [], "Authorize Item reopen",
-        {"Record": "project-fence-v1", "Protocol": "1", "Mode": "open",
+        {"Record": "project-fence-v2", "Protocol": "2", "Mode": "open",
          "Epoch": trailer(fence_message, "Epoch") or epoch_token(),
          "Target": trailer(fence_message, "Target") or "none",
-         "Config-Hash": trailer(fence_message, "Config-Hash") or "none"},
+         "Governance-Hash": trailer(fence_message, "Governance-Hash") or "none"},
     )
     receipt = create_writer_receipt(
         root, delivery_id, story_id, slot, writer, refs["item"], slot_ref,
@@ -2824,10 +2875,10 @@ def pause_item(project_root: Path, delivery_id: str, story_id: str,
     fence_message = commit_message(root, fence_oid)
     fence_candidate = commit_tree(
         root, fence_oid, [], f"Fence project in open mode",
-        {"Record": "project-fence-v1", "Protocol": "1", "Mode": "open",
+        {"Record": "project-fence-v2", "Protocol": "2", "Mode": "open",
          "Epoch": trailer(fence_message, "Epoch") or epoch_token(),
          "Target": trailer(fence_message, "Target") or "none",
-         "Config-Hash": trailer(fence_message, "Config-Hash") or "none"},
+         "Governance-Hash": trailer(fence_message, "Governance-Hash") or "none"},
     )
     atomic_push(root, remote, [(refs["fence"], fence_oid, fence_candidate),
                                (refs["item"], item_oid, item_candidate),
@@ -2881,6 +2932,7 @@ def takeover_item(project_root: Path, delivery_id: str, story_id: str,
     item_props, item_body = split_remote_note(root, item_oid, relative_item, split_note)
     if item_props.get("status") not in {"active", "blocked"}:
         raise RuntimeError("takeover requires an active or blocked remote Item")
+    require_item_operation_bindings(root, item_props)
     worktree = worktree_paths(root, delivery_id, story_id)["item"]
     if worktree.exists():
         worktree_is_clean_and_at(root, worktree, item_oid)
@@ -2908,10 +2960,10 @@ def takeover_item(project_root: Path, delivery_id: str, story_id: str,
     )
     fence_candidate = commit_tree(
         root, fence_oid, [], "Fence project in open mode",
-        {"Record": "project-fence-v1", "Protocol": "1", "Mode": "open",
+        {"Record": "project-fence-v2", "Protocol": "2", "Mode": "open",
          "Epoch": trailer(fence_message, "Epoch") or epoch_token(),
          "Target": trailer(fence_message, "Target") or "none",
-         "Config-Hash": trailer(fence_message, "Config-Hash") or "none"},
+         "Governance-Hash": trailer(fence_message, "Governance-Hash") or "none"},
     )
     create_writer_receipt(
         root, delivery_id, story_id, slot, writer, refs["item"], slot_ref,
@@ -2988,6 +3040,7 @@ def push_item(project_root: Path, delivery_id: str, story_id: str,
         raise RuntimeError("Item evidence must bind the exact committed product/test tip")
     if review_props.get("item_plan_hash") != item_props.get("item_plan_hash") or verification_props.get("item_plan_hash") != item_props.get("item_plan_hash"):
         raise RuntimeError("Item evidence does not bind the active Item plan hash")
+    require_item_architecture_binding(worktree, item_props, story_id)
     if review_props.get("source_hash") != content_hash(review_props, review_body):
         raise RuntimeError("code review source_hash is stale")
     if verification_props.get("source_hash") != content_hash(verification_props, verification_body):
@@ -3052,6 +3105,7 @@ def integrate_item(project_root: Path, delivery_id: str, story_id: str,
         raise RuntimeError("integrate-item evidence does not bind the published product/test tip")
     if review_props.get("item_plan_hash") != item_props.get("item_plan_hash") or verification_props.get("item_plan_hash") != item_props.get("item_plan_hash"):
         raise RuntimeError("integrate-item evidence does not bind the Item plan hash")
+    require_item_architecture_binding(worktree, item_props, story_id)
     if review_props.get("source_hash") != content_hash(review_props, review_body):
         raise RuntimeError("integrate-item code review source_hash is stale")
     if verification_props.get("source_hash") != content_hash(verification_props, verification_body):
@@ -3171,11 +3225,12 @@ def main(argv=None) -> int:
     names = sub.add_parser("names"); names.add_argument("--delivery", required=True); names.add_argument("--story"); names.add_argument("--slot"); names.set_defaults(func="names")
     check = sub.add_parser("preflight"); check.add_argument("--project-root", default="."); check.add_argument("--delivery", required=True); check.add_argument("--story"); check.add_argument("--slot"); check.set_defaults(func="preflight")
     reserve = sub.add_parser("reserve-delivery"); reserve.add_argument("--project-root", default="."); reserve.add_argument("--delivery", required=True); reserve.add_argument("--remote", default="origin"); reserve.set_defaults(func="reserve")
-    config = sub.add_parser("configure-parallelism"); config.add_argument("--project-root", default="."); config.add_argument("--value", type=int, required=True); config.add_argument("--dry-run", action="store_true"); config.add_argument("--remote", default="origin"); config.set_defaults(func="configure")
+    governance = sub.add_parser("apply-governance"); governance.add_argument("--project-root", default="."); governance.add_argument("--dry-run", action="store_true"); governance.add_argument("--remote", default="origin"); governance.set_defaults(func="apply-governance")
+    fence_upgrade = sub.add_parser("upgrade-fence-v1"); fence_upgrade.add_argument("--project-root", default="."); fence_upgrade.add_argument("--dry-run", action="store_true"); fence_upgrade.add_argument("--remote", default="origin"); fence_upgrade.set_defaults(func="upgrade-fence-v1")
     source_begin = sub.add_parser("begin-source-handoff"); source_begin.add_argument("--project-root", default="."); source_begin.add_argument("--source-hash", default="none"); source_begin.add_argument("--source-kind", choices=["requirement_supersession", "backlog_revision", "designation_reconciliation"], default="requirement_supersession"); source_begin.add_argument("--remote", default="origin"); source_begin.set_defaults(func="source-begin")
-    source_auth = sub.add_parser("authorize-target-update"); source_auth.add_argument("--project-root", default="."); source_auth.add_argument("--mode", choices=["source_handoff", "configuring", "upgrade"], default="source_handoff"); source_auth.add_argument("--candidate-hash", required=True); source_auth.add_argument("--carrier-kind", choices=["github_pr", "direct_target"], required=True); source_auth.add_argument("--carrier-ref", required=True); source_auth.add_argument("--carrier-object", required=True); source_auth.add_argument("--carrier-head", required=True); source_auth.add_argument("--carrier-base", required=True); source_auth.add_argument("--target-repository", required=True); source_auth.add_argument("--remote", default="origin"); source_auth.set_defaults(func="source-authorize")
-    source_apply = sub.add_parser("apply-target-update"); source_apply.add_argument("--project-root", default="."); source_apply.add_argument("--mode", choices=["source_handoff", "configuring", "upgrade"], default="source_handoff"); source_apply.add_argument("--remote", default="origin"); source_apply.set_defaults(func="source-apply")
-    source_reauth = sub.add_parser("reauthorize-target-update"); source_reauth.add_argument("--project-root", default="."); source_reauth.add_argument("--mode", choices=["source_handoff", "configuring", "upgrade"], default="source_handoff"); source_reauth.add_argument("--candidate-hash", default="none"); source_reauth.add_argument("--remote", default="origin"); source_reauth.set_defaults(func="source-reauthorize")
+    source_auth = sub.add_parser("authorize-target-update"); source_auth.add_argument("--project-root", default="."); source_auth.add_argument("--mode", choices=["source_handoff", "governance", "upgrade"], default="source_handoff"); source_auth.add_argument("--candidate-hash", required=True); source_auth.add_argument("--carrier-kind", choices=["github_pr", "direct_target"], required=True); source_auth.add_argument("--carrier-ref", required=True); source_auth.add_argument("--carrier-object", required=True); source_auth.add_argument("--carrier-head", required=True); source_auth.add_argument("--carrier-base", required=True); source_auth.add_argument("--target-repository", required=True); source_auth.add_argument("--remote", default="origin"); source_auth.set_defaults(func="source-authorize")
+    source_apply = sub.add_parser("apply-target-update"); source_apply.add_argument("--project-root", default="."); source_apply.add_argument("--mode", choices=["source_handoff", "governance", "upgrade"], default="source_handoff"); source_apply.add_argument("--remote", default="origin"); source_apply.set_defaults(func="source-apply")
+    source_reauth = sub.add_parser("reauthorize-target-update"); source_reauth.add_argument("--project-root", default="."); source_reauth.add_argument("--mode", choices=["source_handoff", "governance", "upgrade"], default="source_handoff"); source_reauth.add_argument("--candidate-hash", default="none"); source_reauth.add_argument("--remote", default="origin"); source_reauth.set_defaults(func="source-reauthorize")
     source_finish = sub.add_parser("finish-source-handoff"); source_finish.add_argument("--project-root", default="."); source_finish.add_argument("--remote", default="origin"); source_finish.set_defaults(func="source-finish")
     source_abort = sub.add_parser("abort-source-handoff"); source_abort.add_argument("--project-root", default="."); source_abort.add_argument("--remote", default="origin"); source_abort.set_defaults(func="source-abort")
     publish = sub.add_parser("publish-execution-plan"); publish.add_argument("--project-root", default="."); publish.add_argument("--delivery", required=True); publish.add_argument("--remote", default="origin"); publish.set_defaults(func="publish")
@@ -3218,8 +3273,10 @@ def main(argv=None) -> int:
         else:
             if args.func == "reserve":
                 result = reserve_delivery(Path(args.project_root), args.delivery, args.remote)
-            elif args.func == "configure":
-                result = configure_parallelism(Path(args.project_root), args.value, dry_run=args.dry_run, remote=args.remote)
+            elif args.func == "apply-governance":
+                result = apply_governance(Path(args.project_root), dry_run=args.dry_run, remote=args.remote)
+            elif args.func == "upgrade-fence-v1":
+                result = upgrade_fence_v1(Path(args.project_root), dry_run=args.dry_run, remote=args.remote)
             elif args.func == "source-begin":
                 result = begin_source_handoff(Path(args.project_root), args.source_hash, args.remote, args.source_kind)
             elif args.func == "source-authorize":

@@ -1,4 +1,4 @@
-"""Project config keeps Requirement and Delivery contracts coherent."""
+"""Closed bootstrap config and convergent setup migration tests."""
 
 from __future__ import annotations
 
@@ -15,6 +15,11 @@ SCRIPTS = ROOT / "plugins" / "software-engineering-team" / "scripts"
 SETUP = SCRIPTS / "setup_project.py"
 CONFIG = SCRIPTS / "project_config.py"
 
+CANONICAL_KEYS = {
+    "schema_version", "team_id", "output_language", "terminology_language",
+    "doc_type_designations", "doc_type_designation_history",
+}
+
 
 class ProjectConfigTests(unittest.TestCase):
     def run_script(self, script: Path, *args: str) -> subprocess.CompletedProcess[str]:
@@ -29,111 +34,130 @@ class ProjectConfigTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         return project / "workspace" / "config.json"
 
-    def set_field(self, config: Path, field: str, value: object, *extra: str):
-        encoded = value if isinstance(value, str) else json.dumps(value)
-        return self.run_script(
-            CONFIG, "set", "--config", str(config), "--field", field,
-            "--value", encoded, *extra,
-        )
-
-    def test_delivery_fields_are_optional_validated_and_preserved(self):
+    def test_fresh_setup_writes_only_the_closed_schema(self):
         with tempfile.TemporaryDirectory() as temporary:
-            project = Path(temporary)
-            config = self.setup_config(project)
-            values = {
-                "backend_stack": "python-fastapi",
-                "frontend_stack": "react-typescript",
-                "environment_stack": "docker-compose",
-                "databases": ["sql", "nosql"],
-                "test_command": "make test",
-                "mutation_command": "make mutation",
-                "env_command": "./tools/env",
-                "source_dirs": ["workspace/apps/api", "workspace/apps/web"],
-                "max_parallel": 3,
-            }
-            for field, value in values.items():
-                result = self.set_field(config, field, value)
-                self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            config = self.setup_config(Path(temporary))
+            value = json.loads(config.read_text(encoding="utf-8"))
+            self.assertEqual(set(value), CANONICAL_KEYS)
+            self.assertEqual(value["schema_version"], 1)
+            self.assertEqual(value["team_id"], "software-engineering-team")
             checked = self.run_script(CONFIG, "check", "--config", str(config))
             self.assertEqual(checked.returncode, 0, checked.stdout + checked.stderr)
-            rerun = self.run_script(SETUP, "--project-root", str(project))
+
+    def test_only_language_fields_have_a_config_writer(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            config = self.setup_config(Path(temporary))
+            written = self.run_script(
+                CONFIG, "set", "--config", str(config), "--field",
+                "output_language", "--value", "Turkish",
+            )
+            self.assertEqual(written.returncode, 0, written.stdout + written.stderr)
+            self.assertEqual(
+                json.loads(config.read_text(encoding="utf-8"))["output_language"],
+                "Turkish",
+            )
+            retired = self.run_script(
+                CONFIG, "set", "--config", str(config), "--field", "scale",
+                "--value", "small",
+            )
+            self.assertNotEqual(retired.returncode, 0)
+            self.assertIn("invalid choice", retired.stderr)
+
+    def test_check_rejects_retired_and_unknown_fields(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            config = self.setup_config(Path(temporary))
+            value = json.loads(config.read_text(encoding="utf-8"))
+            value["scale"] = "small"
+            value["unknown"] = True
+            config.write_text(json.dumps(value), encoding="utf-8")
+            checked = self.run_script(CONFIG, "check", "--config", str(config))
+            self.assertEqual(checked.returncode, 1)
+            self.assertIn("unknown or retired field: scale", checked.stdout)
+            self.assertIn("unknown or retired field: unknown", checked.stdout)
+
+    def test_setup_replaces_legacy_config_and_preserves_allowed_values(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            project = Path(temporary)
+            subprocess.run(["git", "init", "-q", str(project)], check=True)
+            workspace = project / "workspace"
+            workspace.mkdir()
+            legacy = {
+                "team_id": "software-engineering-team",
+                "output_language": "Turkish",
+                "terminology_language": "English",
+                "doc_type_designations": {"story": "Story"},
+                "doc_type_designation_history": {"story": ["Work item"]},
+                "backend_stack": "python-fastapi", "test_command": "make test",
+                "mutation_command": "make mutation", "env_command": "./tools/env",
+                "max_parallel": 2, "scale": "small", "unknown": "discard",
+            }
+            (workspace / "config.json").write_text(
+                json.dumps(legacy), encoding="utf-8"
+            )
+            inspected = self.run_script(SETUP, "inspect", "--project-root", str(project), "--json")
+            self.assertEqual(inspected.returncode, 0, inspected.stdout + inspected.stderr)
+            plan = json.loads(inspected.stdout)
+            config_op = next(item for item in plan["operations"] if item["surface"] == "workspace_config")
+            self.assertEqual(config_op["action"], "replace")
+            self.assertIn("backend_stack", config_op["removed_fields"])
+            self.assertIn("unknown", config_op["removed_fields"])
+            applied = self.run_script(SETUP, "apply", "--project-root", str(project))
+            self.assertEqual(applied.returncode, 0, applied.stdout + applied.stderr)
+            current = json.loads((workspace / "config.json").read_text(encoding="utf-8"))
+            self.assertEqual(set(current), CANONICAL_KEYS)
+            self.assertEqual(current["output_language"], "Turkish")
+            self.assertEqual(current["doc_type_designations"]["story"], "Story")
+            self.assertIn("verification-contract", current["doc_type_designations"])
+            docs = workspace / "docs"
+            self.assertTrue((docs / "operation" / "verification-contract.md").is_file())
+            self.assertTrue((docs / "operation" / "environment-contract.md").is_file())
+            self.assertTrue((docs / "delivery" / "governance" / "governance.md").is_file())
+            rerun = self.run_script(SETUP, "inspect", "--project-root", str(project), "--json")
             self.assertEqual(rerun.returncode, 0, rerun.stdout + rerun.stderr)
-            current = json.loads(config.read_text(encoding="utf-8"))
-            for field, value in values.items():
-                self.assertEqual(current[field], value)
+            self.assertEqual(json.loads(rerun.stdout)["operations"], [])
 
-    def test_invalid_write_is_rejected_without_changing_config(self):
+    def test_future_schema_is_never_downgraded(self):
         with tempfile.TemporaryDirectory() as temporary:
-            config = self.setup_config(Path(temporary))
-            before = config.read_bytes()
-            invalid = self.set_field(config, "source_dirs", ["../outside"])
-            self.assertEqual(invalid.returncode, 1)
-            self.assertIn("repository-relative", invalid.stderr)
-            self.assertEqual(config.read_bytes(), before)
-            unknown_limit = self.set_field(config, "limits", {"unknown": 1})
-            self.assertEqual(unknown_limit.returncode, 1)
-            self.assertIn("unknown key", unknown_limit.stderr)
-            self.assertEqual(config.read_bytes(), before)
+            project = Path(temporary)
+            subprocess.run(["git", "init", "-q", str(project)], check=True)
+            workspace = project / "workspace"
+            workspace.mkdir()
+            (workspace / "config.json").write_text(json.dumps({
+                "schema_version": 99, "team_id": "software-engineering-team",
+                "output_language": "English", "terminology_language": "English",
+                "doc_type_designations": {}, "doc_type_designation_history": {},
+            }), encoding="utf-8")
+            result = self.run_script(SETUP, "inspect", "--project-root", str(project))
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("future schema_version", result.stderr)
 
-    def test_limits_are_active_and_dry_run_is_non_mutating(self):
+    def test_setup_moves_a_recognized_legacy_environment_contract_transactionally(self):
         with tempfile.TemporaryDirectory() as temporary:
-            config = self.setup_config(Path(temporary))
-            before = config.read_bytes()
-            preview = self.set_field(
-                config, "limits",
-                {"nesting_warn_depth": 4, "nesting_fail_depth": 7,
-                 "nav_peer_min": 0, "nav_peer_max": 8},
-                "--dry-run", "--json",
+            project = Path(temporary)
+            subprocess.run(["git", "init", "-q", str(project)], check=True)
+            workspace = project / "workspace"
+            (workspace / "environment").mkdir(parents=True)
+            (workspace / "config.json").write_text(json.dumps({
+                "team_id": "software-engineering-team",
+            }), encoding="utf-8")
+            legacy = workspace / "environment" / "contract.md"
+            legacy.write_text(
+                "---\ntype: environment-contract\nstatus: draft\nrevision: 1\n"
+                "env_command: ./tools/env\nenv_workdir: .\nscenarios:\n  - default\n"
+                "tolerated_warnings:\nservice_catalog:\n---\n\n# Environment\n",
+                encoding="utf-8",
             )
-            self.assertEqual(preview.returncode, 0, preview.stderr)
-            self.assertTrue(json.loads(preview.stdout)["dry_run"])
-            self.assertEqual(config.read_bytes(), before)
-            inverted = self.set_field(
-                config, "limits",
-                {"nesting_warn_depth": 7, "nesting_fail_depth": 4},
-            )
-            self.assertEqual(inverted.returncode, 1)
-            self.assertIn("must be lower", inverted.stderr)
-            one_sided = self.set_field(
-                config, "limits", {"nesting_warn_depth": 999},
-            )
-            self.assertEqual(one_sided.returncode, 1)
-            self.assertIn("effective nesting_warn_depth", one_sided.stderr)
-            nav_inverted = self.set_field(
-                config, "limits", {"nav_peer_min": 999},
-            )
-            self.assertEqual(nav_inverted.returncode, 1)
-            self.assertIn("effective nav_peer_min", nav_inverted.stderr)
+            inspected = self.run_script(SETUP, "inspect", "--project-root", str(project), "--json")
+            self.assertEqual(inspected.returncode, 0, inspected.stdout + inspected.stderr)
+            operations = json.loads(inspected.stdout)["operations"]
+            self.assertTrue(any(item["action"] == "delete" and item["path"] == "workspace/environment/contract.md"
+                                for item in operations))
+            applied = self.run_script(SETUP, "apply", "--project-root", str(project))
+            self.assertEqual(applied.returncode, 0, applied.stdout + applied.stderr)
+            canonical = workspace / "docs" / "operation" / "environment-contract.md"
+            self.assertTrue(canonical.is_file())
+            self.assertFalse(legacy.exists())
 
-    def test_documented_delivery_fields_have_a_writer_and_consumers(self):
-        fields = {
-            "backend_stack", "frontend_stack", "environment_stack",
-            "databases", "test_command", "mutation_command", "env_command",
-            "source_dirs", "max_parallel", "limits",
-        }
-        help_result = self.run_script(CONFIG, "set", "--help")
-        self.assertEqual(help_result.returncode, 0, help_result.stderr)
-        contract = (
-            ROOT / "plugins/software-engineering-team/skill-content/configure"
-            / "references/config-contract.md"
-        ).read_text(encoding="utf-8")
-        for field in fields:
-            self.assertIn(field, help_result.stdout)
-            self.assertIn(f"`{field}`", contract)
-        consumers = {
-            "limits": ["scripts/ba_compile.py", "scripts/experience_compile.py",
-                       "scripts/vault_check.py"],
-            "test_command": ["skill-content/qa-verification/SKILL.md"],
-            "mutation_command": ["skill-content/qa-verification/SKILL.md"],
-            "env_command": ["skill-content/docker-compose/SKILL.md"],
-        }
-        plugin = ROOT / "plugins/software-engineering-team"
-        for field, relatives in consumers.items():
-            for relative in relatives:
-                self.assertIn(
-                    field, (plugin / relative).read_text(encoding="utf-8"),
-                    f"{field} lost its declared consumer {relative}",
-                )
 
 if __name__ == "__main__":
     unittest.main()

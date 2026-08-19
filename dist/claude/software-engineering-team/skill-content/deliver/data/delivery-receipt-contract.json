@@ -38,7 +38,7 @@
     "call_started_rule": "exclusive exact-preimage transition persisted before provider mutation; response loss is requery-only"
   },
   "target_update_rule": {
-    "intent": "project-fence-v1 Target-Update-Intent and Attempt are durable before direct/provider target mutation",
+    "intent": "project-fence-v2 Target-Update-Intent and Attempt are durable before direct/provider target mutation",
     "reauthorization": "only conclusive zero-target-effect permits a fresh Attempt",
     "ambiguous_or_partial": "never blind-repeat; requery or manual incident"
   },

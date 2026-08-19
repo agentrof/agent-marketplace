@@ -35,7 +35,8 @@ One row per candidate, one column per dimension from the skill's dimension set, 
 - Judgments cite their source: a requirement id, a budget link, a vendor document, a measurement, or an explicit assumption. Training-memory claims about products and pricing are assumptions until checked.
 - Verification has one meaning: a source obtained in this session and named in the cell (a fetched vendor or standards document with title and date, a recorded measurement, or an owner statement at the gate). Clearing an ASSUMED or UNVERIFIED marker without a named source is a defect; training memory never verifies anything.
 - Options are judged against the landscape that exists: a candidate duplicating a capability an adopted component already provides states why the incumbent does not serve; a second technology in a solved territory is sprawl until the matrix proves otherwise.
-- Team capability is judged against the configured stacks and the team's recorded skills, not optimism.
+- Team capability is judged against accepted component technology decisions
+  and the team's recorded skills, not optimism.
 - Cost includes the run-rate trajectory at the analysis space's stated scale, not the free-tier snapshot. Cost judgments state their horizon: structural decisions default to three years of run-rate, reversible ones to one.
 
 ## The Ungrounded-Engagement Rule

@@ -18,9 +18,12 @@ import shutil
 import subprocess
 import sys
 import tempfile
+from datetime import datetime, timezone
 from pathlib import Path
 
 import marketplace_paths
+import delivery_governance
+import operation_compile
 import project_config
 import setup_check
 import vault_check
@@ -31,10 +34,11 @@ WORKSPACE = "workspace"
 START = "# agent-marketplace:software-engineering-team:gitignore:start"
 END = "# agent-marketplace:software-engineering-team:gitignore:end"
 REQUIRED_DIRS = (
-    "apps", "environment", "demos", "sketches",
+    "apps", "demos", "sketches",
     "docs/business-analysis", "docs/solution-design",
     "docs/system-architecture", "docs/design-system/pages",
-    "docs/experience-design", "docs/requirements", "docs/delivery", "docs/backlog",
+    "docs/experience-design", "docs/requirements", "docs/operation",
+    "docs/delivery", "docs/delivery/governance", "docs/backlog",
 )
 RUNTIME_PARTS = ("agent-marketplace", ".runtime")
 JSON_PAYLOAD_FILES = (
@@ -81,6 +85,27 @@ def atomic_bytes(path: Path, content: bytes, mode: int = 0o644,
         os.replace(temporary, path)
     finally:
         temporary.unlink(missing_ok=True)
+
+
+def legacy_topology_blockers(vault_root: Path) -> list[str]:
+    """Hard-cut models must be removed deliberately, never rewritten by setup."""
+    blockers: list[str] = []
+    experience = vault_root / "experience-design"
+    legacy_experience = experience / "baselines"
+    if legacy_experience.exists():
+        blockers.append("legacy Experience baseline tree exists at docs/experience-design/baselines; no migration is available")
+    for path in (experience / "experiences").glob("exp-*") if (experience / "experiences").is_dir() else []:
+        if path.is_dir():
+            blockers.append(f"retired exp- Experience slug exists at {path.relative_to(vault_root)}; rename it deliberately before setup")
+    for path in experience.rglob("*.md") if experience.is_dir() else []:
+        text = path.read_text(encoding="utf-8", errors="ignore")
+        if any(marker in text for marker in ("baseline_id:", "program_id:", "release_id:", "type: experience-baseline", "type: experience-space", "type: experience-domain")):
+            blockers.append(f"legacy Experience metadata exists at {path.relative_to(vault_root)}; no migration is available")
+    architecture = vault_root / "system-architecture"
+    for name in ("api-contract.md", "data-model.md", "threat-model.md", "environment.md"):
+        if (architecture / name).exists():
+            blockers.append(f"legacy root-level System Architecture record exists at system-architecture/{name}; no migration is available")
+    return sorted(set(blockers))
 
 
 def load_json(path: Path) -> dict:
@@ -297,19 +322,32 @@ def desired_config(args, config_path: Path) -> tuple[dict, list[str]]:
         owner = setup_owner(current)
         if owner and owner != TEAM:
             raise SetupError(f"workspace is owned by {owner}")
-        config = dict(current)
+        schema = current.get("schema_version")
+        if isinstance(schema, int) and schema > project_config.SCHEMA_VERSION:
+            raise SetupError(
+                "workspace config uses a future schema_version and cannot be downgraded"
+            )
+        config = {
+            "schema_version": project_config.SCHEMA_VERSION,
+            "team_id": TEAM,
+            "output_language": current.get("output_language", args.output_language),
+            "terminology_language": current.get(
+                "terminology_language", args.terminology_language
+            ),
+            "doc_type_designations": current.get("doc_type_designations", {}),
+            "doc_type_designation_history": current.get(
+                "doc_type_designation_history", {}
+            ),
+        }
     else:
         config = {
+            "schema_version": project_config.SCHEMA_VERSION,
             "team_id": TEAM,
-            "scale": args.scale,
             "output_language": args.output_language,
             "terminology_language": args.terminology_language,
+            "doc_type_designations": {},
+            "doc_type_designation_history": {},
         }
-
-    config["team_id"] = TEAM
-    config.setdefault("scale", args.scale)
-    config.setdefault("output_language", args.output_language)
-    config.setdefault("terminology_language", args.terminology_language)
 
     errors = project_config.check(config)
     if errors:
@@ -319,6 +357,75 @@ def desired_config(args, config_path: Path) -> tuple[dict, list[str]]:
         if current.get(key) != config.get(key) or (key in current) != (key in config)
     )
     return config, changed_fields
+
+
+def legacy_operation_updates(workspace_root: Path, config: dict) -> tuple[dict[Path, str], list[Path], list[str]]:
+    """Translate retired command fields into draft vault contracts.
+
+    No stack value becomes a Solution decision. A legacy command becomes a
+    transparent, still-draft operational proposal until a user binds it to an
+    accepted Solution decision and approves the contract.
+    """
+    docs = workspace_root / "docs"
+    updates: dict[Path, str] = {}
+    deletions: list[Path] = []
+    blockers: list[str] = []
+    verification = docs / "operation" / "verification-contract.md"
+    environment = docs / "operation" / "environment-contract.md"
+    legacy_test = config.get("test_command")
+    legacy_mutation = config.get("mutation_command")
+    legacy_env = config.get("env_command")
+    if not verification.exists() and (isinstance(legacy_test, str) or isinstance(legacy_mutation, str)):
+        props = operation_compile.initial_props("verification", [])
+        props["test_command"] = legacy_test if isinstance(legacy_test, str) else ""
+        if isinstance(legacy_mutation, str) and legacy_mutation.strip():
+            props["mutation_disposition"] = "required"
+            props["mutation_command"] = legacy_mutation
+            props["mutation_rationale"] = ""
+        body = "# Verification Contract\n\n## Contract\n\nMigrated from retired workspace config. Bind this draft to accepted Solution decisions before approval.\n\n## Navigation <!-- sec: nav -->\n\n[[maps/operation|Operation]]"
+        updates[verification] = operation_compile.render(props, body)
+    legacy_environment = workspace_root / "environment" / "contract.md"
+    if not environment.exists() and legacy_environment.exists():
+        text = legacy_environment.read_text(encoding="utf-8")
+        try:
+            props, _body_line, error = operation_compile.parse_frontmatter(text)
+        except ValueError:
+            props, error = {}, "invalid frontmatter"
+        if error or props.get("type") not in {"environment-contract", "environment-reference"}:
+            blockers.append(
+                "legacy workspace/environment/contract.md is not a recognized environment contract; preserve it and migrate manually"
+            )
+        else:
+            updates[environment] = text
+            # A recognized legacy document has a lossless canonical successor.
+            # Keep this removal in the same refresh transaction as the create,
+            # so a failed closing gate restores the original file.
+            deletions.append(legacy_environment)
+    elif not environment.exists() and isinstance(legacy_env, str):
+        props = operation_compile.initial_props("environment", [])
+        props["env_command"] = legacy_env
+        body = "# Environment Contract\n\n## Contract\n\nMigrated from retired workspace config. Bind this draft to accepted Solution decisions before approval.\n\n## Navigation <!-- sec: nav -->\n\n[[maps/operation|Operation]]"
+        updates[environment] = operation_compile.render(props, body)
+    return updates, deletions, blockers
+
+
+def legacy_governance_update(workspace_root: Path, config: dict) -> dict[Path, str]:
+    value = config.get("max_parallel")
+    target = workspace_root / "docs" / "delivery" / "governance" / "governance.md"
+    if target.exists() or not isinstance(value, int) or isinstance(value, bool) or value < 1:
+        return {}
+    props = {
+        "type": "delivery-governance", "title": "Delivery Governance",
+        "status": "approved", "revision": 1, "max_parallel": value,
+        "governance_hash": "", "source_hash": "",
+        "approved_at_utc": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+        "tags": ["doc/delivery-governance", "status/approved"],
+    }
+    body = "# Delivery Governance\n\n## Coordination\n\nMigrated from retired workspace config. This is the hard maximum number of active Delivery slots.\n\n## Navigation <!-- sec: nav -->\n\n[[maps/delivery|Delivery]]"
+    digest = delivery_governance.governance_hash(props, body)
+    props["governance_hash"] = digest
+    props["source_hash"] = digest
+    return {target: delivery_governance.render(props, body)}
 
 
 def alternate_workspaces(root: Path) -> list[str]:
@@ -378,10 +485,11 @@ def build_plan(args) -> dict:
             + f"; move its durable content under {WORKSPACE}/"
         )
 
+    legacy_config = load_json(config_path)
     config, changed_fields = desired_config(args, config_path)
     payload_root, policy_path, policy = package_surfaces()
     operations: list[dict] = []
-    blockers: list[str] = []
+    blockers: list[str] = legacy_topology_blockers(vault_root)
     defaults = vault_check.default_designations(policy)
     configured = config.get("doc_type_designations")
     configured = dict(configured) if isinstance(configured, dict) else {}
@@ -404,12 +512,59 @@ def build_plan(args) -> dict:
     if target_config != current_config:
         current_value = load_json(config_path) if config_path.is_file() else {}
         operations.append({
-            "action": "create" if not config_path.exists() else "update",
+            "action": "create" if not config_path.exists() else "replace",
             "surface": "workspace_config",
             "path": f"{workspace}/config.json",
+            "schema_from": current_value.get("schema_version", "unversioned"),
+            "schema_to": project_config.SCHEMA_VERSION,
+            "preserved_fields": sorted(
+                key for key in project_config.CONFIG_FIELDS
+                if key in current_value and current_value.get(key) == config.get(key)
+            ),
+            "removed_fields": sorted(
+                key for key in current_value if key not in project_config.CONFIG_FIELDS
+            ),
+            "migrated_fields": sorted(
+                key for key in ("test_command", "mutation_command", "env_command", "max_parallel")
+                if key in current_value
+            ),
             "fields": changed_fields,
             "changes": value_deltas(current_value, config),
             "ownership": "tracked_managed",
+        })
+
+    operation_updates, operation_deletions, migration_blockers = legacy_operation_updates(
+        workspace_root, legacy_config
+    )
+    governance_updates = legacy_governance_update(workspace_root, legacy_config)
+    blockers.extend(migration_blockers)
+    if operation_updates:
+        operation_map = vault_root / "maps" / "operation.md"
+        if not operation_map.exists():
+            source = payload_root.parent / "maps" / "operation.md"
+            operation_updates[operation_map] = source.read_text(encoding="utf-8")
+    if governance_updates:
+        delivery_map = vault_root / "maps" / "delivery.md"
+        if not delivery_map.exists():
+            source = payload_root.parent / "maps" / "delivery.md"
+            governance_updates[delivery_map] = source.read_text(encoding="utf-8")
+    for target, content in sorted(
+        {**operation_updates, **governance_updates}.items(), key=lambda item: str(item[0])
+    ):
+        assert_not_symlinked(root, target, "legacy contract migration")
+        operations.append({
+            "action": "create", "surface": "legacy_contract_migration",
+            "path": target.relative_to(root).as_posix(),
+            "ownership": "tracked_migration",
+            "after_hash": bytes_hash(content.encode("utf-8")),
+        })
+    for target in operation_deletions:
+        assert_not_symlinked(root, target, "legacy contract migration")
+        operations.append({
+            "action": "delete", "surface": "legacy_contract_migration",
+            "path": target.relative_to(root).as_posix(),
+            "ownership": "tracked_migration",
+            "before_hash": bytes_hash(target.read_bytes()),
         })
 
     for relative in REQUIRED_DIRS:
@@ -585,6 +740,8 @@ def build_plan(args) -> dict:
         "_payload_deletions": planned_deletions,
         "_gate_bytes": gate_bytes,
         "_relation_reports": relation_updates,
+        "_legacy_contract_updates": {**operation_updates, **governance_updates},
+        "_legacy_contract_deletions": operation_deletions,
         "_gitignore_content": target_ignore,
     }
 
@@ -622,6 +779,7 @@ def rollback_targets(root: Path, plan: dict) -> list[Path]:
     """
     mutable_surfaces = {
         "workspace_config", "vault_payload", "generated_relation_report",
+        "legacy_contract_migration",
         "gitignore", "portable_gate",
     }
     targets = {
@@ -852,6 +1010,12 @@ def _apply_plan_locked(args, plan: dict) -> tuple[int, dict]:
         )
         for target, content in plan["_relation_reports"].items():
             snapshot.write_text(target, content)
+        for target, content in sorted(
+            plan["_legacy_contract_updates"].items(), key=lambda item: str(item[0])
+        ):
+            snapshot.write_text(target, content)
+        for target in plan["_legacy_contract_deletions"]:
+            snapshot.delete(target)
         current_ignore, _target_ignore = proposed_gitignore(
             root, args.workspace
         )
@@ -981,11 +1145,6 @@ def main(argv=None) -> int:
     )
     parser.add_argument("--project-root", required=True)
     parser.set_defaults(workspace=WORKSPACE)
-    parser.add_argument(
-        "--scale",
-        choices=("small", "medium", "large", "x-large", "xx-large", "enterprise"),
-        default="small",
-    )
     parser.add_argument("--output-language", default="English")
     parser.add_argument("--terminology-language", default="English")
     parser.add_argument("--json", action="store_true")

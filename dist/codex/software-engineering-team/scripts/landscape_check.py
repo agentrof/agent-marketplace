@@ -30,6 +30,8 @@ Stdlib only. Exit 0 clean, 1 on findings, 2 on usage errors.
 from __future__ import annotations
 
 import argparse
+import hashlib
+import json
 import re
 import sys
 from datetime import date, datetime, timezone
@@ -51,6 +53,24 @@ ENGAGEMENT_STATUS_RE = re.compile(
     r"^Status: (open|approved \d{4}-\d{2}-\d{2}"
     r"|parked \d{4}-\d{2}-\d{2}: .+|superseded by [a-z0-9-]+)$"
 )
+DECISION_KINDS = {
+    "technology-selection", "data-store", "environment", "integration", "other",
+}
+COMPONENT_ID_RE = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
+COMPONENT_CLASSES = {"application", "platform-service", "external-service"}
+SOURCING = {"build", "self-hosted", "managed", "third-party"}
+APP_KINDS = {"backend-api", "frontend-web", "mobile", "worker", "scheduler", "gateway", "cli", "other"}
+APP_SUFFIXES = {
+    "backend-api": "-api", "frontend-web": "-web", "mobile": "-mobile",
+    "worker": "-worker", "scheduler": "-scheduler", "gateway": "-gateway",
+    "cli": "-cli",
+}
+
+
+def installed_method_skills() -> set[str]:
+    """Resolve the packaged internal skill ids in source and host builds."""
+    root = Path(__file__).resolve().parents[1] / "skill-content"
+    return {path.name for path in root.iterdir() if path.is_dir()} if root.is_dir() else set()
 
 
 def section(text: str, name: str) -> str:
@@ -66,6 +86,277 @@ def section(text: str, name: str) -> str:
 def utc_today():
     """This script's single clock read."""
     return datetime.now(timezone.utc).date()
+
+
+def package_hash(tree: Path) -> str:
+    digest = hashlib.sha256()
+    ignored = {"package_hash", "package_status", "package_approved_at_utc"}
+    for path in sorted(tree.rglob("*.md")):
+        text = path.read_text(encoding="utf-8")
+        props, body_line, error = parse_frontmatter(text)
+        if not error and props:
+            lines = text.splitlines()
+            kept = ["---"]
+            for raw in lines[1:body_line - 2]:
+                if raw.partition(":")[0].strip() not in ignored:
+                    kept.append(raw)
+            kept.extend(lines[body_line - 1:])
+            text = "\n".join(kept).rstrip() + "\n"
+        digest.update(path.relative_to(tree).as_posix().encode())
+        digest.update(b"\0")
+        digest.update(text.encode())
+        digest.update(b"\0")
+    for generated_name in ("capability-registry.json", "component-catalog.json", "topology.json"):
+        generated = tree / "_generated" / generated_name
+        if generated.is_file():
+            digest.update(generated.relative_to(tree).as_posix().encode())
+            digest.update(b"\0")
+            digest.update(generated.read_bytes())
+            digest.update(b"\0")
+    return "sha256:" + digest.hexdigest()
+
+
+def capability_registry(tree: Path, decisions: list[dict]) -> str:
+    capabilities = []
+    for decision in sorted(decisions, key=lambda row: (row["id"], row["path"])):
+        if (decision["status"] != "accepted" or decision["kind"] == "other"
+                or decision["kind"] not in DECISION_KINDS):
+            continue
+        capabilities.append({
+            "decision_id": decision["id"],
+            "decision_ref": f"solution-design/decisions/{decision['path']}",
+            "decision_kind": decision["kind"],
+            "applies_to": decision["applies_to"],
+            "selected_technology": decision["selected_technology"],
+            "method_skills": decision["method_skills"],
+        })
+    return json.dumps({"schema_version": 1, "capabilities": capabilities},
+                      ensure_ascii=False, indent=2, sort_keys=True) + "\n"
+
+
+def render_capability_registry(tree: Path, decisions: list[dict],
+                               components: list[dict] | None = None) -> Path:
+    target = tree / "_generated" / "capability-registry.json"
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(capability_registry(tree, decisions), encoding="utf-8")
+    catalog = tree / "_generated" / "component-catalog.json"
+    topology = tree / "_generated" / "topology.json"
+    ordered = sorted(components or [], key=lambda item: item["component_id"])
+    catalog.write_text(json.dumps({"schema_version": 1, "components": ordered}, ensure_ascii=False,
+                                  indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    topology.write_text(json.dumps({"schema_version": 1, "components": [
+        {key: item[key] for key in ("component_id", "component_class", "sourcing", "app_kind", "code_path", "depends_on_component")
+         if key in item}
+        for item in ordered
+    ]}, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    map_path = tree.parent / "maps" / "solution-design.md"
+    if map_path.is_file():
+        text = map_path.read_text(encoding="utf-8")
+        marker = "<!-- landscape_check.py: generated topology -->"
+        retained = text.split(marker, 1)[0].rstrip()
+        links = ["", marker, "", "- [[solution-design/landscape|Solution landscape]]"]
+        links.extend(f"- [[solution-design/components/{row['component_id']}/component|{row['component_id']}]]" for row in ordered)
+        map_path.write_text("\n".join([retained, *links]).rstrip() + "\n", encoding="utf-8")
+    return target
+
+
+def component_rows(tree: Path, findings: list[str], *, enforce: bool) -> list[dict]:
+    """Read the topology's canonical component catalog from authored notes."""
+    rows: list[dict] = []
+    seen: set[str] = set()
+    root = tree / "components"
+    if not root.is_dir():
+        if enforce:
+            findings.append("components/ is required for a lifecycle Solution package")
+        return rows
+    for note in sorted(root.glob("*/component.md")):
+        component_id = note.parent.name
+        try:
+            fm, _line, error = parse_frontmatter(note.read_text(encoding="utf-8"))
+        except OSError as exc:
+            findings.append(f"components/{component_id}/component.md: cannot read: {exc}")
+            continue
+        if error:
+            findings.append(f"components/{component_id}/component.md: {error}")
+            continue
+        declared = str(fm.get("component_id", ""))
+        if declared != component_id or not COMPONENT_ID_RE.fullmatch(component_id):
+            findings.append(f"components/{component_id}/component.md: component_id must match lower-kebab path")
+        if component_id in seen:
+            findings.append(f"components/{component_id}/component.md: duplicate component_id")
+        seen.add(component_id)
+        component_class = str(fm.get("component_class", ""))
+        sourcing = str(fm.get("sourcing", ""))
+        app_kind = str(fm.get("app_kind", ""))
+        code_path = str(fm.get("code_path", ""))
+        if component_class not in COMPONENT_CLASSES:
+            findings.append(f"components/{component_id}/component.md: invalid component_class")
+        if sourcing not in SOURCING:
+            findings.append(f"components/{component_id}/component.md: invalid sourcing")
+        if sourcing == "build":
+            if app_kind not in APP_KINDS:
+                findings.append(f"components/{component_id}/component.md: build component needs app_kind")
+            if code_path != f"workspace/apps/{component_id}":
+                findings.append(f"components/{component_id}/component.md: build component code_path must be workspace/apps/{component_id}")
+            suffix = APP_SUFFIXES.get(app_kind)
+            if suffix and not component_id.endswith(suffix):
+                findings.append(f"components/{component_id}/component.md: {app_kind} ids must end with {suffix}")
+        elif app_kind or code_path:
+            findings.append(f"components/{component_id}/component.md: non-build components cannot declare app_kind or code_path")
+        for field in ("derives_from", "owned_ba_refs", "depends_on_component", "technology_bindings"):
+            value = fm.get(field, [])
+            if value and (not isinstance(value, list) or not all(isinstance(item, str) and item.strip() for item in value)):
+                findings.append(f"components/{component_id}/component.md: {field} must be a string list")
+        rows.append({
+            "component_id": component_id, "component_class": component_class,
+            "sourcing": sourcing, **({"app_kind": app_kind, "code_path": code_path} if sourcing == "build" else {}),
+            "derives_from": fm.get("derives_from", []),
+            "owned_ba_refs": fm.get("owned_ba_refs", []),
+            "depends_on_component": fm.get("depends_on_component", []),
+            "technology_bindings": fm.get("technology_bindings", []),
+            "data_store_disposition": str(fm.get("data_store_disposition", "")),
+        })
+    return rows
+
+
+def ba_process_universe(tree: Path) -> set[str]:
+    """Return active root-process refs from approved BA spaces.
+
+    The path is deliberately the same canonical identity consumed by living
+    Experience packages.  The BA package hash is carried by its stage receipt.
+    """
+    docs = tree.parent
+    result: set[str] = set()
+    for space in sorted((docs / "business-analysis").glob("*")) if (docs / "business-analysis").is_dir() else []:
+        root = space / "space.md"
+        if not space.is_dir() or not root.is_file():
+            continue
+        props, _line, error = parse_frontmatter(root.read_text(encoding="utf-8"))
+        if error or props.get("package_status") != "approved":
+            continue
+        for process in sorted((space / "processes").glob("*-process.md")) if (space / "processes").is_dir() else []:
+            process_props, _line, process_error = parse_frontmatter(process.read_text(encoding="utf-8"))
+            if not process_error and process_props.get("type") == "process" and process_props.get("status") == "approved":
+                result.add(process.relative_to(docs).with_suffix("").as_posix())
+    return result
+
+
+def not_technical_allocations(props: dict) -> tuple[dict[str, str], list[str]]:
+    allocations: dict[str, str] = {}
+    findings: list[str] = []
+    values = props.get("not_technical_allocations", [])
+    if values and not isinstance(values, list):
+        return {}, ["landscape.md not_technical_allocations must be a string list"]
+    for raw in values if isinstance(values, list) else []:
+        reference, marker, rationale = str(raw).partition("|")
+        if not marker or not reference.strip() or not rationale.strip():
+            findings.append("landscape.md not_technical_allocations entries must use <BA process ref>|<rationale>")
+            continue
+        if reference in allocations:
+            findings.append(f"landscape.md not_technical_allocations duplicates {reference}")
+            continue
+        allocations[reference] = rationale
+    return allocations, findings
+
+
+def topology_confirmation_hash(components: list[dict], decisions: list[dict],
+                               not_technical: dict[str, str] | None = None) -> str:
+    """Canonical evidence of the user-confirmed component/naming set."""
+    payload = {
+        "components": sorted(components, key=lambda row: row["component_id"]),
+        "accepted_decisions": sorted(
+            [{key: row.get(key) for key in ("path", "kind", "applies_to", "selected_technology")}
+             for row in decisions if row.get("status") == "accepted"],
+            key=lambda row: str(row["path"]),
+        ),
+        "not_technical_allocations": sorted((not_technical or {}).items()),
+    }
+    return "sha256:" + hashlib.sha256(
+        json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode()
+    ).hexdigest()
+
+
+def topology_findings(tree: Path, components: list[dict], decisions: list[dict],
+                      landscape_props: dict) -> list[str]:
+    """Enforce topology ownership only for the modern confirmed contract."""
+    findings: list[str] = []
+    ids = {row["component_id"] for row in components}
+    graph = {row["component_id"]: set(row.get("depends_on_component", [])) for row in components}
+    visiting, visited = set(), set()
+    def visit(node: str) -> None:
+        if node in visiting:
+            findings.append(f"component dependency graph has a cycle at {node}")
+            return
+        if node in visited:
+            return
+        visiting.add(node)
+        for neighbour in graph.get(node, set()):
+            if neighbour in ids:
+                visit(neighbour)
+        visiting.remove(node); visited.add(node)
+    for component in sorted(ids):
+        visit(component)
+    ownership: dict[str, str] = {}
+    universe = ba_process_universe(tree)
+    not_technical, allocation_findings = not_technical_allocations(landscape_props)
+    findings.extend(allocation_findings)
+    accepted_by_path = {f"solution-design/decisions/{row['path']}": row
+                        for row in decisions if row.get("status") == "accepted"}
+    for component in components:
+        cid = component["component_id"]
+        refs = component.get("owned_ba_refs", [])
+        if not refs:
+            findings.append(f"components/{cid}/component.md: modern topology needs owned_ba_refs")
+        for ref in refs:
+            if ref not in universe:
+                findings.append(f"components/{cid}/component.md: owned_ba_refs contains an inactive or unknown BA process: {ref}")
+            owner = ownership.setdefault(ref, cid)
+            if owner != cid:
+                findings.append(f"BA capability/process {ref} has multiple topology owners: {owner}, {cid}")
+        bindings = [accepted_by_path.get(ref) for ref in component.get("technology_bindings", [])]
+        kinds = {row["kind"] for row in bindings if row}
+        if component.get("sourcing") == "build":
+            missing = {"technology-selection", "environment"} - kinds
+            if missing:
+                findings.append(f"components/{cid}/component.md: build component lacks accepted {', '.join(sorted(missing))} binding")
+            if component.get("data_store_disposition") not in {"required", "not_applicable"}:
+                findings.append(f"components/{cid}/component.md: data_store_disposition must be required or not_applicable")
+        elif component.get("sourcing") in {"self-hosted", "managed", "third-party"} and "integration" not in kinds:
+            findings.append(f"components/{cid}/component.md: external component needs an accepted integration binding")
+    for reference in sorted(not_technical):
+        if reference not in universe:
+            findings.append(f"landscape.md not_technical allocation targets an inactive or unknown BA process: {reference}")
+        if reference in ownership:
+            findings.append(f"BA process {reference} cannot be both component-owned and not_technical")
+    for reference in sorted(universe - set(ownership) - set(not_technical)):
+        findings.append(f"BA process {reference} has no topology owner or not_technical disposition")
+    return findings
+
+
+def rewrite_frontmatter(path: Path, updates: dict, removals: set[str] = set()) -> None:
+    text = path.read_text(encoding="utf-8")
+    lines = text.splitlines()
+    if not lines or lines[0].strip() != "---":
+        raise ValueError("landscape.md needs vault frontmatter for package lifecycle")
+    end = next((i for i, line in enumerate(lines[1:], 1) if line.strip() == "---"), -1)
+    if end < 0:
+        raise ValueError("landscape.md frontmatter is unterminated")
+    written = set()
+    output = ["---"]
+    for line in lines[1:end]:
+        key = line.strip().partition(":")[0].strip()
+        if key in removals:
+            continue
+        if key in updates:
+            output.append(f"{key}: {updates[key]}")
+            written.add(key)
+        else:
+            output.append(line)
+    for key, value in updates.items():
+        if key not in written:
+            output.append(f"{key}: {value}")
+    output.extend(lines[end:])
+    path.write_text("\n".join(output).rstrip() + "\n", encoding="utf-8")
 
 
 def stamp_engagement(tree: Path, slug: str, status: str,
@@ -110,6 +401,8 @@ def stamp_engagement(tree: Path, slug: str, status: str,
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Check solution-tree integrity.")
+    parser.add_argument("command", nargs="?", default="check",
+                        choices=["check", "render-capabilities", "confirm-topology", "begin-revision", "approve", "status"])
     parser.add_argument("--tree", required=True, help="solution-design directory")
     parser.add_argument("--stamp-engagement", default="", metavar="SLUG")
     parser.add_argument("--status", choices=["approved", "parked", "open"],
@@ -139,7 +432,22 @@ def main(argv: list[str] | None = None) -> int:
 
     findings: list[str] = []
     records: dict[str, str] = {}  # path stem -> frontmatter status
+    decision_rows: list[dict] = []
     seen_ids: dict[str, str] = {}
+    # Older approved Solution packages remain readable until their first
+    # revision or implementation handoff. New lifecycle packages must carry
+    # the structured capability metadata on accepted decisions.
+    landscape_props = {}
+    landscape_path = tree / "landscape.md"
+    if landscape_path.is_file():
+        landscape_props, _line, landscape_error = parse_frontmatter(
+            landscape_path.read_text(encoding="utf-8")
+        )
+        if landscape_error:
+            landscape_props = {}
+    enforce_capability_metadata = bool(landscape_props.get("package_status"))
+    components = component_rows(tree, findings, enforce=enforce_capability_metadata)
+    component_ids = {row["component_id"] for row in components}
     decisions_dir = tree / "decisions"
     if decisions_dir.is_dir():
         for note in sorted(decisions_dir.glob("*.md")):
@@ -170,6 +478,46 @@ def main(argv: list[str] | None = None) -> int:
                 continue
             seen_ids[rec_id] = note.name
             records[note.stem] = status
+            kind = str(fm.get("decision_kind", ""))
+            applies_to = fm.get("applies_to")
+            selected = str(fm.get("selected_technology", ""))
+            skills = fm.get("method_skills", [])
+            if status == "accepted" and enforce_capability_metadata:
+                if kind not in DECISION_KINDS:
+                    findings.append(f"decisions/{note.name}: accepted decision needs a supported decision_kind")
+                if not isinstance(applies_to, list) or not applies_to or not all(isinstance(value, str) and value for value in applies_to):
+                    findings.append(f"decisions/{note.name}: accepted decision needs non-empty applies_to")
+                if kind != "other" and not selected:
+                    findings.append(f"decisions/{note.name}: {kind or 'accepted'} decision needs selected_technology")
+                if not isinstance(skills, list) or not all(isinstance(value, str) and value for value in skills):
+                    findings.append(f"decisions/{note.name}: method_skills must be a string list")
+                elif unknown := sorted(set(skills) - installed_method_skills()):
+                    findings.append(f"decisions/{note.name}: method_skills are not installed internal skills: {', '.join(unknown)}")
+            decision_rows.append({
+                "id": rec_id, "path": note.stem, "status": status, "kind": kind,
+                "applies_to": applies_to if isinstance(applies_to, list) else [],
+                "selected_technology": selected,
+                "method_skills": skills if isinstance(skills, list) else [],
+            })
+            if status == "accepted" and enforce_capability_metadata:
+                unknown_components = sorted(set(applies_to if isinstance(applies_to, list) else []) - component_ids)
+                if unknown_components:
+                    findings.append(f"decisions/{note.name}: applies_to references unknown components: {', '.join(unknown_components)}")
+    for component in components:
+        unknown_dependencies = sorted(set(component.get("depends_on_component", [])) - component_ids)
+        if unknown_dependencies:
+            findings.append(f"components/{component['component_id']}/component.md: depends_on_component references unknown components: {', '.join(unknown_dependencies)}")
+        accepted_refs = {f"solution-design/decisions/{row['path']}" for row in decision_rows if row["status"] == "accepted"}
+        unknown_decisions = sorted(set(component.get("technology_bindings", [])) - accepted_refs)
+        if unknown_decisions:
+            findings.append(f"components/{component['component_id']}/component.md: technology_bindings need accepted decisions: {', '.join(unknown_decisions)}")
+    # Version 3 introduces the complete BA allocation universe and explicit
+    # not-technical dispositions. Version 2 packages remain readable as
+    # legacy evidence, but cannot become a new strict handoff without a
+    # revision and a fresh topology confirmation.
+    modern_topology = int(landscape_props.get("topology_contract_version", 0) or 0) >= 3
+    if modern_topology:
+        findings.extend(topology_findings(tree, components, decision_rows, landscape_props))
     log_path = tree / "decision-log.md"
     if records:
         if not log_path.is_file():
@@ -184,8 +532,8 @@ def main(argv: list[str] | None = None) -> int:
     land_path = tree / "landscape.md"
     if land_path.is_file():
         land_text = land_path.read_text(encoding="utf-8")
-        components = section(land_text, "Components")
-        for line in components.splitlines():
+        component_section = section(land_text, "Components")
+        for line in component_section.splitlines():
             if not line.strip().startswith("|") or set(line.strip()) <= {"|", "-", " "}:
                 continue
             if "component" in line.lower() and "verdict" in line.lower():
@@ -208,9 +556,9 @@ def main(argv: list[str] | None = None) -> int:
                 if status is None:
                     findings.append("landscape.md Components cites missing"
                                     f" record {stem}")
-                elif status == "superseded":
+                elif status != "accepted":
                     findings.append("landscape.md Components cites"
-                                    f" superseded record {stem}")
+                                    f" non-accepted record {stem} ({status})")
         target = section(land_text, "Target")
         for line in target.splitlines():
             stripped = line.strip()
@@ -242,6 +590,37 @@ def main(argv: list[str] | None = None) -> int:
                         " date; stamps come from the clock"
                         " (landscape_check.py --stamp-engagement)")
 
+    if args.command == "render-capabilities" and not findings:
+        target = render_capability_registry(tree, decision_rows, components)
+        print(f"landscape_check: rendered {target}")
+        return 0
+    if args.command == "confirm-topology" and not findings:
+        if landscape_error or not bool(landscape_props.get("topology_selected")) or not components:
+            print("landscape_check: topology_selected and at least one component are required", file=sys.stderr)
+            return 1
+        contract_findings = topology_findings(tree, components, decision_rows, landscape_props)
+        if contract_findings:
+            print("landscape_check: FAIL", file=sys.stderr)
+            for finding in contract_findings:
+                print(f"  - {finding}", file=sys.stderr)
+            return 1
+        not_technical, allocation_findings = not_technical_allocations(landscape_props)
+        if allocation_findings:
+            print("landscape_check: FAIL", file=sys.stderr)
+            for finding in allocation_findings:
+                print(f"  - {finding}", file=sys.stderr)
+            return 1
+        digest = topology_confirmation_hash(components, decision_rows, not_technical)
+        try:
+            rewrite_frontmatter(land_path, {
+                "topology_contract_version": 3,
+                "topology_confirmation_hash": digest,
+            })
+        except ValueError as exc:
+            print(f"landscape_check: {exc}", file=sys.stderr)
+            return 1
+        print(json.dumps({"topology_confirmation_hash": digest, "components": [row["component_id"] for row in components]}, sort_keys=True))
+        return 0
     if findings:
         if stamped_doc is not None and stamped_original is not None:
             stamped_doc.write_text(stamped_original, encoding="utf-8")
@@ -251,6 +630,72 @@ def main(argv: list[str] | None = None) -> int:
         for finding in findings:
             print(f"  - {finding}", file=sys.stderr)
         return 1
+    landscape_props, _line, landscape_error = parse_frontmatter(
+        land_path.read_text(encoding="utf-8")) if land_path.is_file() else ({}, 0, "missing")
+    if args.command == "status":
+        digest = package_hash(tree)
+        current = (not landscape_error and landscape_props.get("package_status") == "approved"
+                   and landscape_props.get("package_hash") == digest)
+        print(json.dumps({"stage": "solution-design", "result_ref": "solution-design/landscape",
+                          "result_type": "solution-design-package", "package_hash": digest,
+                          "status": "approved" if current else "draft", "current": current}, sort_keys=True))
+        return 0 if current else 1
+    if args.command == "begin-revision":
+        if landscape_error or (landscape_props.get("package_status") not in {"approved", ""}
+                               and landscape_props.get("status") != "approved"):
+            print("landscape_check: only an approved package can begin a revision", file=sys.stderr)
+            return 1
+        try:
+            rewrite_frontmatter(land_path, {"package_status": "draft"},
+                                {"package_hash", "package_approved_at_utc"})
+        except ValueError as exc:
+            print(f"landscape_check: {exc}", file=sys.stderr)
+            return 1
+        print("landscape_check: began solution package revision")
+        return 0
+    if args.command == "approve":
+        if landscape_error:
+            print("landscape_check: landscape.md needs frontmatter for approval", file=sys.stderr)
+            return 1
+        if any("Status: open" in doc.read_text(encoding="utf-8") for doc in engagements.glob("*.md")):
+            print("landscape_check: open engagement blocks package approval", file=sys.stderr)
+            return 1
+        for heading in ("Target", "Transition", "Components"):
+            if not section(land_path.read_text(encoding="utf-8"), heading).strip():
+                print(f"landscape_check: landscape {heading} is incomplete", file=sys.stderr)
+                return 1
+        if not bool(landscape_props.get("topology_selected")):
+            print("landscape_check: topology_selected must be true before approval", file=sys.stderr)
+            return 1
+        if not components:
+            print("landscape_check: at least one topology component is required", file=sys.stderr)
+            return 1
+        not_technical, allocation_findings = not_technical_allocations(landscape_props)
+        if allocation_findings:
+            print("landscape_check: " + "; ".join(allocation_findings), file=sys.stderr)
+            return 1
+        expected_confirmation = topology_confirmation_hash(components, decision_rows, not_technical)
+        if (int(landscape_props.get("topology_contract_version", 0) or 0) < 3
+                or landscape_props.get("topology_confirmation_hash") != expected_confirmation):
+            print("landscape_check: run confirm-topology after the user confirms the exact topology and naming set", file=sys.stderr)
+            return 1
+        render_capability_registry(tree, decision_rows, components)
+        digest = package_hash(tree)
+        try:
+            rewrite_frontmatter(land_path, {
+                "package_status": "approved", "package_hash": digest,
+                "package_approved_at_utc": datetime.now(timezone.utc).replace(microsecond=0).isoformat(),
+            })
+        except ValueError as exc:
+            print(f"landscape_check: {exc}", file=sys.stderr)
+            return 1
+        if package_hash(tree) != digest:
+            print("landscape_check: package approval hash closing check failed", file=sys.stderr)
+            return 1
+        print(json.dumps({"stage": "solution-design", "result_ref": "solution-design/landscape",
+                          "result_type": "solution-design-package", "package_hash": digest,
+                          "status": "approved", "current": True}, sort_keys=True))
+        return 0
     print(f"landscape_check: OK: {len(records)} records, tree consistent")
     return 0
 

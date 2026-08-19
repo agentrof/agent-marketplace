@@ -5,10 +5,13 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import json
 import re
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
+
+import stage_package
 
 HASH_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
 RELATION_BLOCK_RE = re.compile(
@@ -20,6 +23,21 @@ RELATION_BLOCK_RE = re.compile(
 MACHINE_FIELDS = {
     "status", "approved_at_utc", "baseline_hash", "supersedes_hash",
 }
+REQUIRED_CONTENT = {
+    "semantic palette": ("palette", "light", "dark"),
+    "typography": ("typography",),
+    "spacing": ("spacing",),
+    "radius": ("radius",),
+    "shadows": ("shadow",),
+    "motion": ("motion", "reduced"),
+    "breakpoints": ("breakpoint",),
+    "icon set": ("icon",),
+    "component specs": ("component",),
+    "accessibility and focus": ("accessibility", "focus"),
+    "anti-patterns": ("anti-pattern",),
+    "pre-delivery checklist": ("pre-delivery", "checklist"),
+}
+WIKILINK_RE = re.compile(r"\[\[([^\]|#]+)")
 
 
 def fail(message: str, code: int = 1) -> int:
@@ -114,6 +132,75 @@ def baseline_hash(root: Path) -> str:
     return "sha256:" + digest.hexdigest()
 
 
+def relation_values(path: Path, key: str) -> list[str]:
+    """Read a simple YAML scalar/list relation without accepting prose links."""
+    lines = path.read_text(encoding="utf-8").splitlines()
+    values: list[str] = []
+    active = False
+    for line in lines[1:]:
+        if line.strip() == "---":
+            break
+        if line.startswith(f"{key}:"):
+            value = line.split(":", 1)[1].strip().strip('"\'')
+            if value:
+                values.append(value)
+            active = True
+            continue
+        if active and line.lstrip().startswith("- "):
+            values.append(line.lstrip()[2:].strip().strip('"\''))
+            continue
+        if active and line and not line.startswith((" ", "\t")):
+            active = False
+    return values
+
+
+def semantic_findings(root: Path) -> list[str]:
+    master = root / "MASTER.md"
+    fields, _lines, _end = parse_frontmatter(master)
+    # Existing approved masters remain reusable read-only.  A new contract is
+    # opted into explicitly by authoring the required upstream bindings or a
+    # contract_version; its first revision then becomes fail-closed.
+    if (not fields.get("contract_version")
+            and not relation_values(master, "derives_from")
+            and not relation_values(master, "constrained_by")):
+        return []
+    text = master.read_text(encoding="utf-8").casefold()
+    result = []
+    for label, terms in REQUIRED_CONTENT.items():
+        if not all(term in text for term in terms):
+            result.append(f"MASTER.md is missing required {label} content")
+    ba_refs = relation_values(master, "derives_from")
+    solution_refs = relation_values(master, "constrained_by")
+    if not ba_refs:
+        result.append("MASTER.md needs derives_from exact Business Analysis package reference(s)")
+    if len(solution_refs) != 1:
+        result.append("MASTER.md needs exactly one constrained_by Solution package reference")
+    docs = root.parent
+    for raw in ba_refs:
+        match = WIKILINK_RE.search(raw)
+        if not match:
+            result.append("MASTER.md derives_from must use exact package wikilinks")
+            continue
+        _receipt, errors = stage_package.verify(
+            docs, "business-analysis", match.group(1), require_strict_current=True,
+        )
+        result.extend(f"MASTER.md derives_from: {error}" for error in errors)
+    for raw in solution_refs:
+        match = WIKILINK_RE.search(raw)
+        if not match:
+            result.append("MASTER.md constrained_by must use an exact package wikilink")
+            continue
+        _receipt, errors = stage_package.verify(
+            docs, "solution-design", match.group(1), require_strict_current=True,
+        )
+        result.extend(f"MASTER.md constrained_by: {error}" for error in errors)
+    for page in sorted((root / "pages").glob("*.md")) if (root / "pages").is_dir() else []:
+        page_text = page.read_text(encoding="utf-8")
+        if "[[design-system/MASTER" not in page_text:
+            result.append(f"{page.relative_to(root)} needs exact uses_design MASTER linkage")
+    return result
+
+
 def findings(root: Path) -> list[str]:
     master = root / "MASTER.md"
     if not master.is_file():
@@ -176,7 +263,7 @@ def cmd_approve(args) -> int:
         return fail(str(exc), 2)
     if fields.get("status") != "draft":
         return fail("only a draft Design System can be approved")
-    problems = findings(root)
+    problems = findings(root) + semantic_findings(root)
     if problems:
         return fail("; ".join(problems))
     digest = baseline_hash(root)
@@ -213,6 +300,23 @@ def cmd_begin_revision(args) -> int:
     return 0
 
 
+def cmd_status(args) -> int:
+    root = Path(args.root).resolve()
+    master = root / "MASTER.md"
+    try:
+        fields, _lines, _end = parse_frontmatter(master)
+    except (OSError, ValueError) as exc:
+        return fail(str(exc), 2)
+    digest = baseline_hash(root)
+    current = fields.get("status") == "approved" and fields.get("baseline_hash") == digest
+    print(json.dumps({
+        "stage": "design-system", "result_ref": "design-system/MASTER",
+        "result_type": "design-system-package", "package_hash": digest,
+        "status": "approved" if current else "draft", "current": current,
+    }, sort_keys=True))
+    return 0 if current else 1
+
+
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     sub = parser.add_subparsers(dest="command", required=True)
@@ -220,6 +324,7 @@ def main(argv=None) -> int:
         ("check", cmd_check),
         ("approve", cmd_approve),
         ("begin-revision", cmd_begin_revision),
+        ("status", cmd_status),
     ):
         command = sub.add_parser(name)
         command.add_argument("--root", required=True)

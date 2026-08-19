@@ -1,6 +1,0 @@
-{
-  "summary": "Remove designation metadata and migrate projects to a closed, resilient configuration contract.",
-  "components": {
-    "software-engineering-team": "major"
-  }
-}

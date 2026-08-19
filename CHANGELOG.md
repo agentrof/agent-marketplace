@@ -12,3 +12,7 @@
 ## 2.0.0
 
 - Remove designation metadata and migrate projects to a closed, resilient configuration contract.
+
+## 3.0.0
+
+- Make issue reporting stateless and open approved reports directly in the Agent Marketplace repository.

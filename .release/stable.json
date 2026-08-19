@@ -1,12 +1,12 @@
 {
   "schema_version": 1,
-  "version": "2.0.0",
-  "stable_base": "b628626a03c83c4662a7fdb7a7817e478a101a6d",
-  "main_source": "014c82a18b2271f670c5a738f1dda1c0bc71cbf2",
+  "version": "3.0.0",
+  "stable_base": "3117ad43112d2bfdabbb069f769efee949f5367e",
+  "main_source": "c3fd918cfe37b5f38fe6f5a31c1751277d790fd2",
   "impacts": {
     "software-engineering-team": "major"
   },
   "summaries": [
-    "Remove designation metadata and migrate projects to a closed, resilient configuration contract."
+    "Make issue reporting stateless and open approved reports directly in the Agent Marketplace repository."
   ]
 }

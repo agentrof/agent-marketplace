@@ -103,28 +103,6 @@ def make_refresh_pair(n_root: Path, next_root: Path) -> None:
     make_valid_root(n_root, REFRESH_N_VERSION, build=False)
     plugin = n_root / "plugins" / PLUGIN
 
-    policy_path = (
-        plugin / "skill-content" / "obsidian-vault" / "data"
-        / "vault-policy.json"
-    )
-    policy = json.loads(policy_path.read_text(encoding="utf-8"))
-    policy["extra_doc_types"].remove("issue-report")
-    policy["type_path_patterns"].pop("issue_report")
-    policy["status_values"].pop("issue_report")
-    policy["fragment_graph_groups"]["backlog"].remove("issue-report")
-    policy["graph_color_groups"] = [
-        group for group in policy["graph_color_groups"]
-        if group["id"] != "issue-report"
-    ]
-    write(policy_path, json.dumps(policy, indent=2) + "\n")
-
-    graph_path = plugin / "templates" / "vault" / ".obsidian" / "graph.json"
-    graph = json.loads(graph_path.read_text(encoding="utf-8"))
-    graph["colorGroups"] = [
-        group for group in graph["colorGroups"]
-        if group["query"] != "tag:#doc/issue-report"
-    ]
-    write(graph_path, json.dumps(graph, indent=2) + "\n")
     write(
         plugin / "templates/vault/.obsidian/snippets/brand.css",
         "/* N-only brand payload */\n:root { --agentrof-accent: #000001; }\n",

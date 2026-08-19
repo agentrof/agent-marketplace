@@ -42,8 +42,8 @@ behavior is host-neutral; Claude and Codex are packaging adapters.
     language; IDs stay in aliases, while stable type keys, graph queries and
     graph colors remain shipped policy. Canonical backlog type keys are
     `backlog`, `backlog-review`, `epic`, `epic-review`, `story` and
-    `test-plan`; the team also reserves `issue-report` for tracked defects and
-    improvements.
+    `test-plan`. Issue reporting is an external, stateless support workflow and
+    is never a vault type or project evidence source.
 17. Timestamps written by compilers come from UTC system time. User-authored
     approval timestamps are not accepted as evidence.
 18. Distribution output under `dist/` is generated only by

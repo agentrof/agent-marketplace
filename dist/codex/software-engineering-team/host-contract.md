@@ -10,6 +10,8 @@
 - Resolve every canonical "packaged script" reference relative to the installed
   plugin root and invoke the resulting file directly. No shared dispatcher or
   second plugin is involved.
+- A canonical entry with `project_scope: external` does not require project
+  setup, workspace configuration or a Git repository.
 - Use `request_user_input` only at declared choice gates, preserving options,
   recommendation and tradeoffs.
 - When the canonical workflow says `spawn`, use the matching project-scoped

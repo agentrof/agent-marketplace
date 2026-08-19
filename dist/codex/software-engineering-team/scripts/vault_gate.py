@@ -19,7 +19,7 @@ from pathlib import Path
 COMPILER_SCRIPTS = (
     "vault_check.py", "ba_compile.py", "landscape_check.py",
     "experience_compile.py", "experience_artifact_check.py", "architecture_compile.py",
-    "design_system_compile.py", "backlog_compile.py", "issue_compile.py",
+    "design_system_compile.py", "backlog_compile.py",
     "requirement_compile.py", "requirement_route.py", "stage_package.py",
     "operation_compile.py", "delivery_governance.py", "marketplace_paths.py",
 )
@@ -216,12 +216,6 @@ def gate(project_root: Path, root: Path) -> dict:
         results.append(run(
             command, "backlog:approved" if approved else "backlog:draft"
         ))
-    issues = docs / "issues"
-    if issues.is_dir() and any(issues.glob("*.md")):
-        results.append(run([
-            sys.executable, str(scripts / "issue_compile.py"), "check",
-            "--docs", str(docs),
-        ], "issue-reports"))
     return {
         "ok": all(item["ok"] for item in results),
         "project_root": str(project_root), "vault": str(docs),

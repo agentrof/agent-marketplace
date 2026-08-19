@@ -36,6 +36,11 @@ Entry skills are the only user-facing commands. Coordinator verbs such as
 `claim-items`, `start-item`, `integrate-item`, `open-pr` and `merge-pr` are
 internal operations invoked by the owning entry.
 
+`/issue-report` is the one external, stateless support entry. It previews an
+Agent Marketplace GitHub issue in chat and files only the explicitly approved
+payload. It does not require setup and never reads or writes Requirement,
+Delivery, workspace or runtime state as workflow state.
+
 ## Durable project truth
 
 The only managed workspace is `workspace/`; its vault root is

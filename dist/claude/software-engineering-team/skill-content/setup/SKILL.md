@@ -61,8 +61,9 @@ placeholder is allowed to reach a consuming repository.
    contracts and a valid legacy `max_parallel` becomes Governance revision 1.
    It never edits authored notes during refresh. The policy includes the fixed
    backlog keys `backlog`, `backlog-review`, `epic`, `epic-review`, `story`
-   and `test-plan`, plus the team's `issue-report` type and all analysis/design
-   types. Type keys and graph colors stay stable; taxonomy changes do not
+   and `test-plan`, plus all analysis/design types. Issue reporting is external
+   and stateless, so setup never creates an issue type, tree, map or runtime
+   record. Type keys and graph colors stay stable; taxonomy changes do not
    expand project configuration.
 6. Policy-owned keys in `app.json`, `core-plugins.json`, `graph.json` and
    `types.json` converge while unrelated user knobs remain untouched. The

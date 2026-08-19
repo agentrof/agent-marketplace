@@ -1,43 +1,57 @@
 ---
 name: issue-report
-description: Capture and explicitly approve a Software Engineering Team issue as a tracked Markdown report, with optional filing to the marketplace repository.
+description: Prepare a stateless GitHub issue in chat and file the approved payload only to the Agent Marketplace repository.
 exposure: entry
+project_scope: external
 ---
 
 # Issue Report
 
-Load the `obsidian-vault` skill before creating or editing an issue report.
-
-Issues and their approval status are ordinary tracked Markdown under
-`workspace/docs/issues/`.
+Issue reporting is an external, stateless support workflow. It never creates or
+updates project files, workspace documents, runtime state, caches, build
+artifacts, Git state or local issue records. Before approval, the current chat
+is the only draft state. After filing, the GitHub issue and returned URL are the
+only durable record.
 
 ## When to Use
 
-- A defect, improvement or repository problem needs a durable report.
-- The owner wants to review an issue before filing it upstream.
+- A defect or improvement in Agent Marketplace needs to be reported upstream.
+- The user wants to review the exact GitHub payload before it is filed.
 
 ## Procedure
 
-1. Create the schema-valid stub with its direct title and graph links:
+1. Prepare the issue from the current conversation. If evidence is missing and
+   the user has placed a project in scope, inspect files, logs and Git state
+   read-only. Do not run tests, builds, setup or any command that may write a
+   cache or artifact. Do not invent missing facts.
+2. Remove secrets, tokens, absolute local paths and unrelated project details.
+   Present the exact payload in chat with this shape:
 
-   ```sh
-   scripts/issue_compile.py init --docs workspace/docs \
-     --slug short-problem --title "Short problem" \
-     --kind defect --id ISSUE-001
-   ```
+   - Target: `agentrof/agent-marketplace`
+   - Title
+   - Summary
+   - Reproduction or Motivation
+   - Expected Behavior
+   - Actual Behavior
+   - Impact
+   - Evidence and Context
 
-2. Replace every stub prompt with reproduction or motivation, expected and
-   actual behavior, impact and justified severity, evidence, and a proposed
-   next action. Keep secrets and raw oversized logs out of the report.
-3. Run `scripts/issue_compile.py check --docs workspace/docs --render`. Resolve
-   every finding, then show the complete diff to the owner. After explicit
-   approval run `scripts/issue_compile.py approve --report <path>`; do not edit
-   an approved report without returning it to draft and approving it again.
-4. Only when the owner separately and explicitly requests external filing, run
-   `scripts/file_issue.py --report <path> --dry-run`, then repeat without
-   `--dry-run`. The filer rejects draft or hash-stale reports, posts only to the
-   fixed `agentrof/agent-marketplace` target and records the returned URL and
-   `filed` status in the report.
+   Use `Unknown` or `Not observed` where the available evidence is incomplete.
+3. Immediately after the complete preview, present one declared choice gate:
+   `Open issue`, `Revise` or `Cancel`. Never treat an earlier request to report
+   the problem as approval of an unseen payload.
+   - `Open issue` approves only the exact displayed title and body.
+   - `Revise` changes the payload in chat, displays it again and requires a new
+     choice gate.
+   - `Cancel` ends without external or local mutation.
+4. After `Open issue`, invoke the packaged `scripts/file_issue.py` exactly once
+   with `--title`. Pass the approved Markdown body through standard input. Do
+   not create a body file, temporary file, report file or local receipt.
+5. Report success only when the filer exits successfully with a canonical
+   `https://github.com/agentrof/agent-marketplace/issues/<number>` URL. Say
+   `Opened #<number>: <url>`. For exit 2 say `Not opened` with the reason. For
+   exit 3 say `Outcome unknown, do not retry automatically` and preserve the
+   diagnostic in chat. Never retry a filing attempt automatically.
 
-Issue reporting is part of the Software Engineering Team and remains separate
-from delivery execution.
+This entry does not require project setup, a Git repository or a project
+workspace. It remains separate from Requirement and Delivery flows.

@@ -47,7 +47,7 @@ SCENARIO_COVERAGE_CLASSES = (
     "duplicate-concurrent", "failure", "adjacent-regression",
 )
 EVIDENCE_TYPES = {
-    "issue-report", "decision", "acceptance-set", "rule-set", "landscape",
+    "decision", "acceptance-set", "rule-set", "landscape",
     "engagement", "api-contract", "data-model", "threat-model",
     "environment-reference",
 }
@@ -1005,9 +1005,7 @@ def validate_evidence_ref(docs: Path, value: str, label: str,
             f"{type_name or '(missing)'}: {target}"
         )
         return parsed
-    allowed_statuses = ({"approved", "filed", "closed"}
-                        if type_name == "issue-report" else
-                        {"approved", "accepted"})
+    allowed_statuses = {"approved", "accepted"}
     if status not in allowed_statuses:
         errors.append(f"{label} target is not approved/accepted: {target}")
     return parsed

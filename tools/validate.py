@@ -49,7 +49,9 @@ AGENT_OUTPUT_CONTRACT_ENUM = {"prose", "structured"}
 AGENT_OPTIONAL_KEYS = {"tools"}
 AGENT_READONLY_TOOLS = {"Read", "Grep", "Glob"}
 SKILL_REQUIRED_KEYS = {"name", "description", "exposure"}
+SKILL_OPTIONAL_KEYS = {"project_scope"}
 SKILL_EXPOSURE_ENUM = {"entry", "internal"}
+SKILL_PROJECT_SCOPE_ENUM = {"project", "external"}
 
 AGENT_REQUIRED_SECTIONS = ["Principles", "Boundaries", "Approach", "Output Contract"]
 SKILL_REQUIRED_SECTIONS = ["When to Use"]
@@ -354,7 +356,7 @@ def check_frontmatter_shape(tree: Tree, findings: list[Finding]) -> None:
             fm, _, _ = parse_frontmatter(read_text(skill_md))
             keys = set(fm)
             missing = SKILL_REQUIRED_KEYS - keys
-            extra = keys - SKILL_REQUIRED_KEYS
+            extra = keys - SKILL_REQUIRED_KEYS - SKILL_OPTIONAL_KEYS
             if missing:
                 findings.append(Finding(
                     "error", rel(tree, skill_md), 1, "frontmatter_shape",
@@ -366,7 +368,23 @@ def check_frontmatter_shape(tree: Tree, findings: list[Finding]) -> None:
                 findings.append(Finding(
                     "error", rel(tree, skill_md), 1, "frontmatter_shape",
                     f"skill frontmatter has unsupported keys: {sorted(extra)}",
-                    "remove them; allowed keys are name, description, and exposure",
+                    "remove them; allowed keys are name, description, exposure"
+                    " and optional project_scope",
+                ))
+            project_scope = fm.get("project_scope", "project")
+            if project_scope not in SKILL_PROJECT_SCOPE_ENUM:
+                findings.append(Finding(
+                    "error", rel(tree, skill_md), 1, "frontmatter_shape",
+                    f"skill project_scope '{project_scope}' is not in"
+                    f" {sorted(SKILL_PROJECT_SCOPE_ENUM)}",
+                    "use project for project-bound workflows or external for"
+                    " stateless external entries",
+                ))
+            if project_scope == "external" and fm.get("exposure") != "entry":
+                findings.append(Finding(
+                    "error", rel(tree, skill_md), 1, "frontmatter_shape",
+                    "only entry skills may use project_scope 'external'",
+                    "make the skill an entry or remove the external scope",
                 ))
 
 

@@ -8,6 +8,8 @@
 - Resolve every canonical "packaged script" reference beneath
   `${CLAUDE_PLUGIN_ROOT}` and invoke the resulting file directly. No shared
   dispatcher or second plugin is involved.
+- A canonical entry with `project_scope: external` does not require project
+  setup, workspace configuration or a Git repository.
 - Present canonical choice gates through `AskUserQuestion`, preserving options,
   recommendation and tradeoffs.
 - When the canonical workflow says `spawn`, use the

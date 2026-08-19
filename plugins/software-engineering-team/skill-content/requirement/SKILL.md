@@ -14,7 +14,7 @@ exposure: entry
   withdraw or supersede under its state-valid action menu.
 
 Before any docs operation, read the `obsidian-vault` skill. Its path,
-frontmatter, designation and generated-view rules are authoritative.
+frontmatter, title and generated-view rules are authoritative.
 Read `flows/requirement.md` completely before dispatching the first stage.
 
 ## Procedure

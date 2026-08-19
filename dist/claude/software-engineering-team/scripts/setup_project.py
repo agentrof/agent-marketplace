@@ -334,10 +334,6 @@ def desired_config(args, config_path: Path) -> tuple[dict, list[str]]:
             "terminology_language": current.get(
                 "terminology_language", args.terminology_language
             ),
-            "doc_type_designations": current.get("doc_type_designations", {}),
-            "doc_type_designation_history": current.get(
-                "doc_type_designation_history", {}
-            ),
         }
     else:
         config = {
@@ -345,8 +341,6 @@ def desired_config(args, config_path: Path) -> tuple[dict, list[str]]:
             "team_id": TEAM,
             "output_language": args.output_language,
             "terminology_language": args.terminology_language,
-            "doc_type_designations": {},
-            "doc_type_designation_history": {},
         }
 
     errors = project_config.check(config)
@@ -490,22 +484,6 @@ def build_plan(args) -> dict:
     payload_root, policy_path, policy = package_surfaces()
     operations: list[dict] = []
     blockers: list[str] = legacy_topology_blockers(vault_root)
-    defaults = vault_check.default_designations(policy)
-    configured = config.get("doc_type_designations")
-    configured = dict(configured) if isinstance(configured, dict) else {}
-    missing_designations = sorted(
-        key for key in defaults if key not in configured
-    )
-    if missing_designations:
-        configured.update({key: defaults[key] for key in missing_designations})
-        config["doc_type_designations"] = configured
-        changed_fields = sorted(set(changed_fields) | {"doc_type_designations"})
-    for issue in vault_check.designation_config_issues(config, policy):
-        if issue["code"] not in {"map_missing", "missing_type"}:
-            blockers.append(
-                "designation contract is invalid: " + issue["message"]
-            )
-
     target_config = json.dumps(config, ensure_ascii=False, indent=2) + "\n"
     current_config = config_path.read_text(encoding="utf-8") \
         if config_path.is_file() else ""

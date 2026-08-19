@@ -35,8 +35,7 @@ OID_RE = re.compile(r"^[0-9a-f]{40,64}$")
 RECEIPT_SCHEMA_VERSION = 1
 GITHUB_PR_RE = re.compile(r"^/([^/]+)/([^/]+)/pull/([1-9][0-9]*)$")
 FENCE_MODES = {"open", "source_handoff", "governance", "upgrade"}
-SOURCE_KINDS = {"none", "requirement_supersession", "backlog_revision",
-                "designation_reconciliation"}
+SOURCE_KINDS = {"none", "requirement_supersession", "backlog_revision"}
 CARRIER_KINDS = {"none", "github_pr", "direct_target"}
 UPGRADE_PHASES = {"none", "acquired", "target_handoff"}
 FENCE_CANONICAL_KEYS = (
@@ -1389,7 +1388,7 @@ def cancel_delivery(project_root: Path, delivery_id: str, reason: str,
     are published. No remote partial cancellation is accepted.
     """
     root = main_worktree(project_root.resolve())
-    from delivery_compile import docs_root, find_delivery, split_note, frontmatter, body_for, title, designation, content_hash
+    from delivery_compile import docs_root, find_delivery, split_note, frontmatter, body_for, content_hash
     docs = docs_root(root)
     directory = find_delivery(docs, delivery_id)
     if directory is None:
@@ -1540,9 +1539,10 @@ def cancel_delivery(project_root: Path, delivery_id: str, reason: str,
          "Cancellation-Projection-Hash": projection_hash, "Target": target},
     )
 
+    review_subject = str(remote_props.get("goal", delivery_id)).strip()
     review_props = {
         "type": "delivery-review", "id": f"{delivery_id}-REVIEW",
-        "title": title(remote_props.get("goal", delivery_id), designation(docs, "delivery-review", "delivery review")),
+        "title": f"Outcome review for {review_subject}",
         "status": "approved", "derives_from": [f"[[{delivery_path_value.relative_to(docs).with_suffix('')}|{delivery_id}]]"],
         "scope_hash": scope_hash, "cancellation_intent_hash": intent_hash,
         "cancellation_projection_hash": projection_hash, "reviewed_integration_commit": finalization,
@@ -3227,7 +3227,7 @@ def main(argv=None) -> int:
     reserve = sub.add_parser("reserve-delivery"); reserve.add_argument("--project-root", default="."); reserve.add_argument("--delivery", required=True); reserve.add_argument("--remote", default="origin"); reserve.set_defaults(func="reserve")
     governance = sub.add_parser("apply-governance"); governance.add_argument("--project-root", default="."); governance.add_argument("--dry-run", action="store_true"); governance.add_argument("--remote", default="origin"); governance.set_defaults(func="apply-governance")
     fence_upgrade = sub.add_parser("upgrade-fence-v1"); fence_upgrade.add_argument("--project-root", default="."); fence_upgrade.add_argument("--dry-run", action="store_true"); fence_upgrade.add_argument("--remote", default="origin"); fence_upgrade.set_defaults(func="upgrade-fence-v1")
-    source_begin = sub.add_parser("begin-source-handoff"); source_begin.add_argument("--project-root", default="."); source_begin.add_argument("--source-hash", default="none"); source_begin.add_argument("--source-kind", choices=["requirement_supersession", "backlog_revision", "designation_reconciliation"], default="requirement_supersession"); source_begin.add_argument("--remote", default="origin"); source_begin.set_defaults(func="source-begin")
+    source_begin = sub.add_parser("begin-source-handoff"); source_begin.add_argument("--project-root", default="."); source_begin.add_argument("--source-hash", default="none"); source_begin.add_argument("--source-kind", choices=["requirement_supersession", "backlog_revision"], default="requirement_supersession"); source_begin.add_argument("--remote", default="origin"); source_begin.set_defaults(func="source-begin")
     source_auth = sub.add_parser("authorize-target-update"); source_auth.add_argument("--project-root", default="."); source_auth.add_argument("--mode", choices=["source_handoff", "governance", "upgrade"], default="source_handoff"); source_auth.add_argument("--candidate-hash", required=True); source_auth.add_argument("--carrier-kind", choices=["github_pr", "direct_target"], required=True); source_auth.add_argument("--carrier-ref", required=True); source_auth.add_argument("--carrier-object", required=True); source_auth.add_argument("--carrier-head", required=True); source_auth.add_argument("--carrier-base", required=True); source_auth.add_argument("--target-repository", required=True); source_auth.add_argument("--remote", default="origin"); source_auth.set_defaults(func="source-authorize")
     source_apply = sub.add_parser("apply-target-update"); source_apply.add_argument("--project-root", default="."); source_apply.add_argument("--mode", choices=["source_handoff", "governance", "upgrade"], default="source_handoff"); source_apply.add_argument("--remote", default="origin"); source_apply.set_defaults(func="source-apply")
     source_reauth = sub.add_parser("reauthorize-target-update"); source_reauth.add_argument("--project-root", default="."); source_reauth.add_argument("--mode", choices=["source_handoff", "governance", "upgrade"], default="source_handoff"); source_reauth.add_argument("--candidate-hash", default="none"); source_reauth.add_argument("--remote", default="origin"); source_reauth.set_defaults(func="source-reauthorize")

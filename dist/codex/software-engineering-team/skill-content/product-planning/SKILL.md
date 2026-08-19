@@ -11,7 +11,7 @@ impact matrix. The project vault is canonical:
 `workspace/docs/backlog/` contains one root backlog, one folder per epic, one
 review folder per epic, one story folder per capability and one test plan per
 story. Read the `obsidian-vault` skill before reading or writing this tree; its
-policy defines paths, metadata, designations and graph colors.
+policy defines paths, metadata, title rules and graph colors.
 
 ## When to Use
 
@@ -104,10 +104,9 @@ placeholders are not review evidence.
 Run `backlog_compile.py check --render` as the mechanical gate; atomic approval
 keeps stories `planned` and hash-stamps the package. Generated views are disposable.
 
-Configured document-type designations govern human-facing authored titles.
-The capitalized designation is the whole root backlog/root-review label;
-authored epic/story/test-plan bases append it. Canonical keys, paths, IDs,
-registry JSON and generated machine-view labels remain stable English vocabulary.
+Authored titles are direct, natural graph labels in the configured output
+language. Canonical keys, paths, IDs, registry JSON and generated machine-view
+labels remain stable English machine vocabulary.
 
 ## References
 

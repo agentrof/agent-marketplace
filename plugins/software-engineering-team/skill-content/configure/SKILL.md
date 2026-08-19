@@ -1,6 +1,6 @@
 ---
 name: configure
-description: The single change gate for project configuration and document-type designations.
+description: The single change gate for project configuration and durable workflow settings.
 exposure: entry
 ---
 
@@ -8,8 +8,8 @@ exposure: entry
 
 ## When to Use
 
-- Changing language, document-type designations, an Operation Contract,
-  Delivery Governance, or Definition of Done.
+- Changing language, an Operation Contract, Delivery Governance, or Definition
+  of Done.
 - Repairing a local workspace contract after an intentional user change.
 
 ## Procedure
@@ -26,12 +26,11 @@ exposure: entry
    `operation environment`, dispatch the same compiler with `--kind
    environment`; for `governance`, use `delivery_governance.py`; for DOD, use
    its Delivery compiler. Never hand-edit their lifecycle fields.
-4. For designation or language changes, run `vault_check.py
-   reconcile-designations --dry-run --json`, present the complete title, H1,
-   alias impact, then request approval. Language changes do
-   not silently translate existing designation values.
-5. On approval, run the owning writer, `project_config.py check`,
-   `vault_check.py check-designations` and the scoped vault gate. A new
+4. For a language change, run `project_config.py set --dry-run --json` and
+   present only the config delta. Existing authored titles are not translated
+   or rewritten by a config change.
+5. On approval, run the owning writer, `project_config.py check` and the
+   scoped vault gate. A new
    Governance revision must be applied through `delivery_git.py
    apply-governance`; do not start, claim or resume an Item while that Fence
    handoff is held. On rejection, write nothing.

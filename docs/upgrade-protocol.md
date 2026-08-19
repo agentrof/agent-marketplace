@@ -23,16 +23,13 @@ configuration remain the source of truth.
    rejects any operation still required.
 4. Preserve authored documents and valid retained project configuration fields;
    setup removes unknown or retired configuration keys as part of the closed
-   schema replacement.
-   user-owned Obsidian knobs. Refresh only policy-asserted JSON keys. Preserve
-   user-owned instruction companions through the separate host projection
-   choice gate.
-5. Preserve configured designation wording and retired-value history. Setup
-   may add defaults for newly shipped document types, but never replaces a
-   project-selected designation. Adding a default writes only
-   `workspace/config.json`; setup never retitles authored notes as an implicit
-   upgrade side effect. Intentional designation changes remain explicit
-   configure/reconcile operations with their own reviewable plans.
+   schema replacement. It refreshes only policy-asserted Obsidian JSON keys
+   and preserves user-owned instruction companions through the separate host
+   projection choice gate.
+5. Config schema v2 has only team identity and language settings. An upgrade
+   removes every field outside that closed shape without editing Markdown,
+   aliases or links. Taxonomy additions and graph-color changes therefore never
+   write `workspace/config.json`.
 6. `workspace/` is the only managed workspace and every second managed vault
    is rejected. Requirement Flow determines request applicability. Repeated
    apply with the same package and project must produce an empty inspect plan.
@@ -72,9 +69,6 @@ recreate it without changing Requirement or Delivery state.
   and upgrade never compares an old project build ID with a new one. Active
   Delivery compatibility is proven from package metadata plus the remote Fence
   and control-record protocol, without a project upgrade ledger.
-- `doc_type_designation_history` is not an upgrade ledger. It contains only
-  retired project-selected display values used to find stale titles after an
-  explicit designation rename.
 
 When open Deliveries exist, the Delivery coordinator acquires the project Fence
 in `upgrade` mode, quiesces active Items, validates every Integration and Item

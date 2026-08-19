@@ -16,8 +16,8 @@ behavior is host-neutral; Claude and Codex are packaging adapters.
 7. The project-local runtime is
    `<git-root>/.agentrof/agent-marketplace/.runtime/` and contains only ignored,
    disposable scratch and cache files. Deleting it cannot change project truth.
-8. The vault root is `workspace/docs/`. Its policy, designations, graph colors,
-   maps and typed front matter are project-local and versioned with the project.
+8. The vault root is `workspace/docs/`. Its policy, graph colors, maps and
+   typed front matter are project-local and versioned with the project.
    No second workspace path is valid.
 9. The backlog source is `workspace/docs/backlog/`. Its nested epic, story,
    review and test-plan Markdown files are canonical.
@@ -38,11 +38,12 @@ behavior is host-neutral; Claude and Codex are packaging adapters.
     delivery concerns.
 15. File names are stable slugs; membership is path-derived. A story does not
     duplicate its epic relationship in front matter.
-16. Designation display values are project config data with one reconcile
-    writer and may follow project language settings. Canonical backlog type
-    keys are `backlog`, `backlog-review`, `epic`, `epic-review`, `story` and
+16. Authored titles are direct, natural phrases in the configured output
+    language; IDs stay in aliases, while stable type keys, graph queries and
+    graph colors remain shipped policy. Canonical backlog type keys are
+    `backlog`, `backlog-review`, `epic`, `epic-review`, `story` and
     `test-plan`; the team also reserves `issue-report` for tracked defects and
-    improvements. Type keys, graph queries and graph colors are shipped policy.
+    improvements.
 17. Timestamps written by compilers come from UTC system time. User-authored
     approval timestamps are not accepted as evidence.
 18. Distribution output under `dist/` is generated only by

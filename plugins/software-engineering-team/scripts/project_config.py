@@ -14,14 +14,12 @@ import marketplace_paths
 
 
 TEAM = "software-engineering-team"
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 CONFIG_FIELDS = {
     "schema_version",
     "team_id",
     "output_language",
     "terminology_language",
-    "doc_type_designations",
-    "doc_type_designation_history",
 }
 ORDINARY_FIELDS = {"output_language", "terminology_language"}
 
@@ -48,28 +46,6 @@ def atomic(path: Path, value: dict) -> None:
         temporary.unlink(missing_ok=True)
 
 
-def _string_map(value: object, field: str, errors: list[str]) -> None:
-    if not isinstance(value, dict):
-        errors.append(f"{field} must be an object")
-        return
-    for key, item in sorted(value.items()):
-        if not isinstance(key, str) or not key.strip():
-            errors.append(f"{field} keys must be non-empty strings")
-        if not isinstance(item, str) or not item.strip():
-            errors.append(f"{field}.{key} must be a non-empty string")
-
-
-def _history_map(value: object, errors: list[str]) -> None:
-    if not isinstance(value, dict):
-        errors.append("doc_type_designation_history must be an object")
-        return
-    for key, entries in sorted(value.items()):
-        if not isinstance(key, str) or not key.strip():
-            errors.append("doc_type_designation_history keys must be non-empty strings")
-        if not isinstance(entries, list):
-            errors.append(f"doc_type_designation_history.{key} must be a list")
-
-
 def check(config: dict) -> list[str]:
     """Validate the team-owned, intentionally narrow bootstrap surface."""
     errors: list[str] = []
@@ -83,8 +59,6 @@ def check(config: dict) -> list[str]:
         value = config.get(field)
         if not isinstance(value, str) or not value.strip():
             errors.append(f"{field} must be a non-empty string")
-    _string_map(config.get("doc_type_designations"), "doc_type_designations", errors)
-    _history_map(config.get("doc_type_designation_history"), errors)
     return errors
 
 

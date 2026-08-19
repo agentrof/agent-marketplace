@@ -64,7 +64,7 @@ column of the owning row, where a wikilink is the error instead.
 
 Headless renames are owned by the checker, not by the vault app or a
 manual grep: `vault_check.py normalize --rename [--dry-run] [--json]` builds
-the grammar-driven rename map (plain named files, type-suffixed content
+the grammar-driven rename map (plain named files and typed content
 notes; already-compliant files are skipped), then renames and
 rewrites every referrer across the WHOLE vault (body links, frontmatter
 values, map rows) in one operation, even when `--scope` narrows the

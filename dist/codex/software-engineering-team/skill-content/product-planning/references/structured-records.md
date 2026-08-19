@@ -204,9 +204,6 @@ wikilink and explains why it supports that lens; the conclusion states the
 lens-specific result. Long generic prose, `approved`, `pass`, `looks good`,
 `no findings`, `none` and untouched placeholders fail.
 
-Configured document-type designations govern authored titles and matching H1s.
-The configured designation, with output-language-aware initial casing, is the
-complete root backlog/root-review label;
-user-authored base titles append the applicable designation. Stable type keys,
-paths, IDs, registry JSON and disposable generated-view labels remain English
-machine vocabulary.
+Authored titles and matching H1s are direct, natural graph labels in the
+configured output language. Stable type keys, paths, IDs, registry JSON and
+disposable generated-view labels remain English machine vocabulary.

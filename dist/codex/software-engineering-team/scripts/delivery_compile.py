@@ -97,20 +97,6 @@ def docs_root(value: str | Path) -> Path:
     return path
 
 
-def load_config(docs: Path) -> dict:
-    try:
-        value = json.loads((docs.parent / "config.json").read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        return {}
-    return value if isinstance(value, dict) else {}
-
-
-def designation(docs: Path, key: str, default: str) -> str:
-    values = load_config(docs).get("doc_type_designations", {})
-    value = values.get(key) if isinstance(values, dict) else None
-    return value.strip() if isinstance(value, str) and value.strip() else default
-
-
 def scalar(value: object) -> str:
     if isinstance(value, bool):
         return "true" if value else "false"
@@ -159,10 +145,6 @@ def content_hash(props: dict, body: str, *, exclude: set[str] | None = None) -> 
     payload = json.dumps({"frontmatter": stable, "body": body.rstrip() + "\n"},
                          ensure_ascii=False, sort_keys=True, separators=(",", ":"))
     return "sha256:" + hashlib.sha256(payload.encode("utf-8")).hexdigest()
-
-
-def title(base: str, designation_value: str) -> str:
-    return base if base.casefold().endswith(designation_value.casefold()) else f"{base} {designation_value}"
 
 
 def body_for(kind: str, heading: str, values: dict[str, str] | None = None) -> str:
@@ -456,7 +438,7 @@ def init_dod(args) -> int:
     if path.exists():
         print(json.dumps({"ok": False, "errors": ["Definition of Done already exists"]}))
         return 1
-    heading = title(args.title or "Definition of Done", designation(docs, "definition-of-done", "definition of done"))
+    heading = (args.title or "Definition of Done").strip()
     props = {"type": "definition-of-done", "id": "DOD", "title": heading,
              "status": "draft", "revision": 1, "aliases": ["DOD"],
              "tags": ["doc/definition-of-done", "status/draft"]}
@@ -540,7 +522,8 @@ def init_delivery(args) -> int:
     root.mkdir(parents=True)
     item_links = [link(f"delivery/deliveries/{root.name}/items/{id_slug(story)}/item", story) for story in stories]
     dod_link = link(dod_snapshot["definition_of_done_path"].removesuffix(".md"), "Definition of Done")
-    props = {"type": "delivery", "id": identifier, "title": title(args.goal, designation(docs, "delivery", "delivery")),
+    goal = str(args.goal).strip()
+    props = {"type": "delivery", "id": identifier, "title": f"Delivery scope for {goal}",
              "status": "scope_proposed", "owner_role": "product_owner", "goal": args.goal,
              "derives_from": item_links, "definition_of_done": dod_link,
              "target_branch": args.target_branch, "revision": 1,
@@ -558,7 +541,7 @@ def init_delivery(args) -> int:
     for story in stories:
         item = root / "items" / id_slug(story) / "item.md"
         source = sources[story]
-        item_props = {"type": "delivery-item", "title": title(story, designation(docs, "delivery-item", "delivery item")),
+        item_props = {"type": "delivery-item", "title": f"Implementation work for {story}",
                       "status": "in_scope", "derives_from": [story], "related_to": [identifier],
                       **{key: source[key] for key in SOURCE_ITEM_FIELDS},
                       "depends_on": source["depends_on"],
@@ -860,13 +843,19 @@ def approve_execution(args) -> int:
         for kind, filename, status in (("code-review", "code-review.md", "draft"), ("verification", "verification.md", "draft")):
             evidence = item_path.parent / filename
             if not evidence.exists():
+                evidence_title = (
+                    f"Implementation review for {story}"
+                    if kind == "code-review"
+                    else f"Verification evidence for {story}"
+                )
                 ev_props = {"type": kind, "id": f"{props['id']}-{story}-{'CR' if kind == 'code-review' else 'QA'}",
-                            "title": title(story, designation(docs, kind, kind.replace('-', ' '))),
+                            "title": evidence_title,
                             "status": status, "derives_from": [link(str(item_path.relative_to(docs)), story)],
                             "item_plan_hash": item_props["item_plan_hash"], "tags": [f"doc/{kind}", f"status/{status}"]}
                 atomic_text(evidence, frontmatter(ev_props, body_for("item", ev_props["title"], {"Navigation": link(str(item_path.relative_to(docs)), story)})))
     plan_path = root / "execution-plan.md"
-    plan_props = {"type": "execution-plan", "id": f"{props['id']}-EXEC", "title": title(props.get("goal", props["id"]), designation(docs, "execution-plan", "execution plan")),
+    plan_subject = str(props.get("goal", props["id"])).strip()
+    plan_props = {"type": "execution-plan", "id": f"{props['id']}-EXEC", "title": f"Execution approach for {plan_subject}",
                   "status": "approved", "revision": 1, "scope_hash": props["scope_hash"],
                   "item_plan_hashes": sorted(item_hashes),
                   "operation_contract_hashes": sorted(operation_hashes),
@@ -1035,8 +1024,9 @@ def approve_review(args) -> int:
     delivery_path_value = root / "delivery.md"
     delivery_props, _ = split_note(delivery_path_value)
     review_path = root / "delivery-review.md"
+    review_subject = str(delivery_props.get("goal", args.delivery)).strip()
     review_props = {"type": "delivery-review", "id": f"{args.delivery}-REVIEW",
-                    "title": title(delivery_props.get("goal", args.delivery), designation(docs, "delivery-review", "delivery review")),
+                    "title": f"Outcome review for {review_subject}",
                     "status": "approved", "derives_from": [link(str(delivery_path_value.relative_to(docs)), args.delivery)],
                     "plan_hash": delivery_props.get("plan_hash", "none"),
                     "reviewed_commit": reviewed_commit,

@@ -17,7 +17,6 @@ CONFIG = SCRIPTS / "project_config.py"
 
 CANONICAL_KEYS = {
     "schema_version", "team_id", "output_language", "terminology_language",
-    "doc_type_designations", "doc_type_designation_history",
 }
 
 
@@ -39,7 +38,7 @@ class ProjectConfigTests(unittest.TestCase):
             config = self.setup_config(Path(temporary))
             value = json.loads(config.read_text(encoding="utf-8"))
             self.assertEqual(set(value), CANONICAL_KEYS)
-            self.assertEqual(value["schema_version"], 1)
+            self.assertEqual(value["schema_version"], 2)
             self.assertEqual(value["team_id"], "software-engineering-team")
             checked = self.run_script(CONFIG, "check", "--config", str(config))
             self.assertEqual(checked.returncode, 0, checked.stdout + checked.stderr)
@@ -75,18 +74,24 @@ class ProjectConfigTests(unittest.TestCase):
             self.assertIn("unknown or retired field: scale", checked.stdout)
             self.assertIn("unknown or retired field: unknown", checked.stdout)
 
-    def test_setup_replaces_legacy_config_and_preserves_allowed_values(self):
+    def test_setup_migrates_v1_config_without_touching_authored_titles(self):
         with tempfile.TemporaryDirectory() as temporary:
             project = Path(temporary)
             subprocess.run(["git", "init", "-q", str(project)], check=True)
             workspace = project / "workspace"
             workspace.mkdir()
             legacy = {
+                "schema_version": 1,
                 "team_id": "software-engineering-team",
                 "output_language": "Turkish",
                 "terminology_language": "English",
-                "doc_type_designations": {"story": "Story"},
-                "doc_type_designation_history": {"story": ["Work item"]},
+                "legacy_nested_settings": {
+                    "work": "custom",
+                    "retired": "old",
+                },
+                "legacy_settings_history": {
+                    "work": [{"value": "old custom value"}],
+                },
                 "backend_stack": "python-fastapi", "test_command": "make test",
                 "mutation_command": "make mutation", "env_command": "./tools/env",
                 "max_parallel": 2, "scale": "small", "unknown": "discard",
@@ -94,6 +99,14 @@ class ProjectConfigTests(unittest.TestCase):
             (workspace / "config.json").write_text(
                 json.dumps(legacy), encoding="utf-8"
             )
+            authored = workspace / "docs" / "project-notes" / "legacy-title.md"
+            authored.parent.mkdir(parents=True)
+            authored.write_text(
+                "---\ntype: note\ntitle: Legacy customer note\n"
+                "---\n\n# Legacy customer note\n",
+                encoding="utf-8",
+            )
+            authored_before = authored.read_bytes()
             inspected = self.run_script(SETUP, "inspect", "--project-root", str(project), "--json")
             self.assertEqual(inspected.returncode, 0, inspected.stdout + inspected.stderr)
             plan = json.loads(inspected.stdout)
@@ -101,13 +114,17 @@ class ProjectConfigTests(unittest.TestCase):
             self.assertEqual(config_op["action"], "replace")
             self.assertIn("backend_stack", config_op["removed_fields"])
             self.assertIn("unknown", config_op["removed_fields"])
+            self.assertIn("legacy_nested_settings", config_op["removed_fields"])
+            self.assertIn("legacy_settings_history", config_op["removed_fields"])
+            self.assertEqual(config_op["schema_from"], 1)
+            self.assertEqual(config_op["schema_to"], 2)
             applied = self.run_script(SETUP, "apply", "--project-root", str(project))
             self.assertEqual(applied.returncode, 0, applied.stdout + applied.stderr)
             current = json.loads((workspace / "config.json").read_text(encoding="utf-8"))
             self.assertEqual(set(current), CANONICAL_KEYS)
             self.assertEqual(current["output_language"], "Turkish")
-            self.assertEqual(current["doc_type_designations"]["story"], "Story")
-            self.assertIn("verification-contract", current["doc_type_designations"])
+            self.assertEqual(current["schema_version"], 2)
+            self.assertEqual(authored.read_bytes(), authored_before)
             docs = workspace / "docs"
             self.assertTrue((docs / "operation" / "verification-contract.md").is_file())
             self.assertTrue((docs / "operation" / "environment-contract.md").is_file())
@@ -125,7 +142,6 @@ class ProjectConfigTests(unittest.TestCase):
             (workspace / "config.json").write_text(json.dumps({
                 "schema_version": 99, "team_id": "software-engineering-team",
                 "output_language": "English", "terminology_language": "English",
-                "doc_type_designations": {}, "doc_type_designation_history": {},
             }), encoding="utf-8")
             result = self.run_script(SETUP, "inspect", "--project-root", str(project))
             self.assertNotEqual(result.returncode, 0)

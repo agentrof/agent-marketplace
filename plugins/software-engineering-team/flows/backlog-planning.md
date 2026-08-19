@@ -199,9 +199,7 @@ stories remain `planned`. Commit `workspace/docs/backlog/` and the updated
 and exact generated views. Stop and route to `delivery-plan`; do not create Delivery
 state in this flow.
 
-Human-facing authored titles use the project's configured document-type
-designations. The root backlog and root review use the capitalized designation
-as their complete title; user-authored epic/story/test-plan bases append their
-type designation. Stable type keys, paths, IDs, CLI messages, registry JSON and
+Human-facing authored titles are direct, natural labels in the project's
+output language. Stable type keys, paths, IDs, CLI messages, registry JSON and
 the disposable generated board, dependency and coverage view labels remain
 English machine vocabulary.

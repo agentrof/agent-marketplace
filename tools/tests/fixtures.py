@@ -109,7 +109,6 @@ def make_refresh_pair(n_root: Path, next_root: Path) -> None:
     )
     policy = json.loads(policy_path.read_text(encoding="utf-8"))
     policy["extra_doc_types"].remove("issue-report")
-    policy["default_designations"].pop("issue_report")
     policy["type_path_patterns"].pop("issue_report")
     policy["status_values"].pop("issue_report")
     policy["fragment_graph_groups"]["backlog"].remove("issue-report")

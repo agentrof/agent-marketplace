@@ -21,12 +21,12 @@ subtrees, not separate vaults. Variation lives only in
 - The taxonomy and property surface are closed. Unknown types, paths, names,
   properties, statuses, tags, relations, unresolved links, and orphan notes
   fail their owning gate.
-- Authored notes use policy-governed plain or type-suffixed filenames. User
+- Authored notes use policy-governed stable filenames. User
   identity lives in `title`; stable ids live in frontmatter `aliases`, never
   filenames or titles. H1 must equal `title` byte-for-byte.
-- `title` ends with the configured type designation under the metadata law.
-  The designation map and history have one writer:
-  `reconcile-designations`.
+- `title` is a direct, natural phrase in the configured output language. It
+  must not be id-led, the raw filename stem, generic, or duplicated in the
+  graph.
 - Generated first-line-marker files and machine directories are rendered,
   never hand-edited. Statuses, dates, tag mirrors, inverse relations, and
   supersede chains are written only by their owning verbs.
@@ -36,7 +36,7 @@ subtrees, not separate vaults. Variation lives only in
 ## Required references
 
 - [linking.md](references/linking.md): citation and rename grammar. Read when writing or repairing any link.
-- [metadata.md](references/metadata.md): frontmatter and typed fields. Read when changing metadata, titles, statuses, relations, or designations.
+- [metadata.md](references/metadata.md): frontmatter and typed fields. Read when changing metadata, titles, statuses, or relations.
 - [vault-structure.md](references/vault-structure.md): paths, maps, nav, and generated views. Read when creating, moving, renaming, or rendering notes.
 - [graph.md](references/graph.md): payload, plugins, labels, colors, and local UI state. Read when the payload fails or the owner needs vault advice.
 

@@ -27,10 +27,9 @@ aliases:
   home, page-override, ...). The kind drives the tag mirror.
 - `title` is the user-facing graph label (see the Title Law in
   SKILL.md): a natural output_language phrase that names the content
-  and ENDS with the type's designation (table below), never the
-  filename stem, never id-led. The first H1 is byte-identical to the
-  title; the checker enforces presence, the H1 match and the id-lead
-  ban, and warns on stem-identical, generic or duplicate labels.
+  and is never the raw filename stem or id-led. The first H1 is
+  byte-identical to the title; the checker enforces presence, the H1
+  match, id-lead, raw-stem, generic, and duplicate-label rules.
 - `tags` is ALWAYS a block list and always exactly the mirror:
   `doc/<type>` plus `status/<status>` when the note has a status,
   underscores kebab-ized (`in_review` becomes `status/in-review`).
@@ -43,78 +42,14 @@ aliases:
   filenames, titles or H1s. An id-shaped LINK alias must target the
   id's owning note (`alias_ownership`).
 
-## Type designations
+## Title law
 
-The title's closing designation is mechanical. The English default table below
-is minted per project into config.json's `doc_type_designations` map
-(type-kebab -> designation). Display wording may follow the project's output
-language, terminology language, or an explicitly approved mixture. The checker
-holds each typed note's title against that data at a word boundary under an
-NFKC+casefold fold. Map absence or unreadable config warns per note naming the
-mint duty, never a silent pass; only the English default table ships.
+Titles are authored directly; their classification is expressed independently
+by the fixed `type` key and `doc/<type>` tag. When similar records would
+otherwise collide in the graph, qualify the subject naturally (for example,
+with its owning space, scope, or audience).
 
-The map is mutable with memory, never hand-edited. Its single writer,
-for mint and change alike, is `vault_check.py reconcile-designations`
-(the write-time hook denies any other Write/Edit of the map or the
-ledger). A change records the outgoing value in the machine-managed
-`doc_type_designation_history` ledger sibling in the SAME config write,
-then transitions every affected title and byte-matching H1 source -> target
-(tail-stripping every known prior value of the note's own type, so no
-double suffix survives), sweeps wikilink aliases byte-equal to the source
-title, and re-renders the generated views. The `designation_drift`
-check holds titles against the ledger: a retired value closing a title
-is an error (mechanically fixable), while a mid-title stranding or a
-non-closing designation warns.
-An adopted vault with stale titles and no ledger states its prior value
-explicitly via `--from` (never recorded: it was not a configured
-value).
-
-| doc type | designation |
-|---|---|
-| space | space overview |
-| domain | domain overview |
-| glossary | glossary |
-| actor-roster | actors |
-| budget-set | budgets |
-| process | process |
-| entity | entity |
-| rule-set | rules |
-| acceptance-set | acceptance criteria |
-| decision | decision |
-| integration | integration |
-| landscape | landscape |
-| engagement | engagement |
-| design-master | design master |
-| page-override | page override |
-| backlog | product backlog |
-| backlog-review | backlog review |
-| epic | epic |
-| epic-review | epic review |
-| story | story |
-| test-plan | test plan |
-| issue-report | issue report |
-| experience | experience |
-| journey | journey |
-| flow-set | flow set |
-| screen | screen |
-| system-architecture | system architecture |
-| architecture-component | architecture component |
-| architecture-module | architecture module |
-| interface-contract | interface contract |
-| data-model | data model |
-| threat-model | threat model |
-| runtime-view | runtime view |
-| reliability-view | reliability view |
-| observability-view | observability view |
-| architecture-connection | architecture connection |
-| architecture-standard | architecture standard |
-| artifact-manifest | artifact manifest |
-| engagement | engagement |
-| design-master | design master |
-| page-override | page override |
-
-Nav-layer notes (home, maps) carry no designation. Worked shapes,
-generic English (render the designation into the output_language):
+Worked shapes:
 
 - `rules/checkout-rules.md` holds `title: Checkout rules`.
 - `processes/order-fulfillment-process.md` holds `title: Order fulfillment process`.

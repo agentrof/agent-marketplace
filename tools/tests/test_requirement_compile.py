@@ -27,8 +27,10 @@ class RequirementCompilerTests(unittest.TestCase):
         (self.docs / "home.md").write_text("# Home\n", encoding="utf-8")
         (self.root / "workspace" / "config.json").write_text(
             json.dumps({
+                "schema_version": 2,
                 "team_id": "software-engineering-team",
-                "doc_type_designations": {"requirement": "requirement"},
+                "output_language": "English",
+                "terminology_language": "English",
             }),
             encoding="utf-8",
         )

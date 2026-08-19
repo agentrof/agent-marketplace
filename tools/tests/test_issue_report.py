@@ -37,7 +37,7 @@ class IssueReportTests(unittest.TestCase):
     def setUpClass(cls) -> None:
         cls.issue = load_module()
 
-    def workspace(self, root: Path, designation: str = "issue report") -> Path:
+    def workspace(self, root: Path) -> Path:
         workspace = root / "workspace"
         docs = workspace / "docs"
         docs.mkdir(parents=True)
@@ -47,8 +47,10 @@ class IssueReportTests(unittest.TestCase):
             encoding="utf-8",
         )
         (workspace / "config.json").write_text(json.dumps({
+            "schema_version": 2,
             "team_id": "software-engineering-team",
-            "doc_type_designations": {"issue-report": designation},
+            "output_language": "English",
+            "terminology_language": "English",
         }), encoding="utf-8")
         return docs
 
@@ -58,8 +60,8 @@ class IssueReportTests(unittest.TestCase):
             cwd=ROOT, capture_output=True, text=True, check=False,
         )
 
-    def create_complete_report(self, root: Path, designation: str = "issue report"):
-        docs = self.workspace(root, designation)
+    def create_complete_report(self, root: Path):
+        docs = self.workspace(root)
         result = self.run_compile(
             "init", "--docs", str(docs), "--slug", "refresh-breaks",
             "--title", "Refresh breaks", "--kind", "defect", "--id", "ISSUE-001",
@@ -80,21 +82,19 @@ class IssueReportTests(unittest.TestCase):
         result = self.run_compile("approve", "--report", str(report))
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
-    def test_init_is_designation_aware_and_renders_graph_navigation(self):
+    def test_init_uses_direct_title_and_renders_graph_navigation(self):
         with tempfile.TemporaryDirectory() as temporary:
-            docs, report = self.create_complete_report(
-                Path(temporary), "sorun kaydı"
-            )
+            docs, report = self.create_complete_report(Path(temporary))
             text = report.read_text(encoding="utf-8")
-            self.assertIn("title: Refresh breaks sorun kaydı", text)
-            self.assertIn("# Refresh breaks sorun kaydı", text)
+            self.assertIn("title: Refresh breaks", text)
+            self.assertIn("# Refresh breaks", text)
             self.assertIn("[[maps/issues|Issue reports]]", text)
             self.assertIn(
                 "[[maps/issues|Issue reports]]",
                 (docs / "home.md").read_text(encoding="utf-8"),
             )
             self.assertIn(
-                "[[issues/refresh-breaks|Refresh breaks sorun kaydı]]",
+                "[[issues/refresh-breaks|Refresh breaks]]",
                 (docs / "maps/issues.md").read_text(encoding="utf-8"),
             )
             checked = self.run_compile("check", "--docs", str(docs), "--render")

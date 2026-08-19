@@ -29,9 +29,9 @@ codex plugin add software-engineering-team@agent-marketplace
 
 Start `software-engineering-team:setup` in the project. The setup entry uses
 `scripts/setup_project.py inspect|apply|check` to converge the workspace,
-tracked vault contract, ignored local Obsidian plugin projection, designation
-map, managed ignore block and portable gate. Claude and Codex use the same
-canonical workflows and project-local files.
+tracked vault contract, ignored local Obsidian plugin projection, closed
+configuration, managed ignore block and portable gate. Claude and Codex use
+the same canonical workflows and project-local files.
 
 ## Requirement and Delivery path
 

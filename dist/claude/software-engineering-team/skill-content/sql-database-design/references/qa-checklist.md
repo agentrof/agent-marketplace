@@ -47,7 +47,7 @@ PASS requires all of:
 FAIL on any of:
 
 - Entity coverage gaps against the brief or stories
-- Any field missing type, required/optional designation, or description
+- Any field missing type, nullability, or description
 - Query patterns without supporting indexes, or indexes without rationale
 - Relationships lacking integrity rules
 - Missing audit fields on mutable entities

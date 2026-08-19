@@ -15,7 +15,6 @@ import os
 import re
 import sys
 import tempfile
-import unicodedata
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -118,29 +117,6 @@ def load_config(docs: Path) -> dict:
     return data if isinstance(data, dict) else {}
 
 
-def designation(docs: Path) -> str:
-    values = load_config(docs).get("doc_type_designations", {})
-    if isinstance(values, dict):
-        value = values.get("issue-report")
-        if isinstance(value, str) and value.strip():
-            return value.strip()
-    return "issue report"
-
-
-def typed_title(docs: Path, base: str) -> str:
-    suffix = designation(docs)
-    title = base.strip()
-    folded_title = unicodedata.normalize("NFKC", title).casefold()
-    folded_suffix = unicodedata.normalize("NFKC", suffix).casefold()
-    start = len(folded_title) - len(folded_suffix)
-    present = (
-        start >= 0 and folded_title.endswith(folded_suffix)
-        and (start == 0 or not (folded_title[start - 1].isalnum()
-                                or folded_title[start - 1] == "_"))
-    )
-    return title if present else f"{title} {suffix}"
-
-
 def managed_docs_findings(docs: Path) -> list[str]:
     if docs.name != "docs" or docs.parent.name != "workspace":
         return ["report must live under <project>/workspace/docs/issues"]
@@ -211,8 +187,6 @@ def report_findings(path: Path, require_approved: bool = False) -> list[str]:
     title = props.get("title")
     if not isinstance(title, str) or not title.strip():
         findings.append("title is required")
-    elif typed_title(docs, title) != title:
-        findings.append("title must end with the configured issue-report designation")
     if props.get("issue_kind") not in KINDS:
         findings.append("issue_kind must be defect or improvement")
     if props.get("owner_role") != "product_owner":
@@ -398,7 +372,7 @@ def create_report(docs: Path, slug: str, base_title: str, issue_kind: str,
         props, _ = split_note(existing)
         if report_id in (props.get("aliases") or []):
             raise ValueError(f"report id is already owned: {report_id}")
-    title = typed_title(docs, base_title)
+    title = base_title.strip()
     props = {
         "type": "issue-report",
         "title": title,

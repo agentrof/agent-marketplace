@@ -80,9 +80,8 @@ class DeliveryGitTests(unittest.TestCase):
         subprocess.run(["git", "-C", str(project), "config", "user.name", "Test"], check=True)
         (project / "workspace" / "docs").mkdir(parents=True)
         (project / "workspace" / "config.json").write_text(
-            json.dumps({"schema_version": 1, "team_id": "software-engineering-team",
-                        "output_language": "English", "terminology_language": "English",
-                        "doc_type_designations": {}, "doc_type_designation_history": {}}),
+            json.dumps({"schema_version": 2, "team_id": "software-engineering-team",
+                        "output_language": "English", "terminology_language": "English"}),
             encoding="utf-8",
         )
         self.approve_governance(project / "workspace" / "docs")
@@ -468,7 +467,7 @@ class DeliveryGitTests(unittest.TestCase):
             subprocess.run(["git", "-C", str(project), "config", "user.email", "test@example.com"], check=True)
             subprocess.run(["git", "-C", str(project), "config", "user.name", "Test"], check=True)
             docs = project / "workspace" / "docs"; (docs / "maps").mkdir(parents=True)
-            (project / "workspace" / "config.json").write_text(json.dumps({"schema_version": 1, "team_id": "software-engineering-team", "output_language": "English", "terminology_language": "English", "doc_type_designations": {}, "doc_type_designation_history": {}}), encoding="utf-8")
+            (project / "workspace" / "config.json").write_text(json.dumps({"schema_version": 2, "team_id": "software-engineering-team", "output_language": "English", "terminology_language": "English"}), encoding="utf-8")
             self.approve_governance(docs)
             make_approved_backlog(docs)
             subprocess.run(["git", "-C", str(project), "add", "."], check=True)
@@ -512,7 +511,7 @@ class DeliveryGitTests(unittest.TestCase):
             subprocess.run(["git", "-C", str(project), "config", "user.name", "Test"], check=True)
             docs = project / "workspace" / "docs"
             (docs / "maps").mkdir(parents=True)
-            (project / "workspace" / "config.json").write_text(json.dumps({"schema_version": 1, "team_id": "software-engineering-team", "output_language": "English", "terminology_language": "English", "doc_type_designations": {}, "doc_type_designation_history": {}}), encoding="utf-8")
+            (project / "workspace" / "config.json").write_text(json.dumps({"schema_version": 2, "team_id": "software-engineering-team", "output_language": "English", "terminology_language": "English"}), encoding="utf-8")
             self.approve_governance(docs)
             make_approved_backlog(docs)
             subprocess.run(["git", "-C", str(project), "add", "."], check=True)
@@ -565,7 +564,7 @@ class DeliveryGitTests(unittest.TestCase):
             subprocess.run(["git", "-C", str(project), "config", "user.email", "test@example.com"], check=True)
             subprocess.run(["git", "-C", str(project), "config", "user.name", "Test"], check=True)
             docs = project / "workspace" / "docs"; (docs / "maps").mkdir(parents=True)
-            (project / "workspace" / "config.json").write_text(json.dumps({"schema_version": 1, "team_id": "software-engineering-team", "output_language": "English", "terminology_language": "English", "doc_type_designations": {}, "doc_type_designation_history": {}}), encoding="utf-8")
+            (project / "workspace" / "config.json").write_text(json.dumps({"schema_version": 2, "team_id": "software-engineering-team", "output_language": "English", "terminology_language": "English"}), encoding="utf-8")
             self.approve_governance(docs)
             make_approved_backlog(docs)
             subprocess.run(["git", "-C", str(project), "add", "."], check=True); subprocess.run(["git", "-C", str(project), "commit", "-qm", "init"], check=True)

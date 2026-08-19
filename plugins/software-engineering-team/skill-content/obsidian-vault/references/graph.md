@@ -74,8 +74,7 @@ its copyleft binds the vendored bundle only.
   (1.12.0) is the consumer's minimum vault-app version.
 - Fallback truth: with the plugin absent, declined or broken (an app
   update can break a pinned build), nothing corrupts; labels fall back
-  to the filenames, which the naming law keeps meaningful plain
-  type-suffixed names.
+  to the filenames, which the naming law keeps meaningful and typed.
 - Update procedure: re-vendor a newer TAGGED release's `manifest.json`
   and `main.js`, keep our committed `data.json`, and review the new
   bundle at vendor time. Honest risk: `main.js` is third-party

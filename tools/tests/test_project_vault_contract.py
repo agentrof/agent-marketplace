@@ -1,4 +1,4 @@
-"""Project-level Obsidian backlog designation and palette contracts."""
+"""Project-level Obsidian title, taxonomy, and graph palette contracts."""
 
 from __future__ import annotations
 
@@ -14,7 +14,6 @@ ROOT = Path(__file__).resolve().parents[2]
 PLUGIN = ROOT / "plugins" / "software-engineering-team"
 SETUP = PLUGIN / "scripts" / "setup_project.py"
 VAULT_CHECK = PLUGIN / "scripts" / "vault_check.py"
-PROJECT_CONFIG = PLUGIN / "scripts" / "project_config.py"
 POLICY = (
     PLUGIN
     / "skill-content"
@@ -23,15 +22,6 @@ POLICY = (
     / "vault-policy.json"
 )
 
-BACKLOG_DESIGNATIONS = {
-    "backlog": "backlog",
-    "backlog-review": "backlog review",
-    "epic": "epic",
-    "epic-review": "epic review",
-    "story": "story",
-    "test-plan": "test plan",
-    "issue-report": "issue report",
-}
 BACKLOG_COLORS = {
     "backlog": 11032055,
     "backlog-review": 16007006,
@@ -90,16 +80,21 @@ class ProjectVaultContractTests(unittest.TestCase):
             f"aliases:\n  - {ident}\n---\n\n# {title}\n"
         )
 
-    def test_setup_materializes_default_designations_and_fixed_colors(self):
+    def test_setup_writes_small_config_and_fixed_colors(self):
         with tempfile.TemporaryDirectory() as temporary:
             workspace = self.setup_project(Path(temporary))
             config = json.loads(
                 (workspace / "config.json").read_text(encoding="utf-8")
             )
-            for doc_type, designation in BACKLOG_DESIGNATIONS.items():
-                self.assertEqual(
-                    config["doc_type_designations"][doc_type], designation
-                )
+            self.assertEqual(
+                config,
+                {
+                    "schema_version": 2,
+                    "team_id": "software-engineering-team",
+                    "output_language": "English",
+                    "terminology_language": "English",
+                },
+            )
 
             policy = json.loads(POLICY.read_text(encoding="utf-8"))
             policy_groups = {
@@ -126,72 +121,6 @@ class ProjectVaultContractTests(unittest.TestCase):
             }
             for doc_type, color in BACKLOG_COLORS.items():
                 self.assertEqual(rendered[f"tag:#doc/{doc_type}"], color)
-
-    def test_localized_designation_is_reconciled_recorded_and_preserved(self):
-        with tempfile.TemporaryDirectory() as temporary:
-            project = Path(temporary)
-            workspace = self.setup_project(project)
-            config_path = workspace / "config.json"
-            language = subprocess.run(
-                [sys.executable, str(PROJECT_CONFIG), "set", "--config",
-                 str(config_path), "--field", "output_language", "--value",
-                 "Turkish"],
-                cwd=ROOT, capture_output=True, text=True, check=False,
-            )
-            self.assertEqual(language.returncode, 0, language.stderr)
-            issues = workspace / "docs" / "issues"
-            issues.mkdir()
-            (issues / "problem.md").write_text(
-                "---\ntype: issue-report\ntitle: Problem issue report\n"
-                "status: draft\ntags:\n  - doc/issue-report\n"
-                "  - status/draft\naliases:\n  - ISSUE-001\n---\n\n"
-                "# Problem issue report\n",
-                encoding="utf-8",
-            )
-            (issues / "reference.md").write_text(
-                "---\ntype: issue-report\ntitle: Reference issue report\n"
-                "status: draft\ntags:\n  - doc/issue-report\n"
-                "  - status/draft\naliases:\n  - ISSUE-002\n---\n\n"
-                "# Reference issue report\n\n"
-                "[[issues/problem|Problem issue report]]\n",
-                encoding="utf-8",
-            )
-            reconciled = subprocess.run(
-                [sys.executable, str(VAULT_CHECK), "reconcile-designations",
-                 "--vault", str(workspace / "docs"), "--set",
-                 "issue-report=sorun kaydı", "--json"],
-                cwd=ROOT, capture_output=True, text=True, check=False,
-            )
-            self.assertEqual(
-                reconciled.returncode, 0,
-                reconciled.stdout + reconciled.stderr,
-            )
-            config = json.loads(config_path.read_text(encoding="utf-8"))
-            self.assertEqual(
-                config["doc_type_designations"]["issue-report"],
-                "sorun kaydı",
-            )
-            history = config["doc_type_designation_history"]["issue-report"]
-            self.assertEqual(history[-1]["value"], "issue report")
-            problem = (issues / "problem.md").read_text(encoding="utf-8")
-            reference = (issues / "reference.md").read_text(encoding="utf-8")
-            self.assertIn("title: Problem sorun kaydı", problem)
-            self.assertIn("# Problem sorun kaydı", problem)
-            self.assertIn("[[issues/problem|Problem sorun kaydı]]", reference)
-            rerun = subprocess.run(
-                [sys.executable, str(SETUP), "--project-root", str(project)],
-                cwd=ROOT, capture_output=True, text=True, check=False,
-            )
-            self.assertEqual(rerun.returncode, 0, rerun.stderr)
-            after = json.loads(config_path.read_text(encoding="utf-8"))
-            self.assertEqual(
-                after["doc_type_designations"]["issue-report"],
-                "sorun kaydı",
-            )
-            self.assertEqual(
-                after["doc_type_designation_history"]["issue-report"],
-                history,
-            )
 
     def test_vault_check_rejects_a_backlog_type_outside_its_nested_path(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -282,36 +211,6 @@ class ProjectVaultContractTests(unittest.TestCase):
             },
         )
 
-    def test_designation_dry_run_is_byte_preserving(self):
-        with tempfile.TemporaryDirectory() as temporary:
-            workspace = self.setup_project(Path(temporary))
-            config = workspace / "config.json"
-            before = config.read_bytes()
-            result = self.run_vault(
-                "reconcile-designations", "--vault", str(workspace / "docs"),
-                "--set", "story=kullanıcı hikayesi", "--dry-run", "--json",
-            )
-            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-            self.assertEqual(config.read_bytes(), before)
-            payload = json.loads(result.stdout)
-            self.assertIn("story", json.dumps(payload, sort_keys=True))
-            self.assertIn("kullanıcı hikayesi", json.dumps(payload, ensure_ascii=False))
-
-    def test_designation_rejects_unknown_and_duplicate_values(self):
-        with tempfile.TemporaryDirectory() as temporary:
-            workspace = self.setup_project(Path(temporary))
-            for assignment, expected in (
-                ("unknown=value", "names no known doc type"),
-                ("story=epic", "share one fold-equal designation"),
-            ):
-                with self.subTest(assignment=assignment):
-                    result = self.run_vault(
-                        "reconcile-designations", "--vault",
-                        str(workspace / "docs"), "--set", assignment, "--json",
-                    )
-                    self.assertNotEqual(result.returncode, 0)
-                    self.assertIn(expected, result.stdout + result.stderr)
-
     def test_normalize_dry_run_and_second_apply_are_idempotent(self):
         with tempfile.TemporaryDirectory() as temporary:
             workspace = self.setup_project(Path(temporary))
@@ -332,12 +231,28 @@ class ProjectVaultContractTests(unittest.TestCase):
             )
             self.assertEqual(first.returncode, 0, first.stdout + first.stderr)
             normalized = note.read_bytes()
-            self.assertIn(b"title: Problem issue report", normalized)
+            self.assertIn(b"title: Problem", normalized)
             second = self.run_vault(
                 "normalize", "--vault", str(workspace / "docs"), "--json"
             )
             self.assertEqual(second.returncode, 0, second.stdout + second.stderr)
             self.assertEqual(note.read_bytes(), normalized)
+
+    def test_title_shape_rejects_generic_and_duplicate_graph_labels(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            workspace = self.setup_project(Path(temporary))
+            issues = workspace / "docs/issues"
+            issues.mkdir()
+            (issues / "overview.md").write_text(
+                self.issue_note("Overview", "ISSUE-001"), encoding="utf-8"
+            )
+            (issues / "overview-copy.md").write_text(
+                self.issue_note("overview", "ISSUE-002"), encoding="utf-8"
+            )
+            result = self.check_vault(workspace)
+            self.assertEqual(result.returncode, 1)
+            self.assertIn("generic title 'Overview'", result.stdout)
+            self.assertIn("also used by", result.stdout)
 
     def test_relation_render_is_deterministic_and_materializes_inverse(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -470,24 +385,6 @@ class ProjectVaultContractTests(unittest.TestCase):
             )
             self.assertEqual(second.returncode, 0, second.stdout + second.stderr)
             self.assertIn("already standard", second.stdout)
-
-    def test_designation_history_rejects_unknown_and_current_values(self):
-        with tempfile.TemporaryDirectory() as temporary:
-            workspace = self.setup_project(Path(temporary))
-            config_path = workspace / "config.json"
-            config = json.loads(config_path.read_text(encoding="utf-8"))
-            config["doc_type_designation_history"] = {
-                "ghost": [{"value": "specter"}],
-                "story": [{"value": config["doc_type_designations"]["story"]}],
-            }
-            config_path.write_text(
-                json.dumps(config, indent=2) + "\n", encoding="utf-8"
-            )
-            result = self.check_vault(workspace)
-            self.assertEqual(result.returncode, 1)
-            self.assertIn("history key 'ghost'", result.stdout)
-            self.assertIn("repeats the current designation", result.stdout)
-
 
 if __name__ == "__main__":
     unittest.main()

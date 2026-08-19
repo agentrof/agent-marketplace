@@ -12,7 +12,6 @@ import hashlib
 import json
 import re
 import sys
-import unicodedata
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -100,63 +99,8 @@ def docs_root(value: str | None) -> Path:
     return path / "docs" if (path / "docs").is_dir() else path
 
 
-def project_config(docs: Path) -> dict:
-    path = docs.parent / "config.json"
-    try:
-        value = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        return {}
-    return value if isinstance(value, dict) else {}
-
-
-def designation_map(docs: Path) -> dict[str, str]:
-    """Resolve display designations without making them machine identities."""
-    try:
-        policy = json.loads(POLICY_PATH.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        policy = {}
-    configured_defaults = policy.get("default_designations", {})
-    defaults = {
-        key.replace("_", "-"): str(value).strip()
-        for key, value in configured_defaults.items()
-        if isinstance(value, str) and value.strip()
-    } if isinstance(configured_defaults, dict) else {}
-    configured = project_config(docs).get("doc_type_designations", {})
-    if isinstance(configured, dict):
-        defaults.update({
-            str(key): str(value).strip()
-            for key, value in configured.items()
-            if isinstance(value, str) and value.strip()
-        })
-    return defaults
-
-
-def typed_title(docs: Path, base: str, doc_type: str) -> str:
-    base = base.strip()
-    designation = designation_map(docs).get(
-        doc_type, doc_type.replace("-", " ")
-    ).strip()
-    folded_base = unicodedata.normalize("NFKC", base).casefold()
-    folded_designation = unicodedata.normalize("NFKC", designation).casefold()
-    start = len(folded_base) - len(folded_designation)
-    if (start >= 0 and folded_base.endswith(folded_designation)
-            and (start == 0 or not (folded_base[start - 1].isalnum()
-                                    or folded_base[start - 1] == "_"))):
-        return base
-    return f"{base} {designation}".strip()
-
-
-def designation_title(docs: Path, doc_type: str) -> str:
-    """Use the configured designation with output-language-aware casing."""
-    value = designation_map(docs).get(
-        doc_type, doc_type.replace("-", " ")
-    ).strip()
-    language = str(project_config(docs).get("output_language", ""))
-    if language.casefold() in {"turkish", "türkçe", "turkce"}:
-        initial = {"i": "İ", "ı": "I"}.get(value[:1], value[:1].upper())
-    else:
-        initial = value[:1].upper()
-    return initial + value[1:]
+DEFAULT_BACKLOG_TITLE = "Product Backlog"
+DEFAULT_BACKLOG_REVIEW_TITLE = "Backlog Review"
 
 
 def title_of(path: Path, fallback: str) -> str:
@@ -1720,7 +1664,7 @@ def normalize_backlog_map_aliases(path: Path, backlog_title: str) -> None:
 def render_backlog_navigation(record: dict, docs: Path) -> None:
     ensure_home_map(docs)
     backlog_title = str(record["backlog"]["props"].get(
-        "title", designation_title(docs, "backlog")
+        "title", DEFAULT_BACKLOG_TITLE
     ))
     map_path = docs / "maps" / "backlog.md"
     map_path.parent.mkdir(parents=True, exist_ok=True)
@@ -1940,8 +1884,8 @@ def init(args) -> int:
     if vault_check is not None and (docs / ".obsidian").is_dir():
         policy = vault_check.load_policy(vault_check.DEFAULT_POLICY)
         vault_check.reconcile_payload_fragment(docs, policy, "backlog")
-    backlog_title = designation_title(docs, "backlog")
-    review_title = designation_title(docs, "backlog-review")
+    backlog_title = DEFAULT_BACKLOG_TITLE
+    review_title = DEFAULT_BACKLOG_REVIEW_TITLE
     files = {
         root / "backlog.md": front_matter(
             {"type": "backlog", "title": backlog_title, "status": "draft",
@@ -2264,10 +2208,10 @@ def stub_epic(args) -> int:
     path = root / "epic.md"
     base_title = args.title or args.slug.replace("-", " ").title()
     backlog_title = title_of(
-        docs / "backlog" / "backlog.md", designation_title(docs, "backlog")
+        docs / "backlog" / "backlog.md", DEFAULT_BACKLOG_TITLE
     )
     if not path.exists():
-        title = typed_title(docs, base_title, "epic")
+        title = base_title.strip()
         goal = args.goal or "Define the customer outcome and boundary."
         path.write_text(front_matter(
             {"type": "epic", "title": title, "status": "draft",
@@ -2276,9 +2220,7 @@ def stub_epic(args) -> int:
             f"# {title}\n\n{goal}\n"), encoding="utf-8")
     review = root / "reviews" / "round-1-epic-review.md"
     if not review.exists():
-        review_title = typed_title(
-            docs, f"{base_title} 1", "epic-review"
-        )
+        review_title = f"Review round 1 for {base_title.strip()}"
         review.write_text(front_matter(
             {"type": "epic-review", "title": review_title, "status": "draft",
              "round": 1, "owner_role": "product_owner",
@@ -2309,8 +2251,8 @@ def stub_story(args) -> int:
     root.mkdir(parents=True, exist_ok=True)
     story_id = args.id or "ST-001"
     base_title = args.title or args.slug.replace("-", " ").title()
-    story_title = typed_title(docs, base_title, "story")
-    test_title = typed_title(docs, base_title, "test-plan")
+    story_title = base_title.strip()
+    test_title = f"Test plan for {base_title.strip()}"
     criteria = list(args.criterion_ref or [])
     experience = list(args.experience_ref or [])
     evidence = list(args.evidence_ref or [])

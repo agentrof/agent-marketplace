@@ -25,7 +25,7 @@ Design-time review of a document-store schema deliverable. Findings are graded C
 - [ ] Timestamp fields use the engine's date type, UTC
 - [ ] Identifier fields use a concrete id type, not a generic "id"
 - [ ] Enum values are explicitly listed and mirrored in schema validation
-- [ ] Required/optional designation is justified for every field; null vs absent is a documented convention
+- [ ] Required, optional, null, and absent semantics are justified for every field
 
 ## Index Strategy
 

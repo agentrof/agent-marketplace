@@ -18,7 +18,6 @@ import re
 import subprocess
 import sys
 import tempfile
-import unicodedata
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -75,36 +74,6 @@ def docs_root(value: str | Path) -> Path:
     if (path / "workspace" / "docs").is_dir():
         return path / "workspace" / "docs"
     return path
-
-
-def load_config(docs: Path) -> dict:
-    try:
-        value = json.loads((docs.parent / "config.json").read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        return {}
-    return value if isinstance(value, dict) else {}
-
-
-def designation(docs: Path) -> str:
-    values = load_config(docs).get("doc_type_designations", {})
-    if isinstance(values, dict):
-        value = values.get("requirement")
-        if isinstance(value, str) and value.strip():
-            return value.strip()
-    return "requirement"
-
-
-def typed_title(docs: Path, base: str) -> str:
-    suffix = designation(docs)
-    title = base.strip()
-    folded_title = unicodedata.normalize("NFKC", title).casefold()
-    folded_suffix = unicodedata.normalize("NFKC", suffix).casefold()
-    start = len(folded_title) - len(folded_suffix)
-    if (start >= 0 and folded_title.endswith(folded_suffix)
-            and (start == 0 or not (folded_title[start - 1].isalnum()
-                                    or folded_title[start - 1] == "_"))):
-        return title
-    return f"{title} {suffix}".strip()
 
 
 def split_note(path: Path) -> tuple[dict, str]:
@@ -439,8 +408,6 @@ def requirement_findings(path: Path, require_approved: bool = False) -> list[str
     if not isinstance(title, str) or not title.strip():
         findings.append("title is required")
     else:
-        if typed_title(docs, title) != title:
-            findings.append("title must end with the configured requirement designation")
         if not re.search(rf"(?m)^# {re.escape(title)}\s*$", body):
             findings.append("the first H1 must match title")
     if props.get("owner_role") != "product_owner":
@@ -595,7 +562,7 @@ def create_requirement(docs: Path, slug: str, title: str, request_kind: str,
     path = docs / "requirements" / f"req-{int(identifier[4:]):03d}-{slug}.md"
     if path.exists():
         raise FileExistsError(f"Requirement already exists: {path}")
-    title = typed_title(docs, title)
+    title = title.strip()
     props = {
         "type": "requirement", "id": identifier, "title": title,
         "status": "draft", "owner_role": "product_owner",

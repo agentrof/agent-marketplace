@@ -63,7 +63,7 @@ def seed_vault_scaffolding(space: Path) -> None:
 def make_valid_space(space: Path) -> None:
     """A gate-passing ERP space with one inventory domain: approved docs,
     wikilink-cited rules and no review-history state. Named files carry their
-    plain contract names; typed content is type-suffixed."""
+    plain contract names; typed content includes its document kind."""
     seed_vault_scaffolding(space)
     write(space / "space.md", """---
 type: space

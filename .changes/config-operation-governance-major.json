@@ -1,6 +1,0 @@
-{
-  "summary": "Move operational contracts and delivery governance out of project config into approved vault records.",
-  "components": {
-    "software-engineering-team": "major"
-  }
-}

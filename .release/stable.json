@@ -1,0 +1,13 @@
+{
+  "schema_version": 1,
+  "version": "1.0.0",
+  "stable_base": "fd105a4e2fae2027ed38cce773fbe4c40a24d886",
+  "main_source": "cb0e898650aef69b2ff0c447a4f22b842b00e712",
+  "impacts": {
+    "software-engineering-team": "major"
+  },
+  "summaries": [
+    "Move operational contracts and delivery governance out of project config into approved vault records.",
+    "Establish Solution-owned deployable topology, Delivery-owned System Architecture, and living process-owned Experience packages."
+  ]
+}

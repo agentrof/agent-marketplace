@@ -54,12 +54,10 @@ class VaultHookTests(unittest.TestCase):
         (root / "workspace" / "docs").mkdir(parents=True)
         config = root / "workspace" / "config.json"
         config.write_text(json.dumps({
-            "schema_version": 1,
+            "schema_version": 2,
             "team_id": "software-engineering-team",
             "output_language": "English",
             "terminology_language": "English",
-            "doc_type_designations": {},
-            "doc_type_designation_history": {},
         }, indent=2) + "\n", encoding="utf-8")
         return config
 
@@ -203,7 +201,7 @@ class VaultHookTests(unittest.TestCase):
             self.assertIn("original config was restored", denied.stderr)
             self.assertEqual(config.read_bytes(), original)
 
-    def test_bash_guard_hash_catches_nested_designation_change(self):
+    def test_bash_guard_hash_catches_unknown_config_change(self):
         with tempfile.TemporaryDirectory() as temporary:
             project = Path(temporary)
             config = self.setup_config_project(project)
@@ -211,9 +209,7 @@ class VaultHookTests(unittest.TestCase):
 
             def mutate():
                 value = json.loads(config.read_text(encoding="utf-8"))
-                designations = dict(value.get("doc_type_designations", {}))
-                designations["story"] = "Work Item"
-                value["doc_type_designations"] = designations
+                value["unexpected"] = "Work Item"
                 config.write_text(json.dumps(value, indent=2) + "\n",
                                   encoding="utf-8")
 

@@ -23,7 +23,7 @@
   configure entry.
 - `{{workspace}}/docs/`: the governed project knowledge vault. Open this
   directory as the vault root. Its maps, generated views, document-type
-  designations, graph policy, citations, and navigation follow the
+  graph policy, citations, and navigation follow the
   `obsidian-vault` skill and the owning validation commands.
 - `{{workspace}}/docs/experience-design/experiences/`: living approved
   Experience packages, one active package per primary BA process. Sketches are

@@ -18,7 +18,7 @@ Issues and their approval status are ordinary tracked Markdown under
 
 ## Procedure
 
-1. Create the schema-valid, designation-aware stub and its graph links:
+1. Create the schema-valid stub with its direct title and graph links:
 
    ```sh
    scripts/issue_compile.py init --docs workspace/docs \

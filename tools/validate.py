@@ -1962,29 +1962,6 @@ def check_vault_policy_shape(tree: Tree, findings: list[Finding]) -> None:
                         " known doc type",
                         "a legend entry without a type is dead; drop the"
                         " group or declare the type in extra_doc_types")
-            metadata = skill / "references" / "metadata.md"
-            if metadata.is_file():
-                rows = re.findall(
-                    r"^\| ([a-z0-9-]+) \| [^|\n]+ \|$",
-                    read_text(metadata), re.MULTILINE,
-                )
-                expected_designations = universe - {"home", "moc"}
-                rendered_designations = set(rows)
-                if len(rows) != len(rendered_designations):
-                    err("canonical designation table repeats a doc type",
-                        "keep exactly one designation row per non-navigation"
-                        " taxonomy type")
-                for name in sorted(expected_designations
-                                   - rendered_designations):
-                    err(f"canonical designation table omits doc type '{name}'",
-                        "add the English designation in the same change as"
-                        " the taxonomy type")
-                for name in sorted(rendered_designations
-                                   - expected_designations):
-                    err(f"canonical designation table names unknown or"
-                        f" navigation doc type '{name}'",
-                        "remove the row or declare a non-navigation taxonomy"
-                        " type")
             # Parity with the shipped seeds: the policy and templates/vault
             # describe one product; they may not drift.
             vault_tpl = plugin / "templates" / "vault"

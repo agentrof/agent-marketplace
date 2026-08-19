@@ -85,8 +85,8 @@ workspace/docs/
 ```
 
 Compiler-rendered maps and backlog views are projections, not independent
-state. Front matter uses fixed English type keys; project-selected display
-designations affect titles and graph presentation only.
+state. Front matter uses fixed English type keys; authored titles are direct
+user-facing labels, while tags drive graph presentation.
 
 ## Requirement Flow
 

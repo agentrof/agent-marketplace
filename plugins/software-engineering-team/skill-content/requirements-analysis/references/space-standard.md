@@ -59,11 +59,9 @@ superseded: superseded_by. Doc identity is its path; there is no
 separate id key.
 
 - title is the user-facing graph label: a natural output_language
-  phrase naming the content and ENDING with the doc type's designation,
-  rendered in the output_language (canonical English designations: the
-  obsidian-vault skill's metadata reference). Never id-led, never the
-  filename stem; the H1 is byte-identical to the title. A decision
-  doc's DEC id lives in its alias and minted row, not its title.
+  phrase naming the content. Never id-led, never the raw filename stem,
+  generic, or duplicated in the graph; the H1 is byte-identical to the title.
+  A decision doc's DEC id lives in its alias and minted row, not its title.
 - tags is a BLOCK list (one `- item` line each) holding exactly the
   stamped mirror: `doc/<type-kebab>` plus `status/<status-kebab>`
   (rule_set becomes `doc/rule-set`, in_review becomes

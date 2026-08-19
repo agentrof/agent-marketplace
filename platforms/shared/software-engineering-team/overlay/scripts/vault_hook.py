@@ -59,17 +59,15 @@ TOOL_NAME_CANON = {
 PATCH_HEADER_RE = re.compile(r"^\*\*\* (Add|Update|Delete) File: (.+)$")
 
 # The complete bootstrap config has only sanctioned subprocess writers:
-# project_config.py for language, reconcile-designations for display wording,
-# and setup for structural replacement. None traverses PreToolUse, so direct
-# Write/Edit changes are denied.
+# project_config.py for language and setup for structural replacement. Neither
+# traverses PreToolUse, so direct Write/Edit changes are denied.
 CONFIG_GUARD_KEYS = (
     "schema_version", "team_id", "output_language", "terminology_language",
-    "doc_type_designations", "doc_type_designation_history",
 )
 
 CONFIG_GUARD_MESSAGE = (
     "team-owned workspace config fields are machine-managed; their writers are"
-    " setup, project_config.py and vault_check.py reconcile-designations."
+    " setup and project_config.py."
     " Direct edits desynchronize the workspace config.")
 
 SHELL_ASSIGNMENT_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=.*$")
@@ -382,7 +380,7 @@ def config_guard(tool_input: dict, file_path: str) -> int:
         except json.JSONDecodeError:
             return deny(
                 "workspace/config.json is machine-managed JSON; an"
-                " unparseable write would blind every designation check. "
+                " unparseable write would blind every config check. "
                 + CONFIG_GUARD_MESSAGE)
         if not isinstance(proposed, dict):
             return deny("workspace/config.json holds a JSON object. "
@@ -884,7 +882,6 @@ def sanctioned_config_writer(payload: dict, config_path: Path) -> bool:
         return False
     args = tokens[2:]
     project = config_path.parent.parent.resolve()
-    vault = project / "workspace" / "docs"
     if script == "setup_project.py":
         target = _cli_path(_option_value(args, "--project-root"), cwd)
         return target == project
@@ -893,14 +890,6 @@ def sanctioned_config_writer(payload: dict, config_path: Path) -> bool:
             return False
         target = _cli_path(_option_value(args, "--config"), cwd)
         return target == config_path.resolve()
-    if script == "vault_check.py":
-        index = 0
-        while index < len(args) and args[index] == "--policy":
-            index += 2
-        if index >= len(args) or args[index] != "reconcile-designations":
-            return False
-        target = _cli_path(_option_value(args, "--vault"), cwd)
-        return target == vault.resolve()
     return False
 
 
@@ -1277,8 +1266,7 @@ def shell_verify(payload: dict) -> int:
                     message = (
                         "Bash changed machine-managed workspace/config.json"
                         " values; the original config was restored. Use"
-                        " setup_project.py, project_config.py or vault_check.py"
-                        " reconcile-designations"
+                        " setup_project.py or project_config.py"
                     )
                 if integrity_error:
                     message += f"; {integrity_error}"

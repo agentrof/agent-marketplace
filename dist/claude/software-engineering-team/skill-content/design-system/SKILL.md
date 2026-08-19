@@ -25,7 +25,7 @@ The only place the design master is born or changed.
      terminology_language (default English).
    - Load the obsidian-vault knowledge skill: MASTER and every page
      override are vault notes (frontmatter, tags mirror, nav section);
-     their titles carry the type designation (Title Law), emitted
+     their titles are direct graph labels under the Title Law, emitted
      born-compliant by the persist script.
    - MASTER exists at workspace/docs/design-system/MASTER.md: UPDATE mode.
    - No MASTER but the codebase carries themes or tokens: EXTRACTION mode;

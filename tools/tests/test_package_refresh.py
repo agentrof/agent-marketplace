@@ -91,8 +91,6 @@ class PackageRefreshAcceptanceTests(unittest.TestCase):
     def customize_n_project(self, project: Path) -> dict[Path, bytes]:
         config_path = project / "workspace/config.json"
         config = json.loads(config_path.read_text(encoding="utf-8"))
-        self.assertNotIn("issue-report", config["doc_type_designations"])
-        config["doc_type_designations"]["story"] = "delivery story"
         # Closed config drops unknown project-owned fields during refresh.
         config["consumer_refresh_data"] = {"owner": "project"}
         config_path.write_text(json.dumps(config, indent=2) + "\n", encoding="utf-8")
@@ -169,7 +167,7 @@ class PackageRefreshAcceptanceTests(unittest.TestCase):
         operations = inspected["operations"]
         self.assertTrue(any(
             item["surface"] == "workspace_config"
-            and "doc_type_designations" in item.get("fields", [])
+            and "consumer_refresh_data" in item.get("removed_fields", [])
             for item in operations
         ))
         self.assertTrue(any(
@@ -235,8 +233,11 @@ class PackageRefreshAcceptanceTests(unittest.TestCase):
         config = json.loads(
             (project / "workspace/config.json").read_text(encoding="utf-8")
         )
-        self.assertEqual(config["doc_type_designations"]["story"], "delivery story")
-        self.assertEqual(config["doc_type_designations"]["issue-report"], "issue report")
+        self.assertEqual(config["schema_version"], 2)
+        self.assertEqual(set(config), {
+            "schema_version", "team_id", "output_language",
+            "terminology_language",
+        })
         self.assertNotIn("consumer_refresh_data", config)
         self.assertTrue((projected / "LICENSE").is_file())
         self.assertEqual(

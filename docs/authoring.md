@@ -61,7 +61,7 @@ workspace/docs/backlog/
 The six fixed backlog type keys are `backlog`, `backlog-review`, `epic`,
 `epic-review`, `story` and `test-plan`; `issue-report` is the seventh stable
 team type for tracked defects and improvements. Their project-selected display
-designations live in `workspace/config.json`. Colors, graph queries and
+labels are authored directly in each note's `title`. Colors, graph queries and
 path/type rules are fixed in `vault-policy.json` and rendered into
 `.obsidian/graph.json` and `.obsidian/types.json`.
 
@@ -105,8 +105,8 @@ Verdict.
 Claude and Codex install the same standalone team. Their manifests contain no
 plugin dependency. Setup creates only a project-local runtime and host
 projection, reconciles the tracked vault contract plus the ignored local
-community-plugin projection, preserves the designation map, and runs the same
-convergence check on both hosts. Generated distributions come from:
+community-plugin projection, and runs the same convergence check on both
+hosts. Generated distributions come from:
 
 ```text
 python3 tools/build_distributions.py

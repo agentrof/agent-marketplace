@@ -38,10 +38,9 @@ approved. This entry prepares delivery, but it does not start delivery.
    `requirement_ref` and requires `implements: REQ-###` on stories.
 4. Create one folder per epic. Each epic contains `epic.md`, `reviews/` and
    `stories/<story-slug>/story.md` plus `test-plan.md` for every story. Authored
-   titles and H1s use the configured document-type designations. The
-   capitalized designation is the complete root backlog/root-review label;
-   authored epic/story/test-plan bases append it. Stable paths, IDs and type
-   keys do not change with display language.
+   titles and H1s are direct, natural labels in the configured output language;
+   qualify similar records by subject when needed for graph clarity. Stable
+   paths, IDs and type keys do not change with display language.
 5. Assign one `owner_role` per story and any concrete `supporting_roles`.
    Author the seven required story sections, resolvable upstream links and
    dependency reasons. Set `work_kind` to `feature`, `defect` or `technical`.

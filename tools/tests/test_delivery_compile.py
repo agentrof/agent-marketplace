@@ -26,7 +26,12 @@ class DeliveryCompilerTests(unittest.TestCase):
         self.docs = self.root / "workspace" / "docs"
         (self.docs / "maps").mkdir(parents=True)
         (self.root / "workspace" / "config.json").write_text(
-            json.dumps({"doc_type_designations": {}}), encoding="utf-8"
+            json.dumps({
+                "schema_version": 2,
+                "team_id": "software-engineering-team",
+                "output_language": "English",
+                "terminology_language": "English",
+            }), encoding="utf-8"
         )
         make_approved_backlog(self.docs)
 
@@ -103,8 +108,13 @@ class DeliveryCompilerTests(unittest.TestCase):
         plan_args = type("Args", (), {"docs": str(self.docs), "delivery": "DLV-001"})
         self.assertEqual(delivery_compile.approve_scope(plan_args), 0)
         root = self.docs / "delivery" / "deliveries" / "dlv-001-saml-authentication"
+        delivery_props, _ = delivery_compile.split_note(root / "delivery.md")
+        self.assertEqual(
+            delivery_props["title"], "Delivery scope for SAML authentication"
+        )
         item = root / "items" / "auth-01" / "item.md"
         props, body = delivery_compile.split_note(item)
+        self.assertEqual(props["title"], "Implementation work for AUTH-01")
         props["path_claims"] = ["src/auth.py"]
         props["contract_claims"] = ["auth:session"]
         delivery_compile.atomic_text(item, delivery_compile.frontmatter(props, body))
@@ -112,6 +122,22 @@ class DeliveryCompilerTests(unittest.TestCase):
         self.assertTrue((root / "execution-plan.md").exists())
         self.assertTrue((root / "items" / "auth-01" / "code-review.md").exists())
         self.assertTrue((root / "items" / "auth-01" / "verification.md").exists())
+        plan_props, _ = delivery_compile.split_note(root / "execution-plan.md")
+        review_props, _ = delivery_compile.split_note(
+            root / "items" / "auth-01" / "code-review.md"
+        )
+        verification_props, _ = delivery_compile.split_note(
+            root / "items" / "auth-01" / "verification.md"
+        )
+        self.assertEqual(
+            plan_props["title"], "Execution approach for SAML authentication"
+        )
+        self.assertEqual(
+            review_props["title"], "Implementation review for AUTH-01"
+        )
+        self.assertEqual(
+            verification_props["title"], "Verification evidence for AUTH-01"
+        )
         self.assertEqual(delivery_compile.check_delivery(plan_args), 0)
 
     def test_no_timebox_or_runtime_coordination_fields_are_generated(self):

@@ -285,7 +285,7 @@ class SetupProjectTests(unittest.TestCase):
             self.assertEqual(second.returncode, 0, second.stdout + second.stderr)
             self.assertEqual(json.loads(second.stdout)["operations"], [])
 
-    def test_inspect_blocks_invalid_designations_before_any_write(self):
+    def test_inspect_migrates_retired_nested_fields_before_any_write(self):
         with tempfile.TemporaryDirectory() as temporary:
             project = Path(temporary)
             subprocess.run(["git", "init", "-q", str(project)], check=True)
@@ -293,9 +293,9 @@ class SetupProjectTests(unittest.TestCase):
             self.assertEqual(setup.returncode, 0, setup.stdout + setup.stderr)
             config_path = project / "workspace/config.json"
             config = json.loads(config_path.read_text(encoding="utf-8"))
-            config["doc_type_designations"]["story"] = (
-                config["doc_type_designations"]["epic"]
-            )
+            config["schema_version"] = 1
+            config["legacy_nested_settings"] = {"story": "Work item", "retired": "Retired"}
+            config["legacy_settings_history"] = {"story": [{"value": "Old work item"}]}
             config_path.write_text(
                 json.dumps(config, indent=2) + "\n", encoding="utf-8"
             )
@@ -304,17 +304,24 @@ class SetupProjectTests(unittest.TestCase):
             inspected = self.run_script(
                 SETUP, "inspect", "--project-root", str(project), "--json"
             )
-            self.assertEqual(inspected.returncode, 1)
+            self.assertEqual(inspected.returncode, 0, inspected.stdout + inspected.stderr)
             payload = json.loads(inspected.stdout)
-            self.assertFalse(payload["ok"])
-            self.assertIn("share one fold-equal", " ".join(payload["blockers"]))
+            self.assertTrue(payload["ok"])
+            self.assertTrue(any(
+                item["surface"] == "workspace_config"
+                and "legacy_nested_settings" in item.get("removed_fields", [])
+                for item in payload["operations"]
+            ))
             self.assertEqual(config_path.read_bytes(), before)
 
             applied = self.run_script(
                 SETUP, "apply", "--project-root", str(project), "--json"
             )
-            self.assertEqual(applied.returncode, 1)
-            self.assertEqual(config_path.read_bytes(), before)
+            self.assertEqual(applied.returncode, 0, applied.stdout + applied.stderr)
+            migrated = json.loads(config_path.read_text(encoding="utf-8"))
+            self.assertNotIn("legacy_nested_settings", migrated)
+            self.assertNotIn("legacy_settings_history", migrated)
+            self.assertEqual(migrated["schema_version"], 2)
 
     def test_inspect_surfaces_forbidden_runtime_state_before_apply(self):
         with tempfile.TemporaryDirectory() as temporary:

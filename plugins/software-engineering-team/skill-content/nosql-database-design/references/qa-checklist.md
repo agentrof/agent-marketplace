@@ -56,7 +56,7 @@ Gate-stage validation of a document-store design deliverable against upstream re
 ## FAIL Criteria
 
 - Entity coverage below 100% for product brief data models
-- Any field missing type, required/optional designation, or description
+- Any field missing type, presence/nullability semantics, or description
 - Any query pattern without a supporting index
 - Any reference without an integrity strategy
 - Any mutable denormalized copy without a declared refresh mechanism (MAJOR)

@@ -56,14 +56,14 @@ placeholder is allowed to reach a consuming repository.
    adapter projection; project truth remains the canonical workspace.
 5. Read the `obsidian-vault` skill completely. Refresh materializes its vault
    payload under `workspace/docs/`, rebuilds the closed `workspace/config.json`
-   shape, preserves valid language/designation values, and converges the
-   compiler-owned relation reports. Retired command fields migrate to draft
-   `docs/operation/` contracts and a valid legacy `max_parallel` becomes
-   Governance revision 1. It never retitles authored notes implicitly. The map includes the fixed
+   shape, preserves valid language values, and converges compiler-owned
+   relation reports. Retired command fields migrate to draft `docs/operation/`
+   contracts and a valid legacy `max_parallel` becomes Governance revision 1.
+   It never edits authored notes during refresh. The policy includes the fixed
    backlog keys `backlog`, `backlog-review`, `epic`, `epic-review`, `story`
-   and `test-plan`, plus the team's `issue-report` designation and all
-   analysis/design types. Type keys and graph colors stay stable. Existing
-   designation wording and history remain project configuration.
+   and `test-plan`, plus the team's `issue-report` type and all analysis/design
+   types. Type keys and graph colors stay stable; taxonomy changes do not
+   expand project configuration.
 6. Policy-owned keys in `app.json`, `core-plugins.json`, `graph.json` and
    `types.json` converge while unrelated user knobs remain untouched. The
    vetted community-plugin enable list and the policy-owned plugin directories

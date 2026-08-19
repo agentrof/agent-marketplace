@@ -1,6 +1,6 @@
 ---
 name: configure
-description: The single change gate for project configuration and document-type designations.
+description: The single change gate for project configuration and durable workflow settings.
 disable-model-invocation: true
 ---
 

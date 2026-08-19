@@ -28,12 +28,12 @@ repairs documentation only.
 
    Run the packaged `vault_check.py`.
 
-3. Present the rename and designation plan. Preserve user-owned prose and ask
-   for approval before applying bulk renames or designation changes.
-4. Apply deterministic repairs through `vault_check.py normalize` and
-   `reconcile-designations`. Curate ambiguous titles, aliases, maps, and home
-   links in the current session. All authored backlog, epic, story, review and
-   test-plan content remains ordinary Markdown under Git.
+3. Present the rename and title-curation plan. Preserve user-owned prose and
+   ask for approval before applying bulk renames or title changes.
+4. Apply deterministic repairs through `vault_check.py normalize`. Curate
+   ambiguous titles, aliases, maps, and home links in the current session. All
+   authored backlog, epic, story, review and test-plan content remains ordinary
+   Markdown under Git.
 5. Render generated views and run a full check. Every residual must name its
    file and reason.
 

@@ -1,15 +1,13 @@
 # Configuration Contract
 
 `workspace/config.json` is a closed bootstrap contract, not a project-design
-database. Its only keys are `schema_version`, `team_id`, `output_language`,
-`terminology_language`, `doc_type_designations` and
-`doc_type_designation_history`. Setup deterministically reconstructs this
-shape, preserving valid language and designation values while dropping retired
-and unknown keys.
+database. Its only keys are `schema_version`, `team_id`, `output_language` and
+`terminology_language`. Setup deterministically reconstructs this shape,
+preserving valid language values while dropping retired and unknown keys.
 
 `output_language` and `terminology_language` are changed through
-`project_config.py set`. Designation wording and its history are changed only
-through `vault_check.py reconcile-designations`.
+`project_config.py set`. Authored note titles are direct user-facing labels,
+not configuration data; a language change does not rewrite them.
 
 The other configuration targets are documents with their own lifecycle:
 

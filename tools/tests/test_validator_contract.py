@@ -42,6 +42,31 @@ class ValidatorContractTests(unittest.TestCase):
             database.write_bytes(b"fixture")
             self.assertIn("packaged_state_files", self.checks(root))
 
+    def test_skill_project_scope_is_closed_and_external_is_entry_only(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = self.fixture(temporary)
+            path = (
+                root / "plugins/software-engineering-team/skill-content/"
+                "issue-report/SKILL.md"
+            )
+            text = path.read_text(encoding="utf-8").replace(
+                "project_scope: external", "project_scope: remote"
+            )
+            path.write_text(text, encoding="utf-8")
+            self.assertIn("frontmatter_shape", self.checks(root))
+
+        with tempfile.TemporaryDirectory() as temporary:
+            root = self.fixture(temporary)
+            path = (
+                root / "plugins/software-engineering-team/skill-content/"
+                "issue-report/SKILL.md"
+            )
+            text = path.read_text(encoding="utf-8").replace(
+                "exposure: entry", "exposure: internal"
+            )
+            path.write_text(text, encoding="utf-8")
+            self.assertIn("frontmatter_shape", self.checks(root))
+
     def test_plugin_dependency_is_rejected(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = self.fixture(temporary)

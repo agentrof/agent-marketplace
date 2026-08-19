@@ -29,7 +29,6 @@ BACKLOG_COLORS = {
     "epic-review": 16096779,
     "story": 1357990,
     "test-plan": 2278750,
-    "issue-report": 14513808,
 }
 
 
@@ -71,12 +70,12 @@ class ProjectVaultContractTests(unittest.TestCase):
         )
 
     @staticmethod
-    def issue_note(title: str, ident: str, relation: str = "") -> str:
+    def decision_note(title: str, ident: str, relation: str = "") -> str:
         relation_row = f"related_to:\n  - \"{relation}\"\n" if relation else ""
         return (
-            "---\ntype: issue-report\n"
-            f"title: {title}\nstatus: draft\n{relation_row}"
-            "tags:\n  - doc/issue-report\n  - status/draft\n"
+            "---\ntype: decision\n"
+            f"title: {title}\nstatus: proposed\n{relation_row}"
+            "tags:\n  - doc/decision\n  - status/proposed\n"
             f"aliases:\n  - {ident}\n---\n\n# {title}\n"
         )
 
@@ -187,7 +186,6 @@ class ProjectVaultContractTests(unittest.TestCase):
                     "epic_review",
                     "story",
                     "test_plan",
-                    "issue_report",
                 )
             },
             {
@@ -207,17 +205,16 @@ class ProjectVaultContractTests(unittest.TestCase):
                 "test_plan": [
                     r"^backlog/epics/[a-z0-9]+(?:-[a-z0-9]+)*/stories/[a-z0-9]+(?:-[a-z0-9]+)*/test-plan\.md$"
                 ],
-                "issue_report": [r"^issues/[a-z0-9]+(?:-[a-z0-9]+)*\.md$"],
             },
         )
 
     def test_normalize_dry_run_and_second_apply_are_idempotent(self):
         with tempfile.TemporaryDirectory() as temporary:
             workspace = self.setup_project(Path(temporary))
-            note = workspace / "docs/issues/problem.md"
-            note.parent.mkdir()
+            note = workspace / "docs/solution-design/decisions/problem-decision.md"
+            note.parent.mkdir(parents=True)
             note.write_text(
-                self.issue_note("Problem", "ISSUE-001"), encoding="utf-8"
+                self.decision_note("Problem", "DEC-001"), encoding="utf-8"
             )
             before = note.read_bytes()
             dry = self.run_vault(
@@ -241,13 +238,13 @@ class ProjectVaultContractTests(unittest.TestCase):
     def test_title_shape_rejects_generic_and_duplicate_graph_labels(self):
         with tempfile.TemporaryDirectory() as temporary:
             workspace = self.setup_project(Path(temporary))
-            issues = workspace / "docs/issues"
-            issues.mkdir()
-            (issues / "overview.md").write_text(
-                self.issue_note("Overview", "ISSUE-001"), encoding="utf-8"
+            decisions = workspace / "docs/solution-design/decisions"
+            decisions.mkdir(parents=True)
+            (decisions / "overview-decision.md").write_text(
+                self.decision_note("Overview", "DEC-001"), encoding="utf-8"
             )
-            (issues / "overview-copy.md").write_text(
-                self.issue_note("overview", "ISSUE-002"), encoding="utf-8"
+            (decisions / "overview-copy-decision.md").write_text(
+                self.decision_note("overview", "DEC-002"), encoding="utf-8"
             )
             result = self.check_vault(workspace)
             self.assertEqual(result.returncode, 1)
@@ -257,18 +254,18 @@ class ProjectVaultContractTests(unittest.TestCase):
     def test_relation_render_is_deterministic_and_materializes_inverse(self):
         with tempfile.TemporaryDirectory() as temporary:
             workspace = self.setup_project(Path(temporary))
-            issues = workspace / "docs/issues"
-            issues.mkdir()
-            target = issues / "target.md"
-            source = issues / "source.md"
+            decisions = workspace / "docs/solution-design/decisions"
+            decisions.mkdir(parents=True)
+            target = decisions / "target-decision.md"
+            source = decisions / "source-decision.md"
             target.write_text(
-                self.issue_note("Target issue report", "ISSUE-001"),
+                self.decision_note("Target decision", "DEC-001"),
                 encoding="utf-8",
             )
             source.write_text(
-                self.issue_note(
-                    "Source issue report", "ISSUE-002",
-                    "[[issues/target|Target issue report]]",
+                self.decision_note(
+                    "Source decision", "DEC-002",
+                    "[[solution-design/decisions/target-decision|Target decision]]",
                 ),
                 encoding="utf-8",
             )
@@ -278,7 +275,10 @@ class ProjectVaultContractTests(unittest.TestCase):
             self.assertEqual(first.returncode, 0, first.stdout + first.stderr)
             rendered = target.read_bytes()
             self.assertIn(b"Related from", rendered)
-            self.assertIn(b"[[issues/source|Source issue report]]", rendered)
+            self.assertIn(
+                b"[[solution-design/decisions/source-decision|Source decision]]",
+                rendered,
+            )
             second = self.run_vault(
                 "render-relations", "--vault", str(workspace / "docs")
             )
@@ -288,12 +288,12 @@ class ProjectVaultContractTests(unittest.TestCase):
     def test_relation_contract_rejects_wrong_target_type(self):
         with tempfile.TemporaryDirectory() as temporary:
             workspace = self.setup_project(Path(temporary))
-            issues = workspace / "docs/issues"
-            issues.mkdir()
-            note = issues / "source.md"
+            decisions = workspace / "docs/solution-design/decisions"
+            decisions.mkdir(parents=True)
+            note = decisions / "source-decision.md"
             note.write_text(
-                self.issue_note(
-                    "Source issue report", "ISSUE-002",
+                self.decision_note(
+                    "Source decision", "DEC-002",
                     "[[home|Home]]",
                 ).replace("related_to:", "verifies:"),
                 encoding="utf-8",

@@ -180,6 +180,44 @@ class SingleTeamDistributionTests(unittest.TestCase):
         self.assertEqual(list(output.rglob("__pycache__")), [])
         self.assertEqual(list(output.rglob("*.pyc")), [])
 
+    def test_issue_reporting_is_external_and_has_no_project_artifacts(self):
+        for host in build_distributions.HOSTS:
+            with self.subTest(host=host):
+                package = self.root / "dist" / host / fixtures.PLUGIN
+                wrapper = (
+                    package / "skills/issue-report/SKILL.md"
+                ).read_text(encoding="utf-8")
+                setup_wrapper = (
+                    package / "skills/setup/SKILL.md"
+                ).read_text(encoding="utf-8")
+                canonical = (
+                    package / "skill-content/issue-report/SKILL.md"
+                ).read_text(encoding="utf-8")
+                self.assertIn("project_scope: external", canonical)
+                self.assertNotIn("workspace config", wrapper)
+                self.assertIn("workspace config", setup_wrapper)
+                self.assertTrue((package / "scripts/file_issue.py").is_file())
+                self.assertFalse((package / "scripts/issue_compile.py").exists())
+                self.assertFalse(
+                    (package / "templates/vault/maps/issues.md").exists()
+                )
+
+                policy = json.loads((
+                    package
+                    / "skill-content/obsidian-vault/data/vault-policy.json"
+                ).read_text(encoding="utf-8"))
+                self.assertNotIn("issues", policy["subtrees"])
+                self.assertNotIn("issue-report", policy["extra_doc_types"])
+                self.assertNotIn("issue_report", policy["type_path_patterns"])
+                self.assertNotIn("issue_report", policy["status_values"])
+                self.assertNotIn(
+                    "issue-report", policy["fragment_graph_groups"]["backlog"]
+                )
+                self.assertNotIn(
+                    "issue-report",
+                    {group["id"] for group in policy["graph_color_groups"]},
+                )
+
     def test_fixture_copy_ignores_python_runtime_caches(self):
         with tempfile.TemporaryDirectory() as source_dir, \
                 tempfile.TemporaryDirectory() as target_dir:

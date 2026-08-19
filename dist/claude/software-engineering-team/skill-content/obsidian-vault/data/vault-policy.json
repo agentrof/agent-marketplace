@@ -12,8 +12,7 @@
     "operation",
     "requirements",
     "delivery",
-    "backlog",
-    "issues"
+    "backlog"
   ],
   "extra_maps": [],
   "machine_dirs": [
@@ -161,11 +160,6 @@
       "rgb": 2278750
     },
     {
-      "id": "issue-report",
-      "query": "tag:#doc/issue-report",
-      "rgb": 14513808
-    },
-    {
       "id": "requirement",
       "query": "tag:#doc/requirement",
       "rgb": 9323693
@@ -278,9 +272,6 @@
     "title": "text",
     "status": "text",
     "owner_role": "text",
-    "issue_kind": "text",
-    "external_url": "text",
-    "filed_at_utc": "datetime",
     "approved_at": "date",
     "decided_at": "date",
     "superseded_by": "text",
@@ -484,9 +475,6 @@
       "priority",
       "priority_reason",
       "work_kind",
-      "issue_kind",
-      "external_url",
-      "filed_at_utc",
       "source_hash",
       "supporting_roles",
       "depends_on",
@@ -516,7 +504,7 @@
     "system_architecture": ["decision", "system-architecture"],
     "design_system": ["design-master", "page-override"],
     "experience_design": ["experience"],
-    "backlog": ["backlog", "backlog-review", "epic", "epic-review", "story", "test-plan", "issue-report"],
+    "backlog": ["backlog", "backlog-review", "epic", "epic-review", "story", "test-plan"],
     "requirements": ["requirement"],
     "delivery": ["definition-of-done", "delivery", "execution-plan", "delivery-item", "code-review", "verification", "delivery-review", "delivery-governance"],
     "operation": ["operation"]
@@ -553,7 +541,6 @@
     "epic-review",
     "story",
     "test-plan",
-    "issue-report",
     "requirement",
     "definition-of-done",
     "delivery",
@@ -599,7 +586,6 @@
     "epic_review": ["^backlog/epics/[a-z0-9]+(?:-[a-z0-9]+)*/reviews/round-[0-9]+-epic-review\\.md$"],
     "story": ["^backlog/epics/[a-z0-9]+(?:-[a-z0-9]+)*/stories/[a-z0-9]+(?:-[a-z0-9]+)*/story\\.md$"],
     "test_plan": ["^backlog/epics/[a-z0-9]+(?:-[a-z0-9]+)*/stories/[a-z0-9]+(?:-[a-z0-9]+)*/test-plan\\.md$"],
-    "issue_report": ["^issues/[a-z0-9]+(?:-[a-z0-9]+)*\\.md$"],
     "requirement": ["^requirements/req-[0-9]{3,}-[a-z0-9]+(?:-[a-z0-9]+)*\\.md$"],
     "definition_of_done": ["^delivery/definition-of-done\\.md$"],
     "delivery": ["^delivery/deliveries/dlv-[0-9]{3,}-[a-z0-9]+(?:-[a-z0-9]+)*/delivery\\.md$"],
@@ -625,7 +611,6 @@
     "epic_review": ["draft", "changes_requested", "approved"],
     "story": ["planned"],
     "test_plan": ["draft", "approved", "superseded", "retired"],
-    "issue_report": ["draft", "approved", "filed"],
     "requirement": ["draft", "approved", "resolved_no_change", "superseded", "withdrawn"],
     "definition_of_done": ["draft", "approved"],
     "delivery": ["scope_proposed", "scope_approved", "execution_approved", "active", "review", "pr_handoff", "awaiting_merge", "merged", "cancelled"],

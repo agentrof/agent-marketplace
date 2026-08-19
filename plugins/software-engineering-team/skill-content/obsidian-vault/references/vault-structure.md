@@ -27,8 +27,6 @@ workspace/docs/            the vault root (open THIS in the vault app)
       stories/<story-slug>/
         story.md           story scope, criteria and delivery metadata
         test-plan.md       executable/manual scenario design for the story
-  issues/                  approved issue and improvement reports
-    <issue-slug>.md
   api/                     generated schema exports (non-note subtree)
   _attachments/            embedded binaries only
   .obsidian/               committed payload + local UI state

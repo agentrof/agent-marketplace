@@ -1,0 +1,6 @@
+{
+  "summary": "Make issue reporting stateless and open approved reports directly in the Agent Marketplace repository.",
+  "components": {
+    "software-engineering-team": "major"
+  }
+}

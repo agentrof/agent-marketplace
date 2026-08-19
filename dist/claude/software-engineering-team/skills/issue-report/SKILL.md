@@ -1,6 +1,6 @@
 ---
 name: issue-report
-description: Capture and explicitly approve a Software Engineering Team issue as a tracked Markdown report, with optional filing to the marketplace repository.
+description: Prepare a stateless GitHub issue in chat and file the approved payload only to the Agent Marketplace repository.
 disable-model-invocation: true
 ---
 
@@ -8,4 +8,4 @@ disable-model-invocation: true
 
 # Issue Report
 
-Read `${CLAUDE_PLUGIN_ROOT}/host-contract.md` and `${CLAUDE_PLUGIN_ROOT}/skill-content/issue-report/SKILL.md` completely. Follow the canonical skill as the authoritative workflow and the host contract as its platform adapter. Before changing a project, confirm the workspace config and local docs contract are present; setup is the only entry that may create them.
+Read `${CLAUDE_PLUGIN_ROOT}/host-contract.md` and `${CLAUDE_PLUGIN_ROOT}/skill-content/issue-report/SKILL.md` completely. Follow the canonical skill as the authoritative workflow and the host contract as its platform adapter.

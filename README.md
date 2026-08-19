@@ -70,9 +70,9 @@ backlog and relates to the exact epic set while covering cross-epic overlap,
 dependency direction, ordering and global coverage. Test plans map acceptance
 criteria and business rules to stable Given/When/Then scenarios and required
 automation targets. Test execution remains a later delivery gate.
-Approved defects and improvements are tracked separately as
-`workspace/docs/issues/<slug>.md` and may be filed upstream only by an explicit
-project decision authority request.
+`/issue-report` is a stateless support path for Agent Marketplace defects and
+improvements. It previews the exact GitHub payload in chat, files only after
+explicit approval and never stores issue state in the consuming project.
 
 ## Local state and upgrades
 

@@ -59,11 +59,11 @@ workspace/docs/backlog/
 ```
 
 The six fixed backlog type keys are `backlog`, `backlog-review`, `epic`,
-`epic-review`, `story` and `test-plan`; `issue-report` is the seventh stable
-team type for tracked defects and improvements. Their project-selected display
-labels are authored directly in each note's `title`. Colors, graph queries and
+`epic-review`, `story` and `test-plan`. Their project-selected display labels
+are authored directly in each note's `title`. Colors, graph queries and
 path/type rules are fixed in `vault-policy.json` and rendered into
-`.obsidian/graph.json` and `.obsidian/types.json`.
+`.obsidian/graph.json` and `.obsidian/types.json`. Issue reporting stays outside
+the vault and cannot serve as backlog evidence.
 
 `backlog_compile.py` is the only backlog helper. It creates deterministic
 stubs, validates front matter and nested paths, checks one owner and any

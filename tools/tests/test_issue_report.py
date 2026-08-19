@@ -1,4 +1,4 @@
-"""Issue-report lifecycle and fixed external-filing contracts."""
+"""Stateless issue preview and fixed external-filing contracts."""
 
 from __future__ import annotations
 
@@ -10,18 +10,19 @@ import subprocess
 import sys
 import tempfile
 import unittest
+import urllib.error
 from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 from unittest import mock
 
 
 ROOT = Path(__file__).resolve().parents[2]
-SCRIPTS = ROOT / "plugins/software-engineering-team/scripts"
-ISSUE_COMPILE = SCRIPTS / "issue_compile.py"
-FILE_ISSUE = SCRIPTS / "file_issue.py"
-SETUP_PROJECT = SCRIPTS / "setup_project.py"
-VAULT_CHECK = SCRIPTS / "vault_check.py"
-sys.path.insert(0, str(SCRIPTS))
+PLUGIN = ROOT / "plugins/software-engineering-team"
+FILE_ISSUE = PLUGIN / "scripts/file_issue.py"
+ISSUE_SKILL = PLUGIN / "skill-content/issue-report/SKILL.md"
+VAULT_POLICY = (
+    PLUGIN / "skill-content/obsidian-vault/data/vault-policy.json"
+)
 
 
 def load_module():
@@ -37,294 +38,287 @@ class IssueReportTests(unittest.TestCase):
     def setUpClass(cls) -> None:
         cls.issue = load_module()
 
-    def workspace(self, root: Path) -> Path:
-        workspace = root / "workspace"
-        docs = workspace / "docs"
-        docs.mkdir(parents=True)
-        (docs / "home.md").write_text(
-            "---\ntype: home\ntitle: Knowledge Base\ntags:\n"
-            "  - doc/home\n---\n\n# Knowledge Base\n",
-            encoding="utf-8",
+    def run_main(self, title: str, body: str):
+        output = io.StringIO()
+        error = io.StringIO()
+        with mock.patch("sys.stdin", io.StringIO(body)), \
+                redirect_stdout(output), redirect_stderr(error):
+            code = self.issue.main(["--title", title])
+        return code, output.getvalue(), error.getvalue()
+
+    def test_skill_is_chat_previewed_external_and_stateless(self):
+        text = ISSUE_SKILL.read_text(encoding="utf-8")
+        for required in (
+            "project_scope: external",
+            "agentrof/agent-marketplace",
+            "Summary",
+            "Reproduction or Motivation",
+            "Expected Behavior",
+            "Actual Behavior",
+            "Impact",
+            "Evidence and Context",
+            "`Open issue`, `Revise` or `Cancel`",
+            "standard input",
+            "Outcome unknown, do not retry automatically",
+            "does not require project setup",
+        ):
+            self.assertIn(required, text)
+        for retired in (
+            "workspace/docs",
+            "obsidian-vault",
+            "issue_compile.py",
+            "--report",
+            "--dry-run",
+            "source_hash",
+        ):
+            self.assertNotIn(retired, text)
+
+    def test_vault_backlog_and_portable_gate_have_no_issue_contract(self):
+        policy = json.loads(VAULT_POLICY.read_text(encoding="utf-8"))
+        self.assertNotIn("issues", policy["subtrees"])
+        self.assertNotIn("issue-report", policy["extra_doc_types"])
+        self.assertNotIn("issue_report", policy["type_path_patterns"])
+        self.assertNotIn("issue_report", policy["status_values"])
+        self.assertNotIn(
+            "issue-report", policy["fragment_graph_groups"]["backlog"]
         )
-        (workspace / "config.json").write_text(json.dumps({
-            "schema_version": 2,
-            "team_id": "software-engineering-team",
-            "output_language": "English",
-            "terminology_language": "English",
-        }), encoding="utf-8")
-        return docs
-
-    def run_compile(self, *args: str):
-        return subprocess.run(
-            [sys.executable, str(ISSUE_COMPILE), *args],
-            cwd=ROOT, capture_output=True, text=True, check=False,
+        self.assertNotIn(
+            "issue-report",
+            {group["id"] for group in policy["graph_color_groups"]},
         )
+        for retired_property in ("issue_kind", "external_url", "filed_at_utc"):
+            self.assertNotIn(retired_property, policy["property_types"])
 
-    def create_complete_report(self, root: Path):
-        docs = self.workspace(root)
-        result = self.run_compile(
-            "init", "--docs", str(docs), "--slug", "refresh-breaks",
-            "--title", "Refresh breaks", "--kind", "defect", "--id", "ISSUE-001",
+        graph = (
+            PLUGIN / "templates/vault/.obsidian/graph.json"
+        ).read_text(encoding="utf-8")
+        types = (
+            PLUGIN / "templates/vault/.obsidian/types.json"
+        ).read_text(encoding="utf-8")
+        backlog = (PLUGIN / "scripts/backlog_compile.py").read_text(
+            encoding="utf-8"
         )
-        self.assertEqual(result.returncode, 0, result.stderr)
-        report = docs / "issues/refresh-breaks.md"
-        text = report.read_text(encoding="utf-8")
-        lines = []
-        for line in text.splitlines():
-            if line.startswith("TODO:"):
-                lines.append("Observed and reproducible evidence is recorded here.")
-            else:
-                lines.append(line)
-        report.write_text("\n".join(lines) + "\n", encoding="utf-8")
-        return docs, report
+        portable = (PLUGIN / "scripts/vault_gate.py").read_text(
+            encoding="utf-8"
+        )
+        self.assertNotIn("doc/issue-report", graph)
+        self.assertNotIn("issue_kind", types)
+        self.assertNotIn('"issue-report"', backlog)
+        self.assertNotIn("issue_compile.py", portable)
+        self.assertFalse((PLUGIN / "scripts/issue_compile.py").exists())
+        self.assertFalse((PLUGIN / "templates/vault/maps/issues.md").exists())
 
-    def approve(self, report: Path):
-        result = self.run_compile("approve", "--report", str(report))
-        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-
-    def test_init_uses_direct_title_and_renders_graph_navigation(self):
-        with tempfile.TemporaryDirectory() as temporary:
-            docs, report = self.create_complete_report(Path(temporary))
-            text = report.read_text(encoding="utf-8")
-            self.assertIn("title: Refresh breaks", text)
-            self.assertIn("# Refresh breaks", text)
-            self.assertIn("[[maps/issues|Issue reports]]", text)
-            self.assertIn(
-                "[[maps/issues|Issue reports]]",
-                (docs / "home.md").read_text(encoding="utf-8"),
-            )
-            self.assertIn(
-                "[[issues/refresh-breaks|Refresh breaks]]",
-                (docs / "maps/issues.md").read_text(encoding="utf-8"),
-            )
-            checked = self.run_compile("check", "--docs", str(docs), "--render")
-            self.assertEqual(checked.returncode, 0, checked.stdout + checked.stderr)
-
-    def test_stub_and_duplicate_identity_are_rejected(self):
-        with tempfile.TemporaryDirectory() as temporary:
-            docs = self.workspace(Path(temporary))
-            created = self.run_compile(
-                "init", "--docs", str(docs), "--slug", "first",
-                "--title", "First", "--kind", "defect", "--id", "ISSUE-001",
-            )
-            self.assertEqual(created.returncode, 0, created.stderr)
-            checked = self.run_compile("check", "--docs", str(docs))
-            self.assertEqual(checked.returncode, 1)
-            self.assertIn("placeholder text", checked.stdout)
-            duplicate = self.run_compile(
-                "init", "--docs", str(docs), "--slug", "second",
-                "--title", "Second", "--kind", "improvement", "--id", "ISSUE-001",
-            )
-            self.assertEqual(duplicate.returncode, 2)
-            self.assertIn("already owned", duplicate.stderr)
-
-    def test_check_rejects_duplicate_identity_and_stale_navigation(self):
-        with tempfile.TemporaryDirectory() as temporary:
-            docs, first = self.create_complete_report(Path(temporary))
-            second = docs / "issues/other.md"
-            second.write_bytes(first.read_bytes())
-            checked = self.run_compile("check", "--docs", str(docs))
-            self.assertEqual(checked.returncode, 1)
-            self.assertIn("ISSUE-001 has multiple owners", checked.stdout)
-            self.assertIn("maps/issues.md is missing or stale", checked.stdout)
-
-            second.unlink()
-            (docs / "maps/issues.md").write_text("stale\n", encoding="utf-8")
-            checked = self.run_compile("check", "--docs", str(docs))
-            self.assertEqual(checked.returncode, 1)
-            self.assertIn("maps/issues.md is missing or stale", checked.stdout)
-
-    def test_approval_is_utc_stamped_and_body_tamper_is_stale(self):
-        with tempfile.TemporaryDirectory() as temporary:
-            docs, report = self.create_complete_report(Path(temporary))
-            self.approve(report)
-            text = report.read_text(encoding="utf-8")
-            self.assertIn("status: approved", text)
-            self.assertIn("approved_at_utc:", text)
-            self.assertIn("source_hash: sha256:", text)
-            checked = self.run_compile("check", "--docs", str(docs))
-            self.assertEqual(checked.returncode, 0, checked.stdout + checked.stderr)
-            report.write_text(text.replace(
-                "Observed and reproducible evidence is recorded here.",
-                "Changed after approval.", 1,
-            ), encoding="utf-8")
-            stale = self.run_compile("check", "--docs", str(docs))
-            self.assertEqual(stale.returncode, 1)
-            self.assertIn("source_hash is stale", stale.stdout)
-
-    def test_approved_report_passes_the_full_project_vault_gate(self):
-        with tempfile.TemporaryDirectory() as temporary:
-            project = Path(temporary)
-            subprocess.run(["git", "init", "-q", str(project)], check=True)
-            setup = subprocess.run(
-                [sys.executable, str(SETUP_PROJECT), "--project-root", str(project)],
-                cwd=ROOT, capture_output=True, text=True, check=False,
-            )
-            self.assertEqual(setup.returncode, 0, setup.stdout + setup.stderr)
-            docs = project / "workspace/docs"
-            created = self.run_compile(
-                "init", "--docs", str(docs), "--slug", "refresh-breaks",
-                "--title", "Refresh breaks", "--kind", "defect", "--id", "ISSUE-001",
-            )
-            self.assertEqual(created.returncode, 0, created.stderr)
-            report = docs / "issues/refresh-breaks.md"
-            text = report.read_text(encoding="utf-8")
-            report.write_text("\n".join(
-                "Observed and reproducible evidence is recorded here."
-                if line.startswith("TODO:") else line
-                for line in text.splitlines()
-            ) + "\n", encoding="utf-8")
-            self.approve(report)
-            gate = subprocess.run(
-                [sys.executable, str(VAULT_CHECK), "check", "--vault", str(docs),
-                 "--json"],
-                cwd=ROOT, capture_output=True, text=True, check=False,
-            )
-            self.assertEqual(gate.returncode, 0, gate.stdout + gate.stderr)
-            portable = subprocess.run(
-                [sys.executable, str(project / ".github/agentrof/vault-gate.pyz"),
-                 "check", "--project-root", str(project), "--json"],
-                cwd=ROOT, capture_output=True, text=True, check=False,
-            )
-            self.assertEqual(
-                portable.returncode, 0, portable.stdout + portable.stderr
-            )
-            names = [
-                item["name"] for item in json.loads(portable.stdout)["results"]
-            ]
-            self.assertIn("issue-reports", names)
-
-    def test_draft_report_cannot_be_dry_run_or_posted(self):
-        with tempfile.TemporaryDirectory() as temporary:
-            _docs, report = self.create_complete_report(Path(temporary))
-            with mock.patch.object(self.issue, "create_issue") as create:
-                error = io.StringIO()
-                with redirect_stderr(error):
-                    code = self.issue.main(["--report", str(report), "--dry-run"])
+    def test_empty_title_and_body_fail_before_network(self):
+        with mock.patch.object(self.issue, "create_issue") as create:
+            code, output, error = self.run_main("   ", "body")
             self.assertEqual(code, 2)
-            create.assert_not_called()
-            self.assertIn("not approved", error.getvalue())
+            self.assertEqual(output, "")
+            self.assertIn("Not opened: title is empty", error)
+            code, output, error = self.run_main("Title", "   \n")
+        self.assertEqual(code, 2)
+        self.assertEqual(output, "")
+        self.assertIn("Not opened: stdin body is empty", error)
+        create.assert_not_called()
 
-    def test_approved_dry_run_uses_fixed_target_without_posting(self):
+    def test_confirmed_url_is_the_only_success_and_writes_nothing(self):
         with tempfile.TemporaryDirectory() as temporary:
-            _docs, report = self.create_complete_report(Path(temporary))
-            self.approve(report)
-            with mock.patch.object(self.issue, "create_issue") as create:
-                output = io.StringIO()
-                with redirect_stdout(output):
-                    code = self.issue.main(["--report", str(report), "--dry-run"])
-            self.assertEqual(code, 0)
-            create.assert_not_called()
-            self.assertIn(self.issue.MARKETPLACE_REPO, output.getvalue())
+            root = Path(temporary)
+            sentinel = root / "sentinel.txt"
+            sentinel.write_text("unchanged\n", encoding="utf-8")
+            before = {path.relative_to(root): path.read_bytes()
+                      for path in root.rglob("*") if path.is_file()}
+            previous = Path.cwd()
+            os.chdir(root)
+            try:
+                with mock.patch.object(
+                    self.issue,
+                    "create_issue",
+                    return_value=(
+                        "https://github.com/agentrof/agent-marketplace/issues/42"
+                    ),
+                ) as create:
+                    code, output, error = self.run_main(
+                        "  Broken refresh  ", "\n## Summary\nBroken.\n"
+                    )
+            finally:
+                os.chdir(previous)
+            after = {path.relative_to(root): path.read_bytes()
+                     for path in root.rglob("*") if path.is_file()}
+        self.assertEqual(code, 0)
+        self.assertEqual(error, "")
+        self.assertEqual(
+            output,
+            "Opened #42: "
+            "https://github.com/agentrof/agent-marketplace/issues/42\n",
+        )
+        create.assert_called_once_with(
+            "Broken refresh", "## Summary\nBroken."
+        )
+        self.assertEqual(after, before)
 
-    def test_successful_post_marks_the_same_report_filed(self):
+    def test_noncanonical_success_response_is_unknown_not_opened(self):
+        with mock.patch.object(
+            self.issue,
+            "create_issue",
+            return_value="https://example.invalid/issues/42",
+        ):
+            code, output, error = self.run_main("Title", "Body")
+        self.assertEqual(code, 3)
+        self.assertEqual(output, "")
+        self.assertNotIn("Opened", error)
+        self.assertIn("Outcome unknown, do not retry automatically", error)
+
+    def test_failed_filing_writes_nothing(self):
         with tempfile.TemporaryDirectory() as temporary:
-            _docs, report = self.create_complete_report(Path(temporary))
-            self.approve(report)
-            url = "https://github.com/agentrof/agent-marketplace/issues/1"
-            with mock.patch.object(
-                self.issue, "create_issue", return_value=url
-            ) as create:
-                output = io.StringIO()
-                with redirect_stdout(output):
-                    code = self.issue.main(["--report", str(report)])
-            self.assertEqual(code, 0, output.getvalue())
-            create.assert_called_once()
-            text = report.read_text(encoding="utf-8")
-            self.assertIn("status: filed", text)
-            self.assertIn(f"external_url: {url}", text)
-            self.assertIn("filed_at_utc:", text)
+            root = Path(temporary)
+            sentinel = root / "sentinel.txt"
+            sentinel.write_text("unchanged\n", encoding="utf-8")
+            before = {path.relative_to(root): path.read_bytes()
+                      for path in root.rglob("*") if path.is_file()}
+            previous = Path.cwd()
+            os.chdir(root)
+            try:
+                with mock.patch.object(
+                    self.issue,
+                    "create_issue",
+                    side_effect=self.issue.NotOpened("authentication rejected"),
+                ):
+                    code, output, error = self.run_main("Title", "Body")
+            finally:
+                os.chdir(previous)
+            after = {path.relative_to(root): path.read_bytes()
+                     for path in root.rglob("*") if path.is_file()}
+        self.assertEqual(code, 2)
+        self.assertEqual(output, "")
+        self.assertIn("Not opened", error)
+        self.assertEqual(after, before)
 
-            with mock.patch.object(self.issue, "create_issue") as duplicate:
-                error = io.StringIO()
-                with redirect_stderr(error):
-                    repeated = self.issue.main(["--report", str(report)])
-            self.assertEqual(repeated, 2)
-            duplicate.assert_not_called()
-            self.assertIn("not-yet-filed", error.getvalue())
+    def test_definite_and_ambiguous_failures_have_distinct_outcomes(self):
+        with mock.patch.object(
+            self.issue,
+            "create_issue",
+            side_effect=self.issue.NotOpened("authentication rejected"),
+        ):
+            definite = self.run_main("Title", "Body")
+        self.assertEqual(definite[0], 2)
+        self.assertEqual(definite[1], "")
+        self.assertIn("Not opened: authentication rejected", definite[2])
 
-    def test_filed_url_tamper_and_local_persistence_failure_are_fail_closed(self):
-        with tempfile.TemporaryDirectory() as temporary:
-            docs, report = self.create_complete_report(Path(temporary))
-            self.approve(report)
-            url = "https://github.com/agentrof/agent-marketplace/issues/42"
-            with mock.patch.object(
-                self.issue, "create_issue", return_value=url
-            ), mock.patch.object(
-                self.issue.issue_compile, "mark_filed",
-                side_effect=ValueError("disk full"),
-            ):
-                output = io.StringIO()
-                error = io.StringIO()
-                with redirect_stdout(output), redirect_stderr(error):
-                    code = self.issue.main(["--report", str(report)])
-            self.assertEqual(code, 3)
-            self.assertIn(url, output.getvalue())
-            self.assertIn("Do not retry", error.getvalue())
-            self.assertIn(url, error.getvalue())
-            self.assertIn("status: approved", report.read_text(encoding="utf-8"))
+        with mock.patch.object(
+            self.issue,
+            "create_issue",
+            side_effect=self.issue.OutcomeUnknown("request timed out"),
+        ):
+            ambiguous = self.run_main("Title", "Body")
+        self.assertEqual(ambiguous[0], 3)
+        self.assertEqual(ambiguous[1], "")
+        self.assertIn("do not retry automatically", ambiguous[2])
 
-            self.issue.issue_compile.mark_filed(report, url)
-            text = report.read_text(encoding="utf-8").replace(
-                url, "https://example.invalid/issues/42"
-            )
-            report.write_text(text, encoding="utf-8")
-            checked = self.run_compile("check", "--docs", str(docs))
-            self.assertEqual(checked.returncode, 1)
-            self.assertIn("canonical agentrof/agent-marketplace", checked.stdout)
-
-    def test_unsupported_hand_authored_closed_state_is_rejected(self):
-        with tempfile.TemporaryDirectory() as temporary:
-            docs, report = self.create_complete_report(Path(temporary))
-            self.approve(report)
-            text = report.read_text(encoding="utf-8").replace(
-                "status: approved", "status: closed"
-            ).replace("status/approved", "status/closed")
-            report.write_text(text, encoding="utf-8")
-            checked = self.run_compile("check", "--docs", str(docs))
-            self.assertEqual(checked.returncode, 1)
-            self.assertIn("not a legal issue-report status", checked.stdout)
-
-    def test_report_outside_the_canonical_workspace_cannot_be_filed(self):
-        with tempfile.TemporaryDirectory() as temporary:
-            docs, report = self.create_complete_report(Path(temporary))
-            self.approve(report)
-            outside = Path(temporary) / "issues/copied.md"
-            outside.parent.mkdir()
-            outside.write_bytes(report.read_bytes())
-            with mock.patch.object(self.issue, "create_issue") as create:
-                error = io.StringIO()
-                with redirect_stderr(error):
-                    code = self.issue.main(["--report", str(outside)])
-            self.assertEqual(code, 2)
-            create.assert_not_called()
-            self.assertIn("workspace/docs/issues", error.getvalue())
-
-    def test_no_cli_or_token_fails_without_network(self):
+    def test_no_cli_or_token_is_definitely_not_opened(self):
         with mock.patch.object(self.issue.shutil, "which", return_value=None), \
                 mock.patch.dict(os.environ, {}, clear=True), \
                 mock.patch.object(self.issue.urllib.request, "urlopen") as urlopen:
-            with self.assertRaisesRegex(RuntimeError, "nothing was posted"):
+            with self.assertRaisesRegex(
+                self.issue.NotOpened, "GH_TOKEN/GITHUB_TOKEN"
+            ):
                 self.issue.create_issue("title", "body")
-            urlopen.assert_not_called()
+        urlopen.assert_not_called()
 
-    def test_api_fallback_uses_only_fixed_repository(self):
+    def test_gh_uses_fixed_api_endpoint_and_stdin_payload(self):
+        authenticated = subprocess.CompletedProcess([], 0, "", "")
+        created = subprocess.CompletedProcess(
+            [], 0,
+            "https://github.com/agentrof/agent-marketplace/issues/7\n", ""
+        )
+        with mock.patch.object(self.issue.shutil, "which", return_value="/bin/gh"), \
+                mock.patch.object(
+                    self.issue.subprocess, "run",
+                    side_effect=[authenticated, created],
+                ) as run:
+            url = self.issue.create_issue("A title", "A body")
+        self.assertEqual(
+            url, "https://github.com/agentrof/agent-marketplace/issues/7"
+        )
+        command = run.call_args_list[1].args[0]
+        self.assertIn("repos/agentrof/agent-marketplace/issues", command)
+        self.assertNotIn("--body", command)
+        self.assertEqual(
+            json.loads(run.call_args_list[1].kwargs["input"]),
+            {"title": "A title", "body": "A body"},
+        )
+
+    def test_gh_auth_rejection_never_attempts_post(self):
+        rejected = subprocess.CompletedProcess([], 1, "", "not logged in")
+        with mock.patch.object(self.issue.shutil, "which", return_value="/bin/gh"), \
+                mock.patch.object(
+                    self.issue.subprocess, "run", return_value=rejected
+                ) as run:
+            with self.assertRaisesRegex(self.issue.NotOpened, "not logged in"):
+                self.issue.create_issue("title", "body")
+        run.assert_called_once()
+
+    def test_gh_process_start_failure_is_definitely_not_opened(self):
+        with mock.patch.object(self.issue.shutil, "which", return_value="/bin/gh"), \
+                mock.patch.object(
+                    self.issue.subprocess, "run", side_effect=OSError("missing")
+                ) as run:
+            with self.assertRaisesRegex(self.issue.NotOpened, "check failed"):
+                self.issue.create_issue("title", "body")
+        run.assert_called_once()
+
+    def test_api_fallback_uses_fixed_repository_and_canonical_url(self):
         response = mock.MagicMock()
         response.__enter__.return_value.read.return_value = (
-            b'{"html_url":"https://example.test/1"}'
+            b'{"html_url":"https://github.com/agentrof/'
+            b'agent-marketplace/issues/9"}'
         )
         with mock.patch.object(self.issue.shutil, "which", return_value=None), \
                 mock.patch.object(self.issue, "token", return_value="secret"), \
                 mock.patch.object(
-                    self.issue.urllib.request, "urlopen", return_value=response
+                    self.issue.urllib.request,
+                    "urlopen",
+                    return_value=response,
                 ) as urlopen:
             result = self.issue.create_issue("title", "body")
-        self.assertEqual(result, "https://example.test/1")
+        self.assertEqual(
+            result, "https://github.com/agentrof/agent-marketplace/issues/9"
+        )
         request = urlopen.call_args.args[0]
         self.assertEqual(
             request.full_url,
             "https://api.github.com/repos/agentrof/agent-marketplace/issues",
         )
+        self.assertEqual(
+            json.loads(request.data.decode("utf-8")),
+            {"title": "title", "body": "body"},
+        )
+
+    def test_api_4xx_is_definite_and_5xx_is_unknown(self):
+        for status, expected in (
+            (422, self.issue.NotOpened),
+            (503, self.issue.OutcomeUnknown),
+        ):
+            with self.subTest(status=status):
+                error = urllib.error.HTTPError(
+                    "https://api.github.com", status, "failure", {},
+                    io.BytesIO(b'{"message":"failure"}'),
+                )
+                with mock.patch.object(
+                    self.issue.urllib.request, "urlopen", side_effect=error
+                ):
+                    with self.assertRaises(expected):
+                        self.issue.create_with_api("title", "body", "secret")
+
+    def test_retired_file_and_dry_run_arguments_are_not_accepted(self):
+        for arguments in (
+            ["--report", "report.md"],
+            ["--title", "Title", "--dry-run"],
+        ):
+            with self.subTest(arguments=arguments), \
+                    redirect_stderr(io.StringIO()):
+                with self.assertRaises(SystemExit) as raised:
+                    self.issue.main(arguments)
+            self.assertEqual(raised.exception.code, 2)
 
 
 if __name__ == "__main__":

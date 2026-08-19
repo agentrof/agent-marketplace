@@ -218,26 +218,33 @@ def parse_frontmatter(path: Path) -> tuple[dict[str, str], str]:
     return fields, text[match.end():]
 
 
-def skill_metadata(path: Path) -> tuple[str, str, str]:
+def skill_metadata(path: Path) -> tuple[str, str, str, str]:
     fields, _ = parse_frontmatter(path)
     name = fields.get("name", "")
     description = fields.get("description", "")
     exposure = fields.get("exposure", "")
+    project_scope = fields.get("project_scope", "project")
     if name != path.parent.name or not description:
         raise ValueError(f"{path}: name/description mismatch")
     if exposure not in {"entry", "internal"}:
         raise ValueError(f"{path}: exposure must be entry or internal")
-    unexpected = set(fields) - {"name", "description", "exposure"}
+    if project_scope not in {"project", "external"}:
+        raise ValueError(f"{path}: project_scope must be project or external")
+    if project_scope == "external" and exposure != "entry":
+        raise ValueError(f"{path}: only entry skills may be external")
+    unexpected = set(fields) - {
+        "name", "description", "exposure", "project_scope"
+    }
     if unexpected:
         raise ValueError(
             f"{path}: canonical frontmatter has host or unknown fields: "
             + ", ".join(sorted(unexpected))
         )
-    return name, description, exposure
+    return name, description, exposure, project_scope
 
 
 def claude_skill_wrapper(
-    plugin: str, name: str, description: str, exposure: str
+    plugin: str, name: str, description: str, exposure: str, project_scope: str
 ) -> str:
     policy = (
         "disable-model-invocation: true\n"
@@ -248,7 +255,7 @@ def claude_skill_wrapper(
         " Before changing a project, confirm the workspace config and local "
         "docs contract are present; setup is the only entry that may create "
         "them."
-    ) if exposure == "entry" else ""
+    ) if exposure == "entry" and project_scope == "project" else ""
     return (
         "---\n"
         f"name: {name}\n"
@@ -264,7 +271,13 @@ def claude_skill_wrapper(
     )
 
 
-def codex_skill_wrapper(name: str, description: str) -> str:
+def codex_skill_wrapper(
+    name: str, description: str, project_scope: str
+) -> str:
+    environment_gate = (
+        " Before any workflow step inside a Git repository, confirm the "
+        "project-local workspace config and docs contract."
+    ) if project_scope == "project" else ""
     return (
         "---\n"
         f"name: {name}\n"
@@ -275,9 +288,8 @@ def codex_skill_wrapper(name: str, description: str) -> str:
         "Read `../../host-contract.md` and "
         f"`../../skill-content/{name}/SKILL.md` completely, resolving both paths "
         "relative to this file. Follow the canonical skill as the authoritative "
-        "workflow and the host contract as its platform adapter. Before any "
-        "workflow step inside a Git repository, confirm the project-local "
-        "workspace config and docs contract.\n"
+        "workflow and the host contract as its platform adapter."
+        f"{environment_gate}\n"
     )
 
 
@@ -351,15 +363,17 @@ def generate_skills(source: Path, target: Path, host: str) -> None:
     skills = target / "skills"
     skills.mkdir()
     for canonical in sorted((source / "skill-content").glob("*/SKILL.md")):
-        name, description, exposure = skill_metadata(canonical)
+        name, description, exposure, project_scope = skill_metadata(canonical)
         if host == "codex" and exposure != "entry":
             continue
         skill_root = skills / name
         skill_root.mkdir()
         if host == "claude":
-            text = claude_skill_wrapper(source.name, name, description, exposure)
+            text = claude_skill_wrapper(
+                source.name, name, description, exposure, project_scope
+            )
         else:
-            text = codex_skill_wrapper(name, description)
+            text = codex_skill_wrapper(name, description, project_scope)
             metadata = skill_root / "agents" / "openai.yaml"
             metadata.parent.mkdir()
             metadata.write_text(openai_yaml(source.name, name), encoding="utf-8")

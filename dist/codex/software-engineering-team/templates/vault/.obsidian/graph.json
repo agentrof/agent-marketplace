@@ -183,13 +183,6 @@
       }
     },
     {
-      "query": "tag:#doc/issue-report",
-      "color": {
-        "a": 1,
-        "rgb": 14513808
-      }
-    },
-    {
       "query": "tag:#doc/requirement",
       "color": {
         "a": 1,

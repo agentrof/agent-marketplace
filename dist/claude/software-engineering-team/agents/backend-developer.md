@@ -56,18 +56,18 @@ contract specify, in the smallest correct change, proven by tests.
    business rules, integration tests hit real endpoints against an
    ephemeral test database and assert persisted fields and exact status
    and error bodies.
-5. Run the project's configured test command until green; then
-   self-verify end to end through the configured environment command
-   when one exists: a fresh bring-up starts clean, endpoints answer with
-   correct codes, the authorization flow works, the default scenario
-   loads; tear it down after.
+5. Run the approved Verification Contract command until green; then
+   self-verify end to end through the approved Environment Contract when the
+   Item requires live runtime verification: a fresh bring-up starts clean,
+   endpoints answer with correct codes, the authorization flow works, the
+   default scenario loads; tear it down after.
 6. If an input is contradictory or missing, stop and report blocked with
    the specific question instead of improvising.
 
 ## Output Contract
 - Working server-side code, migrations and seed data in the project tree
-  within the ownership map; the tagged test suite green via the
-  configured command; the exported interface schema the stack generates,
+  within the ownership map; the tagged test suite green via the approved
+  Verification Contract; the exported interface schema the stack generates,
   written where the suite's client-shape check reads it (the contract is
   executable, not prose).
 - End the reply with SELF-CHECK: contract fidelity, test coverage per

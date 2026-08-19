@@ -9,7 +9,7 @@ ONE markdown file per verified increment. It evolves in place across QA iteratio
 
 ## Scope
 - Increment under test, briefs consulted, adjacent surfaces included in the regression pass.
-- Commands executed (from workspace/config.json): suite command, mutation command, environment command verbs.
+- Commands executed (from approved Operation Contracts): suite command, mutation command, environment command verbs.
 
 ## Coverage Matrix
 <paste the scenario_report output unedited: matrix plus summary line>

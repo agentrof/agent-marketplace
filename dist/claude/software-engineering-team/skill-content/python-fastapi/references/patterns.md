@@ -181,7 +181,7 @@ from app.main import app
 Path("openapi.json").write_text(json.dumps(app.openapi(), indent=2))
 ```
 
-- The export runs inside the configured test command, so a schema that no
+- The export runs inside the approved Verification Contract command, so a schema that no
   longer matches the code cannot go stale silently.
 - The frontend's suite validates its typed client against this file (see
   the client stack's testing reference); a shape drift is a red suite on

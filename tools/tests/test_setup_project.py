@@ -239,9 +239,7 @@ class SetupProjectTests(unittest.TestCase):
             self.assertEqual(json.loads(routed.stdout)["next_entry"], "requirement")
             self.assertEqual(authored.read_bytes(), authored_before)
             refreshed_config = json.loads(config_path.read_text(encoding="utf-8"))
-            self.assertEqual(
-                refreshed_config["custom_project_field"], {"owner": "consumer"}
-            )
+            self.assertNotIn("custom_project_field", refreshed_config)
             refreshed_graph = json.loads(graph_path.read_text(encoding="utf-8"))
             policy = json.loads((
                 ROOT / "plugins/software-engineering-team/skill-content/"
@@ -726,24 +724,16 @@ class SetupProjectTests(unittest.TestCase):
                 {},
             )
 
-    def test_backlog_stubs_do_not_bypass_authored_evidence(self):
+    def test_backlog_init_requires_explicit_modern_mode(self):
         with tempfile.TemporaryDirectory() as temporary:
             project = Path(temporary)
             subprocess.run(["git", "init", "-q", str(project)], check=True)
             setup = self.run_script(SETUP, "--project-root", str(project))
             self.assertEqual(setup.returncode, 0, setup.stderr)
             docs = project / "workspace" / "docs"
-            for command in (
-                ["init"],
-                ["stub-epic", "customer-account-access", "--id", "EP-001"],
-                ["stub-story", "customer-account-access", "register-account", "--id", "ST-001"],
-            ):
-                result = self.run_script(BACKLOG, *command, "--docs", str(docs))
-                self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-            check = self.run_script(
-                BACKLOG, "check", "--render", "--docs", str(docs)
-            )
-            self.assertEqual(check.returncode, 1, check.stdout + check.stderr)
+            result = self.run_script(BACKLOG, "init", "--docs", str(docs))
+            self.assertEqual(result.returncode, 2, result.stdout + result.stderr)
+            self.assertFalse((docs / "backlog" / "backlog.md").exists())
 
     def test_runtime_symlink_is_rejected_without_following_it(self):
         with tempfile.TemporaryDirectory() as temporary:

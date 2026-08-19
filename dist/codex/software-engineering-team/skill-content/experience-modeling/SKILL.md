@@ -1,32 +1,46 @@
 ---
 name: experience-modeling
-description: Internal knowledge for program and release Experience Design trees, stable journey/flow/screen/state/transition identities, BA space/domain projection, inheritance, coverage, artifacts and deterministic gates. Load for experience authoring, review and backlog UX references.
+description: Internal knowledge for living, process-owned Experience packages, stable journey/flow/screen/state/transition identities, revisions, coverage, artifacts and deterministic gates.
 exposure: internal
 ---
 
 # Experience Modeling
 
-Treat experience as a versioned graph projected from approved analysis scopes.
+Treat Experience Design as a living graph owned by a primary Business Analysis
+process, not as a deployment release or numbered baseline.
 
 ## When to Use
 
-- Loaded by experience authors and reviewers.
-- Loaded by backlog planning when stories cite exact experience revisions.
+Load for Experience authoring, review and exact Experience references in
+backlog planning.
 
 ## Core Rules
 
-- Use `programs/<program>/releases/<release>/`; do not use `sketches/` for approved experience.
-- Place a record at the lowest common ancestor of its `analysis_scopes`: one domain under that domain, multiple domains in one space under the space, multiple spaces under the release.
-- Model one user goal per journey, bounded variations per flow-set and one screen with its states and transitions per screen note.
-- Use `JRN`, `FLW`, `SCR`, `STA` and `TRN` stable IDs. Preserve IDs across releases and increment revision when behavior changes. Cite exact records as `PRG-001:SCR-001@r2`.
-- Inherit the preceding effective registry. Author only the release delta. Retire records instead of deleting them and never reference a future release revision.
-- Qualify BA criteria as `<space>:<criterion-id>` and retain the approved analysis revision and hash in scope projection notes.
-- Generate files only through `experience_compile.py`; never edit `_generated/`.
-- Initialize HTML packages directly under the owning release node's
-  `artifacts/` directory. Edit only draft packages; approve network-free HTML
-  in place with declared IDs and the effective registry hash.
-- Enforce schema and limits from `data/experience-schema.json`. Overrides require the configure gate.
-- Mechanical findings cannot be waived. A fresh read-only reviewer returns
-  semantic findings to the active workflow; each finding needs a fix or a
-  reasoned rejection before the owner sees the final approval gate. Do not
-  persist reviewer rounds or hashes as project state.
+- Use `experiences/<process-slug>/experience.md`. The slug is the semantic
+  primary BA process name; it is never `exp-*`, `EXP-*`, a Requirement,
+  release or technical component name.
+- One active Experience owns one primary process. Cross-process behavior has
+  one owner and exact references from related processes/packages.
+- Use `JRN`, `FLW`, `SCR`, `STA` and `TRN` stable IDs. Cite records as
+  `checkout:SCR-001@r2` and packages as `checkout@r3`.
+- Update a package in place with `begin-revision`. Changed children increment
+  revision and carry `supersedes`; unchanged children retain their IDs and
+  revisions. Retired children leave the active registry but remain resolvable
+  through `_ledger/` for historical work.
+- The root package owns lifecycle approval. Child records use only
+  `record_state: active|retired`; child approval fields are forbidden.
+- Requirement and manual mode share scope proposal, authoring, challenge and
+  approval. Requirement mode adds exact Requirement traceability and binds the
+  final receipt set; manual mode never creates Requirement state.
+- A scope proposal is a transient JSON payload, not vault history. Its hash
+  covers the complete action set, selected BA/Solution/Design receipt hashes,
+  canonical primary BA process references and Requirement semantic state. Pass
+  the exact proposal file and hash to every lifecycle mutation and approval.
+- Generate only with `experience_compile.py`; `_generated/` is disposable and
+  `_ledger/` is durable compiler-owned revision/alias truth.
+- Artifacts live in the owning package, are network-free, declare only known
+  IDs and carry the rendered registry hash. Never persist reviewer rounds or
+  history documents.
+- Mechanical checks cannot be waived. Fresh read-only reviewers challenge
+  semantic coverage; the UX Designer fixes canonical records or records a real
+  assumption/open question before rerunning affected lenses.

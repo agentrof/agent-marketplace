@@ -94,17 +94,20 @@ value).
 | test-plan | test plan |
 | issue-report | issue report |
 | experience | experience |
-| program | program |
-| release | release |
 | journey | journey |
 | flow-set | flow set |
 | screen | screen |
-| experience-space | experience space |
-| experience-domain | experience domain |
-| api-contract | API contract |
+| system-architecture | system architecture |
+| architecture-component | architecture component |
+| architecture-module | architecture module |
+| interface-contract | interface contract |
 | data-model | data model |
 | threat-model | threat model |
-| environment-reference | environment reference |
+| runtime-view | runtime view |
+| reliability-view | reliability view |
+| observability-view | observability view |
+| architecture-connection | architecture connection |
+| architecture-standard | architecture standard |
 | artifact-manifest | artifact manifest |
 | engagement | engagement |
 | design-master | design master |

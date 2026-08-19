@@ -16,6 +16,7 @@ if str(SCRIPTS) not in sys.path:
     sys.path.insert(0, str(SCRIPTS))
 
 import backlog_compile
+import stage_package
 
 
 CRITERION = (
@@ -23,7 +24,7 @@ CRITERION = (
     "delivery-acceptance|delivery:AC-DEL-001]]"
 )
 EXPERIENCE = (
-    "[[experience-design/programs/prg-001/releases/rel-001/release|REL-001]]"
+    "[[experience-design/experiences/checkout/screens/checkout-screen|checkout:SCR-001@r1]]"
 )
 DESIGN = "[[design-system/MASTER|Design Master]]"
 CONSTRAINT = "[[solution-design/landscape|Solution Landscape]]"
@@ -68,11 +69,19 @@ def _write_upstreams(docs: Path) -> None:
         "doc_status": "approved",
     }}}), encoding="utf-8")
     _write_note(
-        docs / "experience-design/programs/prg-001/releases/rel-001/release.md",
-        {"type": "release", "title": "Release 1", "status": "approved",
-         "owner_role": "ux_designer", "tags": ["doc/release", "status/approved"],
-         "aliases": ["REL-001"]},
-        "# Release 1\n\nApproved experience boundary.\n",
+        docs / "experience-design/experiences/checkout/experience.md",
+        {"type": "experience", "title": "Checkout", "status": "approved",
+         "owner_role": "ux_designer", "experience_id": "checkout", "revision": 1,
+         "tags": ["doc/experience", "status/approved"]},
+        "# Checkout\n\nApproved process-owned experience package.\n",
+    )
+    _write_note(
+        docs / "experience-design/experiences/checkout/screens/checkout-screen.md",
+        {"type": "screen", "title": "Checkout screen", "status": "approved",
+         "owner_role": "ux_designer", "id": "SCR-001", "revision": 1,
+         "record_state": "active", "tags": ["doc/screen", "status/approved"],
+         "aliases": ["checkout:SCR-001@r1"]},
+        "# Checkout screen\n\nApproved checkout interaction boundary.\n",
     )
     _write_note(
         docs / "design-system/MASTER.md",
@@ -83,9 +92,25 @@ def _write_upstreams(docs: Path) -> None:
     _write_note(
         docs / "solution-design/landscape.md",
         {"type": "landscape", "title": "Solution Landscape", "status": "approved",
-         "owner_role": "solution_architect", "tags": ["doc/landscape", "status/approved"]},
+         "package_status": "draft", "owner_role": "solution_architect", "tags": ["doc/landscape", "status/approved"]},
         "# Solution Landscape\n\nApproved solution boundary.\n",
     )
+    _write_note(
+        docs / "solution-design/decisions/fixture-api.md",
+        {"type": "decision", "title": "Fixture API", "status": "accepted",
+         "decision_kind": "technology-selection", "applies_to": ["api"],
+         "selected_technology": "python-fastapi", "method_skills": ["python-fastapi"],
+         "tags": ["doc/decision", "status/accepted"]},
+        "# Fixture API\n\nAccepted fixture technology decision.\n",
+    )
+    landscape = docs / "solution-design/landscape.md"
+    props, body = backlog_compile.parse_front_matter(landscape)
+    props["package_hash"] = stage_package.tree_hash(
+        docs / "solution-design",
+        {"package_hash", "package_status", "package_approved_at_utc"},
+    )
+    props["package_status"] = "approved"
+    landscape.write_text(backlog_compile.front_matter(props, body), encoding="utf-8")
 
 
 def _author_story(story: Path, test_plan: Path, story_id: str) -> None:

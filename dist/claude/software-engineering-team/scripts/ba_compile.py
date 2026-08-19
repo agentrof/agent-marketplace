@@ -6,13 +6,9 @@ a tree of typed, cross-linked markdown documents (the authored source of
 truth) plus machine-generated views under _generated/. This script is the
 single mechanical authority over that structure. It contains zero document
 taxonomy of its own: every doc type, section token, id kind, row schema and
-threshold comes from the shipped schema data file
-(skill-content/business-analysis/data/space-schema.json). At run time the
-project's workspace/config.json may relax thresholds over those shipped
-defaults (a scale level plus per-key limits; precedence limits > scale >
-shipped), every finding names its effective value and source, and the
-volume warnings form an advisory class: split PROPOSALS grouped in
-status.md, acted on only with explicit project decision authority approval.
+row schema comes from the shipped schema data file
+(skill-content/business-analysis/data/space-schema.json). The compiler
+enforces structural and semantic correctness, never authoring-volume caps.
 
 Subcommands:
   init          create a new space skeleton
@@ -129,10 +125,10 @@ def root_file_rels(schema: dict) -> list[str]:
 # cannot merge (same doctrine as tools/validate.py).
 CHECK_IDS = (
     "space_layout", "frontmatter_schema", "status_legality",
-    "required_sections", "summary_caps", "content_bans", "dead_links",
+    "required_sections", "content_bans", "dead_links",
     "id_format", "id_unique", "id_minting", "id_links", "row_schema",
     "semantic_links", "approval_preconditions",
-    "br_uncited", "thresholds", "aging", "gate_approval",
+    "br_uncited", "gate_approval",
     "generated_freshness", "future_dates", "identifier_shape",
     "diagram_identifiers",
 )
@@ -434,21 +430,6 @@ def scan_space(space_dir: Path, schema: dict) -> tuple[Space, list[Finding]]:
             parts[i] == "domains" for i in range(0, len(parts), 2))
         if is_node:
             space.nodes[rel] = ""
-            depth = len(parts) // 2
-            fail_at = schema["thresholds"]["nesting_fail_depth"]
-            warn_at = schema["thresholds"]["nesting_warn_depth"]
-            if depth >= fail_at:
-                err(rel, 1, "space_layout",
-                    f"domain nesting depth {depth} exceeds the cap (fail at"
-                    f" {fail_at}"
-                    f"{limit_provenance(schema, 'nesting_fail_depth')})",
-                    "restructure: promote the subtree or merge domains")
-            elif depth >= warn_at:
-                warn(rel, 1, "space_layout",
-                     f"domain nesting depth {depth} (warn at {warn_at}"
-                     f"{limit_provenance(schema, 'nesting_warn_depth')});"
-                     " consider restructuring",
-                     "deep trees hide content; prefer wider domain maps")
 
     for node_rel in sorted(space.nodes):
         overview_rel = node_overview_rel(schema, node_rel)
@@ -794,16 +775,6 @@ def run_checks(space: Space, base: list[Finding], gate: bool = False,
                     f"missing section '{token}'",
                     f"add an H2 carrying <!-- sec: {token} -->")
 
-        cap = schema["summary_max_lines"].get(doc.doc_type,
-                                              schema["summary_max_lines"]["default"])
-        cap_key = ("summary_max_lines_space" if doc.doc_type == "space"
-                   else "summary_max_lines_default")
-        if doc.summary_lines > cap:
-            err(rel, 1, "summary_caps",
-                f"head summary is {doc.summary_lines} lines (cap {cap}"
-                f"{limit_provenance(schema, cap_key)})",
-                "the summary between the H1 and the first H2 is capped")
-
         for idx, line in enumerate(doc.lines, start=1):
             if EM_DASH in line:
                 err(rel, idx, "content_bans", "em dash character found",
@@ -914,16 +885,6 @@ def run_checks(space: Space, base: list[Finding], gate: bool = False,
                             " the future",
                             "stamps come from the clock: paste UTC timestamp"
                             " now --date output")
-                    elif row.get("status") == "open":
-                        age = (today - stamp).days
-                        limit = schema["thresholds"]["open_row_age_days_warn"]
-                        if age > limit:
-                            warn(rel, info["line"], "aging",
-                                 f"{id_value} has been open for {age} days"
-                                 f" (warn at {limit}"
-                                 f"{limit_provenance(schema, 'open_row_age_days_warn')})",
-                                 "force it to an answer or defer it explicitly"
-                                 " with a revisit trigger")
                 if kind == "AC":
                     cite_ids = re.findall(r"\b[A-Z]{2,3}-[A-Z0-9]{2,4}-\d{3,}\b",
                                           row.get("cites", ""))
@@ -949,7 +910,6 @@ def run_checks(space: Space, base: list[Finding], gate: bool = False,
 
     check_semantic_links(space, findings)
     check_identifier_language(space, findings)
-    check_thresholds(space, findings, warn)
     check_br_citations(space, findings, gate=gate, gate_node=gate_node)
 
     if gate:
@@ -1126,131 +1086,6 @@ def check_semantic_links(space: Space, findings: list[Finding]) -> None:
                     "the overview's process map links every process it owns"))
 
 
-def check_thresholds(space: Space, findings: list[Finding], warn) -> None:
-    th = space.schema["thresholds"]
-    space_rel = space_overview_rel(space.schema)
-    total_docs = len(space.docs)
-    total_bytes = sum(len("\n".join(d.lines).encode("utf-8"))
-                      for d in space.docs.values())
-    if total_docs > th["space_docs_warn"]:
-        warn(space_rel, 1, "thresholds",
-             f"split proposal: space holds {total_docs} docs (warn at"
-             f" {th['space_docs_warn']}"
-             f"{limit_provenance(space.schema, 'space_docs_warn')})",
-             "propose splitting the topic into multiple spaces; a space split"
-             " needs explicit project decision authority approval")
-    if total_bytes > th["space_bytes_warn"]:
-        warn(space_rel, 1, "thresholds",
-             f"split proposal: space totals {total_bytes} bytes (warn at"
-             f" {th['space_bytes_warn']}"
-             f"{limit_provenance(space.schema, 'space_bytes_warn')})",
-             "a split proposal: review the decomposition; snapshot size"
-             " follows space size")
-
-    for node_rel in sorted(space.nodes):
-        own = [d for d in space.docs.values() if d.node == node_rel]
-        direct = [d for d in own if d.doc_type not in ("space", "domain")]
-        overview_rel = node_overview_rel(space.schema, node_rel)
-        if len(direct) > th["node_direct_docs_warn"]:
-            warn(overview_rel, 1, "thresholds",
-                 f"split proposal: node owns {len(direct)} content docs (warn at"
-                 f" {th['node_direct_docs_warn']}"
-                 f"{limit_provenance(space.schema, 'node_direct_docs_warn')})",
-                 "a split proposal: offer a child domain through the"
-                 " choice gate; splits need explicit owner"
-                 " approval")
-        rule_sets = [d for d in own if d.doc_type == "rule_set"]
-        if len(rule_sets) > th["rule_sets_per_node_warn"]:
-            warn(overview_rel, 1, "thresholds",
-                 f"split proposal: node owns {len(rule_sets)} rule sets (warn at"
-                 f" {th['rule_sets_per_node_warn']}"
-                 f"{limit_provenance(space.schema, 'rule_sets_per_node_warn')})",
-                 "a split proposal: offer a child domain through the"
-                 " choice gate; splits need explicit owner"
-                 " approval")
-        active_br = sum(1 for i in space.ids.values()
-                        if i["kind"] == "BR" and i["row"].get("status") == "active"
-                        and space.docs[i["doc"]].node == node_rel)
-        if active_br > th["active_br_per_node_warn"]:
-            warn(overview_rel, 1, "thresholds",
-                 f"split proposal: node holds {active_br} active business rules"
-                 f" (warn at"
-                 f" {th['active_br_per_node_warn']}"
-                 f"{limit_provenance(space.schema, 'active_br_per_node_warn')})",
-                 "a split proposal: offer a child domain through the"
-                 " choice gate; splits need explicit owner"
-                 " approval")
-        for d in own:
-            if d.doc_type == "process" and len(d.lines) > th["process_doc_lines_warn"]:
-                warn(d.rel, 1, "thresholds",
-                     f"split proposal: process doc is {len(d.lines)} lines (warn at"
-                     f" {th['process_doc_lines_warn']}"
-                     f"{limit_provenance(space.schema, 'process_doc_lines_warn')})",
-                     "a split proposal: offer a split by workflow stage or"
-                     " variant; project decision authority approval required")
-            if d.doc_type == "rule_set":
-                count = sum(1 for i in space.ids.values()
-                            if i["doc"] == d.rel and i["kind"] == "BR"
-                            and i["row"].get("status") == "active")
-                if count > th["rules_per_set_warn"]:
-                    warn(d.rel, 1, "thresholds",
-                         f"split proposal: rule set holds {count} active rules (warn at"
-                         f" {th['rules_per_set_warn']}"
-                         f"{limit_provenance(space.schema, 'rules_per_set_warn')})",
-                         "a split proposal: offer a split by governed target;"
-                         " project decision authority approval required")
-            if d.doc_type == "acceptance_set":
-                count = sum(1 for i in space.ids.values()
-                            if i["doc"] == d.rel and i["kind"] == "AC"
-                            and i["row"].get("status") == "active")
-                if count > th["criteria_per_set_warn"]:
-                    warn(d.rel, 1, "thresholds",
-                         f"split proposal: acceptance set holds {count} active criteria"
-                         f" (warn at {th['criteria_per_set_warn']}"
-                         f"{limit_provenance(space.schema, 'criteria_per_set_warn')})",
-                         "a split proposal: offer a split by flow (main versus"
-                         " exceptions); project decision authority approval required")
-
-        processes = [d for d in own if d.doc_type == "process"]
-        if len(processes) >= 2:
-            entity_links: dict[str, set] = {}
-            for proc in processes:
-                touched = set()
-                for _l, _t, target in proc.links:
-                    clean = target.split("#", 1)[0]
-                    resolved = (proc.abs_path.parent / clean).resolve()
-                    try:
-                        target_rel = resolved.relative_to(space.root.resolve()).as_posix()
-                    except ValueError:
-                        continue
-                    tdoc = space.docs.get(target_rel)
-                    if tdoc is not None and tdoc.doc_type == "entity":
-                        touched.add(target_rel)
-                entity_links[proc.rel] = touched
-            groups = [{"procs": {proc_rel}, "entities": set(touched)}
-                      for proc_rel, touched in sorted(entity_links.items())]
-            changed = True
-            while changed:
-                changed = False
-                for a in range(len(groups)):
-                    for b in range(a + 1, len(groups)):
-                        if groups[a]["entities"] & groups[b]["entities"]:
-                            groups[a]["procs"] |= groups[b]["procs"]
-                            groups[a]["entities"] |= groups[b]["entities"]
-                            del groups[b]
-                            changed = True
-                            break
-                    if changed:
-                        break
-            real = [g for g in groups if g["entities"]]
-            if len(real) >= 2 and all(len(g["procs"]) >= 2 for g in real):
-                warn(overview_rel, 1, "thresholds",
-                     "split proposal: node's processes touch disjoint"
-                     " entity clusters",
-                     "the clusters may be separate domains; offer the"
-                     " split, project decision authority approval required")
-
-
 def check_br_citations(space: Space, findings: list[Finding],
                        gate: bool, gate_node: str) -> None:
     cited: set[str] = set()
@@ -1410,13 +1245,7 @@ def render_views(space: Space, warnings: list[Finding]) -> dict[str, str]:
     space_rel = space_overview_rel(space.schema)
     title = str(space.docs.get(space_rel).fm.get("title", "")) \
         if space_rel in space.docs else ""
-    stable = [w for w in warnings
-              if w.severity == "warning" and w.check != "aging"]
-    # The volume family (check id 'thresholds') is the advisory class:
-    # split proposals, grouped in status.md, never listed as plain
-    # warnings in the index.
-    advisories = [w for w in stable if w.check == "thresholds"]
-    stable_warnings = [w for w in stable if w.check != "thresholds"]
+    stable_warnings = [w for w in warnings if w.severity == "warning"]
 
     lines = [GENERATED_MARKER, f"# Index: {title}", ""]
     lines.append(f"Foundation approved: {'yes' if foundation_approved(space) else 'no'}")
@@ -1490,6 +1319,16 @@ def render_views(space: Space, warnings: list[Finding]) -> dict[str, str]:
             text = re.sub(r"\n*" + re.escape(start) + r".*?"
                           + re.escape(end) + r"\n*", "\n\n", text,
                           flags=re.DOTALL)
+        # Package lifecycle stamps are compiler-owned receipt metadata, not
+        # authored semantic input. Keeping them in registry source hashes
+        # would make approval self-invalidating: the package hash includes the
+        # registry, while the registry would change only because its own stamp
+        # was added to space.md.
+        if doc.rel == space_rel:
+            text = re.sub(
+                r"(?m)^(?:package_status|package_hash|package_approved_at_utc|"
+                r"package_contract_version):[^\n]*\n?", "", text,
+            )
         text = text.rstrip() + "\n"
         return "sha256:" + hashlib.sha256(text.encode("utf-8")).hexdigest()
 
@@ -1559,14 +1398,6 @@ def render_views(space: Space, warnings: list[Finding]) -> dict[str, str]:
         if sum(counts.values()):
             lines.append(f"| {type_name} | {counts['draft']} | {counts['in_review']} |"
                          f" {counts['approved']} | {counts['superseded']} |")
-    if advisories:
-        lines += ["", "## Advisories: split proposals", "",
-                  "Proposals, not instructions: a domain or space splits only",
-                  "on explicit project decision authority approval, asked through a choice gate;",
-                  "a declined proposal is recorded as a",
-                  "deferral row in the node's open questions.", ""]
-        for w in sorted(advisories, key=lambda f: (f.path, f.line, f.check)):
-            lines.append(f"- {w.path}:{w.line} [{w.check}] {w.message}")
     status_md = "\n".join(lines) + "\n"
 
     groups = {"open": [], "deferred": [], "answered": []}
@@ -1640,116 +1471,9 @@ def emit(findings: list[Finding], as_json: bool) -> int:
 
 def load_schema(path: Path) -> dict:
     schema = json.loads(path.read_text(encoding="utf-8"))
-    if schema.get("schema_version") != 3:
+    if schema.get("schema_version") != 4:
         raise SystemExit(f"ba_compile: unknown schema_version in {path}")
     return schema
-
-
-# ---------------------------------------------------------------------------
-# Project limits: workspace config merged over the shipped schema
-# ---------------------------------------------------------------------------
-
-# Flat limits-namespace keys that live outside the thresholds block.
-STRUCTURAL_LIMIT_TARGETS = {
-    "summary_max_lines_space": ("summary_max_lines", "space"),
-    "summary_max_lines_default": ("summary_max_lines", "default"),
-}
-
-
-def load_project_config(vault_root: Path | None) -> dict:
-    """workspace/config.json (the workspace is the vault root's parent,
-    the same derivation the vault checker's designation loader uses).
-    Fail-soft: missing, unreadable or malformed returns {} and the
-    shipped defaults stand."""
-    if vault_root is None:
-        return {}
-    try:
-        data = json.loads((vault_root.parent / "config.json")
-                          .read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        return {}
-    return data if isinstance(data, dict) else {}
-
-
-def _positive_int(value) -> bool:
-    return (isinstance(value, int) and not isinstance(value, bool)
-            and value > 0)
-
-
-def effective_schema(schema: dict, vault_root: Path | None) -> dict:
-    """A deep-copied schema with the project's scale and limits merged
-    over the shipped defaults; precedence limits > scale > shipped.
-    Scale multiplies the scaled_thresholds keys and steps the
-    nesting_thresholds keys by the level's nesting_bonus; limits
-    overwrites single keys (thresholds keys plus the structural names in
-    STRUCTURAL_LIMIT_TARGETS). Unknown or invalid config values degrade
-    silently: the configure gate is the validator, this is a degrader.
-    Attaches the runtime-only _limit_provenance map; a key absent there
-    is a shipped default."""
-    merged = json.loads(json.dumps({k: v for k, v in schema.items()
-                                    if k != "_limit_provenance"}))
-    provenance: dict[str, str] = {}
-    config = load_project_config(vault_root)
-    thresholds = merged.setdefault("thresholds", {})
-    level = config.get("scale")
-    applied_bonus = 0
-    for row in merged.get("scale_profiles") or []:
-        if not (isinstance(row, dict) and row.get("level") == level):
-            continue
-        multiplier = row.get("multiplier")
-        bonus = row.get("nesting_bonus")
-        if not (_positive_int(multiplier) and isinstance(bonus, int)
-                and not isinstance(bonus, bool) and bonus >= 0):
-            break
-        if multiplier == 1 and bonus == 0:
-            break  # the baseline level leaves shipped values untouched
-        applied_bonus = bonus
-        for key in merged.get("scaled_thresholds") or []:
-            if _positive_int(thresholds.get(key)):
-                thresholds[key] = int(round(thresholds[key] * multiplier))
-                provenance[key] = f"scale {level}"
-        for key in merged.get("nesting_thresholds") or []:
-            if _positive_int(thresholds.get(key)):
-                thresholds[key] = thresholds[key] + bonus
-                provenance[key] = f"scale {level}"
-        break
-    limits = config.get("limits")
-    if isinstance(limits, dict):
-        for key, value in sorted(limits.items()):
-            if not _positive_int(value):
-                continue
-            if key in thresholds:
-                thresholds[key] = value
-                provenance[key] = "project override"
-            elif key in STRUCTURAL_LIMIT_TARGETS:
-                block, leaf = STRUCTURAL_LIMIT_TARGETS[key]
-                target = merged.get(block)
-                if isinstance(target, dict):
-                    target[leaf] = value
-                    provenance[key] = "project override"
-    warn_depth = thresholds.get("nesting_warn_depth")
-    fail_depth = thresholds.get("nesting_fail_depth")
-    if (isinstance(warn_depth, int) and isinstance(fail_depth, int)
-            and warn_depth >= fail_depth):
-        # An inverted pair never ships: both overrides drop back to the
-        # scale ladder's values, which are consistent by construction.
-        shipped = schema.get("thresholds") or {}
-        for key in ("nesting_warn_depth", "nesting_fail_depth"):
-            if isinstance(shipped.get(key), int):
-                thresholds[key] = shipped[key] + applied_bonus
-                if applied_bonus:
-                    provenance[key] = f"scale {level}"
-                else:
-                    provenance.pop(key, None)
-    merged["_limit_provenance"] = provenance
-    return merged
-
-
-def limit_provenance(schema: dict, key: str) -> str:
-    """':' plus the threshold's source for finding messages; empty for a
-    shipped default."""
-    source = (schema.get("_limit_provenance") or {}).get(key, "")
-    return f": {source}" if source else ""
 
 
 # ---------------------------------------------------------------------------
@@ -2004,7 +1728,6 @@ def cmd_check(args, schema: dict) -> int:
     vault_root = require_vault_root(args)
     if vault_root is None:
         return 2
-    schema = effective_schema(schema, vault_root)
     space, base = scan_space(Path(args.space), schema)
     space.vault_root = vault_root
     findings = run_checks(space, base, gate=args.gate == "approval",
@@ -2037,6 +1760,39 @@ def restamp_frontmatter(text: str, stamps: dict) -> str | None:
     return "".join(lines)
 
 
+def package_hash(space_dir: Path) -> str:
+    """Hash the complete BA package, including the rendered registry.
+
+    Lifecycle stamps deliberately sit outside the digest so approval is
+    atomic: writing the stamp does not immediately make the stamp stale.
+    """
+    digest = hashlib.sha256()
+    ignored = {"package_hash", "package_status", "package_approved_at_utc",
+               "package_contract_version"}
+    for path in sorted(space_dir.rglob("*.md")):
+        text = path.read_text(encoding="utf-8")
+        props, body_line, error = parse_frontmatter(text)
+        if not error and props:
+            lines = text.splitlines()
+            kept = ["---"]
+            for raw in lines[1:body_line - 2]:
+                if raw.partition(":")[0].strip() not in ignored:
+                    kept.append(raw)
+            kept.extend(lines[body_line - 1:])
+            text = "\n".join(kept).rstrip() + "\n"
+        digest.update(path.relative_to(space_dir).as_posix().encode())
+        digest.update(b"\0")
+        digest.update(text.encode())
+        digest.update(b"\0")
+    registry = space_dir / "_generated" / "registry.json"
+    if registry.is_file():
+        digest.update(registry.relative_to(space_dir).as_posix().encode())
+        digest.update(b"\0")
+        digest.update(registry.read_bytes())
+        digest.update(b"\0")
+    return "sha256:" + digest.hexdigest()
+
+
 def cmd_approve(args, schema: dict) -> int:
     """Approve a doc: the script stamps status and the UTC date, then
     re-runs the checks; a doc the compiler rejects is restored untouched.
@@ -2045,7 +1801,6 @@ def cmd_approve(args, schema: dict) -> int:
     vault_root = require_vault_root(args)
     if vault_root is None:
         return 2
-    schema = effective_schema(schema, vault_root)
     space, base = scan_space(space_dir, schema)
     space.vault_root = vault_root
     rel = args.doc
@@ -2091,11 +1846,116 @@ def cmd_approve(args, schema: dict) -> int:
     return 0
 
 
+def cmd_approve_package(args, schema: dict) -> int:
+    """Close the whole BA space as one handoff package."""
+    vault_root = require_vault_root(args)
+    if vault_root is None:
+        return 2
+    space_dir = Path(args.space)
+    # Generated registry is part of the receipt and must be fresh before the
+    # gate is evaluated.
+    render_args = argparse.Namespace(space=args.space, vault_root=args.vault_root,
+                                    check_only=False, json=False)
+    if cmd_render(render_args, schema):
+        return 1
+    space, base = scan_space(space_dir, schema)
+    space.vault_root = vault_root
+    findings = run_checks(space, base, gate=True)
+    if not space.broken:
+        warnings = [f for f in findings if f.severity == "warning"]
+        findings += freshness_findings(space, warnings)
+    errors = [f for f in findings if f.severity == "error"]
+    if errors:
+        return emit(errors, getattr(args, "json", False))
+    root_rel = space_overview_rel(schema)
+    root_doc = space.docs.get(root_rel)
+    if root_doc is None:
+        print("ba_compile: FAIL: space overview is missing", file=sys.stderr)
+        return 1
+    if str(root_doc.fm.get("package_status", "")) == "approved":
+        print("ba_compile: FAIL: approved package needs begin-revision", file=sys.stderr)
+        return 1
+    target = root_doc.abs_path
+    original = target.read_text(encoding="utf-8")
+    updated = restamp_frontmatter(original, {
+        "package_status": "approved",
+        "package_contract_version": 2,
+        "package_hash": package_hash(space_dir),
+        "package_approved_at_utc": utc_today().isoformat(),
+    })
+    if updated is None:
+        return 1
+    target.write_text(updated, encoding="utf-8")
+    expected = package_hash(space_dir)
+    props, _body_line, error = parse_frontmatter(target.read_text(encoding="utf-8"))
+    if error or props.get("package_hash") != expected:
+        target.write_text(original, encoding="utf-8")
+        print("ba_compile: FAIL: package approval hash closing check failed", file=sys.stderr)
+        return 1
+    print(json.dumps({"stage": "business-analysis",
+                      "result_ref": f"business-analysis/{space_dir.name}/space",
+                      "result_type": "business-analysis-package",
+                      "package_hash": expected, "status": "approved",
+                      "current": True}, sort_keys=True))
+    return 0
+
+
+def cmd_begin_revision(args, schema: dict) -> int:
+    vault_root = require_vault_root(args)
+    if vault_root is None:
+        return 2
+    space, _base = scan_space(Path(args.space), schema)
+    space.vault_root = vault_root
+    target = space.docs.get(args.doc)
+    if target is None:
+        print(f"ba_compile: FAIL: unknown doc '{args.doc}'", file=sys.stderr)
+        return 2
+    overview = space.docs.get(space_overview_rel(schema))
+    if overview is None or str(overview.fm.get("package_status", "")) not in {"approved", ""}:
+        print("ba_compile: FAIL: only an approved or legacy-approved package can begin a revision", file=sys.stderr)
+        return 1
+    if doc_status(target) not in {"approved", "superseded"}:
+        print("ba_compile: FAIL: begin-revision requires an approved document", file=sys.stderr)
+        return 1
+    original = target.abs_path.read_text(encoding="utf-8")
+    updated = restamp_frontmatter(original, {"status": "draft"})
+    if updated is None:
+        return 1
+    updated = re.sub(r"(?m)^(\s*- status/)[a-z0-9-]+\s*$", r"\g<1>draft", updated, count=1)
+    updated = re.sub(r"(?m)^approved_at:\s*.*\n?", "", updated)
+    target.abs_path.write_text(updated, encoding="utf-8")
+    root_original = overview.abs_path.read_text(encoding="utf-8")
+    root_updated = restamp_frontmatter(root_original, {"package_status": "draft"})
+    root_updated = re.sub(r"(?m)^package_hash:\s*.*\n?", "", root_updated or "")
+    root_updated = re.sub(r"(?m)^package_approved_at_utc:\s*.*\n?", "", root_updated)
+    overview.abs_path.write_text(root_updated, encoding="utf-8")
+    print(f"ba_compile: began package revision at {args.doc}")
+    return 0
+
+
+def cmd_status(args, schema: dict) -> int:
+    vault_root = require_vault_root(args)
+    if vault_root is None:
+        return 2
+    space, _base = scan_space(Path(args.space), schema)
+    space.vault_root = vault_root
+    overview = space.docs.get(space_overview_rel(schema))
+    props = overview.fm if overview else {}
+    digest = package_hash(Path(args.space)) if Path(args.space).is_dir() else ""
+    value = {"stage": "business-analysis",
+             "result_ref": f"business-analysis/{Path(args.space).name}/space",
+             "result_type": "business-analysis-package",
+             "package_hash": digest,
+             "status": "approved" if props.get("package_status") == "approved" and props.get("package_hash") == digest else "draft",
+             "current": props.get("package_status") == "approved" and props.get("package_hash") == digest}
+    print(json.dumps(value, indent=2, sort_keys=True))
+    return 0 if value["current"] else 1
+
+
 def cmd_render(args, schema: dict) -> int:
     vault_root = require_vault_root(args)
     if vault_root is None:
         return 2
-    schema = effective_schema(schema, vault_root)
     space, base = scan_space(Path(args.space), schema)
     space.vault_root = vault_root
     if space.broken:
@@ -2221,6 +2081,21 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--doc", required=True)
     p.add_argument("--json", action="store_true")
 
+    p = sub.add_parser("approve-package")
+    p.add_argument("--space", required=True)
+    p.add_argument("--vault-root", default="", dest="vault_root")
+    p.add_argument("--json", action="store_true")
+
+    p = sub.add_parser("begin-revision")
+    p.add_argument("--space", required=True)
+    p.add_argument("--vault-root", default="", dest="vault_root")
+    p.add_argument("--doc", required=True)
+
+    p = sub.add_parser("status")
+    p.add_argument("--space", required=True)
+    p.add_argument("--vault-root", default="", dest="vault_root")
+    p.add_argument("--json", action="store_true")
+
     p = sub.add_parser("render")
     p.add_argument("--space", required=True)
     p.add_argument("--vault-root", default="", dest="vault_root")
@@ -2239,7 +2114,9 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     schema = load_schema(args.schema)
     handlers = {"init": cmd_init, "stub": cmd_stub, "check": cmd_check,
-                "approve": cmd_approve, "render": cmd_render,
+                "approve": cmd_approve, "approve-package": cmd_approve_package,
+                "begin-revision": cmd_begin_revision, "status": cmd_status,
+                "render": cmd_render,
                 "resolve": cmd_resolve, "verify-import": cmd_verify_import}
     return handlers[args.command](args, schema)
 

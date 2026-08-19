@@ -39,7 +39,7 @@ its alias:
 criterion_refs:
   - "[[business-analysis/accounts/acceptance/account-access-acceptance|accounts:AC-ACC-001]]"
 experience_refs:
-  - "[[experience-design/programs/prg-1/releases/rel-1/journeys/account-access-journey|Account access journey]]"
+  - "checkout:JRN-001@r1"
 uses_design:
   - "[[design-system/MASTER|Product design master]]"
 ```
@@ -171,7 +171,7 @@ The root-review body has these headings:
 Epic Coverage
 Cross-Epic Overlap
 Cross-Epic Dependencies
-Release Ordering
+Delivery Sequencing
 Shared Contracts
 Deferred Criteria
 Global Test Coverage

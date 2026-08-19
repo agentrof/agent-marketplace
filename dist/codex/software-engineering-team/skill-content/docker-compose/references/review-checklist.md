@@ -31,7 +31,7 @@ Checkbox assertions for reviewing environment-owned diffs (the workspace/environ
 
 ## Entry Point
 
-- [ ] All five verbs (`up`, `down`, `seed`, `logs`, `url`) implemented and matching the configured environment command (env_command)
+- [ ] All five verbs (`up`, `down`, `seed`, `logs`, `url`) implemented and matching the approved Environment Contract command
 - [ ] Project name derived from the sanitized working-tree basename inside the entry point, never hardcoded and never caller-supplied
 - [ ] `up` gates on health and seeds the default scenario; nonzero exit on any unhealthy service
 - [ ] `down` removes containers, networks and data volumes

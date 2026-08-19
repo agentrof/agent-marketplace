@@ -6,7 +6,7 @@ Severity vocabulary: CRITICAL (maps to Critical), FAIL (maps to High), MINOR (ma
 
 ## Step 1: Stand the Environment Up From Scratch
 
-- Use the environment command (env_command) from `workspace/config.json`. Never invent commands.
+- Use the approved Environment Contract's `env_command`. Never invent commands.
 - Full teardown first (`down`), then one-command bring-up (`up`): every service healthy, the default scenario seeded. Seed the scenario the test plan names (`seed baseline` unless the plan says otherwise).
 - Verify bring-up output is clean: no errors, no unexplained warnings.
 - Resolve and record the base URL per published service (`url <service>`).

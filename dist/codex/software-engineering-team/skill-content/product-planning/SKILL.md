@@ -26,8 +26,8 @@ policy defines paths, metadata, designations and graph colors.
 - Story: one vertical, demonstrable capability and one review unit.
 - Test plan: the planned scenario design for that story.
 
-Approved Experience Design notes remain the source for journeys, screens and
-release boundaries. Stories link to them directly.
+Approved living Experience packages remain the source for journeys, screens
+and process boundaries. Stories link to their exact child references directly.
 
 ## Story contract
 
@@ -89,7 +89,7 @@ The epic review derives from its epic and verifies exactly every child story
 and test plan. It covers scope, slicing, criteria, test design, dependencies,
 role ownership, findings and verdict. The root review derives from the backlog
 and relates to exactly every epic. It covers cross-epic overlap, dependency
-direction, cycles, release ordering, shared contracts, deferred criteria,
+direction, cycles, delivery sequencing, shared contracts, deferred criteria,
 global coverage, findings and verdict.
 
 The latest root review's `Deferred Criteria` table records exactly four fields:
@@ -114,5 +114,5 @@ registry JSON and generated machine-view labels remain stable English vocabulary
 - [slicing-patterns](references/slicing-patterns.md). Read when a story fails a size test or resists vertical slicing.
 - [structured-records](references/structured-records.md). Read when authoring role ownership, dependency edges, references or scenarios.
 - [prioritization](references/prioritization.md). Read when ordering stories.
-- [program-release-contract](references/program-release-contract.md). Read when attaching approved Experience Design references.
+- [living-experience-contract](references/living-experience-contract.md). Read when attaching approved Experience Design references.
 - [flow-metrics](references/flow-metrics.md). Read when forecasting cadence; never use it as a scope gate.

@@ -33,3 +33,13 @@ Read `flows/delivery-planning.md` completely before creating the proposal.
 
 There is no duration, cadence, estimate, velocity or release field. A Delivery
 is one reviewable outcome and may contain one or many backlog stories.
+
+Operation contracts are not a scope-planning prerequisite. During the later
+execution-plan step, every Item receives an exact approved Verification
+Contract receipt. Mark an Item `runtime_required: true` only when it needs a
+live environment; the compiler then requires and pins Environment Contract too.
+
+Execution planning also declares the Item's architecture impact. When it is
+`required`, name current Solution components and requested architecture record
+kinds, put `software_architect` first in the role sequence, and reserve the
+actual System Architecture mutation for that active Item.

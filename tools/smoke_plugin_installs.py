@@ -75,14 +75,40 @@ def exercise_package(team_root: Path, project: Path, env: dict[str, str]) -> Non
     route = team_root / "scripts" / "requirement_route.py"
     delivery_compile = team_root / "scripts" / "delivery_compile.py"
     delivery_git = team_root / "scripts" / "delivery_git.py"
+    product_chain_scripts = (
+        "stage_package.py", "ba_compile.py", "landscape_check.py",
+        "design_system_compile.py", "experience_compile.py",
+        "backlog_compile.py", "architecture_compile.py",
+    )
     for path in (
-        setup, check, route, team_root / "scripts" / "backlog_compile.py",
+        setup, check, route,
+        *(team_root / "scripts" / name for name in product_chain_scripts),
         delivery_compile, delivery_git, team_root / "scripts" / "delivery_provider.py",
     ):
         if not path.is_file():
             raise SmokeFailure(f"installed package is missing {path.relative_to(team_root)}")
-    for script in (delivery_compile, delivery_git):
+    for script in (delivery_compile, delivery_git,
+                   *(team_root / "scripts" / name for name in product_chain_scripts)):
         run([sys.executable, str(script), "--help"], env)
+    required_flows = {
+        "requirement.md", "business-analysis.md", "solution-design.md",
+        "design-system.md", "experience-design.md", "backlog-planning.md",
+    }
+    present_flows = {path.name for path in (team_root / "flows").glob("*.md")}
+    missing_flows = required_flows - present_flows
+    if missing_flows:
+        raise SmokeFailure("installed package is missing product-chain flows: "
+                           + ", ".join(sorted(missing_flows)))
+    required_agents = {
+        "business-analyst.md", "solution-architect.md", "solution-reviewer.md",
+        "ux-designer.md", "experience-reviewer.md", "product-owner.md",
+        "software-architect.md",
+    }
+    missing_agents = [name for name in sorted(required_agents)
+                      if not (team_root / "agents" / name).is_file()]
+    if missing_agents:
+        raise SmokeFailure("installed package is missing product-chain agents: "
+                           + ", ".join(missing_agents))
     inspected = json.loads(run([
         sys.executable, str(setup), "inspect", "--project-root", str(project),
         "--json",
@@ -145,10 +171,10 @@ def exercise_package(team_root: Path, project: Path, env: dict[str, str]) -> Non
     if sentinel.read_text(encoding="utf-8") \
             != "# User-owned package refresh sentinel\n":
         raise SmokeFailure("setup refresh changed a user-owned project file")
-    if json.loads(config_path.read_text(encoding="utf-8")).get(
-        "consumer_refresh_fixture"
-    ) != "preserve":
-        raise SmokeFailure("setup refresh changed a user-owned config field")
+    if "consumer_refresh_fixture" in json.loads(
+        config_path.read_text(encoding="utf-8")
+    ):
+        raise SmokeFailure("setup refresh retained an unknown config field")
     refreshed_app = json.loads(app_path.read_text(encoding="utf-8"))
     if refreshed_app.get("alwaysUpdateLinks") is not True \
             or refreshed_app.get("consumer_knob") != "preserve":

@@ -1,6 +1,6 @@
 ---
 name: experience-modeling
-description: Internal knowledge for program and release Experience Design trees, stable journey/flow/screen/state/transition identities, BA space/domain projection, inheritance, coverage, artifacts and deterministic gates. Load for experience authoring, review and backlog UX references.
+description: Internal knowledge for living, process-owned Experience packages, stable journey/flow/screen/state/transition identities, revisions, coverage, artifacts and deterministic gates.
 user-invocable: false
 ---
 

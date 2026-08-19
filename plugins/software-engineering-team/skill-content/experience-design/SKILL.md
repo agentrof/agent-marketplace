@@ -1,30 +1,35 @@
 ---
 name: experience-design
-description: Interactive release-scoped product experience modeling after approved analysis, solution landscape and design system. Use to define journeys, bounded flow sets, screens, states, transitions and approved HTML artifacts before baseline backlog planning.
+description: Maintain approved living, process-owned Experience packages after approved analysis, Solution Design and Design System inputs. Supports Requirement and manual entry before backlog planning.
 exposure: entry
 ---
 
 # Experience Design
 
-Produce an approved, compiler-backed experience baseline without implementing product code.
+Model and revise living user experiences without implementing product code.
 
 ## When to Use
 
-- Approved analysis, solution landscape and design master are ready for release experience work.
-- A later release needs an experience delta before backlog planning.
+Use after approved BA, Solution and Design System inputs need user-journey,
+screen, flow, state or artifact work, either from an exact Requirement or a
+manual/direct product-design chain.
 
-## Procedure
-
-1. Read `workspace/config.json`; require the Requirement Flow impact matrix to
-   mark Experience Design as `required`, an approved BA scope, an approved
-   solution landscape and `workspace/docs/design-system/MASTER.md`.
-   Run `requirement_route.py --project-root <root> REQ-### --json` and stop at
-   the entry it names when an earlier stage is incomplete.
-2. Load the canonical flow at `flows/experience-design.md`, the
-   `experience-modeling` knowledge skill and the `obsidian-vault` law. Follow
-   them exactly.
-3. Work only in `workspace/docs/experience-design/`, plus the experience
-   map/home reconciliation owned by the vault policy. Markdown and HTML start
-   as drafts at their durable release paths and are approved there. Never
-   promote a sketch as a baseline and never create a filesystem run folder.
-4. Stop after the program gate. Name `backlog-plan` as the next entry. Do not activate a release and do not start delivery.
+1. Read `workspace/config.json`, `flows/experience-design.md`,
+   `experience-modeling` and `obsidian-vault` in full.
+2. Determine the mode from an explicit `REQ-###`; do not infer a Requirement
+   in manual mode. Validate all upstream receipts before writing.
+3. Run the read-only scope proposal and retain its JSON only as a transient
+   local file. Obtain the user's exact action-set approval, then pass that
+   file and its hash to every lifecycle mutation and atomic approval.
+4. The primary process ref is
+   `business-analysis/<space>/processes/<process-slug>-process`; it must
+   resolve through the selected approved BA package. Work exclusively in
+   `workspace/docs/experience-design/experiences/<process-slug>/` using the
+   Experience compiler. There are no EXP IDs, `exp-` directories, baselines,
+   programs, releases or inheritance chains.
+5. Use stable child IDs and exact refs. The package owns approval; children
+   use `record_state`. Generated and ledger data are compiler-owned.
+6. Run the transient, fresh reviewer challenge loop defined by the flow.
+   Close blockers in canonical records, not in review-history artifacts.
+7. Atomically approve the complete changed package set. Requirement mode then
+   binds the receipt set; manual mode returns it to `backlog-plan` directly.

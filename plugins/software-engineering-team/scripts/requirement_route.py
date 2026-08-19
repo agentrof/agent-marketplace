@@ -16,6 +16,7 @@ import subprocess
 from pathlib import Path
 
 import requirement_compile
+import stage_package
 
 
 REQ_ID_RE = re.compile(r"^REQ-[0-9]{3,}$")
@@ -45,6 +46,55 @@ def is_committed(path: Path) -> bool:
         cwd=path.parents[3], capture_output=True, text=True, check=False,
     )
     return result.returncode == 0 and not result.stdout.strip()
+
+
+def route_stage(path: Path) -> dict:
+    """Return the first authoring, binding or repair action for a Requirement."""
+    try:
+        props, body = requirement_compile.split_note(path)
+    except (OSError, ValueError):
+        return {"next_entry": "requirement", "stage": "requirement", "action": "requirement"}
+    docs = path.parents[1]
+    if props.get("status") != "approved" or props.get("source_hash") != requirement_compile.semantic_hash(props, body):
+        return {"next_entry": "requirement", "stage": "requirement", "action": "requirement"}
+    if not is_committed(path):
+        return {"next_entry": "requirement", "stage": "requirement", "action": "requirement",
+                "reason": "Requirement is not committed"}
+    results = requirement_compile.stage_results(body)
+    upstream_receipts: dict[str, dict] = {}
+    for stage, disposition, refs, _rationale in requirement_compile.impact_rows(body):
+        if disposition == "not_applicable":
+            continue
+        result_rows = results.get(stage, [])
+        if not result_rows:
+            return {
+                "next_entry": stage, "stage": stage,
+                "action": "bind_reuse" if disposition == "reuse" else "author",
+                "upstream_receipts": upstream_receipts,
+            }
+        if stage != "experience-design" and len(result_rows) != 1:
+            return {"next_entry": stage, "stage": stage, "action": "repair",
+                    "upstream_receipts": upstream_receipts,
+                    "reason": f"{stage} has an invalid receipt count"}
+        receipts, errors = [], []
+        for result_ref, result_hash in result_rows:
+            receipt, invalid = stage_package.verify(
+                docs, stage, result_ref, result_hash, require_committed=True,
+            )
+            errors.extend(invalid)
+            if receipt is not None:
+                receipts.append(receipt)
+        if errors:
+            return {"next_entry": stage, "stage": stage, "action": "repair",
+                    "upstream_receipts": upstream_receipts, "reason": "; ".join(errors)}
+        upstream_receipts[stage] = receipts if stage == "experience-design" else receipts[0]
+    return {"next_entry": "backlog-plan", "stage": "backlog-plan", "action": "backlog",
+            "upstream_receipts": upstream_receipts}
+
+
+def next_stage(path: Path) -> str:
+    """Compatibility helper for callers that only need the entry name."""
+    return str(route_stage(path)["next_entry"])
 
 
 def route(docs: Path, argument: str | None = None) -> dict:
@@ -78,10 +128,14 @@ def route(docs: Path, argument: str | None = None) -> dict:
             "superseded": ["inspect"],
             "withdrawn": ["inspect"],
             }.get(status, ["inspect"])
+        routing = route_stage(path) if status == "approved" else {
+            "next_entry": "requirement", "stage": "requirement", "action": "requirement"}
         return {
             "ok": True, "mode": "exact", "requirement_id": identifier,
             "path": path.as_posix(), "status": status,
-            "next_entry": "requirement", "actions": actions,
+            "next_entry": routing["next_entry"], "stage": routing["stage"],
+            "action": routing["action"], "upstream_receipts": routing.get("upstream_receipts", {}),
+            "actions": actions,
         }
     if argument:
         return {
@@ -93,7 +147,7 @@ def route(docs: Path, argument: str | None = None) -> dict:
         path = candidates[0]
         props = read_props(path)
         return {
-            "ok": True, "mode": "sole_candidate", "next_entry": "requirement",
+            "ok": True, "mode": "sole_candidate", **route_stage(path),
             "requirement_id": props.get("id"), "path": path.as_posix(),
             "status": props.get("status"),
         }

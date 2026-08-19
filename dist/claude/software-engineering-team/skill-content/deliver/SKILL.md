@@ -32,6 +32,11 @@ publishes that committed product/test change with its review and verification
 records. Do not copy evidence from the primary worktree or supply an arbitrary
 commit identifier. Integration validates the remote Item tip and its exact
 product/test parent before it can merge.
+For an Item whose approved plan requires architecture impact, invoke the
+Software Architect first. The exact Item may create or revise only its claimed
+System Architecture records with `architecture_compile.py`, stamp its
+`architecture_delta_hash`, then pass that hash through verification alongside
+the code change.
 Cancellation is a deliberate exception inside the same entry. `/deliver
 DLV-###` first renders an exact read-only cancellation preview when the user
 chooses cancellation. The internal `cancel-delivery` coordinator records the

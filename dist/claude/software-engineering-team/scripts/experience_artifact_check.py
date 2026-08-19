@@ -11,6 +11,8 @@ from html.parser import HTMLParser
 from pathlib import Path
 from urllib.parse import urlparse
 
+import experience_compile
+
 ID_RE = re.compile(r"^(?:JRN|FLW|SCR|STA|TRN)-[0-9]{3,}$")
 
 
@@ -63,23 +65,22 @@ def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--artifact", required=True)
     parser.add_argument("--manifest", default="")
-    parser.add_argument("--release-root", required=True)
+    parser.add_argument("--experience-root", required=True)
     parser.add_argument("--registry", default="")
-    parser.add_argument("--owner", required=True)
     parser.add_argument("--declared-id", action="append", default=[])
     parser.add_argument("--json", action="store_true")
     args = parser.parse_args(argv)
     artifact = Path(args.artifact).resolve()
-    release = Path(args.release_root).resolve()
-    owner = (release / args.owner).resolve()
+    experience = Path(args.experience_root).resolve()
+    owner = experience
     findings: list[str] = []
     try:
         relative = artifact.relative_to(owner / "artifacts")
-        release_relative = artifact.relative_to(release).as_posix()
+        experience_relative = artifact.relative_to(experience).as_posix()
     except ValueError:
         findings.append("artifact is not under the declared owning node artifacts directory")
         relative = artifact.name
-        release_relative = ""
+        experience_relative = ""
     if not artifact.is_file() or artifact.suffix.lower() != ".html":
         findings.append("artifact must be an existing HTML file")
         content = ""
@@ -116,46 +117,34 @@ def main(argv=None) -> int:
             declared = {str(value) for value in values}
     findings.extend(f"declared id is absent from HTML: {value}" for value in sorted(declared - scanner.ids))
     findings.extend(f"HTML contains undeclared experience id: {value}" for value in sorted(scanner.ids - declared))
-    registry_path = Path(args.registry) if args.registry else release / "_generated" / "effective-registry.json"
+    registry_path = Path(args.registry) if args.registry else experience / "_generated" / "registry.json"
     registry = {}
     try:
         registry = json.loads(registry_path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as exc:
         findings.append(f"registry is unreadable: {exc}")
     expected = {
-        "experience-program": str(registry.get("program_id", "")),
-        "experience-release": str(registry.get("release_id", "")),
+        "experience-id": str(registry.get("experience_id", "")),
         "experience-registry-hash": str(registry.get("registry_hash", "")),
     }
     for key, value in expected.items():
         if not value or scanner.metadata.get(key) != value:
-            findings.append(f"metadata {key} does not match the effective registry")
-    owner_note = next(
-        (owner / name for name in ("domain.md", "space.md", "release.md")
-         if (owner / name).is_file()),
-        None,
-    )
-    manifest_target = manifest.relative_to(release.parents[4]).with_suffix("").as_posix()
-    if (owner_note is None
-            or f"[[{manifest_target}|" not in owner_note.read_text(encoding="utf-8")):
-        findings.append("owning node note does not reference the artifact manifest")
-    digest = "sha256:" + hashlib.sha256(content.encode()).hexdigest()
-    if manifest_fm.get("artifact_path") != release_relative:
+            findings.append(f"metadata {key} does not match the Experience registry")
+    digest = experience_compile.artifact_digest(content.encode())
+    if manifest_fm.get("artifact_path") != experience_relative:
         findings.append("artifact path does not match the manifest")
     if manifest_fm.get("artifact_sha256") != digest:
         findings.append("artifact SHA-256 does not match the manifest")
     if manifest_fm.get("registry_hash") != registry.get("registry_hash"):
         findings.append("artifact registry hash does not match the manifest")
-    if manifest_fm.get("program_id") != registry.get("program_id"):
-        findings.append("artifact program does not match the manifest")
-    if manifest_fm.get("release_id") != registry.get("release_id"):
-        findings.append("artifact release does not match the manifest")
+    if manifest_fm.get("baseline_id"):
+        findings.append("artifact manifest must not carry a baseline identity")
     registered = {
         str(item.get("path", "")): str(item.get("sha256", ""))
         for item in registry.get("artifacts", []) if isinstance(item, dict)
     }
-    if not release_relative or registered.get(release_relative) != digest:
-        findings.append("artifact SHA-256 does not match the effective registry")
+    if not experience_relative or registered.get(experience_relative) != digest:
+        findings.append("artifact SHA-256 does not match the Experience registry")
     result = {"ok": not findings, "path": str(relative), "sha256": digest,
               "ids": sorted(scanner.ids), "findings": sorted(set(findings))}
     if args.json:

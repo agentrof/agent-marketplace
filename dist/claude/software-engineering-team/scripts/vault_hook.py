@@ -58,14 +58,12 @@ TOOL_NAME_CANON = {
 
 PATCH_HEADER_RE = re.compile(r"^\*\*\* (Add|Update|Delete) File: (.+)$")
 
-# Team-owned config keys have one of two sanctioned subprocess writers:
-# project_config.py for ordinary fields and reconcile-designations for display
-# wording. Neither traverses PreToolUse, so direct Write/Edit changes are denied.
+# The complete bootstrap config has only sanctioned subprocess writers:
+# project_config.py for language, reconcile-designations for display wording,
+# and setup for structural replacement. None traverses PreToolUse, so direct
+# Write/Edit changes are denied.
 CONFIG_GUARD_KEYS = (
-    "team_id", "scale", "output_language",
-    "terminology_language", "backend_stack", "frontend_stack",
-    "environment_stack", "databases", "test_command", "mutation_command",
-    "env_command", "source_dirs", "max_parallel", "limits",
+    "schema_version", "team_id", "output_language", "terminology_language",
     "doc_type_designations", "doc_type_designation_history",
 )
 
@@ -76,7 +74,7 @@ CONFIG_GUARD_MESSAGE = (
 
 SHELL_ASSIGNMENT_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=.*$")
 PYTHON_COMMAND_RE = re.compile(r"^python(?:3(?:[.][0-9]+)?)?$")
-SANCTIONED_PROJECT_CONFIG_COMMANDS = {"set", "unset"}
+SANCTIONED_PROJECT_CONFIG_COMMANDS = {"set"}
 SANCTIONED_SHELL_ASSIGNMENTS = {"PYTHONDONTWRITEBYTECODE": "1"}
 RECOVERY_TTL_SECONDS = 24 * 60 * 60
 
@@ -88,7 +86,10 @@ INLINE_FLOW_LIST_RE = re.compile(r"^\s*(tags|aliases):\s*\[", re.MULTILINE)
 FENCE_RE = re.compile(r"^\s*```")
 EXPERIENCE_MACHINE_FIELD_RE = re.compile(
     r"(?m)^\s*(approved_at_utc|approval_revision|revision|registry_hash|"
-    r"source_hash|stamped_at):")
+    r"package_hash|source_hash|stamped_at|manifest_hash):")
+ARCHITECTURE_MACHINE_FIELD_RE = re.compile(
+    r"(?m)^\s*(record_id|revision|record_state|supersedes|introduced_by|"
+    r"architecture_delta_hash|revision_state):")
 DESIGN_SYSTEM_MACHINE_FIELD_RE = re.compile(
     r"(?m)^\s*(status|revision|approved_at_utc|baseline_hash|"
     r"supersedes_hash):")
@@ -99,16 +100,12 @@ BACKLOG_APPROVED_STATE_RE = re.compile(
     r"-\s*[\"']?status/approved[\"']?\s*$)"
 )
 EXPERIENCE_PATHS = (
-    re.compile(r"^experience-design/experience\.md$"),
-    re.compile(r"^experience-design/programs/prg-[0-9]+/program\.md$"),
-    re.compile(r"^experience-design/programs/prg-[0-9]+/releases/rel-[0-9]+/release\.md$"),
-    re.compile(r"^experience-design/programs/prg-[0-9]+/releases/rel-[0-9]+/spaces/[a-z0-9-]+/space\.md$"),
-    re.compile(r"^experience-design/programs/prg-[0-9]+/releases/rel-[0-9]+/spaces/[a-z0-9-]+/(?:domains/[a-z0-9-]+/)+domain\.md$"),
-    re.compile(r"^experience-design/programs/prg-[0-9]+/releases/rel-[0-9]+/(?:spaces/[a-z0-9-]+/(?:domains/[a-z0-9-]+/)*)?(?:journeys/[a-z0-9-]+-journey|screens/[a-z0-9-]+-screen|flows/[a-z0-9-]+-flows|artifacts/[a-z0-9-]+-artifact)\.md$"),
+    re.compile(r"^experience-design/experiences/[a-z0-9]+(?:-[a-z0-9]+)*/experience\.md$"),
+    re.compile(r"^experience-design/experiences/[a-z0-9]+(?:-[a-z0-9]+)*/(?:journeys/[a-z0-9-]+-journey|screens/[a-z0-9-]+-screen|flows/[a-z0-9-]+-flow-set|states/[a-z0-9-]+-state|transitions/[a-z0-9-]+-transition|artifacts/[a-z0-9-]+-artifact)\.md$"),
 )
 
 
-def note_status(path: Path) -> str:
+def note_field(path: Path, field: str) -> str:
     try:
         lines = path.read_text(encoding="utf-8").splitlines()
     except OSError:
@@ -119,19 +116,20 @@ def note_status(path: Path) -> str:
         value = raw.strip()
         if value == "---":
             break
-        if value.startswith("status:"):
+        if value.startswith(field + ":"):
             return value.split(":", 1)[1].strip().strip("\"'")
     return ""
 
 
+def note_status(path: Path) -> str:
+    return note_field(path, "status")
+
+
 def approved_experience_owner(path: Path) -> Path | None:
     for parent in (path.parent, *path.parents):
-        release = parent / "release.md"
-        if release.is_file() and note_status(release) == "approved":
-            return release
-        program = parent / "program.md"
-        if program.is_file() and note_status(program) == "approved":
-            return program
+        experience = parent / "experience.md"
+        if experience.is_file() and note_status(experience) == "approved":
+            return experience
         if parent.name == "docs":
             break
     return None
@@ -373,13 +371,7 @@ def guarded_spans(text: str) -> list[tuple[int, int]]:
 
 
 def config_guard(tool_input: dict, file_path: str) -> int:
-    """Deny any tool-level change to team-owned config keys, mint included.
-
-    Introduction over an absent key is a change. Writes are
-    diffed subtree-against-disk (a Write changing only other config keys
-    passes); Edits are fragments the final JSON cannot be rebuilt from,
-    so any fragment naming a guarded key or landing inside its on-disk
-    block is denied conservatively."""
+    """Deny every direct workspace-config mutation, including unknown keys."""
     try:
         disk_text = Path(file_path).read_text(encoding="utf-8")
     except OSError:
@@ -401,25 +393,10 @@ def config_guard(tool_input: dict, file_path: str) -> int:
                 disk = json.loads(disk_text)
             except json.JSONDecodeError:
                 disk = None
-        for key in CONFIG_GUARD_KEYS:
-            disk_value = disk.get(key) if isinstance(disk, dict) else None
-            if proposed.get(key) != disk_value:
-                return deny(CONFIG_GUARD_MESSAGE)
+        if proposed != disk:
+            return deny(CONFIG_GUARD_MESSAGE)
         return 0
-    old = str(tool_input.get("old_string") or "")
-    new = str(tool_input.get("new_string") or "")
-    if any(key in old or key in new for key in CONFIG_GUARD_KEYS):
-        return deny(CONFIG_GUARD_MESSAGE)
-    if disk_text and old:
-        spans = guarded_spans(disk_text)
-        pos = disk_text.find(old)
-        while pos != -1:
-            end = pos + len(old)
-            if any(pos < s_end and end > s_start
-                   for (s_start, s_end) in spans):
-                return deny(CONFIG_GUARD_MESSAGE)
-            pos = disk_text.find(old, pos + 1)
-    return 0
+    return deny(CONFIG_GUARD_MESSAGE)
 
 
 def relation_projection_guard(written: dict, file_path: str) -> int:
@@ -634,9 +611,37 @@ def pre_target(written: dict) -> int:
                 "Design System status, revision, approval timestamp and hashes"
                 " are machine-managed; use design_system_compile.py"
             )
+    if rel.startswith("operation/") and rel.endswith(".md"):
+        path = Path(file_path).resolve()
+        if path.is_file() and note_status(path) == "approved":
+            return deny(
+                "approved Operation contracts are immutable through Write/Edit;"
+                " use operation_compile.py begin-revision first"
+            )
+        content = written_content(written) + "\n" + str(written.get("old_string") or "")
+        if re.search(r"(?m)^\s*(status|revision|source_hash|approved_at_utc):", content):
+            return deny(
+                "Operation contract lifecycle fields are compiler-owned;"
+                " use operation_compile.py"
+            )
+    if rel == "delivery/governance/governance.md":
+        path = Path(file_path).resolve()
+        if path.is_file() and note_status(path) == "approved":
+            return deny(
+                "approved Delivery Governance is immutable through Write/Edit;"
+                " use delivery_governance.py begin-revision first"
+            )
+        content = written_content(written) + "\n" + str(written.get("old_string") or "")
+        if re.search(r"(?m)^\s*(status|revision|max_parallel|governance_hash|source_hash|approved_at_utc):", content):
+            return deny(
+                "Delivery Governance lifecycle fields are compiler-owned;"
+                " use delivery_governance.py"
+            )
     if rel.startswith("experience-design/"):
-        if "/_generated/" in f"/{rel}":
-            return deny("Experience Design _generated files are compiler-owned; run experience_compile.py render")
+        if re.match(r"^experience-design/experiences/exp-(?:[a-z0-9]+(?:-[a-z0-9]+)*)/", rel):
+            return deny("Experience slugs are process names and must not use the retired exp- prefix")
+        if "/_generated/" in f"/{rel}" or "/_ledger/" in f"/{rel}":
+            return deny("Experience Design generated and ledger files are compiler-owned; run experience_compile.py")
         if "/artifacts/" in rel and rel.endswith(".html"):
             manifest = Path(file_path).with_name(
                 Path(file_path).name.removesuffix("-preview.html")
@@ -650,25 +655,37 @@ def pre_target(written: dict) -> int:
             if note_status(manifest) == "approved":
                 return deny(
                     "approved Experience Design artifacts are immutable;"
-                    " create a new draft package"
+                    " begin an Experience revision first"
                 )
         if rel.endswith("-artifact.md") and Path(file_path).is_file() \
                 and note_status(Path(file_path)) == "approved":
             return deny(
                 "approved Experience Design artifact manifests are immutable;"
-                " create a new draft package"
+                " begin an Experience revision first"
             )
         approved_owner = approved_experience_owner(Path(file_path).resolve())
         if approved_owner is not None:
             return deny(
-                "approved Experience Design release/program content is immutable;"
-                " create the next release through experience_compile.py"
+                "approved Experience content is immutable;"
+                " begin a living Experience revision through experience_compile.py"
             )
         if rel.endswith(".md") and not any(pattern.fullmatch(rel) for pattern in EXPERIENCE_PATHS):
             return deny(f"invalid Experience Design filename or path '{rel}'; use compiler init/stub commands")
         content = written_content(written) + "\n" + str(written.get("old_string") or "")
         if EXPERIENCE_MACHINE_FIELD_RE.search(content):
-            return deny("Experience Design approval, revision hash and timestamp fields are machine-managed; use render/stamp")
+            return deny("Experience approval, revision, hash and timestamp fields are machine-managed; use experience_compile.py")
+    if rel.startswith("system-architecture/"):
+        if "/_generated/" in f"/{rel}" or "/_ledger/" in f"/{rel}":
+            return deny("System Architecture generated and ledger files are compiler-owned; use architecture_compile.py")
+        owner = Path(file_path).resolve()
+        if owner.is_file():
+            if note_field(owner, "revision_state") == "sealed":
+                return deny(
+                    "sealed System Architecture content is immutable; use "
+                    "architecture_compile.py begin-revision --item-ref"
+                )
+        if owner.is_file() and ARCHITECTURE_MACHINE_FIELD_RE.search(written_content(written) + "\n" + str(written.get("old_string") or "")):
+            return deny("System Architecture record identity and revision fields are compiler-owned; use architecture_compile.py begin-revision --item-ref")
     if rel.startswith("backlog/") and rel.endswith(".md"):
         proposed = written_content(written)
         removed = str(written.get("old_string") or "")
@@ -756,20 +773,16 @@ def post_target(file_path: str) -> int:
         return 2
     if rel.startswith("experience-design/") and experience_compile is not None:
         parts = rel.split("/")
-        try:
-            release_index = parts.index("releases")
-            release_root = root.joinpath(*parts[:release_index + 2])
-        except (ValueError, IndexError):
-            release_root = None
-        if release_root is not None and (release_root / "release.md").is_file():
+        experience_root = root.joinpath(*parts[:3]) if len(parts) > 2 and parts[1] == "experiences" else None
+        if experience_root is not None and (experience_root / "experience.md").is_file():
             buffer = io.StringIO()
             with contextlib.redirect_stdout(buffer):
                 code = experience_compile.main([
-                    "check", "--release-root", str(release_root), "--changed",
+                    "check", "--experience-root", str(experience_root),
                 ])
             if code == 1:
                 sys.stderr.write(buffer.getvalue())
-                print("vault law: Experience Design compiler found a scoped violation; repair it before continuing", file=sys.stderr)
+                print("vault law: Experience compiler found a scoped violation; repair it before continuing", file=sys.stderr)
                 return 2
     return 0
 
@@ -907,13 +920,10 @@ def guarded_config_hash(text: str | None, exists: bool) -> str:
                 ).hexdigest(),
             }
         else:
-            projection = {
-                "state": "object",
-                "values": {
-                    key: {"present": key in parsed, "value": parsed.get(key)}
-                    for key in CONFIG_GUARD_KEYS
-                },
-            }
+            # Config is a closed bootstrap contract. Hash all parsed values so
+            # a Bash command cannot smuggle an unknown/retired field past the
+            # writer guard by leaving the six canonical keys untouched.
+            projection = {"state": "object", "values": parsed}
     encoded = json.dumps(
         projection, ensure_ascii=False, sort_keys=True, separators=(",", ":")
     ).encode("utf-8")

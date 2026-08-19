@@ -222,10 +222,11 @@ def closing(root: Path, workspace: str) -> list[str]:
                 + candidate.parent.relative_to(root).as_posix()
             )
     required = (
-        "apps", "environment", "demos", "sketches",
+        "apps", "demos", "sketches",
         "docs/business-analysis", "docs/solution-design",
         "docs/system-architecture", "docs/design-system/pages",
-        "docs/experience-design", "docs/requirements", "docs/delivery", "docs/backlog",
+        "docs/experience-design", "docs/requirements", "docs/operation",
+        "docs/delivery", "docs/delivery/governance", "docs/backlog",
     )
     for relative in required:
         path = work / relative

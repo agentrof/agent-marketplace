@@ -31,6 +31,12 @@ status: proposed
 owner_role: solution_architect
 territory: <decision territory>
 revisit_trigger: <one named condition>
+decision_kind: technology-selection | data-store | environment | integration | other
+applies_to:
+  - <component-id>
+selected_technology: <selected project value>
+method_skills:
+  - <installed internal skill id, if any>
 engagement: "[[solution-design/engagements/<slug>]]"
 tags:
   - doc/decision
@@ -68,7 +74,11 @@ First-run landscape: Current states "Nothing built yet" plus any inherited const
 - One note per decision at decisions/<kebab-slug>-decision.md, with a title-matching H1 and one `SD-###` frontmatter alias. The id never enters the filename, title or H1.
 - Id allocation: the next id is scan-max+1 over the `SD-###` aliases, computed immediately before the note is born. Ids are assigned only at note birth; engagement drafts cite `pending` until then. Duplicate id numbers are caught at every gate, and render-decisions refuses to render over them.
 - Lifecycle: notes are born at verdict-accept with `status: proposed`; the gate's approve flips them to `accepted`, request-changes to `rejected` or superseded. Every status change goes ONLY through the vault checker's stamp-decision verb, which writes status, the UTC decided_at, the tag mirror and both ends of the supersede chain in one operation; a hand-typed stamp is guard-denied. The fold-in finalizes statuses; it never first-writes notes.
-- Solution notes carry, as first-class fields: the exit path, the sustainability judgment, the requirement ids and budget block-ids they rest on (so "which decisions rest on this requirement" is answerable from the note alone), and a revisit trigger: one named condition that reopens the decision (a cited budget or scale threshold crossed, a pricing or licensing term changed, a date reached). A note with no condition that could invalidate it states why.
+- Accepted decisions additionally declare `decision_kind`, `applies_to`,
+  `selected_technology` and any installed `method_skills`. A component may use
+  different choices from another component; there is no global stack field.
+  `landscape_check.py render-capabilities` renders the accepted capability
+  registry consumed by Delivery.
 - decision-log.md is the GENERATED index (marker first line), rendered by
   `scripts/vault_check.py render-decisions --vault workspace/docs` after any
   decision write. It is never authored or hand-edited. Entries and gates read

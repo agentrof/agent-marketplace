@@ -13,8 +13,10 @@ __pycache__/
 .env.*
 !.env.example
 
-# Claude Code: local agent workspace, never tracked
+# Local agent workspaces, never tracked
 .claude/
+.codex/
+.agentrof/
 
 # Research and source material: local only, never in git (architecture invariant)
 assets/

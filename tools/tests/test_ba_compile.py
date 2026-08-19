@@ -455,7 +455,6 @@ BA_BUILDERS = {
     "frontmatter_schema": break_frontmatter_schema,
     "status_legality": break_status_legality,
     "required_sections": break_required_sections,
-    "summary_caps": break_summary_caps,
     "content_bans": break_content_bans,
     "dead_links": break_dead_links,
     "id_format": break_id_format,
@@ -466,8 +465,6 @@ BA_BUILDERS = {
     "semantic_links": break_semantic_links,
     "approval_preconditions": break_approval_preconditions,
     "br_uncited": break_br_uncited,
-    "thresholds": break_thresholds,
-    "aging": break_aging,
     "gate_approval": break_gate_approval,
     "generated_freshness": break_generated_freshness,
     "future_dates": break_future_dates,
@@ -483,8 +480,7 @@ GATE_CHECKS = {"gate_approval"}
 
 def collect(space: Path, gate: bool = False) -> list:
     vault_root = ba.resolve_vault_root(space, "")
-    schema = ba.effective_schema(SCHEMA, vault_root)
-    scanned, base = ba.scan_space(space, schema)
+    scanned, base = ba.scan_space(space, SCHEMA)
     scanned.vault_root = vault_root
     findings = ba.run_checks(scanned, base, gate=gate, gate_node="")
     if not scanned.broken:
@@ -851,142 +847,18 @@ class SubcommandTests(unittest.TestCase):
 
 
 
-class ProjectLimitsTests(unittest.TestCase):
-    """workspace/config.json scale and limits merge over the shipped
-    schema: precedence limits > scale > shipped, provenance in messages,
-    silent degradation on garbage."""
+class NumericLimitRemovalTests(unittest.TestCase):
+    """BA remains structural and semantic when authored content grows."""
 
-    def setUp(self):
-        self.tmp = tempfile.TemporaryDirectory()
-        self.space = Path(self.tmp.name) / "docs" / "business-analysis" / "erp"
-        make_valid_space(self.space)
-        self.vault_root = self.space.parent.parent
-
-    def tearDown(self):
-        self.tmp.cleanup()
-
-    def effective(self):
-        return ba.effective_schema(SCHEMA, self.vault_root)
-
-    def test_absent_config_keeps_shipped_defaults(self):
-        merged = self.effective()
-        self.assertEqual(merged["thresholds"], SCHEMA["thresholds"])
-        self.assertEqual(merged["_limit_provenance"], {})
-        break_thresholds(self.space)
-        hits = [f for f in collect(self.space) if f.check == "thresholds"]
-        self.assertEqual(len(hits), 1, hits)
-        self.assertIn("(warn at 1350)", hits[0].message)
-
-    def test_scale_multiplies_volume_warns(self):
-        write_config(self.space, {"scale": "medium"})
-        th = self.effective()["thresholds"]
-        self.assertEqual(th["node_direct_docs_warn"], 324)
-        self.assertEqual(th["process_doc_lines_warn"], 4050)
-        self.assertEqual(th["space_bytes_warn"], 40500000)
-        break_thresholds(self.space)  # 160-line process doc
-        hits = [f for f in collect(self.space) if f.check == "thresholds"]
-        self.assertEqual(hits, [], "medium raises the cap past 160 lines")
-
-    def test_full_ladder_table(self):
-        ladder = {"small": 1, "medium": 3, "large": 9, "x-large": 45,
-                  "xx-large": 225, "enterprise": 1125}
-        for level, multiplier in ladder.items():
-            write_config(self.space, {"scale": level})
-            th = self.effective()["thresholds"]
-            self.assertEqual(th["node_direct_docs_warn"], 108 * multiplier,
-                             level)
-            self.assertEqual(th["open_row_age_days_warn"], 14,
-                             f"{level}: age never scales")
-
-    def test_nesting_ladder_is_additive(self):
-        expected = {"small": (4, 5), "medium": (5, 6), "large": (6, 7),
-                    "x-large": (7, 8), "xx-large": (8, 9),
-                    "enterprise": (9, 10)}
-        for level, (warn_at, fail_at) in expected.items():
-            write_config(self.space, {"scale": level})
-            th = self.effective()["thresholds"]
-            self.assertEqual(
-                (th["nesting_warn_depth"], th["nesting_fail_depth"]),
-                (warn_at, fail_at), level)
-
-    def test_override_beats_scale_with_provenance(self):
-        write_config(self.space, {"scale": "medium",
-                                  "limits": {"process_doc_lines_warn": 150}})
-        break_thresholds(self.space)
-        hits = [f for f in collect(self.space) if f.check == "thresholds"]
-        self.assertEqual(len(hits), 1, hits)
-        self.assertIn("(warn at 150: project override)", hits[0].message)  # override below scale
-
-    def test_structural_values_never_scale(self):
-        write_config(self.space, {"scale": "enterprise"})
-        merged = self.effective()
-        self.assertEqual(merged["summary_max_lines"],
-                         SCHEMA["summary_max_lines"])
-        break_aging(self.space)
-        hits = [f for f in collect(self.space) if f.check == "aging"]
-        self.assertEqual(len(hits), 1, hits)
-        self.assertIn("(warn at 14)", hits[0].message)
-        self.assertNotIn("scale", hits[0].message)
-
-    def test_structural_overrides_apply(self):
-        write_config(self.space, {"limits": {"summary_max_lines_default": 3}})
-        merged = self.effective()
-        self.assertEqual(merged["summary_max_lines"]["default"], 3)
-        self.assertEqual(merged["summary_max_lines"]["space"], 30)
-        self.assertEqual(
-            ba.limit_provenance(merged, "summary_max_lines_default"),
-            ": project override")
-
-    def test_invalid_config_fails_soft(self):
-        write_config(self.space, {"scale": "galactic",
-                                  "limits": {"process_doc_lines_warn": -5,
-                                             "bogus_key": 7,
-                                             "rules_per_set_warn": "many"}})
-        merged = self.effective()
-        self.assertEqual(merged["thresholds"], SCHEMA["thresholds"])
-        self.assertEqual(merged["_limit_provenance"], {})
-        write_config(self.space, "{not json")
-        merged = self.effective()
-        self.assertEqual(merged["thresholds"], SCHEMA["thresholds"])
-
-    def test_nesting_inversion_dropped(self):
-        write_config(self.space, {"limits": {"nesting_warn_depth": 9}})
-        th = self.effective()["thresholds"]
-        self.assertEqual((th["nesting_warn_depth"],
-                          th["nesting_fail_depth"]), (4, 5))
-        write_config(self.space, {"scale": "medium",
-                                  "limits": {"nesting_warn_depth": 9}})
-        th = self.effective()["thresholds"]
-        self.assertEqual((th["nesting_warn_depth"],
-                          th["nesting_fail_depth"]), (5, 6),
-                         "inversion falls back to the scale ladder values")
-
-    def test_advisory_grouping_in_views(self):
-        break_thresholds(self.space)
-        code, _, err = run(["render", "--space", str(self.space)])
-        self.assertEqual(code, 0, err)
-        status = (self.space / "_generated" / "status.md").read_text(
-            encoding="utf-8")
-        self.assertIn("## Advisories: split proposals", status)
-        self.assertIn("split proposal: process doc is", status)
-        self.assertIn("(warn at 1350)", status)
-        self.assertIn("explicit project decision authority", status)
-        index = (self.space / "_generated" / "index.md").read_text(
-            encoding="utf-8")
-        self.assertNotIn("split proposal", index)
-        stale = [f for f in collect(self.space)
-                 if f.check == "generated_freshness"]
-        self.assertEqual(stale, [], "check after render stays fresh")
-
-    def test_render_deterministic_under_config(self):
-        write_config(self.space, {"scale": "large"})
-        code, _, err = run(["render", "--space", str(self.space)])
-        self.assertEqual(code, 0, err)
-        first = (self.space / "_generated" / "index.md").read_bytes()
-        code, _, _ = run(["render", "--space", str(self.space)])
-        self.assertEqual(code, 0)
-        second = (self.space / "_generated" / "index.md").read_bytes()
-        self.assertEqual(first, second)
+    def test_long_summary_and_deep_nesting_have_no_numeric_finding(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            space = Path(temporary) / "docs" / "business-analysis" / "erp"
+            make_valid_space(space)
+            summary = space / "space.md"
+            summary.write_text(summary.read_text(encoding="utf-8") + "\n" + "\n".join("Additional scope context." for _ in range(400)), encoding="utf-8")
+            findings = collect(space)
+            numeric = {"summary_caps", "thresholds", "aging"}
+            self.assertFalse([item for item in findings if item.check in numeric])
 
 
 if __name__ == "__main__":

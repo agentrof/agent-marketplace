@@ -2,7 +2,7 @@
   "schema_version": 1,
   "record_trailer": "Agentrof-Record",
   "records": {
-    "project_fence_v1": ["Mode", "Epoch", "Target", "Config-Hash", "Source-Kind", "Source-Intent", "Target-Update-Intent", "Target-Update-Attempt", "Target-Repository", "Target-Carrier-Kind", "Target-Carrier-Ref", "Target-Carrier-Object", "Target-Carrier-Head", "Target-Carrier-Base", "Upgrade-Phase", "Upgrade-Contract", "Handoff-Target", "Barrier-Kind", "Barrier-Epoch"],
+    "project_fence_v2": ["Mode", "Epoch", "Target", "Governance-Hash", "Source-Kind", "Source-Intent", "Target-Update-Intent", "Target-Update-Attempt", "Target-Repository", "Target-Carrier-Kind", "Target-Carrier-Ref", "Target-Carrier-Object", "Target-Carrier-Head", "Target-Carrier-Base", "Upgrade-Phase", "Upgrade-Contract", "Handoff-Target", "Barrier-Kind", "Barrier-Epoch"],
     "delivery_barrier_release_v1": ["Delivery", "Barrier-Kind", "Barrier-Epoch", "Barrier-OID", "Target", "Plan-Hash", "Target-Impact-Hash", "Upgrade-Contract"],
     "target_carrier_reauthorization_v1": ["Mode", "Previous-Attempt", "Previous-Target", "Target"],
     "delivery_reservation_v1": ["Delivery", "Slug", "Target"],
@@ -36,7 +36,7 @@
   "unknown_record_policy": "fail_closed",
   "subject_policy": "record-specific fixed English subject; unknown or mismatched subject fails closed",
   "subjects": {
-    "project_fence_v1": "Fence <Mode> transition",
+    "project_fence_v2": "Fence <Mode> transition",
     "target_carrier_reauthorization_v1": "Rebase target carrier",
     "delivery_reservation_v1": "Reserve Delivery <DLV-ID>",
     "delivery_scope_revised_v1": "Revise Delivery Scope <DLV-ID>",

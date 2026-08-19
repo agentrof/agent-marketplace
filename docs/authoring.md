@@ -24,11 +24,14 @@ The user moves through these durable document gates:
 requirement -> business-analysis -> solution-design -> design-system -> experience-design -> backlog-plan -> delivery-plan -> execution-plan -> deliver
 ```
 
-Requirement Flow evaluates stage applicability, each required stage writes its
-own Markdown artifacts and runs its own compiler/checker, and backlog approval
-is the handoff to Delivery Flow. A stage is complete when its approved
-documents are tracked in Git. `requirement_route.py` only reads durable state
-and routes to the next explicit entry.
+An exact `REQ-###` selects the Requirement-driven chain. Its impact matrix
+decides `required`, `reuse` or `not_applicable`; every completed applicable
+stage binds a current, approved, committed package receipt. Without `REQ-###`,
+the same entries are manual: the user explicitly selects approved/current
+upstream packages and no Requirement, Stage Impact or Stage Results state is
+created. A stage is complete only when its package is approved and committed.
+`requirement_route.py` reads only Requirement-driven durable state; manual
+entries never call it.
 
 The complete current lifecycle, Delivery tree and Git coordination contract is
 defined in [requirement-delivery-protocol.md](requirement-delivery-protocol.md).
@@ -75,10 +78,13 @@ Responsibilities, Acceptance, Dependencies and Delivery Notes. It names one
 concrete responsibility and the owner cannot repeat as supporting. The fields
 hold team role identifiers only.
 
-`criterion_refs`, `experience_refs`, `derives_from`, `depends_on`,
+`criterion_refs`, `derives_from`, `depends_on`,
 `uses_design` and `constrained_by` are vault-absolute wikilinks. Criterion and
 rule links resolve to exact stable headings in approved upstream notes.
 Dependencies target stories and have matching reasons in the story body.
+`experience_refs` instead use exact living Experience aliases such as
+`checkout:SCR-001@r2`, resolved through the owning approved package registry
+or durable ledger for historical work.
 
 An epic review derives from its epic and verifies the exact story/test-plan set
 below it. The root review derives from the backlog and relates to the exact
@@ -90,7 +96,7 @@ not rewrite its source.
 
 Epic-review sections are Scope, Slicing, Criteria Coverage, Test Design,
 Dependencies, Role Ownership, Findings and Verdict. Root-review sections are
-Epic Coverage, Cross-Epic Overlap, Cross-Epic Dependencies, Release Ordering,
+Epic Coverage, Cross-Epic Overlap, Cross-Epic Dependencies, Delivery Sequencing,
 Shared Contracts, Deferred Criteria, Global Test Coverage, Findings and
 Verdict.
 
@@ -116,7 +122,7 @@ sequence and compatibility rules live in [upgrade-protocol.md](upgrade-protocol.
 
 ## Validation expectations
 
-Run `make check` before committing. It validates repository contracts, release
-metadata, generated distributions, focused compiler tests and runtime scripts.
+Run `make check` before committing. It validates repository contracts, package
+receipts, generated distributions, focused compiler tests and runtime scripts.
 Use `make counts` only to refresh derived README counts. Never edit `dist/`
 directly.

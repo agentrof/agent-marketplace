@@ -10,7 +10,7 @@ to the Delivery Flow.
 <!-- counts:start -->
 | Plugins | Agents | Entry skills | Knowledge skills |
 |---|---|---|---|
-| 1 | 14 | 15 | 15 |
+| 1 | 17 | 15 | 15 |
 <!-- counts:end -->
 
 Counts are maintained by `make counts`.

@@ -14,6 +14,8 @@ sys.path.insert(0, str(SCRIPTS))
 sys.path.insert(0, str(ROOT / "tools" / "tests"))
 
 import delivery_compile  # noqa: E402
+import operation_compile  # noqa: E402
+import stage_package  # noqa: E402
 from backlog_fixture import make_approved_backlog  # noqa: E402
 
 
@@ -36,6 +38,45 @@ class DeliveryCompilerTests(unittest.TestCase):
         self.assertEqual(delivery_compile.init_dod(args), 0)
         self.assertEqual(delivery_compile.approve_dod(args), 0)
 
+    def approve_verification_contract(self):
+        """Create the smallest current Solution and Operation handoff chain."""
+        decisions = self.docs / "solution-design" / "decisions"
+        decisions.mkdir(parents=True, exist_ok=True)
+        decision = decisions / "fixture-api.md"
+        ref = "solution-design/decisions/fixture-api"
+        if not decision.exists():
+            decision = decisions / "api.md"
+            ref = "solution-design/decisions/api"
+            decision.write_text(
+                "---\n"
+                "type: decision\nstatus: accepted\n"
+                "decision_kind: technology-selection\n"
+                "applies_to:\n  - api\n"
+                "selected_technology: python-fastapi\n"
+                "method_skills:\n  - python-fastapi\n"
+                "---\n\n# API\n",
+                encoding="utf-8",
+            )
+            landscape = self.docs / "solution-design" / "landscape.md"
+            landscape.write_text("---\ntype: landscape\nstatus: approved\npackage_status: draft\n---\n\n# Landscape\n", encoding="utf-8")
+            digest = stage_package.tree_hash(
+                self.docs / "solution-design",
+                {"package_hash", "package_status", "package_approved_at_utc"},
+            )
+            landscape.write_text(
+                f"---\ntype: landscape\nstatus: approved\npackage_status: approved\npackage_hash: {digest}\n---\n\n# Landscape\n",
+                encoding="utf-8",
+            )
+        args = type("Args", (), {
+            "docs": str(self.docs), "kind": "verification", "constrained_by": [ref],
+        })
+        self.assertEqual(operation_compile.init(args), 0)
+        path = self.docs / "operation" / "verification-contract.md"
+        props, body = operation_compile.parse(path)
+        props["test_command"] = "make test"
+        operation_compile.atomic_text(path, operation_compile.render(props, body))
+        self.assertEqual(operation_compile.approve(args), 0)
+
     def test_dod_bootstrap_approval_and_revision_keep_one_path(self):
         args = type("Args", (), {"docs": str(self.docs), "title": "Project", "file": None})
         self.assertEqual(delivery_compile.init_dod(args), 0)
@@ -50,6 +91,7 @@ class DeliveryCompilerTests(unittest.TestCase):
         self.assertNotEqual(props.get("source_hash"), before)
 
     def test_scope_then_execution_creates_exact_item_evidence_files(self):
+        self.approve_verification_contract()
         dod_args = type("Args", (), {"docs": str(self.docs), "title": "Project", "file": None})
         delivery_compile.init_dod(dod_args)
         delivery_compile.approve_dod(dod_args)

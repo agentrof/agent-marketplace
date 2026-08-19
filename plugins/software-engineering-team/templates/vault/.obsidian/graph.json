@@ -1,6 +1,6 @@
 {
   "collapse-filter": false,
-  "search": "-path:_generated",
+  "search": "-path:_generated -path:_ledger",
   "showTags": false,
   "showAttachments": false,
   "hideUnresolved": false,
@@ -78,7 +78,7 @@
       }
     },
     {
-      "query": "tag:#doc/api-contract OR tag:#doc/data-model OR tag:#doc/threat-model OR tag:#doc/environment-reference",
+      "query": "tag:#doc/system-architecture OR tag:#doc/architecture-component OR tag:#doc/architecture-module OR tag:#doc/interface-contract OR tag:#doc/data-model OR tag:#doc/threat-model OR tag:#doc/runtime-view OR tag:#doc/reliability-view OR tag:#doc/observability-view OR tag:#doc/architecture-connection OR tag:#doc/architecture-standard",
       "color": {
         "a": 1,
         "rgb": 3447003
@@ -93,6 +93,13 @@
     },
     {
       "query": "tag:#doc/landscape",
+      "color": {
+        "a": 1,
+        "rgb": 5227511
+      }
+    },
+    {
+      "query": "tag:#doc/solution-component",
       "color": {
         "a": 1,
         "rgb": 5227511
@@ -120,24 +127,10 @@
       }
     },
     {
-      "query": "tag:#doc/experience OR tag:#doc/program OR tag:#doc/release OR tag:#doc/experience-space OR tag:#doc/experience-domain",
+      "query": "tag:#doc/experience OR tag:#doc/journey OR tag:#doc/flow-set OR tag:#doc/screen OR tag:#doc/state OR tag:#doc/transition OR tag:#doc/artifact-manifest",
       "color": {
         "a": 1,
         "rgb": 3108513
-      }
-    },
-    {
-      "query": "tag:#doc/journey OR tag:#doc/flow-set",
-      "color": {
-        "a": 1,
-        "rgb": 16747520
-      }
-    },
-    {
-      "query": "tag:#doc/screen OR tag:#doc/artifact-manifest",
-      "color": {
-        "a": 1,
-        "rgb": 5592575
       }
     },
     {
@@ -250,6 +243,20 @@
       "color": {
         "a": 1,
         "rgb": 12154638
+      }
+    },
+    {
+      "query": "tag:#doc/verification-contract OR tag:#doc/environment-contract",
+      "color": {
+        "a": 1,
+        "rgb": 1549705
+      }
+    },
+    {
+      "query": "tag:#doc/delivery-governance",
+      "color": {
+        "a": 1,
+        "rgb": 2388387
       }
     }
   ],

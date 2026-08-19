@@ -58,15 +58,16 @@ design master's tokens.
 4. Write tagged tests as you go: component render and interaction, state
    coverage, accessibility checks; one tagged test per acceptance
    criterion and business rule this package owns.
-5. Self-verify end to end, through the configured environment command
-   when one exists: the application starts clean, every approved screen
-   renders, no console errors, all states reachable; tear it down after.
+5. Self-verify end to end through the approved Environment Contract when the
+   Item requires a live runtime: the application starts clean, every approved
+   screen renders, no console errors, all states reachable; tear it down
+   after.
 6. If an input is contradictory or missing, stop and report blocked with
    the specific question instead of improvising.
 
 ## Output Contract
 - Working client-side code in the project tree within the ownership map;
-  the tagged test suite green via the configured command; token
+  the tagged test suite green via the approved Verification Contract; token
   compliance and full state coverage as hard done-conditions.
 - End the reply with SELF-CHECK: token fidelity, state coverage,
   accessibility pass and contract fidelity marked satisfied or violated.

@@ -93,6 +93,7 @@ class PackageRefreshAcceptanceTests(unittest.TestCase):
         config = json.loads(config_path.read_text(encoding="utf-8"))
         self.assertNotIn("issue-report", config["doc_type_designations"])
         config["doc_type_designations"]["story"] = "delivery story"
+        # Closed config drops unknown project-owned fields during refresh.
         config["consumer_refresh_data"] = {"owner": "project"}
         config_path.write_text(json.dumps(config, indent=2) + "\n", encoding="utf-8")
 
@@ -236,7 +237,7 @@ class PackageRefreshAcceptanceTests(unittest.TestCase):
         )
         self.assertEqual(config["doc_type_designations"]["story"], "delivery story")
         self.assertEqual(config["doc_type_designations"]["issue-report"], "issue report")
-        self.assertEqual(config["consumer_refresh_data"], {"owner": "project"})
+        self.assertNotIn("consumer_refresh_data", config)
         self.assertTrue((projected / "LICENSE").is_file())
         self.assertEqual(
             (projected / "LICENSE").read_bytes(),

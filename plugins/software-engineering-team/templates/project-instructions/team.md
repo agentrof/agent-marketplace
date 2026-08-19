@@ -8,11 +8,12 @@
   directory as the vault root. Its maps, generated views, document-type
   designations, graph policy, citations, and navigation follow the
   `obsidian-vault` skill and the owning validation commands.
-- `{{workspace}}/docs/experience-design/`: approved program and release
-  experience graphs. Sketches are exploration, not baselines.
+- `{{workspace}}/docs/experience-design/experiences/`: living approved
+  Experience packages, one active package per primary BA process. Sketches are
+  exploration, not Experience state.
 - `{{workspace}}/apps/`: application code, one directory per application.
-- `{{workspace}}/environment/`: containerized environment definitions, build
-  recipes, seed scenarios, and its command contract.
+- `{{workspace}}/docs/operation/`: approved verification and environment
+  contracts used when Delivery turns stories into executable Items.
 - `{{workspace}}/demos/` and `{{workspace}}/sketches/`: outward demos and
   design exploration previews.
 - `<git-root>/.agentrof/agent-marketplace/.runtime/`: project-local runtime

@@ -9,6 +9,9 @@ exposure: internal
 **Given:** an architecture delta declaring applications, services and stores, and an ownership map granting the environment prefix.
 **Produces:** a compose-defined environment that rises from scratch with one command, healthchecked, seeded and clean, plus the entry point the whole team consumes.
 
+Load the `obsidian-vault` skill before reading or writing the approved
+Environment Contract under `workspace/docs/operation/`.
+
 ## When to Use
 
 - Defining or extending the project's containerized environment
@@ -28,7 +31,10 @@ exposure: internal
 
 ## The Environment Command
 
-`env_command` in workspace/config.json names one project-owned entry point (a script or make target) with fixed verbs. All roles and flows consume the environment ONLY through it:
+The approved Environment Contract at
+`workspace/docs/operation/environment-contract.md` names one project-owned
+entry point (a script or make target) with fixed verbs. All roles and flows
+consume the environment ONLY through it:
 
 | verb | contract |
 |---|---|
@@ -40,11 +46,18 @@ exposure: internal
 
 The entry point derives the compose project name itself: sanitized, lowercased basename of the working tree root. Parallel worktrees therefore get disjoint containers, networks, volumes and ports with zero caller effort.
 
-The environment contract document lives at workspace/environment/contract.md with exactly three sections: Commands (verb usage), Scenarios (the catalog), Tolerated Warnings (the log-audit record: library name and reason per entry).
+The Environment Contract carries its command, workdir, scenarios, tolerated
+warnings and service catalog. It is revisioned independently of Solution and
+product-stage packages.
 
 ## Hermetic Suite Rule
 
-The configured test and mutation commands NEVER depend on a standing environment; test fixtures own their ephemeral stores. If a project ever violates this, bring the environment up once for the whole mutation run, never per mutant. Environment cycles happen only at: authoring self-verification, developer smoke checks, the QA live protocol, the CI smoke job, and merge checkpoints.
+The approved Verification Contract commands NEVER depend on a standing
+environment; test fixtures own their ephemeral stores. If a project ever
+violates this, bring the environment up once for the whole mutation run, never
+per mutant. Environment cycles happen only at: authoring self-verification,
+developer smoke checks, the QA live protocol, the CI smoke job, and merge
+checkpoints.
 
 ## Seed Scenarios
 

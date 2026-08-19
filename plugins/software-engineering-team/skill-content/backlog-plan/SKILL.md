@@ -1,6 +1,6 @@
 ---
 name: backlog-plan
-description: User-gated Requirement Flow entry that turns approved analysis, solution-design, design-system and experience-design evidence into a project-local nested Markdown backlog with epic reviews, story test plans and reproducible coverage views.
+description: User-gated planning entry that turns either an approved Requirement chain or a manual approved BA, solution, design-system and living Experience receipt set into a project-local nested Markdown backlog with epic reviews, story test plans and reproducible coverage views.
 exposure: entry
 ---
 
@@ -14,17 +14,28 @@ approved. This entry prepares delivery, but it does not start delivery.
 - Requirement Flow has approved the request impact matrix and every stage
   marked `required` is approved and current; `reuse` rows cite valid approved
   evidence and `not_applicable` rows carry their concrete rationale.
+- Or the user has approved the exact strict-current manual BA scope, solution landscape,
+  Design System MASTER and one or more living Experience packages. Manual planning does not
+  require a Requirement, Stage Impact or Requirement Coverage section.
 - Every defect or technical intake has its approved source, issue or decision
   evidence in the Requirement record when no feature traceability applies.
 - The user wants a tracked backlog before any delivery work begins.
 
 ## Procedure
 
-1. Run `requirement_route.py --project-root <root> REQ-### --json`. Require the
-   response to route to `backlog-plan`; an earlier entry is a hard route.
+1. Resolve the planning mode. In Requirement mode run
+   `requirement_route.py --project-root <root> REQ-### --json` and require the
+   response to route to `backlog-plan`. In manual mode do not call the
+   Requirement router; validate the exact approved upstream package chain and
+   report `Input Package Coverage` instead.
 2. Read `flows/backlog-planning.md`, `product-planning` and the `obsidian-vault`
    skill completely; the vault policy is authoritative for paths and metadata.
 3. Initialize `workspace/docs/backlog/` with `backlog_compile.py init`.
+   For the direct chain, pass `--planning-mode manual` and four exact
+   `--input-ref` links for the approved BA, solution, Design System and
+   Experience package receipts. This renders the compiler-owned
+   `Input Package Coverage` report. Requirement mode records the exact
+   `requirement_ref` and requires `implements: REQ-###` on stories.
 4. Create one folder per epic. Each epic contains `epic.md`, `reviews/` and
    `stories/<story-slug>/story.md` plus `test-plan.md` for every story. Authored
    titles and H1s use the configured document-type designations. The
@@ -61,8 +72,8 @@ approved. This entry prepares delivery, but it does not start delivery.
    Product Owner is the only backlog writer. After epic packages are green,
    invoke and wait for the root reviewer, then let the Product Owner write the
    root review. The epic review covers the exact story and test-plan set; the
-   root review covers the exact epic set, global scope, dependencies, release
-   ordering and coverage. Its structured `Deferred Criteria` table carries
+   root review covers the exact epic set, global scope, dependencies, delivery
+   sequencing and coverage. Its structured `Deferred Criteria` table carries
    an escaped-table vault wikilink `criterion_ref`, `owner_role`, `reason` and
    `revisit_trigger`. Every selected AC/BR is either story-covered or deferred,
    never both. Replace all review

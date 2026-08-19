@@ -20,6 +20,26 @@ HOOK = ROOT / "platforms" / "shared" / "software-engineering-team" / "overlay" /
 
 
 class VaultHookTests(unittest.TestCase):
+    @staticmethod
+    def draft_backlog(docs: Path) -> Path:
+        """A deliberately incomplete modern backlog for hook-only tests."""
+        maps = docs / "maps"
+        maps.mkdir(parents=True, exist_ok=True)
+        (maps / "backlog.md").write_text(
+            "---\ntype: moc\ntitle: Backlog map\ntags:\n  - doc/moc\n"
+            "---\n\n# Backlog map\n", encoding="utf-8",
+        )
+        path = docs / "backlog" / "backlog.md"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(
+            "---\ntype: backlog\ntitle: Product backlog\nstatus: draft\n"
+            "planning_mode: manual\nowner_role: product_owner\nrevision: 1\n"
+            "tags:\n  - doc/backlog\n  - status/draft\naliases:\n  - BACKLOG\n"
+            "---\n\n# Product backlog\n\n## Navigation <!-- sec: nav -->\n\n"
+            "[[maps/backlog|Backlog map]]\n", encoding="utf-8",
+        )
+        return path
+
     def setup_project(self, root: Path) -> Path:
         subprocess.run(["git", "init", "-q", str(root)], check=True)
         result = subprocess.run(
@@ -34,10 +54,12 @@ class VaultHookTests(unittest.TestCase):
         (root / "workspace" / "docs").mkdir(parents=True)
         config = root / "workspace" / "config.json"
         config.write_text(json.dumps({
+            "schema_version": 1,
             "team_id": "software-engineering-team",
-            "scale": "small",
             "output_language": "English",
             "terminology_language": "English",
+            "doc_type_designations": {},
+            "doc_type_designation_history": {},
         }, indent=2) + "\n", encoding="utf-8")
         return config
 
@@ -98,14 +120,7 @@ class VaultHookTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary:
             project = Path(temporary)
             docs = self.setup_project(project)
-            initialized = subprocess.run(
-                [sys.executable, str(BACKLOG), "init", "--docs", str(docs)],
-                cwd=ROOT, capture_output=True, text=True, check=False,
-            )
-            self.assertEqual(
-                initialized.returncode, 0,
-                initialized.stdout + initialized.stderr,
-            )
+            self.draft_backlog(docs)
             full = subprocess.run(
                 [sys.executable, str(BACKLOG), "check", "--docs", str(docs)],
                 cwd=ROOT, capture_output=True, text=True, check=False,
@@ -127,12 +142,7 @@ class VaultHookTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary:
             project = Path(temporary)
             docs = self.setup_project(project)
-            initialized = subprocess.run(
-                [sys.executable, str(BACKLOG), "init", "--docs", str(docs)],
-                cwd=ROOT, capture_output=True, text=True, check=False,
-            )
-            self.assertEqual(initialized.returncode, 0)
-            backlog = docs / "backlog" / "backlog.md"
+            backlog = self.draft_backlog(docs)
             changes_requested = {
                 "tool_name": "Edit",
                 "tool_input": {
@@ -155,14 +165,14 @@ class VaultHookTests(unittest.TestCase):
             self.assertEqual(denied.returncode, 2)
             self.assertIn("machine-managed", denied.stderr)
 
-    def test_team_owned_delivery_config_fields_require_the_config_writer(self):
+    def test_closed_config_rejects_direct_write(self):
         with tempfile.TemporaryDirectory() as temporary:
             project = Path(temporary)
             self.setup_project(project)
             config = project / "workspace" / "config.json"
             current = json.loads(config.read_text(encoding="utf-8"))
             proposed = dict(current)
-            proposed["test_command"] = "make test"
+            proposed["output_language"] = "Turkish"
             payload = {
                 "tool_name": "Write",
                 "tool_input": {
@@ -182,7 +192,7 @@ class VaultHookTests(unittest.TestCase):
 
             def mutate():
                 value = json.loads(config.read_text(encoding="utf-8"))
-                value["test_command"] = "make test"
+                value["output_language"] = "Turkish"
                 config.write_text(json.dumps(value, indent=2) + "\n",
                                   encoding="utf-8")
 
@@ -230,7 +240,7 @@ class VaultHookTests(unittest.TestCase):
             self.assertTrue(capsule.is_file())
 
             value = json.loads(config.read_text(encoding="utf-8"))
-            value["test_command"] = "bypassed"
+            value["output_language"] = "Turkish"
             config.write_text(json.dumps(value, indent=2) + "\n",
                               encoding="utf-8")
             shutil.rmtree(
@@ -266,7 +276,7 @@ class VaultHookTests(unittest.TestCase):
             self.assertEqual(len(snapshots), 1)
             snapshots[0].write_text('{"tampered":true}', encoding="utf-8")
             value = json.loads(config.read_text(encoding="utf-8"))
-            value["test_command"] = "bypassed"
+            value["output_language"] = "Turkish"
             config.write_text(json.dumps(value, indent=2) + "\n",
                               encoding="utf-8")
 
@@ -308,8 +318,8 @@ class VaultHookTests(unittest.TestCase):
             config = self.setup_config_project(project)
             argv = [
                 sys.executable, str(SCRIPTS / "project_config.py"), "set",
-                "--config", str(config), "--field", "test_command",
-                "--value", "make test && make lint",
+                "--config", str(config), "--field", "output_language",
+                "--value", "Turkish",
             ]
 
             def mutate():
@@ -328,7 +338,7 @@ class VaultHookTests(unittest.TestCase):
             self.assertEqual(allowed.returncode, 0,
                              allowed.stdout + allowed.stderr)
             value = json.loads(config.read_text(encoding="utf-8"))
-            self.assertEqual(value["test_command"], "make test && make lint")
+            self.assertEqual(value["output_language"], "Turkish")
 
     def test_chained_command_cannot_impersonate_config_writer(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -337,13 +347,13 @@ class VaultHookTests(unittest.TestCase):
             original = config.read_bytes()
             sanctioned = shlex.join([
                 sys.executable, str(SCRIPTS / "project_config.py"), "set",
-                "--config", str(config), "--field", "test_command",
-                "--value", "make test",
+                "--config", str(config), "--field", "output_language",
+                "--value", "Turkish",
             ])
 
             def mutate():
                 value = json.loads(config.read_text(encoding="utf-8"))
-                value["test_command"] = "bypassed"
+                value["output_language"] = "Turkish"
                 config.write_text(json.dumps(value, indent=2) + "\n",
                                   encoding="utf-8")
 
@@ -360,13 +370,13 @@ class VaultHookTests(unittest.TestCase):
             original = config.read_bytes()
             sanctioned = shlex.join([
                 sys.executable, str(SCRIPTS / "project_config.py"), "set",
-                "--config", str(config), "--field", "test_command",
-                "--value", "bypassed",
+                "--config", str(config), "--field", "output_language",
+                "--value", "Turkish",
             ])
 
             def mutate():
                 value = json.loads(config.read_text(encoding="utf-8"))
-                value["test_command"] = "bypassed"
+                value["output_language"] = "Turkish"
                 config.write_text(json.dumps(value, indent=2) + "\n",
                                   encoding="utf-8")
 
@@ -385,12 +395,12 @@ class VaultHookTests(unittest.TestCase):
             spoof = project / "project_config.py"
             command = shlex.join([
                 sys.executable, str(spoof), "set", "--config", str(config),
-                "--field", "test_command", "--value", "bypassed",
+                "--field", "output_language", "--value", "Turkish",
             ])
 
             def mutate():
                 value = json.loads(config.read_text(encoding="utf-8"))
-                value["test_command"] = "bypassed"
+                value["output_language"] = "Turkish"
                 config.write_text(json.dumps(value, indent=2) + "\n",
                                   encoding="utf-8")
 
@@ -399,7 +409,7 @@ class VaultHookTests(unittest.TestCase):
             self.assertIn("original config was restored", denied.stderr)
             self.assertEqual(config.read_bytes(), original)
 
-    def test_bash_may_change_project_owned_config_fields(self):
+    def test_bash_cannot_add_unknown_config_fields(self):
         with tempfile.TemporaryDirectory() as temporary:
             project = Path(temporary)
             config = self.setup_config_project(project)
@@ -410,11 +420,11 @@ class VaultHookTests(unittest.TestCase):
                 config.write_text(json.dumps(value, indent=2) + "\n",
                                   encoding="utf-8")
 
-            allowed = self.run_bash_cycle(project, "python3 mutate.py", mutate)
-            self.assertEqual(allowed.returncode, 0,
-                             allowed.stdout + allowed.stderr)
+            denied = self.run_bash_cycle(project, "python3 mutate.py", mutate)
+            self.assertEqual(denied.returncode, 2,
+                             denied.stdout + denied.stderr)
             value = json.loads(config.read_text(encoding="utf-8"))
-            self.assertEqual(value["project_notes"], "local")
+            self.assertNotIn("project_notes", value)
 
     def test_bash_ignores_policy_owned_obsidian_plugin_projection(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -527,7 +537,7 @@ class VaultHookTests(unittest.TestCase):
             self.assertEqual(result.returncode, 2)
             self.assertIn("approved Design System content is immutable", result.stderr)
 
-    def test_approved_experience_release_is_immutable(self):
+    def test_legacy_experience_release_path_is_rejected(self):
         with tempfile.TemporaryDirectory() as temporary:
             project = Path(temporary)
             docs = self.setup_project(project)
@@ -545,7 +555,7 @@ class VaultHookTests(unittest.TestCase):
                 "tool_input": {"file_path": str(journey), "content": "draft"},
             })
             self.assertEqual(result.returncode, 2)
-            self.assertIn("approved Experience Design", result.stderr)
+            self.assertIn("invalid Experience Design filename or path", result.stderr)
 
     def test_retired_experience_review_path_is_rejected(self):
         with tempfile.TemporaryDirectory() as temporary:

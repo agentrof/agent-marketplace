@@ -6,9 +6,12 @@ exposure: entry
 
 # Setup
 
-Deferred template activation substitutes `{{test_command}}`,
-`{{audit_command}}`, `{{env_command}}` and `{{project_local_ignores}}`; these
-tokens never land literally in a consuming project.
+Setup never writes executable test or environment placeholders into a consuming
+project. Approved Operation Contracts supply those commands at Delivery time.
+Delivery activation replaces `{{test_command}}`, `{{dependency_audit_job}}`
+and `{{environment_smoke_job}}` in its private CI template, while setup alone
+replaces `{{project_local_ignores}}` in its managed gitignore block. No
+placeholder is allowed to reach a consuming repository.
 
 ## When to Use
 
@@ -52,9 +55,11 @@ tokens never land literally in a consuming project.
    `apply` and `check`. Never overwrite companions silently. This is a host
    adapter projection; project truth remains the canonical workspace.
 5. Read the `obsidian-vault` skill completely. Refresh materializes its vault
-   payload under `workspace/docs/`, adds only missing designation defaults to
-   `workspace/config.json`, and converges the compiler-owned relation reports.
-   It never retitles authored notes implicitly. The map includes the fixed
+   payload under `workspace/docs/`, rebuilds the closed `workspace/config.json`
+   shape, preserves valid language/designation values, and converges the
+   compiler-owned relation reports. Retired command fields migrate to draft
+   `docs/operation/` contracts and a valid legacy `max_parallel` becomes
+   Governance revision 1. It never retitles authored notes implicitly. The map includes the fixed
    backlog keys `backlog`, `backlog-review`, `epic`, `epic-review`, `story`
    and `test-plan`, plus the team's `issue-report` designation and all
    analysis/design types. Type keys and graph colors stay stable. Existing
@@ -71,9 +76,9 @@ tokens never land literally in a consuming project.
    reviewable project changes.
 8. Run the portable vault gate and relevant Requirement compilers. Delivery
    execution owns its own test and provider gates; setup never emits a
-   template with unresolved command placeholders. The CI template
-   substitutions remain documented in [ci-bootstrap.md](references/ci-bootstrap.md)
-   for the later Release Management boundary.
+   template with unresolved command placeholders.
+   Read [ci-bootstrap](references/ci-bootstrap.md) when an approved Delivery
+   is ready to materialize project CI.
 9. Review and commit the exact tracked refresh diff before a workflow handoff.
    Report `requirement` as the next entry. `/requirement` evaluates the
    request-specific impact matrix and routes only the required stages and

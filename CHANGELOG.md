@@ -16,3 +16,7 @@
 ## 3.0.0
 
 - Make issue reporting stateless and open approved reports directly in the Agent Marketplace repository.
+
+## 3.0.1
+
+- Fix Solution validators for canonical nested BA processes, explicit empty ownership, and complete vault property typing.

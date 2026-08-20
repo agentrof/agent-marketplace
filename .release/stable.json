@@ -1,12 +1,12 @@
 {
   "schema_version": 1,
-  "version": "3.0.1",
-  "stable_base": "315afaec3dc8d7bce696dbe5f50074a323b87393",
-  "main_source": "5b44fbbeba0f622abc03962da5c087981b401d82",
+  "version": "3.1.0",
+  "stable_base": "d04c0ae02a3d55b8ff03d81e41085c0593e5209d",
+  "main_source": "288393476ba186e552169a1f7b1de15736732fa7",
   "impacts": {
-    "software-engineering-team": "patch"
+    "software-engineering-team": "minor"
   },
   "summaries": [
-    "Fix Solution validators for canonical nested BA processes, explicit empty ownership, and complete vault property typing."
+    "Add domain-aware Experience process resolution, opaque vault artifacts, and the contract-v3 Design System catalog."
   ]
 }

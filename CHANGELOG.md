@@ -20,3 +20,7 @@
 ## 3.0.1
 
 - Fix Solution validators for canonical nested BA processes, explicit empty ownership, and complete vault property typing.
+
+## 3.1.0
+
+- Add domain-aware Experience process resolution, opaque vault artifacts, and the contract-v3 Design System catalog.

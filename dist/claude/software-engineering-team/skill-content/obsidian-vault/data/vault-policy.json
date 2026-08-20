@@ -1,5 +1,5 @@
 {
-  "schema_version": 6,
+  "schema_version": 7,
   "vault_root_dirname": "docs",
   "home_file": "home.md",
   "maps_dir": "maps",
@@ -263,6 +263,7 @@
     "api/"
   ],
   "attachments_dir": "_attachments",
+  "artifact_directory_name": "artifacts",
   "attachment_extensions": [
     ".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg", ".pdf",
     ".mp3", ".wav", ".m4a", ".mp4", ".webm"

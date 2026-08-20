@@ -35,8 +35,10 @@ create releases, numbered baselines, programs or delivery state.
 3. Use the same transient `--scope-plan <file>` and approved
    `--proposal-hash <hash>` for every create, revision, rename, retirement and
    set approval. A canonical primary process is
-   `business-analysis/<space>/processes/<process-slug>-process`; it must
-   resolve through the selected BA receipt. A no-op revision is prohibited.
+   `business-analysis/<space>/(domains/<domain>/)*/processes/<process-slug>-process`;
+   it must resolve through the selected BA compiler topology and receipt. The
+   same resolver validates primary and related process references. A no-op
+   revision is prohibited.
 4. UX Designer is the only writer. Child records use stable `JRN`, `FLW`,
    `SCR`, `STA` and `TRN` identities, exact refs and `record_state` only.
    Place all canonical records in the process-owned package; `_generated/`

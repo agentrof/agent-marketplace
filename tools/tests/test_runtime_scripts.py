@@ -277,11 +277,81 @@ class DesignSystemCompileTests(unittest.TestCase):
             self.assertIn("status: draft", revised)
             self.assertIn("  - status/draft", revised)
             self.assertIn("supersedes_hash: sha256:", revised)
+            self.assertIn("contract_version: 3", revised)
             self.assertNotIn("baseline_hash:", revised)
             code, _, err = run(
                 design_system_compile, ["check", "--root", str(root)]
             )
+            self.assertEqual(code, 1, err)
+
+    @staticmethod
+    def v3_master() -> str:
+        return (
+            "---\ntype: design_master\ntitle: Product design system\n"
+            "status: draft\nrevision: 1\ncontract_version: 3\ntags:\n"
+            "  - doc/design-master\n  - status/draft\n---\n\n"
+            "# Product design system\n\n"
+            "## Product position\n\nPosition.\n\n"
+            "## Brand and asset fidelity\n\nNo supplied identity asset.\n\n"
+            "## Global rules\n\n### Catalog tokens\n\n"
+            "<!-- catalog:tokens:start -->\n```css\n:root { --catalog-background: #fff; }\n"
+            "```\n<!-- catalog:tokens:end -->\n\n"
+            "## Component specs\n\nSpecs.\n\n## Style guidelines\n\nRules.\n\n"
+            "## Anti-patterns\n\nAvoid.\n\n## Pre-delivery checklist\n\nCheck.\n\n"
+            "## Navigation\n\n[[maps/design-system|Design System]]\n"
+        )
+
+    def test_catalog_init_sync_and_staleness_are_mechanical(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            master = root / "MASTER.md"
+            master.write_text(self.v3_master(), encoding="utf-8")
+            code, _, err = run(design_system_compile, [
+                "init-catalog", "--root", str(root),
+            ])
             self.assertEqual(code, 0, err)
+            self.assertTrue((root / "artifacts" / "standalone.html").is_file())
+            self.assertTrue(design_system_compile.catalog_findings(root))
+            catalog = root / "artifacts" / "standalone.html"
+            catalog.write_text(
+                catalog.read_text(encoding="utf-8").replace("AUTHOR_REQUIRED", "Filled"),
+                encoding="utf-8",
+            )
+            self.assertEqual(design_system_compile.catalog_findings(root), [])
+            master.write_text(
+                master.read_text(encoding="utf-8").replace("#fff", "#fefefe"),
+                encoding="utf-8",
+            )
+            stale = design_system_compile.catalog_findings(root)
+            self.assertIn("catalog token block does not match MASTER.md", stale)
+            code, _, err = run(design_system_compile, [
+                "sync-catalog", "--root", str(root),
+            ])
+            self.assertEqual(code, 0, err)
+            self.assertEqual(design_system_compile.catalog_findings(root), [])
+
+    def test_design_system_persistence_creates_master_and_catalog_skeleton_together(self):
+        script_dir = REPO / "plugins/software-engineering-team/skill-content/ui-ux-design/scripts"
+        sys.path.insert(0, str(script_dir))
+        try:
+            spec = importlib.util.spec_from_file_location(
+                "ui_ux_design_system", script_dir / "design_system.py")
+            module = importlib.util.module_from_spec(spec)
+            assert spec.loader is not None
+            spec.loader.exec_module(module)
+        finally:
+            sys.path.remove(str(script_dir))
+        design = {
+            "project_name": "Atlas", "category": "General", "colors": {},
+            "colors_dark": {}, "typography": {}, "radius": {}, "motion": {},
+            "pattern": {}, "style": {}, "icon_set": "Local icons",
+        }
+        with tempfile.TemporaryDirectory() as temporary:
+            output = Path(temporary) / "design-system"
+            result = module.persist_design_system(design, output_dir=str(output))
+            self.assertIn(str(output / "MASTER.md"), result["created_files"])
+            self.assertIn(str(output / "artifacts" / "standalone.html"), result["created_files"])
+            self.assertIn("contract_version: 3", (output / "MASTER.md").read_text(encoding="utf-8"))
 
 
 if __name__ == "__main__":

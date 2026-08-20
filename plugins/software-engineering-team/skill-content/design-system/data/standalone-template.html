@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="en" data-catalog-theme="light">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="design-system-contract-version" content="3">
+  <meta name="design-system-master-revision" content="">
+  <meta name="design-system-master-source-hash" content="">
+  <title data-catalog-slot="document-title">AUTHOR_REQUIRED</title>
+  <style id="design-system-tokens">
+/* catalog:tokens:start */
+/* catalog:tokens:end */
+  </style>
+  <style>
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body { margin: 0; background: var(--catalog-background); color: var(--catalog-foreground); font-family: var(--catalog-font-body); line-height: var(--catalog-line-height); }
+    a { color: inherit; }
+    :focus-visible { outline: var(--catalog-focus-width) solid var(--catalog-focus); outline-offset: var(--catalog-focus-offset); }
+    .catalog-shell { max-width: var(--catalog-content-width); margin: auto; padding-inline: var(--catalog-gutter); }
+    .catalog-header { position: sticky; top: 0; z-index: var(--catalog-header-layer); display: flex; flex-wrap: wrap; gap: var(--catalog-space-sm); align-items: center; justify-content: space-between; padding-block: var(--catalog-space-sm); background: var(--catalog-background); border-bottom: var(--catalog-border-width) solid var(--catalog-border); }
+    .catalog-nav { display: flex; flex-wrap: wrap; gap: var(--catalog-space-xs); }
+    .catalog-section { scroll-margin-top: var(--catalog-scroll-offset); padding-block: var(--catalog-space-3xl); border-bottom: var(--catalog-border-width) solid var(--catalog-border); }
+    .catalog-grid { display: grid; gap: var(--catalog-space-md); grid-template-columns: repeat(auto-fit, minmax(var(--catalog-card-min-width), 1fr)); }
+    .catalog-card, .catalog-specimen { padding: var(--catalog-space-md); border: var(--catalog-border-width) solid var(--catalog-border); border-radius: var(--catalog-radius-md); background: var(--catalog-surface); box-shadow: var(--catalog-shadow-sm); }
+    .catalog-button { display: inline-flex; align-items: center; justify-content: center; min-height: var(--catalog-touch-target); padding-inline: var(--catalog-space-md); border-radius: var(--catalog-radius-sm); border: var(--catalog-border-width) solid currentColor; transition: transform var(--catalog-motion-fast) var(--catalog-motion-easing); }
+    .catalog-swatch { min-height: var(--catalog-swatch-height); border-radius: var(--catalog-radius-sm); }
+    .catalog-type-display { font-family: var(--catalog-font-heading); font-size: var(--catalog-type-display-size); font-weight: var(--catalog-type-display-weight); }
+    .catalog-muted { color: var(--catalog-muted); }
+    @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation-duration: 0.01ms !important; animation-iteration-count: 1 !important; scroll-behavior: auto !important; transition-duration: 0.01ms !important; } }
+  </style>
+</head>
+<body id="top">
+  <header class="catalog-header catalog-shell" data-catalog-section="sticky-header">
+    <a href="#top" data-catalog-slot="project-lockup">AUTHOR_REQUIRED</a>
+    <nav class="catalog-nav" aria-label="Design system sections">
+      <a href="#foundation" data-catalog-slot="nav-foundation">AUTHOR_REQUIRED</a><a href="#brand" data-catalog-slot="nav-brand">AUTHOR_REQUIRED</a><a href="#color" data-catalog-slot="nav-color">AUTHOR_REQUIRED</a><a href="#components" data-catalog-slot="nav-components">AUTHOR_REQUIRED</a><a href="#accessibility" data-catalog-slot="nav-accessibility">AUTHOR_REQUIRED</a>
+    </nav>
+    <button id="theme-toggle" class="catalog-button" type="button" aria-pressed="false" aria-label="Toggle color theme" data-catalog-slot="theme-toggle-label">AUTHOR_REQUIRED</button>
+  </header>
+  <main class="catalog-shell">
+    <section id="hero" class="catalog-section" data-catalog-section="hero">
+      <p class="catalog-muted" data-catalog-slot="design-system-revision">AUTHOR_REQUIRED</p>
+      <h1 class="catalog-type-display" data-catalog-slot="project-name">AUTHOR_REQUIRED</h1>
+      <p data-catalog-slot="design-posture">AUTHOR_REQUIRED</p>
+      <div class="catalog-grid">
+        <article class="catalog-card" data-catalog-slot="foundation-card">AUTHOR_REQUIRED</article>
+        <article class="catalog-card" data-catalog-slot="project-expression-card">AUTHOR_REQUIRED</article>
+        <article class="catalog-card" data-catalog-slot="domain-additions-card">AUTHOR_REQUIRED</article>
+      </div>
+    </section>
+    <section id="foundation" class="catalog-section" data-catalog-section="foundation">
+      <h2 data-catalog-slot="section-foundation">AUTHOR_REQUIRED</h2><div class="catalog-grid"><article class="catalog-card" data-catalog-slot="core-system-rules">AUTHOR_REQUIRED</article><article class="catalog-card" data-catalog-slot="project-layer-comparison">AUTHOR_REQUIRED</article></div>
+    </section>
+    <section id="brand" class="catalog-section" data-catalog-section="brand">
+      <h2 data-catalog-slot="section-brand">AUTHOR_REQUIRED</h2><div class="catalog-grid"><article class="catalog-specimen" data-catalog-slot="brand-light-lockup">AUTHOR_REQUIRED</article><article class="catalog-specimen" data-catalog-slot="brand-dark-lockup">AUTHOR_REQUIRED</article><article class="catalog-card" data-catalog-slot="brand-clear-space">AUTHOR_REQUIRED</article><article class="catalog-card" data-catalog-slot="brand-permitted-use">AUTHOR_REQUIRED</article><article class="catalog-card" data-catalog-slot="brand-forbidden-use">AUTHOR_REQUIRED</article></div>
+    </section>
+    <section id="voice" class="catalog-section" data-catalog-section="content-voice">
+      <h2 data-catalog-slot="section-content-voice">AUTHOR_REQUIRED</h2><div class="catalog-grid"><article class="catalog-card" data-catalog-slot="write-like-this">AUTHOR_REQUIRED</article><article class="catalog-card" data-catalog-slot="avoid-writing">AUTHOR_REQUIRED</article></div>
+    </section>
+    <section id="color" class="catalog-section" data-catalog-section="color">
+      <h2 data-catalog-slot="section-color">AUTHOR_REQUIRED</h2><div class="catalog-grid"><article class="catalog-card" data-catalog-slot="primitive-scale">AUTHOR_REQUIRED</article><article class="catalog-card" data-catalog-slot="semantic-themes">AUTHOR_REQUIRED</article><article class="catalog-card" data-catalog-slot="accent-palette">AUTHOR_REQUIRED</article><article class="catalog-card" data-catalog-slot="system-states">AUTHOR_REQUIRED</article></div>
+    </section>
+    <section id="type" class="catalog-section" data-catalog-section="typography">
+      <h2 data-catalog-slot="section-typography">AUTHOR_REQUIRED</h2><div class="catalog-grid"><article class="catalog-card" data-catalog-slot="type-scale">AUTHOR_REQUIRED</article><article class="catalog-card" data-catalog-slot="weight-specimens">AUTHOR_REQUIRED</article><article class="catalog-card" data-catalog-slot="specialized-text-roles">AUTHOR_REQUIRED</article></div>
+    </section>
+    <section id="foundations" class="catalog-section" data-catalog-section="foundations">
+      <h2 data-catalog-slot="section-foundations">AUTHOR_REQUIRED</h2><div class="catalog-grid"><article class="catalog-card" data-catalog-slot="spacing-scale">AUTHOR_REQUIRED</article><article class="catalog-card" data-catalog-slot="radius-specimens">AUTHOR_REQUIRED</article><article class="catalog-card" data-catalog-slot="layout-visualization">AUTHOR_REQUIRED</article><article class="catalog-card" data-catalog-slot="elevation-specimens">AUTHOR_REQUIRED</article><article class="catalog-card" data-catalog-slot="motion-specimens">AUTHOR_REQUIRED</article></div>
+    </section>
+    <section id="components" class="catalog-section" data-catalog-section="components">
+      <h2 data-catalog-slot="section-components">AUTHOR_REQUIRED</h2><div class="catalog-grid"><article class="catalog-card" data-catalog-slot="actions">AUTHOR_REQUIRED</article><article class="catalog-card" data-catalog-slot="text-atoms">AUTHOR_REQUIRED</article><article class="catalog-card" data-catalog-slot="surfaces-cards">AUTHOR_REQUIRED</article><article class="catalog-card" data-catalog-slot="forms-inputs">AUTHOR_REQUIRED</article><article class="catalog-card" data-catalog-slot="state-specimens">AUTHOR_REQUIRED</article><article class="catalog-card" data-catalog-slot="domain-repeatable-specimens">AUTHOR_REQUIRED</article></div>
+    </section>
+    <section id="iconography" class="catalog-section" data-catalog-section="iconography">
+      <h2 data-catalog-slot="section-iconography">AUTHOR_REQUIRED</h2><div class="catalog-grid"><article class="catalog-card" data-catalog-slot="icon-family-specimens">AUTHOR_REQUIRED</article><article class="catalog-card" data-catalog-slot="icon-rules">AUTHOR_REQUIRED</article></div>
+    </section>
+    <section id="accessibility" class="catalog-section" data-catalog-section="accessibility">
+      <h2 data-catalog-slot="section-accessibility">AUTHOR_REQUIRED</h2><article class="catalog-card" data-catalog-slot="accessibility-checklist">AUTHOR_REQUIRED</article>
+    </section>
+  </main>
+  <footer class="catalog-shell catalog-section" data-catalog-section="footer">
+    <p data-catalog-slot="source-binding">AUTHOR_REQUIRED</p><p data-catalog-slot="catalog-disclaimer">AUTHOR_REQUIRED</p>
+  </footer>
+  <script>
+    (() => { const button = document.querySelector('#theme-toggle'); const root = document.documentElement; button.addEventListener('click', () => { const dark = root.dataset.catalogTheme !== 'dark'; root.dataset.catalogTheme = dark ? 'dark' : 'light'; button.setAttribute('aria-pressed', String(dark)); }); })();
+  </script>
+</body>
+</html>

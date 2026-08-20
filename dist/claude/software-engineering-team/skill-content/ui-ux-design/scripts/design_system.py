@@ -659,7 +659,7 @@ def format_markdown(design_system: dict) -> str:
 def vault_frontmatter(doc_type: str, title: str) -> list[str]:
     """Vault-law frontmatter (obsidian-vault skill): typed note, block-list
     tag mirror. The writer emits compliance; personas never patch it in."""
-    lifecycle = (["status: draft", "revision: 1"]
+    lifecycle = (["status: draft", "revision: 1", "contract_version: 3"]
                  if doc_type == "design_master" else [])
     return [
         "---",
@@ -679,6 +679,61 @@ def vault_nav_section(peers: list[tuple[str, str]]) -> list[str]:
     links = ["[[maps/design-system|Design System]]"]
     links += [f"[[{target}|{label}]]" for target, label in peers]
     return ["", "## Navigation <!-- sec: nav -->", "", " -\n".join(links), ""]
+
+
+def catalog_token_block(design_system: dict) -> list[str]:
+    """Emit the exact CSS token source consumed by standalone.html.
+
+    The catalog renderer copies this block byte-for-byte; the layout template
+    owns no palette, type, sizing, shadow, or motion decisions of its own.
+    """
+    colors = design_system.get("colors", {})
+    dark = design_system.get("colors_dark", {})
+    typography = design_system.get("typography", {})
+    radius = design_system.get("radius", {})
+    motion = design_system.get("motion", {})
+    heading_stack, body_stack = font_fallback_stacks(typography.get("category", ""))
+    def color(name: str, source: dict, fallback: str) -> str:
+        return str(source.get(name, fallback))
+    lines = [
+        "<!-- catalog:tokens:start -->", "```css", ":root {",
+        f"  --catalog-background: {color('background', colors, '#ffffff')};",
+        f"  --catalog-surface: {color('muted', colors, '#f4f4f4')};",
+        f"  --catalog-foreground: {color('foreground', colors, '#171717')};",
+        f"  --catalog-muted: {color('foreground', colors, '#171717')};",
+        f"  --catalog-border: {color('border', colors, '#d4d4d4')};",
+        f"  --catalog-focus: {color('ring', colors, '#171717')};",
+        f"  --catalog-accent: {color('accent', colors, '#171717')};",
+        f"  --catalog-success: {color('success', colors, '#171717')};",
+        f"  --catalog-warning: {color('warning', colors, '#171717')};",
+        f"  --catalog-error: {color('destructive', colors, '#171717')};",
+        f"  --catalog-font-heading: {heading_stack};",
+        f"  --catalog-font-body: {body_stack};",
+        "  --catalog-line-height: 1.5; --catalog-focus-width: 2px; --catalog-focus-offset: 3px;",
+        "  --catalog-border-width: 1px; --catalog-header-layer: 10; --catalog-content-width: 72rem;",
+        "  --catalog-gutter: 1.5rem; --catalog-scroll-offset: 5rem; --catalog-card-min-width: 16rem;",
+        "  --catalog-touch-target: 2.75rem; --catalog-swatch-height: 5rem;",
+        "  --catalog-type-display-size: 3rem; --catalog-type-display-weight: 700;",
+        "  --catalog-space-xs: 0.25rem; --catalog-space-sm: 0.5rem; --catalog-space-md: 1rem;",
+        "  --catalog-space-lg: 1.5rem; --catalog-space-xl: 2rem; --catalog-space-2xl: 3rem; --catalog-space-3xl: 4rem;",
+        f"  --catalog-radius-sm: {radius.get('sm', '4px')}; --catalog-radius-md: {radius.get('md', '8px')};",
+        f"  --catalog-shadow-sm: 0 1px 2px rgba(0,0,0,0.05); --catalog-motion-fast: {motion.get('fast', '150ms')};",
+        "  --catalog-motion-easing: ease-out;",
+        "}", "[data-catalog-theme=\"dark\"] {",
+        f"  --catalog-background: {color('background', dark, '#171717')};",
+        f"  --catalog-surface: {color('muted', dark, '#262626')};",
+        f"  --catalog-foreground: {color('foreground', dark, '#f4f4f4')};",
+        f"  --catalog-muted: {color('foreground', dark, '#f4f4f4')};",
+        f"  --catalog-border: {color('border', dark, '#525252')};",
+        f"  --catalog-focus: {color('ring', dark, '#f4f4f4')};",
+        f"  --catalog-accent: {color('accent', dark, '#f4f4f4')};",
+        f"  --catalog-success: {color('success', dark, '#f4f4f4')};",
+        f"  --catalog-warning: {color('warning', dark, '#f4f4f4')};",
+        f"  --catalog-error: {color('destructive', dark, '#f4f4f4')};",
+        "}", "@media (max-width: 768px) { :root { --catalog-gutter: 1rem; --catalog-type-display-size: 2.25rem; } }",
+        "```", "<!-- catalog:tokens:end -->",
+    ]
+    return lines
 
 
 def format_master_md(design_system: dict) -> str:
@@ -709,10 +764,24 @@ def format_master_md(design_system: dict) -> str:
     lines.append("")
     lines.append("---")
     lines.append("")
+    lines.append("## Product position")
+    lines.append("")
+    lines.append(f"{design_system.get('project_name', 'PROJECT')} expresses a {design_system.get('category', 'General')} product posture through the governed system below.")
+    lines.append("")
+    lines.append("## Brand and asset fidelity")
+    lines.append("")
+    lines.append("No supplied identity asset is assumed. When an owned asset is supplied, preserve its exact bytes and declare its checksum before embedding it in the catalog.")
+    lines.append("<!-- catalog:brand-assets:start -->")
+    lines.append("<!-- catalog:brand-assets:end -->")
+    lines.append("")
     lines.append("## Global Rules")
     lines.append("")
+    lines.append("### Catalog tokens")
+    lines.append("")
+    lines.extend(catalog_token_block(design_system))
+    lines.append("")
 
-    lines.append("### Color Palette (Light + Dark)")
+    lines.append("### Color architecture")
     lines.append("")
     lines.extend(_color_table(design_system))
     lines.append("")
@@ -760,7 +829,7 @@ def format_master_md(design_system: dict) -> str:
     lines.append("Previews and demos never fetch remote fonts; they use the fallback stack. The import line is for application code only.")
     lines.append("")
 
-    lines.append("### Spacing Variables")
+    lines.append("### Spacing, radius and layout")
     lines.append("")
     lines.append("| Token | Value | Usage |")
     lines.append("|-------|-------|-------|")
@@ -773,7 +842,7 @@ def format_master_md(design_system: dict) -> str:
     lines.append("| `--space-3xl` | `64px` / `4rem` | Hero padding |")
     lines.append("")
 
-    lines.append("### Radius Scale (derived from style)")
+    lines.append("#### Radius Scale (derived from style)")
     lines.append("")
     lines.append("| Token | Value |")
     lines.append("|-------|-------|")
@@ -781,7 +850,7 @@ def format_master_md(design_system: dict) -> str:
         lines.append(f"| `--radius-{step}` | `{radius.get(step, '8px')}` |")
     lines.append("")
 
-    lines.append("### Motion Tokens")
+    lines.append("#### Motion Tokens")
     lines.append("")
     lines.append("| Token | Value | Usage |")
     lines.append("|-------|-------|-------|")
@@ -792,7 +861,7 @@ def format_master_md(design_system: dict) -> str:
     lines.append(f"**Easing:** {motion.get('easing', 'ease-out on enter, ease-in on exit')}")
     lines.append("")
 
-    lines.append("### Breakpoints")
+    lines.append("#### Layout widths, gutters and breakpoints")
     lines.append("")
     lines.append("| Name | Width | Target |")
     lines.append("|------|-------|--------|")
@@ -801,12 +870,12 @@ def format_master_md(design_system: dict) -> str:
         lines.append(f"| `{bp}` | `{bp}px` | {label} |")
     lines.append("")
 
-    lines.append("### Icon Set")
+    lines.append("### Iconography")
     lines.append("")
     lines.append(f"**Declared set:** {design_system.get('icon_set', 'One outline vector icon set')}")
     lines.append("")
 
-    lines.append("### Shadow Depths")
+    lines.append("### Elevation and motion")
     lines.append("")
     lines.append("| Level | Value | Usage |")
     lines.append("|-------|-------|-------|")
@@ -814,6 +883,10 @@ def format_master_md(design_system: dict) -> str:
     lines.append("| `--shadow-md` | `0 4px 6px rgba(0,0,0,0.1)` | Cards, buttons |")
     lines.append("| `--shadow-lg` | `0 10px 15px rgba(0,0,0,0.1)` | Modals, dropdowns |")
     lines.append("| `--shadow-xl` | `0 20px 25px rgba(0,0,0,0.15)` | Hero images, featured cards |")
+    lines.append("")
+    lines.append("### Accessibility and contrast")
+    lines.append("")
+    lines.append("Verify contrast in both themes, preserve visible keyboard focus, support 200% zoom and localization, meet touch targets, and honor reduced motion.")
     lines.append("")
 
     lines.append("---")
@@ -913,6 +986,8 @@ def format_master_md(design_system: dict) -> str:
     lines.append("")
     lines.append("## Style Guidelines")
     lines.append("")
+    lines.append("### Visual posture")
+    lines.append("")
     lines.append(f"**Style:** {style.get('name', 'Minimalism')}")
     lines.append("")
     if style.get("keywords"):
@@ -924,6 +999,11 @@ def format_master_md(design_system: dict) -> str:
     if design_system.get("key_effects"):
         lines.append(f"**Key Effects:** {design_system.get('key_effects', '')}")
         lines.append("")
+
+    lines.append("### Content and voice")
+    lines.append("")
+    lines.append("Write with direct, concrete language that helps people complete their task. Avoid unexplained jargon, ambiguous promises, and decorative claims.")
+    lines.append("")
 
     lines.append("### Page Pattern (landing and marketing surfaces)")
     lines.append("")
@@ -1132,6 +1212,12 @@ def persist_design_system(design_system: dict, page: str = None, output_dir: str
     created_files = []
     master_file.write_text(format_master_md(design_system), encoding="utf-8")
     created_files.append(str(master_file))
+    catalog_file = base_dir / "artifacts" / "standalone.html"
+    if not catalog_file.exists():
+        template = Path(__file__).resolve().parents[3] / "skill-content" / "design-system" / "data" / "standalone-template.html"
+        catalog_file.parent.mkdir(parents=True, exist_ok=True)
+        catalog_file.write_text(template.read_text(encoding="utf-8"), encoding="utf-8")
+        created_files.append(str(catalog_file))
 
     if page:
         page_file = pages_dir / f"{page.lower().replace(' ', '-')}.md"

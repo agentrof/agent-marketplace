@@ -506,10 +506,24 @@ def compile_package(package: Path, gate: bool = False) -> tuple[dict, list[str]]
         canonical_process, process_errors = stage_package.resolve_ba_process(
             docs, str(data.get("primary_process_ref", "")),
             expected_ba_ref=ba_binding[0], expected_ba_hash=ba_binding[1],
+            require_strict_current=gate,
         )
         problems.extend(f"experience.md: {error}" for error in process_errors)
         if canonical_process and canonical_process != data.get("primary_process_ref"):
             problems.append("experience.md: primary_process_ref is not canonical")
+        related = list_value(data, "related_process_refs")
+        for index, raw in enumerate(related, start=1):
+            canonical_related, related_errors = stage_package.resolve_ba_process(
+                docs, raw, expected_ba_ref=ba_binding[0], expected_ba_hash=ba_binding[1],
+                require_strict_current=gate,
+            )
+            problems.extend(
+                f"experience.md: related_process_refs[{index}]: {error}"
+                for error in related_errors
+            )
+            if canonical_related and canonical_related != raw:
+                problems.append(
+                    f"experience.md: related_process_refs[{index}] is not canonical")
     rows = records(package, problems)
     live = {f"{package.name}:{row['id']}@r{row['revision']}" for row in rows
             if row.get("record_state") == "active"}
@@ -648,6 +662,13 @@ def init(args) -> int:
                                                        require_committed=True)
         if process_errors or primary is None:
             raise ValueError("; ".join(process_errors))
+        related = []
+        for raw_related in args.related_process_ref:
+            related_process, related_errors = process_from_inputs(
+                root, raw_related, receipts, require_committed=True)
+            if related_errors or related_process is None:
+                raise ValueError("; ".join(related_errors))
+            related.append(related_process)
         action_for_plan(root, plan, action="create", experience=args.experience,
                         process=primary)
     except ValueError as exc:
@@ -655,7 +676,7 @@ def init(args) -> int:
     if any(fields(item).get("primary_process_ref") == primary and fields(item).get("status") != "retired" for item in packages(root)): return fail("an active Experience already owns this primary process", 2)
     package = root / "experiences" / args.experience
     data = {"type": "experience", "experience_id": args.experience, "origin_mode": args.origin_mode, "status": "draft", "revision": 1, "primary_process_ref": primary, "input_bindings": binding_rows(receipts)}
-    if args.related_process_ref: data["related_process_refs"] = args.related_process_ref
+    if related: data["related_process_refs"] = related
     if args.origin_mode == "requirement":
         data["implements"] = [args.requirement]
         data["upstream_stage_receipts_hash"] = context["upstream_stage_receipts_hash"]

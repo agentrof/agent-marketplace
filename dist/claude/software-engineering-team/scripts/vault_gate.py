@@ -27,6 +27,7 @@ DATA_PATHS = (
     "skill-content/obsidian-vault/data",
     "skill-content/business-analysis/data",
     "skill-content/experience-modeling/data",
+    "skill-content/design-system/data",
     "templates/vault",
 )
 

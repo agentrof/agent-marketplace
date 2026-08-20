@@ -403,5 +403,34 @@ class ProjectVaultContractTests(unittest.TestCase):
             self.assertEqual(second.returncode, 0, second.stdout + second.stderr)
             self.assertIn("already standard", second.stdout)
 
+    def test_opaque_artifacts_accept_arbitrary_files_and_relative_links(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            workspace = self.setup_project(Path(temporary))
+            docs = workspace / "docs"
+            artifacts = docs / "design-system" / "artifacts"
+            artifacts.mkdir(parents=True)
+            (artifacts / "standalone.html").write_text("<!doctype html>", encoding="utf-8")
+            (artifacts / "source.md").write_text("not a vault note", encoding="utf-8")
+            (artifacts / "view.base").write_text("opaque", encoding="utf-8")
+            (artifacts / "no-extension").write_bytes(b"opaque\x00bytes")
+            home = docs / "home.md"
+            home.write_text(
+                home.read_text(encoding="utf-8")
+                + "\n[Catalog](design-system/artifacts/standalone.html)\n",
+                encoding="utf-8",
+            )
+            result = self.check_vault(workspace)
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+    def test_artifacts_cannot_create_an_unknown_top_level_subtree(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            workspace = self.setup_project(Path(temporary))
+            path = workspace / "docs" / "unknown" / "artifacts" / "anything.bin"
+            path.parent.mkdir(parents=True)
+            path.write_bytes(b"x")
+            result = self.check_vault(workspace)
+            self.assertEqual(result.returncode, 1)
+            self.assertIn("unknown top-level directory 'unknown'", result.stdout)
+
 if __name__ == "__main__":
     unittest.main()

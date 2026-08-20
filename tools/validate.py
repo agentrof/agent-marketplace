@@ -1640,7 +1640,8 @@ def check_vault_policy_shape(tree: Tree, findings: list[Finding]) -> None:
                 err("schema_version must be an integer",
                     "version the policy so the checker can refuse unknowns")
             for key in ("vault_root_dirname", "home_file",
-                        "maps_dir", "generated_marker_prefix", "attachments_dir"):
+                        "maps_dir", "generated_marker_prefix", "attachments_dir",
+                        "artifact_directory_name"):
                 value = policy.get(key)
                 if not (isinstance(value, str) and value):
                     err(f"'{key}' must be a non-empty string",

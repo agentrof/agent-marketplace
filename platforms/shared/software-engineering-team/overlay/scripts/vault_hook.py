@@ -287,6 +287,15 @@ def vault_relative(file_path: str) -> str | None:
     return inner or None
 
 
+def is_opaque_artifact(rel: str) -> bool:
+    """Use the vault policy's one artifact-path definition in write guards."""
+    try:
+        policy = vault_check.load_policy(vault_check.DEFAULT_POLICY)
+    except (OSError, ValueError, json.JSONDecodeError):
+        return False
+    return vault_check.is_artifact_path(policy, rel)
+
+
 def written_content(tool_input: dict) -> str:
     if "content" in tool_input:
         return str(tool_input.get("content") or "")
@@ -578,6 +587,7 @@ def pre_target(written: dict) -> int:
     rel = vault_relative(file_path)
     if rel is None:
         return 0
+    artifact = is_opaque_artifact(rel)
     if rel.startswith("backlog/_generated/"):
         return deny(
             "backlog/_generated files are compiler-owned; run"
@@ -587,7 +597,7 @@ def pre_target(written: dict) -> int:
         return deny(
             "inverse relation catalogs are compiler-owned; run"
             " vault_check.py render-relations")
-    if rel.endswith(".md"):
+    if rel.endswith(".md") and not artifact:
         relation_code = relation_projection_guard(written, file_path)
         if relation_code:
             return relation_code
@@ -640,22 +650,7 @@ def pre_target(written: dict) -> int:
             return deny("Experience slugs are process names and must not use the retired exp- prefix")
         if "/_generated/" in f"/{rel}" or "/_ledger/" in f"/{rel}":
             return deny("Experience Design generated and ledger files are compiler-owned; run experience_compile.py")
-        if "/artifacts/" in rel and rel.endswith(".html"):
-            manifest = Path(file_path).with_name(
-                Path(file_path).name.removesuffix("-preview.html")
-                + "-artifact.md"
-            )
-            if not manifest.is_file():
-                return deny(
-                    "Experience Design HTML must be born through"
-                    " experience_compile.py init-artifact"
-                )
-            if note_status(manifest) == "approved":
-                return deny(
-                    "approved Experience Design artifacts are immutable;"
-                    " begin an Experience revision first"
-                )
-        if rel.endswith("-artifact.md") and Path(file_path).is_file() \
+        if not artifact and rel.endswith("-artifact.md") and Path(file_path).is_file() \
                 and note_status(Path(file_path)) == "approved":
             return deny(
                 "approved Experience Design artifact manifests are immutable;"
@@ -667,7 +662,8 @@ def pre_target(written: dict) -> int:
                 "approved Experience content is immutable;"
                 " begin a living Experience revision through experience_compile.py"
             )
-        if rel.endswith(".md") and not any(pattern.fullmatch(rel) for pattern in EXPERIENCE_PATHS):
+        if (rel.endswith(".md") and not artifact
+                and not any(pattern.fullmatch(rel) for pattern in EXPERIENCE_PATHS)):
             return deny(f"invalid Experience Design filename or path '{rel}'; use compiler init/stub commands")
         content = written_content(written) + "\n" + str(written.get("old_string") or "")
         if EXPERIENCE_MACHINE_FIELD_RE.search(content):

@@ -65,6 +65,18 @@ path/type rules are fixed in `vault-policy.json` and rendered into
 `.obsidian/graph.json` and `.obsidian/types.json`. Issue reporting stays outside
 the vault and cannot serve as backlog evidence.
 
+Files below an `artifacts/` directory under a policy-valid vault folder are
+opaque local artifacts, not Markdown notes. Their names and extensions are
+unconstrained, symlinks are rejected, and authored Markdown may link to a real
+artifact with a relative Markdown link or embed.
+
+A contract-v3 Design System pairs `MASTER.md` with
+`design-system/artifacts/standalone.html`. The catalog's page and specimen
+slots are fixed, but its colors, type, spacing, dimensions, elevation and
+motion come only from the marked MASTER token block. Run `init-catalog` only
+to create a missing skeleton and `sync-catalog` after MASTER changes; approval
+requires a complete, current, offline catalog.
+
 `backlog_compile.py` is the only backlog helper. It creates deterministic
 stubs, validates front matter and nested paths, checks one owner and any
 supporting roles, resolves upstream and dependency links, checks unique IDs and

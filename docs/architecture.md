@@ -55,6 +55,13 @@ behavior is host-neutral; Claude and Codex are packaging adapters.
     datastore choices belong to accepted Solution decisions, commands belong
     to Operation Contracts, and the hard Delivery concurrency guard belongs to
     approved Delivery Governance under `workspace/docs/delivery/governance/`.
+21. `artifacts/` beneath a policy-valid vault folder holds opaque, local files.
+    Artifact content is neither a vault note nor executable behavior; symlinks
+    are forbidden and Markdown may link to real local artifacts.
+22. A contract-v3 Design System publishes MASTER.md and its offline standalone
+    catalog together at `design-system/artifacts/standalone.html`. The catalog
+    has a fixed DOM flow while all visual values and project content bind to
+    MASTER's machine-readable token block.
 
 The normative Requirement and Delivery lifecycle is documented in
 [requirement-delivery-protocol.md](requirement-delivery-protocol.md).

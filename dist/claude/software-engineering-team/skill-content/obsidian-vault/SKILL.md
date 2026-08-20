@@ -32,6 +32,10 @@ subtrees, not separate vaults. Variation lives only in
   supersede chains are written only by their owning verbs.
 - Cross-subtree semantic links are allowed. Structural navigation constrains
   the first nav link, not traceability or prose links.
+- `artifacts/` beneath a policy-valid vault folder is opaque: every filename,
+  extension and binary form is allowed, but artifact files are never notes,
+  never inferred as executable content and may not be symlinks. Relative
+  Markdown links and embeds to real opaque artifacts are allowed.
 
 ## Required references
 

@@ -553,6 +553,20 @@ class VaultHookTests(unittest.TestCase):
             self.assertEqual(result.returncode, 2)
             self.assertIn("invalid Experience Design filename or path", result.stderr)
 
+    def test_opaque_experience_artifact_bypasses_note_filename_and_relation_guards(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            project = Path(temporary)
+            docs = self.setup_project(project)
+            artifact = docs / "experience-design/experiences/example/artifacts/arbitrary.md"
+            result = self.run_hook("pre", {
+                "tool_name": "Write",
+                "tool_input": {
+                    "file_path": str(artifact),
+                    "content": "opaque artifact, not frontmatter\n",
+                },
+            })
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
     def test_retired_experience_review_path_is_rejected(self):
         with tempfile.TemporaryDirectory() as temporary:
             project = Path(temporary)

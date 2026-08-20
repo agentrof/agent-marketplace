@@ -28,7 +28,9 @@ STAGES = {
     "backlog-plan": "backlog-package",
 }
 
-BA_PROCESS_REF = "business-analysis/{space}/processes/{slug}-process"
+# BA owns the process topology (including nested domain chains). This module
+# only identifies the containing space and asks ba_compile for classification.
+BA_PROCESS_REF = "business-analysis/{space}/(domains/<domain>/)*/processes/<slug>-process"
 
 
 def docs_root(value: str | Path) -> Path:
@@ -268,16 +270,22 @@ def backlog_candidates(docs: Path) -> list[dict]:
 
 
 def canonical_ba_process_ref(value: str) -> tuple[str, str, str] | None:
-    """Return ``(canonical_ref, space, slug)`` for a root BA process note."""
-    raw = value.strip().removesuffix(".md")
-    match = re.fullmatch(
-        r"business-analysis/([a-z0-9]+(?:-[a-z0-9]+)*)/processes/"
-        r"([a-z0-9]+(?:-[a-z0-9]+)*)-process", raw,
-    )
-    if match is None:
+    """Normalize a BA reference without reimplementing BA's topology.
+
+    The third value is the path relative to the BA space. Its classification
+    is intentionally deferred to ``ba_compile.scan_space``.
+    """
+    raw = value.strip().replace("\\", "/")
+    if raw.endswith(".md"):
+        raw = raw[:-3]
+    parts = raw.split("/")
+    if (len(parts) < 3 or parts[0] != "business-analysis"
+            or not re.fullmatch(r"[a-z0-9]+(?:-[a-z0-9]+)*", parts[1])
+            or any(part in {"", ".", ".."} for part in parts)):
         return None
-    space, slug = match.groups()
-    return BA_PROCESS_REF.format(space=space, slug=slug), space, slug
+    space = parts[1]
+    relative = "/".join(parts[2:])
+    return f"business-analysis/{space}/{relative}", space, relative
 
 
 def resolve_ba_process(docs: Path, value: str, *, expected_ba_ref: str = "",
@@ -287,8 +295,11 @@ def resolve_ba_process(docs: Path, value: str, *, expected_ba_ref: str = "",
     """Resolve a process through the exact BA package that contains it."""
     parsed = canonical_ba_process_ref(value)
     if parsed is None:
-        return None, ["primary_process_ref must be business-analysis/<space>/processes/<slug>-process"]
-    canonical, space, _slug = parsed
+        return None, [
+            "primary_process_ref must be a vault-relative Business Analysis process "
+            "under business-analysis/<space>/(domains/<domain>/)*/processes/"
+        ]
+    canonical, space, relative = parsed
     expected = f"business-analysis/{space}/space"
     receipt_value, errors = verify(
         docs, "business-analysis", expected, expected_ba_hash,
@@ -300,6 +311,17 @@ def resolve_ba_process(docs: Path, value: str, *, expected_ba_ref: str = "",
     if not process.is_file():
         errors.append("primary_process_ref does not resolve to a Business Analysis process note")
         return None, errors
+    try:
+        import ba_compile
+        schema = ba_compile.load_schema(ba_compile.DEFAULT_SCHEMA)
+        scanned, _base = ba_compile.scan_space(
+            docs / "business-analysis" / space, schema)
+        document = scanned.docs.get(f"{relative}.md")
+    except (ImportError, OSError, ValueError):
+        document = None
+    if document is None or document.doc_type != "process":
+        errors.append(
+            "primary_process_ref must resolve through the BA topology to a process note")
     props = frontmatter(process)
     if props.get("type") != "process":
         errors.append("primary_process_ref must resolve to a process note")

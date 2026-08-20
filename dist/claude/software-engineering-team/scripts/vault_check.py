@@ -207,6 +207,20 @@ def normalize_vault_rel(raw: str) -> str:
     return p
 
 
+def is_artifact_path(policy: dict, rel: str) -> bool:
+    """Whether ``rel`` is an opaque artifact under a policy-valid folder.
+
+    Layout still decides whether the top-level subtree is allowed.  Keeping
+    that decision separate prevents an ``artifacts`` directory from creating
+    a new top-level vault subtree.
+    """
+    parts = normalize_vault_rel(rel).split("/")
+    directory = str(policy.get("artifact_directory_name", "artifacts"))
+    valid_roots = set(policy.get("subtrees", [])) | {str(policy.get("maps_dir", "maps"))}
+    return (len(parts) >= 3 and parts[0] in valid_roots and directory in parts[1:-1]
+            and all(part not in {"", ".", ".."} for part in parts))
+
+
 def is_hub(policy: dict, rel: str) -> bool:
     parts = rel.split("/")
     if (len(parts) >= 3 and parts[0] == "business-analysis"
@@ -286,8 +300,7 @@ def resolve_hub(policy: dict, index: set, rel: str) -> str | None:
 
 def subtree_has_notes(vault: Vault, subtree: str) -> bool:
     prefix = subtree + "/"
-    return any(rel.startswith(prefix) and rel.endswith(".md")
-               for rel in vault.index)
+    return any(rel.startswith(prefix) for rel in vault.notes)
 
 
 def rel_posix(root: Path, path: Path) -> str:
@@ -353,7 +366,8 @@ def build_vault(root: Path, policy: dict) -> Vault:
         if rel.split("/")[0] == ".trash":
             continue
         vault.index.add(rel)
-        if path.suffix == ".md" and rel.split("/")[0] != ".obsidian":
+        if (path.suffix == ".md" and rel.split("/")[0] != ".obsidian"
+                and not is_artifact_path(policy, rel)):
             vault.notes[rel] = scan_note(root, path, marker_prefix)
     for note in vault.notes.values():
         targets = [t for (_, _, t, _, _, _) in note.wikilinks if t]
@@ -448,6 +462,13 @@ def check_vault_layout(vault: Vault, findings: list[Finding]) -> None:
             continue  # git plumbing for empty skeleton directories
         if in_machine_dir(policy, rel):
             continue  # compiler-owned directories manage their own files
+        if is_artifact_path(policy, rel):
+            if (vault.root / rel).is_symlink():
+                findings.append(Finding(
+                    "error", rel, 1, "vault_layout",
+                    "artifact files must not be symlinks",
+                    "copy the artifact into the vault; opaque artifacts may not escape it"))
+            continue
         if rel.endswith(".base"):
             findings.append(Finding(
                 "error", rel, 1, "vault_layout",
@@ -492,10 +513,6 @@ def check_vault_layout(vault: Vault, findings: list[Finding]) -> None:
                     "attachment is not referenced by any embed",
                     "reference it with an embed wikilink or delete it"))
         elif (not rel.endswith(".md")
-              and not (top == "experience-design"
-                       and re.fullmatch(
-                           r"experience-design/experiences/[a-z0-9]+(?:-[a-z0-9]+)*/artifacts/"
-                           r"[a-z0-9]+(?:-[a-z0-9]+)*-preview\.html", rel))
               and top not in {
                 p.rstrip("/").split("/")[0]
                 for p in policy.get("generated_subtrees", [])}):
@@ -563,11 +580,9 @@ def check_link_policy(vault: Vault, findings: list[Finding]) -> None:
                 inside = True
             except ValueError:
                 inside = False
-            artifact_link = (
-                inside and note.fm.get("type") == "artifact-manifest"
-                and clean.endswith(".html") and resolved.is_file()
-                and resolved.parent == note.path.parent
-            )
+            artifact_link = (inside and resolved.is_file()
+                             and is_artifact_path(
+                                 vault.policy, rel_posix(vault.root, resolved)))
             if inside and not artifact_link:
                 findings.append(Finding(
                     "error", note.rel, lineno, "link_policy",

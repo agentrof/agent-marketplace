@@ -20,10 +20,13 @@ write, approve or silently reconcile contradictions.
 
 ## Approach
 
-Inspect MASTER, overrides and exact BA/Solution bindings. Challenge semantic
-light/dark tokens, typography, spacing, radius, shadows, motion,
-reduced-motion, breakpoints, one icon set, component specifications, focus,
-accessibility, anti-patterns and override contradictions. Do not write files.
+Inspect MASTER, its standalone catalog, overrides and exact BA/Solution
+bindings section by section. Challenge source-token parity, light/dark tokens,
+typography, spacing, radius, layout, shadows, motion, reduced-motion,
+breakpoints, one icon set, component specifications, focus, accessibility,
+anti-patterns and override contradictions. Render and challenge desktop,
+mobile and reduced-motion states; verify that a brand asset is exact or that
+the no-supplied-asset state is explicit. Do not write files.
 
 ## Output Contract
 

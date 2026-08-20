@@ -216,6 +216,36 @@ The customer corrects a recoverable failure.
             ], cwd=ROOT, capture_output=True, text=True, check=False)
             self.assertEqual(initialized.returncode, 0, initialized.stdout + initialized.stderr)
 
+    def test_nested_domain_primary_and_related_processes_use_the_same_resolver(self):
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw) / "workspace/docs/experience-design"
+            root.mkdir(parents=True)
+            self.prepare_inputs(root.parent)
+            nested = "business-analysis/erp/domains/inventory/processes/goods-receipt-process.md"
+            related = "business-analysis/erp/processes/checkout-process.md"
+            plan, proposal_hash = self.propose_manual(
+                root, nested, experience="goods-receipt")
+            docs = root.parent
+            payload = json.loads(self.run_cli(
+                "init", "--root", root, "--experience", "goods-receipt",
+                "--origin-mode", "manual", "--primary-process-ref", nested,
+                "--related-process-ref", related,
+                "--ba-ref", self.stage_receipt(docs, "business-analysis"),
+                "--solution-ref", self.stage_receipt(docs, "solution-design"),
+                "--design-ref", self.stage_receipt(docs, "design-system"),
+                "--scope-plan", plan, "--proposal-hash", proposal_hash,
+            ).stdout)
+            experience = Path(payload["path"])
+            fields = experience.joinpath("experience.md").read_text(encoding="utf-8")
+            self.assertIn(
+                "primary_process_ref: business-analysis/erp/domains/inventory/processes/goods-receipt-process",
+                fields,
+            )
+            self.assertIn("related_process_refs:", fields)
+            self.assertIn("business-analysis/erp/processes/checkout-process", fields)
+            checked = self.run_cli("check", "--experience-root", experience, "--json")
+            self.assertTrue(json.loads(checked.stdout)["ok"])
+
     def test_second_active_experience_for_process_is_rejected(self):
         with tempfile.TemporaryDirectory() as raw:
             root = Path(raw) / "workspace/docs/experience-design"

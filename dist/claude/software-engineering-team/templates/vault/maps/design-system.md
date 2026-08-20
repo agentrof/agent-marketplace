@@ -7,8 +7,9 @@ tags:
 
 # Design System
 
-The design master and one link per page override with its deviation
-summary. The design-system entry curates this map whenever MASTER or an
-override is written, consolidated or deleted.
+The design master, its standalone catalog (`../design-system/artifacts/standalone.html`)
+and one link per page override with its deviation summary. The design-system
+entry curates this map whenever MASTER, catalog or an override is written,
+consolidated or deleted.
 
 No master yet. The design-system entry adds it.

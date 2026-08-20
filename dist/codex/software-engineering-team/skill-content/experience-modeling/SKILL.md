@@ -21,6 +21,10 @@ backlog planning.
   release or technical component name.
 - One active Experience owns one primary process. Cross-process behavior has
   one owner and exact references from related processes/packages.
+- Primary and related BA process references are vault-relative, extensionless
+  topology paths. Root and arbitrarily nested domain processes are both valid
+  only when BA's compiler classifies the target as an approved process in the
+  selected strict-current BA package.
 - Use `JRN`, `FLW`, `SCR`, `STA` and `TRN` stable IDs. Cite records as
   `checkout:SCR-001@r2` and packages as `checkout@r3`.
 - Update a package in place with `begin-revision`. Changed children increment

@@ -1,5 +1,5 @@
 {
-  "build_id": "snapshot.4f819e2fd8f4b3d343b128ffb8d09e505962cda44b2a8ceaa12dc76c1d0d5dc1",
+  "build_id": "snapshot.8ba389ef9593a190a74bfcfa2c308267553f0b7134a494b9f4fa90c044bcf64d",
   "component": "software-engineering-team",
   "delivery_protocol": {
     "read_max": 1,
@@ -59,7 +59,7 @@
     "scripts/experience_compile.py": "67858726662debf562c5b946bf8a3255c25b679e7a3b7f2b96fe4c84b4097c88",
     "scripts/file_issue.py": "9dabf91796c416be8909e517f9a9859faff12c24c868c0c0e037739820bee02e",
     "scripts/generate_claude_project.py": "5a36f5ce03516869cc8bcf0fb50dd868f57b11d67c1a8c6d3b9e6863612346df",
-    "scripts/landscape_check.py": "c7610b3678ce44b62c3cc9a4e8357fef0595d618d2aa9fe092de3ff1922a6df5",
+    "scripts/landscape_check.py": "699381eac15b8a776bbd4ba93a02825db526afee1e4f65a71d6ab41bb48e7983",
     "scripts/marketplace_paths.py": "612e835bb2c91fab9509282dd4ecbce55c9b62a35ff59b3f22e7e6c05e2fbd79",
     "scripts/operation_compile.py": "e2fd53938e0ab2e9fc04bf250063b57ed6e12934e3b5a76c29f83f9bedbda0f1",
     "scripts/project_config.py": "a0bebad9b625003a175371dcadf82425288065d469229d9677695f035d6a9790",
@@ -118,7 +118,7 @@
     "skill-content/nosql-database-design/references/schema-patterns.md": "ca2773d7964e43649926d0afe1dcc330f3d47a9a7f77eee19726995b3fe4fc81",
     "skill-content/nosql-database-design/references/schema-validation.md": "4ebfa5db83ff108d0352bca68e8ea13d2c7c860f13d876bd0f1a49d03db0802e",
     "skill-content/obsidian-vault/SKILL.md": "3159fbe7b7cf6cfc7e7c380f5f8e1e405bc113a242ac820e2cf47b8f6d86386e",
-    "skill-content/obsidian-vault/data/vault-policy.json": "bd2c3221a242ff20e774a7718cd796d3f59530b783d4025eaf044f19a5edcff1",
+    "skill-content/obsidian-vault/data/vault-policy.json": "351d431e2487316066b5381b009b79e55ca0659e02167785a0e40d08b23d83ce",
     "skill-content/obsidian-vault/references/graph.md": "e730f2e176541e1db640f3aadec9a35e51cfa8af95a62331e0e2894a65862a1e",
     "skill-content/obsidian-vault/references/linking.md": "7cdd63dcd67ed3326765abe065744e1b39c189e5399f1dfe8baa62f786ca52e9",
     "skill-content/obsidian-vault/references/metadata.md": "73b716736859585ff25e68a6576d93f8127e49133c4a7cd7241ed43a2858a07e",
@@ -257,7 +257,7 @@
     "templates/vault/.obsidian/plugins/obsidian-front-matter-title-plugin/main.js": "8a55ac74ea628a9db5b2fae5fd57031638c794279e24610efc19ad0f5a6fc444",
     "templates/vault/.obsidian/plugins/obsidian-front-matter-title-plugin/manifest.json": "a83265e1e8a0db3658d7121f8611650b74daa8b11760ead3579ad1953e71f136",
     "templates/vault/.obsidian/snippets/brand.css": "46b840eaddc2c50abf29b4b0b145e1e0774c4760e89b4d09a7a9ce122b33bbbe",
-    "templates/vault/.obsidian/types.json": "84616fccb8a7d06e07d62e3f926a2e18d83520953c8b6f94ad18d2a101376591",
+    "templates/vault/.obsidian/types.json": "d23b69ed3a2ee78a4c73ff9e3d420147992de7a8d05dce97bd97fc1227395cb7",
     "templates/vault/home.md": "b62efb50cb11a9e14ea667a2e12cbff4789ec458c705cd226440c9d5d25b3397",
     "templates/vault/maps/backlog.md": "b4e9c92f341ef5599bf8e6980856f6e8e74dd8e4effe01c0d8f8ec88eb4e2a7b",
     "templates/vault/maps/business-analysis.md": "4401acf304330465362dc4888b0de2da5bf8088e107343f7ee7a0d639eb0a4fa",
@@ -277,6 +277,6 @@
   "schema_version": 2,
   "source_channel": "snapshot",
   "source_commit": "",
-  "source_ref": "snapshot.4f819e2fd8f4b3d343b128ffb8d09e505962cda44b2a8ceaa12dc76c1d0d5dc1",
+  "source_ref": "snapshot.8ba389ef9593a190a74bfcfa2c308267553f0b7134a494b9f4fa90c044bcf64d",
   "version": "3.0.0"
 }

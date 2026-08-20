@@ -211,7 +211,7 @@ def component_rows(tree: Path, findings: list[str], *, enforce: bool) -> list[di
             "component_id": component_id, "component_class": component_class,
             "sourcing": sourcing, **({"app_kind": app_kind, "code_path": code_path} if sourcing == "build" else {}),
             "derives_from": fm.get("derives_from", []),
-            "owned_ba_refs": fm.get("owned_ba_refs", []),
+            "owned_ba_refs": fm.get("owned_ba_refs"),
             "depends_on_component": fm.get("depends_on_component", []),
             "technology_bindings": fm.get("technology_bindings", []),
             "data_store_disposition": str(fm.get("data_store_disposition", "")),
@@ -220,7 +220,7 @@ def component_rows(tree: Path, findings: list[str], *, enforce: bool) -> list[di
 
 
 def ba_process_universe(tree: Path) -> set[str]:
-    """Return active root-process refs from approved BA spaces.
+    """Return active process refs from approved BA spaces.
 
     The path is deliberately the same canonical identity consumed by living
     Experience packages.  The BA package hash is carried by its stage receipt.
@@ -234,7 +234,9 @@ def ba_process_universe(tree: Path) -> set[str]:
         props, _line, error = parse_frontmatter(root.read_text(encoding="utf-8"))
         if error or props.get("package_status") != "approved":
             continue
-        for process in sorted((space / "processes").glob("*-process.md")) if (space / "processes").is_dir() else []:
+        for process in sorted(space.rglob("*-process.md")):
+            if process.parent.name != "processes":
+                continue
             process_props, _line, process_error = parse_frontmatter(process.read_text(encoding="utf-8"))
             if not process_error and process_props.get("type") == "process" and process_props.get("status") == "approved":
                 result.add(process.relative_to(docs).with_suffix("").as_posix())
@@ -304,15 +306,16 @@ def topology_findings(tree: Path, components: list[dict], decisions: list[dict],
                         for row in decisions if row.get("status") == "accepted"}
     for component in components:
         cid = component["component_id"]
-        refs = component.get("owned_ba_refs", [])
-        if not refs:
+        refs = component.get("owned_ba_refs")
+        if refs is None:
             findings.append(f"components/{cid}/component.md: modern topology needs owned_ba_refs")
-        for ref in refs:
-            if ref not in universe:
-                findings.append(f"components/{cid}/component.md: owned_ba_refs contains an inactive or unknown BA process: {ref}")
-            owner = ownership.setdefault(ref, cid)
-            if owner != cid:
-                findings.append(f"BA capability/process {ref} has multiple topology owners: {owner}, {cid}")
+        else:
+            for ref in refs:
+                if ref not in universe:
+                    findings.append(f"components/{cid}/component.md: owned_ba_refs contains an inactive or unknown BA process: {ref}")
+                owner = ownership.setdefault(ref, cid)
+                if owner != cid:
+                    findings.append(f"BA capability/process {ref} has multiple topology owners: {owner}, {cid}")
         bindings = [accepted_by_path.get(ref) for ref in component.get("technology_bindings", [])]
         kinds = {row["kind"] for row in bindings if row}
         if component.get("sourcing") == "build":

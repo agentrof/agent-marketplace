@@ -1834,12 +1834,28 @@ def check_vault_policy_shape(tree: Tree, findings: list[Finding]) -> None:
             if not isinstance(prop_types, dict) or not prop_types:
                 err("property_types must be a non-empty object",
                     "one value type per frontmatter key, vault-wide")
+                prop_types = {}
             else:
                 for key, value in sorted(prop_types.items()):
                     if value not in OBSIDIAN_PROPERTY_TYPES:
                         err(f"property_types['{key}'] value '{value}' is not"
                             f" one of {sorted(OBSIDIAN_PROPERTY_TYPES)}",
                             "use the vault app's property type enum")
+            lazy_fragments = policy.get("lazy_fragments")
+            if not isinstance(lazy_fragments, dict):
+                err("lazy_fragments must be an object of property lists",
+                    "declare each lazy payload fragment as a list of policy properties")
+            else:
+                for fragment, properties in sorted(lazy_fragments.items()):
+                    if (not isinstance(properties, list)
+                            or not all(isinstance(key, str) and key for key in properties)):
+                        err(f"lazy_fragments['{fragment}'] must be a list of property names",
+                            "use one non-empty property name per lazy fragment entry")
+                        continue
+                    for key in properties:
+                        if key not in prop_types:
+                            err(f"lazy_fragments['{fragment}'] names property '{key}' missing from property_types",
+                                "declare every lazy fragment property in the vault-wide property type map")
             extra_types = policy.get("extra_doc_types")
             if (not isinstance(extra_types, list)
                     or not all(isinstance(s, str) and KEBAB_RE.match(s)

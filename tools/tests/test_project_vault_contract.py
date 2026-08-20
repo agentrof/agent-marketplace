@@ -155,6 +155,23 @@ class ProjectVaultContractTests(unittest.TestCase):
             self.assertEqual(result.returncode, 1)
             self.assertIn("property 'owner_role' must be typed 'text'", result.stdout)
 
+    def test_business_analysis_fragment_reconciles_all_declared_property_types(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            workspace = self.setup_project(Path(temporary))
+            result = self.run_vault(
+                "reconcile-payload-fragment",
+                "--vault", str(workspace / "docs"),
+                "--fragment", "business-analysis",
+            )
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            types = json.loads(
+                (workspace / "docs/.obsidian/types.json").read_text(
+                    encoding="utf-8"
+                )
+            )["types"]
+            self.assertEqual(types["package_status"], "text")
+            self.assertEqual(types["package_approved_at_utc"], "datetime")
+
     def test_vault_check_rejects_project_backlog_color_drift(self):
         with tempfile.TemporaryDirectory() as temporary:
             workspace = self.setup_project(Path(temporary))

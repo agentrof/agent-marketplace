@@ -68,6 +68,8 @@
     "dependency_refs": "multitext",
     "scenario_refs": "multitext",
     "package_hash": "text",
+    "package_status": "text",
+    "package_approved_at_utc": "datetime",
     "package_contract_version": "number",
     "work_kind": "text",
     "request_kind": "text",

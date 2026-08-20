@@ -100,6 +100,7 @@ The customer corrects a recoverable failure.
             "code_path: workspace/apps/orders-api\nowned_ba_refs:\n"
             "  - business-analysis/erp/processes/checkout-process\n"
             "  - business-analysis/erp/processes/returns-process\n"
+            "  - business-analysis/erp/domains/inventory/processes/goods-receipt-process\n"
             "technology_bindings:\n"
             "  - solution-design/decisions/python-decision\n"
             "  - solution-design/decisions/container-decision\n"

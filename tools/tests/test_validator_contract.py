@@ -93,6 +93,25 @@ class ValidatorContractTests(unittest.TestCase):
             path.write_text(json.dumps(policy, indent=2) + "\n", encoding="utf-8")
             self.assertIn("vault_policy_shape", self.checks(root))
 
+    def test_lazy_fragment_property_drift_is_validated(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = self.fixture(temporary)
+            path = (
+                root / "plugins/software-engineering-team/skill-content/"
+                "obsidian-vault/data/vault-policy.json"
+            )
+            policy = json.loads(path.read_text(encoding="utf-8"))
+            del policy["property_types"]["package_status"]
+            path.write_text(json.dumps(policy, indent=2) + "\n", encoding="utf-8")
+            findings = validate.run(root)
+            self.assertTrue(any(
+                finding.check == "vault_policy_shape"
+                and "lazy_fragments['business_analysis']"
+                in finding.message
+                and "package_status" in finding.message
+                for finding in findings
+            ))
+
     def test_delivery_contract_set_and_merge_policy_are_validated(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = self.fixture(temporary)

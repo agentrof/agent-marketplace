@@ -432,6 +432,8 @@
     ,"connects": "multitext"
     ,"affected_scopes": "multitext"
     ,"upstream_stage_receipts_hash": "text"
+    ,"package_status": "text"
+    ,"package_approved_at_utc": "datetime"
   },
   "retired_managed_properties": [
     "locked",

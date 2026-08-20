@@ -26,6 +26,19 @@ class SolutionTopologyTests(unittest.TestCase):
                 encoding="utf-8",
             )
 
+    def write_nested_process(self, docs):
+        space = docs / "business-analysis/marketplace"
+        process_root = space / "domains/orders/processes"
+        process_root.mkdir(parents=True)
+        (space / "space.md").write_text(
+            "---\ntype: space\npackage_status: approved\n---\n# Marketplace\n",
+            encoding="utf-8",
+        )
+        (process_root / "checkout-process.md").write_text(
+            "---\ntype: process\nstatus: approved\n---\n# Process\n",
+            encoding="utf-8",
+        )
+
     def topology(self):
         return [{
             "component_id": "orders-api", "sourcing": "build",
@@ -53,6 +66,49 @@ class SolutionTopologyTests(unittest.TestCase):
             )
             self.assertIn(
                 "BA process business-analysis/marketplace/processes/returns-process has no topology owner or not_technical disposition",
+                findings,
+            )
+
+    def test_nested_approved_ba_process_is_resolved(self):
+        with tempfile.TemporaryDirectory() as raw:
+            docs = Path(raw) / "workspace/docs"
+            self.write_nested_process(docs)
+            topology = self.topology()
+            topology[0]["owned_ba_refs"] = [
+                "business-analysis/marketplace/domains/orders/processes/checkout-process"
+            ]
+            findings = landscape_check.topology_findings(
+                docs / "solution-design", topology, self.decisions(), {}
+            )
+            self.assertFalse(findings)
+
+    def test_explicit_empty_ba_ownership_is_valid_when_coverage_is_disposed(self):
+        with tempfile.TemporaryDirectory() as raw:
+            docs = Path(raw) / "workspace/docs"
+            self.write_processes(docs)
+            topology = self.topology()
+            topology[0]["owned_ba_refs"] = []
+            findings = landscape_check.topology_findings(
+                docs / "solution-design", topology, self.decisions(), {
+                    "not_technical_allocations": [
+                        "business-analysis/marketplace/processes/checkout-process|Handled outside the technical topology",
+                        "business-analysis/marketplace/processes/returns-process|Handled outside the technical topology",
+                    ]
+                }
+            )
+            self.assertFalse(findings)
+
+    def test_missing_ba_ownership_is_still_rejected(self):
+        with tempfile.TemporaryDirectory() as raw:
+            docs = Path(raw) / "workspace/docs"
+            self.write_processes(docs)
+            topology = self.topology()
+            del topology[0]["owned_ba_refs"]
+            findings = landscape_check.topology_findings(
+                docs / "solution-design", topology, self.decisions(), {}
+            )
+            self.assertIn(
+                "components/orders-api/component.md: modern topology needs owned_ba_refs",
                 findings,
             )
 

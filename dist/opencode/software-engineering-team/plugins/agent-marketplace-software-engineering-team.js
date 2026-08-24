@@ -16,7 +16,7 @@ import {
 } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-const buildId = "snapshot.23b9486c62b270ded29ea4973bb54889e7529a211583a29a918c514ddc096606";
+const buildId = "snapshot.b4d0b7d3290214e9309791eeab3cd054300e0a0aadea1e5f0c266bc8987ca386";
 const vaultHookSha256 = "90324eb40f82c7246d9e5a3fe932429d2c19489f7b9cf3acf21fd7ce45442022";
 const component = 'software-engineering-team';
 const pluginFilename = 'agent-marketplace-software-engineering-team.js';
@@ -132,17 +132,21 @@ function normalizePluginReference(value) {
 function assertSupportedPluginSet(config) {
   const own = pluginPath();
   const configured = config && config.plugin;
-  if (!Array.isArray(configured)
-      || configured.length !== 1
-      || normalizePluginReference(configured[0]) !== own) {
-    fail('unsupported_plugin_set');
+  if (!Array.isArray(configured)) {
+    fail('unsupported_plugin_set', 'configured plugin value is not an array');
+  }
+  if (configured.length !== 1) {
+    fail('unsupported_plugin_set', `expected one configured plugin, found ${configured.length}`);
+  }
+  if (normalizePluginReference(configured[0]) !== own) {
+    fail('unsupported_plugin_set', 'configured plugin path differs from runtime plugin');
   }
   const discovered = readdirSync(dirname(own), { withFileTypes: true })
     .filter((entry) => entry.isFile() && /\.(?:[cm]?js|tsx?)$/i.test(entry.name))
     .map((entry) => entry.name)
     .sort();
   if (discovered.length !== 1 || discovered[0] !== pluginFilename) {
-    fail('unsupported_plugin_set');
+    fail('unsupported_plugin_set', `unexpected plugin files: ${discovered.join(',')}`);
   }
 }
 

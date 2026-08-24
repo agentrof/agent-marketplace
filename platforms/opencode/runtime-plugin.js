@@ -132,17 +132,21 @@ function normalizePluginReference(value) {
 function assertSupportedPluginSet(config) {
   const own = pluginPath();
   const configured = config && config.plugin;
-  if (!Array.isArray(configured)
-      || configured.length !== 1
-      || normalizePluginReference(configured[0]) !== own) {
-    fail('unsupported_plugin_set');
+  if (!Array.isArray(configured)) {
+    fail('unsupported_plugin_set', 'configured plugin value is not an array');
+  }
+  if (configured.length !== 1) {
+    fail('unsupported_plugin_set', `expected one configured plugin, found ${configured.length}`);
+  }
+  if (normalizePluginReference(configured[0]) !== own) {
+    fail('unsupported_plugin_set', 'configured plugin path differs from runtime plugin');
   }
   const discovered = readdirSync(dirname(own), { withFileTypes: true })
     .filter((entry) => entry.isFile() && /\.(?:[cm]?js|tsx?)$/i.test(entry.name))
     .map((entry) => entry.name)
     .sort();
   if (discovered.length !== 1 || discovered[0] !== pluginFilename) {
-    fail('unsupported_plugin_set');
+    fail('unsupported_plugin_set', `unexpected plugin files: ${discovered.join(',')}`);
   }
 }
 

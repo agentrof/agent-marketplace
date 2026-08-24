@@ -59,27 +59,29 @@ class SingleTeamDistributionTests(unittest.TestCase):
                     sorted(path.name for path in (self.root / "dist" / host).iterdir()),
                     [fixtures.PLUGIN],
                 )
-                manifest = json.loads(
-                    (
-                        self.root
-                        / "platforms"
-                        / host
-                        / fixtures.PLUGIN
-                        / "manifest.json"
-                    ).read_text(encoding="utf-8")
+                adapter = build_distributions.load_adapters(self.root)[host]
+                manifest_path = (
+                    self.root / "platforms" / host / fixtures.PLUGIN / "manifest.json"
                 )
-                self.assertIn(manifest.get("dependencies"), (None, []))
+                if adapter.metadata["artifact_kind"] == "native_marketplace":
+                    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+                    self.assertIn(manifest.get("dependencies"), (None, []))
+                else:
+                    self.assertFalse(manifest_path.exists())
 
     def test_hosts_share_snapshot_and_host_neutral_canonical_payload(self):
         snapshots = []
         for host in build_distributions.HOSTS:
             package = self.root / "dist" / host / fixtures.PLUGIN
-            manifest = json.loads(
-                (package / f".{host}-plugin/plugin.json").read_text(
-                    encoding="utf-8"
+            adapter = build_distributions.load_adapters(self.root)[host]
+            manifest_dir = adapter.module.native_manifest_directory(host)
+            if manifest_dir is not None:
+                manifest = json.loads(
+                    (package / manifest_dir / "plugin.json").read_text(encoding="utf-8")
                 )
-            )
-            self.assertNotIn("agent_marketplace", manifest)
+                self.assertNotIn("agent_marketplace", manifest)
+            else:
+                self.assertFalse((package / f".{host}-plugin").exists())
             provenance = json.loads(
                 (package / ".agent-marketplace-package.json").read_text(
                     encoding="utf-8"
@@ -102,7 +104,7 @@ class SingleTeamDistributionTests(unittest.TestCase):
                 json.loads((package / "product.json").read_text(encoding="utf-8")),
                 build_distributions.load_product_contract(self.root),
             )
-        self.assertEqual(snapshots[0], snapshots[1])
+        self.assertTrue(all(snapshot == snapshots[0] for snapshot in snapshots))
 
         source = self.root / "plugins" / fixtures.PLUGIN
         for relative in ("constitution.md", "flows", "skill-content"):
@@ -184,11 +186,12 @@ class SingleTeamDistributionTests(unittest.TestCase):
         for host in build_distributions.HOSTS:
             with self.subTest(host=host):
                 package = self.root / "dist" / host / fixtures.PLUGIN
+                prefix = "software-engineering-team-" if host == "opencode" else ""
                 wrapper = (
-                    package / "skills/issue-report/SKILL.md"
+                    package / f"skills/{prefix}issue-report/SKILL.md"
                 ).read_text(encoding="utf-8")
                 setup_wrapper = (
-                    package / "skills/setup/SKILL.md"
+                    package / f"skills/{prefix}setup/SKILL.md"
                 ).read_text(encoding="utf-8")
                 canonical = (
                     package / "skill-content/issue-report/SKILL.md"
@@ -247,10 +250,66 @@ class SingleTeamDistributionTests(unittest.TestCase):
             codex = (
                 self.root / "dist/codex" / fixtures.PLUGIN / "agents" / source.name
             ).read_text(encoding="utf-8")
+            opencode = (
+                self.root / "dist/opencode" / fixtures.PLUGIN / "agents"
+                / f"software-engineering-team-{name}.md"
+            ).read_text(encoding="utf-8")
             self.assertIn(f"name: {name}", claude)
             self.assertIn(f"name: {name}", codex)
             self.assertIn("model:", claude)
             self.assertIn("reasoning:", codex)
+            self.assertIn("mode: subagent", opencode)
+            self.assertNotIn("reasoning:", opencode)
+            self.assertNotIn("output_contract:", opencode)
+
+    def test_opencode_run_support_is_complete_and_choice_safe(self):
+        package = self.root / "dist/opencode" / fixtures.PLUGIN
+        support = json.loads((package / "run-support.json").read_text(encoding="utf-8"))
+        self.assertEqual(support["schema_version"], 1)
+        expected = {
+            fields["name"]
+            for path in (self.root / "plugins" / fixtures.PLUGIN / "skill-content").glob("*/SKILL.md")
+            for fields, _body in [build_distributions.parse_frontmatter(path)]
+            if fields.get("exposure") == "entry"
+        }
+        self.assertEqual(set(support["entries"]), expected)
+        self.assertEqual(support["entries"]["issue-report"], "choice_free")
+        self.assertTrue(all(
+            mode in {"choice_free", "tui_only"}
+            for mode in support["entries"].values()
+        ))
+
+    def test_opencode_permissions_are_closed_and_read_only_roles_cannot_mutate(self):
+        agents = self.root / "dist/opencode" / fixtures.PLUGIN / "agents"
+        reviewer = (agents / "software-engineering-team-solution-reviewer.md").read_text(
+            encoding="utf-8"
+        )
+        developer = (agents / "software-engineering-team-backend-developer.md").read_text(
+            encoding="utf-8"
+        )
+        for text in (reviewer, developer):
+            self.assertIn('"*": deny', text)
+        for denied in ("edit: allow", "bash: allow", "task: allow"):
+            self.assertNotIn(denied, reviewer)
+        for allowed in ("edit: allow", "bash: allow", "task: allow"):
+            self.assertIn(allowed, developer)
+
+    def test_opencode_plugin_mechanically_invokes_the_canonical_hook(self):
+        package = self.root / "dist/opencode" / fixtures.PLUGIN
+        plugin = (
+            package / "plugins/agent-marketplace-software-engineering-team.js"
+        ).read_text(encoding="utf-8")
+        self.assertTrue((package / "scripts/vault_hook.py").is_file())
+        for token in (
+            "spawnSync",
+            "scripts/vault_hook.py",
+            "'tool.execute.before'",
+            "'tool.execute.after'",
+            "pre_hook_denied",
+            "post_hook_failed",
+        ):
+            with self.subTest(token=token):
+                self.assertIn(token, plugin)
 
 
 if __name__ == "__main__":

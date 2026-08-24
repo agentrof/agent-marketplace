@@ -13,12 +13,23 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  exact-sha-host-gates:
+    if: >-
+      github.event.pull_request.merged == true &&
+      github.event.pull_request.base.ref == 'main' &&
+      github.event.pull_request.head.ref == 'release/stable' &&
+      github.event.pull_request.head.repo.full_name == github.repository
+    uses: ./.github/workflows/release-hosts.yml
+    with:
+      candidate_sha: ${{ github.event.pull_request.merge_commit_sha }}
+
   publish:
     if: >-
       github.event.pull_request.merged == true &&
       github.event.pull_request.base.ref == 'main' &&
       github.event.pull_request.head.ref == 'release/stable' &&
       github.event.pull_request.head.repo.full_name == github.repository
+    needs: exact-sha-host-gates
     runs-on: macos-latest
     timeout-minutes: 35
     steps:
@@ -29,6 +40,10 @@ jobs:
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.x"
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "24"
+          package-manager-cache: false
       - name: Verify and publish the exact merge commit
         env:
           GH_TOKEN: ${{ github.token }}
@@ -37,6 +52,12 @@ jobs:
         run: |
           set -euo pipefail
           test "$(git rev-parse HEAD)" = "$EXPECTED_MERGE_SHA"
+          opencode_version="$(python3 -c 'import json; print(json.load(open("tools/data/host-cli-versions.json"))["opencode"])')"
+          npm install --global "opencode-ai@${opencode_version}"
+          opencode --version | grep -F "${opencode_version}"
+          export OPENCODE_BIN="$(command -v opencode)"
+          export OPENCODE_REAL_PROBE="$GITHUB_WORKSPACE/platforms/opencode/real_host_probe.py"
+          export OPENCODE_TUI=1
           make release-check
           version="$(python3 -c 'import json; print(json.load(open("versions.json"))["marketplace"])')"
           python3 tools/release.py verify-release --version "$version"

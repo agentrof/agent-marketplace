@@ -6,5 +6,5 @@
   "merge_policy": "merge-commit-only; squash and rebase fail closed",
   "coordination_policy": "Fence and item/slot refs are compiler-owned; no database or event ledger",
   "release_management": "out_of_scope",
-  "host_parity": "both supported host distributions consume the same canonical contracts"
+  "host_parity": "all supported host distributions consume the same canonical contracts"
 }

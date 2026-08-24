@@ -13,6 +13,7 @@
 /.agentrof/
 /.claude/
 /.codex/
+/.opencode/
 workspace/junit-*.xml
 workspace/docs/.obsidian/*
 !workspace/docs/.obsidian/app.json

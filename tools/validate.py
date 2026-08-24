@@ -813,14 +813,19 @@ def check_registration(tree: Tree, findings: list[Finding]) -> None:
                 f" {registered.get(plugin.name)!r}, expected the channel-relative source",
                 "point the Claude marketplace at its local dist/claude package",
             ))
-        for host in ("claude", "codex"):
+        try:
+            adapters = build_distributions.load_adapters(tree.root)
+        except ValueError:
+            adapters = {}
+        for host, adapter in adapters.items():
             manifest = tree.root / "platforms" / host / plugin.name / "manifest.json"
             contract = tree.root / "platforms" / host / plugin.name / "host-contract.md"
-            if not manifest.is_file() or not contract.is_file():
+            manifest_required = adapter.metadata.get("artifact_kind") == "native_marketplace"
+            if (manifest_required and not manifest.is_file()) or not contract.is_file():
                 findings.append(Finding(
-                    "error", rel(tree, manifest), 1, "registration",
+                    "error", rel(tree, contract), 1, "registration",
                     f"plugin '{plugin.name}' lacks the {host} platform source",
-                    "add manifest.json and host-contract.md under platforms/",
+                    "add its declared host contract and required native manifest under platforms/",
                 ))
 
 
@@ -917,6 +922,62 @@ def check_distribution_packaging(tree: Tree, findings: list[Finding]) -> None:
             if not (archive / marker_name).is_file():
                 error(archive, "distribution lacks its generated ownership marker",
                       "rebuild with tools/build_distributions.py")
+
+        try:
+            adapters = build_distributions.load_adapters(tree.root)
+        except ValueError:
+            adapters = {}
+        for host, adapter in adapters.items():
+            if adapter.metadata.get("artifact_kind") != "project_projection":
+                continue
+            archive = tree.root / "dist" / host / plugin.name
+            provenance = archive / ".agent-marketplace-package.json"
+            plugin_dir = archive / "plugins"
+            support = archive / "run-support.json"
+            if not (archive / marker_name).is_file():
+                error(archive, "project projection lacks its generated ownership marker",
+                      "rebuild with tools/build_distributions.py")
+            try:
+                data = json.loads(read_text(provenance))
+            except (OSError, json.JSONDecodeError):
+                data = {}
+                error(provenance, "project projection provenance is missing or invalid",
+                      "rebuild the host distribution")
+            if data.get("host") != host or data.get("component") != plugin.name:
+                error(provenance, "project projection provenance identity differs from adapter",
+                      "regenerate the project-projection distribution")
+            if not plugin_dir.is_dir() or not any(plugin_dir.glob("*.js")):
+                error(plugin_dir, "project projection has no local host plugin",
+                      "generate the adapter-owned project plugin")
+            if host == "opencode":
+                plugins = sorted(plugin_dir.glob("*.js")) if plugin_dir.is_dir() else []
+                plugin_text = read_text(plugins[0]) if len(plugins) == 1 else ""
+                hook = archive / "scripts" / "vault_hook.py"
+                required_hook_contract = (
+                    "spawnSync",
+                    "scripts/vault_hook.py",
+                    "'tool.execute.before'",
+                    "'tool.execute.after'",
+                    "pre_hook_denied",
+                    "post_hook_failed",
+                )
+                if len(plugins) != 1 or not hook.is_file() or any(
+                    token not in plugin_text for token in required_hook_contract
+                ):
+                    error(
+                        plugin_dir,
+                        "OpenCode projection does not mechanically invoke the canonical mutation hook",
+                        "render one local plugin that calls vault_hook.py before and after protected tools",
+                    )
+            try:
+                support_data = json.loads(read_text(support))
+            except (OSError, json.JSONDecodeError):
+                support_data = {}
+                error(support, "project projection run-support mapping is missing or invalid",
+                      "declare every entry workflow run mode in the adapter")
+            if support_data.get("schema_version") != 1 or not isinstance(support_data.get("entries"), dict):
+                error(support, "project projection run-support mapping has invalid schema",
+                      "emit a complete schema-v1 run support map")
 
         codex_surface = {
             path.parent.name for path in (codex_archive / "skills").glob("*/SKILL.md")
@@ -1148,6 +1209,7 @@ def check_choice_gate(tree: Tree, findings: list[Finding]) -> None:
     for host, token in (
         ("claude", "AskUserQuestion"),
         ("codex", "request_user_input"),
+        ("opencode", "normal conversation text"),
     ):
         contract = (tree.root / "platforms" / host
                     / "software-engineering-team" / "host-contract.md")
@@ -1155,7 +1217,7 @@ def check_choice_gate(tree: Tree, findings: list[Finding]) -> None:
             findings.append(Finding(
                 "error", rel(tree, contract), 1, "choice_gate",
                 f"{host} host contract lacks {token}",
-                "map the canonical gate to the host-native input tool",
+                "map the canonical gate to the declared host choice surface",
             ))
     # Setup fields are project-specific and are checked by the owning config
     # writer. This validator only requires host-native gate wording above.
@@ -1386,8 +1448,13 @@ def check_project_instruction_contract(
     for filename in ("agent-marketplace.md", "me.md", "profile.md"):
         if not (templates / "memory" / filename).is_file():
             problems.append(f"memory template is missing {filename}")
+    try:
+        adapters = build_distributions.load_adapters(tree.root)
+    except ValueError as exc:
+        problems.append(str(exc))
+        adapters = {}
     host_deltas: dict[str, Path] = {}
-    for host in ("claude", "codex"):
+    for host in adapters:
         delta = (
             tree.root / "platforms" / host / "_team" / "overlay"
             / "templates" / "project-instructions" / "host.md"
@@ -1404,7 +1471,30 @@ def check_project_instruction_contract(
         allowed_workspace_fragments.add(team)
         if not team.is_file():
             problems.append(f"{plugin.name} lacks templates/project-instructions/team.md")
-        for host, filename in (("claude", "CLAUDE.md"), ("codex", "AGENTS.md")):
+        registry_path = tree.root / "dist" / next(iter(adapters), "claude") / plugin.name \
+            / "templates" / "project-instruction-surfaces.json"
+        try:
+            surfaces = json.loads(read_text(registry_path)).get("surfaces", [])
+        except (OSError, json.JSONDecodeError):
+            surfaces = []
+            problems.append(f"generated instruction surface registry is missing: {registry_path}")
+        surface_by_host = {
+            item.get("host_id"): item for item in surfaces if isinstance(item, dict)
+        }
+        if set(surface_by_host) != set(adapters):
+            problems.append(f"generated instruction surface registry differs from adapters for {plugin.name}")
+        for host in adapters:
+            surface = surface_by_host.get(host, {})
+            filename = surface.get("filename", "")
+            owner_host = surface.get("owner_host", "")
+            companion = surface.get("user_companion", "")
+            migrations = surface.get("migrates_from_owners", [])
+            if not isinstance(filename, str) or not isinstance(owner_host, str) \
+                    or not isinstance(companion, str) or not companion \
+                    or not isinstance(migrations, list) \
+                    or not all(isinstance(value, str) for value in migrations):
+                problems.append(f"generated {host}/{plugin.name} instruction surface is invalid")
+                continue
             fork = (
                 tree.root / "platforms" / host / plugin.name / "overlay"
                 / "templates" / filename
@@ -1420,7 +1510,7 @@ def check_project_instruction_contract(
             if common.is_file() and team.is_file() and delta.is_file():
                 expected = (
                     f"<!-- generated by agent-marketplace {plugin.name} for"
-                    f" {host}; do not edit by hand -->\n\n"
+                    f" {owner_host}; do not edit by hand -->\n\n"
                     + "\n\n".join(
                         path.read_text(encoding="utf-8").strip()
                         for path in (common, team, delta)
@@ -1581,7 +1671,7 @@ def check_wikilink_ban(tree: Tree, findings: list[Finding]) -> None:
 
 
 def check_version_sync(tree: Tree, findings: list[Finding]) -> None:
-    """One canonical plugin version drives both hosts and runtime output."""
+    """One canonical plugin version drives every supported host and runtime output."""
     problems = [
         problem for problem in release_tool.validate_version_surfaces(tree.root)
         if "marketplace source must stay inside the selected channel" not in problem
@@ -1589,7 +1679,7 @@ def check_version_sync(tree: Tree, findings: list[Finding]) -> None:
     for problem in problems:
         findings.append(Finding(
             "error", "versions.json", 1, "version_sync", problem,
-            "update versions.json once, run the release sync and rebuild both hosts",
+            "update versions.json once, run the release sync and rebuild every host",
         ))
 
 

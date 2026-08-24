@@ -1,5 +1,5 @@
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "vendor": {
     "id": "agentrof",
     "display_name": "Agentrof",
@@ -18,13 +18,17 @@
     },
     "codex": {
       "plugins_dir_env": "AGENT_MARKETPLACE_CODEX_PLUGINS_DIR"
+    },
+    "opencode": {
+      "installation_mode": "project_projection"
     }
   },
   "project_environment": {
     "runtime_root": ".agentrof",
     "projection_roots": {
       "claude": ".claude",
-      "codex": ".codex"
+      "codex": ".codex",
+      "opencode": ".opencode"
     }
   }
 }

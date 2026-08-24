@@ -21,47 +21,8 @@ import shutil
 from pathlib import Path
 
 import build_distributions
-import release as release_tool
 
 KEBAB_RE = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
-
-CLAUDE_TEAM_CONTRACT = """# Host Contract
-
-- `team_guard.py` is an informational session marker and never stores state.
-- One team owns one project and no cross-project state is consulted.
-- Resolve packaged scripts from this plugin root and invoke them directly.
-- During setup, preview and then run the generated project instruction
-  generator. Preserve user instructions in CLAUDE.user.md.
-- Present canonical choice gates through `AskUserQuestion`.
-"""
-
-CODEX_TEAM_CONTRACT = """# Host Contract
-
-- `team_guard.py` is an informational session marker and never stores state.
-- One team owns one project and no cross-project state is consulted.
-- Resolve packaged scripts from this plugin root and invoke them directly.
-- During setup, preview and then run the generated project instruction
-  generator. Preserve user instructions in AGENTS.user.md.
-- Present canonical choice gates through `request_user_input`.
-"""
-
-CLAUDE_TEAM_HOOKS = {
-    "hooks": {
-        "SessionStart": [{"hooks": [{
-            "type": "command",
-            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}\"/scripts/team_guard.py register",
-        }]}],
-    }
-}
-
-CODEX_TEAM_HOOKS = {
-    "hooks": {
-        "SessionStart": [{"hooks": [{
-            "type": "command",
-            "command": "python3 \"${PLUGIN_ROOT}\"/scripts/team_guard.py register",
-        }]}],
-    }
-}
 
 AGENT_TEMPLATE = """---
 name: {name}
@@ -130,35 +91,6 @@ One-line statement of the knowledge this skill carries.
 - State prescriptive DO/DON'T rules; keep depth in references/.
 """
 
-def codex_manifest(name: str, description: str, product_contract: dict) -> dict:
-    vendor = product_contract["vendor"]
-    product = product_contract["product"]
-    repository = f"https://github.com/{vendor['id']}/{product['id']}"
-    long_description = description
-    return {
-        "name": name,
-        "version": "0.0.1",
-        "description": description,
-        "author": {
-            "name": vendor["display_name"],
-            "url": f"https://github.com/{vendor['id']}",
-        },
-        "homepage": repository,
-        "repository": repository,
-        "license": "MIT",
-        "skills": "./skills/",
-        "interface": {
-            "displayName": title_of(name),
-            "shortDescription": description,
-            "longDescription": long_description,
-            "developerName": vendor["display_name"],
-            "category": "Engineering",
-            "capabilities": ["Read", "Write", "Interactive"],
-            "websiteURL": repository,
-        },
-    }
-
-
 def sync_distributions(root: Path) -> None:
     output = root / "dist"
     try:
@@ -204,23 +136,33 @@ def new_plugin(root: Path, name: str) -> None:
     plugin = root / "plugins" / name
     if plugin.exists():
         raise SystemExit(f"scaffold: plugin '{name}' already exists")
-    marketplace_path = root / ".claude-plugin" / "marketplace.json"
-    codex_marketplace_path = root / ".agents" / "plugins" / "marketplace.json"
+    adapters = build_distributions.load_adapters(root)
     versions_path = root / "versions.json"
     try:
-        marketplace = json.loads(marketplace_path.read_text(encoding="utf-8"))
-        codex_marketplace = json.loads(
-            codex_marketplace_path.read_text(encoding="utf-8")
-        )
         versions = json.loads(versions_path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as exc:
         raise SystemExit(f"scaffold: marketplace registry is unreadable: {exc}") from exc
-    marketplace_before = marketplace_path.read_bytes()
-    codex_marketplace_before = codex_marketplace_path.read_bytes()
+    catalogs: dict[Path, dict] = {}
+    catalog_before: dict[Path, bytes] = {}
+    for adapter in adapters.values():
+        if not adapter.metadata["marketplace_catalog"]:
+            continue
+        locator = getattr(adapter.module, "marketplace_catalog_path", None)
+        if not callable(locator):
+            raise SystemExit(
+                f"scaffold: {adapter.host_id} marketplace adapter lacks catalog path"
+            )
+        path = locator(root)
+        try:
+            catalogs[path] = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            raise SystemExit(f"scaffold: marketplace registry is unreadable: {exc}") from exc
+        catalog_before[path] = path.read_bytes()
     versions_before = versions_path.read_bytes()
-    claude_platform = root / "platforms" / "claude" / name
-    codex_platform = root / "platforms" / "codex" / name
-    created = [plugin, claude_platform, codex_platform]
+    platforms = {
+        host: root / "platforms" / host / name for host in adapters
+    }
+    created = [plugin, *platforms.values()]
     try:
         (plugin / "agents").mkdir(parents=True)
         (plugin / "skill-content").mkdir()
@@ -254,64 +196,39 @@ def new_plugin(root: Path, name: str) -> None:
             build_distributions.marketplace_paths_source(product_contract),
             encoding="utf-8",
         )
-        claude_platform.mkdir(parents=True)
-        codex_platform.mkdir(parents=True)
-        vendor = product_contract["vendor"]
-        manifest = {
-            "name": name,
-            "version": "0.0.1",
-            "description": f"{title_of(name)} plugin.",
-            "author": {
-                "name": vendor["display_name"],
-                "url": f"https://github.com/{vendor['id']}",
-            },
-            "license": "MIT",
-            "skills": "./skills/",
-        }
-        (claude_platform / "manifest.json").write_text(
-            json.dumps(manifest, indent=2) + "\n", encoding="utf-8"
-        )
-        claude_contract = CLAUDE_TEAM_CONTRACT
-        (claude_platform / "host-contract.md").write_text(
-            claude_contract, encoding="utf-8")
-        claude_hooks = claude_platform / "overlay" / "hooks" / "hooks.json"
-        claude_hooks.parent.mkdir(parents=True)
-        claude_hooks.write_text(
-            json.dumps(CLAUDE_TEAM_HOOKS, indent=2) + "\n", encoding="utf-8"
-        )
-        marketplace.setdefault("plugins", []).append({
-            "name": name,
-            "source": release_tool.channel_source("claude", name),
-            "description": manifest["description"],
-            "version": manifest["version"],
-            "license": "MIT",
-        })
-        marketplace_path.write_text(
-            json.dumps(marketplace, indent=2) + "\n", encoding="utf-8")
-        (codex_platform / "manifest.json").write_text(
-            json.dumps(
-                codex_manifest(name, manifest["description"], product_contract),
-                indent=2,
-            ) + "\n",
-            encoding="utf-8",
-        )
-        codex_contract = CODEX_TEAM_CONTRACT
-        (codex_platform / "host-contract.md").write_text(
-            codex_contract, encoding="utf-8")
-        codex_hooks = codex_platform / "overlay" / "hooks" / "hooks.json"
-        codex_hooks.parent.mkdir(parents=True)
-        codex_hooks.write_text(
-            json.dumps(CODEX_TEAM_HOOKS, indent=2) + "\n", encoding="utf-8"
-        )
-        codex_marketplace.setdefault("plugins", []).append({
-            "name": name,
-            "source": release_tool.channel_source("codex", name),
-            "policy": {"installation": "INSTALLED_BY_DEFAULT", "authentication": "ON_INSTALL"},
-            "category": "Engineering",
-        })
-        codex_marketplace_path.write_text(
-            json.dumps(codex_marketplace, indent=2) + "\n", encoding="utf-8"
-        )
+        description = f"{title_of(name)} plugin."
+        for host, adapter in adapters.items():
+            platform = platforms[host]
+            platform.mkdir(parents=True)
+            contract = getattr(adapter.module, "scaffold_contract", None)
+            if not callable(contract):
+                raise RuntimeError(f"{host}: adapter lacks scaffold host contract")
+            (platform / "host-contract.md").write_text(contract(), encoding="utf-8")
+            if adapter.metadata["artifact_kind"] == "native_marketplace":
+                manifest_factory = getattr(adapter.module, "scaffold_manifest", None)
+                if not callable(manifest_factory):
+                    raise RuntimeError(f"{host}: native adapter lacks scaffold manifest")
+                manifest = manifest_factory(name, description, product_contract)
+                (platform / "manifest.json").write_text(
+                    json.dumps(manifest, indent=2) + "\n", encoding="utf-8"
+                )
+            overlays = getattr(adapter.module, "scaffold_overlay_files", lambda: {})()
+            if not isinstance(overlays, dict):
+                raise RuntimeError(f"{host}: invalid scaffold overlays")
+            for relative, payload in overlays.items():
+                path = platform / relative
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+            if adapter.metadata["marketplace_catalog"]:
+                catalog_path = getattr(adapter.module, "marketplace_catalog_path")(root)
+                catalog_entry = getattr(adapter.module, "scaffold_catalog_entry", None)
+                if not callable(catalog_entry):
+                    raise RuntimeError(f"{host}: catalog adapter lacks scaffold entry")
+                catalogs[catalog_path].setdefault("plugins", []).append(
+                    catalog_entry(name, manifest, product_contract)
+                )
+        for path, catalog in catalogs.items():
+            path.write_text(json.dumps(catalog, indent=2) + "\n", encoding="utf-8")
         plugin_versions = versions.setdefault("plugins", {})
         if name in plugin_versions:
             raise RuntimeError(f"versions.json already registers {name}")
@@ -321,13 +238,12 @@ def new_plugin(root: Path, name: str) -> None:
         )
         sync_distributions(root)
     except BaseException:
-        marketplace_path.write_bytes(marketplace_before)
-        codex_marketplace_path.write_bytes(codex_marketplace_before)
+        for path, contents in catalog_before.items():
+            path.write_bytes(contents)
         versions_path.write_bytes(versions_before)
         rollback_created(root, created)
         raise
-    print(f"scaffold: created plugins/{name}, both platform adapters,"
-          " and both marketplace entries")
+    print(f"scaffold: created plugins/{name} and all registered platform adapters")
 
 
 def new_agent(root: Path, plugin_name: str, name: str) -> None:

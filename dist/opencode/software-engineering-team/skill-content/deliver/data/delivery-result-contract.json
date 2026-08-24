@@ -1,0 +1,43 @@
+{
+  "schema_version": 1,
+  "envelope": {
+    "required": ["schema_version", "ok", "operation", "mutation_state", "mutation_plan_hash", "observations", "planned_mutations", "findings"],
+    "mutation_state": ["none", "complete", "partial", "uncertain"],
+    "observation": {"required": ["kind", "target", "value"], "kinds": ["config", "file", "provider", "ref", "worktree"], "ordering": ["kind", "target", "value"]},
+    "planned_mutation": {"required": ["atomic_group", "order", "kind", "target", "before", "after", "lease"], "kinds": ["file_create", "file_update", "file_delete", "provider_create", "provider_update", "ref_create", "ref_update", "ref_delete", "worktree_create", "worktree_remove"], "ordering": ["atomic_group", "order", "kind", "target"]},
+    "finding": {"required": ["code", "severity", "refs", "paths", "message", "next_entry"], "severity": ["blocker", "error", "warning", "info"]}
+  },
+  "hash": {
+    "algorithm": "sha256",
+    "projection": "compact sorted-key UTF-8 JSON of schema_version, operation, observations and planned_mutations",
+    "field": "mutation_plan_hash",
+    "format": "sha256:<64 lowercase hexadecimal characters>"
+  },
+  "finding_codes": [
+    "REQUIREMENT_ID_COLLISION", "REQUIREMENT_NOT_CURRENT", "REQUIREMENT_STAGE_ORDER",
+    "REQUIREMENT_STAGE_IMPACT_INVALID", "REQUIREMENT_NOT_INCORPORATED",
+    "BACKLOG_REVISION_STALE", "BACKLOG_SOURCE_CLAIMED", "BACKLOG_COVERAGE_MISMATCH",
+    "DELIVERY_INPUT_INVALID", "DELIVERY_SCOPE_STALE", "DELIVERY_PLAN_STALE",
+    "DELIVERY_REVIEW_STALE", "DELIVERY_CLAIM_CONFLICT", "DELIVERY_DEPENDENCY_UNMET",
+    "DELIVERY_BARRIER_ACTIVE", "DELIVERY_ITEM_NOT_READY", "DELIVERY_ITEM_ALREADY_INTEGRATED",
+    "DELIVERY_ITEM_REF_MISSING", "DELIVERY_PATH_CLAIM_EXCEEDED", "DELIVERY_CONTRACT_CLAIM_EXCEEDED",
+    "DELIVERY_CANCELLATION_INVALID", "DELIVERY_CANCELLATION_FINALIZATION_STALE",
+    "DELIVERY_TARGET_IMPACT_INVALID", "DELIVERY_TARGET_SOURCE_VIOLATION",
+    "DELIVERY_TARGET_CONVERGENCE_REQUIRED", "DELIVERY_SOURCE_HANDOFF_STALE",
+    "DELIVERY_TARGET_CARRIER_INVALID", "DELIVERY_TARGET_UPDATE_UNCERTAIN",
+    "DELIVERY_FENCE_MISSING", "DELIVERY_FENCE_CORRUPT", "DELIVERY_FENCE_MODE",
+    "DELIVERY_FENCE_LEASE_LOST", "DELIVERY_SLOT_UNAVAILABLE", "DELIVERY_SLOT_INVALID",
+    "DELIVERY_SLOT_DUPLICATE", "DELIVERY_ITEM_SLOT_MISSING", "DELIVERY_ITEM_SLOT_DIVERGED",
+    "DELIVERY_REMOTE_ATOMIC_UNSUPPORTED", "DELIVERY_REF_COLLISION", "DELIVERY_LEASE_LOST",
+    "DELIVERY_LOCAL_REF_DIVERGED", "DELIVERY_WRITER_RECEIPT_MISSING",
+    "DELIVERY_WRITER_RECEIPT_STALE", "DELIVERY_WORKTREE_UNSAFE",
+    "DELIVERY_PROVIDER_UNSUPPORTED", "DELIVERY_PR_UNCERTAIN", "DELIVERY_PR_INTENT_STRANDED",
+    "DELIVERY_PR_DUPLICATE", "DELIVERY_PR_STATE_INVALID", "DELIVERY_PR_HEAD_BASE_MISMATCH",
+    "DELIVERY_REQUIRED_CHECK_FAILED", "DELIVERY_MERGE_POLICY_INVALID",
+    "DELIVERY_MERGE_PROOF_INVALID", "DELIVERY_POST_MERGE_TRANSITION",
+    "DELIVERY_UPGRADE_INCOMPATIBLE", "DELIVERY_UPGRADE_CONTRACT_MISMATCH",
+    "DELIVERY_UPGRADE_HANDOFF_COLLISION", "DELIVERY_PROTOCOL_UNSUPPORTED",
+    "DELIVERY_PATH_ESCAPE", "DELIVERY_COORDINATION_CORRUPT",
+    "DELIVERY_TARGET_DRIFT"
+  ]
+}

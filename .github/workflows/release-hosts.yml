@@ -1,6 +1,13 @@
 name: release-hosts
 
 on:
+  workflow_call:
+    inputs:
+      candidate_sha:
+        description: Exact trusted candidate commit to exercise
+        required: false
+        type: string
+        default: ""
   workflow_dispatch:
   pull_request:
     paths:
@@ -24,11 +31,126 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  opencode-cli-real-host:
+    name: opencode CLI (${{ matrix.os }}, Python ${{ matrix.python }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            python: "3.9"
+          - os: ubuntu-latest
+            python: "3.x"
+          - os: macos-latest
+            python: "3.9"
+          - os: macos-latest
+            python: "3.x"
+          - os: windows-latest
+            python: "3.9"
+          - os: windows-latest
+            python: "3.x"
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          ref: ${{ inputs.candidate_sha || github.sha }}
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: ${{ matrix.python }}
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "24"
+          package-manager-cache: false
+      - name: Install the pinned OpenCode CLI
+        if: runner.os != 'Windows'
+        run: |
+          set -euo pipefail
+          opencode_version="$(python -c 'import json; print(json.load(open("tools/data/host-cli-versions.json"))["opencode"])')"
+          npm install --global "opencode-ai@${opencode_version}"
+          opencode --version | grep -F "${opencode_version}"
+      - name: Install the pinned native Windows OpenCode CLI
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $version = python -c 'import json; print(json.load(open("tools/data/host-cli-versions.json"))["opencode"])'
+          npm install --global --allow-scripts=opencode-ai "opencode-ai@$version"
+          $npmRoot = npm root --global
+          $openCode = Join-Path $npmRoot "opencode-ai/node_modules/opencode-windows-x64-baseline/bin/opencode.exe"
+          if (-not (Test-Path $openCode)) {
+            $openCode = Join-Path $npmRoot "opencode-ai/node_modules/opencode-windows-x64/bin/opencode.exe"
+          }
+          if (-not (Test-Path $openCode)) { throw "native OpenCode binary missing" }
+          if ((& $openCode --version) -notmatch [regex]::Escape($version)) { throw "OpenCode version mismatch" }
+      - name: Exercise terminal run and hook contracts
+        if: runner.os != 'Windows'
+        run: |
+          set -euo pipefail
+          python -B platforms/opencode/host_check.py \
+            --opencode "$(command -v opencode)" \
+            --probe "$GITHUB_WORKSPACE/platforms/opencode/real_host_probe.py"
+      - name: Exercise native Windows terminal run and hook contracts
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $npmRoot = npm root --global
+          $openCode = Join-Path $npmRoot "opencode-ai/node_modules/opencode-windows-x64-baseline/bin/opencode.exe"
+          if (-not (Test-Path $openCode)) {
+            $openCode = Join-Path $npmRoot "opencode-ai/node_modules/opencode-windows-x64/bin/opencode.exe"
+          }
+          python -B platforms/opencode/host_check.py --opencode $openCode --probe "$env:GITHUB_WORKSPACE/platforms/opencode/real_host_probe.py"
+
+  opencode-windows-conpty:
+    name: opencode TUI (Windows ConPTY)
+    runs-on: windows-latest
+    timeout-minutes: 25
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          ref: ${{ inputs.candidate_sha || github.sha }}
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.x"
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "24"
+          package-manager-cache: false
+      - name: Install pinned OpenCode and ConPTY harness
+        shell: pwsh
+        run: |
+          $version = python -c 'import json; print(json.load(open("tools/data/host-cli-versions.json"))["opencode"])'
+          npm install --global --allow-scripts=opencode-ai "opencode-ai@$version"
+          python -m pip install "pywinpty==3.0.5"
+          $npmRoot = npm root --global
+          $openCode = Join-Path $npmRoot "opencode-ai/node_modules/opencode-windows-x64-baseline/bin/opencode.exe"
+          if (-not (Test-Path $openCode)) {
+            $openCode = Join-Path $npmRoot "opencode-ai/node_modules/opencode-windows-x64/bin/opencode.exe"
+          }
+          if (-not (Test-Path $openCode)) { throw "native OpenCode binary missing" }
+          if ((& $openCode --version) -notmatch [regex]::Escape($version)) { throw "OpenCode version mismatch" }
+      - name: Exercise the native Windows ConPTY TUI
+        shell: pwsh
+        run: |
+          $npmRoot = npm root --global
+          $openCode = Join-Path $npmRoot "opencode-ai/node_modules/opencode-windows-x64-baseline/bin/opencode.exe"
+          if (-not (Test-Path $openCode)) {
+            $openCode = Join-Path $npmRoot "opencode-ai/node_modules/opencode-windows-x64/bin/opencode.exe"
+          }
+          python -B platforms/opencode/host_check.py --opencode $openCode --probe "$env:GITHUB_WORKSPACE/platforms/opencode/real_host_probe.py" --tui
+
   real-host-lifecycle:
     runs-on: macos-latest
     timeout-minutes: 25
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          ref: ${{ inputs.candidate_sha || github.sha }}
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.x"
@@ -41,14 +163,69 @@ jobs:
           set -euo pipefail
           claude_version="$(python3 -c 'import json; print(json.load(open("tools/data/host-cli-versions.json"))["claude_code"])')"
           codex_version="$(python3 -c 'import json; print(json.load(open("tools/data/host-cli-versions.json"))["codex"])')"
-          npm install --global "@anthropic-ai/claude-code@${claude_version}" "@openai/codex@${codex_version}"
+          opencode_version="$(python3 -c 'import json; print(json.load(open("tools/data/host-cli-versions.json"))["opencode"])')"
+          npm install --global "@anthropic-ai/claude-code@${claude_version}" "@openai/codex@${codex_version}" "opencode-ai@${opencode_version}"
           claude --version | grep -F "${claude_version}"
           codex --version | grep -F "${codex_version}"
+          opencode --version | grep -F "${opencode_version}"
       - name: Record host versions
         run: |
           claude --version
           codex --version
+          opencode --version
       - name: Run deterministic and public stable lifecycle gates
         run: |
           make public-release-check
+          python3 platforms/opencode/host_check.py \
+            --opencode "$(command -v opencode)" \
+            --probe "$GITHUB_WORKSPACE/platforms/opencode/real_host_probe.py" \
+            --tui
           python3 tools/smoke_plugin_installs.py --channel checkout
+
+  opencode-wsl2-real-host:
+    name: opencode terminal (real WSL2)
+    if: github.event_name != 'pull_request'
+    runs-on: windows-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          ref: ${{ inputs.candidate_sha || github.sha }}
+      - name: Provision the ephemeral WSL2 Ubuntu host
+        run: |
+          $ErrorActionPreference = 'Stop'
+          wsl.exe --install --distribution Ubuntu --no-launch
+          $bootstrap = @'
+          set -euo pipefail
+          export DEBIAN_FRONTEND=noninteractive
+          apt-get update
+          apt-get install --yes nodejs npm python3
+          '@
+          $bootstrap = $bootstrap.Replace("`r", "")
+          wsl.exe --distribution Ubuntu --user root -- bash -lc $bootstrap
+      - name: Prove real WSL2 OpenCode terminal support
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $windowsWorkspace = $env:GITHUB_WORKSPACE -replace '\\', '/'
+          $workspace = (wsl.exe --distribution Ubuntu -- wslpath -a $windowsWorkspace).Trim()
+          if ([string]::IsNullOrWhiteSpace($workspace)) { throw "WSL workspace path resolution failed" }
+          $proof = @'
+          set -euo pipefail
+          workspace="$1"
+          cd "$workspace"
+          grep -qi microsoft /proc/sys/kernel/osrelease
+          grep -q WSL2 /proc/sys/kernel/osrelease
+          opencode_version=$(python3 -c 'import json; print(json.load(open("tools/data/host-cli-versions.json"))["opencode"])')
+          npm install --global "opencode-ai@${opencode_version}"
+          opencode --version | grep -F "${opencode_version}"
+          python3 -B platforms/opencode/host_check.py \
+            --opencode "$(command -v opencode)" \
+            --probe "$workspace/platforms/opencode/real_host_probe.py" \
+            --tui
+          '@
+          $proof = $proof.Replace("`r", "")
+          $proof | wsl.exe --distribution Ubuntu --user root -- bash -s -- "$workspace"
+          if ($LASTEXITCODE -ne 0) { throw "WSL OpenCode proof failed with exit code $LASTEXITCODE" }

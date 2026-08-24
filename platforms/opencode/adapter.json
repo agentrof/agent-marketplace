@@ -1,0 +1,13 @@
+{
+  "schema_version": 1,
+  "host_id": "opencode",
+  "display_name": "OpenCode",
+  "artifact_kind": "project_projection",
+  "projection_root": ".opencode",
+  "marketplace_catalog": false,
+  "adapter_api_version": 1,
+  "supported_surfaces": [
+    "terminal.tui",
+    "terminal.run.choice_free"
+  ]
+}

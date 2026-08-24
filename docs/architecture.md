@@ -1,7 +1,8 @@
 # Architecture
 
 This repository ships one standalone Software Engineering Team. Its canonical
-behavior is host-neutral; Claude and Codex are packaging adapters.
+behavior is host-neutral; Claude Code, Codex, and OpenCode are packaging
+adapters.
 
 ## Invariants
 
@@ -48,17 +49,34 @@ behavior is host-neutral; Claude and Codex are packaging adapters.
     approval timestamps are not accepted as evidence.
 18. Distribution output under `dist/` is generated only by
     `tools/build_distributions.py`.
-19. Requirement Flow ends at a committed, approved backlog. Delivery Flow owns
+19. Every host is discovered through `platforms/<host>/adapter.json` and its
+    adapter module. Host-specific path names, manifests, permissions, hooks,
+    and runtime behavior remain in that platform directory; central tooling
+    only orchestrates registry discovery, canonical copying, provenance, and
+    owned generated-tree replacement.
+20. OpenCode packages are project projections, not a fabricated native
+    marketplace artifact. Their Agent Marketplace-owned private state is under
+    `.opencode/agentrof/agent-marketplace/`; `opencode.json`, `opencode.jsonc`,
+    and host-created bootstrap files remain user/host owned.
+21. A project projection requires explicit stopped-client attestation for
+    mutation. Its multi-file publication is rollback-capable but is not a
+    single atomic swap while a host client is running.
+22. OpenCode stable release evidence is exact-candidate, host-executable
+    evidence, not merely a generated-tree check: the pinned terminal binary
+    must pass the real fake-provider CLI/hook probe and interactive PTY/ConPTY
+    probe on native macOS, Linux, and Windows. Real WSL2 evidence is a separate
+    release blocker and is never inferred from a Linux runner.
+23. Requirement Flow ends at a committed, approved backlog. Delivery Flow owns
     scope reservation, execution coordination, review, PR handoff and merge;
     Release Management remains a later scope.
-20. `workspace/config.json` is a closed bootstrap contract. Technology and
+24. `workspace/config.json` is a closed bootstrap contract. Technology and
     datastore choices belong to accepted Solution decisions, commands belong
     to Operation Contracts, and the hard Delivery concurrency guard belongs to
     approved Delivery Governance under `workspace/docs/delivery/governance/`.
-21. `artifacts/` beneath a policy-valid vault folder holds opaque, local files.
+25. `artifacts/` beneath a policy-valid vault folder holds opaque, local files.
     Artifact content is neither a vault note nor executable behavior; symlinks
     are forbidden and Markdown may link to real local artifacts.
-22. A contract-v3 Design System publishes MASTER.md and its offline standalone
+26. A contract-v3 Design System publishes MASTER.md and its offline standalone
     catalog together at `design-system/artifacts/standalone.html`. The catalog
     has a fixed DOM flow while all visual values and project content bind to
     MASTER's machine-readable token block.
@@ -70,6 +88,7 @@ The normative Requirement and Delivery lifecycle is documented in
 
 - `plugins/software-engineering-team/`: canonical workflows, agents, skills,
   compilers and templates.
-- `platforms/`: Claude/Codex manifests and host overlays.
+- `platforms/`: registered host adapters, native manifests, overlays, and
+  OpenCode project-projection contracts.
 - `workspace/docs/`: consuming project's Obsidian vault and backlog.
 - `tools/`: build, validation, release and scaffolding contracts.

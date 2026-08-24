@@ -215,7 +215,7 @@ def normalize(payload: dict) -> dict:
         if isinstance(raw_input, str):
             patch = raw_input
         else:
-            for key in ("patch", "input", "text"):
+            for key in ("patch", "patchText", "input", "text"):
                 value = tool_input.get(key)
                 if isinstance(value, str) and value.strip():
                     patch = value

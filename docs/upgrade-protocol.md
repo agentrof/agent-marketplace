@@ -4,7 +4,7 @@ An Agent Marketplace upgrade is a package replacement followed by one
 convergent project refresh. The consuming repository's authored Markdown and
 configuration remain the source of truth.
 
-1. Build and validate both host distributions from the same source snapshot.
+1. Build and validate all registered host distributions from the same source snapshot.
 2. Run `setup_project.py inspect --project-root <root> --json`. This is a
    read-only, pre-mutation plan over the workspace contract, policy-owned
    Obsidian keys, package-local Obsidian plugin projection, managed ignore block

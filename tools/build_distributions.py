@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build deterministic Claude and Codex plugin distributions.
+"""Build deterministic host distributions from canonical plugin content.
 
 Canonical product behavior lives under ``plugins/`` and is host-neutral.
 Host manifests, contracts, overlays, and append-only fragments live under
@@ -11,18 +11,18 @@ from __future__ import annotations
 import argparse
 import filecmp
 import hashlib
+import importlib.util
 import json
 import re
 import shutil
 import tempfile
+from dataclasses import dataclass
 from pathlib import Path
+from types import ModuleType
 
 
-HOSTS = ("claude", "codex")
-HOST_RUNTIME_CONTRACTS = {
-    "claude": ["in_use_pid_marker_v1"],
-    "codex": [],
-}
+ADAPTER_API_VERSION = 1
+CANONICAL_REASONING_LEVELS = {"high", "medium", "low", "inherit"}
 DELIVERY_PROTOCOL_CAPABILITY = {
     "read_min": 1,
     "read_max": 1,
@@ -43,12 +43,6 @@ DISPLAY_TOKENS = {
     "ui": "UI",
     "ux": "UX",
 }
-CLAUDE_MODELS = {
-    "high": "opus",
-    "medium": "sonnet",
-    "low": "haiku",
-    "inherit": "inherit",
-}
 CANONICAL_HOST_TOKENS = (
     "Claude",
     "Codex",
@@ -62,6 +56,11 @@ CANONICAL_HOST_TOKENS = (
     "PLUGIN_ROOT",
     ".claude",
     ".codex",
+    "OpenCode",
+    "opencode",
+    ".opencode",
+    "tool.execute.before",
+    "tool.execute.after",
 )
 CANONICAL_COMPONENTS = {
     "agents",
@@ -107,24 +106,28 @@ def load_product_contract(root: Path) -> dict:
             data["schema_version"], vendor["id"], vendor["display_name"],
             vendor["home_env"], vendor["default_home_dir"], product["id"],
             product["display_name"], product["home_env"],
-            product["home_subdir"], hosts["claude"]["plugins_dir_env"],
-            hosts["codex"]["plugins_dir_env"],
+            product["home_subdir"],
         )
     except (KeyError, TypeError) as exc:
         raise ValueError(f"{path}: incomplete product contract") from exc
     expected = (
-        1, "agentrof", "Agentrof", "AGENT_MARKETPLACE_HOME", ".agent-marketplace",
+        2, "agentrof", "Agentrof", "AGENT_MARKETPLACE_HOME", ".agent-marketplace",
         "agent-marketplace", "Agent Marketplace", "AGENT_MARKETPLACE_HOME",
-        "", "AGENT_MARKETPLACE_CLAUDE_PLUGINS_DIR",
-        "AGENT_MARKETPLACE_CODEX_PLUGINS_DIR",
+        "",
     )
     if values != expected:
         raise ValueError(f"{path}: product contract differs from the supported namespace")
+    if not isinstance(hosts, dict) or not hosts or not all(
+            isinstance(host, str) and isinstance(value, dict)
+            for host, value in hosts.items()):
+        raise ValueError(f"{path}: hosts must be a non-empty object")
     environment = data.get("project_environment", {})
-    if environment != {
-        "runtime_root": ".agentrof",
-        "projection_roots": {"claude": ".claude", "codex": ".codex"},
-    }:
+    roots = environment.get("projection_roots") if isinstance(environment, dict) else None
+    if environment.get("runtime_root") != ".agentrof" or not isinstance(roots, dict):
+        raise ValueError(f"{path}: project environment roots are invalid")
+    if set(roots) != set(hosts) or not all(
+            isinstance(value, str) and value.startswith(".")
+            for value in roots.values()):
         raise ValueError(f"{path}: project environment roots are invalid")
     return data
 
@@ -187,6 +190,89 @@ _DEFAULT_ROOT = Path(__file__).resolve().parent.parent
 MARKER, PROVENANCE = packaging_names(_DEFAULT_ROOT)
 
 
+@dataclass(frozen=True)
+class HostAdapter:
+    """A loaded platform adapter with declarative metadata."""
+
+    host_id: str
+    metadata: dict
+    module: ModuleType
+
+
+def _load_adapter_module(path: Path, host_id: str) -> ModuleType:
+    spec = importlib.util.spec_from_file_location(
+        f"agent_marketplace_adapter_{host_id}", path
+    )
+    if spec is None or spec.loader is None:
+        raise ValueError(f"{path}: adapter module cannot be loaded")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def load_adapters(root: Path) -> dict[str, HostAdapter]:
+    """Load every declared platform adapter in stable host-id order."""
+    contract = load_product_contract(root)
+    result: dict[str, HostAdapter] = {}
+    for path in sorted((root / "platforms").glob("*/adapter.json")):
+        try:
+            metadata = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            raise ValueError(f"{path}: invalid adapter metadata") from exc
+        if not isinstance(metadata, dict):
+            raise ValueError(f"{path}: adapter metadata must be an object")
+        host_id = metadata.get("host_id")
+        projection_root = metadata.get("projection_root")
+        artifact_kind = metadata.get("artifact_kind")
+        catalog = metadata.get("marketplace_catalog")
+        surfaces = metadata.get("supported_surfaces")
+        if not isinstance(host_id, str) or not host_id:
+            raise ValueError(f"{path}: adapter host_id is required")
+        if host_id in result:
+            raise ValueError(f"{path}: duplicate adapter host_id {host_id!r}")
+        if metadata.get("schema_version") != 1 \
+                or metadata.get("adapter_api_version") != ADAPTER_API_VERSION:
+            raise ValueError(f"{path}: unsupported adapter schema or API version")
+        if artifact_kind not in {"native_marketplace", "project_projection"}:
+            raise ValueError(f"{path}: unsupported artifact_kind {artifact_kind!r}")
+        if not isinstance(catalog, bool) or not isinstance(surfaces, list) \
+                or not surfaces or not all(isinstance(item, str) and item for item in surfaces) \
+                or len(surfaces) != len(set(surfaces)):
+            raise ValueError(f"{path}: marketplace_catalog and supported_surfaces are invalid")
+        if artifact_kind == "project_projection" and catalog:
+            raise ValueError(f"{path}: project projection cannot declare a marketplace catalog")
+        if not isinstance(projection_root, str) or not projection_root.startswith("."):
+            raise ValueError(f"{path}: projection_root must be a local dot directory")
+        if contract["hosts"].get(host_id) is None:
+            raise ValueError(f"{path}: host is absent from product.json")
+        if contract["project_environment"]["projection_roots"].get(host_id) != projection_root:
+            raise ValueError(f"{path}: projection_root differs from product.json")
+        module_path = path.with_name("adapter.py")
+        if not module_path.is_file():
+            raise ValueError(f"{path}: adapter.py is missing")
+        module = _load_adapter_module(module_path, host_id)
+        required = ("skill_artifacts", "agent_artifacts", "native_manifest_directory",
+                    "instruction_surface", "runtime_contracts")
+        if artifact_kind == "project_projection":
+            required += ("command_artifacts", "primary_agent_artifact", "plugin_artifact")
+        missing = [name for name in required if not callable(getattr(module, name, None))]
+        if missing:
+            raise ValueError(f"{module_path}: missing adapter functions: {', '.join(missing)}")
+        result[host_id] = HostAdapter(host_id, metadata, module)
+    if set(result) != set(contract["hosts"]):
+        raise ValueError(
+            "product host registry differs from platform adapters: "
+            f"product={sorted(contract['hosts'])}, adapters={sorted(result)}"
+        )
+    roots = [adapter.metadata["projection_root"] for adapter in result.values()]
+    if len(roots) != len(set(roots)):
+        raise ValueError("platform adapters declare duplicate projection roots")
+    return dict(sorted(result.items()))
+
+
+HOSTS = tuple(load_adapters(_DEFAULT_ROOT))
+
+
 def is_python_cache(path: Path) -> bool:
     return "__pycache__" in path.parts or path.suffix in PYTHON_CACHE_SUFFIXES
 
@@ -243,89 +329,6 @@ def skill_metadata(path: Path) -> tuple[str, str, str, str]:
     return name, description, exposure, project_scope
 
 
-def claude_skill_wrapper(
-    plugin: str, name: str, description: str, exposure: str, project_scope: str
-) -> str:
-    policy = (
-        "disable-model-invocation: true\n"
-        if exposure == "entry"
-        else "user-invocable: false\n"
-    )
-    environment_gate = (
-        " Before changing a project, confirm the workspace config and local "
-        "docs contract are present; setup is the only entry that may create "
-        "them."
-    ) if exposure == "entry" and project_scope == "project" else ""
-    return (
-        "---\n"
-        f"name: {name}\n"
-        f"description: {description}\n"
-        f"{policy}"
-        "---\n\n"
-        f"{WRAPPER_MARKER}\n\n"
-        f"# {title_of(name)}\n\n"
-        "Read `${CLAUDE_PLUGIN_ROOT}/host-contract.md` and "
-        f"`${{CLAUDE_PLUGIN_ROOT}}/skill-content/{name}/SKILL.md` completely. "
-        "Follow the canonical skill as the authoritative workflow and the host "
-        f"contract as its platform adapter.{environment_gate}\n"
-    )
-
-
-def codex_skill_wrapper(
-    name: str, description: str, project_scope: str
-) -> str:
-    environment_gate = (
-        " Before any workflow step inside a Git repository, confirm the "
-        "project-local workspace config and docs contract."
-    ) if project_scope == "project" else ""
-    return (
-        "---\n"
-        f"name: {name}\n"
-        f"description: {description}\n"
-        "---\n\n"
-        f"{WRAPPER_MARKER}\n\n"
-        f"# {title_of(name)}\n\n"
-        "Read `../../host-contract.md` and "
-        f"`../../skill-content/{name}/SKILL.md` completely, resolving both paths "
-        "relative to this file. Follow the canonical skill as the authoritative "
-        "workflow and the host contract as its platform adapter."
-        f"{environment_gate}\n"
-    )
-
-
-def openai_yaml(plugin: str, name: str) -> str:
-    visible = title_of(name)
-    short = f"Start the {visible} guided workflow"
-    if len(short) > 64:
-        short = f"Run {visible}"
-    return (
-        "interface:\n"
-        f"  display_name: \"{visible}\"\n"
-        f"  short_description: \"{short}\"\n"
-        f"  default_prompt: \"Use ${plugin}:{name} to start this workflow.\"\n"
-        "policy:\n"
-        "  allow_implicit_invocation: false\n"
-    )
-
-
-def claude_agent(source: Path) -> str:
-    fields, body = parse_frontmatter(source)
-    reasoning = fields.pop("reasoning", "")
-    if reasoning not in CLAUDE_MODELS:
-        raise ValueError(f"{source}: invalid reasoning level {reasoning!r}")
-    ordered = ["name", "description"]
-    lines = ["---"]
-    for key in ordered:
-        if not fields.get(key):
-            raise ValueError(f"{source}: missing {key}")
-        lines.append(f"{key}: {fields.pop(key)}")
-    lines.append(f"model: {CLAUDE_MODELS[reasoning]}")
-    for key, value in fields.items():
-        lines.append(f"{key}: {value}")
-    lines.extend(("---", "", body.lstrip("\n")))
-    return "\n".join(lines)
-
-
 def copy_canonical(source: Path, target: Path) -> None:
     def ignore(directory: str, names: list[str]) -> set[str]:
         ignored = ignore_python_cache(directory, names)
@@ -359,42 +362,55 @@ def apply_appends(root: Path, target: Path) -> None:
         destination.write_text(f"{base}\n\n{extra}\n", encoding="utf-8")
 
 
-def generate_skills(source: Path, target: Path, host: str) -> None:
-    skills = target / "skills"
-    skills.mkdir()
-    for canonical in sorted((source / "skill-content").glob("*/SKILL.md")):
-        name, description, exposure, project_scope = skill_metadata(canonical)
-        if host == "codex" and exposure != "entry":
-            continue
-        skill_root = skills / name
-        skill_root.mkdir()
-        if host == "claude":
-            text = claude_skill_wrapper(
-                source.name, name, description, exposure, project_scope
-            )
-        else:
-            text = codex_skill_wrapper(name, description, project_scope)
-            metadata = skill_root / "agents" / "openai.yaml"
-            metadata.parent.mkdir()
-            metadata.write_text(openai_yaml(source.name, name), encoding="utf-8")
-        (skill_root / "SKILL.md").write_text(text, encoding="utf-8")
+def write_artifacts(target: Path, artifacts: list[tuple[str, str]]) -> None:
+    """Write declared adapter artifacts without allowing path escape."""
+    for relative, content in artifacts:
+        path = target / relative
+        try:
+            path.resolve().relative_to(target.resolve())
+        except ValueError as exc:
+            raise ValueError(f"adapter output escapes package: {relative}") from exc
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(content, encoding="utf-8")
 
 
-def generate_agents(source: Path, target: Path, host: str) -> None:
+def skill_records(source: Path) -> list[tuple[str, str, str, str]]:
+    return [skill_metadata(path) for path in sorted(
+        (source / "skill-content").glob("*/SKILL.md")
+    )]
+
+
+def generate_skills(source: Path, target: Path, adapter: HostAdapter) -> list[tuple[str, str, str, str]]:
+    records = skill_records(source)
+    context = {"wrapper_marker": WRAPPER_MARKER, "title_of": title_of}
+    for record in records:
+        write_artifacts(
+            target,
+            adapter.module.skill_artifacts(context, source.name, record),
+        )
+    command_artifacts = getattr(adapter.module, "command_artifacts", None)
+    if callable(command_artifacts):
+        write_artifacts(target, command_artifacts(source.name, records))
+    run_support = getattr(adapter.module, "run_support_artifact", None)
+    if callable(run_support):
+        write_artifacts(target, [run_support(records)])
+    return records
+
+
+def generate_agents(source: Path, target: Path, adapter: HostAdapter) -> None:
     agents = source / "agents"
     if not agents.is_dir():
         return
-    if host == "claude":
-        destination = target / "agents"
-        destination.mkdir()
-        for path in sorted(agents.glob("*.md")):
-            (destination / path.name).write_text(claude_agent(path), encoding="utf-8")
-    else:
-        shutil.copytree(agents, target / "agents")
+    context = {"parse_frontmatter": parse_frontmatter}
+    for path in sorted(agents.glob("*.md")):
+        write_artifacts(target, adapter.module.agent_artifacts(context, path))
+    primary = getattr(adapter.module, "primary_agent_artifact", None)
+    if callable(primary):
+        write_artifacts(target, [primary(source.name)])
 
 
 def compose_project_instructions(
-    root: Path, source: Path, target: Path,
+    root: Path, source: Path, target: Path, adapters: dict[str, HostAdapter],
 ) -> None:
     """Compose every portable project instruction template for a team."""
     common = (
@@ -403,11 +419,11 @@ def compose_project_instructions(
     )
     team = source / "templates" / "project-instructions" / "team.md"
     host_deltas = {
-        template_host: (
-            root / "platforms" / template_host / "_team" / "overlay"
+        host_id: (
+            root / "platforms" / host_id / "_team" / "overlay"
             / "templates" / "project-instructions" / "host.md"
         )
-        for template_host in HOSTS
+        for host_id in adapters
     }
     missing = [
         path for path in (common, team, *host_deltas.values())
@@ -428,11 +444,20 @@ def compose_project_instructions(
         raise ValueError("project instruction limits are missing or invalid") from exc
     templates = target / "templates"
     templates.mkdir(exist_ok=True)
+    surfaces = []
     for template_host, host_delta in host_deltas.items():
-        filename = "AGENTS.md" if template_host == "codex" else "CLAUDE.md"
+        surface = adapters[template_host].module.instruction_surface()
+        filename = surface.get("filename")
+        owner_host = surface.get("owner_host")
+        companion = surface.get("user_companion")
+        migrations = surface.get("migrates_from_owners", [])
+        if not isinstance(filename, str) or not filename or not isinstance(owner_host, str) \
+                or not isinstance(companion, str) or not companion \
+                or not isinstance(migrations, list) or not all(isinstance(value, str) for value in migrations):
+            raise ValueError(f"{template_host}: invalid instruction surface")
         owner = (
             f"<!-- generated by agent-marketplace {source.name} for "
-            f"{template_host}; do not edit by hand -->"
+            f"{owner_host}; do not edit by hand -->"
         )
         sections = [
             common.read_text(encoding="utf-8").strip(),
@@ -448,6 +473,17 @@ def compose_project_instructions(
                 f"exceed cap: {size} bytes, {lines} lines"
             )
         (templates / filename).write_text(rendered, encoding="utf-8")
+        surfaces.append({
+            "host_id": template_host,
+            "filename": filename,
+            "owner_host": owner_host,
+            "user_companion": companion,
+            "migrates_from_owners": migrations,
+        })
+    (templates / "project-instruction-surfaces.json").write_text(
+        json.dumps({"schema_version": 1, "surfaces": surfaces}, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
 
     memory_source = source / "templates" / "memory"
     if not memory_source.is_dir():
@@ -475,7 +511,7 @@ def normalize_generated_text(root: Path) -> None:
 def write_provenance(
     target: Path,
     component: str,
-    host: str,
+    adapter: HostAdapter,
     version: str,
     provenance_name: str,
     snapshot: dict[str, str],
@@ -490,17 +526,17 @@ def write_provenance(
     (target / provenance_name).write_text(json.dumps({
         "schema_version": 2,
         "component": component,
-        "host": host,
+        "host": adapter.host_id,
         "version": version,
         **snapshot,
         "files": files,
-        "runtime_contracts": HOST_RUNTIME_CONTRACTS[host],
+        "runtime_contracts": adapter.module.runtime_contracts(),
         "delivery_protocol": DELIVERY_PROTOCOL_CAPABILITY,
     }, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 
 
 def marketplace_snapshot(root: Path) -> dict[str, str]:
-    """Return one deterministic identity shared by both host builds."""
+    """Return one deterministic identity shared by all host builds."""
     digest = hashlib.sha256()
     for relative_root in ("plugins", "platforms"):
         base = root / relative_root
@@ -554,19 +590,19 @@ def load_plugin_versions(root: Path) -> dict[str, str]:
 def build_plugin(
     root: Path,
     source: Path,
-    host: str,
+    adapter: HostAdapter,
     target: Path,
     version: str,
     marker_name: str,
     provenance_name: str,
     snapshot: dict[str, str],
 ) -> None:
+    host = adapter.host_id
     platform = root / "platforms" / host / source.name
     shared = root / "platforms" / "shared" / source.name
-    manifest = platform / "manifest.json"
     contract = platform / "host-contract.md"
-    if not manifest.is_file() or not contract.is_file():
-        raise ValueError(f"{platform}: missing manifest.json or host-contract.md")
+    if not contract.is_file():
+        raise ValueError(f"{platform}: missing host-contract.md")
     copy_canonical(source, target)
     shutil.copy2(root / PRODUCT_CONTRACT_RELPATH, target / PRODUCT_CONTRACT_RELPATH)
     gitignore = target / "templates" / "gitignore"
@@ -586,26 +622,34 @@ def build_plugin(
     apply_appends(shared / "append", target)
     apply_appends(platform / "append", target)
     shutil.copy2(contract, target / "host-contract.md")
-    manifest_dir = target / f".{host}-plugin"
-    manifest_dir.mkdir()
-    try:
-        manifest_data = json.loads(manifest.read_text(encoding="utf-8"))
-    except json.JSONDecodeError as exc:
-        raise ValueError(f"{manifest}: invalid JSON") from exc
-    manifest_data["version"] = version
-    (manifest_dir / "plugin.json").write_text(
-        json.dumps(manifest_data, indent=2) + "\n", encoding="utf-8"
-    )
-    generate_skills(source, target, host)
-    generate_agents(source, target, host)
-    compose_project_instructions(root, source, target)
+    manifest_directory = adapter.module.native_manifest_directory(host)
+    if manifest_directory is not None:
+        manifest = platform / "manifest.json"
+        if not manifest.is_file():
+            raise ValueError(f"{platform}: native marketplace adapter requires manifest.json")
+        try:
+            manifest_data = json.loads(manifest.read_text(encoding="utf-8"))
+        except json.JSONDecodeError as exc:
+            raise ValueError(f"{manifest}: invalid JSON") from exc
+        manifest_data["version"] = version
+        manifest_dir = target / manifest_directory
+        manifest_dir.mkdir()
+        (manifest_dir / "plugin.json").write_text(
+            json.dumps(manifest_data, indent=2) + "\n", encoding="utf-8"
+        )
+    generate_skills(source, target, adapter)
+    generate_agents(source, target, adapter)
+    plugin_artifact = getattr(adapter.module, "plugin_artifact", None)
+    if callable(plugin_artifact):
+        write_artifacts(target, [plugin_artifact(source.name, snapshot["build_id"])])
+    compose_project_instructions(root, source, target, load_adapters(root))
     (target / marker_name).write_text(
         "Generated by tools/build_distributions.py; do not edit.\n",
         encoding="utf-8",
     )
     normalize_generated_text(target)
     write_provenance(
-        target, source.name, host, version, provenance_name, snapshot
+        target, source.name, adapter, version, provenance_name, snapshot
     )
 
 
@@ -642,7 +686,7 @@ def validate_canonical(root: Path) -> None:
                 problems.append(str(exc))
         for agent in sorted((source / "agents").glob("*.md")):
             fields, _ = parse_frontmatter(agent)
-            if fields.get("reasoning") not in CLAUDE_MODELS:
+            if fields.get("reasoning") not in CANONICAL_REASONING_LEVELS:
                 problems.append(f"{agent}: reasoning must be high/medium/low/inherit")
             if "model" in fields:
                 problems.append(f"{agent}: canonical agents use reasoning, not model")
@@ -664,24 +708,28 @@ def validate_canonical(root: Path) -> None:
 
 def build(root: Path, output: Path) -> None:
     validate_canonical(root)
+    adapters = load_adapters(root)
     marker_name, provenance_name = packaging_names(root)
     versions = load_plugin_versions(root)
     snapshot = marketplace_snapshot(root)
-    for host in HOSTS:
+    for host, adapter in adapters.items():
         host_root = output / host
         host_root.mkdir(parents=True)
         for source in sorted(path for path in (root / "plugins").iterdir() if path.is_dir()):
             build_plugin(
-                root, source, host, host_root / source.name, versions[source.name],
+                root, source, adapter, host_root / source.name, versions[source.name],
                 marker_name, provenance_name, snapshot,
             )
 
 
-def generated_tree_owned(output: Path, marker_name: str) -> bool:
+def generated_tree_owned(output: Path, marker_name: str, hosts: tuple[str, ...]) -> bool:
     if not output.exists():
         return True
     plugin_dirs: list[Path] = []
-    for host in HOSTS:
+    present = {path.name for path in output.iterdir() if path.is_dir()}
+    if not present or not present.issubset(set(hosts)):
+        return False
+    for host in sorted(present):
         host_root = output / host
         if not host_root.is_dir():
             return False
@@ -695,7 +743,7 @@ def replace_generated(root: Path, output: Path) -> None:
     sync_marketplace_paths_sources(root)
     marker_name, _ = packaging_names(root)
     if output.exists():
-        if not generated_tree_owned(output, marker_name):
+        if not generated_tree_owned(output, marker_name, tuple(load_adapters(root))):
             raise ValueError("refusing to replace an unmanaged dist tree")
         shutil.rmtree(output)
     build(root, output)
@@ -754,13 +802,13 @@ def main() -> int:
             print(f"distribution-build: {problem}")
         if problems:
             return 1
-        print("distribution-build: Claude and Codex distributions are in sync")
+        print("distribution-build: host distributions are in sync")
         return 0
     try:
         replace_generated(root, output)
     except ValueError as exc:
         raise SystemExit(f"distribution-build: {exc}") from exc
-    print("distribution-build: generated Claude and Codex distributions")
+    print("distribution-build: generated host distributions")
     return 0
 
 

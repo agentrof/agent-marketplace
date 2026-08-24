@@ -2,7 +2,7 @@
 
 This document defines the current host-neutral lifecycle implemented by the
 Software Engineering Team. Canonical behavior lives under
-`plugins/software-engineering-team/`; Claude and Codex only adapt invocation,
+`plugins/software-engineering-team/`; supported host adapters only adapt invocation,
 choice gates and project projection.
 
 ## Public entry surface
@@ -301,7 +301,7 @@ The machine-readable Delivery contract set is under
 - `delivery-result-contract.json`
 
 `tools/validate.py` enforces the closed file set and contract identities.
-`tools/build_distributions.py` builds both hosts from the same canonical
+`tools/build_distributions.py` builds all registered hosts from the same canonical
 sources and embeds the same protocol capability. `make check` is the release
 gate for source validation, generated-distribution parity and all compiler,
 coordinator, provider, setup and host tests.

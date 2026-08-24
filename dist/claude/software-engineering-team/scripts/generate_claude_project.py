@@ -83,7 +83,7 @@ def main() -> int:
         if args.action == "inspect":
             team = project_instructions.plugin_name(plugin_root)
             surfaces = project_instructions.owned_portable_surfaces(
-                project, team, args.workspace
+                project, plugin_root, team, args.workspace
             )
             result = {
                 "changes": [],

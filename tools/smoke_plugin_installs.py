@@ -15,6 +15,11 @@ import threading
 import time
 from pathlib import Path
 
+try:
+    import build_distributions
+except ModuleNotFoundError:  # Imported as tools.smoke_plugin_installs in tests.
+    from tools import build_distributions
+
 
 TEAM = "software-engineering-team"
 MARKETPLACE = "agent-marketplace"
@@ -198,6 +203,28 @@ def exercise_package(team_root: Path, project: Path, env: dict[str, str]) -> Non
         raise SmokeFailure("document router did not remain at Requirement Flow")
 
 
+def exercise_project_projection(
+    team_root: Path, project: Path, env: dict[str, str], projection_entrypoint: str,
+    projection_root: str,
+) -> None:
+    """Exercise a project-local host installer without a global marketplace."""
+    projector = team_root / projection_entrypoint
+    if not projector.is_file():
+        raise SmokeFailure(f"project projection is missing {projection_entrypoint}")
+    project.mkdir(parents=True, exist_ok=True)
+    run([
+        sys.executable, "-B", str(projector), "apply",
+        "--project-root", str(project), "--clients-stopped",
+        "--development-source",
+    ], dict(env, PYTHONDONTWRITEBYTECODE="1"))
+    manage = project / projection_root / "agentrof" / "agent-marketplace" / "manage.py"
+    if not manage.is_file():
+        raise SmokeFailure("project projection did not install its lifecycle tool")
+    run([sys.executable, "-B", str(manage), "check"], env)
+    if not (project / projection_root / "plugins").is_dir():
+        raise SmokeFailure("project projection did not publish host discovery files")
+
+
 def codex_skill_names(env: dict[str, str], project: Path) -> set[str]:
     process = subprocess.Popen(
         ["codex", "app-server"], stdin=subprocess.PIPE,
@@ -306,23 +333,43 @@ def checkout_marketplace(root: Path, target: Path) -> Path:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--host", choices=("all", "claude", "codex"), default="all")
+    root_default = Path(__file__).resolve().parent.parent
+    host_choices = ("all", *build_distributions.load_adapters(root_default))
+    parser.add_argument("--host", choices=host_choices, default="all")
     parser.add_argument("--channel", choices=("checkout", "public"), default="checkout")
     parser.add_argument("--root", type=Path, default=Path(__file__).resolve().parent.parent)
     args = parser.parse_args()
     root = args.root.resolve()
+    adapters = build_distributions.load_adapters(root)
+    selected = set(adapters) if args.host == "all" else {args.host}
     if args.channel == "public":
-        if args.host in {"all", "claude"}:
+        if "claude" in selected:
             smoke_claude(PUBLIC_MARKETPLACES["claude"])
-        if args.host in {"all", "codex"}:
+        if "codex" in selected:
             smoke_codex(root, PUBLIC_MARKETPLACES["codex"])
+        if any(adapters[host].metadata["artifact_kind"] == "project_projection"
+               for host in selected):
+            raise SmokeFailure("project-projection hosts have no global public marketplace install")
         return 0
     with tempfile.TemporaryDirectory(prefix="marketplace-checkout.") as temporary:
         source = checkout_marketplace(root, Path(temporary))
-        if args.host in {"all", "claude"}:
-            smoke_claude(source)
-        if args.host in {"all", "codex"}:
-            smoke_codex(root, source)
+        for host in sorted(selected):
+            adapter = adapters[host]
+            if adapter.metadata["artifact_kind"] == "project_projection":
+                entrypoint = getattr(adapter.module, "projection_entrypoint", None)
+                if not callable(entrypoint):
+                    raise SmokeFailure(f"{host} project adapter lacks a projection entrypoint")
+                exercise_project_projection(
+                    source / "dist" / host / TEAM,
+                    Path(temporary) / f"{host}-project",
+                    os.environ.copy(), entrypoint(), adapter.metadata["projection_root"],
+                )
+            elif host == "claude":
+                smoke_claude(source)
+            elif host == "codex":
+                smoke_codex(root, source)
+            else:
+                raise SmokeFailure(f"{host} native marketplace smoke is not implemented")
     return 0
 
 

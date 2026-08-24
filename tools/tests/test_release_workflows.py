@@ -92,14 +92,20 @@ class ReleaseWorkflowContracts(unittest.TestCase):
                         text.index("git push --atomic origin HEAD:refs/heads/stable"))
         self.assertLess(text.index("gh release view"),
                         text.index("git push --atomic origin HEAD:refs/heads/stable"))
+        self.assertIn('"opencode-ai@${opencode_version}"', text)
+        self.assertIn("OPENCODE_REAL_PROBE", text)
 
     def test_publish_refuses_fork_or_wrong_base_release_prs(self):
         text = self.text("publish-stable-release.yml")
         self.assertIn("github.event.pull_request.base.ref == 'main'", text)
         self.assertIn("github.event.pull_request.head.repo.full_name == github.repository", text)
-        self.assertNotIn("npm install --global", text)
+        self.assertIn('npm install --global "opencode-ai@${opencode_version}"', text)
+        self.assertLess(
+            text.index('test "$(git rev-parse HEAD)" = "$EXPECTED_MERGE_SHA"'),
+            text.index('npm install --global "opencode-ai@${opencode_version}"'),
+        )
 
-    def test_main_validation_uploads_build_id_and_both_hosts(self):
+    def test_main_validation_uploads_build_id_and_all_host_artifacts(self):
         text = self.text("validate.yml")
         self.assertIn("permissions:\n  contents: read", text)
         self.assertIn("tools/release.py build-info", text)
@@ -113,6 +119,7 @@ class ReleaseWorkflowContracts(unittest.TestCase):
         self.assertIn("actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1", text)
         self.assertIn("dist/claude", text)
         self.assertIn("dist/codex", text)
+        self.assertIn("dist/opencode", text)
 
     def test_dependabot_tracks_github_actions(self):
         text = (REPO / ".github/dependabot.yml").read_text(encoding="utf-8")
@@ -151,12 +158,71 @@ class ReleaseWorkflowContracts(unittest.TestCase):
     def test_real_host_smoke_uses_versions_from_the_tracked_policy(self):
         payload = json.loads((REPO / "tools/data/host-cli-versions.json").read_text(encoding="utf-8"))
         self.assertEqual(payload["schema_version"], 1)
-        for key in ("claude_code", "codex"):
+        for key in ("claude_code", "codex", "opencode"):
             self.assertRegex(payload[key], r"^[0-9]+\.[0-9]+\.[0-9]+$")
         workflow = self.text("release-hosts.yml")
         self.assertIn("tools/data/host-cli-versions.json", workflow)
         self.assertIn('"@anthropic-ai/claude-code@${claude_version}"', workflow)
         self.assertIn('"@openai/codex@${codex_version}"', workflow)
+        self.assertIn('"opencode-ai@${opencode_version}"', workflow)
+        self.assertIn("platforms/opencode/host_check.py", workflow)
+        self.assertIn("platforms/opencode/real_host_probe.py", workflow)
+        self.assertIn("opencode-cli-real-host", workflow)
+        for runner in ("ubuntu-latest", "macos-latest", "windows-latest"):
+            self.assertIn(runner, workflow)
+        self.assertIn("workflow_call", workflow)
+        self.assertIn("--tui", workflow)
+        self.assertIn("candidate_sha:", workflow)
+        self.assertIn("inputs.candidate_sha || github.sha", workflow)
+        self.assertIn("opencode-windows-conpty", workflow)
+        self.assertIn('"pywinpty==3.0.5"', workflow)
+        self.assertIn("opencode-wsl2-real-host", workflow)
+        self.assertEqual(
+            workflow.count('npm install --global --allow-scripts=opencode-ai "opencode-ai@$version"'),
+            2,
+        )
+        wsl2 = workflow.split("  opencode-wsl2-real-host:", 1)[1]
+        self.assertIn("runs-on: windows-latest", wsl2)
+        self.assertIn("wsl.exe --install --distribution Ubuntu --no-launch", wsl2)
+        self.assertIn("wsl.exe --distribution Ubuntu", wsl2)
+        self.assertIn("$windowsWorkspace = $env:GITHUB_WORKSPACE -replace '\\\\', '/'", wsl2)
+        self.assertIn("WSL workspace path resolution failed", wsl2)
+        self.assertEqual(wsl2.count('$bootstrap = $bootstrap.Replace("`r", "")'), 1)
+        self.assertEqual(wsl2.count('$proof = $proof.Replace("`r", "")'), 1)
+        self.assertIn("opencode_version=$(python3 -c 'import json;", wsl2)
+        self.assertNotIn(r'open(\"tools/data/host-cli-versions.json\")', wsl2)
+        self.assertIn('$proof | wsl.exe --distribution Ubuntu --user root -- bash -s -- "$workspace"', wsl2)
+        self.assertIn('WSL OpenCode proof failed with exit code $LASTEXITCODE', wsl2)
+        self.assertNotIn('bash -lc $proof', wsl2)
+        self.assertIn("grep -q WSL2 /proc/sys/kernel/osrelease", workflow)
+        for release_workflow in ("prepare-stable-release.yml", "publish-stable-release.yml"):
+            text = self.text(release_workflow)
+            with self.subTest(workflow=release_workflow):
+                self.assertIn('"opencode-ai@${opencode_version}"', text)
+                self.assertIn("OPENCODE_BIN", text)
+                self.assertIn("OPENCODE_REAL_PROBE", text)
+                self.assertIn("OPENCODE_TUI=1", text)
+                self.assertIn("exact-sha-host-gates", text)
+                self.assertIn("uses: ./.github/workflows/release-hosts.yml", text)
+                self.assertIn("needs: exact-sha-host-gates", text)
+
+        prepare = self.text("prepare-stable-release.yml")
+        publish = self.text("publish-stable-release.yml")
+        self.assertIn("candidate_sha: ${{ github.sha }}", prepare)
+        self.assertIn(
+            "candidate_sha: ${{ github.event.pull_request.merge_commit_sha }}",
+            publish,
+        )
+
+    def test_release_check_requires_the_fail_closed_opencode_host_gate(self):
+        makefile = (REPO / "Makefile").read_text(encoding="utf-8")
+        self.assertRegex(
+            makefile,
+            r"(?m)^release-check: check host-check-opencode$",
+        )
+        self.assertIn("platforms/opencode/host_check.py --opencode", makefile)
+        self.assertIn("OPENCODE_REAL_PROBE", makefile)
+        self.assertIn("OPENCODE_TUI_ARG", makefile)
 
     def test_real_host_smoke_covers_its_complete_control_plane(self):
         workflow = self.text("release-hosts.yml")
@@ -210,12 +276,12 @@ class ReleaseWorkflowContracts(unittest.TestCase):
             text = workflow.read_text(encoding="utf-8")
             self.assertEqual([], workflow_action_findings(workflow.name, text))
 
-    def test_codeql_scans_python_on_pr_main_and_schedule(self):
+    def test_codeql_scans_python_and_javascript_on_pr_main_and_schedule(self):
         text = self.text("codeql.yml")
         self.assertIn("pull_request:", text)
         self.assertIn("branches: [main]", text)
         self.assertIn("schedule:", text)
-        self.assertIn("languages: python", text)
+        self.assertIn("languages: python,javascript-typescript", text)
         self.assertIn("build-mode: none", text)
         self.assertIn("security-events: write", text)
 

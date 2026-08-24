@@ -1,6 +1,0 @@
-{
-  "summary": "Bound OpenCode runtime probes and clean up timed-out command trees on Windows.",
-  "components": {
-    "software-engineering-team": "patch"
-  }
-}

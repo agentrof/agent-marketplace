@@ -200,9 +200,18 @@ class FakeProvider:
             FakeProvider._chunk({}, "stop"),
         ]
 
+    @staticmethod
+    def _unknown_text() -> list[dict[str, Any]]:
+        return [
+            FakeProvider._chunk({"role": "assistant", "content": "probe response"}, None),
+            FakeProvider._chunk({}, "unknown"),
+        ]
+
     def response(self, request: dict[str, Any]) -> list[dict[str, Any]]:
         if self.mode == "text":
             return self._text()
+        if self.mode == "unknown_text":
+            return self._unknown_text()
         tools = {
             item.get("function", {}).get("name")
             for item in request.get("tools", [])
@@ -424,6 +433,16 @@ def assert_mutator(executable: Path, project: Path, env: dict[str, str], provide
         marker = detail.find(f'"tool": "{mode}"')
         context = detail[marker:marker + 1500] if marker >= 0 else detail[-900:]
         raise ProbeError(f"mutator_effect_missing:{mode}:{actual!r}:{context}")
+
+
+def assert_unknown_text_is_bounded(
+    executable: Path, project: Path, env: dict[str, str], provider: FakeProvider,
+) -> None:
+    before = provider.request_count()
+    run_command(executable, project, env, provider, "unknown_text")
+    requests = provider.request_count() - before
+    if requests > 2:
+        raise ProbeError(f"unknown_text_unbounded:{requests}")
 
 
 def assert_pre_deny(executable: Path, project: Path, env: dict[str, str], provider: FakeProvider) -> None:
@@ -680,6 +699,7 @@ def main() -> int:
                     tui(executable, project, env, args.artifact_dir, provider)
                 else:
                     run_command(executable, project, env, provider, "text")
+                    assert_unknown_text_is_bounded(executable, project, env, provider)
                     for mode in ("write", "edit", "apply_patch", "bash"):
                         assert_mutator(executable, project, env, provider, mode)
                     assert_pre_deny(executable, project, env, provider)

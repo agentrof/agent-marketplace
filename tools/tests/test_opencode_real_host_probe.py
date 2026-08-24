@@ -1,0 +1,57 @@
+"""Focused behavior checks for the executable OpenCode compatibility probe."""
+
+from __future__ import annotations
+
+import importlib.util
+import subprocess
+import sys
+import tempfile
+import unittest
+from pathlib import Path
+
+
+ROOT = Path(__file__).resolve().parents[2]
+PROBE_PATH = ROOT / "platforms" / "opencode" / "real_host_probe.py"
+SPEC = importlib.util.spec_from_file_location("opencode_real_host_probe", PROBE_PATH)
+assert SPEC is not None and SPEC.loader is not None
+PROBE = importlib.util.module_from_spec(SPEC)
+SPEC.loader.exec_module(PROBE)
+
+
+class OpenCodeRealHostProbeTests(unittest.TestCase):
+    def test_bind_runtime_has_a_dedicated_first_bootstrap_budget(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            package = root / "package"
+            package.mkdir()
+            project = root / "project"
+            project.mkdir()
+            executable = root / "opencode"
+            executable.write_text("placeholder", encoding="utf-8")
+            calls: list[tuple[list[str], float]] = []
+            original_command = PROBE.command
+
+            def fake_command(argv, *, cwd, environment, timeout=45.0):
+                del cwd, environment
+                calls.append((argv, timeout))
+                if "apply" in argv:
+                    (project / ".opencode" / "agentrof" / "agent-marketplace").mkdir(
+                        parents=True
+                    )
+                    (project / ".opencode" / "agents").mkdir(parents=True)
+                return subprocess.CompletedProcess(argv, 0, "", "")
+
+            PROBE.command = fake_command
+            try:
+                manage = PROBE.configure_project(package, project, executable, {})
+            finally:
+                PROBE.command = original_command
+
+        self.assertEqual(manage, project / ".opencode/agentrof/agent-marketplace/manage.py")
+        self.assertEqual(calls[-1][0][3], "bind-runtime")
+        self.assertEqual(calls[-1][1], PROBE.CONFIGURATION_TIMEOUT)
+        self.assertGreater(PROBE.CONFIGURATION_TIMEOUT, 45.0)
+
+
+if __name__ == "__main__":
+    unittest.main()

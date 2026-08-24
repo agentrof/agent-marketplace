@@ -181,6 +181,8 @@ class ReleaseWorkflowContracts(unittest.TestCase):
         self.assertIn("runs-on: windows-latest", wsl2)
         self.assertIn("wsl.exe --install --distribution Ubuntu --no-launch", wsl2)
         self.assertIn("wsl.exe --distribution Ubuntu", wsl2)
+        self.assertIn("$windowsWorkspace = $env:GITHUB_WORKSPACE -replace '\\\\', '/'", wsl2)
+        self.assertIn("WSL workspace path resolution failed", wsl2)
         self.assertEqual(wsl2.count('$bootstrap = $bootstrap.Replace("`r", "")'), 1)
         self.assertEqual(wsl2.count('$proof = $proof.Replace("`r", "")'), 1)
         self.assertIn("grep -q WSL2 /proc/sys/kernel/osrelease", workflow)

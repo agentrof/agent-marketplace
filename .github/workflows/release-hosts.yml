@@ -209,7 +209,9 @@ jobs:
       - name: Prove real WSL2 OpenCode terminal support
         run: |
           $ErrorActionPreference = 'Stop'
-          $workspace = (wsl.exe --distribution Ubuntu -- wslpath -a $env:GITHUB_WORKSPACE).Trim()
+          $windowsWorkspace = $env:GITHUB_WORKSPACE -replace '\\', '/'
+          $workspace = (wsl.exe --distribution Ubuntu -- wslpath -a $windowsWorkspace).Trim()
+          if ([string]::IsNullOrWhiteSpace($workspace)) { throw "WSL workspace path resolution failed" }
           $proof = @'
           set -euo pipefail
           workspace="$1"

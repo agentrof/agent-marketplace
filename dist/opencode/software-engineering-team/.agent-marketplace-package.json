@@ -1,5 +1,5 @@
 {
-  "build_id": "snapshot.b4d0b7d3290214e9309791eeab3cd054300e0a0aadea1e5f0c266bc8987ca386",
+  "build_id": "snapshot.22b2cdc6acb4e902458a3ba01631257aefc7bc6334f3628329a97e4c7d079b2c",
   "component": "software-engineering-team",
   "delivery_protocol": {
     "read_max": 1,
@@ -58,7 +58,7 @@
     "flows/requirement.md": "9863a7148aff4cdb3c833277611b5bb8c81a80284f474a973d8a58fa56b03580",
     "flows/solution-design.md": "839ff02348d1b2001c724eee39ee7af0f9257d1629453125da5eb7ad22b79135",
     "host-contract.md": "67567a39c4cd2fea8f952d907259c2b85599cc0b4265a787d650b16f0f700950",
-    "plugins/agent-marketplace-software-engineering-team.js": "fd01aae6b67e21c27f8d73f973a500e7dec19be2c06039050f4585c32f8ae9f4",
+    "plugins/agent-marketplace-software-engineering-team.js": "4f5cbbe351c8ea3f9c30a30f9a34dc0338f7bbcf4d11c1379eab051e82e730b5",
     "product.json": "b518546dc334e243cf261f44acccd5fb06de5734234930987e1518058acdf18a",
     "run-support.json": "5fd025e74880e0e5ec2b30c5a9dc248eb0c591e013142616bee069af99ebb95b",
     "scripts/architecture_compile.py": "8cc5a827677f3627b559d038f026dad4abb84477f8e581d8c46979a7d125ed82",
@@ -297,6 +297,6 @@
   "schema_version": 2,
   "source_channel": "snapshot",
   "source_commit": "",
-  "source_ref": "snapshot.b4d0b7d3290214e9309791eeab3cd054300e0a0aadea1e5f0c266bc8987ca386",
+  "source_ref": "snapshot.22b2cdc6acb4e902458a3ba01631257aefc7bc6334f3628329a97e4c7d079b2c",
   "version": "3.1.0"
 }

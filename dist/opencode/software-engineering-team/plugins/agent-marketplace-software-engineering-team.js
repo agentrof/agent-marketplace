@@ -16,7 +16,7 @@ import {
 } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-const buildId = "snapshot.b4d0b7d3290214e9309791eeab3cd054300e0a0aadea1e5f0c266bc8987ca386";
+const buildId = "snapshot.22b2cdc6acb4e902458a3ba01631257aefc7bc6334f3628329a97e4c7d079b2c";
 const vaultHookSha256 = "90324eb40f82c7246d9e5a3fe932429d2c19489f7b9cf3acf21fd7ce45442022";
 const component = 'software-engineering-team';
 const pluginFilename = 'agent-marketplace-software-engineering-team.js';
@@ -146,7 +146,7 @@ function assertSupportedPluginSet(config) {
     .map((entry) => entry.name)
     .sort();
   if (discovered.length !== 1 || discovered[0] !== pluginFilename) {
-    fail('unsupported_plugin_set', `unexpected plugin files: ${discovered.join(',')}`);
+    fail('unsupported_plugin_set_directory', `unexpected plugin files: ${discovered.join(',')}`);
   }
 }
 
@@ -214,7 +214,7 @@ function runtime() {
   if (!Array.isArray(binding.effective_plugins)
       || binding.effective_plugins.length !== 1
       || normalizePluginReference(binding.effective_plugins[0]) !== own) {
-    fail('unsupported_plugin_set');
+    fail('unsupported_plugin_set_binding');
   }
   const owned = installation.public_owned_files;
   const ownedPlugin = owned && owned[`plugins/${pluginFilename}`];

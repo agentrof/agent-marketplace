@@ -146,7 +146,7 @@ function assertSupportedPluginSet(config) {
     .map((entry) => entry.name)
     .sort();
   if (discovered.length !== 1 || discovered[0] !== pluginFilename) {
-    fail('unsupported_plugin_set', `unexpected plugin files: ${discovered.join(',')}`);
+    fail('unsupported_plugin_set_directory', `unexpected plugin files: ${discovered.join(',')}`);
   }
 }
 
@@ -214,7 +214,7 @@ function runtime() {
   if (!Array.isArray(binding.effective_plugins)
       || binding.effective_plugins.length !== 1
       || normalizePluginReference(binding.effective_plugins[0]) !== own) {
-    fail('unsupported_plugin_set');
+    fail('unsupported_plugin_set_binding');
   }
   const owned = installation.public_owned_files;
   const ownedPlugin = owned && owned[`plugins/${pluginFilename}`];

@@ -24,8 +24,11 @@ class OpenCodeRealHostProbeTests(unittest.TestCase):
             root = Path(temporary)
             environment = PROBE.environment(root)
             self.assertTrue((root / "home").is_dir())
+            self.assertTrue((root / "tmp").is_dir())
 
         self.assertEqual(environment["OPENCODE_TEST_HOME"], str(root / "home"))
+        for name in ("TEMP", "TMP", "TMPDIR"):
+            self.assertEqual(environment[name], str(root / "tmp"))
 
     def test_bind_runtime_has_a_dedicated_first_bootstrap_budget(self):
         with tempfile.TemporaryDirectory() as temporary:

@@ -266,7 +266,9 @@ class FakeProvider:
 
 def environment(root: Path) -> dict[str, str]:
     home = root / "home"
+    temporary = root / "tmp"
     home.mkdir()
+    temporary.mkdir()
     values = dict(os.environ)
     values.update({
         "AGENT_MARKETPLACE_HOME": str(root / "global-agent-marketplace"),
@@ -276,7 +278,11 @@ def environment(root: Path) -> dict[str, str]:
         "XDG_DATA_HOME": str(root / "xdg-data"),
         "XDG_CACHE_HOME": str(root / "xdg-cache"),
         "XDG_STATE_HOME": str(root / "xdg-state"),
-        "TMPDIR": str(root / "tmp"),
+        # Keep the Windows and POSIX temporary-directory spellings aligned on
+        # one existing, probe-owned directory for OpenCode's TUI subprocess.
+        "TEMP": str(temporary),
+        "TMP": str(temporary),
+        "TMPDIR": str(temporary),
     })
     return values
 

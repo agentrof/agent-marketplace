@@ -19,6 +19,14 @@ SPEC.loader.exec_module(PROBE)
 
 
 class OpenCodeRealHostProbeTests(unittest.TestCase):
+    def test_environment_isolates_the_opencode_home(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            environment = PROBE.environment(root)
+            self.assertTrue((root / "home").is_dir())
+
+        self.assertEqual(environment["OPENCODE_TEST_HOME"], str(root / "home"))
+
     def test_bind_runtime_has_a_dedicated_first_bootstrap_budget(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)

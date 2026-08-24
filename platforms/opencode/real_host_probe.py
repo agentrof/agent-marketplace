@@ -265,9 +265,12 @@ class FakeProvider:
 
 
 def environment(root: Path) -> dict[str, str]:
+    home = root / "home"
+    home.mkdir()
     values = dict(os.environ)
     values.update({
         "AGENT_MARKETPLACE_HOME": str(root / "global-agent-marketplace"),
+        "OPENCODE_TEST_HOME": str(home),
         "PYTHONDONTWRITEBYTECODE": "1",
         "XDG_CONFIG_HOME": str(root / "xdg-config"),
         "XDG_DATA_HOME": str(root / "xdg-data"),
@@ -283,7 +286,7 @@ def assert_no_global_marketplace_state(root: Path) -> None:
     global_home = root / "global-agent-marketplace"
     if global_home.exists():
         forbidden.append(global_home)
-    for name in ("xdg-config", "xdg-data", "xdg-cache", "xdg-state"):
+    for name in ("home", "xdg-config", "xdg-data", "xdg-cache", "xdg-state"):
         base = root / name
         if not base.is_dir():
             continue

@@ -35,6 +35,16 @@ class OpenCodeProjectionTests(unittest.TestCase):
             "dist/opencode/software-engineering-team/.agent-marketplace-package.json: text: unset\n",
         )
 
+    def test_runtime_plugin_accepts_windows_drive_plugin_references(self):
+        plugin = (PACKAGE / "plugins/agent-marketplace-software-engineering-team.js").read_text(
+            encoding="utf-8"
+        )
+        windows_path = "if (/^[A-Za-z]:[\\\\/]/.test(value))"
+        scheme = "if (/^[A-Za-z][A-Za-z0-9+.-]*:/.test(value))"
+        self.assertIn(windows_path, plugin)
+        self.assertIn(scheme, plugin)
+        self.assertLess(plugin.index(windows_path), plugin.index(scheme))
+
     def setUp(self) -> None:
         self.temporary = tempfile.TemporaryDirectory()
         self.root = Path(self.temporary.name)

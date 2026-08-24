@@ -125,6 +125,9 @@ function normalizePluginReference(value) {
       fail('unsupported_plugin_set', error.message);
     }
   }
+  if (/^[A-Za-z]:[\\/]/.test(value)) {
+    return canonical(value, 'unsupported_plugin_set');
+  }
   if (/^[A-Za-z][A-Za-z0-9+.-]*:/.test(value)) fail('unsupported_plugin_set');
   return canonical(value, 'unsupported_plugin_set');
 }

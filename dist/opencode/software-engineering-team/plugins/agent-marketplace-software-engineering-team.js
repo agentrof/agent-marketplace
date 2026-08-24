@@ -16,7 +16,7 @@ import {
 } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-const buildId = "snapshot.3c32d3c894cc1fc4344da5056d3843bc9f8cbc8b9ea9c514fb07028c9954e93f";
+const buildId = "snapshot.6940b77e41df01db84b9df189441f7143a34264f781be487fd040ccc063d0915";
 const vaultHookSha256 = "90324eb40f82c7246d9e5a3fe932429d2c19489f7b9cf3acf21fd7ce45442022";
 const component = 'software-engineering-team';
 const pluginFilename = 'agent-marketplace-software-engineering-team.js';
@@ -124,6 +124,9 @@ function normalizePluginReference(value) {
     } catch (error) {
       fail('unsupported_plugin_set', error.message);
     }
+  }
+  if (/^[A-Za-z]:[\\/]/.test(value)) {
+    return canonical(value, 'unsupported_plugin_set');
   }
   if (/^[A-Za-z][A-Za-z0-9+.-]*:/.test(value)) fail('unsupported_plugin_set');
   return canonical(value, 'unsupported_plugin_set');

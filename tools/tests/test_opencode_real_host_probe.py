@@ -93,6 +93,28 @@ class OpenCodeRealHostProbeTests(unittest.TestCase):
 
         PROBE.terminate_windows_process_tree(None)
 
+    def test_windows_tui_cleanup_kills_the_tree_before_and_after_closing_winpty(self):
+        events: list[str] = []
+
+        class FakeProcess:
+            pid = 123
+
+            def terminate(self, *, force):
+                events.append(f"terminate:{force}")
+
+            def close(self, *, force):
+                events.append(f"close:{force}")
+
+        with mock.patch.object(
+            PROBE,
+            "terminate_windows_process_tree",
+            side_effect=lambda pid: events.append(f"tree:{pid}"),
+        ):
+            PROBE.close_windows_tui_process(FakeProcess())
+
+        self.assertEqual(events, ["tree:123", "terminate:True", "close:True", "tree:123"])
+        self.assertEqual(PROBE.CLEANUP_TIMEOUT, 30.0)
+
 
 if __name__ == "__main__":
     unittest.main()

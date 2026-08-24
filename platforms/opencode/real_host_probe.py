@@ -22,6 +22,7 @@ from typing import Any
 TEAM = "software-engineering-team"
 EXPECTED_VERSION = "1.18.17"
 CONFIGURATION_TIMEOUT = 180.0
+CLEANUP_TIMEOUT = 30.0
 TUI_COMMAND = "/issue-report Prepare a deterministic probe issue\r"
 TUI_READY_MARKERS = (b"ctrl+p", b"commands")
 
@@ -555,7 +556,7 @@ def terminate_windows_process_tree(pid: object) -> None:
 
 def cleanup_probe_root(root: Path) -> None:
     """Remove an isolated probe root after Windows releases a killed TUI tree."""
-    deadline = time.monotonic() + 10
+    deadline = time.monotonic() + CLEANUP_TIMEOUT
     while True:
         try:
             shutil.rmtree(root)
@@ -570,6 +571,22 @@ def cleanup_probe_root(root: Path) -> None:
 
 def tui_ready(transcript: bytes) -> bool:
     return all(marker in transcript for marker in TUI_READY_MARKERS)
+
+
+def close_windows_tui_process(process: Any) -> None:
+    """Kill OpenCode's native tree before and after closing the winpty wrapper."""
+    pid = getattr(process, "pid", None)
+    terminate_windows_process_tree(pid)
+    try:
+        process.terminate(force=True)
+    except Exception:  # pywinpty may raise WinptyError after child exit.
+        pass
+    try:
+        process.close(force=True)
+    except Exception:  # cleanup must not mask a successful ConPTY proof.
+        pass
+    # Winpty may detach conhost/node while closing; retry with the captured root.
+    terminate_windows_process_tree(pid)
 
 
 def tui_windows(
@@ -610,16 +627,7 @@ def tui_windows(
         excerpt = transcript.decode("utf-8", errors="replace")[-1200:]
         raise ProbeError(f"tui_command_timeout:{excerpt!r}")
     finally:
-        pid = getattr(process, "pid", None)
-        try:
-            process.terminate(force=True)
-        except Exception:  # pywinpty may raise WinptyError after child exit.
-            pass
-        terminate_windows_process_tree(pid)
-        try:
-            process.close(force=True)
-        except Exception:  # cleanup must not mask a successful ConPTY proof.
-            pass
+        close_windows_tui_process(process)
         write_tui_artifact(artifact_dir, bytes(transcript))
 
 

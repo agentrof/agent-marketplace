@@ -77,7 +77,7 @@ jobs:
         shell: pwsh
         run: |
           $version = python -c 'import json; print(json.load(open("tools/data/host-cli-versions.json"))["opencode"])'
-          npm install --global "opencode-ai@$version"
+          npm install --global --allow-scripts=opencode-ai "opencode-ai@$version"
           $npmRoot = npm root --global
           $openCode = Join-Path $npmRoot "opencode-ai/node_modules/opencode-windows-x64-baseline/bin/opencode.exe"
           if (-not (Test-Path $openCode)) {
@@ -125,7 +125,7 @@ jobs:
         shell: pwsh
         run: |
           $version = python -c 'import json; print(json.load(open("tools/data/host-cli-versions.json"))["opencode"])'
-          npm install --global "opencode-ai@$version"
+          npm install --global --allow-scripts=opencode-ai "opencode-ai@$version"
           python -m pip install "pywinpty==3.0.5"
           $npmRoot = npm root --global
           $openCode = Join-Path $npmRoot "opencode-ai/node_modules/opencode-windows-x64-baseline/bin/opencode.exe"
@@ -218,7 +218,7 @@ jobs:
           cd "$workspace"
           grep -qi microsoft /proc/sys/kernel/osrelease
           grep -q WSL2 /proc/sys/kernel/osrelease
-          opencode_version=$(python3 -c "import json; print(json.load(open(\"tools/data/host-cli-versions.json\"))[\"opencode\"])")
+          opencode_version=$(python3 -c 'import json; print(json.load(open("tools/data/host-cli-versions.json"))["opencode"])')
           npm install --global "opencode-ai@${opencode_version}"
           opencode --version | grep -F "${opencode_version}"
           python3 -B platforms/opencode/host_check.py \

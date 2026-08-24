@@ -177,6 +177,10 @@ class ReleaseWorkflowContracts(unittest.TestCase):
         self.assertIn("opencode-windows-conpty", workflow)
         self.assertIn('"pywinpty==3.0.5"', workflow)
         self.assertIn("opencode-wsl2-real-host", workflow)
+        self.assertEqual(
+            workflow.count('npm install --global --allow-scripts=opencode-ai "opencode-ai@$version"'),
+            2,
+        )
         wsl2 = workflow.split("  opencode-wsl2-real-host:", 1)[1]
         self.assertIn("runs-on: windows-latest", wsl2)
         self.assertIn("wsl.exe --install --distribution Ubuntu --no-launch", wsl2)
@@ -185,6 +189,8 @@ class ReleaseWorkflowContracts(unittest.TestCase):
         self.assertIn("WSL workspace path resolution failed", wsl2)
         self.assertEqual(wsl2.count('$bootstrap = $bootstrap.Replace("`r", "")'), 1)
         self.assertEqual(wsl2.count('$proof = $proof.Replace("`r", "")'), 1)
+        self.assertIn("opencode_version=$(python3 -c 'import json;", wsl2)
+        self.assertNotIn(r'open(\"tools/data/host-cli-versions.json\")', wsl2)
         self.assertIn("grep -q WSL2 /proc/sys/kernel/osrelease", workflow)
         for release_workflow in ("prepare-stable-release.yml", "publish-stable-release.yml"):
             text = self.text(release_workflow)

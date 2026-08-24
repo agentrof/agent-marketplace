@@ -179,7 +179,7 @@ class ReleaseWorkflowContracts(unittest.TestCase):
         self.assertIn("opencode-wsl2-real-host", workflow)
         wsl2 = workflow.split("  opencode-wsl2-real-host:", 1)[1]
         self.assertIn("runs-on: windows-latest", wsl2)
-        self.assertIn("wsl.exe --install Ubuntu", wsl2)
+        self.assertIn("wsl.exe --install --distribution Ubuntu --no-launch", wsl2)
         self.assertIn("wsl.exe --distribution Ubuntu", wsl2)
         self.assertIn("grep -q WSL2 /proc/sys/kernel/osrelease", workflow)
         for release_workflow in ("prepare-stable-release.yml", "publish-stable-release.yml"):

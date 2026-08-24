@@ -197,7 +197,7 @@ jobs:
       - name: Provision the ephemeral WSL2 Ubuntu host
         run: |
           $ErrorActionPreference = 'Stop'
-          wsl.exe --install Ubuntu
+          wsl.exe --install --distribution Ubuntu --no-launch
           wsl.exe --distribution Ubuntu --user root -- bash -lc 'set -euo pipefail
             export DEBIAN_FRONTEND=noninteractive
             apt-get update

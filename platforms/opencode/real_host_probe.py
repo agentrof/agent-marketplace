@@ -22,6 +22,8 @@ from typing import Any
 TEAM = "software-engineering-team"
 EXPECTED_VERSION = "1.18.17"
 CONFIGURATION_TIMEOUT = 180.0
+TUI_COMMAND = "/issue-report Prepare a deterministic probe issue\r"
+WINDOWS_TUI_READY_MARKERS = (b"ctrl+p", b"commands")
 
 
 class ProbeError(RuntimeError):
@@ -533,6 +535,10 @@ def write_tui_artifact(artifact_dir: Path | None, transcript: bytes) -> None:
         (artifact_dir / "opencode-tui-transcript.bin").write_bytes(transcript)
 
 
+def tui_windows_ready(transcript: bytes) -> bool:
+    return all(marker in transcript for marker in WINDOWS_TUI_READY_MARKERS)
+
+
 def tui_windows(
     executable: Path, project: Path, env: dict[str, str], artifact_dir: Path | None,
 ) -> None:
@@ -551,8 +557,6 @@ def tui_windows(
     process.fileobj.setblocking(False)
     transcript = bytearray()
     started = time.monotonic()
-    command_sent = False
-    command_selected = False
     prompt_sent = False
     try:
         while time.monotonic() - started < 25:
@@ -563,15 +567,8 @@ def tui_windows(
                 except BlockingIOError:
                     data = b""
                 transcript.extend(data.replace(b"0011Ignore", b""))
-            elapsed = time.monotonic() - started
-            if not command_sent and elapsed >= 5:
-                process.write("/issue-report\r")
-                command_sent = True
-            if command_sent and not command_selected and elapsed >= 5.7:
-                process.write("\r")
-                command_selected = True
-            if command_selected and not prompt_sent and elapsed >= 6.4:
-                process.write("Prepare a deterministic probe issue\r")
+            if not prompt_sent and tui_windows_ready(bytes(transcript)):
+                process.write(TUI_COMMAND)
                 prompt_sent = True
             if b"probe response" in transcript:
                 return
@@ -603,8 +600,6 @@ def tui_posix(
     transcript = bytearray()
     try:
         deadline = time.monotonic() + 20
-        command_sent_at: float | None = None
-        command_selected = False
         prompt_sent = False
         while time.monotonic() < deadline:
             ready, _, _ = select.select([master], [], [], 0.2)
@@ -613,17 +608,8 @@ def tui_posix(
                     transcript.extend(os.read(master, 65536))
                 except OSError:
                     break
-            if command_sent_at is None and time.monotonic() + 16 > deadline:
-                os.write(master, b"/issue-report\r")
-                command_sent_at = time.monotonic()
-            if command_sent_at is not None and not command_selected \
-                    and time.monotonic() - command_sent_at >= 0.5:
-                os.write(master, b"\r")
-                command_selected = True
-                command_sent_at = time.monotonic()
-            if command_selected and not prompt_sent \
-                    and command_sent_at is not None and time.monotonic() - command_sent_at >= 0.5:
-                os.write(master, b"Prepare a deterministic probe issue\r")
+            if not prompt_sent and time.monotonic() + 16 > deadline:
+                os.write(master, TUI_COMMAND.encode("utf-8"))
                 prompt_sent = True
             if b"probe response" in transcript:
                 return

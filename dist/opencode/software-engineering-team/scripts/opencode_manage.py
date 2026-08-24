@@ -8,6 +8,7 @@ import contextlib
 import hashlib
 import json
 import os
+import signal
 import shutil
 import subprocess
 import sys
@@ -17,6 +18,12 @@ from urllib.parse import urlparse
 from urllib.request import url2pathname
 from platform import machine
 from pathlib import Path
+
+
+OPENCODE_COMMAND_TIMEOUT = 45.0
+OPENCODE_CONFIG_TIMEOUT = 80.0
+OPENCODE_CONFIG_ATTEMPTS = 2
+PROCESS_TERMINATION_TIMEOUT = 5.0
 
 
 def sha256(path: Path) -> str:
@@ -122,20 +129,93 @@ def plugin_path(value: object) -> Path:
     return candidate.resolve()
 
 
-def effective_config(executable: str, project: Path) -> tuple[str, list[Path]]:
+def terminate_process_tree(process: subprocess.Popen) -> None:
     try:
-        descriptor, temporary = tempfile.mkstemp(prefix="agent-marketplace-opencode-config.")
-        with os.fdopen(descriptor, "wb") as output:
-            result = subprocess.run([executable, "debug", "config"], cwd=project,
-                                    stdout=output, stderr=subprocess.PIPE, check=False)
-        if result.returncode:
-            raise RuntimeError("runtime_unbound")
-        config = json.loads(Path(temporary).read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError) as exc:
-        raise RuntimeError("hook_contract_incompatible") from exc
-    finally:
-        if "temporary" in locals():
-            Path(temporary).unlink(missing_ok=True)
+        if os.name == "nt":
+            subprocess.run(
+                ["taskkill", "/PID", str(process.pid), "/T", "/F"],
+                capture_output=True,
+                text=True,
+                check=False,
+                timeout=PROCESS_TERMINATION_TIMEOUT,
+            )
+        else:
+            os.killpg(process.pid, signal.SIGKILL)
+    except (OSError, subprocess.TimeoutExpired):
+        try:
+            process.kill()
+        except OSError:
+            pass
+    try:
+        process.communicate(timeout=PROCESS_TERMINATION_TIMEOUT)
+    except subprocess.TimeoutExpired:
+        try:
+            process.kill()
+            process.communicate(timeout=PROCESS_TERMINATION_TIMEOUT)
+        except (OSError, subprocess.TimeoutExpired):
+            pass
+
+
+def run_opencode(
+    argv: list[str], project: Path, *, stdout: object | None = None,
+    timeout: float = OPENCODE_COMMAND_TIMEOUT,
+) -> subprocess.CompletedProcess[str]:
+    options: dict[str, object] = {
+        "cwd": project,
+        "stdout": subprocess.PIPE if stdout is None else stdout,
+        "stderr": subprocess.PIPE,
+        "text": True,
+    }
+    if os.name == "nt":
+        options["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP
+    else:
+        options["start_new_session"] = True
+    try:
+        process = subprocess.Popen(argv, **options)
+    except OSError as exc:
+        raise RuntimeError("runtime_unbound") from exc
+    try:
+        output, error = process.communicate(timeout=timeout)
+    except subprocess.TimeoutExpired as exc:
+        terminate_process_tree(process)
+        raise RuntimeError("runtime_unbound") from exc
+    return subprocess.CompletedProcess(argv, process.returncode, output, error)
+
+
+def effective_config(executable: str, project: Path) -> tuple[str, list[Path]]:
+    config: dict | None = None
+    failure: Exception | None = None
+    for _ in range(OPENCODE_CONFIG_ATTEMPTS):
+        temporary: str | None = None
+        try:
+            descriptor, temporary = tempfile.mkstemp(prefix="agent-marketplace-opencode-config.")
+            with os.fdopen(descriptor, "wb") as output:
+                result = run_opencode(
+                    [executable, "debug", "config"], project, stdout=output,
+                    timeout=OPENCODE_CONFIG_TIMEOUT,
+                )
+            if result.returncode:
+                raise RuntimeError("runtime_unbound")
+            candidate = json.loads(Path(temporary).read_text(encoding="utf-8"))
+            if not isinstance(candidate, dict):
+                raise RuntimeError("hook_contract_incompatible")
+            config = candidate
+            break
+        except RuntimeError as exc:
+            if str(exc) != "runtime_unbound":
+                raise
+            failure = exc
+            continue
+        except (OSError, json.JSONDecodeError) as exc:
+            failure = exc
+            continue
+        finally:
+            if temporary is not None:
+                Path(temporary).unlink(missing_ok=True)
+    if config is None:
+        if isinstance(failure, (OSError, json.JSONDecodeError)):
+            raise RuntimeError("hook_contract_incompatible") from failure
+        raise RuntimeError("runtime_unbound")
     plugins = config.get("plugin", [])
     if not isinstance(plugins, list):
         raise RuntimeError("unsupported_plugin_set")
@@ -235,8 +315,7 @@ def check(private: Path) -> list[str]:
                         or python["sha256"] != binding.get("python_sha256") \
                         or python["path"] != str(Path(sys.executable).resolve()):
                     raise RuntimeError("runtime_binding_drift")
-                result = subprocess.run([open_code["path"], "--version"], capture_output=True,
-                                        text=True, check=False)
+                result = run_opencode([open_code["path"], "--version"], project)
                 version = (result.stdout or result.stderr).strip().removeprefix("v")
                 if result.returncode or version != binding.get("opencode_version") \
                         or version not in value.get("tested_opencode_versions", []):
@@ -254,7 +333,7 @@ def bind_runtime(private: Path, executable: str | None) -> None:
     path = executable or shutil.which("opencode")
     if not path:
         raise RuntimeError("runtime_unbound")
-    result = subprocess.run([path, "--version"], capture_output=True, text=True, check=False)
+    result = run_opencode([path, "--version"], project_root(private))
     if result.returncode:
         raise RuntimeError("runtime_unbound")
     version = (result.stdout or result.stderr).strip().removeprefix("v")

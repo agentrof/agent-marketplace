@@ -1,5 +1,5 @@
 {
-  "build_id": "snapshot.a30426a720884f9c0cab7944cce0341c9531679eee8605443dc5105c9f39e7dc",
+  "build_id": "snapshot.d14613fb551a91e6a1d1a1b5e38fe337664e5cbdb48fa3ccb2278fb0167ad77b",
   "component": "software-engineering-team",
   "delivery_protocol": {
     "read_max": 1,
@@ -58,7 +58,7 @@
     "flows/requirement.md": "9863a7148aff4cdb3c833277611b5bb8c81a80284f474a973d8a58fa56b03580",
     "flows/solution-design.md": "839ff02348d1b2001c724eee39ee7af0f9257d1629453125da5eb7ad22b79135",
     "host-contract.md": "67567a39c4cd2fea8f952d907259c2b85599cc0b4265a787d650b16f0f700950",
-    "plugins/agent-marketplace-software-engineering-team.js": "0fc18fb011ef34225344946b80ec8505c289b312d3845bc3188c55569b012220",
+    "plugins/agent-marketplace-software-engineering-team.js": "427ea792c678e2d4e8670833a54ce553c2537dc41416d92d25eb6d05a1870969",
     "product.json": "b518546dc334e243cf261f44acccd5fb06de5734234930987e1518058acdf18a",
     "run-support.json": "5fd025e74880e0e5ec2b30c5a9dc248eb0c591e013142616bee069af99ebb95b",
     "scripts/architecture_compile.py": "8cc5a827677f3627b559d038f026dad4abb84477f8e581d8c46979a7d125ed82",
@@ -89,7 +89,7 @@
     "scripts/team_guard.py": "275f50df4648a7dc6242d4b6e619a7e5d9a1c84ba88eb29df4a4ff8b6447aad0",
     "scripts/vault_check.py": "3c342529b35b017e4d0bbd862dfd9425706e254dec31e1e3d345ef68c06a88aa",
     "scripts/vault_gate.py": "018e98e2d70fe47c7b2c13b4880acb35ba8a944d1fe4b944ffe300b0623dd0a2",
-    "scripts/vault_hook.py": "123b0767be9c89017a5d5e168b96640c0ff806a4895366a8d09c867e52363bda",
+    "scripts/vault_hook.py": "90324eb40f82c7246d9e5a3fe932429d2c19489f7b9cf3acf21fd7ce45442022",
     "skill-content/backlog-plan/SKILL.md": "1089619234996540dc46fb586f592e61fafca4da3365544b4d7bbd4d7b808dee",
     "skill-content/business-analysis/SKILL.md": "46008d5d7e8103fbaf2575bd3fbc141bf3b896f6cf4a8a774b43e6c52d29915a",
     "skill-content/business-analysis/data/space-schema.json": "c9c9d567279d73d60c635f40bcaa13cf54acc8d1792a393ef8809ddd121df5cd",
@@ -297,6 +297,6 @@
   "schema_version": 2,
   "source_channel": "snapshot",
   "source_commit": "",
-  "source_ref": "snapshot.a30426a720884f9c0cab7944cce0341c9531679eee8605443dc5105c9f39e7dc",
+  "source_ref": "snapshot.d14613fb551a91e6a1d1a1b5e38fe337664e5cbdb48fa3ccb2278fb0167ad77b",
   "version": "3.1.0"
 }

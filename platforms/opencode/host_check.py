@@ -26,7 +26,16 @@ TEAM = "software-engineering-team"
 
 
 class HostCheckError(RuntimeError):
-    pass
+    def __init__(self, code: str, detail: str | None = None):
+        super().__init__(code)
+        self.code = code
+        self.detail = detail
+
+
+def command_detail(result: subprocess.CompletedProcess[str], label: str) -> str:
+    """Return bounded child output when a deterministic subcheck fails."""
+    output = (result.stderr or result.stdout).strip()
+    return f"{label}: {output[-2000:]}" if output else label
 
 
 def policy_version() -> str:
@@ -87,11 +96,15 @@ def deterministic_projection_check() -> Path:
             "--project-root", str(project), "--clients-stopped", "--development-source",
         ], env=dict(os.environ, PYTHONDONTWRITEBYTECODE="1"))
         if applied.returncode:
-            raise HostCheckError("projection_drift")
+            raise HostCheckError(
+                "projection_drift", command_detail(applied, "projector_apply_failed")
+            )
         manage = project / ".opencode" / "agentrof" / "agent-marketplace" / "manage.py"
         checked = run([sys.executable, "-B", str(manage), "check"])
         if checked.returncode:
-            raise HostCheckError("projection_drift")
+            raise HostCheckError(
+                "projection_drift", command_detail(checked, "manage_check_failed")
+            )
     return package
 
 
@@ -151,7 +164,10 @@ def main() -> int:
         print(json.dumps({"ok": True, "scope": "real-host", "package": str(package)}))
         return 0
     except HostCheckError as exc:
-        print(json.dumps({"ok": False, "code": str(exc)}))
+        payload = {"ok": False, "code": exc.code}
+        if exc.detail:
+            payload["detail"] = exc.detail
+        print(json.dumps(payload))
         return 4
 
 

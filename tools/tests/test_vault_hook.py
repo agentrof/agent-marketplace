@@ -514,6 +514,22 @@ class VaultHookTests(unittest.TestCase):
             })
             self.assertEqual(result.returncode, 0, result.stderr)
 
+    def test_apply_patch_accepts_patch_text_tool_input(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            project = Path(temporary)
+            patch = (
+                "*** Begin Patch\n"
+                f"*** Add File: {project / 'README.md'}\n"
+                "+safe\n"
+                "*** End Patch"
+            )
+            result = self.run_hook("pre", {
+                "tool_name": "apply_patch",
+                "tool_input": {"patchText": patch},
+                "cwd": str(project),
+            })
+            self.assertEqual(result.returncode, 0, result.stderr)
+
     def test_approved_design_system_is_immutable(self):
         with tempfile.TemporaryDirectory() as temporary:
             project = Path(temporary)

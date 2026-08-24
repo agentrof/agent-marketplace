@@ -36,7 +36,10 @@ class OpenCodeHostCheckTests(unittest.TestCase):
         self.assertEqual(result.returncode, 4, result.stdout + result.stderr)
         payload = json.loads(result.stdout)
         self.assertFalse(payload["ok"])
-        self.assertIn(payload["code"], {"runtime_unbound", "unsupported_opencode_version"})
+        self.assertIn(
+            payload["code"],
+            {"runtime_unbound", "unsupported_opencode_version", "hook_contract_incompatible"},
+        )
 
     def test_tui_flag_is_forwarded_only_to_an_explicit_real_probe(self):
         text = SCRIPT.read_text(encoding="utf-8")

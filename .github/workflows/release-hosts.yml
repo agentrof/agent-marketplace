@@ -198,23 +198,31 @@ jobs:
         run: |
           $ErrorActionPreference = 'Stop'
           wsl.exe --install --distribution Ubuntu --no-launch
-          wsl.exe --distribution Ubuntu --user root -- bash -lc 'set -euo pipefail
-            export DEBIAN_FRONTEND=noninteractive
-            apt-get update
-            apt-get install --yes nodejs npm python3'
+          $bootstrap = @'
+          set -euo pipefail
+          export DEBIAN_FRONTEND=noninteractive
+          apt-get update
+          apt-get install --yes nodejs npm python3
+          '@
+          $bootstrap = $bootstrap.Replace("`r", "")
+          wsl.exe --distribution Ubuntu --user root -- bash -lc $bootstrap
       - name: Prove real WSL2 OpenCode terminal support
         run: |
           $ErrorActionPreference = 'Stop'
           $workspace = (wsl.exe --distribution Ubuntu -- wslpath -a $env:GITHUB_WORKSPACE).Trim()
-          wsl.exe --distribution Ubuntu --user root -- bash -lc 'set -euo pipefail
-            workspace="$1"
-            cd "$workspace"
-            grep -qi microsoft /proc/sys/kernel/osrelease
-            grep -q WSL2 /proc/sys/kernel/osrelease
-            opencode_version=$(python3 -c "import json; print(json.load(open(\"tools/data/host-cli-versions.json\"))[\"opencode\"])")
-            npm install --global "opencode-ai@${opencode_version}"
-            opencode --version | grep -F "${opencode_version}"
-            python3 -B platforms/opencode/host_check.py \
-              --opencode "$(command -v opencode)" \
-              --probe "$workspace/platforms/opencode/real_host_probe.py" \
-              --tui' -- "$workspace"
+          $proof = @'
+          set -euo pipefail
+          workspace="$1"
+          cd "$workspace"
+          grep -qi microsoft /proc/sys/kernel/osrelease
+          grep -q WSL2 /proc/sys/kernel/osrelease
+          opencode_version=$(python3 -c "import json; print(json.load(open(\"tools/data/host-cli-versions.json\"))[\"opencode\"])")
+          npm install --global "opencode-ai@${opencode_version}"
+          opencode --version | grep -F "${opencode_version}"
+          python3 -B platforms/opencode/host_check.py \
+            --opencode "$(command -v opencode)" \
+            --probe "$workspace/platforms/opencode/real_host_probe.py" \
+            --tui
+          '@
+          $proof = $proof.Replace("`r", "")
+          wsl.exe --distribution Ubuntu --user root -- bash -lc $proof -- "$workspace"

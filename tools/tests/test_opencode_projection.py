@@ -18,6 +18,23 @@ PACKAGE = ROOT / "dist" / "opencode" / "software-engineering-team"
 
 
 class OpenCodeProjectionTests(unittest.TestCase):
+    def test_distribution_bytes_are_eol_immutable(self):
+        result = subprocess.run(
+            [
+                "git", "check-attr", "text", "--",
+                "dist/opencode/software-engineering-team/.agent-marketplace-package.json",
+            ],
+            cwd=ROOT,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(
+            result.stdout,
+            "dist/opencode/software-engineering-team/.agent-marketplace-package.json: text: unset\n",
+        )
+
     def setUp(self) -> None:
         self.temporary = tempfile.TemporaryDirectory()
         self.root = Path(self.temporary.name)

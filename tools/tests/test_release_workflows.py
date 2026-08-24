@@ -177,7 +177,10 @@ class ReleaseWorkflowContracts(unittest.TestCase):
         self.assertIn("opencode-windows-conpty", workflow)
         self.assertIn('"pywinpty==3.0.5"', workflow)
         self.assertIn("opencode-wsl2-real-host", workflow)
-        self.assertIn("runs-on: [self-hosted, Linux, X64, WSL2, opencode]", workflow)
+        wsl2 = workflow.split("  opencode-wsl2-real-host:", 1)[1]
+        self.assertIn("runs-on: windows-latest", wsl2)
+        self.assertIn("wsl.exe --install Ubuntu", wsl2)
+        self.assertIn("wsl.exe --distribution Ubuntu", wsl2)
         self.assertIn("grep -q WSL2 /proc/sys/kernel/osrelease", workflow)
         for release_workflow in ("prepare-stable-release.yml", "publish-stable-release.yml"):
             text = self.text(release_workflow)

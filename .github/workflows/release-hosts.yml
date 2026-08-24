@@ -185,34 +185,36 @@ jobs:
   opencode-wsl2-real-host:
     name: opencode terminal (real WSL2)
     if: github.event_name != 'pull_request'
-    runs-on: [self-hosted, Linux, X64, WSL2, opencode]
+    runs-on: windows-latest
     timeout-minutes: 30
+    defaults:
+      run:
+        shell: pwsh
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
           ref: ${{ inputs.candidate_sha || github.sha }}
-      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
-        with:
-          python-version: "3.x"
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
-        with:
-          node-version: "24"
-          package-manager-cache: false
-      - name: Prove this runner is WSL2
+      - name: Provision the ephemeral WSL2 Ubuntu host
         run: |
-          set -euo pipefail
-          grep -qi microsoft /proc/sys/kernel/osrelease
-          grep -q WSL2 /proc/sys/kernel/osrelease
-      - name: Install pinned OpenCode
+          $ErrorActionPreference = 'Stop'
+          wsl.exe --install Ubuntu
+          wsl.exe --distribution Ubuntu --user root -- bash -lc 'set -euo pipefail
+            export DEBIAN_FRONTEND=noninteractive
+            apt-get update
+            apt-get install --yes nodejs npm python3'
+      - name: Prove real WSL2 OpenCode terminal support
         run: |
-          set -euo pipefail
-          opencode_version="$(python3 -c 'import json; print(json.load(open("tools/data/host-cli-versions.json"))["opencode"])')"
-          npm install --global "opencode-ai@${opencode_version}"
-          opencode --version | grep -F "${opencode_version}"
-      - name: Exercise run hooks and the WSL2 PTY TUI
-        run: |
-          set -euo pipefail
-          python3 -B platforms/opencode/host_check.py \
-            --opencode "$(command -v opencode)" \
-            --probe "$GITHUB_WORKSPACE/platforms/opencode/real_host_probe.py" \
-            --tui
+          $ErrorActionPreference = 'Stop'
+          $workspace = (wsl.exe --distribution Ubuntu -- wslpath -a $env:GITHUB_WORKSPACE).Trim()
+          wsl.exe --distribution Ubuntu --user root -- bash -lc 'set -euo pipefail
+            workspace="$1"
+            cd "$workspace"
+            grep -qi microsoft /proc/sys/kernel/osrelease
+            grep -q WSL2 /proc/sys/kernel/osrelease
+            opencode_version=$(python3 -c "import json; print(json.load(open(\"tools/data/host-cli-versions.json\"))[\"opencode\"])")
+            npm install --global "opencode-ai@${opencode_version}"
+            opencode --version | grep -F "${opencode_version}"
+            python3 -B platforms/opencode/host_check.py \
+              --opencode "$(command -v opencode)" \
+              --probe "$workspace/platforms/opencode/real_host_probe.py" \
+              --tui' -- "$workspace"

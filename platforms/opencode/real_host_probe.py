@@ -21,6 +21,7 @@ from typing import Any
 
 TEAM = "software-engineering-team"
 EXPECTED_VERSION = "1.18.17"
+CONFIGURATION_TIMEOUT = 180.0
 
 
 class ProbeError(RuntimeError):
@@ -347,7 +348,7 @@ def configure_project(package: Path, project: Path, executable: Path, env: dict[
     )
     require(command([
         sys.executable, "-B", str(manage), "bind-runtime", "--opencode", str(executable),
-    ], cwd=project, environment=env), "bind_runtime")
+    ], cwd=project, environment=env, timeout=CONFIGURATION_TIMEOUT), "bind_runtime")
     return manage
 
 

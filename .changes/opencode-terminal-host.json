@@ -1,7 +1,0 @@
-{
-  "summary": "Add project-local OpenCode Terminal host projection support with fail-closed release evidence.",
-  "components": {
-    "agent-marketplace": "minor",
-    "software-engineering-team": "minor"
-  }
-}

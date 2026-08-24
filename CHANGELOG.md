@@ -24,3 +24,8 @@
 ## 3.1.0
 
 - Add domain-aware Experience process resolution, opaque vault artifacts, and the contract-v3 Design System catalog.
+
+## 3.2.0
+
+- Bound OpenCode runtime probes and clean up timed-out command trees on Windows.
+- Add project-local OpenCode Terminal host projection support with fail-closed release evidence.

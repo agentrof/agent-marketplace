@@ -3,7 +3,7 @@
 
 The coordinator functions keep their rich Python return values for internal
 callers and tests. The command-line boundary uses this module to expose one
-stable, redacted shape to both host adapters.
+stable, redacted shape to all supported host adapters.
 """
 
 from __future__ import annotations

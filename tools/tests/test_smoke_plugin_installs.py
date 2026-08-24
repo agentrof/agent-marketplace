@@ -7,6 +7,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from tools import build_distributions
 from tools import smoke_plugin_installs as smoke
 
 
@@ -19,12 +20,12 @@ class HostSmokeContracts(unittest.TestCase):
             target = smoke.checkout_marketplace(ROOT, Path(temporary) / "catalog")
             self.assertTrue((target / ".claude-plugin/marketplace.json").is_file())
             self.assertTrue((target / ".agents/plugins/marketplace.json").is_file())
-            for host in ("claude", "codex"):
+            for host in build_distributions.HOSTS:
                 packages = sorted(path.name for path in (target / "dist" / host).iterdir()
                                   if path.is_dir())
                 self.assertEqual(packages, [smoke.TEAM])
 
-    def test_both_packages_execute_fresh_project_setup(self):
+    def test_native_packages_and_opencode_projection_execute_fresh_setup(self):
         for host in ("claude", "codex"):
             with self.subTest(host=host), tempfile.TemporaryDirectory() as temporary:
                 project = Path(temporary) / "project"
@@ -34,6 +35,14 @@ class HostSmokeContracts(unittest.TestCase):
                     project,
                     os.environ.copy(),
                 )
+        with tempfile.TemporaryDirectory() as temporary:
+            smoke.exercise_project_projection(
+                ROOT / "dist" / "opencode" / smoke.TEAM,
+                Path(temporary) / "project",
+                os.environ.copy(),
+                "scripts/project_opencode.py",
+                ".opencode",
+            )
 
     def test_installed_package_smoke_requires_product_and_delivery_entrypoints(self):
         with tempfile.TemporaryDirectory() as temporary:

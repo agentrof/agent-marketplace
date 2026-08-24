@@ -66,6 +66,7 @@ jobs:
             build-info.json
             dist/claude
             dist/codex
+            dist/opencode
           if-no-files-found: error
 
   compatibility:

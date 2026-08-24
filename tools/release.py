@@ -14,6 +14,8 @@ import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 
+import build_distributions
+
 
 MARKETPLACE_COMPONENT = "agent-marketplace"
 IMPACTS = {"patch": 1, "minor": 2, "major": 3}
@@ -162,41 +164,59 @@ def channel_source(host: str, plugin: str) -> str | dict:
     The marketplace ref is the release-channel boundary. Relative sources keep
     catalog and package content on that same ref for main, stable, and tags.
     """
-    path = f"./dist/{host}/{plugin}"
-    if host == "claude":
-        return path
-    if host == "codex":
-        return {"source": "local", "path": path}
-    raise ReleaseError(f"unknown marketplace host: {host!r}")
+    try:
+        adapter = build_distributions.load_adapters(
+            Path(__file__).resolve().parent.parent
+        )[host]
+    except (KeyError, ValueError) as exc:
+        raise ReleaseError(f"unknown marketplace host: {host!r}") from exc
+    resolver = getattr(adapter.module, "channel_source", None)
+    if not callable(resolver):
+        raise ReleaseError(f"{host} does not provide a marketplace channel source")
+    return resolver(plugin)
+
+
+def catalog_adapters(root: Path) -> dict[str, build_distributions.HostAdapter]:
+    adapters = build_distributions.load_adapters(root)
+    result = {}
+    for host, adapter in adapters.items():
+        if not adapter.metadata.get("marketplace_catalog"):
+            continue
+        required = (
+            "marketplace_catalog_path", "sync_catalog_entry", "sync_catalog_metadata",
+            "catalog_component_version", "channel_source",
+        )
+        missing = [name for name in required if not callable(getattr(adapter.module, name, None))]
+        if missing:
+            raise ReleaseError(f"{host} catalog adapter lacks: {', '.join(missing)}")
+        result[host] = adapter
+    return result
 
 
 def sync_version_surfaces(root: Path, versions: dict) -> None:
-    marketplace_path = root / ".claude-plugin" / "marketplace.json"
-    marketplace = read_json(marketplace_path)
-    marketplace.setdefault("metadata", {})["version"] = versions["marketplace"]
-    entries = {entry.get("name"): entry for entry in marketplace.get("plugins", [])}
-    if set(entries) != set(versions["plugins"]):
-        raise ReleaseError("Claude marketplace plugin registry differs from versions.json")
+    adapters = build_distributions.load_adapters(root)
+    for host, adapter in catalog_adapters(root).items():
+        marketplace_path = adapter.module.marketplace_catalog_path(root)
+        marketplace = read_json(marketplace_path)
+        entries = {entry.get("name"): entry for entry in marketplace.get("plugins", [])}
+        if set(entries) != set(versions["plugins"]):
+            raise ReleaseError(
+                f"{host} marketplace plugin registry differs from versions.json"
+            )
+        adapter.module.sync_catalog_metadata(marketplace, versions["marketplace"])
+        for plugin, version in versions["plugins"].items():
+            adapter.module.sync_catalog_entry(entries[plugin], plugin, version)
+        write_json(marketplace_path, marketplace)
     for plugin, version in versions["plugins"].items():
-        entries[plugin]["version"] = version
-        entries[plugin]["source"] = channel_source("claude", plugin)
-        for host in ("claude", "codex"):
+        for host, adapter in adapters.items():
+            if adapter.metadata.get("artifact_kind") != "native_marketplace":
+                continue
             manifest_path = root / "platforms" / host / plugin / "manifest.json"
             manifest = read_json(manifest_path)
             if manifest.get("name") != plugin:
                 raise ReleaseError(f"manifest identity mismatch: {manifest_path}")
             manifest["version"] = version
             write_json(manifest_path, manifest)
-    write_json(marketplace_path, marketplace)
-
-    codex_path = root / ".agents" / "plugins" / "marketplace.json"
-    codex = read_json(codex_path)
-    codex_entries = {entry.get("name"): entry for entry in codex.get("plugins", [])}
-    if set(codex_entries) != set(versions["plugins"]):
-        raise ReleaseError("Codex marketplace plugin registry differs from versions.json")
-    for plugin in versions["plugins"]:
-        codex_entries[plugin]["source"] = channel_source("codex", plugin)
-    write_json(codex_path, codex)
 
 
 
@@ -206,30 +226,36 @@ def validate_version_surfaces(root: Path) -> list[str]:
         versions = load_versions(root)
         changesets = load_changesets(root, versions)
         release_plan(versions, changesets)
+        adapters = build_distributions.load_adapters(root)
     except ReleaseError as exc:
         return [str(exc)]
     try:
-        claude_marketplace = read_json(root / ".claude-plugin" / "marketplace.json")
-        codex_marketplace = read_json(root / ".agents" / "plugins" / "marketplace.json")
+        catalogs = {
+            host: read_json(adapter.module.marketplace_catalog_path(root))
+            for host, adapter in catalog_adapters(root).items()
+        }
     except ReleaseError as exc:
         return [str(exc)]
-    if (claude_marketplace.get("metadata") or {}).get("version") != versions["marketplace"]:
-        problems.append("Claude marketplace version differs from versions.json")
-    claude_entries = {
-        entry.get("name"): entry for entry in claude_marketplace.get("plugins", [])
-    }
-    codex_entries = {
-        entry.get("name"): entry for entry in codex_marketplace.get("plugins", [])
+    catalog_entries = {
+        host: {entry.get("name"): entry for entry in catalog.get("plugins", [])}
+        for host, catalog in catalogs.items()
     }
     for plugin, expected in versions["plugins"].items():
         surfaces: list[tuple[str, str]] = []
-        entry = claude_entries.get(plugin, {})
-        surfaces.append(("Claude marketplace", entry.get("version", "")))
-        for host in ("claude", "codex"):
-            for manifest in (
-                root / "platforms" / host / plugin / "manifest.json",
-                root / "dist" / host / plugin / f".{host}-plugin" / "plugin.json",
-            ):
+        for host, adapter in catalog_adapters(root).items():
+            catalog_entry = catalog_entries[host].get(plugin, {})
+            value = adapter.module.catalog_component_version(catalog_entry)
+            if value is not None:
+                surfaces.append((f"{host} marketplace", value))
+        for host, adapter in adapters.items():
+            if adapter.metadata.get("artifact_kind") == "native_marketplace":
+                manifests = (
+                    root / "platforms" / host / plugin / "manifest.json",
+                    root / "dist" / host / plugin / f".{host}-plugin" / "plugin.json",
+                )
+            else:
+                manifests = (root / "dist" / host / plugin / ".agent-marketplace-package.json",)
+            for manifest in manifests:
                 try:
                     surfaces.append((str(manifest.relative_to(root)), read_json(manifest).get("version", "")))
                 except ReleaseError as exc:
@@ -239,11 +265,9 @@ def validate_version_surfaces(root: Path) -> list[str]:
                 problems.append(
                     f"{plugin} version drift at {label}: expected {expected}, got {actual or '<missing>'}"
                 )
-        for host, source in (
-            ("claude", entry.get("source")),
-            ("codex", codex_entries.get(plugin, {}).get("source")),
-        ):
-            expected_source = channel_source(host, plugin)
+        for host, catalog in catalog_entries.items():
+            source = catalog.get(plugin, {}).get("source")
+            expected_source = build_distributions.load_adapters(root)[host].module.channel_source(plugin)
             if source != expected_source:
                 problems.append(
                     f"{plugin} {host} marketplace source must stay inside the selected channel"
@@ -342,9 +366,10 @@ def check_pr_changeset(root: Path, base: str, allow_bootstrap: bool = False) -> 
         parts = Path(path).parts
         if len(parts) >= 2 and parts[0] == "plugins" and parts[1] in versions["plugins"]:
             required.add(parts[1])
-        if len(parts) >= 3 and parts[0] == "platforms" and parts[1] in {"claude", "codex"} and parts[2] in versions["plugins"]:
+        adapters = build_distributions.load_adapters(root)
+        if len(parts) >= 3 and parts[0] == "platforms" and parts[1] in adapters and parts[2] in versions["plugins"]:
             required.add(parts[2])
-        if len(parts) >= 3 and parts[0] == "dist" and parts[1] in {"claude", "codex"} and parts[2] in versions["plugins"]:
+        if len(parts) >= 3 and parts[0] == "dist" and parts[1] in adapters and parts[2] in versions["plugins"]:
             required.add(parts[2])
         if path in {".claude-plugin/marketplace.json", ".agents/plugins/marketplace.json"}:
             required.add(MARKETPLACE_COMPONENT)
@@ -505,7 +530,7 @@ def release_notes(root: Path, version: str) -> str:
         if metadata.get("version") == version:
             return "\n".join(f"- {item}" for item in metadata.get("summaries", [])) + "\n"
     if version == BOOTSTRAP_VERSION:
-        return "- Establish the first stable Agent Marketplace baseline for Claude and Codex.\n"
+        return "- Establish the first stable Agent Marketplace baseline for all supported hosts.\n"
     raise ReleaseError(f"release notes unavailable for {version}")
 
 

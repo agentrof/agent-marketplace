@@ -1,6 +1,10 @@
-.PHONY: validate release-validate counts counts-check dist-check test eval check scaffold release-check public-release-check
+.PHONY: validate release-validate counts counts-check dist-check test eval check scaffold host-check-opencode release-check public-release-check
 
 PY := python3
+OPENCODE_BIN ?= $(shell command -v opencode 2>/dev/null)
+OPENCODE_REAL_PROBE ?= $(CURDIR)/platforms/opencode/real_host_probe.py
+OPENCODE_TUI ?= 0
+OPENCODE_TUI_ARG := $(if $(filter 1 true yes,$(OPENCODE_TUI)),--tui,)
 
 validate:
 	$(PY) tools/validate.py
@@ -27,8 +31,13 @@ eval:
 check: validate release-validate counts-check dist-check test
 	@echo "check: all gates green"
 
-release-check: check
-	@echo "release-check: deterministic gates green"
+host-check-opencode:
+	@test -n "$(OPENCODE_BIN)" || { echo "host-check-opencode: OPENCODE_BIN is required" >&2; exit 4; }
+	@test -f "$(OPENCODE_REAL_PROBE)" || { echo "host-check-opencode: OPENCODE_REAL_PROBE is required" >&2; exit 4; }
+	$(PY) platforms/opencode/host_check.py --opencode "$(OPENCODE_BIN)" --probe "$(OPENCODE_REAL_PROBE)" $(OPENCODE_TUI_ARG)
+
+release-check: check host-check-opencode
+	@echo "release-check: deterministic and real-host gates green"
 
 public-release-check: check
 	@echo "public-release-check: stable channel gates green"

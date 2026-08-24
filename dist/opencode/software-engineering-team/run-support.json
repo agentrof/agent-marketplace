@@ -1,0 +1,20 @@
+{
+  "entries": {
+    "backlog-plan": "tui_only",
+    "business-analysis": "tui_only",
+    "configure": "tui_only",
+    "deliver": "tui_only",
+    "delivery-plan": "tui_only",
+    "demo": "tui_only",
+    "design-system": "tui_only",
+    "execution-plan": "tui_only",
+    "experience-design": "tui_only",
+    "issue-report": "choice_free",
+    "organize-docs": "tui_only",
+    "requirement": "tui_only",
+    "setup": "tui_only",
+    "sketch": "tui_only",
+    "solution-design": "tui_only"
+  },
+  "schema_version": 1
+}

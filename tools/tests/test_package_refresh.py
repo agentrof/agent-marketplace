@@ -338,7 +338,7 @@ class PackageRefreshAcceptanceTests(unittest.TestCase):
         self.assertEqual(self.tree_snapshot(project, {".git"}), before_second)
         return self.tree_snapshot(project, {".git", ".agentrof", ".codex"})
 
-    def test_real_n_to_next_refresh_converges_identically_on_both_hosts(self):
+    def test_real_n_to_next_refresh_converges_on_native_marketplace_hosts(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             n_root = root / "marketplace-n"
@@ -347,7 +347,12 @@ class PackageRefreshAcceptanceTests(unittest.TestCase):
 
             n_identity = set()
             next_identity = set()
-            for host in build_distributions.HOSTS:
+            adapters = build_distributions.load_adapters(n_root)
+            native_hosts = [
+                host for host, adapter in adapters.items()
+                if adapter.metadata["artifact_kind"] == "native_marketplace"
+            ]
+            for host in native_hosts:
                 n_provenance = json.loads((
                     n_root / "dist" / host / fixtures.PLUGIN
                     / build_distributions.PROVENANCE
@@ -379,7 +384,7 @@ class PackageRefreshAcceptanceTests(unittest.TestCase):
 
             results = {
                 host: self.refresh_host(n_root, next_root, root / "runs", host)
-                for host in build_distributions.HOSTS
+                for host in native_hosts
             }
             self.assertEqual(results["claude"], results["codex"])
 

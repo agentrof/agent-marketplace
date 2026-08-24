@@ -1,0 +1,10 @@
+{
+  "schema_version": 1,
+  "host_id": "claude",
+  "display_name": "Claude Code",
+  "artifact_kind": "native_marketplace",
+  "projection_root": ".claude",
+  "marketplace_catalog": true,
+  "adapter_api_version": 1,
+  "supported_surfaces": ["terminal"]
+}

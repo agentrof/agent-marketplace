@@ -1,0 +1,23 @@
+{
+  "schema_version": 4,
+  "experience_pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$",
+  "exact_ref_pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*:(?:JRN|FLW|SCR|STA|TRN)-[0-9]{3,}@r[1-9][0-9]*$",
+  "id_patterns": {
+    "journey": "^JRN-[0-9]{3,}$",
+    "flow_set": "^FLW-[0-9]{3,}$",
+    "screen": "^SCR-[0-9]{3,}$",
+    "state": "^STA-[0-9]{3,}$",
+    "transition": "^TRN-[0-9]{3,}$"
+  },
+  "doc_types": {
+    "experience": {"filename": "experience.md"},
+    "journey": {"suffix": "-journey.md", "directory": "journeys"},
+    "flow_set": {"suffix": "-flow-set.md", "directory": "flows"},
+    "screen": {"suffix": "-screen.md", "directory": "screens"},
+    "state": {"suffix": "-state.md", "directory": "states"},
+    "transition": {"suffix": "-transition.md", "directory": "transitions"},
+    "artifact_manifest": {"suffix": "-artifact.md", "directory": "artifacts"}
+  },
+  "generated_files": ["registry.json", "coverage.json", "artifact-registry.json"],
+  "machine_fields": ["approved_at_utc", "approval_revision", "registry_hash", "package_hash", "source_hash"]
+}

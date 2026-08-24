@@ -68,9 +68,10 @@ current lifecycle and Git protocol in
    now stale. Never edit counted numbers by hand.
 
 The scaffolder creates one host-neutral
-`templates/project-instructions/team.md`, updates both host manifests and
-registries, and rebuilds both distributions. Host-specific project instruction
-behavior belongs only in the shared `_team` host fragments.
+`templates/project-instructions/team.md`, creates platform source for every
+registered adapter, updates native marketplace registries, and rebuilds all
+distributions. Host-specific project instruction behavior belongs only in the
+relevant platform adapter fragments.
 After a manual canonical edit, run
 `python3 tools/build_distributions.py` before `make check`.
 

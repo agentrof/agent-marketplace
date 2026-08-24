@@ -1,0 +1,17 @@
+{
+  "schema_version": 1,
+  "default": ["read", "grep", "glob", "edit", "bash", "task"],
+  "roles": {
+    "analysis_challenger": ["read", "grep", "glob"],
+    "backlog_reviewer": ["read", "grep", "glob"],
+    "business_analyst": ["read", "grep", "glob", "edit", "task"],
+    "code_reviewer": ["read", "grep", "glob"],
+    "design_system_reviewer": ["read", "grep", "glob"],
+    "domain_expert": ["read", "grep", "glob"],
+    "experience_reviewer": ["read", "grep", "glob"],
+    "product_owner": ["read", "grep", "glob", "edit", "task"],
+    "qa_engineer": ["read", "grep", "glob", "bash"],
+    "solution_reviewer": ["read", "grep", "glob"]
+  },
+  "primary": ["read", "grep", "glob", "task"]
+}

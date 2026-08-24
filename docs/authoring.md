@@ -8,10 +8,11 @@ wrappers are generated under `dist/` and are never edited by hand.
 
 - Keep canonical skills, agents, flows, scripts and templates under
   `plugins/software-engineering-team/`.
-- Keep host-specific loading and choice-gate behavior under `platforms/claude/`
-  and `platforms/codex/`.
+- Keep host-specific loading, permissions, choice behavior, and lifecycle
+  behavior under the relevant `platforms/<host>/` adapter directory.
 - Keep project content in the consuming repository's tracked
-  `workspace/docs/` vault. `.agentrof/`, `.claude/` and `.codex/` are local,
+  `workspace/docs/` vault. `.agentrof/`, `.claude/`, `.codex/`, and `.opencode/`
+  are local,
   ignored runtime/projection surfaces only.
 - Keep the Software Engineering Team standalone and scope every operation to
   the current project checkout.
@@ -114,11 +115,13 @@ Verdict.
 
 ## Host and runtime contract
 
-Claude and Codex install the same standalone team. Their manifests contain no
-plugin dependency. Setup creates only a project-local runtime and host
+Claude Code and Codex install the same standalone team through their native
+marketplaces. OpenCode projects instead use the generated project projector;
+it creates no Agent Marketplace global install or dependency. Setup creates
+only a project-local runtime and host
 projection, reconciles the tracked vault contract plus the ignored local
-community-plugin projection, and runs the same convergence check on both
-hosts. Generated distributions come from:
+community-plugin projection, and runs the same convergence check on each
+native marketplace host. Generated distributions come from:
 
 ```text
 python3 tools/build_distributions.py

@@ -18,6 +18,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -179,25 +180,33 @@ def create_runtime(root: Path) -> Path:
 
 
 @contextlib.contextmanager
-def refresh_guard(root: Path):
-    """Serialize setup applies without creating durable workflow state."""
+def refresh_guard(root: Path, timeout_seconds: float = 3.0):
+    """Serialize setup and host projection maintenance with a bounded wait."""
     runtime = create_runtime(root)
     guard_path = runtime / "setup-apply.guard"
     handle = guard_path.open("a+b")
     windows = os.name == "nt"
     acquired = False
     try:
-        if windows:
-            msvcrt = __import__("msvcrt")
-            if guard_path.stat().st_size == 0:
-                handle.write(b"\0")
-                handle.flush()
-            handle.seek(0)
-            msvcrt.locking(handle.fileno(), msvcrt.LK_LOCK, 1)
-        else:
-            fcntl = __import__("fcntl")
-            fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
-        acquired = True
+        deadline = time.monotonic() + timeout_seconds
+        while time.monotonic() < deadline:
+            try:
+                if windows:
+                    msvcrt = __import__("msvcrt")
+                    if guard_path.stat().st_size == 0:
+                        handle.write(b"\0")
+                        handle.flush()
+                    handle.seek(0)
+                    msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1)
+                else:
+                    fcntl = __import__("fcntl")
+                    fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+                acquired = True
+                break
+            except OSError:
+                time.sleep(0.05)
+        if not acquired:
+            raise SetupError("maintenance_busy: setup/projector maintenance lock is busy")
         yield
     finally:
         if acquired and windows:

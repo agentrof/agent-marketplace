@@ -44,19 +44,14 @@ def make_valid_root(
     copy("AGENTS.md", root)
     copy("CLAUDE.md", root)
     copy(f"plugins/{PLUGIN}", root)
-    for relative in (
-        "platforms/shared/_team",
-        f"platforms/shared/{PLUGIN}",
-        "platforms/claude/_team",
-        f"platforms/claude/{PLUGIN}",
-        "platforms/codex/_team",
-        f"platforms/codex/{PLUGIN}",
-    ):
-        source = REAL_REPOSITORY / relative
-        if source.exists():
-            copy(relative, root)
+    # The fixture must exercise the same dynamic adapter registry as production.
+    # Copying only individual legacy host trees would make product.json and the
+    # discovered platform registry disagree as soon as a new host is added.
+    copy("platforms", root)
 
-    for host in ("claude", "codex"):
+    for host, adapter in build_distributions.load_adapters(root).items():
+        if adapter.metadata["artifact_kind"] != "native_marketplace":
+            continue
         manifest_path = root / "platforms" / host / PLUGIN / "manifest.json"
         manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
         manifest["version"] = version

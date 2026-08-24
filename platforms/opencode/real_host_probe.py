@@ -535,6 +535,39 @@ def write_tui_artifact(artifact_dir: Path | None, transcript: bytes) -> None:
         (artifact_dir / "opencode-tui-transcript.bin").write_bytes(transcript)
 
 
+def terminate_windows_process_tree(pid: object) -> None:
+    """Terminate the TUI host and any descendants which keep its project open."""
+    if not isinstance(pid, int) or pid <= 0:
+        return
+    try:
+        subprocess.run(
+            ["taskkill", "/PID", str(pid), "/T", "/F"],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=5,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        # PtyProcess.terminate is still attempted by the caller. This fallback
+        # is only needed for OpenCode descendants which inherit the project CWD.
+        pass
+
+
+def cleanup_probe_root(root: Path) -> None:
+    """Remove an isolated probe root after Windows releases a killed TUI tree."""
+    deadline = time.monotonic() + 10
+    while True:
+        try:
+            shutil.rmtree(root)
+            return
+        except FileNotFoundError:
+            return
+        except PermissionError as exc:
+            if time.monotonic() >= deadline:
+                raise ProbeError(f"temporary_cleanup_failed:{exc}") from exc
+            time.sleep(0.2)
+
+
 def tui_windows_ready(transcript: bytes) -> bool:
     return all(marker in transcript for marker in WINDOWS_TUI_READY_MARKERS)
 
@@ -577,10 +610,12 @@ def tui_windows(
         excerpt = transcript.decode("utf-8", errors="replace")[-1200:]
         raise ProbeError(f"tui_command_timeout:{excerpt!r}")
     finally:
+        pid = getattr(process, "pid", None)
         try:
             process.terminate(force=True)
         except Exception:  # pywinpty may raise WinptyError after child exit.
             pass
+        terminate_windows_process_tree(pid)
         try:
             process.close(force=True)
         except Exception:  # cleanup must not mask a successful ConPTY proof.
@@ -679,8 +714,8 @@ def main() -> int:
         print(json.dumps({"ok": False, "code": "runtime_unbound"}))
         return 4
     try:
-        with tempfile.TemporaryDirectory(prefix="agent-marketplace-opencode-real.") as temporary:
-            root = Path(temporary)
+        root = Path(tempfile.mkdtemp(prefix="agent-marketplace-opencode-real."))
+        try:
             project = (root / "project").resolve()
             project.mkdir()
             env = environment(root)
@@ -704,6 +739,8 @@ def main() -> int:
                     if args.tui:
                         tui(executable, project, env, args.artifact_dir, provider)
                 assert_no_global_marketplace_state(root)
+        finally:
+            cleanup_probe_root(root)
         print(json.dumps({"ok": True, "version": EXPECTED_VERSION, "surface": "terminal"}))
         return 0
     except ProbeError as exc:

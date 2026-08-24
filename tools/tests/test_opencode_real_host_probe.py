@@ -8,6 +8,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -71,6 +72,24 @@ class OpenCodeRealHostProbeTests(unittest.TestCase):
         self.assertEqual(calls[-1][0][3], "bind-runtime")
         self.assertEqual(calls[-1][1], PROBE.CONFIGURATION_TIMEOUT)
         self.assertGreater(PROBE.CONFIGURATION_TIMEOUT, 45.0)
+
+    def test_windows_tui_cleanup_terminates_the_process_tree(self):
+        with mock.patch.object(PROBE.subprocess, "run") as run:
+            PROBE.terminate_windows_process_tree(123)
+
+        run.assert_called_once_with(
+            ["taskkill", "/PID", "123", "/T", "/F"],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=5,
+        )
+
+    def test_windows_tui_cleanup_ignores_missing_taskkill(self):
+        with mock.patch.object(PROBE.subprocess, "run", side_effect=OSError):
+            PROBE.terminate_windows_process_tree(123)
+
+        PROBE.terminate_windows_process_tree(None)
 
 
 if __name__ == "__main__":

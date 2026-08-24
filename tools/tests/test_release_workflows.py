@@ -191,6 +191,9 @@ class ReleaseWorkflowContracts(unittest.TestCase):
         self.assertEqual(wsl2.count('$proof = $proof.Replace("`r", "")'), 1)
         self.assertIn("opencode_version=$(python3 -c 'import json;", wsl2)
         self.assertNotIn(r'open(\"tools/data/host-cli-versions.json\")', wsl2)
+        self.assertIn('$proof | wsl.exe --distribution Ubuntu --user root -- bash -s -- "$workspace"', wsl2)
+        self.assertIn('WSL OpenCode proof failed with exit code $LASTEXITCODE', wsl2)
+        self.assertNotIn('bash -lc $proof', wsl2)
         self.assertIn("grep -q WSL2 /proc/sys/kernel/osrelease", workflow)
         for release_workflow in ("prepare-stable-release.yml", "publish-stable-release.yml"):
             text = self.text(release_workflow)

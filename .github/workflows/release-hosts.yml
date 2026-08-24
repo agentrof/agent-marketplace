@@ -227,4 +227,5 @@ jobs:
             --tui
           '@
           $proof = $proof.Replace("`r", "")
-          wsl.exe --distribution Ubuntu --user root -- bash -lc $proof -- "$workspace"
+          $proof | wsl.exe --distribution Ubuntu --user root -- bash -s -- "$workspace"
+          if ($LASTEXITCODE -ne 0) { throw "WSL OpenCode proof failed with exit code $LASTEXITCODE" }

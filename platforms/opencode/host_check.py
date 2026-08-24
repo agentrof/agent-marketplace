@@ -133,7 +133,10 @@ def main() -> int:
         action="store_true",
         help="require the real probe to complete an interactive terminal PTY/ConPTY check",
     )
-    args = parser.parse_args()
+    # Native Windows-to-WSL stdin forwarding may terminate an otherwise valid
+    # final argument with CRLF. Keep argument validation strict while accepting
+    # that transport-only terminal carriage return.
+    args = parser.parse_args([argument.rstrip("\r") for argument in sys.argv[1:]])
     try:
         package = deterministic_projection_check()
         if args.static_only:

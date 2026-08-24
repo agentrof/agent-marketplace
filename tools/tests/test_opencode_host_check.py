@@ -26,6 +26,15 @@ class OpenCodeHostCheckTests(unittest.TestCase):
         self.assertTrue(payload["ok"])
         self.assertEqual(payload["scope"], "static")
 
+    def test_crlf_framed_tui_flag_is_accepted(self):
+        result = subprocess.run(
+            [sys.executable, "-B", str(SCRIPT), "--static-only", "--tui\r"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
     def test_real_host_gate_fails_closed_without_a_real_probe(self):
         result = subprocess.run(
             [sys.executable, "-B", str(SCRIPT)],

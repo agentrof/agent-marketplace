@@ -20,14 +20,16 @@ SPEC.loader.exec_module(PROBE)
 
 
 class OpenCodeRealHostProbeTests(unittest.TestCase):
-    def test_windows_tui_input_waits_for_a_rendered_command_bar(self):
-        self.assertFalse(PROBE.tui_windows_ready(b"ctrl+p"))
-        self.assertFalse(PROBE.tui_windows_ready(b"commands"))
-        self.assertTrue(PROBE.tui_windows_ready(b"tab ctrl+p commands"))
+    def test_terminal_tui_input_waits_for_a_rendered_command_bar(self):
+        self.assertFalse(PROBE.tui_ready(b"ctrl+p"))
+        self.assertFalse(PROBE.tui_ready(b"commands"))
+        self.assertTrue(PROBE.tui_ready(b"tab ctrl+p commands"))
         self.assertEqual(
             PROBE.TUI_COMMAND,
             "/issue-report Prepare a deterministic probe issue\r",
         )
+        text = (ROOT / "platforms" / "opencode" / "real_host_probe.py").read_text(encoding="utf-8")
+        self.assertEqual(text.count("if not prompt_sent and tui_ready(bytes(transcript))"), 2)
 
     def test_environment_isolates_the_opencode_home(self):
         with tempfile.TemporaryDirectory() as temporary:

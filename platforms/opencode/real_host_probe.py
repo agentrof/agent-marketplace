@@ -23,7 +23,7 @@ TEAM = "software-engineering-team"
 EXPECTED_VERSION = "1.18.17"
 CONFIGURATION_TIMEOUT = 180.0
 TUI_COMMAND = "/issue-report Prepare a deterministic probe issue\r"
-WINDOWS_TUI_READY_MARKERS = (b"ctrl+p", b"commands")
+TUI_READY_MARKERS = (b"ctrl+p", b"commands")
 
 
 class ProbeError(RuntimeError):
@@ -568,8 +568,8 @@ def cleanup_probe_root(root: Path) -> None:
             time.sleep(0.2)
 
 
-def tui_windows_ready(transcript: bytes) -> bool:
-    return all(marker in transcript for marker in WINDOWS_TUI_READY_MARKERS)
+def tui_ready(transcript: bytes) -> bool:
+    return all(marker in transcript for marker in TUI_READY_MARKERS)
 
 
 def tui_windows(
@@ -600,7 +600,7 @@ def tui_windows(
                 except BlockingIOError:
                     data = b""
                 transcript.extend(data.replace(b"0011Ignore", b""))
-            if not prompt_sent and tui_windows_ready(bytes(transcript)):
+            if not prompt_sent and tui_ready(bytes(transcript)):
                 process.write(TUI_COMMAND)
                 prompt_sent = True
             if b"probe response" in transcript:
@@ -643,7 +643,7 @@ def tui_posix(
                     transcript.extend(os.read(master, 65536))
                 except OSError:
                     break
-            if not prompt_sent and time.monotonic() + 16 > deadline:
+            if not prompt_sent and tui_ready(bytes(transcript)):
                 os.write(master, TUI_COMMAND.encode("utf-8"))
                 prompt_sent = True
             if b"probe response" in transcript:

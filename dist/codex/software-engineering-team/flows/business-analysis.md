@@ -16,5 +16,10 @@ mode. Manual mode never reads, creates or binds Requirement state.
    output contract and `SELF-CHECK`.
 3. Render, close individual document gates, then run `approve-package`.
    Compiler approval plus a committed package are required before handoff.
+   An open package revision is `package_status: draft`: repeat
+   `begin-revision` for every approved or superseded document that joins the
+   same revision, then approve every gate-blocking document before closing it.
+   Git history is the audit baseline; the workflow stores no revision marker
+   or recovery receipt.
 4. Requirement mode binds the returned receipt. Manual mode returns the exact
    BA package receipt and suggests `/solution-design`; it does not run it.

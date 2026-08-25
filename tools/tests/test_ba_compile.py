@@ -13,19 +13,24 @@ from __future__ import annotations
 import importlib.util
 import io
 import json
+import subprocess
 import sys
 import tempfile
 import unittest
 from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
+from unittest import mock
 
 REPO = Path(__file__).resolve().parents[2]
 COMPILER = REPO / "plugins" / "software-engineering-team" / "scripts" / "ba_compile.py"
+VAULT_CHECK = REPO / "plugins" / "software-engineering-team" / "scripts" / "vault_check.py"
 
 spec = importlib.util.spec_from_file_location("ba_compile", COMPILER)
 ba = importlib.util.module_from_spec(spec)
 sys.modules["ba_compile"] = ba  # dataclass resolution needs the registry entry
 spec.loader.exec_module(ba)
+sys.path.insert(0, str(COMPILER.parent))
+import stage_package  # noqa: E402
 
 SCHEMA = ba.load_schema(ba.DEFAULT_SCHEMA)
 
@@ -38,6 +43,24 @@ def run(argv):
         except SystemExit as exc:
             code = exc.code if isinstance(exc.code, int) else 1
     return code, out.getvalue(), err.getvalue()
+
+
+def run_compiler(compiler, argv):
+    out, err = io.StringIO(), io.StringIO()
+    with redirect_stdout(out), redirect_stderr(err):
+        try:
+            code = compiler.main(argv)
+        except SystemExit as exc:
+            code = exc.code if isinstance(exc.code, int) else 1
+    return code, out.getvalue(), err.getvalue()
+
+
+def load_compiler(path: Path, name: str):
+    module_spec = importlib.util.spec_from_file_location(name, path)
+    compiler = importlib.util.module_from_spec(module_spec)
+    sys.modules[name] = compiler
+    module_spec.loader.exec_module(compiler)
+    return compiler
 
 
 def write(path: Path, text: str) -> None:
@@ -843,6 +866,338 @@ class SubcommandTests(unittest.TestCase):
         entry = payload["ids"]["BR-INV-002"]
         self.assertEqual(entry["cited_by"], ["AC-INV-001"])
         self.assertEqual(entry["doc_status"], "approved")
+
+
+class PackageLifecycleTests(unittest.TestCase):
+    """Receipt lifecycle, compatibility classification and write safety."""
+
+    entity = "domains/inventory/entities/stock-item-entity.md"
+    process = "domains/inventory/processes/goods-receipt-process.md"
+    acceptance = "domains/inventory/acceptance/goods-receipt-acceptance.md"
+    decision = "domains/inventory/decisions/batch-sizing-decision.md"
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.docs = Path(self.tmp.name) / "docs"
+        self.space = self.docs / "business-analysis" / "erp"
+        make_valid_space(self.space)
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    @property
+    def overview(self) -> Path:
+        return self.space / "space.md"
+
+    def command(self, *args: str):
+        return run([*args, "--space", str(self.space)])
+
+    def approve_package(self):
+        code, out, err = run(["approve-package", "--space", str(self.space),
+                              "--vault-root", str(self.docs)])
+        self.assertEqual(code, 0, out + err)
+        return json.loads(out.strip().splitlines()[-1])
+
+    def add_approved_decision(self) -> Path:
+        code, out, err = run([
+            "stub", "--space", str(self.space), "--type", "decision",
+            "--node", "domains/inventory", "--slug", "batch-sizing",
+            "--title", "Batch sizing",
+        ])
+        self.assertEqual(code, 0, out + err)
+        target = self.space / self.decision
+        text = target.read_text(encoding="utf-8")
+        text = text.replace("status: draft", "status: in_review")
+        text = text.replace("  - status/draft", "  - status/in-review")
+        target.write_text(text, encoding="utf-8")
+        code, out, err = run(["approve", "--space", str(self.space),
+                              "--doc", self.decision])
+        self.assertEqual(code, 0, out + err)
+        approved = target.read_text(encoding="utf-8")
+        self.assertIn("status: approved", approved)
+        self.assertIn(f"approved_at: {ba.utc_today().isoformat()}", approved)
+        self.assertIn("  - status/approved", approved)
+        return target
+
+    def prepare_v2_decision_legacy(self, status: str = "draft") -> Path:
+        target = self.add_approved_decision()
+        self.approve_package()
+        text = ba.draft_document_text(target.read_text(encoding="utf-8"))
+        self.assertIsNotNone(text)
+        if status == "in_review":
+            text = ba.restamp_frontmatter(text, {"status": "in_review"})
+            text = text.replace("  - status/draft", "  - status/in-review")
+        target.write_text(text, encoding="utf-8")
+        code, out, err = run(["render", "--space", str(self.space)])
+        self.assertEqual(code, 0, out + err)
+        root = self.overview.read_text(encoding="utf-8")
+        root = ba.restamp_frontmatter(root, {
+            "package_contract_version": 2,
+            "package_hash": ba.package_hash(self.space),
+        })
+        self.assertIsNotNone(root)
+        self.overview.write_text(root, encoding="utf-8")
+        return target
+
+    def test_multiple_documents_join_one_open_revision(self):
+        self.approve_package()
+        for rel in (self.entity, self.process, self.acceptance):
+            code, out, err = run(["begin-revision", "--space", str(self.space),
+                                  "--doc", rel])
+            self.assertEqual(code, 0, out + err)
+        root = self.overview.read_text(encoding="utf-8")
+        self.assertIn("package_status: draft", root)
+        self.assertNotIn("package_hash:", root)
+        self.assertNotIn("package_approved_at_utc:", root)
+        for rel in (self.entity, self.process, self.acceptance):
+            self.assertIn("status: draft", (self.space / rel).read_text(encoding="utf-8"))
+
+    def test_markerless_draft_package_accepts_another_approved_document(self):
+        self.approve_package()
+        root = ba.restamp_frontmatter(
+            self.overview.read_text(encoding="utf-8"), {"package_status": "draft"})
+        self.overview.write_text(root, encoding="utf-8")
+        code, out, err = run(["begin-revision", "--space", str(self.space),
+                              "--doc", self.process])
+        self.assertEqual(code, 0, out + err)
+        root = self.overview.read_text(encoding="utf-8")
+        self.assertNotIn("package_hash:", root)
+        self.assertNotIn("package_approved_at_utc:", root)
+        self.assertNotIn("revision_baseline", root)
+        self.assertNotIn("revision_marker", root)
+
+    def test_open_revision_rejects_an_already_open_target_without_writes(self):
+        self.approve_package()
+        code, out, err = run(["begin-revision", "--space", str(self.space),
+                              "--doc", self.entity])
+        self.assertEqual(code, 0, out + err)
+        before = {path: path.read_bytes() for path in (self.overview, self.space / self.entity)}
+        code, _, err = run(["begin-revision", "--space", str(self.space),
+                            "--doc", self.entity])
+        self.assertEqual(code, 1)
+        self.assertIn("approved or superseded", err)
+        self.assertEqual({path: path.read_bytes() for path in before}, before)
+
+    def test_unrecognized_package_status_rejects_without_writes(self):
+        self.approve_package()
+        root = self.overview.read_text(encoding="utf-8").replace(
+            "package_status: approved", "package_status: abandoned")
+        self.overview.write_text(root, encoding="utf-8")
+        before = {path: path.read_bytes() for path in (self.overview, self.space / self.entity)}
+        code, _, err = run(["begin-revision", "--space", str(self.space),
+                            "--doc", self.entity])
+        self.assertEqual(code, 1)
+        self.assertIn("approved, draft, or legacy-approved", err)
+        self.assertEqual({path: path.read_bytes() for path in before}, before)
+
+    def test_target_write_failure_restores_the_exact_root_receipt(self):
+        self.approve_package()
+        target = self.space / self.entity
+        before_root, before_target = self.overview.read_bytes(), target.read_bytes()
+        replace = ba.atomic_replace
+
+        def fail_target(path, text):
+            if path == target:
+                raise OSError("simulated target failure")
+            return replace(path, text)
+
+        with mock.patch.object(ba, "atomic_replace", side_effect=fail_target):
+            code, _, err = run(["begin-revision", "--space", str(self.space),
+                                "--doc", self.entity])
+        self.assertEqual(code, 1)
+        self.assertIn("original package receipt restored", err)
+        self.assertEqual(self.overview.read_bytes(), before_root)
+        self.assertEqual(target.read_bytes(), before_target)
+
+    def test_failed_root_restore_leaves_the_package_draft(self):
+        self.approve_package()
+        target = self.space / self.entity
+        replace = ba.atomic_replace
+        root_writes = 0
+
+        def fail_restore(path, text):
+            nonlocal root_writes
+            if path == target:
+                raise OSError("simulated target failure")
+            if path == self.overview:
+                root_writes += 1
+                if root_writes == 2:
+                    raise OSError("simulated restore failure")
+            return replace(path, text)
+
+        with mock.patch.object(ba, "atomic_replace", side_effect=fail_restore):
+            code, _, err = run(["begin-revision", "--space", str(self.space),
+                                "--doc", self.entity])
+        self.assertEqual(code, 1)
+        self.assertIn("root remains draft", err)
+        root = self.overview.read_text(encoding="utf-8")
+        self.assertIn("package_status: draft", root)
+        self.assertNotIn("package_hash:", root)
+
+    def test_space_document_revision_is_one_atomic_replacement(self):
+        self.approve_package()
+        replace = ba.atomic_replace
+        writes = []
+
+        def record(path, text):
+            writes.append(path)
+            return replace(path, text)
+
+        with mock.patch.object(ba, "atomic_replace", side_effect=record):
+            code, out, err = run(["begin-revision", "--space", str(self.space),
+                                  "--doc", "space.md"])
+        self.assertEqual(code, 0, out + err)
+        self.assertEqual(writes, [self.overview])
+        root = self.overview.read_text(encoding="utf-8")
+        self.assertIn("status: draft", root)
+        self.assertIn("package_status: draft", root)
+        self.assertNotIn("approved_at:", root)
+        self.assertNotIn("package_hash:", root)
+
+    def test_v2_decision_only_gate_failure_is_legacy_readonly_everywhere(self):
+        target = self.prepare_v2_decision_legacy("in_review")
+        classification = ba.classify_package(self.space, SCHEMA, self.docs)
+        self.assertEqual(classification["profile"], "legacy-readonly")
+        self.assertEqual(classification["legacy_reason"], "v2-decision-gate")
+        code, out, err = run(["status", "--space", str(self.space)])
+        self.assertEqual(code, 0, out + err)
+        status = json.loads(out)
+        self.assertTrue(status["current"])
+        self.assertTrue(status["legacy"])
+        self.assertEqual(status["verification_profile"], "legacy-readonly")
+        candidate = stage_package.ba_candidates(self.docs)[0]
+        self.assertEqual(candidate["verification_profile"], "legacy-readonly")
+        self.assertTrue(candidate["current"])
+        before = target.read_bytes()
+        code, out, err = run(["begin-revision", "--space", str(self.space),
+                              "--doc", self.decision])
+        self.assertEqual(code, 0, out + err)
+        self.assertEqual(target.read_bytes(), before)
+        self.assertIn("package_status: draft", self.overview.read_text(encoding="utf-8"))
+
+    def test_v2_and_v3_compatibility_profiles_are_distinct(self):
+        self.approve_package()
+        root = ba.restamp_frontmatter(
+            self.overview.read_text(encoding="utf-8"), {"package_contract_version": 2})
+        self.overview.write_text(root, encoding="utf-8")
+        self.assertEqual(ba.classify_package(self.space, SCHEMA, self.docs)["profile"],
+                         "strict-current")
+
+    def test_stale_or_nondecision_v2_gate_failure_is_invalid(self):
+        target = self.prepare_v2_decision_legacy()
+        target.write_text(target.read_text(encoding="utf-8") + "\nStale edit.\n",
+                          encoding="utf-8")
+        self.assertEqual(ba.classify_package(self.space, SCHEMA, self.docs)["profile"],
+                         "invalid")
+
+        self.tmp.cleanup()
+        self.tmp = tempfile.TemporaryDirectory()
+        self.docs = Path(self.tmp.name) / "docs"
+        self.space = self.docs / "business-analysis" / "erp"
+        make_valid_space(self.space)
+        self.add_approved_decision()
+        self.approve_package()
+        process = self.space / self.process
+        process.write_text(ba.draft_document_text(process.read_text(encoding="utf-8")),
+                           encoding="utf-8")
+        code, out, err = run(["render", "--space", str(self.space)])
+        self.assertEqual(code, 0, out + err)
+        root = ba.restamp_frontmatter(self.overview.read_text(encoding="utf-8"), {
+            "package_contract_version": 2,
+            "package_hash": ba.package_hash(self.space),
+        })
+        self.overview.write_text(root, encoding="utf-8")
+        self.assertEqual(ba.classify_package(self.space, SCHEMA, self.docs)["profile"],
+                         "invalid")
+
+    def test_v3_package_with_open_decision_is_invalid_then_migrates_to_strict(self):
+        target = self.prepare_v2_decision_legacy()
+        root = ba.restamp_frontmatter(
+            self.overview.read_text(encoding="utf-8"), {
+                "package_contract_version": 3,
+                "package_hash": ba.package_hash(self.space),
+            })
+        self.overview.write_text(root, encoding="utf-8")
+        self.assertEqual(ba.classify_package(self.space, SCHEMA, self.docs)["profile"],
+                         "invalid")
+
+        root = ba.restamp_frontmatter(
+            self.overview.read_text(encoding="utf-8"), {"package_contract_version": 2})
+        self.overview.write_text(root, encoding="utf-8")
+        code, out, err = run(["begin-revision", "--space", str(self.space),
+                              "--doc", self.decision])
+        self.assertEqual(code, 0, out + err)
+        text = target.read_text(encoding="utf-8").replace("status: draft", "status: in_review")
+        text = text.replace("  - status/draft", "  - status/in-review")
+        target.write_text(text, encoding="utf-8")
+        code, out, err = run(["approve", "--space", str(self.space),
+                              "--doc", self.decision])
+        self.assertEqual(code, 0, out + err)
+        receipt = self.approve_package()
+        self.assertEqual(receipt["verification_profile"], "strict-current")
+        root = self.overview.read_text(encoding="utf-8")
+        self.assertIn("package_contract_version: 3", root)
+        self.assertEqual(ba.classify_package(self.space, SCHEMA, self.docs)["profile"],
+                         "strict-current")
+
+    def test_decision_in_review_is_vault_legal_but_blocks_ba_package_closure(self):
+        target = self.add_approved_decision()
+        text = ba.draft_document_text(target.read_text(encoding="utf-8"))
+        text = ba.restamp_frontmatter(text, {"status": "in_review"})
+        text = text.replace("  - status/draft", "  - status/in-review")
+        target.write_text(text, encoding="utf-8")
+        relative = f"business-analysis/erp/{self.decision}"
+        checked = subprocess.run(
+            [sys.executable, str(VAULT_CHECK), "check", "--vault", str(self.docs),
+             "--impact", relative], capture_output=True, text=True, check=False,
+        )
+        self.assertEqual(checked.returncode, 0, checked.stdout + checked.stderr)
+        code, out, err = run(["approve-package", "--space", str(self.space),
+                              "--vault-root", str(self.docs)])
+        self.assertEqual(code, 1)
+        self.assertIn("gate-blocking doc is in_review", out + err)
+
+    def test_superseded_decision_passes_the_package_gate(self):
+        target = self.add_approved_decision()
+        text = ba.draft_document_text(target.read_text(encoding="utf-8"))
+        text = ba.restamp_frontmatter(text, {
+            "status": "superseded",
+            "superseded_by": "next-decision",
+        })
+        text = text.replace("  - status/draft", "  - status/superseded")
+        target.write_text(text, encoding="utf-8")
+        receipt = self.approve_package()
+        self.assertEqual(receipt["verification_profile"], "strict-current")
+
+    def test_issue_56_lifecycle_runs_three_times_in_every_distribution(self):
+        compilers = {
+            "canonical": COMPILER,
+            "claude": REPO / "dist/claude/software-engineering-team/scripts/ba_compile.py",
+            "codex": REPO / "dist/codex/software-engineering-team/scripts/ba_compile.py",
+            "opencode": REPO / "dist/opencode/software-engineering-team/scripts/ba_compile.py",
+        }
+        for name, path in compilers.items():
+            self.assertTrue(path.is_file(), name)
+            compiler = load_compiler(path, f"issue_56_{name}")
+            for attempt in range(3):
+                with tempfile.TemporaryDirectory() as raw:
+                    docs = Path(raw) / "docs"
+                    space = docs / "business-analysis" / "erp"
+                    make_valid_space(space)
+                    for argv in (
+                        ["approve-package", "--space", str(space),
+                         "--vault-root", str(docs)],
+                        ["begin-revision", "--space", str(space),
+                         "--doc", self.entity],
+                        ["begin-revision", "--space", str(space),
+                         "--doc", self.process],
+                    ):
+                        code, out, err = run_compiler(compiler, argv)
+                        self.assertEqual(code, 0,
+                                         f"{name} attempt {attempt + 1}: {out}{err}")
+                    root = (space / "space.md").read_text(encoding="utf-8")
+                    self.assertIn("package_status: draft", root)
+                    self.assertNotIn("package_hash:", root)
 
 
 

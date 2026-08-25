@@ -66,14 +66,23 @@ checker are the only mechanical authorities.
    - each domain has no unresolved blocking question or challenge finding;
    - the complete space passes `ba_compile.py check --gate approval`;
    - individual records are approved through the compiler's `approve` command;
+   - every decision is `approved` or `superseded` before package closure;
    - `ba_compile.py approve-package --space <space> --vault-root workspace/docs`
      stamps the immutable package receipt.
 
    Never hand-write approval timestamps. The compiler stamps UTC evidence.
 8. An approved space changes only after
    `ba_compile.py begin-revision --space <space> --doc <relative-doc>`.
-   Commit the authored and generated analysis documents together. In
-   Requirement mode bind the returned receipt with `requirement_compile.py
-   bind-stage`; in manual mode report the exact receipt and suggest
-   `solution-design`. Do not create backlog,
-   delivery, task or release records in this entry.
+   The first call invalidates the package receipt and opens a normal
+   `package_status: draft` revision. Repeat it for every approved or
+   superseded carryover document that joins that revision. Draft and
+   in-review documents are already part of the open revision and move through
+   their own lifecycle before `approve-package` closes a new receipt. An
+   exact-hash v2 package blocked only by draft or in-review decisions is
+   legacy-readonly: begin its migration on one such decision, approve its open
+   decisions, then close it as contract v3. Git history, not synthetic
+   metadata, is the audit baseline. Commit the authored and generated analysis
+   documents together. In Requirement mode bind the returned receipt with
+   `requirement_compile.py bind-stage`; in manual mode report the exact receipt
+   and suggest `solution-design`. Do not create backlog, delivery, task or
+   release records in this entry.

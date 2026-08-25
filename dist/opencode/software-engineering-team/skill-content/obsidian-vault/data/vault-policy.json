@@ -602,7 +602,7 @@
     "delivery_governance": ["^delivery/governance/governance\\.md$"]
   },
   "status_values": {
-    "decision": ["draft", "proposed", "accepted", "rejected", "approved", "superseded"],
+    "decision": ["draft", "in_review", "proposed", "accepted", "rejected", "approved", "superseded"],
     "landscape": ["draft", "in_review", "approved", "superseded"],
     "experience": ["draft", "in_review", "approved", "retired"],
     "transition": ["draft", "in_review", "approved", "retired"],

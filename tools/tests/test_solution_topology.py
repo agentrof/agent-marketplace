@@ -199,6 +199,30 @@ class SolutionTopologyTests(unittest.TestCase):
             )
             self.assertTrue(any("legacy-readonly" in error for error in errors))
 
+    def test_in_review_decision_is_not_a_topology_binding(self):
+        with tempfile.TemporaryDirectory() as raw:
+            docs = Path(raw) / "workspace/docs"
+            self.write_processes(docs)
+            decisions = self.decisions()
+            decisions[0]["status"] = "in_review"
+            decisions[0].update({
+                "id": "SD-001", "applies_to": ["orders-api"],
+                "selected_technology": "python-fastapi",
+                "method_skills": ["python-fastapi"],
+            })
+            decisions[1].update({
+                "id": "SD-002", "applies_to": ["orders-api"],
+                "selected_technology": "docker",
+                "method_skills": ["docker-compose"],
+            })
+            registry = landscape_check.capability_registry(
+                docs / "solution-design", decisions)
+            self.assertNotIn("runtime-decision", registry)
+            findings = landscape_check.topology_findings(
+                docs / "solution-design", self.topology(), decisions, {}
+            )
+            self.assertTrue(any("accepted" in finding for finding in findings))
+
 
 if __name__ == "__main__":
     unittest.main()

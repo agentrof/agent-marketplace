@@ -121,36 +121,33 @@ def ba_candidates(docs: Path) -> list[dict]:
         note = folder / "space.md"
         if not folder.is_dir() or not note.is_file():
             continue
-        props = frontmatter(note)
-        compiler_ok = False
         try:
             import ba_compile
-            digest = ba_compile.package_hash(folder)
             schema = ba_compile.load_schema(ba_compile.DEFAULT_SCHEMA)
-            space, base = ba_compile.scan_space(folder, schema)
-            space.vault_root = docs
-            findings = ba_compile.run_checks(space, base, gate=True)
-            if not space.broken:
-                warnings = [item for item in findings if item.severity == "warning"]
-                findings += ba_compile.freshness_findings(space, warnings)
-            compiler_ok = not any(item.severity == "error" for item in findings)
+            classification = ba_compile.classify_package(folder, schema, docs)
+            digest = classification["package_hash"]
+            profile = classification["profile"]
+            current = classification["current"]
         except (ImportError, OSError, ValueError):
             digest = tree_hash(folder, {"package_hash", "package_status", "package_approved_at_utc",
                                         "package_contract_version"})
-        authored = [p for p in folder.rglob("*.md") if "_generated" not in p.parts]
-        version = int(props.get("package_contract_version", 0) or 0)
-        strict_current = (props.get("package_status") == "approved"
-                          and props.get("package_hash") == digest
-                          and version >= 2 and compiler_ok)
-        legacy = ((not props.get("package_status") and bool(authored) and all(
-            frontmatter(p).get("status") in {"approved", "superseded"} for p in authored))
-            or (props.get("package_status") == "approved"
-                and props.get("package_hash") == digest and version < 2))
-        current = strict_current or legacy
+            props = frontmatter(note)
+            authored = [path for path in folder.rglob("*.md")
+                        if "_generated" not in path.parts]
+            try:
+                version = int(props.get("package_contract_version", 0) or 0)
+            except (TypeError, ValueError):
+                version = 0
+            legacy = ((not props.get("package_status") and bool(authored) and all(
+                frontmatter(path).get("status") in {"approved", "superseded"}
+                for path in authored))
+                or (props.get("package_status") == "approved"
+                    and props.get("package_hash") == digest and version < 2))
+            profile = "legacy-readonly" if legacy else "invalid"
+            current = legacy
         found.append(receipt("business-analysis", f"business-analysis/{folder.name}/space",
-                             "business-analysis-package", digest, current or legacy,
-                             current or legacy, note, folder,
-                             "strict-current" if strict_current else "legacy-readonly" if legacy else "invalid"))
+                             "business-analysis-package", digest, current, current,
+                             note, folder, profile))
     return found
 
 

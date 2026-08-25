@@ -80,6 +80,10 @@ adapters.
     catalog together at `design-system/artifacts/standalone.html`. The catalog
     has a fixed DOM flow while all visual values and project content bind to
     MASTER's machine-readable token block.
+27. An open Business Analysis package revision is `package_status: draft` and
+    may contain approved carryover documents plus multiple draft or in-review
+    documents. Only `approve-package` creates a current package receipt; Git
+    history is the audit baseline for the prior approved state.
 
 The normative Requirement and Delivery lifecycle is documented in
 [requirement-delivery-protocol.md](requirement-delivery-protocol.md).

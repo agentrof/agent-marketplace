@@ -20,8 +20,8 @@ bound as an explicit Requirement reuse, never used to author a new Solution revi
    components but never project app directories.
 3. Author `components/<component-id>/component.md` plus accepted technology,
    data-store, environment and integration decisions. A component may use a
-   different accepted stack than another component. Proposed, rejected and
-   superseded decisions never constrain an approved topology.
+   different accepted stack than another component. Proposed, in-review,
+   rejected and superseded decisions never constrain an approved topology.
 4. Spawn `solution-reviewer` read-only with BA allocation, topology, naming,
    sourcing, decision-status and `SELF-CHECK` lenses. Resolve blockers in the
    canonical landscape/components/decisions; reviewer responses are transient.

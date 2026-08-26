@@ -21,7 +21,7 @@ import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 
-from ba_compile import parse_frontmatter
+from ba_compile import parse_frontmatter, without_generated_relations
 import stage_package
 
 
@@ -160,7 +160,7 @@ def section_text(body: str, heading: str) -> str:
 
 
 def authored_body(body: str) -> str:
-    value = body.split(NAV_MARKER, 1)[0]
+    value = without_generated_relations(body).split(NAV_MARKER, 1)[0]
     value = re.sub(
         r"(?ms)^## Stage Results(?:\s+<!--.*?-->)?\s*\n.*?(?=^## |\Z)",
         "", value,

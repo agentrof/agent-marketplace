@@ -20,7 +20,7 @@ import tempfile
 from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
 
-from ba_compile import parse_frontmatter
+from ba_compile import parse_frontmatter, without_generated_relations
 import stage_package
 
 
@@ -96,7 +96,7 @@ def source_hash(props: dict, body: str) -> str:
     excluded = {"source_hash", "approved_at_utc"}
     view = {key: value for key, value in props.items() if key not in excluded}
     return "sha256:" + hashlib.sha256(
-        json.dumps({"frontmatter": view, "body": body}, ensure_ascii=False,
+        json.dumps({"frontmatter": view, "body": without_generated_relations(body)}, ensure_ascii=False,
                    sort_keys=True, separators=(",", ":")).encode("utf-8")
     ).hexdigest()
 

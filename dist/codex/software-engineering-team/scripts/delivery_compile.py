@@ -18,7 +18,7 @@ import tempfile
 from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
 
-from ba_compile import parse_frontmatter
+from ba_compile import parse_frontmatter, without_generated_relations
 import backlog_compile
 import operation_compile
 
@@ -142,7 +142,8 @@ def content_hash(props: dict, body: str, *, exclude: set[str] | None = None) -> 
     if isinstance(stable.get("tags"), list):
         stable["tags"] = [tag for tag in stable["tags"]
                            if not (isinstance(tag, str) and tag.startswith("status/"))]
-    payload = json.dumps({"frontmatter": stable, "body": body.rstrip() + "\n"},
+    payload = json.dumps({"frontmatter": stable,
+                          "body": without_generated_relations(body).rstrip() + "\n"},
                          ensure_ascii=False, sort_keys=True, separators=(",", ":"))
     return "sha256:" + hashlib.sha256(payload.encode("utf-8")).hexdigest()
 

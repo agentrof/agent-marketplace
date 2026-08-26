@@ -19,6 +19,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 import stage_package
+from ba_compile import without_generated_relations
 
 
 GENERATED = "_generated"
@@ -351,7 +352,7 @@ def source_digest(package: Path) -> str:
         stable = {key: value for key, value in data.items() if key not in ignored}
         digest.update(path.relative_to(package).as_posix().encode())
         digest.update(b"\0")
-        digest.update(render_fm(stable, body).encode())
+        digest.update(render_fm(stable, without_generated_relations(body)).encode())
         digest.update(b"\0")
     return "sha256:" + digest.hexdigest()
 

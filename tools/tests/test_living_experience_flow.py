@@ -216,6 +216,45 @@ The customer corrects a recoverable failure.
             ], cwd=ROOT, capture_output=True, text=True, check=False)
             self.assertEqual(initialized.returncode, 0, initialized.stdout + initialized.stderr)
 
+    def test_generated_relations_preserve_approved_stage_receipts(self):
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw) / "workspace/docs/experience-design"
+            root.mkdir(parents=True)
+            self.prepare_inputs(root.parent)
+            package, create_plan, proposal_hash = self.init_manual(root)
+            self.run_cli("stub", "--experience-root", package, "--kind", "journey",
+                         "--id", "JRN-001", "--slug", "checkout")
+            self.run_cli("enter-review", "--experience-root", package)
+            self.run_cli("approve-set", "--root", root, "--experience", "checkout",
+                         "--scope-plan", create_plan, "--proposal-hash", proposal_hash)
+
+            stages = ("business-analysis", "solution-design", "design-system",
+                      "experience-design")
+            before = {
+                stage: self.stage_candidate(root.parent, stage)["package_hash"]
+                for stage in stages
+            }
+            relation = (
+                "\n\n## Related knowledge <!-- sec: relations:generated:start -->\n\n"
+                "- Used by: [[experience-design/experiences/checkout/experience|Checkout]]\n\n"
+                "<!-- sec: relations:generated:end -->\n"
+            )
+            for path in (
+                root.parent / "business-analysis/erp/processes/checkout-process.md",
+                root.parent / "solution-design/landscape.md",
+                root.parent / "design-system/MASTER.md",
+                package / "experience.md",
+            ):
+                path.write_text(path.read_text(encoding="utf-8").rstrip() + relation,
+                                encoding="utf-8")
+
+            check = self.run_cli("check", "--experience-root", package, "--gate", "--json")
+            self.assertTrue(json.loads(check.stdout)["ok"])
+            for stage in stages:
+                candidate = self.stage_candidate(root.parent, stage)
+                self.assertTrue(candidate["current"])
+                self.assertEqual(candidate["package_hash"], before[stage])
+
     def test_nested_domain_primary_and_related_processes_use_the_same_resolver(self):
         with tempfile.TemporaryDirectory() as raw:
             root = Path(raw) / "workspace/docs/experience-design"

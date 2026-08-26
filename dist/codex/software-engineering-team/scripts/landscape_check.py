@@ -37,7 +37,7 @@ import sys
 from datetime import date, datetime, timezone
 from pathlib import Path
 
-from ba_compile import parse_frontmatter
+from ba_compile import parse_frontmatter, without_generated_relations
 
 # The record id's single home: an SD-shaped frontmatter alias.
 DECISION_ALIAS_RE = re.compile(r"^SD-\d{3,}$")
@@ -102,6 +102,7 @@ def package_hash(tree: Path) -> str:
                     kept.append(raw)
             kept.extend(lines[body_line - 1:])
             text = "\n".join(kept).rstrip() + "\n"
+        text = without_generated_relations(text)
         digest.update(path.relative_to(tree).as_posix().encode())
         digest.update(b"\0")
         digest.update(text.encode())

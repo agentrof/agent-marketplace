@@ -14,8 +14,8 @@ PINNED_ACTIONS = {
     "actions/setup-python": ("5fda3b95a4ea91299a34e894583c3862153e4b97", "v7.0.0"),
     "actions/setup-node": ("820762786026740c76f36085b0efc47a31fe5020", "v7.0.0"),
     "actions/upload-artifact": ("043fb46d1a93c77aae656e7c1c64a875d1fc6a0a", "v7.0.1"),
-    "github/codeql-action/init": ("ff2f1c621b7f889edc0d3c761ac2e6a3f8cdb0dd", "v4"),
-    "github/codeql-action/analyze": ("ff2f1c621b7f889edc0d3c761ac2e6a3f8cdb0dd", "v4"),
+    "github/codeql-action/init": ("db488ddef3bf6cb639b32c2e9a7c0a7ea8271d28", "v4"),
+    "github/codeql-action/analyze": ("db488ddef3bf6cb639b32c2e9a7c0a7ea8271d28", "v4"),
 }
 ACTION_USE_RE = re.compile(
     r"uses:\s+([A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+(?:/[A-Za-z0-9_.-]+)?)"

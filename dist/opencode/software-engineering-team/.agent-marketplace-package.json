@@ -1,5 +1,5 @@
 {
-  "build_id": "snapshot.64e918982df395560084eb85a6674683554b118e233341627480a8cf62c955f1",
+  "build_id": "snapshot.b2d7a0cc1f87847125be07e8975318cdb7758f79d68443e8ac2efb36ca616bf8",
   "component": "software-engineering-team",
   "delivery_protocol": {
     "read_max": 1,
@@ -58,7 +58,7 @@
     "flows/requirement.md": "9863a7148aff4cdb3c833277611b5bb8c81a80284f474a973d8a58fa56b03580",
     "flows/solution-design.md": "5d1d4e2ead2ee8458b4f6498f39afd91447e91ed50b66ee79e3c71d224736f10",
     "host-contract.md": "67567a39c4cd2fea8f952d907259c2b85599cc0b4265a787d650b16f0f700950",
-    "plugins/agent-marketplace-software-engineering-team.js": "49e445bb790728950e17e198902fdad7ce36cd3fe89e98f417c51d284acd9e45",
+    "plugins/agent-marketplace-software-engineering-team.js": "e3adbcb153eb3b71b6146c8f691430b6320383dca9d4e640faacd5646d0e306e",
     "product.json": "b518546dc334e243cf261f44acccd5fb06de5734234930987e1518058acdf18a",
     "run-support.json": "5fd025e74880e0e5ec2b30c5a9dc248eb0c591e013142616bee069af99ebb95b",
     "scripts/architecture_compile.py": "6efad5f1d59d5f0debb6c8693be6c262e80489703dccc08ba91e1abe2ad588ea",
@@ -72,7 +72,7 @@
     "scripts/delivery_result.py": "ec591462319c871ffc97e5b5c9296be9c6f559a9608201d55d48509b8a689b89",
     "scripts/design_system_compile.py": "77bd9ea0d1d34d1768aa3d73685fc0a6001d47c520da86cf9435ebe594894dfc",
     "scripts/experience_artifact_check.py": "3bac93dbf71e1dd2b80e449a48605a15f71de3972d43016e29e1fbbb080bec91",
-    "scripts/experience_compile.py": "9e4c9798f4268d4157c0e084fb72b95f0004ad359471d1917ff3fce4e071ccdd",
+    "scripts/experience_compile.py": "7e875e51e460efc678520baaf31c4c188c9773f0c4ba91d00dc35893bb384d9d",
     "scripts/file_issue.py": "9dabf91796c416be8909e517f9a9859faff12c24c868c0c0e037739820bee02e",
     "scripts/landscape_check.py": "64fe7922c5fd3b26c1fd0648f046af1ccc521339eefdab39714bc4908865c4a3",
     "scripts/marketplace_paths.py": "612e835bb2c91fab9509282dd4ecbce55c9b62a35ff59b3f22e7e6c05e2fbd79",
@@ -297,6 +297,6 @@
   "schema_version": 2,
   "source_channel": "snapshot",
   "source_commit": "",
-  "source_ref": "snapshot.64e918982df395560084eb85a6674683554b118e233341627480a8cf62c955f1",
+  "source_ref": "snapshot.b2d7a0cc1f87847125be07e8975318cdb7758f79d68443e8ac2efb36ca616bf8",
   "version": "3.2.0"
 }

@@ -458,7 +458,8 @@ def artifacts(package: Path, registry: dict, findings: list[str], gate: bool) ->
     return output
 
 
-def compile_package(package: Path, gate: bool = False) -> tuple[dict, list[str]]:
+def compile_package(package: Path, gate: bool = False, *,
+                    allow_stale_inputs: bool = False) -> tuple[dict, list[str]]:
     problems = []
     try:
         data, _body = fm(package / "experience.md")
@@ -479,7 +480,9 @@ def compile_package(package: Path, gate: bool = False) -> tuple[dict, list[str]]
     for key in ("baseline_id", "inherits", "program_id", "release_id", "baseline", "program", "release"):
         if key in data: problems.append(f"experience.md: legacy field {key} is forbidden")
     docs = docs_for(package)
-    if data.get("origin_mode") == "requirement" and len(implemented_requirements) == 1 and re.fullmatch(r"REQ-[0-9]{3,}", implemented_requirements[0]):
+    if (not allow_stale_inputs and data.get("origin_mode") == "requirement"
+            and len(implemented_requirements) == 1
+            and re.fullmatch(r"REQ-[0-9]{3,}", implemented_requirements[0])):
         try:
             import requirement_compile
             matches = [path for path in requirement_compile.requirement_paths(docs)
@@ -495,36 +498,37 @@ def compile_package(package: Path, gate: bool = False) -> tuple[dict, list[str]]
                     problems.append("experience.md: Requirement receipt set is stale")
         except (ImportError, OSError, ValueError):
             problems.append("experience.md: Requirement receipt set cannot be verified")
-    for stage in ("business-analysis", "solution-design", "design-system"):
-        item = bindings(data).get(stage)
-        if item is None:
-            problems.append(f"experience.md: missing {stage} input binding")
-        else:
-            _receipt, errors = stage_package.verify(docs, stage, item[0], item[1])
-            problems.extend(f"experience.md: {error}" for error in errors)
-    ba_binding = bindings(data).get("business-analysis")
-    if ba_binding is not None:
-        canonical_process, process_errors = stage_package.resolve_ba_process(
-            docs, str(data.get("primary_process_ref", "")),
-            expected_ba_ref=ba_binding[0], expected_ba_hash=ba_binding[1],
-            require_strict_current=gate,
-        )
-        problems.extend(f"experience.md: {error}" for error in process_errors)
-        if canonical_process and canonical_process != data.get("primary_process_ref"):
-            problems.append("experience.md: primary_process_ref is not canonical")
-        related = list_value(data, "related_process_refs")
-        for index, raw in enumerate(related, start=1):
-            canonical_related, related_errors = stage_package.resolve_ba_process(
-                docs, raw, expected_ba_ref=ba_binding[0], expected_ba_hash=ba_binding[1],
+    if not allow_stale_inputs:
+        for stage in ("business-analysis", "solution-design", "design-system"):
+            item = bindings(data).get(stage)
+            if item is None:
+                problems.append(f"experience.md: missing {stage} input binding")
+            else:
+                _receipt, errors = stage_package.verify(docs, stage, item[0], item[1])
+                problems.extend(f"experience.md: {error}" for error in errors)
+        ba_binding = bindings(data).get("business-analysis")
+        if ba_binding is not None:
+            canonical_process, process_errors = stage_package.resolve_ba_process(
+                docs, str(data.get("primary_process_ref", "")),
+                expected_ba_ref=ba_binding[0], expected_ba_hash=ba_binding[1],
                 require_strict_current=gate,
             )
-            problems.extend(
-                f"experience.md: related_process_refs[{index}]: {error}"
-                for error in related_errors
-            )
-            if canonical_related and canonical_related != raw:
-                problems.append(
-                    f"experience.md: related_process_refs[{index}] is not canonical")
+            problems.extend(f"experience.md: {error}" for error in process_errors)
+            if canonical_process and canonical_process != data.get("primary_process_ref"):
+                problems.append("experience.md: primary_process_ref is not canonical")
+            related = list_value(data, "related_process_refs")
+            for index, raw in enumerate(related, start=1):
+                canonical_related, related_errors = stage_package.resolve_ba_process(
+                    docs, raw, expected_ba_ref=ba_binding[0], expected_ba_hash=ba_binding[1],
+                    require_strict_current=gate,
+                )
+                problems.extend(
+                    f"experience.md: related_process_refs[{index}]: {error}"
+                    for error in related_errors
+                )
+                if canonical_related and canonical_related != raw:
+                    problems.append(
+                        f"experience.md: related_process_refs[{index}] is not canonical")
     rows = records(package, problems)
     live = {f"{package.name}:{row['id']}@r{row['revision']}" for row in rows
             if row.get("record_state") == "active"}
@@ -739,23 +743,32 @@ def propose(args) -> int:
 
 def begin_revision(args) -> int:
     package = package_for(args.experience_root); data, body = fm(package / "experience.md")
-    registry, problems = compile_package(package, True)
-    if problems: return print_problems(problems, False)
     try:
         plan = load_scope_plan(args.scope_plan, args.proposal_hash)
+        if plan.get("origin_mode") != data.get("origin_mode"):
+            raise ValueError("scope plan origin mode does not match the Experience package")
         findings = verify_scope_inputs(package.parent.parent, plan, require_committed=True)
         if findings:
             raise ValueError("; ".join(findings))
         action_for_plan(package.parent.parent, plan, action="update", experience=package.name,
                         process=str(data.get("primary_process_ref", "")))
+        replacement_bindings = [f"{stage}|{reference}|{digest}"
+                                for stage, reference, digest in input_rows(plan)]
     except ValueError as exc:
         return fail(str(exc), 2)
+    # The plan has already verified the successor receipts. Preserve the last
+    # approved registry while allowing those predecessor receipts to be stale.
+    registry, problems = compile_package(package, True, allow_stale_inputs=True)
+    if problems: return print_problems(problems, False)
     history = [row for row in ledger(package) if int(row.get("package_revision", 0) or 0) != int(registry["package_revision"])] + [registry]
     write_ledger(package, history)
     for row in registry["records"]:
         path = package / LEDGER / "records" / str(row["id"]) / f"r{row['revision']}.json"; path.parent.mkdir(parents=True, exist_ok=True)
         if not path.exists(): path.write_bytes(canonical(row))
     data["status"], data["revision"] = "draft", int(data.get("revision", 1) or 1) + 1
+    data["input_bindings"] = replacement_bindings
+    if data.get("origin_mode") == "requirement":
+        data["upstream_stage_receipts_hash"] = plan["upstream_stage_receipts_hash"]
     for key in ("approval_revision", "registry_hash", "package_hash", "source_hash", "approved_at_utc"): data.pop(key, None)
     status_tags(data); rewrite(package / "experience.md", data, body); return 0
 

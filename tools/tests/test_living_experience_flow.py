@@ -185,6 +185,59 @@ The customer corrects a recoverable failure.
         payload = json.loads(self.run_cli(*args).stdout)
         return Path(payload["path"]), plan, proposal_hash
 
+    def approve_v3_design_revision(self, root):
+        docs = root.parent
+        design = docs / "design-system"
+        compiler = ROOT / "plugins/software-engineering-team/scripts/design_system_compile.py"
+        revision = subprocess.run(
+            [sys.executable, str(compiler), "begin-revision", "--root", str(design)],
+            cwd=ROOT, capture_output=True, text=True, check=False,
+        )
+        self.assertEqual(revision.returncode, 0, revision.stdout + revision.stderr)
+        master = design / "MASTER.md"
+        supersedes_hash = next(
+            line.split(": ", 1)[1]
+            for line in master.read_text(encoding="utf-8").splitlines()
+            if line.startswith("supersedes_hash: ")
+        )
+        master.write_text(
+            "---\ntype: design_master\ntitle: Master\nstatus: draft\nrevision: 2\n"
+            f"contract_version: 3\nsupersedes_hash: {supersedes_hash}\nderives_from:\n"
+            "  - \"[[business-analysis/erp/space|ERP]]\"\nconstrained_by:\n"
+            "  - \"[[solution-design/landscape|Landscape]]\"\ntags:\n"
+            "  - doc/design-master\n  - status/draft\n---\n# Master\n\n"
+            "## Product position\n\nCheckout-first product.\n\n"
+            "## Brand and asset fidelity\n\nNo supplied identity asset.\n\n"
+            "## Global rules\n\n### Catalog tokens\n\n"
+            "<!-- catalog:tokens:start -->\n```css\n:root { --catalog-background: #ffffff; }\n"
+            "```\n<!-- catalog:tokens:end -->\n\n"
+            "## Component specs\n\nButtons use the current catalog token.\n\n"
+            "## Style guidelines\n\nKeep checkout labels concise.\n\n"
+            "## Anti-patterns\n\nAvoid ambiguous confirmation states.\n\n"
+            "## Pre-delivery checklist\n\nCheck the updated receipt.\n\n"
+            "## Navigation\n\n[[maps/design-system|Design System]]\n",
+            encoding="utf-8",
+        )
+        initialized = subprocess.run(
+            [sys.executable, str(compiler), "init-catalog", "--root", str(design)],
+            cwd=ROOT, capture_output=True, text=True, check=False,
+        )
+        self.assertEqual(initialized.returncode, 0, initialized.stdout + initialized.stderr)
+        catalog = design / "artifacts/standalone.html"
+        catalog.write_text(catalog.read_text(encoding="utf-8").replace("AUTHOR_REQUIRED", "Filled"),
+                           encoding="utf-8")
+        synchronized = subprocess.run(
+            [sys.executable, str(compiler), "sync-catalog", "--root", str(design)],
+            cwd=ROOT, capture_output=True, text=True, check=False,
+        )
+        self.assertEqual(synchronized.returncode, 0, synchronized.stdout + synchronized.stderr)
+        approved = subprocess.run(
+            [sys.executable, str(compiler), "approve", "--root", str(design)],
+            cwd=ROOT, capture_output=True, text=True, check=False,
+        )
+        self.assertEqual(approved.returncode, 0, approved.stdout + approved.stderr)
+        self.commit_docs(root, "approve revised design system")
+
     def test_manual_living_experience_approves_without_requirement(self):
         with tempfile.TemporaryDirectory() as raw:
             root = Path(raw) / "workspace/docs/experience-design"
@@ -215,6 +268,39 @@ The customer corrects a recoverable failure.
                 "--input-ref", "checkout@r1",
             ], cwd=ROOT, capture_output=True, text=True, check=False)
             self.assertEqual(initialized.returncode, 0, initialized.stdout + initialized.stderr)
+
+    def test_begin_revision_rebinds_to_a_newly_approved_design_receipt(self):
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw) / "workspace/docs/experience-design"
+            root.mkdir(parents=True)
+            self.prepare_inputs(root.parent)
+            package, create_plan, proposal_hash = self.init_manual(root)
+            self.run_cli("stub", "--experience-root", package, "--kind", "journey",
+                         "--id", "JRN-001", "--slug", "checkout")
+            self.run_cli("enter-review", "--experience-root", package)
+            self.run_cli("approve-set", "--root", root, "--experience", "checkout",
+                         "--scope-plan", create_plan, "--proposal-hash", proposal_hash)
+            self.commit_docs(root, "approve initial experience")
+
+            old_design = self.stage_candidate(root.parent, "design-system")["package_hash"]
+            self.approve_v3_design_revision(root)
+            new_design = self.stage_candidate(root.parent, "design-system")["package_hash"]
+            self.assertNotEqual(old_design, new_design)
+            plan, proposal_hash = self.propose_manual(root, experience="checkout", action="update")
+
+            self.run_cli("begin-revision", "--experience-root", package,
+                         "--scope-plan", plan, "--proposal-hash", proposal_hash)
+            revised = (package / "experience.md").read_text(encoding="utf-8")
+            self.assertIn("status: draft", revised)
+            self.assertIn("revision: 2", revised)
+            self.assertIn(f"design-system|design-system/MASTER|{new_design}", revised)
+            self.assertNotIn(f"design-system|design-system/MASTER|{old_design}", revised)
+
+            self.run_cli("enter-review", "--experience-root", package)
+            self.run_cli("approve-set", "--root", root, "--experience", "checkout",
+                         "--scope-plan", plan, "--proposal-hash", proposal_hash)
+            checked = self.run_cli("check", "--experience-root", package, "--gate", "--json")
+            self.assertTrue(json.loads(checked.stdout)["ok"])
 
     def test_generated_relations_preserve_approved_stage_receipts(self):
         with tempfile.TemporaryDirectory() as raw:

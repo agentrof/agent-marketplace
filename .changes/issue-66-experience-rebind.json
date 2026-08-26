@@ -1,0 +1,6 @@
+{
+  "summary": "Allow approved Experience packages to rebind to a newly approved Design System receipt during revision.",
+  "components": {
+    "software-engineering-team": "patch"
+  }
+}

@@ -58,7 +58,20 @@ GENERATED_BODY_BLOCKS = (
     ("## Contents <!-- sec: structural:generated:start -->",
      "<!-- sec: structural:generated:end -->"),
 )
+RELATION_BLOCK_RE = re.compile(
+    r"\n*" + re.escape(GENERATED_BODY_BLOCKS[0][0]) + r".*?"
+    + re.escape(GENERATED_BODY_BLOCKS[0][1]) + r"\s*",
+    re.DOTALL,
+)
 INLINE_CODE_RE = re.compile(r"`[^`]*`")
+
+
+def without_generated_relations(text: str) -> str:
+    """Remove only the renderer-owned inverse-relation projection."""
+    start, end = GENERATED_BODY_BLOCKS[0]
+    if start not in text or end not in text:
+        return text
+    return RELATION_BLOCK_RE.sub("\n\n", text).rstrip() + "\n"
 
 
 def split_wikilink(inner: str) -> tuple[str, str, str]:
@@ -1837,6 +1850,7 @@ def package_hash(space_dir: Path) -> str:
                     kept.append(raw)
             kept.extend(lines[body_line - 1:])
             text = "\n".join(kept).rstrip() + "\n"
+        text = without_generated_relations(text)
         digest.update(path.relative_to(space_dir).as_posix().encode())
         digest.update(b"\0")
         digest.update(text.encode())

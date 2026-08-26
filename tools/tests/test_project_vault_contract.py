@@ -302,6 +302,19 @@ class ProjectVaultContractTests(unittest.TestCase):
             self.assertEqual(second.returncode, 0, second.stdout + second.stderr)
             self.assertEqual(target.read_bytes(), rendered)
 
+    def test_design_system_fragment_registers_contract_version(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            workspace = self.setup_project(Path(temporary))
+            result = self.run_vault(
+                "reconcile-payload-fragment", "--vault", workspace / "docs",
+                "--fragment", "design-system",
+            )
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            types = json.loads(
+                (workspace / "docs/.obsidian/types.json").read_text(encoding="utf-8")
+            )
+            self.assertEqual(types["types"]["contract_version"], "number")
+
     def test_relation_contract_rejects_wrong_target_type(self):
         with tempfile.TemporaryDirectory() as temporary:
             workspace = self.setup_project(Path(temporary))

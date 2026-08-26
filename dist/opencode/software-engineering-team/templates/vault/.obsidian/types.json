@@ -28,6 +28,7 @@
     "analysis_scopes": "multitext",
     "criterion_refs": "multitext",
     "revision": "number",
+    "contract_version": "number",
     "registry_hash": "text",
     "approved_at_utc": "datetime",
     "approval_revision": "number",

@@ -17,7 +17,7 @@ import re
 import subprocess
 from pathlib import Path
 
-from ba_compile import parse_frontmatter
+from ba_compile import parse_frontmatter, without_generated_relations
 
 
 STAGES = {
@@ -73,6 +73,7 @@ def tree_hash(root: Path, omitted_fields: set[str]) -> str:
                     kept.append(raw)
             kept.extend(lines[body_line - 1:])
             text = "\n".join(kept).rstrip() + "\n"
+        text = without_generated_relations(text)
         digest.update(path.relative_to(root).as_posix().encode())
         digest.update(b"\0")
         digest.update(text.encode())

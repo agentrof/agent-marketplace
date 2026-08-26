@@ -19,7 +19,7 @@ import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 
-from ba_compile import parse_frontmatter
+from ba_compile import parse_frontmatter, without_generated_relations
 
 
 SLUG = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
@@ -158,7 +158,8 @@ def stable_id(props: dict) -> str:
 
 
 def source_hash(path: Path) -> str:
-    return "sha256:" + hashlib.sha256(path.read_bytes()).hexdigest()
+    content = without_generated_relations(path.read_text(encoding="utf-8"))
+    return "sha256:" + hashlib.sha256(content.encode("utf-8")).hexdigest()
 
 
 def current_ref(props: dict) -> str:

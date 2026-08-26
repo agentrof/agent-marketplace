@@ -588,6 +588,7 @@ class ValidSpaceTests(unittest.TestCase):
         self.assertEqual(code, 0, err)
         registry = self.space / "_generated" / "registry.json"
         before = registry.read_bytes()
+        before_package_hash = ba.package_hash(self.space)
         relation = (
             "## Related knowledge <!-- sec: relations:generated:start -->\n\n"
             "- Verified by: "
@@ -605,6 +606,7 @@ class ValidSpaceTests(unittest.TestCase):
         code, _, err = run(["render", "--space", str(self.space)])
         self.assertEqual(code, 0, err)
         self.assertEqual(registry.read_bytes(), before)
+        self.assertEqual(ba.package_hash(self.space), before_package_hash)
 
 
 class BuilderFixtureTests(unittest.TestCase):

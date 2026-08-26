@@ -10,7 +10,7 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
-from ba_compile import parse_frontmatter
+from ba_compile import parse_frontmatter, without_generated_relations
 
 
 RELATIVE = Path("delivery/governance/governance.md")
@@ -54,7 +54,7 @@ def governance_hash(props: dict, body: str) -> str:
     projection = {key: value for key, value in props.items()
                   if key not in {"governance_hash", "source_hash", "approved_at_utc"}}
     return "sha256:" + hashlib.sha256(json.dumps(
-        {"frontmatter": projection, "body": body}, ensure_ascii=False,
+        {"frontmatter": projection, "body": without_generated_relations(body)}, ensure_ascii=False,
         sort_keys=True, separators=(",", ":")
     ).encode("utf-8")).hexdigest()
 

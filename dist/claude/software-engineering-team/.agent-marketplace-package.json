@@ -1,5 +1,5 @@
 {
-  "build_id": "snapshot.64e918982df395560084eb85a6674683554b118e233341627480a8cf62c955f1",
+  "build_id": "snapshot.b2d7a0cc1f87847125be07e8975318cdb7758f79d68443e8ac2efb36ca616bf8",
   "component": "software-engineering-team",
   "delivery_protocol": {
     "read_max": 1,
@@ -56,7 +56,7 @@
     "scripts/delivery_result.py": "ec591462319c871ffc97e5b5c9296be9c6f559a9608201d55d48509b8a689b89",
     "scripts/design_system_compile.py": "77bd9ea0d1d34d1768aa3d73685fc0a6001d47c520da86cf9435ebe594894dfc",
     "scripts/experience_artifact_check.py": "3bac93dbf71e1dd2b80e449a48605a15f71de3972d43016e29e1fbbb080bec91",
-    "scripts/experience_compile.py": "9e4c9798f4268d4157c0e084fb72b95f0004ad359471d1917ff3fce4e071ccdd",
+    "scripts/experience_compile.py": "7e875e51e460efc678520baaf31c4c188c9773f0c4ba91d00dc35893bb384d9d",
     "scripts/file_issue.py": "9dabf91796c416be8909e517f9a9859faff12c24c868c0c0e037739820bee02e",
     "scripts/generate_claude_project.py": "9258954d09757f36a51ac022c1dd8e915b3b831025f24d887d01be2ca2e02d29",
     "scripts/landscape_check.py": "64fe7922c5fd3b26c1fd0648f046af1ccc521339eefdab39714bc4908865c4a3",
@@ -280,6 +280,6 @@
   "schema_version": 2,
   "source_channel": "snapshot",
   "source_commit": "",
-  "source_ref": "snapshot.64e918982df395560084eb85a6674683554b118e233341627480a8cf62c955f1",
+  "source_ref": "snapshot.b2d7a0cc1f87847125be07e8975318cdb7758f79d68443e8ac2efb36ca616bf8",
   "version": "3.2.0"
 }

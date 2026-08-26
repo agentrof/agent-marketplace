@@ -1,0 +1,6 @@
+{
+  "summary": "Preserve approved stage receipts when generated vault relations are rendered.",
+  "components": {
+    "software-engineering-team": "patch"
+  }
+}

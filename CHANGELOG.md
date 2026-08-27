@@ -29,3 +29,11 @@
 
 - Bound OpenCode runtime probes and clean up timed-out command trees on Windows.
 - Add project-local OpenCode Terminal host projection support with fail-closed release evidence.
+
+## 4.0.0
+
+- Update the CodeQL GitHub Action to version 4.37.8.
+- Allow multi-document Business Analysis revisions and make decision approval part of the package gate.
+- Preserve approved stage receipts when generated vault relations are rendered.
+- Replace package-local Experience previews with one receipt-bound canonical application, exact route/state maps, and a deterministic network-free runtime.
+- Allow approved Experience packages to rebind to a newly approved Design System receipt during revision.

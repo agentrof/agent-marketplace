@@ -1,14 +1,16 @@
 {
   "schema_version": 1,
-  "version": "3.2.0",
-  "stable_base": "4dba8670bcca9350c6525982372b4d1afa8c5b6e",
-  "main_source": "b1fef55ca939de2c888f760efd56e53285460785",
+  "version": "4.0.0",
+  "stable_base": "d8762d2788c2de87b10d6008c8ae6a7a8db458e5",
+  "main_source": "18556654634665d71a21732cedb50c5647232eb5",
   "impacts": {
-    "software-engineering-team": "minor",
-    "agent-marketplace": "minor"
+    "software-engineering-team": "major"
   },
   "summaries": [
-    "Bound OpenCode runtime probes and clean up timed-out command trees on Windows.",
-    "Add project-local OpenCode Terminal host projection support with fail-closed release evidence."
+    "Update the CodeQL GitHub Action to version 4.37.8.",
+    "Allow multi-document Business Analysis revisions and make decision approval part of the package gate.",
+    "Preserve approved stage receipts when generated vault relations are rendered.",
+    "Replace package-local Experience previews with one receipt-bound canonical application, exact route/state maps, and a deterministic network-free runtime.",
+    "Allow approved Experience packages to rebind to a newly approved Design System receipt during revision."
   ]
 }

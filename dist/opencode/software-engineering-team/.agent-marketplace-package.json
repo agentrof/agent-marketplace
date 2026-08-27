@@ -1,5 +1,5 @@
 {
-  "build_id": "snapshot.cc952dcad94c2914d09bba9948839efdd05cd8992c0776910ae6f699ecbe87cf",
+  "build_id": "snapshot.0972c48725790f9360bab768ae6fc2307ddb1cadb7c39a2d41f4f28a4db3a055",
   "component": "software-engineering-team",
   "delivery_protocol": {
     "read_max": 1,
@@ -58,7 +58,7 @@
     "flows/requirement.md": "fc7930f17daf899ed2375d4c67bf0fefcc86be7894f0f8d02b276527e67a3c04",
     "flows/solution-design.md": "5d1d4e2ead2ee8458b4f6498f39afd91447e91ed50b66ee79e3c71d224736f10",
     "host-contract.md": "67567a39c4cd2fea8f952d907259c2b85599cc0b4265a787d650b16f0f700950",
-    "plugins/agent-marketplace-software-engineering-team.js": "fd041e6d1f0722b669e4dfb32ace81cdd4538035c765a5a1791f93a622a976cd",
+    "plugins/agent-marketplace-software-engineering-team.js": "78ece44aa2178d9c9925e4a12ed54a81172c53943ed5555e9b2e283f90f4cf66",
     "product.json": "b518546dc334e243cf261f44acccd5fb06de5734234930987e1518058acdf18a",
     "run-support.json": "5fd025e74880e0e5ec2b30c5a9dc248eb0c591e013142616bee069af99ebb95b",
     "scripts/architecture_compile.py": "6efad5f1d59d5f0debb6c8693be6c262e80489703dccc08ba91e1abe2ad588ea",
@@ -293,13 +293,13 @@
     "templates/vault/maps/system-architecture.md": "6608e750755077fc1828b1fe40456f9828ca1fc1da82234c5864f5e996e41d77"
   },
   "host": "opencode",
-  "marketplace_release": "3.2.0",
+  "marketplace_release": "4.0.0",
   "runtime_contracts": [
     "opencode_tool_execute_v1"
   ],
   "schema_version": 2,
   "source_channel": "snapshot",
   "source_commit": "",
-  "source_ref": "snapshot.cc952dcad94c2914d09bba9948839efdd05cd8992c0776910ae6f699ecbe87cf",
-  "version": "3.2.0"
+  "source_ref": "snapshot.0972c48725790f9360bab768ae6fc2307ddb1cadb7c39a2d41f4f28a4db3a055",
+  "version": "4.0.0"
 }

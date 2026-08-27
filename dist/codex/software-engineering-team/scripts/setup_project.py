@@ -92,16 +92,61 @@ def legacy_topology_blockers(vault_root: Path) -> list[str]:
     """Hard-cut models must be removed deliberately, never rewritten by setup."""
     blockers: list[str] = []
     experience = vault_root / "experience-design"
-    legacy_experience = experience / "baselines"
-    if legacy_experience.exists():
-        blockers.append("legacy Experience baseline tree exists at docs/experience-design/baselines; no migration is available")
-    for path in (experience / "experiences").glob("exp-*") if (experience / "experiences").is_dir() else []:
-        if path.is_dir():
-            blockers.append(f"retired exp- Experience slug exists at {path.relative_to(vault_root)}; rename it deliberately before setup")
-    for path in experience.rglob("*.md") if experience.is_dir() else []:
-        text = path.read_text(encoding="utf-8", errors="ignore")
-        if any(marker in text for marker in ("baseline_id:", "program_id:", "release_id:", "type: experience-baseline", "type: experience-space", "type: experience-domain")):
-            blockers.append(f"legacy Experience metadata exists at {path.relative_to(vault_root)}; no migration is available")
+    if experience.is_symlink():
+        blockers.append(
+            "Experience subtree symlink exists at experience-design; remove"
+            " it before setup"
+        )
+    elif experience.is_dir():
+        legacy_experience = experience / "baselines"
+        if legacy_experience.exists():
+            blockers.append("legacy Experience baseline tree exists at docs/experience-design/baselines; no migration is available")
+        for name in ("artifact-registry.json", "artifact-manifest.md"):
+            path = experience / name
+            if path.exists():
+                blockers.append(
+                    f"legacy Experience artifact index exists at {path.relative_to(vault_root)}; no migration is available"
+                )
+        entries = sorted(experience.rglob("*"))
+        for path in entries:
+            relative = path.relative_to(vault_root)
+            if path.is_symlink():
+                blockers.append(
+                    "Experience subtree symlink exists at "
+                    f"{relative.as_posix()}; remove it before setup"
+                )
+            elif path.is_file() and path.stat().st_nlink != 1:
+                blockers.append(
+                    "Experience Design file has a hard-link alias at "
+                    f"{relative.as_posix()}; remove every alias before setup"
+                )
+            if (path.name == "artifact-registry.json"
+                    and "_generated" in relative.parts):
+                blockers.append(
+                    "legacy Experience artifact index exists at "
+                    f"{relative.as_posix()}; no migration is available"
+                )
+        experiences = experience / "experiences"
+        for path in experiences.glob("exp-*") \
+                if experiences.is_dir() and not experiences.is_symlink() \
+                else []:
+            if path.is_dir() and not path.is_symlink():
+                blockers.append(f"retired exp- Experience slug exists at {path.relative_to(vault_root)}; rename it deliberately before setup")
+        for path in experience.rglob("*.md"):
+            if path.is_symlink():
+                continue
+            text = path.read_text(encoding="utf-8", errors="ignore")
+            if any(marker in text for marker in ("baseline_id:", "program_id:", "release_id:", "type: experience-baseline", "type: experience-space", "type: experience-domain")):
+                blockers.append(f"legacy Experience metadata exists at {path.relative_to(vault_root)}; no migration is available")
+        policy = vault_check.load_policy(vault_check.DEFAULT_POLICY)
+        for path in entries:
+            if not (path.is_file() or path.is_symlink()):
+                continue
+            relative = path.relative_to(vault_root).as_posix()
+            violation = vault_check.artifact_hard_cut_violation(
+                policy, relative)
+            if violation:
+                blockers.append(violation + "; remove it before setup")
     architecture = vault_root / "system-architecture"
     for name in ("api-contract.md", "data-model.md", "threat-model.md", "environment.md"):
         if (architecture / name).exists():

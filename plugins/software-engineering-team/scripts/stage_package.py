@@ -13,8 +13,11 @@ import contextlib
 import hashlib
 import io
 import json
+import os
 import re
+import stat
 import subprocess
+import unicodedata
 from pathlib import Path
 
 from ba_compile import parse_frontmatter, without_generated_relations
@@ -33,15 +36,89 @@ STAGES = {
 BA_PROCESS_REF = "business-analysis/{space}/(domains/<domain>/)*/processes/<slug>-process"
 
 
+def _reserved_path_alias(name: str, expected: str) -> bool:
+    return unicodedata.normalize("NFC", name).casefold() == expected.casefold()
+
+
+def _regular_stage_directory(
+    path: Path, label: str, *, reserved_name: str | None = None,
+) -> None:
+    if reserved_name is not None:
+        if (
+            path.name != reserved_name
+            or unicodedata.normalize("NFC", path.name) != reserved_name
+        ):
+            raise ValueError(
+                f"{label} must use exact NFC spelling and case: {reserved_name}"
+            )
+        if path.parent.is_dir() and not path.parent.is_symlink():
+            aliases = [
+                child.name for child in path.parent.iterdir()
+                if _reserved_path_alias(child.name, reserved_name)
+            ]
+            if aliases != [reserved_name]:
+                raise ValueError(
+                    f"{label} must resolve from one exact {reserved_name} directory"
+                )
+    if path.is_symlink() or not path.is_dir():
+        raise ValueError(f"{label} must be one regular, non-symlink directory")
+
+
+def _reject_resolved_reserved_aliases(path: Path) -> None:
+    """Recover owner aliases erased by an upstream ``Path.resolve()`` call."""
+    for candidate in (path, *path.parents):
+        for reserved_name in ("workspace", "docs", "experience-design"):
+            alias = candidate.parent / reserved_name
+            if alias == candidate or not alias.is_symlink():
+                continue
+            try:
+                if alias.resolve(strict=False) == candidate.resolve(strict=False):
+                    raise ValueError(
+                        "stage selector was resolved through a symlinked "
+                        f"{reserved_name} owner"
+                    )
+            except OSError as exc:
+                raise ValueError(
+                    "stage selector owner identity could not be verified"
+                ) from exc
+
+
 def docs_root(value: str | Path) -> Path:
-    path = Path(value).resolve()
-    if path.name == "docs":
-        return path
-    if (path / "workspace" / "docs").is_dir():
-        return path / "workspace" / "docs"
-    if (path / "docs").is_dir():
-        return path / "docs"
-    return path
+    """Resolve a docs selector only after lexical owner validation."""
+    raw = Path(value).expanduser()
+    lexical = Path(os.path.abspath(os.fspath(raw)))
+    _reject_resolved_reserved_aliases(lexical)
+    name = unicodedata.normalize("NFC", lexical.name).casefold()
+    if name == "docs":
+        docs = lexical
+        chain = [(docs, "stage docs root", "docs")]
+        workspace = docs.parent
+        if _reserved_path_alias(workspace.name, "workspace"):
+            chain.insert(0, (workspace, "stage workspace", "workspace"))
+    elif name == "workspace":
+        docs = lexical / "docs"
+        chain = [
+            (lexical, "stage workspace", "workspace"),
+            (docs, "stage docs root", "docs"),
+        ]
+    else:
+        _regular_stage_directory(lexical, "stage project selector")
+        workspace = lexical / "workspace"
+        direct = lexical / "docs"
+        if workspace.exists() or workspace.is_symlink():
+            docs = workspace / "docs"
+            chain = [
+                (workspace, "stage workspace", "workspace"),
+                (docs, "stage docs root", "docs"),
+            ]
+        elif direct.exists() or direct.is_symlink():
+            docs = direct
+            chain = [(docs, "stage docs root", "docs")]
+        else:
+            return lexical.resolve()
+    for path, label, reserved_name in chain:
+        _regular_stage_directory(path, label, reserved_name=reserved_name)
+    return docs.resolve()
 
 
 def frontmatter(path: Path) -> dict:
@@ -100,6 +177,24 @@ def is_committed(package_root: Path) -> bool:
     result = subprocess.run(["git", "status", "--porcelain=v1", "--",
                              str(package_root)], cwd=root, capture_output=True,
                             text=True, check=False)
+    return result.returncode == 0 and not result.stdout.strip()
+
+
+def paths_are_committed(paths: list[Path]) -> bool:
+    if not paths:
+        return False
+    root = next(
+        (parent for path in paths for parent in (path.parent, *path.parents)
+         if (parent / ".git").exists()),
+        paths[0].parent,
+    )
+    result = subprocess.run(
+        ["git", "status", "--porcelain=v1", "--", *map(str, paths)],
+        cwd=root,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
     return result.returncode == 0 and not result.stdout.strip()
 
 
@@ -220,8 +315,35 @@ def design_candidates(docs: Path) -> list[dict]:
 
 
 def experience_candidates(docs: Path) -> list[dict]:
-    root = docs / "experience-design" / "experiences"
-    found = []
+    experience_root = docs / "experience-design"
+    root = experience_root / "experiences"
+    try:
+        import experience_application_check
+        application, application_problems = (
+            experience_application_check.compile_application(experience_root, True)
+        )
+    except (ImportError, OSError, ValueError):
+        return []
+    if application_problems or not application:
+        return []
+    application_path = experience_root / experience_application_check.APPLICATION_RELATIVE
+    application_receipt = receipt(
+        "experience-design",
+        f"application@r{application['application_revision']}",
+        "experience-application",
+        str(application["application_hash"]),
+        True,
+        True,
+        application_path,
+        application_path.parent,
+        "strict-current",
+    )
+    application_receipt["committed"] = paths_are_committed([
+        application_path,
+        experience_root / experience_application_check.REGISTRY_RELATIVE,
+        experience_root / experience_application_check.LEDGER_RELATIVE,
+    ])
+    found = [application_receipt]
     for folder in sorted(root.iterdir()) if root.is_dir() else []:
         note = folder / "experience.md"
         if not folder.is_dir() or not note.is_file():
@@ -232,7 +354,12 @@ def experience_candidates(docs: Path) -> list[dict]:
             props = frontmatter(note)
             package_hash = str(compiled.get("package_hash", ""))
             revision = props.get("revision")
-            approved = not problems and isinstance(revision, int) and revision > 0
+            approved = (
+                props.get("status") == "approved"
+                and not problems
+                and type(revision) is int
+                and revision > 0
+            )
         except (ImportError, OSError, ValueError):
             props = frontmatter(note)
             package_hash = ""
@@ -245,6 +372,258 @@ def experience_candidates(docs: Path) -> list[dict]:
                                  approved, approved, note, folder,
                                  "strict-current" if approved else "invalid"))
     return found
+
+
+def verified_application_rows(experience_root: Path) -> list[dict]:
+    """Load the immutable application publication ledger fail-closed."""
+    import experience_application_check
+    rows, findings = experience_application_check.verified_application_ledger(
+        experience_root,
+    )
+    if findings:
+        return []
+    published: dict[str, str] = {}
+    for application in rows:
+        for package in application.get("packages", []):
+            ref = package.get("result_ref") if isinstance(package, dict) else None
+            package_hash = (
+                package.get("package_hash") if isinstance(package, dict) else None
+            )
+            if not isinstance(ref, str) or not isinstance(package_hash, str):
+                return []
+            if ref in published and published[ref] != package_hash:
+                return []
+            published[ref] = package_hash
+    return rows
+
+
+def historical_application_row(
+    experience_root: Path, ref: str,
+) -> dict | None:
+    match = re.fullmatch(r"application@r([1-9][0-9]*)", ref)
+    if match is None:
+        return None
+    revision = int(match.group(1))
+    return next(
+        (
+            row for row in verified_application_rows(experience_root)
+            if row.get("application_revision") == revision
+        ),
+        None,
+    )
+
+
+def historical_process_evidence(
+    experience_root: Path, ref: str, expected_hash: str,
+) -> bool:
+    """Verify one published process receipt without current-upstream gates."""
+    match = re.fullmatch(
+        r"((?!application$)[a-z0-9]+(?:-[a-z0-9]+)*)@r([1-9][0-9]*)",
+        ref,
+    )
+    if match is None:
+        return False
+    experience_id, revision_text = match.groups()
+    revision = int(revision_text)
+    try:
+        import experience_compile
+        package = experience_compile.resolve_package(
+            experience_root, experience_id,
+        )
+        if package is None or not historical_package_tree_is_regular(package):
+            return False
+        props = experience_compile.fields(package)
+        current_revision = props.get("revision")
+        if type(current_revision) is not int or current_revision < 1:
+            return False
+        history, findings = experience_compile.validate_process_ledger(
+            package, current_revision,
+        )
+        if findings:
+            return False
+        historic = next(
+            (
+                row for row in history
+                if row.get("experience_id") == experience_id
+                and row.get("package_revision") == revision
+            ),
+            None,
+        )
+        if historic is not None:
+            return historic.get("package_hash") == expected_hash
+        if (
+            props.get("status") != "approved"
+            or current_revision != revision
+            or experience_id not in experience_compile.package_aliases(package)
+        ):
+            return False
+        current, current_findings = experience_compile.compile_package(
+            package, True, allow_stale_inputs=True,
+        )
+        return (
+            not current_findings
+            and current.get("package_hash") == expected_hash
+        )
+    except (ImportError, OSError, TypeError, ValueError):
+        return False
+
+
+def historical_package_tree_is_regular(package: Path) -> bool:
+    """Reject aliases, special files and shared inodes in historical evidence."""
+    try:
+        root_stat = os.lstat(package)
+        if stat.S_ISLNK(root_stat.st_mode) or not stat.S_ISDIR(root_stat.st_mode):
+            return False
+        for path in package.rglob("*"):
+            path_stat = os.lstat(path)
+            if stat.S_ISLNK(path_stat.st_mode):
+                return False
+            if stat.S_ISDIR(path_stat.st_mode):
+                continue
+            if not stat.S_ISREG(path_stat.st_mode) or path_stat.st_nlink != 1:
+                return False
+    except OSError:
+        return False
+    return True
+
+
+def historical_process_refs(
+    experience_root: Path, application: dict,
+) -> list[str] | None:
+    packages = application.get("packages")
+    if not isinstance(packages, list):
+        return None
+    refs: list[str] = []
+    for package in packages:
+        if not isinstance(package, dict):
+            return None
+        ref = package.get("result_ref")
+        package_hash = package.get("package_hash")
+        if (
+            not isinstance(ref, str)
+            or not isinstance(package_hash, str)
+            or not historical_process_evidence(
+                experience_root, ref, package_hash,
+            )
+        ):
+            return None
+        refs.append(ref)
+    return refs if len(refs) == len(set(refs)) else None
+
+
+def historical_experience_candidate(docs: Path, ref: str) -> dict | None:
+    """Resolve one immutable Experience receipt after it stops being current."""
+    try:
+        docs = docs_root(docs)
+    except (OSError, ValueError):
+        return None
+    experience_root = docs / "experience-design"
+    application_match = re.fullmatch(r"application@r([1-9][0-9]*)", ref)
+    if application_match:
+        try:
+            import experience_application_check
+            historic = historical_application_row(experience_root, ref)
+        except (ImportError, OSError, TypeError, ValueError):
+            return None
+        if (
+            historic is None
+            or historical_process_refs(experience_root, historic) is None
+        ):
+            return None
+        candidate = receipt(
+            "experience-design", ref, "experience-application",
+            str(historic.get("application_hash", "")), True, False,
+            experience_root / experience_application_check.LEDGER_RELATIVE,
+            experience_root, "historical",
+        )
+        candidate["committed"] = paths_are_committed([
+            experience_root / experience_application_check.LEDGER_RELATIVE,
+        ])
+        return candidate
+
+    package_match = re.fullmatch(
+        r"((?!application$)[a-z0-9]+(?:-[a-z0-9]+)*)@r([1-9][0-9]*)",
+        ref,
+    )
+    if package_match is None:
+        return None
+    try:
+        import experience_application_check
+        matches = [
+            package
+            for application in verified_application_rows(experience_root)
+            for package in application.get("packages", [])
+            if isinstance(package, dict) and package.get("result_ref") == ref
+        ]
+    except (ImportError, OSError, TypeError, ValueError):
+        return None
+    hashes = {
+        package.get("package_hash") for package in matches
+        if isinstance(package.get("package_hash"), str)
+    }
+    if len(hashes) != 1:
+        return None
+    package_hash = next(iter(hashes))
+    if not historical_process_evidence(experience_root, ref, package_hash):
+        return None
+    candidate = receipt(
+        "experience-design", ref, "experience-package",
+        package_hash, True, False,
+        experience_root / experience_application_check.LEDGER_RELATIVE,
+        experience_root, "historical",
+    )
+    candidate["committed"] = paths_are_committed([
+        experience_root / experience_application_check.LEDGER_RELATIVE,
+    ])
+    return candidate
+
+
+def experience_application_process_refs(
+    docs: Path, ref: str, *, allow_historical: bool = False,
+) -> list[str] | None:
+    """Return the process receipt set owned by one verified application."""
+    try:
+        docs = docs_root(docs)
+    except (OSError, ValueError):
+        return None
+    match = re.fullmatch(r"application@r([1-9][0-9]*)", ref)
+    if match is None:
+        return None
+    experience_root = docs / "experience-design"
+    try:
+        import experience_application_check
+        revision = int(match.group(1))
+        if allow_historical:
+            registry = historical_application_row(experience_root, ref)
+            if registry is None:
+                return None
+            return historical_process_refs(experience_root, registry)
+        else:
+            current, findings = experience_application_check.compile_application(
+                experience_root, True,
+            )
+            if findings or current.get("application_revision") != revision:
+                return None
+            registry = current
+    except (ImportError, OSError, TypeError, ValueError):
+        return None
+    if not isinstance(registry, dict) or not isinstance(registry.get("packages"), list):
+        return None
+    refs = []
+    for row in registry["packages"]:
+        if not isinstance(row, dict) or not isinstance(row.get("result_ref"), str):
+            return None
+        refs.append(row["result_ref"])
+    return refs if len(refs) == len(set(refs)) else None
+
+
+def experience_application_is_empty(
+    docs: Path, ref: str, *, allow_historical: bool = False,
+) -> bool:
+    """Prove that an exact application receipt owns zero process receipts."""
+    return experience_application_process_refs(
+        docs, ref, allow_historical=allow_historical,
+    ) == []
 
 
 def backlog_candidates(docs: Path) -> list[dict]:
@@ -331,6 +710,7 @@ def resolve_ba_process(docs: Path, value: str, *, expected_ba_ref: str = "",
 def candidates(docs: Path, stage: str) -> list[dict]:
     if stage not in STAGES:
         raise ValueError(f"unsupported stage: {stage}")
+    docs = docs_root(docs)
     return {
         "business-analysis": ba_candidates,
         "solution-design": solution_candidates,
@@ -342,13 +722,18 @@ def candidates(docs: Path, stage: str) -> list[dict]:
 
 def verify(docs: Path, stage: str, ref: str, expected_hash: str = "",
            require_committed: bool = False,
-           require_strict_current: bool = False) -> tuple[dict | None, list[str]]:
+           require_strict_current: bool = False,
+           allow_historical: bool = False) -> tuple[dict | None, list[str]]:
+    docs = docs_root(docs)
     matches = [item for item in candidates(docs, stage) if item["result_ref"] == ref]
+    if not matches and allow_historical and stage == "experience-design":
+        historical = historical_experience_candidate(docs, ref)
+        matches = [historical] if historical is not None else []
     if not matches:
         return None, [f"{stage} receipt must use its canonical result_ref, got {ref}"]
     item = matches[0]
     errors = []
-    if item["status"] != "approved" or not item["current"]:
+    if item["status"] != "approved" or (not item["current"] and not allow_historical):
         errors.append(f"{ref} is not an approved/current {stage} package")
     if expected_hash and item["package_hash"] != expected_hash:
         errors.append(f"{ref} package hash is stale or does not match expected hash")
@@ -373,8 +758,8 @@ def main(argv: list[str] | None = None) -> int:
             command.add_argument("--require-committed", action="store_true")
             command.add_argument("--strict-current", action="store_true")
     args = parser.parse_args(argv)
-    docs = docs_root(args.docs)
     try:
+        docs = docs_root(args.docs)
         if args.command == "candidates":
             result, errors = {"stage": args.stage, "candidates": candidates(docs, args.stage)}, []
         else:

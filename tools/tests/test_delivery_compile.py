@@ -7,6 +7,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 ROOT = Path(__file__).resolve().parents[2]
 SCRIPTS = ROOT / "plugins" / "software-engineering-team" / "scripts"
@@ -169,6 +170,52 @@ class DeliveryCompilerTests(unittest.TestCase):
         source_story.write_text(source_story.read_text(encoding="utf-8") + "\nChanged after scope proposal.\n", encoding="utf-8")
         scope = type("Args", (), {"docs": str(self.docs), "delivery": "DLV-001"})
         self.assertEqual(delivery_compile.approve_scope(scope), 1)
+
+    def test_existing_delivery_uses_historical_backlog_inputs_but_new_scope_is_strict(self):
+        self.approve_dod()
+        original_collect = delivery_compile.backlog_compile.collect
+        calls: list[bool] = []
+        application_advanced = False
+
+        def collect_with_application_revision(docs, *, historical_inputs=False):
+            calls.append(historical_inputs)
+            record, findings = original_collect(
+                docs, historical_inputs=historical_inputs,
+            )
+            if application_advanced and not historical_inputs:
+                findings = [*findings, "pinned application receipt is not current"]
+            return record, findings
+
+        first = type("Args", (), {
+            "docs": str(self.docs), "id": None, "slug": "auth",
+            "goal": "Authenticate", "outcome": None,
+            "target_branch": "main", "story": ["AUTH-01"],
+        })
+        with mock.patch.object(
+            delivery_compile.backlog_compile,
+            "collect",
+            side_effect=collect_with_application_revision,
+        ):
+            self.assertEqual(delivery_compile.init_delivery(first), 0)
+            self.assertFalse(calls[-1])
+
+            # This models an application-only r1 -> r2 change: the approved
+            # backlog package and selected Story/Test Plan bytes are unchanged,
+            # but its Experience input is now historical.
+            application_advanced = True
+            existing = type("Args", (), {
+                "docs": str(self.docs), "delivery": "DLV-001",
+            })
+            self.assertEqual(delivery_compile.check_delivery(existing), 0)
+            self.assertTrue(calls[-1])
+
+            second = type("Args", (), {
+                "docs": str(self.docs), "id": None, "slug": "auth-next",
+                "goal": "Authenticate next", "outcome": None,
+                "target_branch": "main", "story": ["AUTH-01"],
+            })
+            self.assertEqual(delivery_compile.init_delivery(second), 2)
+            self.assertFalse(calls[-1])
 
     def test_review_rejects_non_git_or_missing_review_baselines(self):
         self.approve_dod()

@@ -27,6 +27,11 @@ PUBLIC_MARKETPLACES = {
     "claude": "https://github.com/agentrof/agent-marketplace.git#stable",
     "codex": "agentrof/agent-marketplace@stable",
 }
+APPLICATION_RESOURCES = (
+    "skill-content/experience-modeling/data/application-template.html",
+    "skill-content/experience-modeling/data/application-map-schema.json",
+    "skill-content/experience-modeling/data/application-contract-schema.json",
+)
 
 
 class SmokeFailure(RuntimeError):
@@ -74,6 +79,25 @@ def installed_root(inventory: dict | list, host: str) -> Path:
     raise SmokeFailure(f"{host} inventory has no enabled {TEAM} install")
 
 
+def exercise_application_resources(
+    team_root: Path, env: dict[str, str]
+) -> None:
+    application_check = team_root / "scripts" / "experience_application_check.py"
+    for path in (application_check, *(team_root / item for item in APPLICATION_RESOURCES)):
+        if not path.is_file():
+            raise SmokeFailure(
+                f"installed package is missing {path.relative_to(team_root)}"
+            )
+    application_self_check = json.loads(run([
+        sys.executable, str(application_check), "self-check", "--json",
+    ], dict(env, PYTHONDONTWRITEBYTECODE="1")))
+    if application_self_check.get("ok") is not True:
+        raise SmokeFailure(
+            "installed canonical application runtime/schema self-check failed: "
+            + json.dumps(application_self_check.get("findings", []))
+        )
+
+
 def exercise_package(team_root: Path, project: Path, env: dict[str, str]) -> None:
     setup = team_root / "scripts" / "setup_project.py"
     check = team_root / "scripts" / "setup_check.py"
@@ -83,6 +107,7 @@ def exercise_package(team_root: Path, project: Path, env: dict[str, str]) -> Non
     product_chain_scripts = (
         "stage_package.py", "ba_compile.py", "landscape_check.py",
         "design_system_compile.py", "experience_compile.py",
+        "experience_application_check.py",
         "backlog_compile.py", "architecture_compile.py",
     )
     for path in (
@@ -95,6 +120,7 @@ def exercise_package(team_root: Path, project: Path, env: dict[str, str]) -> Non
     for script in (delivery_compile, delivery_git,
                    *(team_root / "scripts" / name for name in product_chain_scripts)):
         run([sys.executable, str(script), "--help"], env)
+    exercise_application_resources(team_root, env)
     required_flows = {
         "requirement.md", "business-analysis.md", "solution-design.md",
         "design-system.md", "experience-design.md", "backlog-planning.md",
@@ -223,6 +249,41 @@ def exercise_project_projection(
     run([sys.executable, "-B", str(manage), "check"], env)
     if not (project / projection_root / "plugins").is_dir():
         raise SmokeFailure("project projection did not publish host discovery files")
+    private = project / projection_root / "agentrof" / "agent-marketplace"
+    try:
+        installation = json.loads(
+            (private / "installation.json").read_text(encoding="utf-8")
+        )
+    except (OSError, json.JSONDecodeError) as exc:
+        raise SmokeFailure(f"project projection installation is unreadable: {exc}") from exc
+    active_key = installation.get("active_build_key") \
+        if isinstance(installation, dict) else None
+    if (
+        type(active_key) is not str
+        or not active_key
+        or Path(active_key).name != active_key
+        or "/" in active_key
+        or "\\" in active_key
+    ):
+        raise SmokeFailure("project projection installation has an unsafe active build key")
+    packages_path = private / "packages"
+    active_package = packages_path / active_key
+    candidate = active_package / TEAM
+    if (
+        packages_path.is_symlink()
+        or active_package.is_symlink()
+        or candidate.is_symlink()
+    ):
+        raise SmokeFailure("project projection active package cannot be a symlink")
+    packages = packages_path.resolve()
+    installed = candidate.resolve()
+    try:
+        installed.relative_to(packages)
+    except ValueError as exc:
+        raise SmokeFailure("project projection active package escapes its package root") from exc
+    if not installed.is_dir() or installed.is_symlink():
+        raise SmokeFailure("project projection active package is missing")
+    exercise_application_resources(installed, env)
 
 
 def codex_skill_names(env: dict[str, str], project: Path) -> set[str]:

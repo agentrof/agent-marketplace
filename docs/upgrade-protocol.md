@@ -44,9 +44,20 @@ configuration remain the source of truth.
 9. Review and commit the exact tracked diff, then start a fresh host session so
    the refreshed skills and hooks load.
 
+The Experience application contract is a hard cut. Inspect reports any
+package-local Experience preview, artifact-manifest note, former
+`_generated/artifact-registry.json` or other Experience implementation file as
+a blocker. Apply does not migrate those files, synthesize application maps or
+offer a compatibility reader. Remove the legacy surface deliberately and
+author the one root `experience-design/artifacts/application.html` plus each
+process package's `artifacts/application-map.json` under the current flow.
+
 Stage routing inspects Git only at a completed-stage handoff. The relevant
 config, approved subtree, home note and stage map must be tracked, committed and
-clean. Unrelated application work and the current draft stage are outside that
+clean. For Experience Design that path set includes the canonical application,
+the exact process packages and maps, and compiler-owned application
+receipt/ledger state selected by the approved transaction. Unrelated product
+application code and the current draft stage are outside a different stage's
 path set and do not block active authoring. A request without an approved,
 committed backlog returns to Requirement Flow; an approved backlog proceeds to
 Delivery Flow.

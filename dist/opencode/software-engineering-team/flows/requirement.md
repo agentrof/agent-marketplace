@@ -23,8 +23,15 @@ workflow mode is created.
    concrete rationale. Every stage entry checks the same prerequisites. Each
    completed stage writes a compiler-owned Stage Results receipt with its exact
    result reference and hash; Stage Results are excluded from the semantic hash.
+   Experience Design is one aggregate stage result: the globally current
+   `application@rN` and its exact current process receipts are bound together.
+   Reuse must verify the complete set, not process receipts alone.
 5. Recheck the Requirement after every stage handoff. Semantic impact changes
-   invalidate approval and require a new approval before downstream work.
+   invalidate approval and require a new approval before downstream work. Any
+   approved Experience package-set or application-only delta advances the
+   global application receipt and makes an older Experience Stage Result
+   non-current. Rebind it through the normal Requirement revision before
+   backlog handoff.
 6. Run Backlog Planning only when all required stage packages are current and
    the compiler-owned incorporation predicate is still open. An approved
    `resolved_no_change` Requirement is the only legal no-backlog terminal.

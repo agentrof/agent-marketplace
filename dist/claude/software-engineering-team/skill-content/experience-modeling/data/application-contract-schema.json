@@ -1,0 +1,108 @@
+{
+  "schema_version": 2,
+  "document_type": "experience_application_contract",
+  "required_fields": [
+    "schema_version",
+    "entry_route",
+    "state_classes",
+    "routes",
+    "simulations"
+  ],
+  "allowed_fields": [
+    "schema_version",
+    "entry_route",
+    "state_classes",
+    "routes",
+    "simulations"
+  ],
+  "field_types": {
+    "schema_version": "integer",
+    "entry_route": "string",
+    "state_classes": "array",
+    "routes": "array",
+    "simulations": "array"
+  },
+  "route_required_fields": [
+    "route",
+    "state_class",
+    "experience_id",
+    "label",
+    "record_refs",
+    "transitions"
+  ],
+  "route_allowed_fields": [
+    "route",
+    "state_class",
+    "experience_id",
+    "label",
+    "record_refs",
+    "transitions"
+  ],
+  "route_field_types": {
+    "route": "string",
+    "state_class": "string",
+    "experience_id": "string",
+    "label": "string",
+    "record_refs": "array",
+    "transitions": "array"
+  },
+  "transition_required_fields": [
+    "transition_ref",
+    "target",
+    "outcome",
+    "preserve_context",
+    "return_route"
+  ],
+  "transition_allowed_fields": [
+    "transition_ref",
+    "target",
+    "outcome",
+    "preserve_context",
+    "return_route"
+  ],
+  "transition_field_types": {
+    "transition_ref": "string",
+    "target": "string",
+    "outcome": "string",
+    "preserve_context": "array",
+    "return_route": "string"
+  },
+  "simulation_required_fields": [
+    "simulation_id",
+    "source",
+    "outcome",
+    "target",
+    "return_route"
+  ],
+  "simulation_allowed_fields": [
+    "simulation_id",
+    "source",
+    "outcome",
+    "target",
+    "return_route"
+  ],
+  "simulation_field_types": {
+    "simulation_id": "string",
+    "source": "string",
+    "outcome": "string",
+    "target": "string",
+    "return_route": "string"
+  },
+  "experience_pattern": "^(?:application|[a-z0-9]+(?:-[a-z0-9]+)*)$",
+  "record_ref_pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*:(?:JRN|FLW|SCR|STA|TRN)-[0-9]{3,}@r[1-9][0-9]*$",
+  "route_pattern": "^#/[a-z0-9]+(?:[-_][a-z0-9]+)*(?:/[a-z0-9]+(?:[-_][a-z0-9]+)*)*$",
+  "simulation_id_pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$",
+  "outcome_pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$",
+  "state_classes": [
+    "ordinary",
+    "loading",
+    "empty",
+    "validation",
+    "permission",
+    "stale",
+    "conflict",
+    "failure",
+    "retry",
+    "recovery"
+  ]
+}

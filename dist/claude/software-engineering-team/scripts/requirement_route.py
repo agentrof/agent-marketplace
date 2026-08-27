@@ -76,6 +76,11 @@ def route_stage(path: Path) -> dict:
             return {"next_entry": stage, "stage": stage, "action": "repair",
                     "upstream_receipts": upstream_receipts,
                     "reason": f"{stage} has an invalid receipt count"}
+        if stage == "experience-design" and not requirement_compile.valid_experience_receipt_refs(
+                [row[0] for row in result_rows], docs):
+            return {"next_entry": stage, "stage": stage, "action": "repair",
+                    "upstream_receipts": upstream_receipts,
+                    "reason": "experience-design needs the exact verified application/process receipt set; zero process receipts require an empty application"}
         receipts, errors = [], []
         for result_ref, result_hash in result_rows:
             receipt, invalid = stage_package.verify(

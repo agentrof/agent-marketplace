@@ -31,9 +31,10 @@ sibling test plan is expressed by `owner_role: qa_engineer` on
 
 ## Traceability links
 
-All document references are quoted, vault-absolute wikilinks. A criterion link
-targets its approved owning note and uses the BA registry-qualified identity as
-its alias:
+Document references other than `experience_refs` are quoted, vault-absolute
+wikilinks. A criterion link targets its approved owning note and uses the BA
+registry-qualified identity as its alias; an Experience ref is a qualified
+exact revision:
 
 ```yaml
 criterion_refs:
@@ -46,6 +47,14 @@ uses_design:
 
 The upstream note must exist, be approved and not be superseded. Bare tokens
 such as `AC-ACC-001` are not links and do not satisfy coverage.
+
+`experience_refs` are the exception to the wikilink form: each is a qualified
+exact living record revision. It must resolve through a process receipt pinned
+at backlog scope and appear in that package's `application-map.json` for the
+same pinned `application@rN`. The application and process receipts are backlog
+input bindings, not values repeated in each story. A newer approved application
+receipt makes that binding non-current even if this story's record revision and
+owning process receipt did not change.
 
 Every story also declares its intake kind:
 

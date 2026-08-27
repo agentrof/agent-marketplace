@@ -127,7 +127,7 @@
       }
     },
     {
-      "query": "tag:#doc/experience OR tag:#doc/journey OR tag:#doc/flow-set OR tag:#doc/screen OR tag:#doc/state OR tag:#doc/transition OR tag:#doc/artifact-manifest",
+      "query": "tag:#doc/experience OR tag:#doc/journey OR tag:#doc/flow-set OR tag:#doc/screen OR tag:#doc/state OR tag:#doc/transition",
       "color": {
         "a": 1,
         "rgb": 3108513

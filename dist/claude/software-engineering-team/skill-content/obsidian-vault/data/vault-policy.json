@@ -1,5 +1,5 @@
 {
-  "schema_version": 7,
+  "schema_version": 8,
   "vault_root_dirname": "docs",
   "home_file": "home.md",
   "maps_dir": "maps",
@@ -121,7 +121,7 @@
     },
     {
       "id": "experience",
-      "query": "tag:#doc/experience OR tag:#doc/journey OR tag:#doc/flow-set OR tag:#doc/screen OR tag:#doc/state OR tag:#doc/transition OR tag:#doc/artifact-manifest",
+      "query": "tag:#doc/experience OR tag:#doc/journey OR tag:#doc/flow-set OR tag:#doc/screen OR tag:#doc/state OR tag:#doc/transition",
       "rgb": 3108513
     },
     {
@@ -264,6 +264,24 @@
   ],
   "attachments_dir": "_attachments",
   "artifact_directory_name": "artifacts",
+  "artifact_path_restrictions": [
+    {
+      "subtree": "experience-design",
+      "patterns": [
+        "^experience-design/artifacts/application\\.html$",
+        "^experience-design/experiences/(?!exp-)[a-z0-9]+(?:-[a-z0-9]+)*/artifacts/application-map\\.json$"
+      ]
+    }
+  ],
+  "artifact_forbidden_extensions": [
+    {
+      "path_prefix": "experience-design/experiences",
+      "extensions": [
+        ".html", ".htm", ".css", ".js", ".mjs", ".cjs", ".jsx",
+        ".tsx", ".vue", ".svelte", ".wasm"
+      ]
+    }
+  ],
   "attachment_extensions": [
     ".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg", ".pdf",
     ".mp3", ".wav", ".m4a", ".mp4", ".webm"
@@ -332,10 +350,6 @@
     "implements": "multitext",
     "uses_design": "multitext",
     "related_to": "multitext",
-    "artifact_path": "text",
-    "artifact_sha256": "text",
-    "artifact_owner": "text",
-    "declared_ids": "multitext",
     "goal": "text",
     "priority": "text",
     "priority_reason": "text",
@@ -420,7 +434,6 @@
     ,"primary_process_ref": "text"
     ,"related_process_refs": "multitext"
     ,"retired_at_utc": "datetime"
-    ,"manifest_hash": "text"
     ,"component_ref": "text"
     ,"record_id": "text"
     ,"introduced_by": "multitext"
@@ -444,7 +457,12 @@
     "baseline_id",
     "inherits",
     "program_id",
-    "release_id"
+    "release_id",
+    "artifact_path",
+    "artifact_sha256",
+    "artifact_owner",
+    "declared_ids",
+    "manifest_hash"
   ],
   "lazy_fragments": {
     "base": ["type", "title", "status", "tags", "aliases", "derives_from", "satisfies", "constrained_by", "implements", "uses_design", "related_to", "origin_mode", "record_state", "stage_results_hash", "upstream_stage_receipts_hash", "planning_mode", "requirement_ref", "input_package_refs", "input_bindings"],
@@ -468,11 +486,7 @@
       "criterion_refs",
       "revision",
       "registry_hash",
-      "approved_at_utc",
-      "artifact_path",
-      "artifact_sha256",
-      "artifact_owner",
-      "declared_ids"
+      "approved_at_utc"
     ],
     "backlog": [
       "goal",
@@ -539,7 +553,6 @@
     "observability-view",
     "architecture-connection",
     "architecture-standard",
-    "artifact-manifest",
     "backlog",
     "backlog-review",
     "epic",
@@ -572,7 +585,6 @@
     "screen": ["^experience-design/experiences/(?!exp-)[a-z0-9]+(?:-[a-z0-9]+)*/screens/[a-z0-9]+(?:-[a-z0-9]+)*-screen\\.md$"],
     "state": ["^experience-design/experiences/(?!exp-)[a-z0-9]+(?:-[a-z0-9]+)*/states/[a-z0-9]+(?:-[a-z0-9]+)*-state\\.md$"],
     "transition": ["^experience-design/experiences/(?!exp-)[a-z0-9]+(?:-[a-z0-9]+)*/transitions/[a-z0-9]+(?:-[a-z0-9]+)*-transition\\.md$"],
-    "artifact_manifest": ["^experience-design/experiences/(?!exp-)[a-z0-9]+(?:-[a-z0-9]+)*/artifacts/[a-z0-9]+(?:-[a-z0-9]+)*-artifact\\.md$"],
     "system_architecture": ["^system-architecture/architecture\\.md$"],
     "architecture_component": ["^system-architecture/components/[a-z0-9]+(?:-[a-z0-9]+)*/component\\.md$"],
     "architecture_module": ["^system-architecture/components/[a-z0-9]+(?:-[a-z0-9]+)*/(?:modules/[a-z0-9]+(?:-[a-z0-9]+)*/)*modules/[a-z0-9]+(?:-[a-z0-9]+)*/module\\.md$"],
@@ -606,7 +618,7 @@
   "status_values": {
     "decision": ["draft", "in_review", "proposed", "accepted", "rejected", "approved", "superseded"],
     "landscape": ["draft", "in_review", "approved", "superseded"],
-    "experience": ["draft", "in_review", "approved", "retired"],
+    "experience": ["draft", "in_review", "approved", "retirement_pending", "retired"],
     "transition": ["draft", "in_review", "approved", "retired"],
     "data_model": ["draft", "in_review", "approved", "retired"],
     "threat_model": ["draft", "in_review", "approved", "retired"],
@@ -703,7 +715,6 @@
     "cardinality_by_type": {
       "page_override": {"uses_design": {"min": 1, "max": 1}},
       "screen": {"uses_design": {"min": 1, "max": 1}},
-      "artifact_manifest": {"related_to": {"min": 1, "max": 1}},
       "backlog_review": {"derives_from": {"min": 1, "max": 1}},
       "epic_review": {"derives_from": {"min": 1, "max": 1}},
       "story": {"derives_from": {"min": 1, "max": 20}},

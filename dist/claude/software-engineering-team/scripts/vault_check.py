@@ -207,6 +207,31 @@ def normalize_vault_rel(raw: str) -> str:
     return p
 
 
+def artifact_path_restrictions(policy: dict, subtree: str) -> tuple[str, ...]:
+    restrictions = policy.get("artifact_path_restrictions", {})
+    if not isinstance(restrictions, list):
+        return ()
+    for restriction in restrictions:
+        if (isinstance(restriction, dict)
+                and restriction.get("subtree") == subtree):
+            values = restriction.get("patterns", [])
+            return tuple(str(value) for value in values
+                         if isinstance(value, str))
+    return ()
+
+
+def is_artifact_location(policy: dict, rel: str) -> bool:
+    """Whether a path is physically inside an artifact directory."""
+    parts = normalize_vault_rel(rel).split("/")
+    directory = str(policy.get("artifact_directory_name", "artifacts"))
+    valid_roots = set(policy.get("subtrees", [])) | {
+        str(policy.get("maps_dir", "maps"))
+    }
+    return (len(parts) >= 3 and parts[0] in valid_roots
+            and directory in parts[1:-1]
+            and all(part not in {"", ".", ".."} for part in parts))
+
+
 def is_artifact_path(policy: dict, rel: str) -> bool:
     """Whether ``rel`` is an opaque artifact under a policy-valid folder.
 
@@ -214,11 +239,48 @@ def is_artifact_path(policy: dict, rel: str) -> bool:
     that decision separate prevents an ``artifacts`` directory from creating
     a new top-level vault subtree.
     """
-    parts = normalize_vault_rel(rel).split("/")
-    directory = str(policy.get("artifact_directory_name", "artifacts"))
-    valid_roots = set(policy.get("subtrees", [])) | {str(policy.get("maps_dir", "maps"))}
-    return (len(parts) >= 3 and parts[0] in valid_roots and directory in parts[1:-1]
-            and all(part not in {"", ".", ".."} for part in parts))
+    normalized = normalize_vault_rel(rel)
+    parts = normalized.split("/")
+    if not is_artifact_location(policy, normalized):
+        return False
+    patterns = artifact_path_restrictions(policy, parts[0])
+    if not patterns:
+        return True
+    try:
+        return any(re.fullmatch(pattern, normalized) for pattern in patterns)
+    except re.error:
+        return False
+
+
+def artifact_hard_cut_violation(policy: dict, rel: str) -> str:
+    """Return the exact artifact restriction violated by one vault path."""
+    normalized = normalize_vault_rel(rel)
+    forbidden = policy.get("artifact_forbidden_extensions", {})
+    if isinstance(forbidden, list):
+        for restriction in forbidden:
+            if not isinstance(restriction, dict):
+                continue
+            prefix = str(restriction.get("path_prefix", ""))
+            values = restriction.get("extensions", [])
+            if (prefix and normalized.startswith(prefix.rstrip("/") + "/")
+                    and Path(normalized).suffix.casefold() in {
+                        str(value).casefold() for value in values
+                        if isinstance(value, str)
+                    }):
+                return (
+                    f"process-local Experience web implementation '{normalized}'"
+                    " is forbidden; use experience-design/artifacts/application.html"
+                    " and the package artifacts/application-map.json"
+                )
+    parts = normalized.split("/")
+    if (is_artifact_location(policy, normalized)
+            and artifact_path_restrictions(policy, parts[0])
+            and not is_artifact_path(policy, normalized)):
+        return (
+            f"artifact '{normalized}' is forbidden by the subtree's exact"
+            " artifact-path contract"
+        )
+    return ""
 
 
 def is_hub(policy: dict, rel: str) -> bool:
@@ -367,7 +429,7 @@ def build_vault(root: Path, policy: dict) -> Vault:
             continue
         vault.index.add(rel)
         if (path.suffix == ".md" and rel.split("/")[0] != ".obsidian"
-                and not is_artifact_path(policy, rel)):
+                and not is_artifact_location(policy, rel)):
             vault.notes[rel] = scan_note(root, path, marker_prefix)
     for note in vault.notes.values():
         targets = [t for (_, _, t, _, _, _) in note.wikilinks if t]
@@ -458,6 +520,14 @@ def check_vault_layout(vault: Vault, findings: list[Finding]) -> None:
                 for (_, embed, t, _, _, _) in note.wikilinks if embed}
     for rel in sorted(vault.index):
         top = rel.split("/")[0]
+        artifact_violation = artifact_hard_cut_violation(policy, rel)
+        if artifact_violation:
+            findings.append(Finding(
+                "error", rel, 1, "vault_layout", artifact_violation,
+                "remove the package-local implementation or legacy artifact;"
+                " Experience Design has one canonical application and one"
+                " JSON route map per process package"))
+            continue
         if rel.rsplit("/", 1)[-1] == ".gitkeep":
             continue  # git plumbing for empty skeleton directories
         if in_machine_dir(policy, rel):

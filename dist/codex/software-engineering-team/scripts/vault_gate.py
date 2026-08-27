@@ -18,7 +18,8 @@ from pathlib import Path
 
 COMPILER_SCRIPTS = (
     "vault_check.py", "ba_compile.py", "landscape_check.py",
-    "experience_compile.py", "experience_artifact_check.py", "architecture_compile.py",
+    "experience_compile.py", "experience_application_check.py",
+    "architecture_compile.py",
     "design_system_compile.py", "backlog_compile.py",
     "requirement_compile.py", "requirement_route.py", "stage_package.py",
     "operation_compile.py", "delivery_governance.py", "marketplace_paths.py",
@@ -173,13 +174,51 @@ def gate(project_root: Path, root: Path) -> dict:
             "--docs", str(docs), "--json",
         ], "delivery-governance"))
     experience = docs / "experience-design"
+    experience_identity_errors: list[str] = []
+    if experience.is_symlink():
+        experience_identity_errors.append("experience-design root is symlinked")
+    elif experience.is_dir():
+        for path in sorted(experience.rglob("*")):
+            relative = path.relative_to(docs).as_posix()
+            if path.is_symlink():
+                experience_identity_errors.append(
+                    f"{relative} is symlinked"
+                )
+            elif path.is_file() and path.stat().st_nlink != 1:
+                experience_identity_errors.append(
+                    f"{relative} has more than one filesystem link"
+                )
+    if experience_identity_errors:
+        results.append({
+            "name": "experience-path-identity",
+            "ok": False,
+            "returncode": 1,
+            "stdout": "; ".join(experience_identity_errors),
+            "stderr": "",
+        })
     legacy_experience = experience / "baselines"
     if legacy_experience.exists():
         results.append({"name": "legacy-experience-hard-cut", "ok": False, "returncode": 1,
                         "stdout": "legacy experience-design/baselines tree is forbidden", "stderr": ""})
     packages = experience / "experiences"
+    experience_packages = sorted(
+        (path for path in packages.iterdir()
+         if path.is_dir() and not path.is_symlink()
+         and (path / "experience.md").is_file()),
+        key=lambda path: path.name,
+    ) if packages.is_dir() else []
+    application = experience / "artifacts" / "application.html"
+    if (experience_packages or application.exists()
+            or application.is_symlink()):
+        results.append(run([
+            sys.executable,
+            str(scripts / "experience_application_check.py"),
+            "check", "--root", str(experience), "--gate", "--json",
+        ], "experience-application"))
     if packages.is_dir():
-        for package in sorted(path for path in packages.iterdir() if path.is_dir()):
+        for package in sorted(
+                path for path in packages.iterdir()
+                if path.is_dir() and not path.is_symlink()):
             if package.name.startswith("exp-"):
                 results.append({"name": f"retired-experience-prefix:{package.name}", "ok": False,
                                 "returncode": 1,

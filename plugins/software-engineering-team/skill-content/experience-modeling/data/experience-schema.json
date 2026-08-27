@@ -1,6 +1,6 @@
 {
-  "schema_version": 4,
-  "experience_pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$",
+  "schema_version": 5,
+  "experience_pattern": "^(?!application$)(?!exp-)[a-z0-9]+(?:-[a-z0-9]+)*$",
   "exact_ref_pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*:(?:JRN|FLW|SCR|STA|TRN)-[0-9]{3,}@r[1-9][0-9]*$",
   "id_patterns": {
     "journey": "^JRN-[0-9]{3,}$",
@@ -15,9 +15,19 @@
     "flow_set": {"suffix": "-flow-set.md", "directory": "flows"},
     "screen": {"suffix": "-screen.md", "directory": "screens"},
     "state": {"suffix": "-state.md", "directory": "states"},
-    "transition": {"suffix": "-transition.md", "directory": "transitions"},
-    "artifact_manifest": {"suffix": "-artifact.md", "directory": "artifacts"}
+    "transition": {"suffix": "-transition.md", "directory": "transitions"}
   },
-  "generated_files": ["registry.json", "coverage.json", "artifact-registry.json"],
+  "application": {
+    "artifact_path": "experience-design/artifacts/application.html",
+    "package_map_path": "artifacts/application-map.json",
+    "generated_registry_path": "experience-design/_generated/application-registry.json",
+    "revision_ledger_path": "experience-design/_ledger/application-revisions.json",
+    "receipt_pattern": "^application@r[1-9][0-9]*$",
+    "reserved_experience_slug": "application",
+    "runtime_contract_version": 2,
+    "map_schema_path": "skill-content/experience-modeling/data/application-map-schema.json",
+    "contract_schema_path": "skill-content/experience-modeling/data/application-contract-schema.json"
+  },
+  "generated_files": ["registry.json", "coverage.json"],
   "machine_fields": ["approved_at_utc", "approval_revision", "registry_hash", "package_hash", "source_hash"]
 }

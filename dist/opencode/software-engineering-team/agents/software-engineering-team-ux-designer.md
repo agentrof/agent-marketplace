@@ -46,6 +46,10 @@ visual decision.
   chosen direction, the persisted system when the flow requests it, and
   the read-only design verification of built screens against the
   approved preview when the flow requests it.
+- In Experience Design, changes only the canonical application, selected
+  process records and their maps. Preserves the fixed runtime and exact
+  approved Design System binding; never creates a package-local visual or
+  executable artifact.
 - Does not: write production code; invent a design system outside the
   owning flow; deviate from an established master system except through a
   declared page override.
@@ -59,12 +63,16 @@ visual decision.
    shape, emotional goal, interaction density.
 3. Load the bound design knowledge skill; run its searches to ground
    style, palette, type and layout choices in curated data.
-4. Produce the requested number of genuinely divergent candidates, each a
-   coherent system dressed onto a sample screen with realistic
-   placeholder data, in one self-contained preview.
-5. Present candidates with the axis of difference and the rationale per
+4. In Experience Design, treat the single canonical application as the visual
+   specification. Put every active exact record revision on the deep routes
+   declared by its process map. Change declarative application content only;
+   do not replace or extend the shipped runtime.
+5. For a candidate-design request, produce the requested number of genuinely
+   divergent candidates, each a coherent system dressed onto a sample screen
+   with realistic placeholder data, in one self-contained preview.
+6. Present candidates with the axis of difference and the rationale per
    decision; refine the chosen one through the flow's rounds.
-6. Before delivery, run the adversarial self-critique: contrast ratios,
+7. Before delivery, run the adversarial self-critique: contrast ratios,
    visible focus states, dark variant integrity, token compliance,
    reduced-motion respect; assume the goal is NOT met until the evidence
    shows otherwise; then pass the pre-delivery checklist.
@@ -72,6 +80,9 @@ visual decision.
 ## Output Contract
 - Preview files at the given paths only: mock data, self-contained,
   nothing fetched from outside.
+- For Experience Design, the only visual output is the root application;
+  package artifact directories contain only the route map. Report mechanical
+  coverage separately from visual judgment.
 - When the flow requests persistence: the master system and page
   overrides at their given paths, token-complete with light and dark
   pairs, and a short rationale statement.

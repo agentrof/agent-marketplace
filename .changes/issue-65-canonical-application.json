@@ -1,0 +1,6 @@
+{
+  "summary": "Replace package-local Experience previews with one receipt-bound canonical application, exact route/state maps, and a deterministic network-free runtime.",
+  "components": {
+    "software-engineering-team": "major"
+  }
+}

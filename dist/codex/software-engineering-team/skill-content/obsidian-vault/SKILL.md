@@ -32,10 +32,17 @@ subtrees, not separate vaults. Variation lives only in
   supersede chains are written only by their owning verbs.
 - Cross-subtree semantic links are allowed. Structural navigation constrains
   the first nav link, not traceability or prose links.
-- `artifacts/` beneath a policy-valid vault folder is opaque: every filename,
-  extension and binary form is allowed, but artifact files are never notes,
-  never inferred as executable content and may not be symlinks. Relative
-  Markdown links and embeds to real opaque artifacts are allowed.
+- `artifacts/` beneath a policy-valid vault folder is opaque unless
+  `data/vault-policy.json` restricts that subtree to exact artifact paths.
+  Artifact files are never notes and may not be symlinks. Relative Markdown
+  links and embeds to policy-valid artifacts are allowed.
+- Experience Design is one such closed surface. It permits exactly the root
+  `experience-design/artifacts/application.html` and one
+  `experience-design/experiences/<process-slug>/artifacts/application-map.json`
+  per process package. Package-local previews, artifact-manifest notes, CSS,
+  JavaScript and other Experience artifacts are invalid. The root application
+  uses the fixed declarative, network-free runtime; its map coverage is
+  mechanical while visual fidelity remains reviewer judgment.
 
 ## Required references
 

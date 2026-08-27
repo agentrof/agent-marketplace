@@ -341,8 +341,9 @@ def validate_upstream_ref(docs: Path, value: str, label: str,
     return parsed
 
 
-def planning_package_findings(docs: Path, props: dict,
-                              path: str) -> tuple[str, list[str], list[str]]:
+def planning_package_findings(
+    docs: Path, props: dict, path: str, *, allow_historical: bool = False,
+) -> tuple[str, list[str], list[str]]:
     """Validate the optional Requirement/manual planning contract.
 
     Existing backlog packages may omit ``planning_mode`` while they are being
@@ -383,7 +384,8 @@ def planning_package_findings(docs: Path, props: dict,
                 refs.append(reference)
                 _receipt, verify_errors = stage_package.verify(
                     docs, stage, reference, digest, require_committed=True,
-                    require_strict_current=True)
+                    require_strict_current=not allow_historical,
+                    allow_historical=allow_historical)
                 errors.extend(f"{path} input binding: {error}"
                               for error in verify_errors)
         else:
@@ -399,7 +401,8 @@ def planning_package_findings(docs: Path, props: dict,
                         continue
                     expected.setdefault(stage, []).append(target)
                     _receipt, verify_errors = stage_package.verify(docs, stage, target,
-                                                                    require_committed=True)
+                                                                    require_committed=True,
+                                                                    allow_historical=allow_historical)
                     errors.extend(f"{path} input package: {error}"
                                   for error in verify_errors)
             else:
@@ -409,6 +412,12 @@ def planning_package_findings(docs: Path, props: dict,
             if stage != "experience-design" and len(references) != 1:
                 errors.append(f"{path} manual planning needs exactly one {stage} input package")
                 continue
+            if stage == "experience-design" and not requirement_compile.valid_experience_receipt_refs(
+                    references, docs, allow_historical=allow_historical):
+                errors.append(
+                    f"{path} manual planning needs one Experience application plus its exact process packages, "
+                    "or only the application when it is verified empty"
+                )
         missing = sorted({"business-analysis", "solution-design", "design-system", "experience-design"} - set(expected))
         if missing:
             errors.append(f"{path} manual planning is missing input packages: {', '.join(missing)}")
@@ -428,9 +437,10 @@ def planning_package_findings(docs: Path, props: dict,
                 if type_name != "requirement" or status != "approved":
                     errors.append(f"{path} requirement_ref is not an approved Requirement: {requirement}")
                 else:
-                    routing = requirement_route.route(docs, requirement)
-                    if routing.get("action") != "backlog":
-                        errors.append(f"{path} Requirement is not ready for backlog: {routing.get('action', 'requirement')}")
+                    if not allow_historical:
+                        routing = requirement_route.route(docs, requirement)
+                        if routing.get("action") != "backlog":
+                            errors.append(f"{path} Requirement is not ready for backlog: {routing.get('action', 'requirement')}")
                     try:
                         req_props, req_body = requirement_compile.split_note(requirement_paths[0])
                         results = requirement_compile.stage_results(req_body)
@@ -440,12 +450,18 @@ def planning_package_findings(docs: Path, props: dict,
                             receipts = results.get(stage, [])
                             if stage != "experience-design" and len(receipts) != 1:
                                 errors.append(f"{path} Requirement {stage} needs exactly one receipt")
-                            if stage == "experience-design" and not receipts:
-                                errors.append(f"{path} Requirement experience-design needs one or more receipts")
+                            if stage == "experience-design" and not requirement_compile.valid_experience_receipt_refs(
+                                    [row[0] for row in receipts], docs,
+                                    allow_historical=allow_historical):
+                                errors.append(
+                                    f"{path} Requirement experience-design needs one application plus its exact process receipts, "
+                                    "or only the application when it is verified empty"
+                                )
                             for result_ref, result_hash in receipts:
                                 _receipt, verify_errors = stage_package.verify(
                                     docs, stage, result_ref, result_hash,
-                                    require_committed=True)
+                                    require_committed=True,
+                                    allow_historical=allow_historical)
                                 errors.extend(f"{path} Requirement {stage} receipt: {error}" for error in verify_errors)
                     except (OSError, ValueError) as exc:
                         errors.append(f"{path} cannot read Requirement Stage Results: {exc}")
@@ -489,16 +505,21 @@ def resolve_manual_input_bindings(docs: Path, raw_refs: list[str],
     for stage in ("business-analysis", "solution-design", "design-system"):
         if len(grouped.get(stage, [])) != 1:
             errors.append(f"{label} manual planning needs exactly one {stage} input package")
-    if not grouped.get("experience-design"):
-        errors.append(f"{label} manual planning needs one or more experience-design input packages")
+    experience_refs = [row[1] for row in grouped.get("experience-design", [])]
+    if not requirement_compile.valid_experience_receipt_refs(
+            experience_refs, docs):
+        errors.append(
+            f"{label} manual planning needs one Experience application plus its exact process packages, "
+            "or only the application when it is verified empty"
+        )
     if len(rows) != len(set(rows)):
         errors.append(f"{label} input package selection contains duplicates")
     return [f"{stage}|{ref}|{digest}" for stage, ref, digest in sorted(rows)], sorted(set(errors))
 
 
 def validate_experience_ref(docs: Path, value: str, label: str,
-                            errors: list[str]) -> None:
-    """Resolve a living ``experience:ID@rN`` ref through its registry."""
+                            errors: list[str], *, require_current: bool = True) -> None:
+    """Resolve a living ``experience:ID@rN`` ref through current or history."""
     match = re.fullmatch(
         r"([a-z0-9]+(?:-[a-z0-9]+)*):(JRN|FLW|SCR|STA|TRN)-[0-9]{3,}@r([1-9][0-9]*)",
         value,
@@ -509,28 +530,162 @@ def validate_experience_ref(docs: Path, value: str, label: str,
     identifier = match.group(1)
     stable_id = value.split(":", 1)[1].split("@", 1)[0]
     revision = int(match.group(3))
+    experience_root = docs / "experience-design"
+    if require_current:
+        try:
+            import experience_application_check
+            _application, application_findings = (
+                experience_application_check.compile_application(
+                    experience_root, True
+                )
+            )
+        except (ImportError, OSError, ValueError) as exc:
+            errors.append(f"{label} canonical application cannot be verified: {exc}")
+            return
+        if application_findings:
+            errors.extend(
+                f"{label} canonical application: {finding}"
+                for finding in application_findings
+            )
+            return
     try:
         import experience_compile
-        package = experience_compile.resolve_package(docs / "experience-design", identifier)
+        package = experience_compile.resolve_package(experience_root, identifier)
     except (ImportError, ValueError) as exc:
         errors.append(f"{label} owning Experience is not uniquely resolvable: {identifier} ({exc})")
         return
+    if package is None:
+        errors.append(f"{label} owning Experience is not uniquely resolvable: {identifier}")
+        return
     try:
-        registry, findings = experience_compile.compile_package(package, gate=False)
-    except (OSError, ValueError) as exc:
+        props, _body = parse_front_matter(package / "experience.md")
+    except OSError as exc:
         errors.append(f"{label} owning Experience registry is missing: {exc}")
         return
-    if findings:
-        errors.extend(f"{label} owning Experience: {finding}" for finding in findings)
+    if require_current:
+        try:
+            registry, findings = experience_compile.compile_package(
+                package, gate=True,
+            )
+        except (OSError, ValueError) as exc:
+            errors.append(f"{label} owning Experience registry is missing: {exc}")
+            return
+        if findings:
+            errors.extend(
+                f"{label} owning Experience: {finding}" for finding in findings
+            )
+            return
+        current_owner = (
+            props.get("status") == "approved" and identifier == package.name
+        )
+        current_records = [
+            item for item in registry.get("records", [])
+            if isinstance(item, dict)
+            and item.get("id") == stable_id
+            and item.get("revision") == revision
+        ] if current_owner else []
+        if (not current_owner
+                or props.get("registry_hash") != registry.get("registry_hash")):
+            errors.append(f"{label} owning Experience is not approved/current")
+            return
+        if len(current_records) != 1 or current_records[0].get("record_state") != "active":
+            errors.append(f"{label} does not resolve to one active effective record")
         return
-    props, _body = parse_front_matter(package / "experience.md")
-    if props.get("status") != "approved" or props.get("registry_hash") != registry.get("registry_hash"):
-        errors.append(f"{label} owning Experience is not approved/current")
+    if not stage_package.historical_package_tree_is_regular(package):
+        errors.append(
+            f"{label} owning Experience history contains an unsafe path alias"
+        )
         return
-    records = [item for item in registry.get("records", []) if isinstance(item, dict)
-               and item.get("id") == stable_id and item.get("revision") == revision]
-    if len(records) != 1 or records[0].get("record_state") != "active":
-        errors.append(f"{label} does not resolve to one active effective record")
+    try:
+        import experience_application_check
+        application_rows, application_findings = (
+            experience_application_check.verified_application_ledger(
+                experience_root,
+            )
+        )
+    except (ImportError, OSError, ValueError) as exc:
+        errors.append(f"{label} application history cannot be verified: {exc}")
+        return
+    if application_findings:
+        errors.extend(
+            f"{label} application history: {finding}"
+            for finding in application_findings
+        )
+        return
+    published_by_ref: dict[str, str] = {}
+    for application in application_rows:
+        for package_row in application.get("packages", []):
+            if not isinstance(package_row, dict):
+                continue
+            result_ref = str(package_row.get("result_ref", ""))
+            package_hash = str(package_row.get("package_hash", ""))
+            if (
+                result_ref in published_by_ref
+                and published_by_ref[result_ref] != package_hash
+            ):
+                errors.append(
+                    f"{label} application history reuses a process receipt with "
+                    "conflicting immutable hashes"
+                )
+                return
+            published_by_ref[result_ref] = package_hash
+    published = set(published_by_ref.items())
+    current_revision = props.get("revision")
+    if type(current_revision) is not int or current_revision < 1:
+        errors.append(f"{label} owning Experience has an invalid revision")
+        return
+    history, history_findings = experience_compile.validate_process_ledger(
+        package, current_revision,
+    )
+    if history_findings:
+        errors.extend(f"{label} owning Experience history: {finding}"
+                      for finding in history_findings)
+        return
+    registries = list(history)
+    if props.get("status") == "approved":
+        try:
+            current, current_findings = experience_compile.compile_package(
+                package, True, allow_stale_inputs=True,
+            )
+        except (OSError, ValueError) as exc:
+            errors.append(f"{label} owning Experience registry is missing: {exc}")
+            return
+        if current_findings:
+            errors.extend(
+                f"{label} owning Experience: {finding}"
+                for finding in current_findings
+            )
+            return
+        registries.append(current)
+    exact_ref = f"{identifier}:{stable_id}@r{revision}"
+    record_receipts = [
+        receipt for receipt in registries
+        if receipt.get("experience_id") == identifier
+        and (
+            f"{identifier}@r{receipt.get('package_revision')}",
+            receipt.get("package_hash"),
+        ) in published
+        and any(
+            isinstance(item, dict)
+            and item.get("id") == stable_id
+            and item.get("revision") == revision
+            for item in receipt.get("records", [])
+        )
+    ]
+    if not record_receipts:
+        errors.append(f"{label} does not resolve through approved Experience history")
+        return
+    if not any(
+        isinstance(binding, dict)
+        and binding.get("record_ref") == exact_ref
+        for receipt in record_receipts
+        for binding in (
+            receipt.get("application_map", {}).get("bindings", []) or []
+        )
+    ):
+        errors.append(
+            f"{label} is not covered by its approved historical application map"
+        )
 
 
 def headings(body: str) -> set[str]:
@@ -1045,7 +1200,7 @@ def round_number(path: Path, props: dict, suffix: str, errors: list[str]) -> int
     return expected
 
 
-def collect(docs: Path) -> tuple[dict, list[str]]:
+def collect(docs: Path, *, historical_inputs: bool = False) -> tuple[dict, list[str]]:
     contract = backlog_contract()
     root = docs / "backlog"
     errors: list[str] = []
@@ -1064,7 +1219,7 @@ def collect(docs: Path) -> tuple[dict, list[str]]:
     if "assignee" in props:
         errors.append("backlog/backlog.md must not contain assignee")
     planning_mode, input_refs, planning_errors = planning_package_findings(
-        docs, props, "backlog/backlog.md")
+        docs, props, "backlog/backlog.md", allow_historical=historical_inputs)
     errors.extend(planning_errors)
     record["backlog"] = {"path": root_note.relative_to(docs).as_posix(),
                          "id": note_id(props, "BACKLOG"), "props": props,
@@ -1267,7 +1422,12 @@ def collect(docs: Path) -> tuple[dict, list[str]]:
                 validate_criterion_ref(docs, value, f"{story_rel} criterion_ref", errors)
             for value in experience:
                 if planning_mode:
-                    validate_experience_ref(docs, value, f"{story_rel} experience_ref", errors)
+                    validate_experience_ref(
+                        docs, value, f"{story_rel} experience_ref", errors,
+                        require_current=(
+                            not historical_inputs and introduced == current_revision
+                        ),
+                    )
                 else:
                     validate_upstream_ref(
                         docs, value, f"{story_rel} experience_ref",
@@ -1843,7 +2003,12 @@ def init(args) -> int:
     requirement_ref = getattr(args, "requirement_ref", "")
     input_ref = list(getattr(args, "input_ref", []) or [])
     if planning_mode == "manual" and (requirement_ref or len(input_ref) < 4):
-        print("backlog_compile: manual init needs BA, Solution, Design and one or more Experience --input-ref values and no Requirement", file=sys.stderr)
+        print(
+            "backlog_compile: manual init needs BA, Solution, Design, one "
+            "application and its exact zero-or-more Experience process "
+            "--input-ref values, with no Requirement",
+            file=sys.stderr,
+        )
         return 2
     if planning_mode == "requirement" and (not requirement_ref or input_ref):
         print("backlog_compile: requirement init needs --requirement-ref and no --input-ref", file=sys.stderr)
@@ -2083,7 +2248,7 @@ def begin_revision(args) -> int:
     records the new root/review revision; it never invents live Git state.
     """
     docs = docs_root(args.docs)
-    record, errors = collect(docs)
+    record, errors = collect(docs, historical_inputs=True)
     errors.extend(approval_findings(record, docs))
     if errors:
         print(json.dumps({"ok": False, "errors": sorted(set(errors))}, indent=2,
@@ -2107,7 +2272,14 @@ def begin_revision(args) -> int:
     backlog_path = docs / record["backlog"]["path"]
     root_props, root_body = parse_front_matter(backlog_path)
     if args.planning_mode == "manual" and (args.requirement_ref or len(args.input_ref) < 4):
-        print(json.dumps({"ok": False, "errors": ["manual revision needs BA, Solution, Design and one or more Experience --input-ref values and no Requirement"]}, indent=2), file=sys.stderr)
+        print(json.dumps({
+            "ok": False,
+            "errors": [
+                "manual revision needs BA, Solution, Design, one application "
+                "and its exact zero-or-more Experience process --input-ref "
+                "values, with no Requirement"
+            ],
+        }, indent=2), file=sys.stderr)
         return 2
     if args.planning_mode == "requirement" and (not args.requirement_ref or args.input_ref):
         print(json.dumps({"ok": False, "errors": ["requirement revision needs --requirement-ref and no --input-ref values"]}, indent=2), file=sys.stderr)

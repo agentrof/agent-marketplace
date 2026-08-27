@@ -1,0 +1,498 @@
+<!doctype html>
+<html lang="en" data-theme="light" data-catalog-theme="light" data-privacy="visible">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; base-uri 'none'; connect-src 'none'; form-action 'none'; font-src data:; img-src data:; object-src 'none'; script-src 'sha256-RUNTIME_CSP_SHA256'; style-src 'unsafe-inline'">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="experience-application-contract-version" content="2">
+  <meta name="experience-application-status" content="draft">
+  <meta name="experience-application-revision" content="1">
+  <meta name="experience-application-proposal-hash" content="PROPOSAL_HASH">
+  <meta name="experience-application-source-hash" content="SOURCE_HASH">
+  <meta name="experience-application-package-set-hash" content="PACKAGE_SET_HASH">
+  <meta name="experience-application-coverage-hash" content="COVERAGE_HASH">
+  <meta name="experience-application-hash" content="APPLICATION_HASH">
+  <meta name="experience-application-approved-at-utc" content="">
+  <meta name="experience-application-runtime-sha256" content="RUNTIME_SHA256">
+  <meta name="design-system-package-hash" content="DESIGN_SYSTEM_PACKAGE_HASH">
+  <meta name="design-system-master-revision" content="DESIGN_SYSTEM_MASTER_REVISION">
+  <meta name="design-system-master-source-hash" content="DESIGN_SYSTEM_MASTER_SOURCE_HASH">
+  <title>Application acceptance prototype</title>
+  <style>
+/* application:design-tokens:start */
+AUTHOR_DESIGN_TOKENS
+/* application:design-tokens:end */
+    :root {
+      color-scheme: light;
+      font-family: var(--catalog-font-body, system-ui, sans-serif);
+      --application-focus: var(--catalog-focus, currentColor);
+      --application-surface: var(--catalog-background, Canvas);
+      --application-text: var(--catalog-foreground, CanvasText);
+    }
+    * {
+      box-sizing: border-box !important;
+      overflow-wrap: anywhere !important;
+    }
+    :where(button, a[href], input:not([type="hidden"]), select, textarea, [role="option"]) {
+      min-block-size: var(--catalog-touch-target, 2.75rem) !important;
+      min-inline-size: var(--catalog-touch-target, 2.75rem) !important;
+      max-inline-size: 100% !important;
+    }
+    :where(button, a[href], [role="option"]) {
+      display: inline-flex !important;
+      align-items: center;
+      justify-content: center;
+    }
+    :where(input:not([type="hidden"]), select, textarea) {
+      display: inline-block !important;
+    }
+    img {
+      max-inline-size: 100% !important;
+      block-size: auto !important;
+      margin-inline: 0 !important;
+    }
+    body {
+      margin: 0;
+      background: var(--application-surface);
+      color: var(--application-text);
+    }
+    .application-shell {
+      width: min(
+        100% - calc(2 * var(--catalog-gutter, 1rem)),
+        var(--catalog-content-width, 72rem)
+      ) !important;
+      margin-inline: auto !important;
+    }
+    .application-toolbar {
+      display: flex;
+      flex-wrap: wrap;
+      gap: var(--catalog-space-sm, .75rem);
+      align-items: center;
+      justify-content: space-between;
+      padding-block: var(--catalog-space-md, 1rem);
+    }
+    .application-actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: var(--catalog-space-xs, .5rem);
+    }
+    [data-application-route] {
+      min-height: 18rem;
+      padding-block: var(--catalog-space-xl, 2rem);
+    }
+    [hidden] { display: none !important; }
+    :focus-visible {
+      outline: var(--catalog-focus-width, .2rem) solid var(--application-focus);
+      outline-offset: var(--catalog-focus-offset, .2rem);
+    }
+    :where(button, a[href], [role="option"]):hover {
+      outline: var(--catalog-focus-width, .2rem) solid var(--application-focus);
+      outline-offset: var(--catalog-focus-offset, .2rem);
+    }
+    :where(button, a[href], [role="option"]):active,
+    [aria-pressed="true"],
+    [aria-selected="true"] {
+      box-shadow: inset 0 0 0 var(--catalog-focus-width, .2rem) var(--application-focus);
+    }
+    .application-skip {
+      position: absolute;
+      inset-inline-start: .5rem;
+      inset-block-start: -4rem;
+    }
+    .application-skip:focus { inset-block-start: .5rem; }
+    html[data-privacy="masked"] [data-private] {
+      filter: blur(.35rem);
+      user-select: none;
+    }
+    html[data-theme="dark"] { color-scheme: dark; }
+    dialog { max-width: min(32rem, calc(100% - 2rem)); }
+    dialog:not([open]) { display: none !important; }
+    @media (max-width: 40rem) {
+      .application-toolbar { align-items: stretch; }
+      .application-actions > * { flex: 1 1 auto; }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after {
+        scroll-behavior: auto !important;
+        transition-duration: .01ms !important;
+        animation-duration: .01ms !important;
+        animation-iteration-count: 1 !important;
+      }
+    }
+/* application:author-styles:start */
+/* Add application-specific CSS here. Visual values must consume approved catalog tokens. */
+/* application:author-styles:end */
+  </style>
+</head>
+<body>
+  <a class="application-skip" href="#application-main">Skip to application</a>
+  <header class="application-shell application-toolbar">
+    <strong>Application acceptance prototype</strong>
+    <div class="application-actions" aria-label="Application preferences">
+      <button type="button" data-application-action="toggle-theme" aria-label="Toggle color theme" aria-pressed="false">Theme</button>
+      <button type="button" data-application-action="toggle-privacy" aria-pressed="false">Privacy mask</button>
+    </div>
+  </header>
+  <main id="application-main" class="application-shell" tabindex="-1">
+    <section data-application-route="#/author-route" data-application-state="ordinary" aria-labelledby="author-route-title">
+      <h1 id="author-route-title">Replace this route with the approved Experience set</h1>
+      <p data-private>This file is the only visual Experience implementation.</p>
+    </section>
+  </main>
+  <div id="application-announcer" role="status" aria-live="polite" class="application-shell"></div>
+  <script type="application/json" id="experience-application-contract">
+{
+  "schema_version": 2,
+  "entry_route": "#/author-route",
+  "state_classes": [
+    "ordinary",
+    "loading",
+    "empty",
+    "validation",
+    "permission",
+    "stale",
+    "conflict",
+    "failure",
+    "retry",
+    "recovery"
+  ],
+  "routes": [
+    {
+      "route": "#/author-route",
+      "state_class": "ordinary",
+      "experience_id": "author-experience",
+      "label": "Replace this route with the approved Experience set",
+      "record_refs": [],
+      "transitions": []
+    }
+  ],
+  "simulations": []
+}
+  </script>
+  <script id="experience-application-runtime" data-runtime-sha256="RUNTIME_SHA256">
+"use strict";
+(() => {
+  const documentPrototype = Object.getPrototypeOf(document);
+  const getElementByIdMethod = documentPrototype.getElementById;
+  const querySelectorAllMethod = documentPrototype.querySelectorAll;
+  const addEventListenerMethod = documentPrototype.addEventListener;
+  const getElementById = (id) => getElementByIdMethod.call(document, id);
+  const querySelectorAll = (selector) => querySelectorAllMethod.call(document, selector);
+  const addEventListener = (target, type, listener) =>
+    addEventListenerMethod.call(target, type, listener);
+  const root = document.documentElement;
+  const main = getElementById("application-main");
+  const announcer = getElementById("application-announcer");
+  const contract = JSON.parse(getElementById("experience-application-contract").textContent);
+  const routes = new Map(contract.routes.map((item) => [item.route, item]));
+  const transitions = new Map(contract.routes.flatMap((route) =>
+    route.transitions.map((edge) => [edge.transition_ref, {source: route.route, ...edge}])
+  ));
+  const simulations = new Map(contract.simulations.map((item) => [item.simulation_id, item]));
+  const state = {contexts: Object.create(null), returnRoutes: [], outcome: ""};
+  const elementClosest = (element, selector) => element instanceof Element ?
+    Element.prototype.closest.call(element, selector) : null;
+  const elementMatches = (element, selector) => element instanceof Element &&
+    Element.prototype.matches.call(element, selector);
+  const getAttribute = (element, name) =>
+    Element.prototype.getAttribute.call(element, name);
+  const hasAttribute = (element, name) =>
+    Element.prototype.hasAttribute.call(element, name);
+  const setAttribute = (element, name, value) =>
+    Element.prototype.setAttribute.call(element, name, value);
+  const normalize = (value) => routes.has(value) ? value : contract.entry_route;
+  let activeRoute = normalize(window.location.hash || contract.entry_route);
+  const currentRoute = () => activeRoute;
+  const historySnapshot = () => ({
+    experienceApplication: true,
+    route: currentRoute(),
+    returnRoutes: [...state.returnRoutes],
+    outcome: state.outcome,
+  });
+  const contextElements = (route, key) => [...querySelectorAll(`[data-application-route="${route}"] [data-context-key]`)]
+    .filter((element) => getAttribute(element, "data-context-key") === key);
+  const inputType = (element) => element.tagName === "INPUT" ?
+    (getAttribute(element, "type") || "text").toLowerCase() : "";
+  const readContext = (element) => {
+    if (getAttribute(element, "role") === "listbox") {
+      const selected = element.querySelector('[role="option"][aria-selected="true"]');
+      return selected ? getAttribute(selected, "data-value") || selected.textContent.trim() : "";
+    }
+    if (inputType(element) === "checkbox") return element.checked;
+    if (inputType(element) === "radio") return element.checked ? element.value : "";
+    if (element.tagName === "SELECT" && element.multiple) {
+      return [...element.options].filter((option) => option.selected).map((option) => option.value);
+    }
+    return "value" in element ? element.value : element.textContent;
+  };
+  const writeContext = (element, value) => {
+    if (getAttribute(element, "role") === "listbox") {
+      element.querySelectorAll('[role="option"]').forEach((option) => {
+        const optionValue = getAttribute(option, "data-value") || option.textContent.trim();
+        setAttribute(option, "aria-selected", String(optionValue === value));
+      });
+    } else if (inputType(element) === "checkbox") {
+      element.checked = Array.isArray(value) ? value.includes(element.value) : Boolean(value);
+    } else if (inputType(element) === "radio") {
+      element.checked = element.value === value;
+    } else if (element.tagName === "SELECT" && element.multiple) {
+      const selected = Array.isArray(value) ? value : [];
+      [...element.options].forEach((option) => { option.selected = selected.includes(option.value); });
+    } else if ("value" in element) {
+      element.value = value;
+    } else {
+      element.textContent = value;
+    }
+  };
+  const readContextGroup = (elements) => {
+    if (elements.length && elements.every((element) => inputType(element) === "radio")) {
+      const selected = elements.find((element) => element.checked);
+      return selected ? selected.value : "";
+    }
+    if (elements.length && elements.every((element) => inputType(element) === "checkbox")) {
+      return elements.filter((element) => element.checked).map((element) => element.value);
+    }
+    return elements.length ? readContext(elements[0]) : "";
+  };
+  const writeContextGroup = (elements, value) => {
+    elements.forEach((element) => writeContext(element, value));
+  };
+  const routeContext = (route) => {
+    if (!state.contexts[route]) state.contexts[route] = Object.create(null);
+    return state.contexts[route];
+  };
+  const captureContext = (route, keys) => {
+    const captured = Object.create(null);
+    keys.forEach((key) => {
+      const elements = contextElements(route, key);
+      if (!elements.length) return;
+      const value = readContextGroup(elements);
+      routeContext(route)[key] = value;
+      captured[key] = value;
+    });
+    return captured;
+  };
+  const transferContext = (source, target, keys) => {
+    Object.assign(routeContext(target), captureContext(source, keys));
+  };
+  const restoreContext = (route) => {
+    Object.entries(routeContext(route)).forEach(([key, value]) => {
+      writeContextGroup(contextElements(route, key), value);
+    });
+    querySelectorAll(`[data-application-route="${route}"] [data-application-outcome]`).forEach((element) => {
+      element.textContent = state.outcome;
+    });
+    const scope = [...querySelectorAll("[data-application-route]")].find(
+      (view) => getAttribute(view, "data-application-route") === route
+    );
+    if (scope) applyCollectionFilters(scope);
+  };
+  const activate = (requested, updateHash = true) => {
+    const route = normalize(requested);
+    activeRoute = route;
+    querySelectorAll("dialog[open]").forEach((dialog) => dialog.close());
+    querySelectorAll("[data-application-route]").forEach((view) => {
+      view.hidden = getAttribute(view, "data-application-route") !== route;
+    });
+    if (updateHash) {
+      if (window.history && typeof window.history.pushState === "function") {
+        window.history.pushState(historySnapshot(), "", route);
+      } else if (window.location.hash !== route) {
+        window.location.hash = route;
+      }
+    }
+    const routeDefinition = routes.get(route);
+    root.dataset.applicationState = routeDefinition.state_class;
+    root.dataset.applicationOutcome = state.outcome;
+    restoreContext(route);
+    const label = routeDefinition.label;
+    announcer.textContent = label;
+    main.focus({preventScroll: true});
+  };
+  const pushReturn = (route) => {
+    if (route && state.returnRoutes[state.returnRoutes.length - 1] !== route) {
+      state.returnRoutes.push(route);
+    }
+  };
+  const followTransition = (control) => {
+    const edge = transitions.get(getAttribute(control, "data-transition-ref"));
+    if (!edge || edge.source !== currentRoute()) return;
+    transferContext(edge.source, edge.target, edge.preserve_context);
+    pushReturn(edge.return_route);
+    state.outcome = edge.outcome;
+    activate(edge.target);
+  };
+  const runSimulation = (control) => {
+    const simulation = simulations.get(getAttribute(control, "data-simulation-id"));
+    if (!simulation || simulation.source !== currentRoute()) return;
+    pushReturn(simulation.return_route);
+    state.outcome = simulation.outcome;
+    activate(simulation.target);
+  };
+  const lower = (value) => String(value).toLowerCase();
+  const applyCollectionFilters = (scope) => {
+    const search = scope.querySelector("[data-application-search]");
+    const query = search ? lower(search.value.trim()) : "";
+    const filter = scope.querySelector("[data-application-filter]");
+    const filterValue = filter ? filter.value : "";
+    scope.querySelectorAll("[data-search-item],[data-filter-item]").forEach((item) => {
+      const visibleText = "innerText" in item ? item.innerText : item.textContent;
+      const searchMatch = !hasAttribute(item, "data-search-item") || lower(visibleText).includes(query);
+      const values = (getAttribute(item, "data-filter-value") || "").split(" ");
+      const filterMatch = !hasAttribute(item, "data-filter-item") || !filterValue || values.includes(filterValue);
+      item.hidden = !(searchMatch && filterMatch);
+    });
+  };
+  const rememberContext = (contextual) => {
+    if (!contextual) return;
+    const key = getAttribute(contextual, "data-context-key");
+    const routeNode = elementClosest(contextual, "[data-application-route]");
+    const route = routeNode ? getAttribute(routeNode, "data-application-route") : currentRoute();
+    routeContext(route)[key] = readContextGroup(contextElements(route, key));
+  };
+  addEventListener(document, "click", (event) => {
+    const skip = elementClosest(event.target, '.application-skip[href="#application-main"]');
+    if (skip) {
+      event.preventDefault();
+      main.focus({preventScroll: false});
+      return;
+    }
+    const control = elementClosest(event.target, "[data-transition-ref],[data-simulation-id],[data-application-action]");
+    if (!control || control.tagName === "FORM") return;
+    if (hasAttribute(control, "disabled") || elementClosest(control, '[hidden],[aria-disabled="true"],[aria-hidden="true"],[inert]')) return;
+    if (hasAttribute(control, "data-transition-ref")) {
+      event.preventDefault();
+      followTransition(control);
+      return;
+    }
+    if (hasAttribute(control, "data-simulation-id")) {
+      event.preventDefault();
+      runSimulation(control);
+      return;
+    }
+    const action = getAttribute(control, "data-application-action");
+    if (action === "toggle-theme") {
+      const dark = root.dataset.theme !== "dark";
+      root.dataset.theme = dark ? "dark" : "light";
+      root.dataset.catalogTheme = root.dataset.theme;
+      setAttribute(control, "aria-pressed", String(dark));
+    } else if (action === "toggle-privacy") {
+      const masked = root.dataset.privacy !== "masked";
+      root.dataset.privacy = masked ? "masked" : "visible";
+      setAttribute(control, "aria-pressed", String(masked));
+    } else if (action === "toggle-menu" || action === "toggle-drawer") {
+      const disclosure = getElementById(getAttribute(control, "aria-controls"));
+      if (disclosure) {
+        disclosure.hidden = !disclosure.hidden;
+        setAttribute(control, "aria-expanded", String(!disclosure.hidden));
+      }
+    } else if (action === "open-modal") {
+      const modal = getElementById(getAttribute(control, "aria-controls"));
+      if (modal && typeof modal.showModal === "function") modal.showModal();
+    } else if (action === "close-modal") {
+      const modal = elementClosest(control, "dialog");
+      if (modal) modal.close();
+    } else if (action === "toggle-pressed") {
+      setAttribute(control, "aria-pressed", String(getAttribute(control, "aria-pressed") !== "true"));
+    } else if (action === "select-option") {
+      const listbox = elementClosest(control, '[role="listbox"]');
+      if (listbox) {
+        listbox.querySelectorAll('[role="option"]').forEach((option) => setAttribute(option, "aria-selected", "false"));
+        setAttribute(control, "aria-selected", "true");
+        const key = getAttribute(listbox, "data-context-key");
+        if (key) routeContext(currentRoute())[key] = getAttribute(control, "data-value") || control.textContent.trim();
+      }
+    } else if (action === "return-route") {
+      state.outcome = "return";
+      activate(state.returnRoutes.pop() || contract.entry_route);
+    }
+  });
+  addEventListener(document, "submit", (event) => {
+    const form = event.target;
+    if (!elementMatches(form, "form[data-transition-ref],form[data-simulation-id]")) return;
+    event.preventDefault();
+    const submitter = event.submitter;
+    if (elementClosest(form, '[hidden],[aria-disabled="true"],[aria-hidden="true"],[inert]') || (submitter && elementClosest(submitter, '[hidden],[aria-disabled="true"],[aria-hidden="true"],[inert]'))) return;
+    if (hasAttribute(form, "data-transition-ref")) followTransition(form);
+    else runSimulation(form);
+  });
+  addEventListener(document, "input", (event) => {
+    const search = elementClosest(event.target, "[data-application-search]");
+    if (search) {
+      const searchScope = elementClosest(search, "[data-application-route]") || main;
+      applyCollectionFilters(searchScope);
+    }
+    rememberContext(elementClosest(event.target, "[data-context-key]"));
+  });
+  addEventListener(document, "change", (event) => {
+    const filter = elementClosest(event.target, "[data-application-filter]");
+    if (filter) applyCollectionFilters(elementClosest(filter, "[data-application-route]") || main);
+    rememberContext(elementClosest(event.target, "[data-context-key]"));
+  });
+  addEventListener(document, "keydown", (event) => {
+    const option = elementClosest(event.target, '[role="option"]');
+    if (!option || !["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)) return;
+    if (hasAttribute(option, "disabled") || elementClosest(option, '[aria-disabled="true"],[aria-hidden="true"],[inert]')) return;
+    const listbox = elementClosest(option, '[role="listbox"]');
+    if (!listbox) return;
+    const options = [...listbox.querySelectorAll(
+      '[role="option"][data-application-action="select-option"]:not([disabled]):not([hidden])'
+    )].filter((candidate) => !elementClosest(candidate, "[hidden]"));
+    const current = options.indexOf(option);
+    if (current < 0 || !options.length) return;
+    const next = event.key === "Home" ? 0 : event.key === "End" ? options.length - 1 :
+      (current + (event.key === "ArrowDown" ? 1 : -1) + options.length) % options.length;
+    event.preventDefault();
+    options[next].focus();
+  });
+  const reconcileHistory = (restoreSameRoute = false) => {
+    const requested = window.location.hash;
+    if (
+      routes.has(requested)
+      && (requested !== currentRoute() || restoreSameRoute)
+    ) {
+      const snapshot = window.history && window.history.state;
+      const snapshotIsValid = Boolean(
+        snapshot && snapshot.experienceApplication === true
+        && snapshot.route === requested
+        && Array.isArray(snapshot.returnRoutes)
+        && snapshot.returnRoutes.every((route) => routes.has(route))
+        && typeof snapshot.outcome === "string"
+      );
+      if (snapshotIsValid) {
+        state.returnRoutes = [...snapshot.returnRoutes];
+        state.outcome = snapshot.outcome;
+      } else {
+        const returnIndex = state.returnRoutes.lastIndexOf(requested);
+        state.returnRoutes = returnIndex >= 0
+          ? state.returnRoutes.slice(0, returnIndex) : [];
+        state.outcome = routes.get(requested).state_class;
+      }
+      activate(requested, false);
+      if (
+        !snapshotIsValid && window.history
+        && typeof window.history.replaceState === "function"
+      ) {
+        window.history.replaceState(historySnapshot(), "", requested);
+      }
+    } else if (!routes.has(requested)) {
+      if (window.history && typeof window.history.replaceState === "function") {
+        window.history.replaceState(historySnapshot(), "", currentRoute());
+      } else if (requested !== currentRoute()) {
+        window.location.hash = currentRoute();
+      }
+    }
+  };
+  addEventListener(window, "popstate", () => reconcileHistory(true));
+  addEventListener(window, "hashchange", () => reconcileHistory(false));
+  state.outcome = routes.get(activeRoute).state_class;
+  activate(activeRoute, false);
+  if (window.history && typeof window.history.replaceState === "function") {
+    window.history.replaceState(historySnapshot(), "", activeRoute);
+  } else if (window.location.hash !== activeRoute) {
+    window.location.hash = activeRoute;
+  }
+})();
+  </script>
+</body>
+</html>

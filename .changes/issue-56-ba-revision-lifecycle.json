@@ -1,6 +1,0 @@
-{
-  "summary": "Allow multi-document Business Analysis revisions and make decision approval part of the package gate.",
-  "components": {
-    "software-engineering-team": "major"
-  }
-}

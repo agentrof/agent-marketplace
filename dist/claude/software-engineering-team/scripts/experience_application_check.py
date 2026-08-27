@@ -180,6 +180,9 @@ SCRIPT_PATTERN = re.compile(
 )
 CSS_ESCAPE = re.compile(r"\\(?:([0-9a-fA-F]{1,6})(?:\s)?|([^\r\n]))")
 INVALID_CSS_MARKER = "\u0000application-invalid-css\u0000"
+ASCII_TAG_NAME = frozenset(
+    "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789:-"
+)
 CSP_PREFIX = "default-src 'none'; base-uri 'none'; connect-src 'none'; " \
     "form-action 'none'; font-src data:; img-src data:; " \
     "object-src 'none'; script-src 'sha256-"
@@ -2472,6 +2475,62 @@ def valid_language_tag(value: str) -> bool:
     return index == len(parts)
 
 
+def html_tag_token(text: str, position: int) -> tuple[bool, str, int] | None:
+    """Lex one conservative HTML tag token without regex tokenizer ambiguity."""
+    if position >= len(text) or text[position] != "<":
+        return None
+    index = position + 1
+    closing = index < len(text) and text[index] == "/"
+    if closing:
+        index += 1
+    if index >= len(text) or text[index] not in (
+        "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"
+    ):
+        return None
+    start = index
+    while index < len(text) and text[index] in ASCII_TAG_NAME:
+        index += 1
+    name = text[start:index].casefold()
+    if index >= len(text) or text[index] not in "\t\n\f\r />":
+        return None
+    quote = ""
+    while index < len(text):
+        character = text[index]
+        if quote:
+            if character == quote:
+                quote = ""
+        elif character in "\"'":
+            quote = character
+        elif character == ">":
+            return closing, name, index + 1
+        index += 1
+    return None
+
+
+def raw_text_markup_findings(text: str) -> list[str]:
+    """Detect markup-like tokens inside browser raw-text and RCDATA elements."""
+    findings: list[str] = []
+    raw_tag = ""
+    index = 0
+    while index < len(text):
+        token = html_tag_token(text, index)
+        if token is None:
+            index += 1
+            continue
+        closing, tag, end = token
+        if raw_tag:
+            if closing and tag == raw_tag:
+                raw_tag = ""
+            else:
+                findings.append(f"{raw_tag}>{tag}")
+            index = end
+            continue
+        if not closing and tag in RAWTEXT_OR_RCDATA_ELEMENTS:
+            raw_tag = tag
+        index = end
+    return sorted(set(findings))
+
+
 class ApplicationScanner(HTMLParser):
     def __init__(self) -> None:
         super().__init__(convert_charrefs=True)
@@ -2569,6 +2628,21 @@ class ApplicationScanner(HTMLParser):
         self.listbox_options: list[dict] = []
         self.http_equivs: list[str] = []
         self.csp_values: list[str] = []
+        self._source_parts: list[str] = []
+        self._raw_text_scanned = False
+
+    def feed(self, data: str) -> None:
+        self._source_parts.append(data)
+        self._raw_text_scanned = False
+        super().feed(data)
+
+    def close(self) -> None:
+        super().close()
+        if not self._raw_text_scanned:
+            self.raw_text_markup.extend(
+                raw_text_markup_findings("".join(self._source_parts))
+            )
+            self._raw_text_scanned = True
 
     def handle_decl(self, decl: str) -> None:
         self.declarations.append(decl.casefold().strip())

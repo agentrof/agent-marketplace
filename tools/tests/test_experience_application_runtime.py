@@ -1885,6 +1885,19 @@ class ExperienceApplicationRuntimeTests(unittest.TestCase):
                 ],
             )
 
+    def test_raw_text_markup_is_detected_independent_of_htmlparser_version(self):
+        scanner = self.scan(
+            self.rendered_template().replace(
+                "<p data-private>This file is the only visual Experience implementation.</p>",
+                "<p data-private>This file is the only visual Experience implementation.</p>"
+                '<textarea data-marker="quoted > value">'
+                '<button type="button">Not DOM</button>'
+                '</textarea>',
+                1,
+            )
+        )
+        self.assertIn("textarea>button", scanner.raw_text_markup)
+
     def test_modal_disclosure_search_and_form_topology_fails_closed(self):
         def validate(fragment: str) -> list[str]:
             text = self.rendered_template().replace(

@@ -106,6 +106,17 @@ class SingleTeamDistributionTests(unittest.TestCase):
             )
         self.assertTrue(all(snapshot == snapshots[0] for snapshot in snapshots))
 
+        for relative in (
+            "scripts/experience_application_check.py",
+            "skill-content/experience-modeling/data/application-template.html",
+            "skill-content/experience-modeling/data/application-map-schema.json",
+            "skill-content/experience-modeling/data/application-contract-schema.json",
+        ):
+            expected = (self.root / "plugins" / fixtures.PLUGIN / relative).read_bytes()
+            for host in build_distributions.HOSTS:
+                packaged = self.root / "dist" / host / fixtures.PLUGIN / relative
+                self.assertEqual(packaged.read_bytes(), expected, packaged)
+
         source = self.root / "plugins" / fixtures.PLUGIN
         for relative in ("constitution.md", "flows", "skill-content"):
             canonical = source / relative

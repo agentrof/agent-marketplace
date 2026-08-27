@@ -1,6 +1,6 @@
 ---
 name: backlog-plan
-description: User-gated planning entry that turns either an approved Requirement chain or a manual approved BA, solution, design-system and living Experience receipt set into a project-local nested Markdown backlog with epic reviews, story test plans and reproducible coverage views.
+description: User-gated planning entry that turns either an approved Requirement chain or a manual approved BA, solution, design-system, Experience application and process receipt set into a project-local nested Markdown backlog with epic reviews, story test plans and reproducible coverage views.
 exposure: entry
 ---
 
@@ -14,9 +14,12 @@ approved. This entry prepares delivery, but it does not start delivery.
 - Requirement Flow has approved the request impact matrix and every stage
   marked `required` is approved and current; `reuse` rows cite valid approved
   evidence and `not_applicable` rows carry their concrete rationale.
-- Or the user has approved the exact strict-current manual BA scope, solution landscape,
-  Design System MASTER and one or more living Experience packages. Manual planning does not
-  require a Requirement, Stage Impact or Requirement Coverage section.
+- Or the user has approved the exact strict-current manual BA scope, solution
+  landscape, Design System MASTER, globally current Experience application and
+  zero or more living Experience packages. Zero process receipts are valid
+  only for the verified empty application; every non-empty application needs
+  its exact process set. Manual planning does not require a Requirement, Stage
+  Impact or Requirement Coverage section.
 - Every defect or technical intake has its approved source, issue or decision
   evidence in the Requirement record when no feature traceability applies.
 - The user wants a tracked backlog before any delivery work begins.
@@ -31,11 +34,14 @@ approved. This entry prepares delivery, but it does not start delivery.
 2. Read `flows/backlog-planning.md`, `product-planning` and the `obsidian-vault`
    skill completely; the vault policy is authoritative for paths and metadata.
 3. Initialize `workspace/docs/backlog/` with `backlog_compile.py init`.
-   For the direct chain, pass `--planning-mode manual` and four exact
-   `--input-ref` links for the approved BA, solution, Design System and
-   Experience package receipts. This renders the compiler-owned
-   `Input Package Coverage` report. Requirement mode records the exact
-   `requirement_ref` and requires `implements: REQ-###` on stories.
+   For the direct chain, pass `--planning-mode manual` and exact `--input-ref`
+   values for the approved BA, solution, Design System, globally current
+   `application@rN` and its exact zero-or-more Experience process receipt set.
+   The zero-process form is accepted only for a verified empty application.
+   This renders the compiler-owned `Input Package Coverage` report. Requirement
+   mode records the exact `requirement_ref`, consumes the same complete
+   Experience set from Stage Results and requires `implements: REQ-###` on
+   stories.
 4. Create one folder per epic. Each epic contains `epic.md`, `reviews/` and
    `stories/<story-slug>/story.md` plus `test-plan.md` for every story. Authored
    titles and H1s are direct, natural labels in the configured output language;
@@ -50,7 +56,9 @@ approved. This entry prepares delivery, but it does not start delivery.
    approved source, issue or decision evidence when the impact matrix says the
    feature stages are not applicable. Do not add an assignee or runtime
    identity. Historical BA is out of scope unless the root backlog deliberately
-   declares canonical `analysis_scopes`.
+   declares canonical `analysis_scopes`. Every selected exact
+   `experience_ref` must resolve in a pinned process receipt and be covered by
+   that package's map in the pinned application.
 6. Give every scenario non-empty source refs. Feature scenarios use story
    criteria; defect/technical scenarios use declared criteria and/or approved
    `related_to` evidence. Map every declared planning source to at least one
@@ -82,6 +90,10 @@ approved. This entry prepares delivery, but it does not start delivery.
    reviews and test plans, preserves stories as `planned`, renders
    `_generated/registry.json`, `board.md`, `dependency-map.md` and
    `test-coverage.md`, and verifies the resulting package hash. Commit the
-   tracked docs.
+   tracked docs. A later approved Experience package-set or application-only
+   delta advances `application@rN` and makes this backlog's older application
+   binding non-current. Revise and reapprove the backlog with the new
+   application receipt before a further handoff; unchanged process receipts do
+   not waive that rebind.
 9. Stop with `delivery-plan` as the next explicit entry. Backlog approval is not
    delivery activation.

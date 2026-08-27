@@ -49,6 +49,39 @@ PLACEHOLDER_RE = re.compile(
 )
 WIKILINK_RE = re.compile(r"\[\[([^\[\]\n]+)\]\]")
 TABLE_ROW_RE = re.compile(r"^\|.*\|$")
+EXPERIENCE_APPLICATION_RE = re.compile(r"^application@r[1-9][0-9]*$")
+EXPERIENCE_PACKAGE_RE = re.compile(
+    r"^(?!application@)[a-z0-9]+(?:-[a-z0-9]+)*@r[1-9][0-9]*$"
+)
+
+
+def valid_experience_receipt_refs(
+    refs: list[str], docs: Path | None = None, *, allow_historical: bool = False,
+) -> bool:
+    syntactic = (
+        len(refs) >= 1
+        and sum(bool(EXPERIENCE_APPLICATION_RE.fullmatch(ref)) for ref in refs) == 1
+        and all(
+            EXPERIENCE_APPLICATION_RE.fullmatch(ref)
+            or EXPERIENCE_PACKAGE_RE.fullmatch(ref)
+            for ref in refs
+        )
+        and len(set(refs)) == len(refs)
+    )
+    if not syntactic:
+        return False
+    if docs is None:
+        return False
+    application_ref = next(
+        ref for ref in refs if EXPERIENCE_APPLICATION_RE.fullmatch(ref)
+    )
+    expected = stage_package.experience_application_process_refs(
+        docs, application_ref, allow_historical=allow_historical,
+    )
+    supplied = sorted(
+        ref for ref in refs if EXPERIENCE_PACKAGE_RE.fullmatch(ref)
+    )
+    return expected is not None and supplied == sorted(expected)
 
 
 def atomic_text(path: Path, text: str) -> None:
@@ -251,6 +284,12 @@ def bind_stage(path: Path, stage: str, result_refs: list[str] | str,
     if stage != "experience-design" and len(targets) != 1:
         raise ValueError(f"{stage} accepts exactly one package receipt")
     docs = path.parents[1]
+    if stage == "experience-design" and not valid_experience_receipt_refs(
+            targets, docs):
+        raise ValueError(
+            "experience-design requires exactly one application receipt and its exact process receipt set; "
+            "zero process receipts are valid only for a verified empty application"
+        )
     receipts = []
     for target in targets:
         receipt, errors = stage_package.verify(
@@ -383,7 +422,12 @@ def identity_findings(docs: Path) -> list[str]:
     ]
 
 
-def requirement_findings(path: Path, require_approved: bool = False) -> list[str]:
+def requirement_findings(
+    path: Path,
+    require_approved: bool = False,
+    *,
+    allow_historical_reuse: bool = False,
+) -> list[str]:
     findings: list[str] = []
     try:
         props, body = split_note(path)
@@ -449,8 +493,28 @@ def requirement_findings(path: Path, require_approved: bool = False) -> list[str
                 findings.append(f"invalid disposition for {stage}: {disposition}")
             if disposition == "required" and refs:
                 findings.append(f"{stage} required must have an empty reuse_refs set")
-            if disposition == "reuse" and (not refs or (stage != "experience-design" and len(refs) != 1)):
-                findings.append(f"{stage} reuse requires one package reference, or one-or-more Experience packages")
+            invalid_reuse = disposition == "reuse" and (
+                (stage != "experience-design" and len(refs) != 1)
+                or (
+                    stage == "experience-design"
+                    and not valid_experience_receipt_refs(
+                        refs,
+                        path.parents[1],
+                        allow_historical=allow_historical_reuse,
+                    )
+                )
+            )
+            if invalid_reuse:
+                if stage == "experience-design":
+                    findings.append(
+                        "experience-design reuse requires one Experience "
+                        "application plus its exact process receipts, or only "
+                        "one verified empty application"
+                    )
+                else:
+                    findings.append(
+                        f"{stage} reuse requires exactly one package receipt"
+                    )
             if disposition == "not_applicable" and refs:
                 findings.append(f"{stage} not_applicable must have an empty evidence set")
             if not rationale.strip() or PLACEHOLDER_RE.search(rationale):
@@ -625,7 +689,16 @@ def begin_revision(path: Path) -> None:
     props, body = split_note(path)
     if props.get("status") != "approved":
         raise ValueError("only an approved Requirement can begin a revision")
-    findings = requirement_findings(path, require_approved=True)
+    # The approved Requirement is an immutable historical preimage. A newer
+    # current stage receipt must not make the documented revision/rebind path
+    # impossible; only this opening check may resolve the previously pinned
+    # Experience set through its verified ledgers. Draft approval, routing and
+    # the replacement binding remain strict-current.
+    findings = requirement_findings(
+        path,
+        require_approved=True,
+        allow_historical_reuse=True,
+    )
     if findings:
         raise ValueError("cannot revise invalid Requirement: " + "; ".join(findings))
     props["status"] = "draft"

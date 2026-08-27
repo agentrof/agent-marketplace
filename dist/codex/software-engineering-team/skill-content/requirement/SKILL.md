@@ -56,13 +56,20 @@ Read `flows/requirement.md` completely before dispatching the first stage.
    approvals remain the existing stage compilers' gates; this entry does not
    duplicate their authoring logic. Bind each approved package with
    `requirement_compile.py bind-stage`; the compiler writes the Stage Results
-   receipt and excludes it from the Requirement semantic hash.
+   receipt and excludes it from the Requirement semantic hash. Experience
+   Design binds one globally current `application@rN` plus the exact current
+   process receipts in the same operation. A newer approved application or
+   package-set delta makes that Experience result non-current even when every
+   selected process receipt is unchanged.
 
 6. Route to `/backlog-plan` only when the Requirement is approved, all required
    stage packages are approved/current, all reuse targets and N/A rows remain
    valid, and the shared Requirement incorporation predicate has no unresolved
-   coverage error. `resolved_no_change` is the only terminal outcome that ends
-   without a backlog delta.
+   coverage error. When Experience applies, the bound application receipt and
+   every process receipt must still be current; rebind a newer application
+   through the Requirement's normal stage-result revision before handoff.
+   `resolved_no_change` is the only terminal outcome that ends without a
+   backlog delta.
 
 7. Use only the state-valid exception actions. Discard removes one exact local
    uncommitted draft with no downstream output. Withdraw is allowed only for a

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -345,6 +346,141 @@ class SetupProjectTests(unittest.TestCase):
             self.assertTrue(any(
                 "cache.sqlite" in blocker for blocker in payload["blockers"]
             ))
+
+    def test_setup_refuses_legacy_process_local_experience_preview(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            project = Path(temporary)
+            subprocess.run(["git", "init", "-q", str(project)], check=True)
+            setup = self.run_script(
+                SETUP, "apply", "--project-root", str(project), "--json"
+            )
+            self.assertEqual(setup.returncode, 0, setup.stdout + setup.stderr)
+            preview = (
+                project / "workspace/docs/experience-design/experiences/checkout/"
+                "artifacts/preview.html"
+            )
+            preview.parent.mkdir(parents=True)
+            preview.write_text("<!doctype html><title>Old preview</title>\n",
+                               encoding="utf-8")
+
+            inspected = self.run_script(
+                SETUP, "inspect", "--project-root", str(project), "--json"
+            )
+            self.assertEqual(inspected.returncode, 1, inspected.stdout)
+            blockers = json.loads(inspected.stdout)["blockers"]
+            self.assertTrue(any(
+                "process-local Experience web implementation" in blocker
+                and "artifacts/application.html" in blocker
+                for blocker in blockers
+            ))
+
+    def test_setup_refuses_nested_legacy_experience_registry(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            project = Path(temporary)
+            subprocess.run(["git", "init", "-q", str(project)], check=True)
+            setup = self.run_script(
+                SETUP, "apply", "--project-root", str(project), "--json"
+            )
+            self.assertEqual(setup.returncode, 0, setup.stdout + setup.stderr)
+            registry = (
+                project / "workspace/docs/experience-design/experiences/checkout/"
+                "_generated/artifact-registry.json"
+            )
+            registry.parent.mkdir(parents=True)
+            registry.write_text("{}\n", encoding="utf-8")
+
+            inspected = self.run_script(
+                SETUP, "inspect", "--project-root", str(project), "--json"
+            )
+            self.assertEqual(inspected.returncode, 1, inspected.stdout)
+            blockers = json.loads(inspected.stdout)["blockers"]
+            self.assertTrue(any(
+                "legacy Experience artifact index" in blocker
+                and "_generated/artifact-registry.json" in blocker
+                for blocker in blockers
+            ))
+            checked = self.run_script(
+                CHECK, "check", "--project-root", str(project), "--json"
+            )
+            self.assertEqual(checked.returncode, 1, checked.stdout)
+            self.assertIn("_generated/artifact-registry.json", checked.stdout)
+
+    def test_setup_refuses_symlink_anywhere_in_experience_subtree(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            project = Path(temporary)
+            subprocess.run(["git", "init", "-q", str(project)], check=True)
+            setup = self.run_script(
+                SETUP, "apply", "--project-root", str(project), "--json"
+            )
+            self.assertEqual(setup.returncode, 0, setup.stdout + setup.stderr)
+            external = project / "external-experience"
+            external.mkdir()
+            (external / "sentinel.md").write_text(
+                "# Outside\n", encoding="utf-8"
+            )
+            link = (
+                project / "workspace/docs/experience-design/experiences/linked"
+            )
+            link.parent.mkdir(parents=True, exist_ok=True)
+            try:
+                link.symlink_to(external, target_is_directory=True)
+            except (OSError, NotImplementedError) as exc:
+                self.skipTest(f"symlinks are unavailable: {exc}")
+
+            inspected = self.run_script(
+                SETUP, "inspect", "--project-root", str(project), "--json"
+            )
+            self.assertEqual(inspected.returncode, 1, inspected.stdout)
+            blockers = json.loads(inspected.stdout)["blockers"]
+            self.assertTrue(any(
+                "Experience subtree symlink" in blocker
+                and "experience-design/experiences/linked" in blocker
+                for blocker in blockers
+            ))
+            checked = self.run_script(
+                CHECK, "check", "--project-root", str(project), "--json"
+            )
+            self.assertEqual(checked.returncode, 1, checked.stdout)
+            self.assertIn("Experience subtree symlink", checked.stdout)
+            self.assertTrue((external / "sentinel.md").is_file())
+
+    def test_setup_and_check_refuse_hardlinks_in_experience_subtree(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            project = Path(temporary)
+            subprocess.run(["git", "init", "-q", str(project)], check=True)
+            setup = self.run_script(
+                SETUP, "apply", "--project-root", str(project), "--json"
+            )
+            self.assertEqual(setup.returncode, 0, setup.stdout + setup.stderr)
+            ledger = (
+                project / "workspace/docs/experience-design/_ledger/"
+                "application-revisions.json"
+            )
+            ledger.parent.mkdir(parents=True, exist_ok=True)
+            ledger.write_text(
+                '{"schema_version":2,"revisions":[]}\n', encoding="utf-8",
+            )
+            alias = project / "application-ledger-alias.json"
+            try:
+                os.link(ledger, alias)
+            except (OSError, NotImplementedError) as exc:
+                self.skipTest(f"hard links are unavailable: {exc}")
+
+            inspected = self.run_script(
+                SETUP, "inspect", "--project-root", str(project), "--json"
+            )
+            self.assertEqual(inspected.returncode, 1, inspected.stdout)
+            blockers = json.loads(inspected.stdout)["blockers"]
+            self.assertTrue(any(
+                "hard-link alias" in blocker
+                and "application-revisions.json" in blocker
+                for blocker in blockers
+            ))
+            checked = self.run_script(
+                CHECK, "check", "--project-root", str(project), "--json"
+            )
+            self.assertEqual(checked.returncode, 1, checked.stdout)
+            self.assertIn("hard-link alias", checked.stdout)
 
     def test_refresh_rolls_back_every_managed_write_on_closing_failure(self):
         with tempfile.TemporaryDirectory() as temporary:

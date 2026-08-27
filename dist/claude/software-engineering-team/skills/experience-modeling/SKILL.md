@@ -1,6 +1,6 @@
 ---
 name: experience-modeling
-description: Internal knowledge for living, process-owned Experience packages, stable journey/flow/screen/state/transition identities, revisions, coverage, artifacts and deterministic gates.
+description: Internal knowledge for living, process-owned Experience packages, their one aggregate application, stable record identities, revisions, coverage and deterministic gates.
 user-invocable: false
 ---
 

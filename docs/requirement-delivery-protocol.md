@@ -67,11 +67,16 @@ workspace/docs/
 │   ├── _ledger/
 │   └── _generated/
 ├── design-system/
-├── experience-design/experiences/<primary-process-slug>/
-│   ├── experience.md
-│   ├── {journeys,flows,screens,states,transitions,artifacts}/
-│   ├── _ledger/
-│   └── _generated/
+├── experience-design/
+│   ├── artifacts/application.html
+│   ├── _ledger/application-revisions.json
+│   ├── _generated/application-registry.json
+│   └── experiences/<primary-process-slug>/
+│       ├── experience.md
+│       ├── {journeys,flows,screens,states,transitions}/
+│       ├── artifacts/application-map.json
+│       ├── _ledger/
+│       └── _generated/
 ├── operation/
 │   ├── verification-contract.md
 │   └── environment-contract.md
@@ -115,6 +120,33 @@ reuse resolves to an approved current package, and not-applicable rows retain a
 concrete rationale with no evidence target. A semantic edit invalidates the
 Requirement approval. Stage compilers own their existing approval gates.
 
+Experience Design completes as one aggregate handoff. Its fixed declarative,
+network-free runtime lives only at
+`experience-design/artifacts/application.html`; every process package maps its
+active exact qualified record revisions to declared route/state entries through
+the version-2 `artifacts/application-map.json`. Its version-2 inline contract
+declares the full state taxonomy, deterministic local outcome simulations,
+preserved context and intentional returns. The application metadata binds one exact
+approved contract-v3 Design System. The compiler reserves `application` from
+process slugs and aliases and returns a globally current `application@rN`
+receipt together with the exact current zero-or-more process receipts. The
+zero-process form is valid only for the verified empty application.
+
+One approved transaction covers every process create, update, rename or
+retire action, every affected map, the aggregate application and its
+compiler-owned open-revision and receipt state. Mutating commands serialize on
+one project-scoped lock; a durable runtime journal restores the exact tracked
+Experience/map preimage after interruption before another command proceeds.
+An application-only revision leaves process receipts unchanged but still
+advances the application receipt. Any approved package-set or application delta
+makes the preceding application receipt non-current. Requirement Stage Results
+and an existing backlog must rebind the new receipt through their normal
+revision before a new handoff. An already-created nonterminal Delivery remains
+bound to its exact approved backlog package and selected Story/Test Plan hashes;
+an unrelated later application revision cannot invalidate those immutable
+inputs. Mechanical coverage proves that selected exact refs have declared
+mappings; visual fidelity and usability remain reviewer judgments.
+
 Backlog Planning starts only when the Requirement and every applicable stage
 are current. `resolved_no_change` is the only approved terminal outcome that
 does not create a backlog delta. Discard, Withdraw and Supersede are explicit,
@@ -129,9 +161,12 @@ automation targets. Epic and root reviews prove the exact child sets,
 dependency direction, overlap and global coverage.
 
 Backlog approval commits the planning package. It creates no Delivery ref,
-branch, worktree, execution slot or release state. Delivery Planning consumes
-only approved current Story, Test Plan, Requirement and Definition of Done
-hashes.
+branch, worktree, execution slot or release state. A new Delivery Planning run
+consumes only approved strict-current Story, Test Plan, Requirement and
+Definition of Done hashes. Once created, that Delivery verifies the same pinned
+approved backlog package and selected Story/Test Plan bytes historically; it
+does not silently adopt or become blocked by a later unrelated upstream
+application receipt.
 
 ## Delivery Planning
 

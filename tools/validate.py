@@ -1227,11 +1227,11 @@ def check_choice_gate(tree: Tree, findings: list[Finding]) -> None:
 FALLBACK_STDLIB = frozenset(
     "__future__ abc argparse ast asyncio base64 bisect calendar collections "
     "configparser contextlib copy csv dataclasses datetime decimal difflib "
-    "enum errno fnmatch functools getpass glob gzip hashlib heapq hmac html "
+    "enum errno fcntl fnmatch functools getpass glob gzip hashlib heapq hmac html "
     "http importlib inspect io itertools json logging math mimetypes "
-    "multiprocessing operator os pathlib pickle platform pprint queue random "
+    "msvcrt multiprocessing operator os pathlib pickle platform pprint queue random "
     "re secrets shlex shutil signal socket statistics string struct "
-    "subprocess sys tarfile tempfile textwrap threading time tomllib "
+    "stat subprocess sys tarfile tempfile textwrap threading time tomllib "
     "traceback types typing unicodedata unittest urllib uuid warnings "
     "webbrowser xml zipfile zlib".split()
 )

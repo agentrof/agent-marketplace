@@ -27,13 +27,14 @@ policy defines paths, metadata, title rules and graph colors.
 - Test plan: the planned scenario design for that story.
 
 Approved living Experience packages remain the source for journeys, screens
-and process boundaries. Stories link to their exact child references directly.
+and process boundaries. The globally current `application@rN` is their visual
+acceptance surface. Stories link to exact child references that resolve through
+the pinned process receipt and its application map.
 
 ## Story contract
 
-Every story has exactly one accountable `owner_role`. Optional
-`supporting_roles` name other team roles that make a concrete implementation
-contribution. The owner cannot repeat in the supporting list, supporting roles
+Every story has exactly one accountable `owner_role`. Optional `supporting_roles`
+name other team roles that make a concrete implementation contribution. The owner cannot repeat in the supporting list, supporting roles
 cannot repeat, and every listed role has a concrete responsibility in the
 body. These fields contain stable team role identifiers, never people, host
 tasks, agent sessions or execution IDs.
@@ -57,20 +58,19 @@ criterion records an owner and revisit trigger.
 
 ## Traceability
 
-Use vault-absolute wikilinks in `criterion_refs`, `experience_refs`,
-`derives_from`, `depends_on`, `uses_design` and `constrained_by`. Criterion and
-rule links target exact stable headings in approved notes. Every target must
-exist and remain approved; bare aliases or invented shorthand do not satisfy
-coverage.
+Use vault-absolute wikilinks in `criterion_refs`, `derives_from`, `depends_on`,
+`uses_design` and `constrained_by`. Criterion and rule links target exact stable
+headings in approved notes. `experience_refs` use qualified exact revisions
+such as `checkout:SCR-001@r2`; each must exist in a pinned current process
+receipt and its `application-map.json` for the pinned application. Bare
+unqualified IDs or invented shorthand do not satisfy coverage.
 
 ## Scenario coverage
 
 The Business Analyst and QA Engineer co-author the sibling `test-plan.md`.
 Each scenario has a stable `<story-id>-TS-###` heading, category, target,
 automation (`required` or `manual`), source links and Given/When/Then.
-Automation-required scenarios name an `automation_target`; the target may be
-planned until delivery. Every scenario cites at least one declared planning
-source. Feature scenarios cite story criteria; defect and technical scenarios
+Automation-required scenarios name an `automation_target`; the target may be planned until delivery. Every scenario cites at least one declared planning source. Feature scenarios cite story criteria; defect and technical scenarios
 cite story criteria and/or approved `related_to` evidence. Every declared
 planning source appears in at least one scenario. A structured `Coverage
 Classes` table contains exactly empty,
@@ -102,7 +102,10 @@ scope. Unknown, overlapping and uncovered identities fail. Generic review
 placeholders are not review evidence.
 
 Run `backlog_compile.py check --render` as the mechanical gate; atomic approval
-keeps stories `planned` and hash-stamps the package. Generated views are disposable.
+keeps stories `planned` and hash-stamps the package. Its input bindings include
+the globally current application receipt and exact process receipt set. A newer
+approved application makes the backlog input non-current even when process
+receipts are unchanged. Generated views are disposable.
 
 Authored titles are direct, natural graph labels in the configured output
 language. Canonical keys, paths, IDs, registry JSON and generated machine-view

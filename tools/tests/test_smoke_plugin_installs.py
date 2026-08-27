@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import json
 import os
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 from tools import build_distributions
 from tools import smoke_plugin_installs as smoke
@@ -36,13 +38,26 @@ class HostSmokeContracts(unittest.TestCase):
                     os.environ.copy(),
                 )
         with tempfile.TemporaryDirectory() as temporary:
-            smoke.exercise_project_projection(
-                ROOT / "dist" / "opencode" / smoke.TEAM,
-                Path(temporary) / "project",
-                os.environ.copy(),
-                "scripts/project_opencode.py",
-                ".opencode",
+            project = Path(temporary) / "project"
+            with mock.patch.object(
+                smoke, "exercise_application_resources"
+            ) as exercised:
+                smoke.exercise_project_projection(
+                    ROOT / "dist" / "opencode" / smoke.TEAM,
+                    project,
+                    os.environ.copy(),
+                    "scripts/project_opencode.py",
+                    ".opencode",
+                )
+            private = project / ".opencode/agentrof/agent-marketplace"
+            installation = json.loads(
+                (private / "installation.json").read_text(encoding="utf-8")
             )
+            expected = (
+                private / "packages" / installation["active_build_key"] / smoke.TEAM
+            ).resolve()
+            exercised.assert_called_once()
+            self.assertEqual(exercised.call_args.args[0], expected)
 
     def test_installed_package_smoke_requires_product_and_delivery_entrypoints(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -53,7 +68,9 @@ class HostSmokeContracts(unittest.TestCase):
                 "scripts/requirement_route.py", "scripts/backlog_compile.py",
                 "scripts/stage_package.py", "scripts/ba_compile.py",
                 "scripts/landscape_check.py", "scripts/design_system_compile.py",
-                "scripts/experience_compile.py", "scripts/architecture_compile.py",
+                "scripts/experience_compile.py",
+                "scripts/experience_application_check.py",
+                "scripts/architecture_compile.py",
                 "scripts/delivery_compile.py", "scripts/delivery_git.py",
                 "scripts/delivery_provider.py",
             ):
@@ -63,6 +80,50 @@ class HostSmokeContracts(unittest.TestCase):
             with self.assertRaisesRegex(smoke.SmokeFailure, "delivery_compile.py"):
                 (root / "scripts/delivery_compile.py").unlink()
                 smoke.exercise_package(root, Path(temporary) / "project", os.environ.copy())
+
+    def test_opencode_projection_self_checks_the_resolved_active_package(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            state = Path(temporary)
+            source = state / "source"
+            projector = source / "scripts/project_opencode.py"
+            projector.parent.mkdir(parents=True)
+            projector.write_text("# fixture\n", encoding="utf-8")
+            project = state / "project"
+            private = project / ".opencode/agentrof/agent-marketplace"
+            installed = private / "packages/build-123" / smoke.TEAM
+            installed.mkdir(parents=True)
+            (private / "manage.py").write_text("# fixture\n", encoding="utf-8")
+            (project / ".opencode/plugins").mkdir(parents=True)
+            (private / "installation.json").write_text(json.dumps({
+                "schema_version": 1,
+                "active_build_key": "build-123",
+            }), encoding="utf-8")
+            with mock.patch.object(smoke, "run", return_value="{}"), \
+                    mock.patch.object(
+                        smoke, "exercise_application_resources"
+                    ) as exercised:
+                smoke.exercise_project_projection(
+                    source,
+                    project,
+                    os.environ.copy(),
+                    "scripts/project_opencode.py",
+                    ".opencode",
+                )
+            exercised.assert_called_once_with(installed.resolve(), os.environ.copy())
+
+            (private / "installation.json").write_text(json.dumps({
+                "schema_version": 1,
+                "active_build_key": "../escape",
+            }), encoding="utf-8")
+            with mock.patch.object(smoke, "run", return_value="{}"), \
+                    self.assertRaisesRegex(smoke.SmokeFailure, "unsafe active build key"):
+                smoke.exercise_project_projection(
+                    source,
+                    project,
+                    os.environ.copy(),
+                    "scripts/project_opencode.py",
+                    ".opencode",
+                )
 
     def test_real_host_workflow_runs_the_install_smoke(self):
         workflow = (ROOT / ".github/workflows/release-hosts.yml").read_text(

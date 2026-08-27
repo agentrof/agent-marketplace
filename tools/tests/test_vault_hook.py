@@ -8,6 +8,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import unicodedata
 import unittest
 from pathlib import Path
 
@@ -17,6 +18,9 @@ SCRIPTS = ROOT / "plugins" / "software-engineering-team" / "scripts"
 SETUP = SCRIPTS / "setup_project.py"
 BACKLOG = SCRIPTS / "backlog_compile.py"
 HOOK = ROOT / "platforms" / "shared" / "software-engineering-team" / "overlay" / "scripts" / "vault_hook.py"
+EXPERIENCE_APPLICATION_TEST_REL = Path(
+    "experience-design/artifacts/application.html"
+)
 
 
 class VaultHookTests(unittest.TestCase):
@@ -530,6 +534,41 @@ class VaultHookTests(unittest.TestCase):
             })
             self.assertEqual(result.returncode, 0, result.stderr)
 
+    def test_apply_patch_accepts_codex_command_tool_input(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            project = Path(temporary)
+            patch = (
+                "*** Begin Patch\n"
+                f"*** Add File: {project / 'README.md'}\n"
+                "+safe\n"
+                "*** End Patch"
+            )
+            result = self.run_hook("pre", {
+                "tool_name": "apply_patch",
+                "tool_input": {"command": patch},
+                "cwd": str(project),
+            })
+            self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_apply_patch_command_tool_input_still_enforces_vault_policy(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            project = Path(temporary)
+            docs = self.setup_project(project)
+            generated = docs / "backlog/_generated/board.md"
+            patch = (
+                "*** Begin Patch\n"
+                f"*** Add File: {generated}\n"
+                "+manual board\n"
+                "*** End Patch"
+            )
+            result = self.run_hook("pre", {
+                "tool_name": "apply_patch",
+                "tool_input": {"command": patch},
+                "cwd": str(project),
+            })
+            self.assertEqual(result.returncode, 2, result.stderr)
+            self.assertIn("compiler-owned", result.stderr)
+
     def test_approved_design_system_is_immutable(self):
         with tempfile.TemporaryDirectory() as temporary:
             project = Path(temporary)
@@ -569,19 +608,380 @@ class VaultHookTests(unittest.TestCase):
             self.assertEqual(result.returncode, 2)
             self.assertIn("invalid Experience Design filename or path", result.stderr)
 
-    def test_opaque_experience_artifact_bypasses_note_filename_and_relation_guards(self):
+    def test_process_artifact_surface_allows_only_the_application_map(self):
         with tempfile.TemporaryDirectory() as temporary:
             project = Path(temporary)
             docs = self.setup_project(project)
             artifact = docs / "experience-design/experiences/example/artifacts/arbitrary.md"
-            result = self.run_hook("pre", {
+            rejected = self.run_hook("pre", {
                 "tool_name": "Write",
                 "tool_input": {
                     "file_path": str(artifact),
                     "content": "opaque artifact, not frontmatter\n",
                 },
             })
-            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            self.assertEqual(rejected.returncode, 2)
+            self.assertIn("exact artifact-path contract", rejected.stderr)
+
+            application_map = artifact.with_name("application-map.json")
+            allowed = self.run_hook("pre", {
+                "tool_name": "Write",
+                "tool_input": {
+                    "file_path": str(application_map),
+                    "content": "{}\n",
+                },
+            })
+            self.assertEqual(allowed.returncode, 0, allowed.stdout + allowed.stderr)
+
+    def test_application_path_aliases_are_rejected_before_write(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            project = Path(temporary) / "project"
+            docs = self.setup_project(project)
+            artifacts = docs / "experience-design" / "artifacts"
+            artifacts.mkdir(parents=True, exist_ok=True)
+            alias = docs / "application-alias"
+            try:
+                alias.symlink_to(artifacts, target_is_directory=True)
+            except (OSError, NotImplementedError) as exc:
+                self.skipTest(f"symlinks are unavailable: {exc}")
+            targets = {
+                "dot segment": (
+                    str(artifacts / ".." / "artifacts" / "application.html")
+                ),
+                "symlink ancestor": str(alias / "application.html"),
+                "case alias": str(
+                    docs / "EXPERIENCE-DESIGN/ARTIFACTS/APPLICATION.HTML"
+                ),
+                "ledger case alias": str(
+                    docs / "Experience-Design/_LEDGER/"
+                    "APPLICATION-REVISIONS.JSON"
+                ),
+            }
+            for label, target in targets.items():
+                with self.subTest(label=label):
+                    denied = self.run_hook("pre", {
+                        "tool_name": "Write",
+                        "tool_input": {
+                            "file_path": target,
+                            "content": "<!doctype html>\n",
+                        },
+                    })
+                    self.assertEqual(denied.returncode, 2, denied.stderr)
+                    self.assertIn("alias", denied.stderr)
+            relative_alias = self.run_hook("pre", {
+                "tool_name": "apply_patch",
+                "tool_input": (
+                    "*** Begin Patch\n"
+                    "*** Add File: application-alias/application.html\n"
+                    "+<!doctype html>\n"
+                    "*** End Patch"
+                ),
+                "cwd": str(docs),
+            })
+            self.assertEqual(relative_alias.returncode, 2,
+                             relative_alias.stderr)
+            self.assertIn("alias", relative_alias.stderr)
+            canonical_application = artifacts / "application.html"
+            canonical_application.write_text(
+                "<!doctype html>\n", encoding="utf-8"
+            )
+            external_alias = project / "application-link.html"
+            external_alias.symlink_to(canonical_application)
+            denied_external = self.run_hook("pre", {
+                "tool_name": "Write",
+                "tool_input": {
+                    "file_path": str(external_alias),
+                    "content": "changed\n",
+                },
+            })
+            self.assertEqual(denied_external.returncode, 2,
+                             denied_external.stderr)
+            self.assertIn("alias", denied_external.stderr)
+
+            unicode_project = Path(temporary) / "caf\u00e9"
+            unicode_docs = self.setup_project(unicode_project)
+            canonical = unicode_docs / EXPERIENCE_APPLICATION_TEST_REL
+            non_nfc = unicodedata.normalize("NFD", str(canonical))
+            self.assertNotEqual(non_nfc, str(canonical))
+            denied = self.run_hook("pre", {
+                "tool_name": "Write",
+                "tool_input": {
+                    "file_path": non_nfc,
+                    "content": "<!doctype html>\n",
+                },
+            })
+            self.assertEqual(denied.returncode, 2, denied.stderr)
+            self.assertIn("non-canonical", denied.stderr)
+
+    def test_hardlink_alias_is_denied_for_direct_write_and_bash_restores_tree(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            project = Path(temporary)
+            docs = self.setup_project(project)
+            ledger = (
+                docs / "experience-design/_ledger/application-revisions.json"
+            )
+            ledger.parent.mkdir(parents=True, exist_ok=True)
+            original = b'{"schema_version":2,"revisions":[]}\n'
+            ledger.write_bytes(original)
+            alias = project / "ledger-alias.json"
+            try:
+                os.link(ledger, alias)
+            except (OSError, NotImplementedError) as exc:
+                self.skipTest(f"hard links are unavailable: {exc}")
+
+            denied = self.run_hook("pre", {
+                "tool_name": "Write",
+                "tool_input": {
+                    "file_path": str(alias),
+                    "content": "tampered\n",
+                },
+                "cwd": str(project),
+            })
+            self.assertEqual(denied.returncode, 2, denied.stderr)
+            self.assertIn("exactly one filesystem link", denied.stderr)
+            alias.unlink()
+            self.assertEqual(ledger.stat().st_nlink, 1)
+
+            payload = {
+                "tool_name": "Bash",
+                "tool_input": {"command": "python3 make_hardlink.py"},
+                "cwd": str(project),
+                "session_id": "experience-hardlink-recovery",
+                "tool_use_id": "experience-hardlink-recovery-event",
+            }
+            before = self.run_hook("pre", payload)
+            self.assertEqual(before.returncode, 0, before.stdout + before.stderr)
+            os.link(ledger, alias)
+            alias.write_bytes(b"tampered through alias\n")
+            after = self.run_hook("post", payload)
+            self.assertEqual(after.returncode, 2, after.stdout + after.stderr)
+            self.assertIn("hard-link alias", after.stderr)
+            self.assertEqual(ledger.read_bytes(), original)
+            self.assertEqual(ledger.stat().st_nlink, 1)
+            self.assertFalse(os.path.samefile(alias, ledger))
+
+    def test_draft_and_in_review_application_use_authoring_post_check(self):
+        from tools.tests.test_living_experience_flow import (
+            LivingExperienceFlowTests,
+        )
+
+        with tempfile.TemporaryDirectory() as temporary:
+            project = Path(temporary)
+            self.setup_config_project(project)
+            docs = project / "workspace/docs"
+            experience = docs / "experience-design"
+            experience.mkdir(parents=True)
+            fixture = LivingExperienceFlowTests(methodName="runTest")
+            fixture.prepare_inputs(docs)
+            package, _receipts = fixture.approve_single(experience)
+            application = experience / "artifacts/application.html"
+            text = application.read_text(encoding="utf-8").replace(
+                'name="experience-application-status" content="approved"',
+                'name="experience-application-status" content="draft"',
+                1,
+            )
+            application.write_text(
+                text.replace(
+                    "</head>",
+                    '<script src="https://example.invalid/app.js"></script>'
+                    "</head>",
+                    1,
+                ),
+                encoding="utf-8",
+            )
+            application_map = package / "artifacts/application-map.json"
+            application_map.write_text("{malformed\n", encoding="utf-8")
+            checked = self.run_hook("post", {
+                "tool_name": "Write",
+                "tool_input": {
+                    "file_path": str(application_map),
+                    "content": "{malformed\n",
+                },
+            })
+            self.assertEqual(checked.returncode, 2, checked.stderr)
+            output = checked.stdout + checked.stderr
+            self.assertIn("application-map.json", output)
+            self.assertIn("in authoring mode", output)
+            self.assertTrue(
+                "dependency or form target is forbidden" in output.lower(),
+                output,
+            )
+            application.write_text(
+                application.read_text(encoding="utf-8").replace(
+                    'name="experience-application-status" content="draft"',
+                    'name="experience-application-status" content="in_review"',
+                    1,
+                ),
+                encoding="utf-8",
+            )
+            reviewed = self.run_hook("post", {
+                "tool_name": "Write",
+                "tool_input": {
+                    "file_path": str(application),
+                    "content": application.read_text(encoding="utf-8"),
+                },
+            })
+            self.assertEqual(reviewed.returncode, 2, reviewed.stderr)
+            reviewed_output = reviewed.stdout + reviewed.stderr
+            self.assertIn("application-map.json", reviewed_output)
+            self.assertIn("in authoring mode", reviewed_output)
+
+    def test_bash_cannot_downgrade_and_rewrite_an_approved_application(self):
+        from tools.tests.test_living_experience_flow import (
+            LivingExperienceFlowTests,
+        )
+
+        with tempfile.TemporaryDirectory() as temporary:
+            project = Path(temporary)
+            self.setup_config_project(project)
+            root = project / "workspace/docs/experience-design"
+            root.mkdir(parents=True)
+            fixture = LivingExperienceFlowTests(methodName="runTest")
+            fixture.prepare_inputs(root.parent)
+            fixture.approve_single(root)
+            application = root / "artifacts/application.html"
+            official_payload = {
+                "tool_name": "Bash",
+                "tool_input": {"command": shlex.join([
+                    sys.executable,
+                    str(SCRIPTS / "experience_compile.py"),
+                    "begin-application-revision",
+                    "--root", str(root),
+                    "--scope-plan", str(root.parent / "unused-plan.json"),
+                    "--proposal-hash", "sha256:" + "0" * 64,
+                ])},
+                "cwd": str(project),
+                "session_id": "official-application-lifecycle",
+                "tool_use_id": "official-application-lifecycle-event",
+            }
+            official_pre = self.run_hook("pre", official_payload)
+            self.assertEqual(official_pre.returncode, 0,
+                             official_pre.stdout + official_pre.stderr)
+            official_snapshots = list((
+                project / ".agentrof/agent-marketplace/.runtime/vault-inventory"
+            ).glob("*.json"))
+            self.assertEqual(len(official_snapshots), 1)
+            official_snapshot = json.loads(
+                official_snapshots[0].read_text(encoding="utf-8")
+            )
+            self.assertTrue(official_snapshot["application_writer_allowed"])
+            official_post = self.run_hook("post", official_payload)
+            self.assertEqual(official_post.returncode, 0,
+                             official_post.stdout + official_post.stderr)
+
+            spoof_payload = {
+                **official_payload,
+                "tool_input": {"command": shlex.join([
+                    str(project / "spoof/python3"),
+                    str(SCRIPTS / "experience_compile.py"),
+                    "begin-application-revision",
+                    "--root", str(root),
+                    "--scope-plan", str(root.parent / "unused-plan.json"),
+                    "--proposal-hash", "sha256:" + "0" * 64,
+                ])},
+                "session_id": "spoofed-application-lifecycle",
+                "tool_use_id": "spoofed-application-lifecycle-event",
+            }
+            spoof_pre = self.run_hook("pre", spoof_payload)
+            self.assertEqual(spoof_pre.returncode, 0,
+                             spoof_pre.stdout + spoof_pre.stderr)
+            spoof_snapshots = list((
+                project / ".agentrof/agent-marketplace/.runtime/vault-inventory"
+            ).glob("*.json"))
+            self.assertEqual(len(spoof_snapshots), 1)
+            spoof_snapshot = json.loads(
+                spoof_snapshots[0].read_text(encoding="utf-8")
+            )
+            self.assertFalse(spoof_snapshot["application_writer_allowed"])
+            spoof_post = self.run_hook("post", spoof_payload)
+            self.assertEqual(spoof_post.returncode, 0,
+                             spoof_post.stdout + spoof_post.stderr)
+
+            payload = {
+                "tool_name": "Bash",
+                "tool_input": {"command": "python3 tamper_application.py"},
+                "cwd": str(project),
+                "session_id": "approved-application-downgrade",
+                "tool_use_id": "approved-application-downgrade-event",
+            }
+            before = self.run_hook("pre", payload)
+            self.assertEqual(before.returncode, 0,
+                             before.stdout + before.stderr)
+            snapshots = list((
+                project / ".agentrof/agent-marketplace/.runtime/vault-inventory"
+            ).glob("*.json"))
+            self.assertEqual(len(snapshots), 1)
+            snapshot = json.loads(snapshots[0].read_text(encoding="utf-8"))
+            self.assertEqual(snapshot["application"]["status"], "approved")
+            self.assertTrue(snapshot["application"]["source_hash"])
+
+            text = application.read_text(encoding="utf-8")
+            text = text.replace(
+                'name="experience-application-status" content="approved"',
+                'name="experience-application-status" content="draft"',
+                1,
+            )
+            self.assertIn(
+                'name="experience-application-status" content="draft"', text
+            )
+            application.write_text(
+                text.replace("</body>", "<p>unauthorized</p></body>", 1),
+                encoding="utf-8",
+            )
+            denied = self.run_hook("post", payload)
+            self.assertEqual(denied.returncode, 2,
+                             denied.stdout + denied.stderr)
+            self.assertIn("outside an authorized", denied.stderr)
+            self.assertEqual(application.read_text(encoding="utf-8"), text.replace(
+                'name="experience-application-status" content="draft"',
+                'name="experience-application-status" content="approved"',
+                1,
+            ).replace("<p>unauthorized</p>", ""))
+
+    def test_bash_preflight_strictly_checks_approved_application(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            project = Path(temporary)
+            self.setup_config_project(project)
+            application = (
+                project / "workspace/docs/experience-design/artifacts/"
+                "application.html"
+            )
+            application.parent.mkdir(parents=True)
+            application.write_text(
+                "<!doctype html><html><head>"
+                '<meta name="experience-application-status" '
+                'content="approved">'
+                "</head><body></body></html>\n",
+                encoding="utf-8",
+            )
+            denied = self.run_hook("pre", {
+                "tool_name": "Bash",
+                "tool_input": {"command": "python3 unrelated.py"},
+                "cwd": str(project),
+                "session_id": "invalid-approved-application",
+                "tool_use_id": "invalid-approved-application-event",
+            })
+            self.assertEqual(denied.returncode, 2,
+                             denied.stdout + denied.stderr)
+            self.assertIn("application checker", denied.stderr.lower())
+
+    def test_process_local_experience_preview_is_rejected_at_write_time(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            project = Path(temporary)
+            docs = self.setup_project(project)
+            preview = (
+                docs / "experience-design/experiences/example/artifacts/preview.html"
+            )
+            result = self.run_hook("pre", {
+                "tool_name": "Write",
+                "tool_input": {
+                    "file_path": str(preview),
+                    "content": "<!doctype html><title>Old preview</title>\n",
+                },
+            })
+            self.assertEqual(result.returncode, 2)
+            self.assertIn("process-local Experience web implementation", result.stderr)
+            self.assertIn("experience-design/artifacts/application.html", result.stderr)
 
     def test_retired_experience_review_path_is_rejected(self):
         with tempfile.TemporaryDirectory() as temporary:

@@ -13,8 +13,11 @@ authoritative.
   `required` is approved/current, every `reuse` target is valid, and every
   `not_applicable` row has its concrete rationale.
 - Manual mode may start from a strict-current BA scope, solution landscape,
-  Design System MASTER and one or more living Experience packages without a Requirement. In that
-  mode the root package records `Input Package Coverage` rather than
+  Design System MASTER, globally current `application@rN` and zero or more
+  living Experience process packages without a Requirement. Zero process
+  receipts are valid only when the application is the verified empty
+  application; otherwise the supplied set must exactly equal its process set.
+  In manual mode the root package records `Input Package Coverage` rather than
   Requirement Coverage.
 - A feature, defect or technical intake carries the exact approved source,
   issue or decision evidence selected by that impact matrix.
@@ -38,13 +41,16 @@ backlog_compile.py init --docs <workspace>/docs --planning-mode manual \\
   --input-ref "business-analysis/<space>/space" \\
   --input-ref "[[solution-design/landscape|Solution landscape]]" \\
   --input-ref "[[design-system/MASTER|Design Master]]" \\
+  --input-ref "application@r4" \\
   --input-ref "checkout@r3"
 ```
 
-The compiler validates those four strict-current package families and renders
-`backlog/_generated/input-package-coverage.md`. Requirement mode instead
-records `requirement_ref: REQ-###`; stories carry `implements: REQ-###` and
-the Requirement Stage Results receipt is required before approval.
+The compiler validates the three strict-current upstream package families plus
+the globally current Experience application and its selected process receipt
+set, then renders `backlog/_generated/input-package-coverage.md`. Requirement
+mode instead records `requirement_ref: REQ-###`; stories carry
+`implements: REQ-###`, and the complete Requirement Stage Results receipt set
+is required before approval.
 
 The root contains `backlog.md` and `reviews/`. Each epic is a folder with an
 `epic.md`, `reviews/`, and `stories/`. Each story folder contains exactly
@@ -82,7 +88,10 @@ by its stories and root review. Add canonical `analysis_scopes` to
 `backlog.md` (`<space>` or `<space>#domains/<path>`) only when the whole named
 approved BA scope must receive an exact covered-or-deferred disposition.
 
-Use exact `<experience>:<ID>@rN` values such as `checkout:SCR-001@r2` for `experience_refs`; use vault-absolute wikilinks for `criterion_refs`,
+Use exact `<experience>:<ID>@rN` values such as `checkout:SCR-001@r2` for
+`experience_refs`. Each value must resolve in a pinned current process receipt
+and be covered by its `application-map.json` in the pinned `application@rN`.
+Use vault-absolute wikilinks for `criterion_refs`,
 `derives_from`, `depends_on`, `uses_design` and `constrained_by`. Criterion
 links target the approved owning note and carry its BA registry-qualified
 criterion or rule identity as the alias.
@@ -196,8 +205,11 @@ backlog_compile.py check --docs <workspace>/docs --approved --render --json
 Approval stamps the package, root backlog, epics, reviews and test plans while
 stories remain `planned`. Commit `workspace/docs/backlog/` and the updated
 `workspace/config.json` in the same project change. Report the package hash
-and exact generated views. Stop and route to `delivery-plan`; do not create Delivery
-state in this flow.
+and exact generated views. A newer approved Experience application receipt,
+including one caused by an application-only revision, makes the backlog input
+non-current. Revise and reapprove the backlog against the new receipt before
+further handoff even when its process receipts did not change. Stop and route
+to `delivery-plan`; do not create Delivery state in this flow.
 
 Human-facing authored titles are direct, natural labels in the project's
 output language. Stable type keys, paths, IDs, CLI messages, registry JSON and

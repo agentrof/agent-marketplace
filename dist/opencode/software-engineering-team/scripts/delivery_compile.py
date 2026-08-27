@@ -196,7 +196,12 @@ def find_delivery(docs: Path, identifier: str) -> Path | None:
     return None
 
 
-def approved_backlog_sources(docs: Path, story_ids: list[str]) -> tuple[dict[str, dict], dict, list[str]]:
+def approved_backlog_sources(
+    docs: Path,
+    story_ids: list[str],
+    *,
+    historical_inputs: bool = False,
+) -> tuple[dict[str, dict], dict, list[str]]:
     """Resolve the exact approved Story/Test Plan snapshots a Delivery may use.
 
     Delivery is deliberately a consumer of the canonical backlog.  It must not
@@ -212,7 +217,9 @@ def approved_backlog_sources(docs: Path, story_ids: list[str]) -> tuple[dict[str
     if len(story_ids) != len(set(story_ids)):
         return {}, {}, ["Delivery cannot select the same Story more than once"]
     try:
-        record, findings = backlog_compile.collect(docs)
+        record, findings = backlog_compile.collect(
+            docs, historical_inputs=historical_inputs,
+        )
     except (OSError, RuntimeError, ValueError) as exc:
         return {}, {}, [f"approved backlog cannot be read: {exc}"]
     errors.extend(findings)
@@ -358,7 +365,9 @@ def delivery_source_findings(docs: Path, root: Path, delivery_props: dict) -> tu
         return {}, sorted(set(errors))
 
     sources, backlog_snapshot, source_errors = approved_backlog_sources(
-        docs, [str(story_id) for story_id in story_ids]
+        docs,
+        [str(story_id) for story_id in story_ids],
+        historical_inputs=True,
     )
     errors.extend(source_errors)
     dod, dod_errors = approved_dod_source(docs)

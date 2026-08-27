@@ -2135,7 +2135,7 @@ def sync_application_dependencies(root: Path, text: str) -> str:
     text = experience_application_check.replace_tokens(text, str(design["tokens"]))
     runtime_pattern = re.compile(
         r'(<script\b[^>]*\bid=["\']experience-application-runtime["\'][^>]*>)'
-        r'.*?(</script\s*>)',
+        r'.*?(</script(?:[\t\n\f\r />][^<>]*)?>)',
         re.I | re.S,
     )
     template_runtime = experience_application_check.template_runtime()
@@ -2182,7 +2182,7 @@ def rename_application_refs(text: str, old: str, new: str) -> str:
     pattern = re.compile(
         r'(<script\b(?=[^>]*\btype=["\']application/json["\'])'
         r'(?=[^>]*\bid=["\']experience-application-contract["\'])[^>]*>)'
-        r'(.*?)(</script\s*>)',
+        r'(.*?)(</script(?:[\t\n\f\r />][^<>]*)?>)',
         re.I | re.S,
     )
     match = pattern.search(text)

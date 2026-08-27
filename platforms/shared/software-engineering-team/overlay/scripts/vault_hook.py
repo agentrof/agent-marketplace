@@ -146,7 +146,7 @@ APPLICATION_TOKEN_BLOCK_RE = re.compile(
 )
 APPLICATION_RUNTIME_RE = re.compile(
     r"<script\b(?=[^>]*\bid\s*=\s*[\"']experience-application-runtime"
-    r"[\"'])[^>]*>.*?</script\s*>",
+    r"[\"'])[^>]*>.*?</script(?:[\t\n\f\r />][^<>]*)?>",
     re.IGNORECASE | re.DOTALL,
 )
 

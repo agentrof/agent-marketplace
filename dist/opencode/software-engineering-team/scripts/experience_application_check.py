@@ -169,10 +169,14 @@ AUTHOR_STYLE_PATTERN = re.compile(
     re.S,
 )
 STYLE_PATTERN = re.compile(
-    r"<style(?P<attrs>[^>]*)>(?P<body>.*?)</style\s*>", re.I | re.S
+    r"<style(?P<attrs>[^>]*)>(?P<body>.*?)"
+    r"</style(?:[\t\n\f\r />][^<>]*)?>",
+    re.I | re.S,
 )
 SCRIPT_PATTERN = re.compile(
-    r"<script(?P<attrs>[^>]*)>(?P<body>.*?)</script\s*>", re.I | re.S
+    r"<script(?P<attrs>[^>]*)>(?P<body>.*?)"
+    r"</script(?:[\t\n\f\r />][^<>]*)?>",
+    re.I | re.S,
 )
 CSS_ESCAPE = re.compile(r"\\(?:([0-9a-fA-F]{1,6})(?:\s)?|([^\r\n]))")
 INVALID_CSS_MARKER = "\u0000application-invalid-css\u0000"
@@ -2092,7 +2096,7 @@ def browser_stable_html_source_findings(text: str) -> list[str]:
     """Ban HTML comment/bogus-declaration channels with tokenizer ambiguity."""
     doctype = re.match(r"(?i)<!doctype html>", text)
     remainder = text[doctype.end():] if doctype is not None else text
-    if re.search(r"(?i)<!|-->|<\?", remainder):
+    if re.search(r"(?i)<!|--!?>|<\?", remainder):
         return [
             "application HTML comments and bogus declarations are forbidden for browser-stable parsing"
         ]

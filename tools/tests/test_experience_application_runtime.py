@@ -1866,6 +1866,25 @@ class ExperienceApplicationRuntimeTests(unittest.TestCase):
             )
         ))
 
+    def test_html_end_tag_scanners_follow_browser_token_boundaries(self):
+        for tag, pattern in (
+            ("script", experience_application_check.SCRIPT_PATTERN),
+            ("style", experience_application_check.STYLE_PATTERN),
+        ):
+            source = f"<{tag}>body</{tag}\t\n data-marker>"
+            matches = list(pattern.finditer(source))
+            self.assertEqual(len(matches), 1)
+            self.assertEqual(matches[0].group("body"), "body")
+            self.assertEqual(
+                experience_application_check.browser_stable_html_source_findings(
+                    f"<html>--!></html>"
+                ),
+                [
+                    "application HTML comments and bogus declarations are forbidden "
+                    "for browser-stable parsing"
+                ],
+            )
+
     def test_modal_disclosure_search_and_form_topology_fails_closed(self):
         def validate(fragment: str) -> list[str]:
             text = self.rendered_template().replace(

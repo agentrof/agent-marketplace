@@ -1042,7 +1042,7 @@ def check_single_team_contract(tree: Tree, findings: list[Finding]) -> None:
                 "Claude",
                 tree.root / "platforms" / "claude" / plugin.name
                 / "overlay" / "hooks" / "hooks.json",
-                ("team_guard.py register", "vault_hook.py pre", "vault_hook.py post", "Write|Edit|Bash"),
+                ("team_guard.py register", "vault_hook.py pre", "vault_hook.py post", "Write|Edit|Bash|PowerShell"),
             ),
             (
                 "Codex",

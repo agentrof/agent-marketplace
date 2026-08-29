@@ -45,6 +45,17 @@ class OpenCodeProjectionTests(unittest.TestCase):
         self.assertIn(scheme, plugin)
         self.assertLess(plugin.index(windows_path), plugin.index(scheme))
 
+    def test_runtime_plugin_binds_the_native_shell_family(self):
+        plugin = (PACKAGE / "plugins/agent-marketplace-software-engineering-team.js").read_text(
+            encoding="utf-8",
+        )
+        self.assertIn("shell_family: shellFamily", plugin)
+        self.assertIn("boundShellFamily = effectiveShellFamily(config)", plugin)
+        self.assertIn("actual === expected ? 'cmd' : 'unknown'", plugin)
+        self.assertIn("if (!isAbsolute(commandShell)) return 'unknown'", plugin)
+        self.assertIn("allowed.has(actual) ? 'posix' : 'unknown'", plugin)
+        self.assertNotIn(".has(basename(commandShell))", plugin)
+
     def setUp(self) -> None:
         self.temporary = tempfile.TemporaryDirectory()
         self.root = Path(self.temporary.name)

@@ -38,6 +38,7 @@ const safeTools = new Set([
   'websearch',
 ]);
 const calls = new Map();
+let boundShellFamily = 'unknown';
 
 function fail(code, detail = '') {
   const clean = String(detail).replace(/\s+/g, ' ').trim().slice(0, 600);
@@ -301,7 +302,42 @@ function rejectManagedHostPath(root, target) {
   }
 }
 
-function canonicalPayload(input, args, root) {
+function effectiveShellFamily(config) {
+  const configured = config && config.shell;
+  if (configured !== undefined && configured !== null
+      && typeof configured !== 'string') return 'unknown';
+  if (process.platform === 'win32') {
+    const commandShell = configured
+      ?? process.env.ComSpec
+      ?? process.env.COMSPEC;
+    const systemRoot = process.env.SystemRoot || process.env.WINDIR;
+    if (!commandShell || !systemRoot) return 'unknown';
+    try {
+      const actual = realpathSync(commandShell).toLowerCase();
+      const expected = realpathSync(resolve(systemRoot, 'System32', 'cmd.exe')).toLowerCase();
+      return actual === expected ? 'cmd' : 'unknown';
+    } catch {
+      return 'unknown';
+    }
+  }
+  const commandShell = configured ?? '/bin/sh';
+  if (!isAbsolute(commandShell)) return 'unknown';
+  try {
+    const actual = realpathSync.native(commandShell);
+    const allowed = new Set();
+    for (const directory of ['/bin', '/usr/bin']) {
+      for (const name of ['sh', 'bash', 'dash', 'zsh', 'ksh']) {
+        const candidate = resolve(directory, name);
+        if (existsSync(candidate)) allowed.add(realpathSync.native(candidate));
+      }
+    }
+    return allowed.has(actual) ? 'posix' : 'unknown';
+  } catch {
+    return 'unknown';
+  }
+}
+
+function canonicalPayload(input, args, root, shellFamily) {
   const common = {
     cwd: root,
     session_id: input.sessionID,
@@ -352,6 +388,7 @@ function canonicalPayload(input, args, root) {
     return {
       ...common,
       cwd,
+      shell_family: shellFamily,
       tool_name: 'Bash',
       tool_input: { command },
     };
@@ -383,6 +420,7 @@ function runHook(bound, phase, payload) {
 export const AgentMarketplacePlugin = async () => ({
   config: async (config) => {
     assertSupportedPluginSet(config);
+    boundShellFamily = effectiveShellFamily(config);
   },
   'tool.execute.before': async (input, output) => {
     if (process.env.OPENCODE_EXPERIMENTAL_CODE_MODE || input.tool === 'execute') {
@@ -397,7 +435,7 @@ export const AgentMarketplacePlugin = async () => ({
     const args = inputArgs(input, output);
     const bound = runtime();
     assertSupportedPluginSet({ plugin: [pluginPath()] });
-    const payload = canonicalPayload(input, args, bound.root);
+    const payload = canonicalPayload(input, args, bound.root, boundShellFamily);
     runHook(bound, 'pre', payload);
     calls.set(key, {
       bound,

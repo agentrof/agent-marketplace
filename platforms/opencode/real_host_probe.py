@@ -7,6 +7,7 @@ import argparse
 import json
 import os
 import select
+import shlex
 import shutil
 import signal
 import subprocess
@@ -85,6 +86,21 @@ def session_id(events: list[dict[str, Any]]) -> str:
         if isinstance(value, str):
             return value
     raise ProbeError("session_id_missing")
+
+
+def direct_shell_command(argv: list[str]) -> str:
+    return subprocess.list2cmdline(argv) if os.name == "nt" else shlex.join(argv)
+
+
+def config_writer_command(project: Path) -> str:
+    private = project / ".opencode" / "agentrof" / "agent-marketplace"
+    return direct_shell_command([
+        sys.executable,
+        str(private / "packages" / active_package_key(private)
+            / TEAM / "scripts" / "project_config.py"),
+        "set", "--config", str(project / "workspace" / "config.json"),
+        "--field", "output_language", "--value", "Turkish",
+    ])
 
 
 class FakeProvider:
@@ -264,6 +280,12 @@ class FakeProvider:
                 "timeout": 5000,
                 "workdir": str(self.project),
             })
+        if self.mode == "bash_config_writer":
+            return self._tool("bash", {
+                "command": config_writer_command(self.project),
+                "timeout": 5000,
+                "workdir": str(self.project),
+            })
         raise ProbeError(f"unsupported_probe_mode:{self.mode}")
 
 
@@ -288,6 +310,19 @@ def environment(root: Path) -> dict[str, str]:
         "TMPDIR": str(temporary),
     })
     return values
+
+
+def active_package_key(private: Path) -> str:
+    try:
+        installation = json.loads(
+            (private / "installation.json").read_text(encoding="utf-8")
+        )
+    except (OSError, json.JSONDecodeError) as exc:
+        raise ProbeError("installation_missing") from exc
+    key = installation.get("active_build_key")
+    if not isinstance(key, str) or not key:
+        raise ProbeError("installation_missing")
+    return key
 
 
 def assert_no_global_marketplace_state(root: Path) -> None:
@@ -471,7 +506,7 @@ def guarded_config(project: Path) -> tuple[Path, str]:
     path = project / "workspace" / "config.json"
     path.parent.mkdir(parents=True, exist_ok=True)
     original = json.dumps({
-        "schema_version": 1,
+        "schema_version": 2,
         "team_id": TEAM,
         "output_language": "English",
         "terminology_language": "English",
@@ -495,6 +530,23 @@ def assert_canonical_hook_guards(
     detail = exported(executable, project, env, child_session(ndjson(output)))
     if "post_hook_failed" not in detail or config.read_text(encoding="utf-8") != original:
         raise ProbeError("canonical_post_hook_not_enforced")
+
+
+def assert_sanctioned_config_writer(
+    executable: Path, project: Path, env: dict[str, str], provider: FakeProvider,
+) -> None:
+    config, _original = guarded_config(project)
+    write_config(project, provider)
+    output = run_command(executable, project, env, provider, "bash_config_writer")
+    detail = exported(executable, project, env, child_session(ndjson(output)))
+    if '"status": "error"' in detail:
+        raise ProbeError(f"sanctioned_config_writer_failed:{detail[-1200:]}")
+    try:
+        value = json.loads(config.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise ProbeError("sanctioned_config_writer_invalid") from exc
+    if value.get("output_language") != "Turkish":
+        raise ProbeError("sanctioned_config_writer_restored")
 
 
 def assert_readonly_permission_denial(
@@ -724,7 +776,9 @@ def main() -> int:
     try:
         root = Path(tempfile.mkdtemp(prefix="agent-marketplace-opencode-real."))
         try:
-            project = (root / "project").resolve()
+            # Spaces and parentheses exercise native shell quoting, especially
+            # cmd.exe on Windows, in every real-host lifecycle scenario.
+            project = (root / "project (shell contract)").resolve()
             project.mkdir()
             env = environment(root)
             with FakeProvider(project) as provider:
@@ -742,6 +796,7 @@ def main() -> int:
                         assert_mutator(executable, project, env, provider, mode)
                     assert_pre_deny(executable, project, env, provider)
                     assert_canonical_hook_guards(executable, project, env, provider)
+                    assert_sanctioned_config_writer(executable, project, env, provider)
                     assert_readonly_permission_denial(executable, project, env, provider)
                     assert_plugin_set_deny(executable, project, env, provider)
                     if args.tui:

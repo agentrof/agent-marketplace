@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -27,6 +29,37 @@ class SingleTeamDistributionTests(unittest.TestCase):
 
     def tearDown(self) -> None:
         self.temporary.cleanup()
+
+    def test_session_marker_publishes_exact_writer_invocation_binding(self):
+        repository = TESTS_DIR.parents[1]
+        for host in build_distributions.HOSTS:
+            with self.subTest(host=host):
+                script = (
+                    repository / "dist" / host / "software-engineering-team"
+                    / "scripts" / "team_guard.py"
+                )
+                result = subprocess.run(
+                    [sys.executable, str(script), "register"],
+                    capture_output=True, text=True, check=False,
+                )
+                self.assertEqual(
+                    result.returncode, 0, result.stdout + result.stderr,
+                )
+                payload = json.loads(result.stdout)
+                context = payload["hookSpecificOutput"]["additionalContext"]
+                self.assertIn(
+                    "AGENT_MARKETPLACE_HOOKS_ACTIVE: software-engineering-team",
+                    context,
+                )
+                self.assertIn(
+                    "AGENT_MARKETPLACE_PYTHON: "
+                    f"{Path(os.path.abspath(sys.executable))}",
+                    context,
+                )
+                self.assertIn(
+                    f"AGENT_MARKETPLACE_SCRIPTS: {script.resolve().parent}",
+                    context,
+                )
 
     def test_catalogs_versions_and_packages_name_one_standalone_team(self):
         versions = json.loads(

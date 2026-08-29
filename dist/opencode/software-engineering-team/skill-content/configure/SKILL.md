@@ -21,6 +21,11 @@ exposure: entry
 2. Read `references/config-contract.md`. Identify the owning document or
    compiler before proposing a change. Stack, database and component method
    choices belong to accepted Solution Design decisions, never config.
+   Invoke every machine-owned writer with the active host runtime's exact
+   absolute Python executable and the installed package script's absolute
+   path. Never use a bare Python command name, `/usr/bin/env` indirection or
+   direct shebang execution for these writes; shell aliases and functions make
+   those forms unverifiable and therefore guard-only.
 3. For language, use `project_config.py set --dry-run --json`. For
    `operation verification`, dispatch `operation_compile.py`; for
    `operation environment`, dispatch the same compiler with `--kind

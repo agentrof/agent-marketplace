@@ -1,0 +1,6 @@
+{
+  "summary": "Bind lifecycle writers to exact runtimes, post-attest legacy Experience commands, normalize shell payloads, and restore protected state across hostile path topologies with explicit host boundaries.",
+  "components": {
+    "software-engineering-team": "patch"
+  }
+}

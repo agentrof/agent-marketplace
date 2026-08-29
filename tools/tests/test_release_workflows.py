@@ -113,13 +113,36 @@ class ReleaseWorkflowContracts(unittest.TestCase):
             text.count(
                 "actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0"
             ),
-            4,
+            5,
         )
         self.assertGreaterEqual(text.count('python-version: "3.9"'), 2)
         self.assertIn("actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1", text)
         self.assertIn("dist/claude", text)
         self.assertIn("dist/codex", text)
         self.assertIn("dist/opencode", text)
+
+    def test_vault_hook_matrix_gates_platforms_and_apple_launcher(self):
+        text = self.text("validate.yml")
+        self.assertIn("needs: [check, compatibility, vault-hook-platforms]", text)
+        for runner in ("ubuntu-latest", "macos-latest", "windows-latest"):
+            with self.subTest(runner=runner):
+                self.assertGreaterEqual(text.count(f"os: {runner}"), 2)
+        self.assertIn('python: "3.9"', text)
+        self.assertIn('python: "3.x"', text)
+        self.assertIn("AGENT_MARKETPLACE_REQUIRE_APPLE_PYTHON3", text)
+        for test_name in (
+            "test_system_macos_python3_launcher_is_accepted",
+            "test_issue_77_bare_python_cmd_preserves_attested_codex_result",
+            "test_bare_python_candidate_with_invalid_result_is_restored",
+            "test_bare_render_cannot_publish_a_different_valid_transition",
+            "test_bare_render_with_forged_registry_is_restored",
+            "test_issue_77_bare_init_has_an_exact_attested_delta",
+            "test_issue_77_bare_init_preserves_real_codex_draft",
+        ):
+            with self.subTest(test_name=test_name):
+                self.assertIn(test_name, text)
+        self.assertIn("tools.tests.test_vault_hook", text)
+        self.assertIn("tools.tests.test_opencode_real_host_probe", text)
 
     def test_dependabot_tracks_github_actions(self):
         text = (REPO / ".github/dependabot.yml").read_text(encoding="utf-8")
@@ -247,6 +270,7 @@ class ReleaseWorkflowContracts(unittest.TestCase):
             "check": "20",
             "build-metadata": "10",
             "compatibility": "20",
+            "vault-hook-platforms": "10",
         }
         for job, minutes in expectations.items():
             with self.subTest(job=job):

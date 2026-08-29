@@ -1412,8 +1412,7 @@ def trusted_python_command(
         # hook.  Preserve the lexical project-boundary check above, then
         # accept only that same-directory alias; an arbitrary PATH symlink to
         # the interpreter remains guard-only.
-        if allow_bare and not Path(value).is_absolute() \
-                and candidate.resolve() in _trusted_runtime_targets():
+        if candidate.resolve() in _trusted_runtime_targets():
             trusted_directories = {
                 Path(runtime).parent.resolve()
                 for runtime in (
@@ -1422,7 +1421,11 @@ def trusted_python_command(
                 )
                 if runtime and Path(runtime).is_absolute()
             }
-            return candidate.parent.resolve() in trusted_directories
+            if candidate.parent.resolve() in trusted_directories:
+                # A bare name is only eligible for the explicitly scoped
+                # compatibility commands; direct absolute aliases retain the
+                # normal writer path.
+                return allow_bare or Path(value).is_absolute()
         return _apple_python_launcher_matches(candidate, cwd)
     except (OSError, RuntimeError):
         return False

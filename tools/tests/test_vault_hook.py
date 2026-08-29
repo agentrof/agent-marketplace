@@ -672,6 +672,9 @@ class VaultHookShellContractTests(unittest.TestCase):
                         "python3", root, allow_bare=True,
                     )
                 )
+                self.assertTrue(
+                    self.hook.trusted_python_command(str(alias), root)
+                )
 
     def test_project_venv_alias_is_rejected_before_realpath_identity(self):
         with tempfile.TemporaryDirectory() as temporary:

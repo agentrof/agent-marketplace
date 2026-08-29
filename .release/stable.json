@@ -1,16 +1,12 @@
 {
   "schema_version": 1,
-  "version": "4.0.0",
-  "stable_base": "d8762d2788c2de87b10d6008c8ae6a7a8db458e5",
-  "main_source": "18556654634665d71a21732cedb50c5647232eb5",
+  "version": "4.0.1",
+  "stable_base": "37747ab91a2a365ccee254beee81f5afd118349a",
+  "main_source": "50c58dd1432ae4d353b24d239c1ab785a61b42cd",
   "impacts": {
-    "software-engineering-team": "major"
+    "software-engineering-team": "patch"
   },
   "summaries": [
-    "Update the CodeQL GitHub Action to version 4.37.8.",
-    "Allow multi-document Business Analysis revisions and make decision approval part of the package gate.",
-    "Preserve approved stage receipts when generated vault relations are rendered.",
-    "Replace package-local Experience previews with one receipt-bound canonical application, exact route/state maps, and a deterministic network-free runtime.",
-    "Allow approved Experience packages to rebind to a newly approved Design System receipt during revision."
+    "Keep diagnostics and project-owned Experience repairs reachable when recoverable path spelling violates vault canonicality."
   ]
 }

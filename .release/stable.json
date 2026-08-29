@@ -1,12 +1,12 @@
 {
   "schema_version": 1,
-  "version": "4.1.0",
-  "stable_base": "0fc4a54b615e9c8f7e6b670e5c30685b1cea9d43",
-  "main_source": "9f6e664a986dddbddb910de53b49cab6ebafaf3c",
+  "version": "4.1.1",
+  "stable_base": "4a22a614fc8bcf34380265443675165a45a742dc",
+  "main_source": "c883c266c15dfa50eb9ed4cb1c389d5b28e60526",
   "impacts": {
-    "software-engineering-team": "minor"
+    "software-engineering-team": "patch"
   },
   "summaries": [
-    "Make Experience Design prototype workspaces fully author-owned and opaque to the compiler."
+    "Bind lifecycle writers to exact runtimes, post-attest legacy Experience commands, normalize shell payloads, and restore protected state across hostile path topologies with explicit host boundaries."
   ]
 }

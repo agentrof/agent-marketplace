@@ -86,9 +86,7 @@ class ExperienceCompilerTests(unittest.TestCase):
         hashes = {
             key: "sha256:" + "1" * 64
             for key in (
-                "source_hash", "package_set_hash", "coverage_hash",
-                "application_hash", "runtime_sha256",
-                "design_system_package_hash",
+                "artifact_tree_hash", "package_set_hash", "application_hash",
             )
         }
         preimage = {

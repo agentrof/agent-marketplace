@@ -347,7 +347,7 @@ class SetupProjectTests(unittest.TestCase):
                 "cache.sqlite" in blocker for blocker in payload["blockers"]
             ))
 
-    def test_setup_refuses_legacy_process_local_experience_preview(self):
+    def test_setup_accepts_process_local_experience_prototype_files(self):
         with tempfile.TemporaryDirectory() as temporary:
             project = Path(temporary)
             subprocess.run(["git", "init", "-q", str(project)], check=True)
@@ -366,13 +366,7 @@ class SetupProjectTests(unittest.TestCase):
             inspected = self.run_script(
                 SETUP, "inspect", "--project-root", str(project), "--json"
             )
-            self.assertEqual(inspected.returncode, 1, inspected.stdout)
-            blockers = json.loads(inspected.stdout)["blockers"]
-            self.assertTrue(any(
-                "process-local Experience web implementation" in blocker
-                and "artifacts/application.html" in blocker
-                for blocker in blockers
-            ))
+            self.assertEqual(inspected.returncode, 0, inspected.stdout)
 
     def test_setup_refuses_nested_legacy_experience_registry(self):
         with tempfile.TemporaryDirectory() as temporary:

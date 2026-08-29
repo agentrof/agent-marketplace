@@ -44,13 +44,15 @@ configuration remain the source of truth.
 9. Review and commit the exact tracked diff, then start a fresh host session so
    the refreshed skills and hooks load.
 
-The Experience application contract is a hard cut. Inspect reports any
-package-local Experience preview, artifact-manifest note, former
-`_generated/artifact-registry.json` or other Experience implementation file as
-a blocker. Apply does not migrate those files, synthesize application maps or
-offer a compatibility reader. Remove the legacy surface deliberately and
-author the one root `experience-design/artifacts/application.html` plus each
-process package's `artifacts/application-map.json` under the current flow.
+Experience prototype interiors are author-owned. Inspect accepts arbitrary
+regular files beneath Experience `artifacts/` directories and does not migrate,
+interpret or synthesize their contents. It continues to protect only
+compiler-owned `_generated/` and `_ledger/` state, path containment and file
+identity required for safe lifecycle snapshots.
+
+The next approval after an existing schema-v2 application receipt appends a
+schema-v3 opaque snapshot receipt while preserving the verified historic hash
+chain. No prototype file is rewritten or interpreted during that transition.
 
 An invalid Experience path spelling does not make project diagnostics or
 repair unreachable. The Bash hook snapshots any tree whose paths remain
@@ -65,9 +67,9 @@ fail-closed because no trustworthy rollback snapshot can be created; direct
 
 Stage routing inspects Git only at a completed-stage handoff. The relevant
 config, approved subtree, home note and stage map must be tracked, committed and
-clean. For Experience Design that path set includes the canonical application,
-the exact process packages and maps, and compiler-owned application
-receipt/ledger state selected by the approved transaction. Unrelated product
+clean. For Experience Design that path set includes the exact prototype artifact
+inventory, process packages and compiler-owned application receipt/ledger state
+selected by the approved transaction. Unrelated product
 application code and the current draft stage are outside a different stage's
 path set and do not block active authoring. A request without an approved,
 committed backlog returns to Requirement Flow; an approved backlog proceeds to

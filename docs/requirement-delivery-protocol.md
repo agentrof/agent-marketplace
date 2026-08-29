@@ -68,13 +68,13 @@ workspace/docs/
 │   └── _generated/
 ├── design-system/
 ├── experience-design/
-│   ├── artifacts/application.html
+│   ├── artifacts/
 │   ├── _ledger/application-revisions.json
 │   ├── _generated/application-registry.json
 │   └── experiences/<primary-process-slug>/
 │       ├── experience.md
 │       ├── {journeys,flows,screens,states,transitions}/
-│       ├── artifacts/application-map.json
+│       ├── artifacts/
 │       ├── _ledger/
 │       └── _generated/
 ├── operation/
@@ -120,23 +120,20 @@ reuse resolves to an approved current package, and not-applicable rows retain a
 concrete rationale with no evidence target. A semantic edit invalidates the
 Requirement approval. Stage compilers own their existing approval gates.
 
-Experience Design completes as one aggregate handoff. Its fixed declarative,
-network-free runtime lives only at
-`experience-design/artifacts/application.html`; every process package maps its
-active exact qualified record revisions to declared route/state entries through
-the version-2 `artifacts/application-map.json`. Its version-2 inline contract
-declares the full state taxonomy, deterministic local outcome simulations,
-preserved context and intentional returns. The application metadata binds one exact
-approved contract-v3 Design System. The compiler reserves `application` from
-process slugs and aliases and returns a globally current `application@rN`
-receipt together with the exact current zero-or-more process receipts. The
-zero-process form is valid only for the verified empty application.
+Experience Design completes as one aggregate handoff. Its complete
+`experience-design/artifacts/` tree is an author-owned prototype workspace:
+its folders, files, technologies, assets and behavior are free. The compiler
+does not parse or constrain those contents. It records a safe recursive byte
+inventory, artifact-tree hash and current process receipt set in the globally
+current `application@rN` receipt. `application` remains reserved from process
+slugs and aliases. The zero-process form is valid with an approved empty
+artifact inventory.
 
 One approved transaction covers every process create, update, rename or
-retire action, every affected map, the aggregate application and its
+retire action, prototype snapshot and its
 compiler-owned open-revision and receipt state. Mutating commands serialize on
 one project-scoped lock; a durable runtime journal restores the exact tracked
-Experience/map preimage after interruption before another command proceeds.
+Experience preimage after interruption before another command proceeds.
 An application-only revision leaves process receipts unchanged but still
 advances the application receipt. Any approved package-set or application delta
 makes the preceding application receipt non-current. Requirement Stage Results

@@ -13,7 +13,7 @@ adapters.
 5. Business Analysis, Solution Design, Design System and Experience Design are
    self-contained document workflows. Their approved Git-tracked packages are
    their complete state before backlog creation. Experience Design additionally
-   owns one canonical acceptance application and its exact package mappings.
+   owns one approved, author-owned prototype snapshot and its exact package set.
 6. One standalone Software Engineering Team owns one project checkout.
 7. The project-local runtime is
    `<git-root>/.agentrof/agent-marketplace/.runtime/` and contains only ignored,
@@ -76,9 +76,9 @@ adapters.
     approved Delivery Governance under `workspace/docs/delivery/governance/`.
 25. Outside an explicitly closed artifact contract, `artifacts/` beneath a
     policy-valid vault folder holds opaque, local files. Generic artifact
-    content is neither a vault note nor workflow executable behavior; symlinks
-    are forbidden and Markdown may link to real local artifacts. Design System
-    and Experience Design define closed artifact surfaces below.
+   content is neither a vault note nor workflow executable behavior; symlinks
+   are forbidden and Markdown may link to real local artifacts. Design System
+   alone defines a closed artifact surface below.
 26. A contract-v3 Design System publishes MASTER.md and its offline standalone
     catalog together at `design-system/artifacts/standalone.html`. The catalog
     has a fixed DOM flow while all visual values and project content bind to
@@ -87,37 +87,28 @@ adapters.
     may contain approved carryover documents plus multiple draft or in-review
     documents. Only `approve-package` creates a current package receipt; Git
     history is the audit baseline for the prior approved state.
-28. Experience Design has exactly one visual implementation at
-    `workspace/docs/experience-design/artifacts/application.html`. Each process
-    package has exactly one version-2 `artifacts/application-map.json` that
-    maps exact qualified record revisions to declared route/state entries in
-    that application. The version-2 inline contract exposes the complete state
-    taxonomy and deterministic outcome simulations. The application uses the
-    fixed declarative, CSP-bound, network-free runtime, executes preserved
-    context and intentional returns, and binds
-    exact approved contract-v3 Design System metadata, including the complete
-    root application token set and explicit dark-theme overrides; every active process
-    package binds that same Design System receipt. Package-local previews,
-    artifact manifests and the former per-package artifact registry are not
-    compatibility inputs. The root `_ledger/application-revisions.json` is
-    durable receipt history; `_generated/application-registry.json` is its
-    disposable current projection.
+28. Experience Design prototype files beneath
+    `workspace/docs/experience-design/artifacts/` are wholly author-owned.
+    Their folders, file names, formats, dependencies, behavior and presentation
+    are not compiler inputs. The compiler records only a safe, byte-level,
+    recursive artifact inventory and its hash in the approved snapshot. The
+    root `_ledger/application-revisions.json` is durable receipt history;
+    `_generated/application-registry.json` is its disposable current projection.
 29. `application` is reserved from Experience process slugs and aliases. An
     approved package-set delta or application-only delta creates a new globally
     current `application@rN` receipt alongside the exact current process
     receipts. Create, update, rename and retire apply under one project-scoped
-    lock as a crash-recoverable transaction across packages, maps, application,
+    lock as a crash-recoverable transaction across packages, prototype artifacts,
     compiler-owned open-revision state and receipt state. Downstream Requirement
     and backlog state must bind the new application receipt before a new
     handoff. An already-created Delivery continues to verify its exact pinned,
     approved backlog and Story/Test Plan hashes instead of being invalidated by
     an unrelated later application revision. Retiring the final process keeps
-    the application receipt sequence alive with one reserved `application`
-    empty route and no process receipts; a later process can join through the
-    next application revision. Exact map coverage is mechanical; visual
-    fidelity remains a fresh reviewer judgment recorded only as a transient
-    proposal/revision/status/source/package-set/coverage/application-hash-bound
-    zero-blocker attestation at approval.
+    the application receipt sequence alive with an empty artifact inventory and
+    no process receipts; a later process can join through the next application
+    revision. Reviewers provide fidelity and usability advice; approval uses a
+    transient attestation bound to proposal, artifact-tree, package-set and
+    application hashes without treating that advice as a compiler gate.
 
 The normative Requirement and Delivery lifecycle is documented in
 [requirement-delivery-protocol.md](requirement-delivery-protocol.md).

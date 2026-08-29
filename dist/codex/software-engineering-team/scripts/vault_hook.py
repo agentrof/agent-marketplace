@@ -122,43 +122,6 @@ EXPERIENCE_PATHS = (
     re.compile(r"^experience-design/experiences/[a-z0-9]+(?:-[a-z0-9]+)*/experience\.md$"),
     re.compile(r"^experience-design/experiences/[a-z0-9]+(?:-[a-z0-9]+)*/(?:journeys/[a-z0-9-]+-journey|screens/[a-z0-9-]+-screen|flows/[a-z0-9-]+-flow-set|states/[a-z0-9-]+-state|transitions/[a-z0-9-]+-transition)\.md$"),
 )
-EXPERIENCE_APPLICATION_REL = "experience-design/artifacts/application.html"
-EXPERIENCE_APPLICATION_MAP_RE = re.compile(
-    r"^experience-design/experiences/(?!exp-)[a-z0-9]+(?:-[a-z0-9]+)*/"
-    r"artifacts/application-map\.json$")
-APPLICATION_MACHINE_META_NAMES = (
-    "experience-application-contract-version",
-    "experience-application-status",
-    "experience-application-revision",
-    "experience-application-proposal-hash",
-    "experience-application-source-hash",
-    "experience-application-package-set-hash",
-    "experience-application-coverage-hash",
-    "experience-application-hash",
-    "experience-application-approved-at-utc",
-    "experience-application-runtime-sha256",
-    "design-system-package-hash",
-    "design-system-master-revision",
-    "design-system-master-source-hash",
-)
-APPLICATION_MACHINE_META_RE = re.compile(
-    r"<meta\b(?=[^>]*\bname\s*=\s*[\"'](?:"
-    + "|".join(re.escape(value) for value in APPLICATION_MACHINE_META_NAMES)
-    + r")[\"'])[^>]*>",
-    re.IGNORECASE | re.DOTALL,
-)
-APPLICATION_TOKEN_BLOCK_RE = re.compile(
-    r"/\* application:design-tokens:start \*/.*?"
-    r"/\* application:design-tokens:end \*/",
-    re.DOTALL,
-)
-APPLICATION_RUNTIME_RE = re.compile(
-    r"<script\b(?=[^>]*\bid\s*=\s*[\"']experience-application-runtime"
-    r"[\"'])[^>]*>.*?</script(?:[\t\n\f\r />][^<>]*)?>",
-    re.IGNORECASE | re.DOTALL,
-)
-
-
 def note_field(path: Path, field: str) -> str:
     try:
         lines = path.read_text(encoding="utf-8").splitlines()
@@ -362,11 +325,6 @@ def artifact_hard_cut_violation(rel: str) -> str:
     return vault_check.artifact_hard_cut_violation(policy, rel)
 
 
-def is_experience_application_surface(rel: str) -> bool:
-    return (rel == EXPERIENCE_APPLICATION_REL
-            or EXPERIENCE_APPLICATION_MAP_RE.fullmatch(rel) is not None)
-
-
 def canonical_application_surface(rel: str) -> str:
     """Return the canonical spelling for any Experience Design path.
 
@@ -548,17 +506,6 @@ def valid_experience_tree_snapshot(value: object) -> bool:
     return not experience_tree_snapshot_safety_problem(value)
 
 
-def noncanonical_experience_snapshot_paths(value: dict[str, dict]) -> list[str]:
-    """Return canonical spelling violations without rejecting recovery data."""
-    return sorted(
-        relative for relative in value
-        if (
-            unicodedata.normalize("NFC", relative) != relative
-            or relative.casefold() != relative
-        )
-    )
-
-
 def written_content(tool_input: dict) -> str:
     if "content" in tool_input:
         return str(tool_input.get("content") or "")
@@ -713,39 +660,6 @@ def relation_projection_guard(written: dict, file_path: str) -> int:
     return 0
 
 
-def html_attribute(tag: str, name: str) -> str:
-    match = re.search(
-        rf"\b{re.escape(name)}\s*=\s*([\"'])(.*?)\1", tag,
-        re.IGNORECASE | re.DOTALL,
-    )
-    return match.group(2) if match else ""
-
-
-def application_meta_value(text: str, name: str) -> str:
-    for match in APPLICATION_MACHINE_META_RE.finditer(text):
-        tag = match.group(0)
-        if html_attribute(tag, "name").casefold() == name.casefold():
-            return html_attribute(tag, "content")
-    return ""
-
-
-def application_status(text: str) -> str:
-    return application_meta_value(
-        text, "experience-application-status"
-    ).casefold()
-
-
-def application_machine_spans(text: str) -> list[tuple[int, int]]:
-    spans = [match.span() for match in APPLICATION_MACHINE_META_RE.finditer(text)]
-    spans.extend(match.span() for match in APPLICATION_TOKEN_BLOCK_RE.finditer(text))
-    spans.extend(match.span() for match in APPLICATION_RUNTIME_RE.finditer(text))
-    return sorted(spans)
-
-
-def application_machine_projection(text: str) -> tuple[str, ...]:
-    return tuple(text[start:end] for start, end in application_machine_spans(text))
-
-
 def rendered_edit(written: dict, disk: str) -> str | None:
     if "content" in written:
         return str(written.get("content") or "")
@@ -776,42 +690,6 @@ def edit_overlaps_spans(text: str, old: str,
             return True
         position = text.find(old, position + 1)
     return False
-
-
-def application_machine_guard(written: dict, file_path: str) -> int:
-    try:
-        disk = Path(file_path).read_text(encoding="utf-8")
-    except OSError:
-        disk = ""
-    proposed = rendered_edit(written, disk)
-    current_status = application_status(disk)
-    proposed_status = application_status(proposed) if proposed is not None else ""
-    if current_status == "approved" and proposed != disk:
-        return deny(
-            "approved Experience application content is immutable; open an"
-            " application revision through experience_compile.py")
-    protected = {current_status, proposed_status} & {
-        "draft", "in_review", "approved",
-    }
-    if not protected:
-        return 0
-    if (proposed is not None
-            and application_machine_projection(proposed)
-            != application_machine_projection(disk)):
-        return deny(
-            "Experience application metadata, Design System token block and"
-            " fixed runtime are machine-managed; use experience_compile.py")
-    old = str(written.get("old_string") or "")
-    combined = old + "\n" + str(written.get("new_string") or "")
-    if (APPLICATION_MACHINE_META_RE.search(combined)
-            or APPLICATION_TOKEN_BLOCK_RE.search(combined)
-            or APPLICATION_RUNTIME_RE.search(combined)
-            or edit_overlaps_spans(disk, old,
-                                   application_machine_spans(disk))):
-        return deny(
-            "the edit overlaps machine-managed Experience application"
-            " metadata, Design System tokens or fixed runtime")
-    return 0
 
 
 def pre(payload: dict) -> int:
@@ -1025,10 +903,6 @@ def pre_target(written: dict) -> int:
                 " use delivery_governance.py"
             )
     if rel.startswith("experience-design/"):
-        if rel == EXPERIENCE_APPLICATION_REL:
-            application_code = application_machine_guard(written, file_path)
-            if application_code:
-                return application_code
         artifact_violation = artifact_hard_cut_violation(rel)
         if artifact_violation:
             return deny(artifact_violation)
@@ -1115,50 +989,6 @@ def pre_target(written: dict) -> int:
     return 0
 
 
-def application_checker_path() -> Path | None:
-    candidates = (
-        Path(__file__).resolve().parent / "experience_application_check.py",
-        Path(vault_check.__file__).resolve().parent
-        / "experience_application_check.py",
-    )
-    return next((path for path in candidates if path.is_file()), None)
-
-
-def run_application_post_check(root: Path, *, force_gate: bool = False) -> int:
-    checker = application_checker_path()
-    if checker is None:
-        return deny(
-            "Experience application checker is unavailable; refusing to"
-            " leave a protected application surface unchecked"
-        )
-    application = root / EXPERIENCE_APPLICATION_REL
-    status = ""
-    if application.is_file():
-        try:
-            status = application_status(application.read_text(encoding="utf-8"))
-        except OSError as exc:
-            return deny(f"Experience application post-write check failed: {exc}")
-    mode = "--gate" if force_gate or status == "approved" else "--authoring"
-    try:
-        completed = subprocess.run(
-            [sys.executable, str(checker), "check", "--root",
-             str(root / "experience-design"), mode, "--json"],
-            capture_output=True, text=True, check=False, timeout=60,
-        )
-    except (OSError, subprocess.TimeoutExpired) as exc:
-        return deny(f"Experience application post-write check failed: {exc}")
-    if completed.returncode:
-        if completed.stdout:
-            sys.stderr.write(completed.stdout)
-        if completed.stderr:
-            sys.stderr.write(completed.stderr)
-        return deny(
-            "Experience application checker found a global violation in"
-            f" {mode[2:]} mode; repair the application and package maps"
-            " before continuing")
-    return 0
-
-
 def post(payload: dict) -> int:
     if "file_targets" not in payload:
         payload = normalize(payload)
@@ -1187,8 +1017,6 @@ def post_target(file_path: str) -> int:
     root = vault_root(file_path)
     if root is None:
         return 0
-    if is_experience_application_surface(rel):
-        return run_application_post_check(root)
     if not rel.endswith(".md"):
         return 0
     buffer = io.StringIO()
@@ -1554,35 +1382,6 @@ def read_config_snapshot(path: Path) -> dict:
     }
 
 
-def read_application_snapshot(vault: Path) -> dict:
-    path = vault / EXPERIENCE_APPLICATION_REL
-    if not path.exists() and not path.is_symlink():
-        return {
-            "path": str(path), "exists": False, "status": "",
-            "source_hash": "", "content_sha256": "", "text": "",
-            "mode": 0, "nlink": 0, "device": 0, "inode": 0,
-        }
-    try:
-        text = path.read_text(encoding="utf-8")
-        stat = path.stat()
-    except (OSError, UnicodeError) as exc:
-        return {"path": str(path), "exists": True, "read_error": str(exc)}
-    return {
-        "path": str(path),
-        "exists": True,
-        "status": application_status(text),
-        "source_hash": application_meta_value(
-            text, "experience-application-source-hash"
-        ),
-        "content_sha256": hashlib.sha256(text.encode("utf-8")).hexdigest(),
-        "text": text,
-        "mode": stat.st_mode & 0o777,
-        "nlink": stat.st_nlink,
-        "device": stat.st_dev,
-        "inode": stat.st_ino,
-    }
-
-
 def restore_config(snapshot: dict, expected_path: Path) -> str | None:
     recorded = Path(str(snapshot.get("path") or ""))
     try:
@@ -1840,47 +1639,6 @@ def valid_config_snapshot(snapshot: object, expected_path: Path) -> bool:
     return snapshot.get("guard_hash") == expected_hash
 
 
-def valid_application_snapshot(snapshot: object, vault: Path) -> bool:
-    if not isinstance(snapshot, dict):
-        return False
-    try:
-        recorded = Path(str(snapshot.get("path") or "")).resolve(strict=False)
-        expected = (vault / EXPERIENCE_APPLICATION_REL).resolve(strict=False)
-    except (OSError, RuntimeError):
-        return False
-    if recorded != expected or not isinstance(snapshot.get("exists"), bool):
-        return False
-    if snapshot.get("read_error"):
-        return False
-    for field in ("status", "source_hash", "content_sha256", "text"):
-        if not isinstance(snapshot.get(field), str):
-            return False
-    for field in ("mode", "nlink", "device", "inode"):
-        if not isinstance(snapshot.get(field), int):
-            return False
-    if not snapshot["exists"]:
-        return not any(
-            snapshot[field]
-            for field in (
-                "status", "source_hash", "content_sha256", "text", "mode",
-                "nlink", "device", "inode",
-            )
-        )
-    encoded = snapshot["text"].encode("utf-8")
-    return (
-        bool(re.fullmatch(r"[0-9a-f]{64}", snapshot["content_sha256"]))
-        and hashlib.sha256(encoded).hexdigest() == snapshot["content_sha256"]
-        and 0 <= snapshot["mode"] <= 0o777
-        and snapshot["nlink"] == 1
-        and snapshot["device"] >= 0
-        and snapshot["inode"] >= 0
-        and application_status(snapshot["text"]) == snapshot["status"]
-        and application_meta_value(
-            snapshot["text"], "experience-application-source-hash"
-        ) == snapshot["source_hash"]
-    )
-
-
 def load_json_file(path: Path) -> tuple[dict | None, bytes | None, str]:
     try:
         raw = path.read_bytes()
@@ -1907,34 +1665,8 @@ def load_recovery(payload: dict, expected_path: Path) \
         return None, "recovery state belongs to another Bash event"
     if not valid_config_snapshot(state.get("config"), expected_path):
         return None, "recovery config snapshot is invalid"
-    expected_vault = expected_path.parent / "docs"
-    if not valid_application_snapshot(
-            state.get("application"), expected_vault):
-        return None, "recovery application snapshot is invalid"
     if not valid_experience_tree_snapshot(state.get("experience_tree")):
         return None, "recovery Experience tree snapshot is invalid"
-    application = state["application"]
-    tree = state["experience_tree"]
-    application_row = tree.get(EXPERIENCE_APPLICATION_REL)
-    if application["exists"]:
-        if not isinstance(application_row, dict):
-            return None, "recovery tree omits the application snapshot"
-        try:
-            decoded = base64.b64decode(
-                application_row["content_base64"], validate=True,
-            ).decode("utf-8")
-        except (ValueError, UnicodeError):
-            return None, "recovery application bytes are invalid"
-        if (
-            decoded != application["text"]
-            or application_row["mode"] != application["mode"]
-            or application_row["nlink"] != application["nlink"]
-            or application_row["device"] != application["device"]
-            or application_row["inode"] != application["inode"]
-        ):
-            return None, "recovery application and tree snapshots differ"
-    elif application_row is not None:
-        return None, "recovery tree unexpectedly contains an application"
     if not isinstance(state.get("application_writer_allowed"), bool):
         return None, "recovery application writer authorization is invalid"
     return state, ""
@@ -1962,16 +1694,8 @@ def shell_snapshot(payload: dict) -> int:
             "workspace/config.json could not be snapshotted before Bash;"
             " refusing a command whose config effects could not be restored"
         )
-    application_vault = root or config_path.parent / "docs"
-    application = read_application_snapshot(application_vault)
-    if application.get("read_error"):
-        return deny(
-            "Experience application could not be snapshotted before Bash;"
-            " refusing a command whose application effects cannot be"
-            " attributed"
-        )
     try:
-        experience_tree = experience_tree_snapshot(application_vault)
+        experience_tree = experience_tree_snapshot(root or config_path.parent / "docs")
     except OSError as exc:
         return deny(
             "Experience Design could not be snapshotted before Bash: "
@@ -1983,17 +1707,6 @@ def shell_snapshot(payload: dict) -> int:
             "Experience Design cannot be safely snapshotted: "
             + snapshot_problem
         )
-    noncanonical_paths = noncanonical_experience_snapshot_paths(
-        experience_tree
-    )
-    if (
-        root is not None
-        and application.get("status") == "approved"
-        and not noncanonical_paths
-    ):
-        strict_code = run_application_post_check(root, force_gate=True)
-        if strict_code:
-            return strict_code
     value = {
         "vault": str(root) if root else "",
         "inventory": vault_inventory(root) if root else {},
@@ -2001,7 +1714,6 @@ def shell_snapshot(payload: dict) -> int:
         "config_writer_allowed": sanctioned_config_writer(
             payload, config_path
         ),
-        "application": application,
         "experience_tree": experience_tree,
         "application_writer_allowed": bool(
             root and sanctioned_application_writer(payload, root)
@@ -2012,7 +1724,6 @@ def shell_snapshot(payload: dict) -> int:
         "binding": guard_binding(payload),
         "config": config,
         "config_writer_allowed": value["config_writer_allowed"],
-        "application": application,
         "experience_tree": experience_tree,
         "application_writer_allowed": value[
             "application_writer_allowed"
@@ -2062,7 +1773,6 @@ def shell_verify(payload: dict) -> int:
             before = None
         config_before = recovery_state["config"]
         writer_allowed = bool(recovery_state.get("config_writer_allowed"))
-        application_before = recovery_state["application"]
         experience_before = recovery_state["experience_tree"]
         application_writer_allowed = bool(
             recovery_state.get("application_writer_allowed")
@@ -2078,16 +1788,9 @@ def shell_verify(payload: dict) -> int:
         writer_allowed = bool(
             before.get("config_writer_allowed")
         ) if isinstance(before, dict) else False
-        application_before = (
-            before.get("application") if isinstance(before, dict) else None
-        )
         experience_before = (
             before.get("experience_tree") if isinstance(before, dict) else None
         )
-        expected_vault = expected_config.parent / "docs"
-        if not valid_application_snapshot(
-                application_before, expected_vault):
-            application_before = None
         if not valid_experience_tree_snapshot(experience_before):
             experience_before = None
         application_writer_allowed = bool(
@@ -2128,31 +1831,14 @@ def shell_verify(payload: dict) -> int:
         if not root_value:
             return 0
         root = Path(root_value)
-        application_after = read_application_snapshot(root)
-        if application_after.get("read_error"):
-            return deny(
-                "Bash left the Experience application unreadable; refusing"
-                " to accept unverifiable application state"
-            )
-        application_changed = (
-            not isinstance(application_before, dict)
-            or application_after != application_before
-        )
         hardlinks_after = experience_hardlink_paths(root)
-        if hardlinks_after or (
-                application_changed and not application_writer_allowed):
+        if hardlinks_after:
             restore_error = (
                 restore_experience_tree(experience_before, root)
                 if isinstance(experience_before, dict)
                 else "the Experience recovery snapshot is unavailable"
             )
-            reason = (
-                "Bash created a hard-link alias for Experience Design state"
-                if hardlinks_after
-                else "Bash changed the canonical Experience application "
-                     "outside an authorized experience_compile.py lifecycle "
-                     "command"
-            )
+            reason = "Bash created a hard-link alias for Experience Design state"
             if restore_error:
                 return deny(f"{reason}; restore failed: {restore_error}")
             return deny(f"{reason}; the original Experience tree was restored")
@@ -2187,12 +1873,6 @@ def shell_verify(payload: dict) -> int:
                 "official lifecycle; the original Experience tree was "
                 f"restored ({detail})"
             )
-        if (application_changed
-                or any(is_experience_application_surface(key)
-                       for key in changed)):
-            application_code = run_application_post_check(root)
-            if application_code:
-                return application_code
         deleted = [key for key in changed if key not in new]
         experience_non_notes = [
             key for key in changed

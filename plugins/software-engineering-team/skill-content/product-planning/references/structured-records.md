@@ -50,8 +50,7 @@ such as `AC-ACC-001` are not links and do not satisfy coverage.
 
 `experience_refs` are the exception to the wikilink form: each is a qualified
 exact living record revision. It must resolve through a process receipt pinned
-at backlog scope and appear in that package's `application-map.json` for the
-same pinned `application@rN`. The application and process receipts are backlog
+at backlog scope for the same pinned `application@rN`. The application and process receipts are backlog
 input bindings, not values repeated in each story. A newer approved application
 receipt makes that binding non-current even if this story's record revision and
 owning process receipt did not change.

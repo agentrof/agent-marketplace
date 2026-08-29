@@ -108,9 +108,7 @@ class SingleTeamDistributionTests(unittest.TestCase):
 
         for relative in (
             "scripts/experience_application_check.py",
-            "skill-content/experience-modeling/data/application-template.html",
-            "skill-content/experience-modeling/data/application-map-schema.json",
-            "skill-content/experience-modeling/data/application-contract-schema.json",
+            "skill-content/experience-modeling/data/experience-schema.json",
         ):
             expected = (self.root / "plugins" / fixtures.PLUGIN / relative).read_bytes()
             for host in build_distributions.HOSTS:

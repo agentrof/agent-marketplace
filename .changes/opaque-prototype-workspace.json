@@ -1,0 +1,6 @@
+{
+  "summary": "Make Experience Design prototype workspaces fully author-owned and opaque to the compiler.",
+  "components": {
+    "software-engineering-team": "minor"
+  }
+}

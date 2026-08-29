@@ -28,9 +28,7 @@ PUBLIC_MARKETPLACES = {
     "codex": "agentrof/agent-marketplace@stable",
 }
 APPLICATION_RESOURCES = (
-    "skill-content/experience-modeling/data/application-template.html",
-    "skill-content/experience-modeling/data/application-map-schema.json",
-    "skill-content/experience-modeling/data/application-contract-schema.json",
+    "skill-content/experience-modeling/data/experience-schema.json",
 )
 
 
@@ -93,7 +91,7 @@ def exercise_application_resources(
     ], dict(env, PYTHONDONTWRITEBYTECODE="1")))
     if application_self_check.get("ok") is not True:
         raise SmokeFailure(
-            "installed canonical application runtime/schema self-check failed: "
+            "installed opaque prototype snapshot checker self-check failed: "
             + json.dumps(application_self_check.get("findings", []))
         )
 

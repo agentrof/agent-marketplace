@@ -268,9 +268,8 @@ def artifact_hard_cut_violation(policy: dict, rel: str) -> str:
                         if isinstance(value, str)
                     }):
                 return (
-                    f"process-local Experience web implementation '{normalized}'"
-                    " is forbidden; use experience-design/artifacts/application.html"
-                    " and the package artifacts/application-map.json"
+                    f"artifact '{normalized}' uses an extension forbidden by"
+                    " this subtree's declared artifact policy"
                 )
     parts = normalized.split("/")
     if (is_artifact_location(policy, normalized)
@@ -524,9 +523,8 @@ def check_vault_layout(vault: Vault, findings: list[Finding]) -> None:
         if artifact_violation:
             findings.append(Finding(
                 "error", rel, 1, "vault_layout", artifact_violation,
-                "remove the package-local implementation or legacy artifact;"
-                " Experience Design has one canonical application and one"
-                " JSON route map per process package"))
+                "remove or relocate the artifact that violates this subtree's"
+                " declared artifact policy"))
             continue
         if rel.rsplit("/", 1)[-1] == ".gitkeep":
             continue  # git plumbing for empty skeleton directories

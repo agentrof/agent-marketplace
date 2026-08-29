@@ -657,7 +657,6 @@ def validate_experience_ref(docs: Path, value: str, label: str,
             )
             return
         registries.append(current)
-    exact_ref = f"{identifier}:{stable_id}@r{revision}"
     record_receipts = [
         receipt for receipt in registries
         if receipt.get("experience_id") == identifier
@@ -675,17 +674,6 @@ def validate_experience_ref(docs: Path, value: str, label: str,
     if not record_receipts:
         errors.append(f"{label} does not resolve through approved Experience history")
         return
-    if not any(
-        isinstance(binding, dict)
-        and binding.get("record_ref") == exact_ref
-        for receipt in record_receipts
-        for binding in (
-            receipt.get("application_map", {}).get("bindings", []) or []
-        )
-    ):
-        errors.append(
-            f"{label} is not covered by its approved historical application map"
-        )
 
 
 def headings(body: str) -> set[str]:

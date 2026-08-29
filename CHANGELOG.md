@@ -45,3 +45,7 @@
 ## 4.1.0
 
 - Make Experience Design prototype workspaces fully author-owned and opaque to the compiler.
+
+## 4.1.1
+
+- Bind lifecycle writers to exact runtimes, post-attest legacy Experience commands, normalize shell payloads, and restore protected state across hostile path topologies with explicit host boundaries.

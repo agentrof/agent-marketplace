@@ -1,5 +1,5 @@
 {
-  "schema_version": 5,
+  "schema_version": 6,
   "experience_pattern": "^(?!application$)(?!exp-)[a-z0-9]+(?:-[a-z0-9]+)*$",
   "exact_ref_pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*:(?:JRN|FLW|SCR|STA|TRN)-[0-9]{3,}@r[1-9][0-9]*$",
   "id_patterns": {
@@ -18,15 +18,13 @@
     "transition": {"suffix": "-transition.md", "directory": "transitions"}
   },
   "application": {
-    "artifact_path": "experience-design/artifacts/application.html",
-    "package_map_path": "artifacts/application-map.json",
+    "artifact_root": "experience-design/artifacts/",
+    "artifact_policy": "opaque-author-owned-tree",
     "generated_registry_path": "experience-design/_generated/application-registry.json",
     "revision_ledger_path": "experience-design/_ledger/application-revisions.json",
     "receipt_pattern": "^application@r[1-9][0-9]*$",
     "reserved_experience_slug": "application",
-    "runtime_contract_version": 2,
-    "map_schema_path": "skill-content/experience-modeling/data/application-map-schema.json",
-    "contract_schema_path": "skill-content/experience-modeling/data/application-contract-schema.json"
+    "receipt_schema_version": 3
   },
   "generated_files": ["registry.json", "coverage.json"],
   "machine_fields": ["approved_at_utc", "approval_revision", "registry_hash", "package_hash", "source_hash"]

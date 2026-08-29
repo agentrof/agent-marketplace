@@ -326,7 +326,7 @@ def experience_candidates(docs: Path) -> list[dict]:
         return []
     if application_problems or not application:
         return []
-    application_path = experience_root / experience_application_check.APPLICATION_RELATIVE
+    application_path = experience_root / experience_application_check.REGISTRY_RELATIVE
     application_receipt = receipt(
         "experience-design",
         f"application@r{application['application_revision']}",
@@ -338,11 +338,11 @@ def experience_candidates(docs: Path) -> list[dict]:
         application_path.parent,
         "strict-current",
     )
-    application_receipt["committed"] = paths_are_committed([
-        application_path,
-        experience_root / experience_application_check.REGISTRY_RELATIVE,
-        experience_root / experience_application_check.LEDGER_RELATIVE,
-    ])
+    application_receipt["committed"] = paths_are_committed(
+        experience_application_check.artifact_snapshot_paths(
+            experience_root, application,
+        )
+    )
     found = [application_receipt]
     for folder in sorted(root.iterdir()) if root.is_dir() else []:
         note = folder / "experience.md"

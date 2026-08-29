@@ -8,18 +8,12 @@
   directory as the vault root. Its maps, generated views, document-type
   graph policy, citations, and navigation follow the
   `obsidian-vault` skill and the owning validation commands.
-- `{{workspace}}/docs/experience-design/artifacts/application.html`: the one
-  canonical, CSP-bound, network-free Experience acceptance application. Its
-  version-2 declarative runtime executes deterministic state outcomes,
-  preserved context and intentional returns; metadata binds the exact approved
-  contract-v3 Design System.
+- `{{workspace}}/docs/experience-design/artifacts/`: the author-owned
+  Experience prototype workspace. Its structure, files, technologies, assets
+  and behavior are free; the compiler snapshots bytes and paths only.
 - `{{workspace}}/docs/experience-design/experiences/`: living approved
-  Experience packages, one active package per primary BA process. Each package
-  maps exact record revisions to application route/state entries through its
-  sole version-2 artifact, `artifacts/application-map.json`. `application` is
-  a reserved slug;
-  package-local previews and manifests are invalid. Sketches are exploration,
-  not Experience state.
+  Experience packages, one active package per primary BA process. `application`
+  is a reserved slug. Prototype files are review evidence, not delivery code.
 - `{{workspace}}/apps/`: application code, one directory per application.
 - `{{workspace}}/docs/operation/`: approved verification and environment
   contracts used when Delivery turns stories into executable Items.

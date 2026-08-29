@@ -27,9 +27,9 @@ policy defines paths, metadata, title rules and graph colors.
 - Test plan: the planned scenario design for that story.
 
 Approved living Experience packages remain the source for journeys, screens
-and process boundaries. The globally current `application@rN` is their visual
-acceptance surface. Stories link to exact child references that resolve through
-the pinned process receipt and its application map.
+and process boundaries. The globally current `application@rN` identifies their
+author-owned prototype snapshot. Stories link to exact child references that
+resolve through the pinned process receipt.
 
 ## Story contract
 
@@ -62,7 +62,7 @@ Use vault-absolute wikilinks in `criterion_refs`, `derives_from`, `depends_on`,
 `uses_design` and `constrained_by`. Criterion and rule links target exact stable
 headings in approved notes. `experience_refs` use qualified exact revisions
 such as `checkout:SCR-001@r2`; each must exist in a pinned current process
-receipt and its `application-map.json` for the pinned application. Bare
+receipt for the pinned application. Bare
 unqualified IDs or invented shorthand do not satisfy coverage.
 
 ## Scenario coverage

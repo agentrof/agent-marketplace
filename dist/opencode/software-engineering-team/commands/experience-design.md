@@ -1,5 +1,5 @@
 ---
-description: Maintain living, process-owned Experience packages and their one canonical application after approved analysis, Solution Design and Design System inputs. Supports Requirement and manual entry before backlog planning.
+description: Maintain living, process-owned Experience packages and author-owned prototype snapshots after approved analysis, Solution Design and Design System inputs.
 agent: software-engineering-team
 ---
 

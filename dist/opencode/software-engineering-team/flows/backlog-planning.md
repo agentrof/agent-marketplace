@@ -90,7 +90,7 @@ approved BA scope must receive an exact covered-or-deferred disposition.
 
 Use exact `<experience>:<ID>@rN` values such as `checkout:SCR-001@r2` for
 `experience_refs`. Each value must resolve in a pinned current process receipt
-and be covered by its `application-map.json` in the pinned `application@rN`.
+for the pinned `application@rN`.
 Use vault-absolute wikilinks for `criterion_refs`,
 `derives_from`, `depends_on`, `uses_design` and `constrained_by`. Criterion
 links target the approved owning note and carry its BA registry-qualified

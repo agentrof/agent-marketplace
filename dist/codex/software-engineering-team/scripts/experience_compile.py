@@ -53,8 +53,12 @@ STATE_CLASSES = {
 PROCESS_REGISTRY_FIELDS = {
     "schema_version", "experience_id", "package_revision", "origin_mode",
     "implements", "primary_process_ref", "related_process_refs",
-    "input_bindings", "source_hash", "records", "application_map",
+    "input_bindings", "source_hash", "records",
     "registry_hash", "package_hash",
+}
+PROCESS_REGISTRY_FIELDS_V5 = {
+    *PROCESS_REGISTRY_FIELDS,
+    "application_map",
 }
 MUTATING_COMMANDS = {
     "init", "begin-revision", "enter-review", "stub", "render",
@@ -806,9 +810,8 @@ def exact_application_preimage(value: object) -> bool:
     if value == {"exists": False}:
         return type(value.get("exists")) is bool
     expected_keys = {
-        "exists", "status", "revision", "source_hash", "package_set_hash",
-        "coverage_hash", "application_hash", "runtime_sha256",
-        "design_system_package_hash",
+        "exists", "status", "revision", "artifact_tree_hash",
+        "package_set_hash", "application_hash",
     }
     return (
         type(value) is dict
@@ -1249,18 +1252,22 @@ def validate_application_predecessor(root: Path, expected: dict) -> None:
     predecessor = rows[-1] if rows else None
     if not isinstance(predecessor, dict):
         raise ValueError("application predecessor receipt is missing")
+    artifact_tree_hash = predecessor.get("artifact_tree_hash")
+    if predecessor.get("schema_version") == 2:
+        files, inventory_findings = experience_application_check.artifact_inventory(root)
+        if inventory_findings:
+            raise ValueError(
+                "legacy application predecessor cannot be snapshotted: "
+                + "; ".join(inventory_findings)
+            )
+        artifact_tree_hash = experience_application_check.artifact_tree_hash(files)
     actual = {
         "exists": True,
         "status": "approved",
         "revision": predecessor.get("application_revision"),
-        "source_hash": predecessor.get("source_hash"),
+        "artifact_tree_hash": artifact_tree_hash,
         "package_set_hash": predecessor.get("package_set_hash"),
-        "coverage_hash": predecessor.get("coverage_hash"),
         "application_hash": predecessor.get("application_hash"),
-        "runtime_sha256": predecessor.get("runtime_sha256"),
-        "design_system_package_hash": predecessor.get(
-            "design_system", {},
-        ).get("package_hash"),
     }
     if actual != expected:
         raise ValueError("application predecessor receipt differs from the scope plan")
@@ -1285,17 +1292,6 @@ def validate_open_application_state(
     elif state.get("phase") != expected_phase:
         raise ValueError("application compiler-owned lifecycle phase is stale")
     validate_application_predecessor(root, state["expected_application"])
-    meta = application_metadata(root)
-    if (
-        meta.get("experience-application-status") != expected_phase
-        or meta.get("experience-application-proposal-hash")
-        != state.get("proposal_hash")
-        or meta.get("experience-application-revision")
-        != str(state.get("opened_revision"))
-    ):
-        raise ValueError(
-            "application lifecycle identity, phase or successor revision drifted after opening"
-        )
     return state
 
 
@@ -1355,16 +1351,15 @@ def source_digest(package: Path, *, historical_revision: int | None = None) -> s
         digest.update(b"\0")
         digest.update(render_fm(stable, without_generated_relations(body)).encode())
         digest.update(b"\0")
-    application_map = package / "artifacts" / "application-map.json"
-    if application_map.is_file():
-        digest.update(b"artifacts/application-map.json\0")
-        try:
-            digest.update(canonical(strict_json_loads(
-                application_map.read_text(encoding="utf-8")
-            )))
-        except (json.JSONDecodeError, ValueError):
-            digest.update(application_map.read_bytes())
-        digest.update(b"\0")
+    artifacts = package / "artifacts"
+    if artifacts.is_dir() and not artifacts.is_symlink():
+        for path in sorted(artifacts.rglob("*")):
+            if not path.is_file() or path.is_symlink():
+                continue
+            digest.update(path.relative_to(package).as_posix().encode())
+            digest.update(b"\0")
+            digest.update(path.read_bytes())
+            digest.update(b"\0")
     return "sha256:" + digest.hexdigest()
 
 
@@ -1409,10 +1404,13 @@ def validate_process_ledger(
             "_ledger/package-revisions.json must contain one ordered, contiguous approved registry before the current revision"
         )
     for row in rows:
+        schema_version = row.get("schema_version")
+        legacy_v5 = schema_version == 5 and set(row) == PROCESS_REGISTRY_FIELDS_V5
         if (
-            set(row) != PROCESS_REGISTRY_FIELDS
-            or type(row.get("schema_version")) is not int
-            or row.get("schema_version") != 5
+            (set(row) != PROCESS_REGISTRY_FIELDS or schema_version != 6)
+            and not legacy_v5
+        ) or (
+            type(schema_version) is not int
             or type(row.get("package_revision")) is not int
             or int(row.get("package_revision", 0)) < 1
             or not valid_experience_slug(str(row.get("experience_id", "")))
@@ -1421,7 +1419,7 @@ def validate_process_ledger(
             or not isinstance(row.get("related_process_refs"), list)
             or not isinstance(row.get("input_bindings"), dict)
             or not isinstance(row.get("records"), list)
-            or not isinstance(row.get("application_map"), dict)
+            or (legacy_v5 and not isinstance(row.get("application_map"), dict))
         ):
             findings.append(
                 "_ledger/package-revisions.json contains an invalid process registry schema"
@@ -1784,10 +1782,7 @@ def compile_package(package: Path, gate: bool = False, *,
                         experience_root, package, reference, related_processes,
                         gate=gate and not allow_stale_inputs)):
                     problems.append(f"{row['path']}: {field} targets a missing, retired, or stale Experience record: {reference}")
-    import experience_application_check
-    application_map, map_problems = experience_application_check.load_application_map(package)
-    problems.extend(map_problems)
-    registry = {"schema_version": 5, "experience_id": package.name, "package_revision": data.get("revision", 1), "origin_mode": data.get("origin_mode"), "implements": implemented_requirements, "primary_process_ref": data.get("primary_process_ref", ""), "related_process_refs": list_value(data, "related_process_refs"), "input_bindings": {key: list(value) for key, value in bindings(data).items()}, "source_hash": source_digest(package), "records": rows, "application_map": application_map}
+    registry = {"schema_version": 6, "experience_id": package.name, "package_revision": data.get("revision", 1), "origin_mode": data.get("origin_mode"), "implements": implemented_requirements, "primary_process_ref": data.get("primary_process_ref", ""), "related_process_refs": list_value(data, "related_process_refs"), "input_bindings": {key: list(value) for key, value in bindings(data).items()}, "source_hash": source_digest(package), "records": rows}
     registry["registry_hash"] = sha(canonical({key: value for key, value in registry.items() if key not in {"source_hash", "registry_hash", "package_hash"}}))
     registry["package_hash"] = sha(canonical({"source_hash": registry["source_hash"], "registry_hash": registry["registry_hash"]}))
     current_revision = data.get("revision") if type(data.get("revision")) is int else 0
@@ -1949,20 +1944,22 @@ def process_from_inputs(root: Path, value: str, receipts: list[dict], *, require
 
 
 def application_metadata(root: Path) -> dict[str, str]:
-    application = root / "artifacts" / "application.html"
-    if not application.is_file():
+    """Expose lifecycle state without inspecting author-owned artifacts."""
+    try:
+        state = read_open_application_state(root)
+    except ValueError:
         return {}
-    import experience_application_check
-    return experience_application_check.metadata(
-        application.read_text(encoding="utf-8")
-    )
+    return {
+        "experience-application-status": str(state.get("phase", "")),
+        "experience-application-proposal-hash": str(state.get("proposal_hash", "")),
+        "experience-application-revision": str(state.get("opened_revision", "")),
+    }
 
 
 def validate_reviewer_attestation(
     path_value: str,
     proposal_hash: str,
     application_registry: dict,
-    application_status: str,
 ) -> None:
     if not path_value:
         raise ValueError("approval requires --review-attestation from experience-reviewer")
@@ -1973,21 +1970,29 @@ def validate_reviewer_attestation(
         value = strict_json_loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError, ValueError) as exc:
         raise ValueError(f"review attestation is unreadable: {exc}") from exc
-    expected_keys = {
-        "schema_version", "proposal_hash", "application_source_hash",
-        "application_package_set_hash", "application_coverage_hash",
-        "application_hash", "application_revision", "application_status",
-        "reviewed_at_utc", "reviewer_role", "blockers",
+    legacy_keys = {
+        "schema_version", "proposal_hash", "artifact_tree_hash",
+        "application_package_set_hash", "application_hash",
+        "application_revision", "reviewed_at_utc", "reviewer_role", "blockers",
     }
-    if not isinstance(value, dict) or set(value) != expected_keys:
+    advisory_keys = {
+        "schema_version", "proposal_hash", "artifact_tree_hash",
+        "application_package_set_hash", "application_hash",
+        "application_revision", "reviewed_at_utc", "reviewer_role", "advisories",
+    }
+    if not isinstance(value, dict):
         raise ValueError("review attestation has an unsupported schema")
-    if value.get("schema_version") != 2:
+    if value.get("schema_version") == 3 and set(value) == legacy_keys:
+        advisories = value.get("blockers")
+    elif value.get("schema_version") == 4 and set(value) == advisory_keys:
+        advisories = value.get("advisories")
+    else:
         raise ValueError("review attestation has an unsupported schema version")
     if value.get("reviewer_role") != "experience-reviewer":
         raise ValueError("review attestation must come from experience-reviewer")
-    blockers = value.get("blockers")
-    if not isinstance(blockers, list) or blockers:
-        raise ValueError("review attestation must report zero blockers")
+    if not isinstance(advisories, list) or any(
+            not isinstance(item, str) for item in advisories):
+        raise ValueError("review attestation advisories must be an array of text")
     if value.get("proposal_hash") != proposal_hash:
         raise ValueError("review attestation is bound to another scope proposal")
     revision = value.get("application_revision")
@@ -1997,11 +2002,6 @@ def validate_reviewer_attestation(
         or revision != application_registry.get("application_revision")
     ):
         raise ValueError("review attestation is stale for the current application revision")
-    if (
-        value.get("application_status") != "in_review"
-        or application_status != "in_review"
-    ):
-        raise ValueError("review attestation application must be in_review")
     reviewed_at = value.get("reviewed_at_utc")
     if not isinstance(reviewed_at, str):
         raise ValueError("review attestation reviewed_at_utc must be timezone-aware")
@@ -2020,12 +2020,10 @@ def validate_reviewer_attestation(
     if now - reviewed > timedelta(hours=24):
         raise ValueError("review attestation is older than 24 hours")
     if (
-        value.get("application_source_hash")
-        != application_registry.get("source_hash")
+        value.get("artifact_tree_hash")
+        != application_registry.get("artifact_tree_hash")
         or value.get("application_package_set_hash")
         != application_registry.get("package_set_hash")
-        or value.get("application_coverage_hash")
-        != application_registry.get("coverage_hash")
         or value.get("application_hash")
         != application_registry.get("application_hash")
     ):
@@ -2034,14 +2032,13 @@ def validate_reviewer_attestation(
 
 def require_committed_application(root: Path) -> None:
     import experience_application_check
-    paths = [
-        root / experience_application_check.APPLICATION_RELATIVE,
-        root / experience_application_check.REGISTRY_RELATIVE,
-        root / experience_application_check.LEDGER_RELATIVE,
-    ]
+    registry, problems = experience_application_check.approved_snapshot(root)
+    if problems:
+        raise ValueError("approved prototype snapshot is invalid: " + "; ".join(problems))
+    paths = experience_application_check.artifact_snapshot_paths(root, registry)
     if not stage_package.paths_are_committed(paths):
         raise ValueError(
-            "the approved application, generated registry and revision ledger must be committed before opening a successor revision"
+            "the approved prototype artifacts, generated registry and revision ledger must be committed before opening a successor revision"
         )
 
 
@@ -2055,10 +2052,9 @@ def approved_application_registry(root: Path) -> tuple[dict, list[str]]:
 
 
 def expected_application(root: Path) -> dict:
-    application = root / "artifacts" / "application.html"
-    if not application.is_file():
+    import experience_application_check
+    if not (root / experience_application_check.LEDGER_RELATIVE).is_file():
         return {"exists": False}
-    meta = application_metadata(root)
     registry, problems = approved_application_registry(root)
     if problems:
         raise ValueError(
@@ -2067,14 +2063,11 @@ def expected_application(root: Path) -> dict:
         )
     return {
         "exists": True,
-        "status": meta.get("experience-application-status"),
+        "status": "approved",
         "revision": registry["application_revision"],
-        "source_hash": registry["source_hash"],
+        "artifact_tree_hash": registry["artifact_tree_hash"],
         "package_set_hash": registry["package_set_hash"],
-        "coverage_hash": registry["coverage_hash"],
         "application_hash": registry["application_hash"],
-        "runtime_sha256": registry["runtime_sha256"],
-        "design_system_package_hash": registry["design_system"]["package_hash"],
     }
 
 
@@ -2084,11 +2077,13 @@ def verify_application_preimage(
     expected = plan.get("expected_application")
     if not isinstance(expected, dict):
         raise ValueError("scope plan is missing the application preimage")
-    application = root / "artifacts" / "application.html"
-    meta = application_metadata(root)
-    phase = meta.get("experience-application-status", "")
-    if allow_open and application.is_file() and phase in {"draft", "in_review"}:
-        if meta.get("experience-application-proposal-hash") != proposal_hash:
+    try:
+        state = read_open_application_state(root)
+    except ValueError:
+        state = {}
+    phase = str(state.get("phase", ""))
+    if allow_open and phase in {"draft", "in_review"}:
+        if state.get("proposal_hash") != proposal_hash:
             raise ValueError("application is open for another scope proposal")
         validate_open_application_state(
             root, plan=plan, proposal_hash=proposal_hash,
@@ -2096,115 +2091,26 @@ def verify_application_preimage(
         )
         return
     if not expected.get("exists"):
-        if application.exists():
+        import experience_application_check
+        if (root / experience_application_check.LEDGER_RELATIVE).exists():
             raise ValueError("application changed after the scope proposal")
         return
-    if not application.is_file():
-        raise ValueError("application disappeared after the scope proposal")
     registry, problems = approved_application_registry(root)
     if problems:
         raise ValueError("application changed after the scope proposal: " + "; ".join(problems))
     actual = {
         "exists": True,
-        "status": meta.get("experience-application-status"),
+        "status": "approved",
         "revision": registry.get("application_revision"),
-        "source_hash": registry.get("source_hash"),
+        "artifact_tree_hash": registry.get("artifact_tree_hash"),
         "package_set_hash": registry.get("package_set_hash"),
-        "coverage_hash": registry.get("coverage_hash"),
         "application_hash": registry.get("application_hash"),
-        "runtime_sha256": registry.get("runtime_sha256"),
-        "design_system_package_hash": registry.get("design_system", {}).get("package_hash"),
     }
     if actual != expected:
         raise ValueError("application changed after the scope proposal")
 
 
-def sync_application_dependencies(root: Path, text: str) -> str:
-    import experience_application_check
-    design, _receipt, problems = experience_application_check.design_binding(root)
-    if problems:
-        raise ValueError("; ".join(problems))
-    values = {
-        "experience-application-runtime-sha256": experience_application_check.runtime_sha256(),
-        "design-system-package-hash": str(design["package_hash"]),
-        "design-system-master-revision": str(design["revision"]),
-        "design-system-master-source-hash": str(design["master_source_hash"]),
-    }
-    for name, value in values.items():
-        text = experience_application_check.replace_meta(text, name, value)
-    text = experience_application_check.replace_tokens(text, str(design["tokens"]))
-    runtime_pattern = re.compile(
-        r'(<script\b[^>]*\bid=["\']experience-application-runtime["\'][^>]*>)'
-        r'.*?(</script(?:[\t\n\f\r />][^<>]*)?>)',
-        re.I | re.S,
-    )
-    template_runtime = experience_application_check.template_runtime()
-    if not runtime_pattern.search(text):
-        raise ValueError("application fixed runtime is missing")
-    text = runtime_pattern.sub(
-        lambda match: match.group(1) + template_runtime + match.group(2),
-        text,
-        count=1,
-    )
-    checksum_pattern = re.compile(
-        r'(<script\b[^>]*\bid=["\']experience-application-runtime["\'][^>]*'
-        r'\bdata-runtime-sha256=["\'])[^"\']*(["\'])',
-        re.I,
-    )
-    if not checksum_pattern.search(text):
-        raise ValueError("application runtime checksum attribute is missing")
-    text = checksum_pattern.sub(
-        rf"\g<1>{experience_application_check.runtime_sha256()}\g<2>",
-        text,
-        count=1,
-    )
-    csp_pattern = re.compile(
-        r'(<meta\b(?=[^>]*\bhttp-equiv=["\']Content-Security-Policy["\'])'
-        r'(?=[^>]*\bcontent=")[^>]*\bcontent=")[^"]*(")',
-        re.I,
-    )
-    if not csp_pattern.search(text):
-        raise ValueError("application Content-Security-Policy metadata is missing")
-    runtime_csp = experience_application_check.runtime_csp_sha256()
-    expected_csp = experience_application_check.expected_csp()
-    if runtime_csp not in expected_csp:
-        raise ValueError("application runtime CSP digest cannot be synchronized")
-    return csp_pattern.sub(
-        lambda match: match.group(1) + expected_csp + match.group(2),
-        text,
-        count=1,
-    )
-
-
-def rename_application_refs(text: str, old: str, new: str) -> str:
-    """Rewrite live exact refs and the declarative route owner canonically."""
-    text = text.replace(old + ":", new + ":")
-    pattern = re.compile(
-        r'(<script\b(?=[^>]*\btype=["\']application/json["\'])'
-        r'(?=[^>]*\bid=["\']experience-application-contract["\'])[^>]*>)'
-        r'(.*?)(</script(?:[\t\n\f\r />][^<>]*)?>)',
-        re.I | re.S,
-    )
-    match = pattern.search(text)
-    if match is None:
-        raise ValueError("application contract script is missing during rename")
-    try:
-        contract = strict_json_loads(match.group(2))
-    except (json.JSONDecodeError, ValueError) as exc:
-        raise ValueError(f"application contract cannot be renamed: {exc}") from exc
-    if not isinstance(contract, dict) or not isinstance(contract.get("routes"), list):
-        raise ValueError("application contract routes are invalid during rename")
-    for route in contract["routes"]:
-        if isinstance(route, dict) and route.get("experience_id") == old:
-            route["experience_id"] = new
-    body = "\n" + json.dumps(
-        contract, ensure_ascii=False, indent=2, sort_keys=True,
-    ) + "\n  "
-    return text[:match.start()] + match.group(1) + body + match.group(3) + text[match.end():]
-
-
 def open_application(root: Path, plan: dict, proposal_hash: str) -> None:
-    import experience_application_check
     action = str(plan.get("application_action", ""))
     if action == "reuse":
         if open_application_state_path(root).exists():
@@ -2213,60 +2119,28 @@ def open_application(root: Path, plan: dict, proposal_hash: str) -> None:
         return
     if action not in {"create", "update"}:
         raise ValueError("scope plan has an invalid application_action")
-    application = root / experience_application_check.APPLICATION_RELATIVE
-    current_meta = application_metadata(root)
-    if (
-        application.is_file()
-        and current_meta.get("experience-application-status") in {"draft", "in_review"}
-    ):
+    if open_application_state_path(root).exists():
+        current = read_open_application_state(root)
+        if current.get("phase") != "draft":
+            raise ValueError("application is already in review")
         validate_open_application_state(
             root, plan=plan, proposal_hash=proposal_hash,
             expected_phase="draft",
         )
         return
-    if open_application_state_path(root).exists():
-        raise ValueError("application has stale compiler-owned open revision state")
     verify_application_preimage(root, plan, proposal_hash, allow_open=False)
     expected = plan["expected_application"]
     if action == "create":
         if expected.get("exists"):
             raise ValueError("application_action create requires an absent application")
-        text = experience_application_check.render_template(root, proposal_hash, 1)
+        (root / "artifacts").mkdir(parents=True, exist_ok=True)
     else:
         if not expected.get("exists"):
             raise ValueError("application_action update requires an approved application")
         require_committed_application(root)
-        text = application.read_text(encoding="utf-8")
-        text = sync_application_dependencies(root, text)
-        revision = opened_application_revision(plan)
-        for name, value in (
-            ("experience-application-status", "draft"),
-            ("experience-application-revision", str(revision)),
-            ("experience-application-proposal-hash", proposal_hash),
-            ("experience-application-source-hash", ""),
-            ("experience-application-package-set-hash", ""),
-            ("experience-application-coverage-hash", ""),
-            ("experience-application-hash", ""),
-            ("experience-application-approved-at-utc", ""),
-        ):
-            text = experience_application_check.replace_meta(text, name, value)
-    atomic_write_bytes(application, text.encode())
     write_open_application_state(
         root, plan, proposal_hash, phase="draft",
     )
-
-
-def write_application_map(package: Path) -> None:
-    target = package / "artifacts" / "application-map.json"
-    if target.exists():
-        raise ValueError(f"refusing to overwrite {target}")
-    target.parent.mkdir(parents=True, exist_ok=True)
-    atomic_write_bytes(target, canonical({
-        "schema_version": 2,
-        "application_path": "experience-design/artifacts/application.html",
-        "experience_id": package.name,
-        "bindings": [],
-    }))
 
 
 def init(args) -> int:
@@ -2301,8 +2175,6 @@ def init(args) -> int:
         return fail(str(exc), 2)
     if any(fields(item).get("primary_process_ref") == primary and fields(item).get("status") != "retired" for item in packages(root)): return fail("an active Experience already owns this primary process", 2)
     package = root / "experiences" / args.experience
-    application = root / "artifacts" / "application.html"
-    original_application = application.read_bytes() if application.is_file() else None
     try:
         open_application(root, plan, args.proposal_hash)
     except ValueError as exc:
@@ -2315,15 +2187,11 @@ def init(args) -> int:
     try:
         write(package / "experience.md", data, args.title or f"{args.experience.replace('-', ' ').title()} Experience", "Living process-owned Experience package.", "maps/experience-design")
         for name in [entry[0] for entry in KIND.values()] + ["artifacts", GENERATED, LEDGER]: (package / name).mkdir(parents=True, exist_ok=True)
-        write_application_map(package)
         write_open_revision(package, plan, selected_action, args.proposal_hash)
     except (OSError, ValueError) as exc:
         if package.exists():
             shutil.rmtree(package)
-        if original_application is None:
-            application.unlink(missing_ok=True)
-        else:
-            atomic_write_bytes(application, original_application)
+        open_application_state_path(root).unlink(missing_ok=True)
         return fail(str(exc), 2)
     print(json.dumps({"experience": args.experience, "path": str(package), "origin_mode": args.origin_mode}, indent=2)); return 0
 
@@ -2333,10 +2201,6 @@ def propose(args) -> int:
     receipts, problems, context = selected_inputs(root, args)
     if problems:
         return fail("; ".join(problems), 2)
-    import experience_application_check
-    _design, _receipt, design_problems = experience_application_check.design_binding(root)
-    if design_problems:
-        return fail("; ".join(design_problems), 2)
     if len(args.process_ref) > 1 and args.experience:
         return fail("a multi-process create derives each Experience slug from its process; omit --experience", 2)
     actions = []
@@ -2347,7 +2211,7 @@ def propose(args) -> int:
             package for package in packages(root)
             if fields(package).get("status") == "approved"
         ]
-        if not current_packages and not (root / "artifacts" / "application.html").is_file():
+        if not current_packages and not (root / LEDGER / "application-revisions.json").is_file():
             return fail("an application-only proposal needs an existing application", 2)
         actions.extend({
             "primary_process_ref": str(fields(package).get("primary_process_ref", "")),
@@ -2451,27 +2315,8 @@ def propose(args) -> int:
             str(row.get("target_experience", "")),
         )
     )
-    current_design_hash = str(_design["package_hash"])
-    selected_updates = {
-        str(row.get("experience"))
-        for row in actions
-        if row.get("action") in {"update", "rename", "retire"}
-    }
-    stale_design_packages = [
-        package.name for package in packages(root)
-        if fields(package).get("status") == "approved"
-        and bindings(fields(package)).get("design-system", ("", ""))[1]
-        != current_design_hash
-        and package.name not in selected_updates
-    ]
-    if stale_design_packages:
-        return fail(
-            "scope proposal must update every Experience package with a stale Design System binding: "
-            + ", ".join(sorted(stale_design_packages)),
-            2,
-        )
     mutating = any(row["action"] in {"create", "update", "rename", "retire"} for row in actions)
-    application_exists = (root / "artifacts" / "application.html").is_file()
+    application_exists = (root / LEDGER / "application-revisions.json").is_file()
     application_action = args.application_action or (
         ("update" if application_exists else "create") if mutating else "reuse"
     )
@@ -2615,23 +2460,12 @@ def render_application(args) -> int:
     registry, problems = experience_application_check.compile_application(root)
     if problems:
         return print_problems(problems, getattr(args, "json", False))
-    application = root / experience_application_check.APPLICATION_RELATIVE
-    text = application.read_text(encoding="utf-8")
-    meta = experience_application_check.metadata(text)
-    status = meta.get("experience-application-status", "draft")
-    if status not in {"draft", "in_review"}:
-        return fail("approved application is immutable; begin an application revision first", 2)
     try:
+        state = read_open_application_state(root)
+        status = str(state.get("phase", ""))
         validate_open_application_state(root, expected_phase=status)
     except ValueError as exc:
         return fail(str(exc), 2)
-    proposal_hash = meta.get("experience-application-proposal-hash", "")
-    atomic_write_bytes(
-        application,
-        experience_application_check.stamp_application(
-            text, registry, status, proposal_hash,
-        ).encode(),
-    )
     target = root / experience_application_check.REGISTRY_RELATIVE
     atomic_write_json(target, registry)
     if getattr(args, "json", False):
@@ -2652,7 +2486,7 @@ def begin_application_revision(args) -> int:
     except ValueError as exc:
         return fail(str(exc), 2)
     print(json.dumps({
-        "path": str(root / "artifacts" / "application.html"),
+        "path": str(root / "artifacts"),
         "status": application_metadata(root).get("experience-application-status"),
         "revision": application_metadata(root).get("experience-application-revision"),
     }, indent=2))
@@ -2695,12 +2529,6 @@ def enter_application_review(args) -> int:
     )
     if problems:
         return print_problems(problems, False)
-    application = root / experience_application_check.APPLICATION_RELATIVE
-    text = application.read_text(encoding="utf-8")
-    text = experience_application_check.stamp_application(
-        text, registry, "in_review", args.proposal_hash
-    )
-    atomic_write_bytes(application, text.encode())
     target = root / experience_application_check.REGISTRY_RELATIVE
     atomic_write_json(target, registry)
     write_open_application_state(
@@ -2814,13 +2642,11 @@ def approve_set(args) -> int:
     )
     try:
         if not {
-            "source_hash", "package_set_hash", "coverage_hash",
-            "application_hash",
+            "artifact_tree_hash", "package_set_hash", "application_hash",
         }.issubset(attested_registry):
             raise ValueError("current application cannot be attested")
         validate_reviewer_attestation(
             args.review_attestation, args.proposal_hash, attested_registry,
-            application_metadata(root).get("experience-application-status", ""),
         )
     except ValueError as exc:
         return fail(str(exc), 2)
@@ -2898,8 +2724,8 @@ def approve_set(args) -> int:
             if problems:
                 raise ValueError("; ".join(problems))
             attested_fields = (
-                "application_revision", "source_hash", "package_set_hash",
-                "coverage_hash", "application_hash",
+                "application_revision", "artifact_tree_hash", "package_set_hash",
+                "application_hash",
             )
             if any(
                 application_registry.get(field) != attested_registry.get(field)
@@ -2909,37 +2735,24 @@ def approve_set(args) -> int:
                     "review attestation is stale for the final application"
                 )
             previous_application = plan.get("expected_application", {})
-            no_semantic_delta = bool(previous_application.get("exists")) and all((
-                application_registry["source_hash"] == previous_application.get("source_hash"),
-                application_registry["package_set_hash"] == previous_application.get("package_set_hash"),
-                application_registry["coverage_hash"] == previous_application.get("coverage_hash"),
-                application_registry["design_system"]["package_hash"]
-                == previous_application.get("design_system_package_hash"),
-                application_registry["runtime_sha256"]
-                == previous_application.get("runtime_sha256"),
+            no_snapshot_delta = bool(previous_application.get("exists")) and all((
+                application_registry["artifact_tree_hash"]
+                == previous_application.get("artifact_tree_hash"),
+                application_registry["package_set_hash"]
+                == previous_application.get("package_set_hash"),
             ))
-            if no_semantic_delta:
-                raise ValueError("application update has no application or package-set delta")
-            application = root / experience_application_check.APPLICATION_RELATIVE
-            atomic_write_bytes(
-                application,
-                experience_application_check.stamp_application(
-                    application.read_text(encoding="utf-8"),
-                    application_registry,
-                    "approved",
-                    args.proposal_hash,
-                ).encode(),
-            )
+            if no_snapshot_delta:
+                raise ValueError("application update has no prototype or package-set delta")
             experience_application_check.write_registry_and_ledger(
                 root, application_registry
             )
+            open_state = open_application_state_path(root)
+            open_state.unlink(missing_ok=True)
+            fsync_directory(open_state.parent)
             checked, problems = experience_application_check.compile_application(root, True)
             if problems:
                 raise ValueError("; ".join(problems))
             application_registry = checked
-            open_state = open_application_state_path(root)
-            open_state.unlink(missing_ok=True)
-            fsync_directory(open_state.parent)
             render_experience_navigation(root)
         except Exception as exc:
             if root.exists():
@@ -3030,23 +2843,6 @@ def rename(args) -> int:
             write_open_revision(
                 destination, plan, selected_action, args.proposal_hash,
             )
-            application_map = destination / "artifacts" / "application-map.json"
-            map_data = strict_json_loads(application_map.read_text(encoding="utf-8"))
-            if not isinstance(map_data, dict):
-                raise ValueError("application map must be a JSON object")
-            map_data["experience_id"] = args.to
-            for binding in map_data.get("bindings", []):
-                if str(binding.get("record_ref", "")).startswith(old + ":"):
-                    binding["record_ref"] = str(binding["record_ref"]).replace(
-                        old + ":", args.to + ":", 1
-                    )
-            atomic_write_bytes(application_map, canonical(map_data))
-            import experience_application_check
-            application = root / experience_application_check.APPLICATION_RELATIVE
-            application_text = rename_application_refs(
-                application.read_text(encoding="utf-8"), old, args.to,
-            )
-            atomic_write_bytes(application, application_text.encode())
             render_experience_navigation(root)
             _registry, problems = compile_package(
                 destination, defer_lifecycle_record_revision=True,

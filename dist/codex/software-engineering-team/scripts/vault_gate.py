@@ -207,9 +207,9 @@ def gate(project_root: Path, root: Path) -> dict:
          and (path / "experience.md").is_file()),
         key=lambda path: path.name,
     ) if packages.is_dir() else []
-    application = experience / "artifacts" / "application.html"
-    if (experience_packages or application.exists()
-            or application.is_symlink()):
+    receipt_state = experience / "_ledger" / "application-revisions.json"
+    if (experience_packages or receipt_state.exists()
+            or receipt_state.is_symlink()):
         results.append(run([
             sys.executable,
             str(scripts / "experience_application_check.py"),

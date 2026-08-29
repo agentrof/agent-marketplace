@@ -36,13 +36,10 @@ subtrees, not separate vaults. Variation lives only in
   `data/vault-policy.json` restricts that subtree to exact artifact paths.
   Artifact files are never notes and may not be symlinks. Relative Markdown
   links and embeds to policy-valid artifacts are allowed.
-- Experience Design is one such closed surface. It permits exactly the root
-  `experience-design/artifacts/application.html` and one
-  `experience-design/experiences/<process-slug>/artifacts/application-map.json`
-  per process package. Package-local previews, artifact-manifest notes, CSS,
-  JavaScript and other Experience artifacts are invalid. The root application
-  uses the fixed declarative, network-free runtime; its map coverage is
-  mechanical while visual fidelity remains reviewer judgment.
+- Experience Design uses the default opaque artifact policy. Its complete
+  `experience-design/artifacts/` subtree is author-owned; names, extensions,
+  directories and contents are unconstrained. The lifecycle compiler records
+  only a safe byte inventory, while review judges prototype quality.
 
 ## Required references
 

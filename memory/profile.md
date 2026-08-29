@@ -36,3 +36,4 @@ The learned profile of this user, derived from prompts, feedback, and requests a
 - A guard or mechanism choice is decided only after a concrete walkthrough: real payload in, real deny out, exact message, what bypasses it and why, anchored to machinery already in the repo. Popup options without that walkthrough go unanswered; show the mechanism first, then ask.
 - Product defaults must stay stable across projects; user customization is an explicit override layer, never accidental per-project drift in generated output.
 - Project-local remediation choices stay project-local; platform fixes remove the blocker without turning one incident response into a general product workflow.
+- Prototype and exploratory artifact interiors stay fully author-owned and opaque. Compilers enforce only repository, lifecycle and evidence boundaries; structure, technology, behavior and presentation remain advisory best practices, never acceptance constraints.

@@ -1,47 +1,41 @@
 ---
 name: experience-design
-description: Maintain living, process-owned Experience packages and their one canonical application after approved analysis, Solution Design and Design System inputs. Supports Requirement and manual entry before backlog planning.
+description: Maintain living, process-owned Experience packages and author-owned prototype snapshots after approved analysis, Solution Design and Design System inputs.
 exposure: entry
 ---
 
 # Experience Design
 
-Model and revise living user experiences without implementing product code.
+Model and revise living user experiences without implementing delivery code.
 
 ## When to Use
 
-Use after approved BA, Solution and Design System inputs need user-journey,
-screen, flow, state or application work, either from an exact Requirement or a
-manual/direct product-design chain.
+Use after approved BA, Solution Design and Design System inputs need
+user-journey, screen, flow, state, transition or prototype work.
 
 1. Read `workspace/config.json`, `flows/experience-design.md`,
    `experience-modeling` and `obsidian-vault` in full.
-2. Determine the mode from an explicit `REQ-###`; do not infer a Requirement
-   in manual mode. Validate all upstream receipts before writing.
-3. Run the read-only scope proposal and retain its JSON only as a transient
-   local file. Obtain the user's exact action-set approval, then pass that
-   file and its hash to every lifecycle mutation and atomic approval. The plan
-   must pin the current application receipt and say whether the application
-   changes, including an independent application-only revision.
-4. The primary process ref is
-   `business-analysis/<space>/processes/<process-slug>-process`; it must
-   resolve through the selected approved BA package. Work only in the selected
-   `workspace/docs/experience-design/experiences/<process-slug>/` packages,
-   their `artifacts/application-map.json` files and the single
-   `workspace/docs/experience-design/artifacts/application.html`, using the
-   Experience compiler. `application` is a reserved process slug and alias.
-   There are no EXP IDs, `exp-` directories, baselines, programs, releases or
-   inheritance chains.
-5. Use stable child IDs and exact refs. The package owns approval; children
-   use `record_state`. Map every active exact ref to one or more declared deep
-   routes in the fixed declarative, network-free application. Bind the
-   application to the exact approved contract-v3 Design System and require
-   every active process package to bind that same receipt. Generated and ledger
-   data are compiler-owned; package-local previews and manifests are invalid.
-6. Run the transient, fresh reviewer challenge loop defined by the flow.
-   Close blockers in canonical records, not in review-history artifacts.
-7. Atomically approve the complete create/update/rename/retire and application
-   action set. The result is a new globally current `application@rN` plus the
-   exact current process receipts. Requirement mode binds that complete set;
-   manual mode returns it to `backlog-plan` directly. A downstream consumer of
-   an older application receipt must rebind through its normal revision.
+2. Determine Requirement or manual mode exactly, validate upstream receipts,
+   run the read-only scope proposal and obtain approval for its complete action
+   set before any lifecycle mutation.
+3. Work in the selected
+   `workspace/docs/experience-design/experiences/<process-slug>/` packages.
+   The primary process is a canonical BA process. `application` is reserved;
+   there are no EXP IDs, baselines, programs, releases or inheritance chains.
+4. Use stable child IDs and exact refs. Package records express process and
+   product intent; the separate prototype demonstrates it for review.
+5. Treat `workspace/docs/experience-design/artifacts/` as the UX designer's
+   free prototype workspace. It may contain any structure, files, pages,
+   technologies, dependencies and assets. Recommend useful conventions, but
+   never require them or make their absence a compiler finding. Do not put
+   lifecycle metadata in those files.
+6. Keep `_generated/` and `_ledger/` compiler-owned. The compiler snapshots
+   artifact paths and bytes, then binds the snapshot to its process receipt
+   set. It does not validate UI structure, CSS, scripts, network behavior,
+   tokens, framework choices, routes or accessibility claims.
+7. Run the fresh read-only reviewer challenge loop. Review actual usability,
+   coherence, accessibility, responsive behavior and risks as judgment, not
+   as a substitute parser contract.
+8. Atomically approve the complete action set. The result is `application@rN`
+   plus the exact current process receipts. Requirement mode binds that set;
+   manual mode hands it to backlog planning.

@@ -37,3 +37,7 @@
 - Preserve approved stage receipts when generated vault relations are rendered.
 - Replace package-local Experience previews with one receipt-bound canonical application, exact route/state maps, and a deterministic network-free runtime.
 - Allow approved Experience packages to rebind to a newly approved Design System receipt during revision.
+
+## 4.0.1
+
+- Keep diagnostics and project-owned Experience repairs reachable when recoverable path spelling violates vault canonicality.

@@ -936,11 +936,13 @@ class VaultHookShellContractTests(unittest.TestCase):
                     st_uid=0, st_mode=0o100755,
                 )), mock.patch.object(self.hook.subprocess, "run", return_value=completed), \
                 mock.patch.dict(self.hook.os.environ, {}, clear=True):
-            self.assertTrue(
-                self.hook._apple_python_launcher_matches(
-                    Path("/usr/bin/python3"), root,
+            for launcher in (
+                Path("/usr/bin/python3"),
+                Path("/Library/Developer/CommandLineTools/usr/bin/python3"),
+            ):
+                self.assertTrue(
+                    self.hook._apple_python_launcher_matches(launcher, root)
                 )
-            )
             with mock.patch.dict(self.hook.os.environ, {
                 "DEVELOPER_DIR": "/tmp/fake-developer",
             }):

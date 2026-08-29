@@ -1331,7 +1331,11 @@ def _apple_developer_root(executables: set[Path]) -> Path | None:
 
 def _apple_python_launcher_matches(candidate: Path, cwd: Path) -> bool:
     """Bind Apple's fixed launcher to the interpreter running this hook."""
-    if sys.platform != "darwin" or candidate != Path("/usr/bin/python3"):
+    launchers = {
+        Path("/usr/bin/python3"),
+        Path("/Library/Developer/CommandLineTools/usr/bin/python3"),
+    }
+    if sys.platform != "darwin" or candidate not in launchers:
         return False
     try:
         mode = candidate.stat()

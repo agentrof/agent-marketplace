@@ -760,6 +760,186 @@ class VaultHookTests(unittest.TestCase):
             self.assertEqual(ledger.stat().st_nlink, 1)
             self.assertFalse(os.path.samefile(alias, ledger))
 
+    def test_noncanonical_experience_path_uses_snapshot_and_project_owned_repair(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            project = Path(temporary)
+            docs = self.setup_project(project)
+            experience = docs / "experience-design"
+            invalid = experience / "Legacy/legacy.bin"
+            invalid.parent.mkdir()
+            invalid.write_bytes(b"project-owned legacy bytes\n")
+
+            payload = {
+                "tool_name": "Bash",
+                "tool_input": {"command": "python3 project_repair.py"},
+                "cwd": str(project),
+                "session_id": "noncanonical-experience-repair",
+                "tool_use_id": "noncanonical-experience-repair-event",
+            }
+            before = self.run_hook("pre", payload)
+            self.assertEqual(before.returncode, 0, before.stdout + before.stderr)
+            snapshots = list((
+                project / ".agentrof/agent-marketplace/.runtime/vault-inventory"
+            ).glob("*.json"))
+            self.assertEqual(len(snapshots), 1)
+            snapshot = json.loads(snapshots[0].read_text(encoding="utf-8"))
+            self.assertIn(
+                "experience-design/Legacy/legacy.bin",
+                snapshot["experience_tree"],
+            )
+
+            archive = project / "project-recovery/Legacy"
+            archive.parent.mkdir()
+            invalid.parent.rename(archive)
+            after = self.run_hook("post", payload)
+            self.assertEqual(after.returncode, 0, after.stdout + after.stderr)
+            self.assertFalse(invalid.exists())
+            self.assertEqual(
+                (archive / "legacy.bin").read_bytes(),
+                b"project-owned legacy bytes\n",
+            )
+
+    def test_noncanonical_snapshot_restores_protected_experience_state(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            project = Path(temporary)
+            self.setup_config_project(project)
+            experience = project / "workspace/docs/experience-design"
+            invalid = experience / "Legacy/legacy.bin"
+            invalid.parent.mkdir(parents=True)
+            invalid_original = b"legacy bytes\n"
+            invalid.write_bytes(invalid_original)
+            ledger = experience / "_ledger/application-revisions.json"
+            ledger.parent.mkdir()
+            ledger_original = b'{"schema_version":2,"revisions":[]}\n'
+            ledger.write_bytes(ledger_original)
+            payload = {
+                "tool_name": "Bash",
+                "tool_input": {"command": "python3 tamper.py"},
+                "cwd": str(project),
+                "session_id": "noncanonical-experience-restore",
+                "tool_use_id": "noncanonical-experience-restore-event",
+            }
+
+            before = self.run_hook("pre", payload)
+            self.assertEqual(before.returncode, 0, before.stdout + before.stderr)
+            invalid.write_bytes(b"changed legacy bytes\n")
+            ledger.write_bytes(b"tampered\n")
+            after = self.run_hook("post", payload)
+            self.assertEqual(after.returncode, 2, after.stdout + after.stderr)
+            self.assertIn("compiler-owned Experience state", after.stderr)
+            self.assertEqual(invalid.read_bytes(), invalid_original)
+            self.assertEqual(ledger.read_bytes(), ledger_original)
+
+    def test_unsnapshotable_experience_identity_keeps_diagnostics_reachable(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            project = Path(temporary)
+            self.setup_config_project(project)
+            ledger = (
+                project / "workspace/docs/experience-design/_ledger/"
+                "application-revisions.json"
+            )
+            ledger.parent.mkdir(parents=True)
+            ledger.write_text(
+                '{"schema_version":2,"revisions":[]}\n', encoding="utf-8"
+            )
+            alias = project / "ledger-alias.json"
+            try:
+                os.link(ledger, alias)
+            except (OSError, NotImplementedError) as exc:
+                self.skipTest(f"hard links are unavailable: {exc}")
+
+            denied = self.run_hook("pre", {
+                "tool_name": "Bash",
+                "tool_input": {"command": "python3 mutate.py"},
+                "cwd": str(project),
+                "session_id": "unsafe-experience-mutation",
+                "tool_use_id": "unsafe-experience-mutation-event",
+            })
+            self.assertEqual(denied.returncode, 2, denied.stderr)
+            self.assertIn(
+                "experience-design/_ledger/application-revisions.json",
+                denied.stderr,
+            )
+
+            for index, command in enumerate(("pwd", "git status --short")):
+                payload = {
+                    "tool_name": "Bash",
+                    "tool_input": {"command": command},
+                    "cwd": str(project),
+                    "session_id": f"unsafe-experience-diagnostic-{index}",
+                    "tool_use_id": f"unsafe-experience-diagnostic-{index}-event",
+                }
+                before = self.run_hook("pre", payload)
+                self.assertEqual(
+                    before.returncode, 0, before.stdout + before.stderr
+                )
+                after = self.run_hook("post", payload)
+                self.assertEqual(after.returncode, 0, after.stdout + after.stderr)
+
+    def test_symlinked_experience_path_fails_closed_with_exact_path(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            project = Path(temporary)
+            self.setup_config_project(project)
+            experience = project / "workspace/docs/experience-design"
+            experience.mkdir(parents=True)
+            external = project / "external-legacy"
+            external.mkdir()
+            alias = experience / "LegacyLink"
+            try:
+                alias.symlink_to(external, target_is_directory=True)
+            except (OSError, NotImplementedError) as exc:
+                self.skipTest(f"symlinks are unavailable: {exc}")
+
+            denied = self.run_hook("pre", {
+                "tool_name": "Bash",
+                "tool_input": {"command": "python3 mutate.py"},
+                "cwd": str(project),
+                "session_id": "symlinked-experience-mutation",
+                "tool_use_id": "symlinked-experience-mutation-event",
+            })
+            self.assertEqual(denied.returncode, 2, denied.stderr)
+            self.assertIn(
+                "experience-design/LegacyLink: path is symlinked",
+                denied.stderr,
+            )
+
+    def test_unreadable_experience_file_fails_closed_with_exact_path(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            project = Path(temporary)
+            self.setup_config_project(project)
+            unreadable = (
+                project / "workspace/docs/experience-design/Legacy/secret.bin"
+            )
+            unreadable.parent.mkdir(parents=True)
+            unreadable.write_bytes(b"project-owned secret\n")
+            original_mode = unreadable.stat().st_mode & 0o777
+            try:
+                unreadable.chmod(0)
+                try:
+                    unreadable.read_bytes()
+                except OSError:
+                    pass
+                else:
+                    self.skipTest(
+                        "this filesystem does not enforce unreadable mode bits"
+                    )
+
+                denied = self.run_hook("pre", {
+                    "tool_name": "Bash",
+                    "tool_input": {"command": "python3 mutate.py"},
+                    "cwd": str(project),
+                    "session_id": "unreadable-experience-mutation",
+                    "tool_use_id": "unreadable-experience-mutation-event",
+                })
+                self.assertEqual(denied.returncode, 2, denied.stderr)
+                self.assertIn(
+                    "experience-design/Legacy/secret.bin: file identity is "
+                    "unreadable",
+                    denied.stderr,
+                )
+            finally:
+                unreadable.chmod(original_mode)
+
     def test_draft_and_in_review_application_use_authoring_post_check(self):
         from tools.tests.test_living_experience_flow import (
             LivingExperienceFlowTests,

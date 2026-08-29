@@ -1,0 +1,6 @@
+{
+  "summary": "Keep diagnostics and project-owned Experience repairs reachable when recoverable path spelling violates vault canonicality.",
+  "components": {
+    "software-engineering-team": "patch"
+  }
+}

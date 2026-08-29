@@ -77,6 +77,14 @@ SHELL_ASSIGNMENT_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=.*$")
 PYTHON_COMMAND_RE = re.compile(r"^python(?:3(?:[.][0-9]+)?)?$")
 SANCTIONED_PROJECT_CONFIG_COMMANDS = {"set"}
 SANCTIONED_SHELL_ASSIGNMENTS = {"PYTHONDONTWRITEBYTECODE": "1"}
+READ_ONLY_GIT_STATUS_ARGS = {
+    "--ahead-behind", "--branch", "--ignored", "--long",
+    "--no-ahead-behind", "--no-column", "--no-renames", "--porcelain",
+    "--porcelain=v1", "--porcelain=v2", "--renames", "--short",
+    "--show-stash", "--untracked-files=all", "--untracked-files=no",
+    "--untracked-files=normal", "-b", "-s", "-uno", "-uall", "-unormal",
+    "-z",
+}
 APPLICATION_ROOT_WRITERS = {
     "init",
     "begin-application-revision",
@@ -467,16 +475,23 @@ def experience_tree_snapshot(vault: Path) -> dict[str, dict]:
     if not root.exists() and not root.is_symlink():
         return {}
     if root.is_symlink() or not root.is_dir():
-        raise OSError("Experience Design root is not one regular directory")
+        raise OSError(
+            "experience-design: root is not one regular directory"
+        )
     snapshot: dict[str, dict] = {}
     for path in sorted(root.rglob("*")):
+        relative = path.relative_to(vault).as_posix()
         if path.is_symlink():
-            raise OSError(f"Experience Design path is symlinked: {path}")
+            raise OSError(f"{relative}: path is symlinked")
         if not path.is_file():
             continue
-        raw = path.read_bytes()
-        stat = path.stat()
-        relative = path.relative_to(vault).as_posix()
+        try:
+            raw = path.read_bytes()
+            stat = path.stat()
+        except OSError as exc:
+            raise OSError(
+                f"{relative}: file identity is unreadable: {exc}"
+            ) from exc
         snapshot[relative] = {
             "content_base64": base64.b64encode(raw).decode("ascii"),
             "content_sha256": hashlib.sha256(raw).hexdigest(),
@@ -488,41 +503,60 @@ def experience_tree_snapshot(vault: Path) -> dict[str, dict]:
     return snapshot
 
 
-def valid_experience_tree_snapshot(value: object) -> bool:
+def experience_tree_snapshot_safety_problem(value: object) -> str:
     if not isinstance(value, dict):
-        return False
+        return "snapshot root is not an object"
     for relative, row in value.items():
+        if not isinstance(relative, str):
+            return f"snapshot contains a non-text path identity: {relative!r}"
+        if not relative.startswith("experience-design/"):
+            return f"{relative}: path escapes the Experience Design subtree"
+        if normalize_posix(relative) != relative:
+            return f"{relative}: path must use canonical POSIX segments"
         if (
-            not isinstance(relative, str)
-            or not relative.startswith("experience-design/")
-            or normalize_posix(relative) != relative
-            or unicodedata.normalize("NFC", relative) != relative
-            or relative.casefold() != relative
-            or not isinstance(row, dict)
+            not isinstance(row, dict)
             or set(row) != {
                 "content_base64", "content_sha256", "mode", "nlink",
                 "device", "inode",
             }
         ):
-            return False
+            return f"{relative}: file identity snapshot is incomplete"
         try:
             raw = base64.b64decode(
                 str(row["content_base64"]), validate=True,
             )
         except (ValueError, TypeError):
-            return False
+            return f"{relative}: file bytes could not be snapshotted"
         if hashlib.sha256(raw).hexdigest() != row.get("content_sha256"):
-            return False
+            return f"{relative}: file snapshot checksum does not match"
         if (
             not isinstance(row.get("mode"), int)
             or not 0 <= row["mode"] <= 0o777
-            or not isinstance(row.get("nlink"), int)
-            or row["nlink"] != 1
             or not isinstance(row.get("device"), int)
             or not isinstance(row.get("inode"), int)
         ):
-            return False
-    return True
+            return f"{relative}: file mode or filesystem identity is unreadable"
+        if not isinstance(row.get("nlink"), int) or row["nlink"] != 1:
+            return (
+                f"{relative}: file must have exactly one filesystem link;"
+                " remove every hard-link alias"
+            )
+    return ""
+
+
+def valid_experience_tree_snapshot(value: object) -> bool:
+    return not experience_tree_snapshot_safety_problem(value)
+
+
+def noncanonical_experience_snapshot_paths(value: dict[str, dict]) -> list[str]:
+    """Return canonical spelling violations without rejecting recovery data."""
+    return sorted(
+        relative for relative in value
+        if (
+            unicodedata.normalize("NFC", relative) != relative
+            or relative.casefold() != relative
+        )
+    )
 
 
 def written_content(tool_input: dict) -> str:
@@ -1276,6 +1310,136 @@ def has_shell_composition(command: str) -> bool:
     return bool(quote or escaped)
 
 
+def direct_shell_tokens(payload: dict) -> tuple[list[str], Path] | None:
+    """Parse one direct command with only the closed safe assignment set."""
+    command = str(payload.get("tool_input", {}).get("command") or "").strip()
+    if not command or has_shell_composition(command):
+        return None
+    try:
+        tokens = shlex.split(command, posix=True)
+    except ValueError:
+        return None
+    while tokens and SHELL_ASSIGNMENT_RE.fullmatch(tokens[0]):
+        name, value = tokens.pop(0).split("=", 1)
+        if SANCTIONED_SHELL_ASSIGNMENTS.get(name) != value:
+            return None
+    return tokens, Path(str(payload.get("cwd") or ".")).resolve()
+
+
+def trusted_system_command(value: str, cwd: Path, name: str) -> bool:
+    """Reject project-local executable shadowing for a named diagnostic."""
+    if "$" in value or Path(value).name not in {name, name + ".exe"}:
+        return False
+    if Path(value).is_absolute() or "/" in value or "\\" in value:
+        candidate = _cli_path(value, cwd)
+    else:
+        resolved = shutil.which(value)
+        candidate = Path(resolved).resolve() if resolved else None
+    if candidate is None or not candidate.is_file():
+        return False
+    project = shell_project({"cwd": str(cwd)}).resolve()
+    try:
+        candidate.relative_to(project)
+    except ValueError:
+        return True
+    return False
+
+
+def parsed_options(
+        args: list[str], valued: set[str], flags: set[str]
+) -> dict[str, str] | None:
+    """Accept each declared option once and reject positional or unknown data."""
+    result: dict[str, str] = {}
+    index = 0
+    while index < len(args):
+        option = args[index]
+        if option in flags:
+            if option in result:
+                return None
+            result[option] = ""
+            index += 1
+            continue
+        if option not in valued or option in result or index + 1 >= len(args):
+            return None
+        result[option] = args[index + 1]
+        index += 2
+    return result
+
+
+def scoped_experience_package(value: str, cwd: Path, root: Path) -> bool:
+    target = _cli_path(value, cwd)
+    if target is None:
+        return False
+    if target.name == "experience.md":
+        target = target.parent
+    try:
+        relative = target.relative_to(root / "experiences")
+    except ValueError:
+        return False
+    return len(relative.parts) == 1 and bool(relative.name)
+
+
+def sanctioned_bash_diagnostic(payload: dict, vault: Path | None) -> bool:
+    """Recognize direct diagnostics that remain safe without a snapshot."""
+    parsed = direct_shell_tokens(payload)
+    if parsed is None:
+        return False
+    tokens, cwd = parsed
+    if not tokens:
+        return False
+    if trusted_system_command(tokens[0], cwd, "pwd"):
+        return all(value in {"-L", "-P"} for value in tokens[1:])
+    if trusted_system_command(tokens[0], cwd, "git"):
+        return (
+            len(tokens) >= 2
+            and tokens[1] == "status"
+            and all(value in READ_ONLY_GIT_STATUS_ARGS for value in tokens[2:])
+        )
+    if len(tokens) < 3 or not trusted_python_command(tokens[0], cwd):
+        return False
+    project = shell_project(payload).resolve()
+    if _installed_script_path(
+            tokens[1], cwd, "setup_project.py") is not None:
+        command_name = tokens[2]
+        values = {"--project-root"}
+        flags = {"--json"}
+        if command_name not in {"inspect", "check"}:
+            return False
+        options = parsed_options(tokens[3:], values, flags)
+        target = _cli_path(
+            options.get("--project-root", "") if options else "", cwd
+        )
+        return (
+            options is not None
+            and target == project
+        )
+    if vault is None or _installed_script_path(
+            tokens[1], cwd, "experience_compile.py") is None:
+        return False
+    command_name = tokens[2]
+    experience_root = vault / "experience-design"
+    if command_name in {"check", "status"}:
+        flags = {"--gate", "--json"} if command_name == "check" else set()
+        options = parsed_options(
+            tokens[3:], {"--experience-root"}, flags
+        )
+        return bool(
+            options
+            and scoped_experience_package(
+                options.get("--experience-root", ""), cwd, experience_root
+            )
+        )
+    if command_name in {"check-application", "application-status"}:
+        flags = ({"--gate", "--json"}
+                 if command_name == "check-application" else set())
+        options = parsed_options(tokens[3:], {"--root"}, flags)
+        target = _cli_path(
+            options.get("--root", "") if options else "", cwd
+        )
+        return options is not None and target == experience_root.resolve()
+    return False
+
+
 def sanctioned_config_writer(payload: dict, config_path: Path) -> bool:
     """Recognize one direct, scoped config writer and no shell composition."""
     command = str(payload.get("tool_input", {}).get("command") or "").strip()
@@ -1799,12 +1963,6 @@ def shell_snapshot(payload: dict) -> int:
             " refusing a command whose config effects could not be restored"
         )
     application_vault = root or config_path.parent / "docs"
-    hardlinks = experience_hardlink_paths(application_vault)
-    if hardlinks:
-        return deny(
-            "Bash cannot start while Experience Design contains hard-linked "
-            "files: " + ", ".join(hardlinks)
-        )
     application = read_application_snapshot(application_vault)
     if application.get("read_error"):
         return deny(
@@ -1819,12 +1977,20 @@ def shell_snapshot(payload: dict) -> int:
             "Experience Design could not be snapshotted before Bash: "
             + str(exc)
         )
-    if not valid_experience_tree_snapshot(experience_tree):
+    snapshot_problem = experience_tree_snapshot_safety_problem(experience_tree)
+    if snapshot_problem:
         return deny(
-            "Experience Design contains a non-canonical path or unreadable "
-            "file identity; refusing Bash"
+            "Experience Design cannot be safely snapshotted: "
+            + snapshot_problem
         )
-    if root is not None and application.get("status") == "approved":
+    noncanonical_paths = noncanonical_experience_snapshot_paths(
+        experience_tree
+    )
+    if (
+        root is not None
+        and application.get("status") == "approved"
+        and not noncanonical_paths
+    ):
         strict_code = run_application_post_check(root, force_gate=True)
         if strict_code:
             return strict_code
@@ -2075,6 +2241,8 @@ def main() -> int:
             + "); the vault guard fails closed. Retry with a valid patch."
         )
     if payload.get("tool_name") == "Bash":
+        if sanctioned_bash_diagnostic(payload, shell_vault(payload)):
+            return 0
         if mode == "pre":
             code = registration_guard(payload)
             return code if code else shell_snapshot(payload)

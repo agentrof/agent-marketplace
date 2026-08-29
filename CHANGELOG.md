@@ -41,3 +41,7 @@
 ## 4.0.1
 
 - Keep diagnostics and project-owned Experience repairs reachable when recoverable path spelling violates vault canonicality.
+
+## 4.1.0
+
+- Make Experience Design prototype workspaces fully author-owned and opaque to the compiler.

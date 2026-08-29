@@ -52,6 +52,17 @@ offer a compatibility reader. Remove the legacy surface deliberately and
 author the one root `experience-design/artifacts/application.html` plus each
 process package's `artifacts/application-map.json` under the current flow.
 
+An invalid Experience path spelling does not make project diagnostics or
+repair unreachable. The Bash hook snapshots any tree whose paths remain
+lexically confined to `experience-design/` and whose bytes and filesystem
+identity are recoverable. Canonical path rules are evaluated after a command
+changes the vault, so the affected project chooses its own bounded rename,
+archive or other repair. The package does not prescribe or execute that
+project-local remediation. Symlinked, hard-linked or unreadable state remains
+fail-closed because no trustworthy rollback snapshot can be created; direct
+`pwd`, bounded `git status`, setup `inspect`/`check`, and Experience compiler
+`check`/`status` remain available for diagnosis.
+
 Stage routing inspects Git only at a completed-stage handoff. The relevant
 config, approved subtree, home note and stage map must be tracked, committed and
 clean. For Experience Design that path set includes the canonical application,

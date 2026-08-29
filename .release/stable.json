@@ -1,12 +1,12 @@
 {
   "schema_version": 1,
-  "version": "4.0.1",
-  "stable_base": "37747ab91a2a365ccee254beee81f5afd118349a",
-  "main_source": "50c58dd1432ae4d353b24d239c1ab785a61b42cd",
+  "version": "4.1.0",
+  "stable_base": "0fc4a54b615e9c8f7e6b670e5c30685b1cea9d43",
+  "main_source": "9f6e664a986dddbddb910de53b49cab6ebafaf3c",
   "impacts": {
-    "software-engineering-team": "patch"
+    "software-engineering-team": "minor"
   },
   "summaries": [
-    "Keep diagnostics and project-owned Experience repairs reachable when recoverable path spelling violates vault canonicality."
+    "Make Experience Design prototype workspaces fully author-owned and opaque to the compiler."
   ]
 }

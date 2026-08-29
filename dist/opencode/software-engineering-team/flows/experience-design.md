@@ -6,6 +6,10 @@ author-owned `experience-design/artifacts/` tree and a required `SELF-CHECK`.
 
 This flow maintains living, process-owned Experience packages. It does not
 create releases, delivery code, numbered baselines or product architecture.
+Every `experience_compile.py` mutation uses the active host runtime's exact
+absolute Python executable and the installed script's absolute path. Bare
+Python names, `/usr/bin/env` indirection and direct shebang execution do not
+receive machine-writer authorization.
 
 ## Entry and scope proposal
 

@@ -9,6 +9,7 @@ compiler and the project-local vault hook.
 from __future__ import annotations
 
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -28,7 +29,19 @@ def plugin_name() -> str:
 def main() -> int:
     mode = sys.argv[1] if len(sys.argv) > 1 else "pre"
     if mode == "register":
-        print(json.dumps({"hookSpecificOutput": {"hookEventName": "SessionStart", "additionalContext": f"AGENT_MARKETPLACE_HOOKS_ACTIVE: {plugin_name()}"}}))
+        python_path = Path(os.path.abspath(sys.executable))
+        scripts_path = Path(__file__).resolve().parent
+        context = "\n".join((
+            f"AGENT_MARKETPLACE_HOOKS_ACTIVE: {plugin_name()}",
+            f"AGENT_MARKETPLACE_PYTHON: {python_path}",
+            f"AGENT_MARKETPLACE_SCRIPTS: {scripts_path}",
+        ))
+        print(json.dumps({
+            "hookSpecificOutput": {
+                "hookEventName": "SessionStart",
+                "additionalContext": context,
+            },
+        }))
     return 0
 
 

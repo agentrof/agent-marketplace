@@ -31,8 +31,12 @@ backlog planning.
 - A transient scope proposal binds the full action set, selected input receipt
   hashes, primary processes, process set and current application receipt. Pass
   its exact file and hash to every mutation and approval.
-- Generate with `experience_compile.py`. `_generated/` is disposable and
-  `_ledger/` is durable compiler truth.
+- Generate with `experience_compile.py`, invoked through the active host
+  runtime's exact absolute Python executable and the installed script's
+  absolute path. Bare Python names, `/usr/bin/env` indirection and direct
+  shebang execution are guard-only because the shell can replace them before
+  execution. `_generated/` is disposable and `_ledger/` is durable compiler
+  truth.
 
 ## Prototype boundary
 

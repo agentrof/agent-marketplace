@@ -25,7 +25,7 @@ placeholder is allowed to reach a consuming repository.
    create an alternate vault location. One team owns one project. Run:
 
    ```text
-   scripts/setup_project.py inspect --project-root <root> --json
+   <absolute-python> <absolute-package-scripts>/setup_project.py inspect --project-root <root> --json
    ```
 
    Present its pre-mutation operation list. Requirement Flow determines which
@@ -33,7 +33,7 @@ placeholder is allowed to reach a consuming repository.
 2. Resolve any reported blocker, then run:
 
    ```text
-   scripts/setup_project.py apply --project-root <root> --json
+   <absolute-python> <absolute-package-scripts>/setup_project.py apply --project-root <root> --json
    ```
 
    Apply creates the project-local
@@ -47,7 +47,13 @@ placeholder is allowed to reach a consuming repository.
    the short apply window because portable filesystems provide no conditional
    replace against a non-cooperating writer. Repeating apply with the same
    package and project must produce no operation.
-3. Run `scripts/setup_project.py check --project-root <root> --json`. Check
+   Use the active host runtime's exact absolute Python executable and the
+   installed package script's absolute path. A bare Python command name,
+   `/usr/bin/env` indirection or direct shebang invocation cannot receive
+   machine-writer authorization because a shell alias or function can replace
+   it before execution.
+3. Run `<absolute-python> <absolute-package-scripts>/setup_project.py check
+   --project-root <root> --json`. Check
    uses the same convergence planner as inspect and apply. A stale portable
    gate, payload key or package projection fails even when the file exists.
 4. Run the generated host project `inspect`, resolve every declared

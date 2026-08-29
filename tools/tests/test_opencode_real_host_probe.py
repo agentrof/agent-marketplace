@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import importlib.util
+import json
 import subprocess
 import sys
 import tempfile
@@ -20,6 +21,22 @@ SPEC.loader.exec_module(PROBE)
 
 
 class OpenCodeRealHostProbeTests(unittest.TestCase):
+    def test_sanctioned_writer_probe_uses_active_package_and_runtime(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            project = Path(temporary) / "project"
+            private = project / ".opencode" / "agentrof" / "agent-marketplace"
+            private.mkdir(parents=True)
+            (private / "installation.json").write_text(json.dumps({
+                "active_build_key": "build-key",
+            }), encoding="utf-8")
+            command = PROBE.config_writer_command(project)
+
+        self.assertIn(str(sys.executable), command)
+        self.assertIn("packages", command)
+        self.assertIn("build-key", command)
+        self.assertIn("project_config.py", command)
+        self.assertIn("output_language", command)
+
     def test_terminal_tui_input_waits_for_a_rendered_command_bar(self):
         self.assertFalse(PROBE.tui_ready(b"ctrl+p"))
         self.assertFalse(PROBE.tui_ready(b"commands"))

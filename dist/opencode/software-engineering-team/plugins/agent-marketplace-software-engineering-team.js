@@ -16,8 +16,8 @@ import {
 } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-const buildId = "snapshot.176d9351a3c2370d2848c00adc9d6d8f83b514412e63abca1d7fb98bd59741af";
-const vaultHookSha256 = "0e48d5324dbda9bb972ae6668808a07ec244f232a0de7e84dab197621906d275";
+const buildId = "snapshot.9693cbae462e241ac45db2c615e19231d602b89c299a70531ddf0a9e714c1bb4";
+const vaultHookSha256 = "437111a4b0c4afc8aacbd43fb4be3b8b2b4a1f891af1894bf7e45690f2643a94";
 const component = 'software-engineering-team';
 const pluginFilename = 'agent-marketplace-software-engineering-team.js';
 const mutators = new Set(['write', 'edit', 'apply_patch', 'bash']);
@@ -38,6 +38,7 @@ const safeTools = new Set([
   'websearch',
 ]);
 const calls = new Map();
+let boundShellFamily = 'unknown';
 
 function fail(code, detail = '') {
   const clean = String(detail).replace(/\s+/g, ' ').trim().slice(0, 600);
@@ -301,7 +302,42 @@ function rejectManagedHostPath(root, target) {
   }
 }
 
-function canonicalPayload(input, args, root) {
+function effectiveShellFamily(config) {
+  const configured = config && config.shell;
+  if (configured !== undefined && configured !== null
+      && typeof configured !== 'string') return 'unknown';
+  if (process.platform === 'win32') {
+    const commandShell = configured
+      ?? process.env.ComSpec
+      ?? process.env.COMSPEC;
+    const systemRoot = process.env.SystemRoot || process.env.WINDIR;
+    if (!commandShell || !systemRoot) return 'unknown';
+    try {
+      const actual = realpathSync(commandShell).toLowerCase();
+      const expected = realpathSync(resolve(systemRoot, 'System32', 'cmd.exe')).toLowerCase();
+      return actual === expected ? 'cmd' : 'unknown';
+    } catch {
+      return 'unknown';
+    }
+  }
+  const commandShell = configured ?? '/bin/sh';
+  if (!isAbsolute(commandShell)) return 'unknown';
+  try {
+    const actual = realpathSync.native(commandShell);
+    const allowed = new Set();
+    for (const directory of ['/bin', '/usr/bin']) {
+      for (const name of ['sh', 'bash', 'dash', 'zsh', 'ksh']) {
+        const candidate = resolve(directory, name);
+        if (existsSync(candidate)) allowed.add(realpathSync.native(candidate));
+      }
+    }
+    return allowed.has(actual) ? 'posix' : 'unknown';
+  } catch {
+    return 'unknown';
+  }
+}
+
+function canonicalPayload(input, args, root, shellFamily) {
   const common = {
     cwd: root,
     session_id: input.sessionID,
@@ -352,6 +388,7 @@ function canonicalPayload(input, args, root) {
     return {
       ...common,
       cwd,
+      shell_family: shellFamily,
       tool_name: 'Bash',
       tool_input: { command },
     };
@@ -383,6 +420,7 @@ function runHook(bound, phase, payload) {
 export const AgentMarketplacePlugin = async () => ({
   config: async (config) => {
     assertSupportedPluginSet(config);
+    boundShellFamily = effectiveShellFamily(config);
   },
   'tool.execute.before': async (input, output) => {
     if (process.env.OPENCODE_EXPERIMENTAL_CODE_MODE || input.tool === 'execute') {
@@ -397,7 +435,7 @@ export const AgentMarketplacePlugin = async () => ({
     const args = inputArgs(input, output);
     const bound = runtime();
     assertSupportedPluginSet({ plugin: [pluginPath()] });
-    const payload = canonicalPayload(input, args, bound.root);
+    const payload = canonicalPayload(input, args, bound.root, boundShellFamily);
     runHook(bound, 'pre', payload);
     calls.set(key, {
       bound,

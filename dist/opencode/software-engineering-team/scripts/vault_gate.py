@@ -316,7 +316,10 @@ def cmd_install(args) -> int:
                             info, path.read_bytes(),
                             compress_type=zipfile.ZIP_DEFLATED,
                         )
-            with temporary_zip.open("rb") as handle:
+            # Windows does not permit fsync on a read-only descriptor.  Open
+            # the completed archive read/write so the durability barrier has
+            # the same semantics on every supported host.
+            with temporary_zip.open("r+b") as handle:
                 os.fsync(handle.fileno())
             os.replace(temporary_zip, destination)
         finally:

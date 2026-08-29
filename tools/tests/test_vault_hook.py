@@ -645,6 +645,34 @@ class VaultHookShellContractTests(unittest.TestCase):
                 self.hook.trusted_python_command("python3", root)
             )
 
+    @unittest.skipIf(os.name == "nt", "POSIX runtime alias contract")
+    def test_bare_runtime_accepts_a_same_directory_trusted_alias(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            base = Path(temporary)
+            root = base / "project"
+            self.project(root)
+            runtime = base / "runtime" / "python3.9"
+            runtime.parent.mkdir(parents=True)
+            runtime.write_bytes(b"runtime")
+            runtime.chmod(0o755)
+            alias = runtime.parent / "python3"
+            try:
+                alias.symlink_to(runtime.name)
+            except OSError as exc:
+                self.skipTest(f"symlinks unavailable: {exc}")
+            with mock.patch.object(
+                self.hook.sys, "executable", str(runtime),
+            ), mock.patch.object(
+                self.hook.sys, "_base_executable", str(runtime), create=True,
+            ), mock.patch.dict(self.hook.os.environ, {
+                "PATH": str(runtime.parent),
+            }, clear=False):
+                self.assertTrue(
+                    self.hook.trusted_python_command(
+                        "python3", root, allow_bare=True,
+                    )
+                )
+
     def test_project_venv_alias_is_rejected_before_realpath_identity(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)

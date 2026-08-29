@@ -16,8 +16,8 @@ import {
 } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-const buildId = "snapshot.5955e0864b7284affd4581eeaf472cac90165182567dff9de1e680663cacba8a";
-const vaultHookSha256 = "2a3a209bcbe684d25e507cb296b0666e14c6c0886c9c7d2e109ca9c9f6c48bb9";
+const buildId = "snapshot.b1a3b67c0442b7b5ec804de0ece68c5a3803b1f53db2fadf027cd8cac7d9e204";
+const vaultHookSha256 = "4dc1ee88a788e7cf029c97d1b0d731b8921ff67c997d68c4a90eb4e576082eee";
 const component = 'software-engineering-team';
 const pluginFilename = 'agent-marketplace-software-engineering-team.js';
 const mutators = new Set(['write', 'edit', 'apply_patch', 'bash']);

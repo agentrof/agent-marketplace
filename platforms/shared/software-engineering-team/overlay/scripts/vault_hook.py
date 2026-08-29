@@ -1403,6 +1403,22 @@ def trusted_python_command(
         if _path_within(candidate, project) \
                 or _path_within(candidate.resolve(), project):
             return False
+        # setup-python and similar managed runtimes commonly expose
+        # ``python3`` as a symlink beside the interpreter that launched this
+        # hook.  Preserve the lexical project-boundary check above, then
+        # accept only that same-directory alias; an arbitrary PATH symlink to
+        # the interpreter remains guard-only.
+        if allow_bare and not Path(value).is_absolute() \
+                and candidate.resolve() in _trusted_runtime_targets():
+            trusted_directories = {
+                Path(runtime).parent.resolve()
+                for runtime in (
+                    sys.executable,
+                    getattr(sys, "_base_executable", ""),
+                )
+                if runtime and Path(runtime).is_absolute()
+            }
+            return candidate.parent.resolve() in trusted_directories
         return _apple_python_launcher_matches(candidate, cwd)
     except (OSError, RuntimeError):
         return False

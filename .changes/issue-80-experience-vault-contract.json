@@ -1,6 +1,0 @@
-{
-  "summary": "Align Experience compiler stubs and navigation with the closed Vault contract, including typed state classes and end-to-end producer validation.",
-  "components": {
-    "software-engineering-team": "patch"
-  }
-}

@@ -1,12 +1,12 @@
 {
   "schema_version": 1,
-  "version": "4.1.1",
-  "stable_base": "4a22a614fc8bcf34380265443675165a45a742dc",
-  "main_source": "c883c266c15dfa50eb9ed4cb1c389d5b28e60526",
+  "version": "4.1.2",
+  "stable_base": "608b2a3c35f69ec83e8d72eba8ea3e65f4604b17",
+  "main_source": "c19c5cd9d9993066065cd0fdce443da32d9c0665",
   "impacts": {
     "software-engineering-team": "patch"
   },
   "summaries": [
-    "Bind lifecycle writers to exact runtimes, post-attest legacy Experience commands, normalize shell payloads, and restore protected state across hostile path topologies with explicit host boundaries."
+    "Align Experience compiler stubs and navigation with the closed Vault contract, including typed state classes and end-to-end producer validation."
   ]
 }

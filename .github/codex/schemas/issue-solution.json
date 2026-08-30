@@ -1,0 +1,44 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "status",
+    "pr_title",
+    "summary",
+    "root_cause",
+    "challenge",
+    "impact",
+    "tests",
+    "patch_base64"
+  ],
+  "properties": {
+    "status": {
+      "type": "string",
+      "enum": ["ready", "blocked"]
+    },
+    "pr_title": {
+      "type": "string"
+    },
+    "summary": {
+      "type": "string"
+    },
+    "root_cause": {
+      "type": "string"
+    },
+    "challenge": {
+      "type": "string"
+    },
+    "impact": {
+      "type": "string"
+    },
+    "tests": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "patch_base64": {
+      "type": "string"
+    }
+  }
+}

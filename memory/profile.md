@@ -37,3 +37,4 @@ The learned profile of this user, derived from prompts, feedback, and requests a
 - Product defaults must stay stable across projects; user customization is an explicit override layer, never accidental per-project drift in generated output.
 - Project-local remediation choices stay project-local; platform fixes remove the blocker without turning one incident response into a general product workflow.
 - Prototype and exploratory artifact interiors stay fully author-owned and opaque. Compilers enforce only repository, lifecycle and evidence boundaries; structure, technology, behavior and presentation remain advisory best practices, never acceptance constraints.
+- Repeated repository operations should become mechanically checked protocols instead of recurring chat instructions; irreversible merge and release transitions remain bound to explicit user authority.

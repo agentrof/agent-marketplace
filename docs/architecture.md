@@ -113,9 +113,17 @@ adapters.
     an immediately legal per-write Vault result. After deterministic generated
     views are rendered, the same tree passes both its scoped Vault gate and its
     owning compiler gate; producer and consumer contracts are tested together.
+31. Maintainer issue automation treats issue text as untrusted data and splits
+    solution, verification, and publication into separate permission domains.
+    It may prepare a pull request but never merge one. Stable release authority
+    comes only from an explicit user request bound to an unambiguous PR set;
+    exact-SHA host gates, release provenance, and clean-ref completion remain
+    mandatory.
 
 The normative Requirement and Delivery lifecycle is documented in
 [requirement-delivery-protocol.md](requirement-delivery-protocol.md).
+Repository issue and release operations are documented separately in
+[maintainer-automation-protocol.md](maintainer-automation-protocol.md).
 
 ## Ownership
 

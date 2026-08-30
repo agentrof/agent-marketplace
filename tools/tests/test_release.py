@@ -393,7 +393,7 @@ class ReleaseFinalizeTests(unittest.TestCase):
         ))
 
     def test_mismatched_stable_or_unbounded_branch_fails_closed(self):
-        release.validate_finalize_branch("codex/maintainer-automation-protocol")
+        release.validate_finalize_branch("codex/maintainer-operations-protocol")
         with self.assertRaisesRegex(release.ReleaseError, "bounded"):
             release.finalize_local_release(
                 self.root, self.VERSION, ["feature/anything"]

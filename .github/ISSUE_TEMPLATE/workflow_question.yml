@@ -1,7 +1,6 @@
 name: Workflow question
 description: Ask for help using an existing Requirement, Delivery or host workflow.
 title: "question: "
-labels: ["question"]
 body:
   - type: dropdown
     id: area

@@ -1,7 +1,6 @@
 name: Improvement proposal
 description: Propose a bounded, evidence-backed improvement.
 title: "proposal: "
-labels: ["enhancement"]
 body:
   - type: textarea
     id: problem

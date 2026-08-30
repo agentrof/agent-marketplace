@@ -11,11 +11,9 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parents[2]
 PINNED_ACTIONS = {
     "actions/checkout": ("fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09", "v5"),
-    "actions/create-github-app-token": ("fee1f7d63c2ff003460e3d139729b119787bc349", "v2"),
     "actions/setup-python": ("5fda3b95a4ea91299a34e894583c3862153e4b97", "v7.0.0"),
     "actions/setup-node": ("820762786026740c76f36085b0efc47a31fe5020", "v7.0.0"),
     "actions/upload-artifact": ("043fb46d1a93c77aae656e7c1c64a875d1fc6a0a", "v7.0.1"),
-    "openai/codex-action": ("86365089eb2b84e0a8fb0717b304f8bdcb13b20e", "v1"),
     "github/codeql-action/init": ("db488ddef3bf6cb639b32c2e9a7c0a7ea8271d28", "v4"),
     "github/codeql-action/analyze": ("db488ddef3bf6cb639b32c2e9a7c0a7ea8271d28", "v4"),
 }
@@ -73,74 +71,7 @@ class ReleaseWorkflowContracts(unittest.TestCase):
         self.assertLess(text.index("git push origin HEAD:refs/heads/release/stable"),
                         text.index("manual_url="))
 
-    def test_issue_solution_is_permission_split_and_never_merges(self):
-        text = self.text("issue-solution.yml")
-        self.assertIn("types: [opened, reopened, labeled]", text)
-        self.assertIn("vars.CODEX_ISSUE_AUTOMATION_ENABLED == 'true'", text)
-        self.assertIn("group: issue-solution-${{ github.event.issue.number }}", text)
-        self.assertNotIn("git ls-remote", text)
-        self.assertIn("git/matching-refs/heads/$BRANCH", text)
-        self.assertNotIn("gh pr merge", text)
-        self.assertNotIn("enablePullRequestAutoMerge", text)
-
-        solve = text.split("  solve:", 1)[1].split("  verify:", 1)[0]
-        verify = text.split("  verify:", 1)[1].split("  publish-pr:", 1)[0]
-        publish = text.split("  publish-pr:", 1)[1].split("  report-blocked:", 1)[0]
-        self.assertIn("contents: read", solve)
-        self.assertIn("persist-credentials: false", solve)
-        self.assertNotIn("GH_TOKEN", solve)
-        self.assertNotIn("contents: write", solve)
-        self.assertIn("permission-profile: \":workspace\"", solve)
-        self.assertIn("safety-strategy: drop-sudo", solve)
-        self.assertIn("printf '%s\\n' '.codex-runtime/' >> .git/info/exclude", solve)
-        self.assertIn("prompt-file: .codex-runtime/issue-prompt.md", solve)
-        self.assertIn(
-            "openai/codex-action@86365089eb2b84e0a8fb0717b304f8bdcb13b20e # v1",
-            solve,
-        )
-        self.assertLess(solve.index("Render the bounded issue prompt"),
-                        solve.index("openai/codex-action@"))
-        self.assertNotIn("\n      - name:", solve.split("openai/codex-action@", 1)[1])
-
-        self.assertIn("contents: read", verify)
-        self.assertNotIn("contents: write", verify)
-        self.assertNotIn("GH_TOKEN", verify)
-        self.assertIn("git apply --index", verify)
-        self.assertIn("python3 tools/build_distributions.py", verify)
-        self.assertIn("python3 tools/release.py check-pr", verify)
-        self.assertIn("make check", verify)
-
-        self.assertIn("contents: read", publish)
-        self.assertNotIn("actions: write", publish)
-        self.assertNotIn("contents: write\n", publish.split("with:", 1)[0])
-        self.assertIn(
-            "actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349 # v2",
-            publish,
-        )
-        self.assertIn("app-id: ${{ vars.ISSUE_AUTOMATION_APP_ID }}", publish)
-        self.assertIn(
-            "private-key: ${{ secrets.ISSUE_AUTOMATION_PRIVATE_KEY }}", publish
-        )
-        for permission in ("contents", "issues", "pull-requests"):
-            self.assertIn(f"permission-{permission}: write", publish)
-        self.assertIn("EXPECTED_PATCH_SHA", publish)
-        self.assertIn("validate-live-issue", publish)
-        self.assertLess(
-            publish.index("validate-live-issue"),
-            publish.index("actions/create-github-app-token@"),
-        )
-        self.assertIn("gh pr create", publish)
-        self.assertIn("GH_TOKEN: ${{ steps.app-token.outputs.token }}", publish)
-        self.assertIn("GH_TOKEN: ${{ github.token }}", publish)
-        after_app_token = publish.split(
-            "actions/create-github-app-token@", 1
-        )[1]
-        self.assertNotIn("GH_TOKEN: ${{ github.token }}", after_app_token)
-        self.assertNotIn("make check", publish)
-        self.assertNotIn("tools/build_distributions.py", publish)
-        self.assertNotIn("gh workflow run", publish)
-
-    def test_app_created_pr_uses_ordinary_pull_request_gates(self):
+    def test_pull_requests_use_ordinary_checks_and_real_wsl2(self):
         validate = self.text("validate.yml")
         codeql = self.text("codeql.yml")
         hosts = self.text("release-hosts.yml")
@@ -150,51 +81,6 @@ class ReleaseWorkflowContracts(unittest.TestCase):
         self.assertIn("pull_request:\n    paths:", hosts)
         wsl = hosts.split("  opencode-wsl2-real-host:", 1)[1]
         self.assertNotIn("if: github.event_name != 'pull_request'", wsl)
-
-    def test_issue_automation_contract_is_discoverable_and_fail_closed(self):
-        protocol = (REPO / "docs/maintainer-automation-protocol.md").read_text(
-            encoding="utf-8"
-        )
-        agents = (REPO / "AGENTS.md").read_text(encoding="utf-8")
-        prompt = (REPO / ".github/codex/prompts/solve-issue.md").read_text(
-            encoding="utf-8"
-        )
-        schema = json.loads(
-            (REPO / ".github/codex/schemas/issue-solution.json").read_text(
-                encoding="utf-8"
-            )
-        )
-        for marker in (
-            "AWAIT_MERGE_APPROVAL",
-            "SECRETS_FREE_VERIFY",
-            "CODEX_ISSUE_AUTOMATION_ENABLED",
-            "OPENAI_API_KEY",
-            "ISSUE_AUTOMATION_APP_ID",
-            "ISSUE_AUTOMATION_PRIVATE_KEY",
-            "automation:solve",
-            "CLEAN_MAIN",
-        ):
-            self.assertIn(marker, protocol)
-        self.assertIn("docs/maintainer-automation-protocol.md", agents)
-        self.assertIn("untrusted data", prompt)
-        self.assertIn("{{ISSUE_CONTEXT_JSON}}", prompt)
-        self.assertFalse(schema["additionalProperties"])
-        self.assertEqual(set(schema["properties"]), set(schema["required"]))
-        schema_text = json.dumps(schema)
-        self.assertNotIn("$schema", schema)
-        self.assertNotIn("maxLength", schema_text)
-        self.assertNotIn("maxItems", schema_text)
-
-        issue_templates = REPO / ".github" / "ISSUE_TEMPLATE"
-        self.assertIn('labels: ["bug"]', (issue_templates / "bug_report.yml").read_text())
-        self.assertIn(
-            'labels: ["enhancement"]',
-            (issue_templates / "feature_request.yml").read_text(),
-        )
-        self.assertIn(
-            'labels: ["question"]',
-            (issue_templates / "workflow_question.yml").read_text(),
-        )
 
     def test_bootstrap_requires_empty_tag_space_and_uses_atomic_refs(self):
         text = self.text("prepare-stable-release.yml")

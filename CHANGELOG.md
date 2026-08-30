@@ -49,3 +49,7 @@
 ## 4.1.1
 
 - Bind lifecycle writers to exact runtimes, post-attest legacy Experience commands, normalize shell payloads, and restore protected state across hostile path topologies with explicit host boundaries.
+
+## 4.1.2
+
+- Align Experience compiler stubs and navigation with the closed Vault contract, including typed state classes and end-to-end producer validation.

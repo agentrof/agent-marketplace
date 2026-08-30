@@ -298,6 +298,7 @@
     "aliases": "aliases",
     "origin_mode": "text",
     "record_state": "text",
+    "state_class": "text",
     "analysis_scopes": "multitext",
     "criterion_refs": "multitext",
     "revision": "number",
@@ -463,6 +464,7 @@
     "experience_design": [
       "origin_mode",
       "record_state",
+      "state_class",
       "experience_id",
       "primary_process_ref",
       "related_process_refs",
@@ -684,7 +686,7 @@
       "derives_from": {"targets": ["*"], "inverse_label": "Derived knowledge"},
       "satisfies": {"targets": ["acceptance-set", "rule-set", "budget-set"], "inverse_label": "Satisfied by"},
       "constrained_by": {"targets": ["budget-set", "decision", "landscape", "design-master", "page-override", "solution-component", "interface-contract", "data-model", "threat-model", "runtime-view", "reliability-view", "observability-view"], "inverse_label": "Constrains"},
-      "implements": {"targets": ["landscape", "decision", "journey", "flow-set", "screen", "state", "transition", "interface-contract", "data-model", "threat-model", "runtime-view", "reliability-view", "observability-view"], "inverse_label": "Implemented by"},
+      "implements": {"targets": ["landscape", "decision", "journey", "flow-set", "screen", "state", "transition", "requirement", "interface-contract", "data-model", "threat-model", "runtime-view", "reliability-view", "observability-view"], "inverse_label": "Implemented by"},
       "uses_design": {"targets": ["design-master", "page-override"], "inverse_label": "Used by"},
       "related_to": {"targets": ["*"], "inverse_label": "Related from"},
       "verifies": {"targets": ["process", "story", "acceptance-set", "rule-set", "test-plan"], "inverse_label": "Verified by"}

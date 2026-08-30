@@ -65,8 +65,10 @@ MUTATING_COMMANDS = {
     "render-application", "begin-application-revision",
     "enter-application-review", "approve-set", "rename", "retire",
 }
-TRANSACTION_SCHEMA_VERSION = 1
+TRANSACTION_SCHEMA_VERSION = 2
 TRANSACTION_TIMEOUT_SECONDS = 30.0
+RECORD_NAV_START = "<!-- experience_compile.py: generated records:start -->"
+RECORD_NAV_END = "<!-- experience_compile.py: generated records:end -->"
 
 
 def valid_experience_slug(value: str) -> bool:
@@ -193,6 +195,10 @@ def transaction_runtime(root: Path) -> Path:
 
 def transaction_map(root: Path) -> Path:
     return root.parent / "maps" / "experience-design.md"
+
+
+def transaction_home(root: Path) -> Path:
+    return root.parent / "home.md"
 
 
 def transaction_journal(root: Path) -> Path:
@@ -445,7 +451,8 @@ def project_transaction_lock(root: Path):
 
 
 def _transaction_payload(root: Path, transaction_id: str, command: str,
-                         root_existed: bool, map_existed: bool) -> dict:
+                         root_existed: bool, map_existed: bool,
+                         home_existed: bool) -> dict:
     return {
         "schema_version": TRANSACTION_SCHEMA_VERSION,
         "transaction_id": transaction_id,
@@ -454,6 +461,8 @@ def _transaction_payload(root: Path, transaction_id: str, command: str,
         "root_existed": root_existed,
         "map_path": str(transaction_map(root)),
         "map_existed": map_existed,
+        "home_path": str(transaction_home(root)),
+        "home_existed": home_existed,
         "phase": "prepared",
     }
 
@@ -468,16 +477,18 @@ def read_transaction_journal(root: Path) -> dict | None:
         value = strict_json_loads(journal.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError, ValueError) as exc:
         raise ValueError(f"Experience transaction journal is unreadable: {exc}") from exc
-    expected_keys = {
+    legacy_keys = {
         "schema_version", "transaction_id", "command", "root",
         "root_existed", "map_path", "map_existed", "phase",
     }
+    current_keys = legacy_keys | {"home_path", "home_existed"}
     transaction_id = value.get("transaction_id") if isinstance(value, dict) else None
+    schema_version = value.get("schema_version") if isinstance(value, dict) else None
     if (
         not isinstance(value, dict)
-        or set(value) != expected_keys
-        or type(value.get("schema_version")) is not int
-        or value.get("schema_version") != TRANSACTION_SCHEMA_VERSION
+        or type(schema_version) is not int
+        or schema_version not in {1, TRANSACTION_SCHEMA_VERSION}
+        or set(value) != (legacy_keys if schema_version == 1 else current_keys)
         or not isinstance(transaction_id, str)
         or not re.fullmatch(r"[0-9a-f]{32}", transaction_id)
         or value.get("command") not in MUTATING_COMMANDS
@@ -485,6 +496,13 @@ def read_transaction_journal(root: Path) -> dict | None:
         or type(value.get("root_existed")) is not bool
         or value.get("map_path") != str(transaction_map(root))
         or type(value.get("map_existed")) is not bool
+        or (
+            schema_version == TRANSACTION_SCHEMA_VERSION
+            and (
+                value.get("home_path") != str(transaction_home(root))
+                or type(value.get("home_existed")) is not bool
+            )
+        )
         or value.get("phase") != "prepared"
     ):
         raise ValueError("Experience transaction journal has an invalid exact schema")
@@ -517,6 +535,11 @@ def restore_transaction(root: Path, journal: dict) -> None:
         not map_backup.is_file() or map_backup.is_symlink()
     ):
         raise ValueError("Experience transaction map backup is missing")
+    home_backup = backup / "home.md"
+    if journal.get("home_existed") and (
+        not home_backup.is_file() or home_backup.is_symlink()
+    ):
+        raise ValueError("Experience home navigation backup is missing")
 
     _remove_exact_path(root)
     if journal["root_existed"]:
@@ -531,6 +554,13 @@ def restore_transaction(root: Path, journal: dict) -> None:
     else:
         _remove_exact_path(map_path)
         fsync_directory(map_path.parent)
+    if "home_existed" in journal:
+        home_path = transaction_home(root)
+        if journal["home_existed"]:
+            atomic_write_bytes(home_path, home_backup.read_bytes())
+        else:
+            _remove_exact_path(home_path)
+            fsync_directory(home_path.parent)
 
 
 def cleanup_transaction(root: Path, transaction_id: str) -> None:
@@ -572,11 +602,18 @@ def begin_transaction(root: Path, command: str) -> str:
             if not map_path.is_file() or map_path.is_symlink():
                 raise ValueError("Experience navigation map must be a regular file")
             shutil.copy2(map_path, backup / "experience-design.md")
+        home_path = transaction_home(root)
+        home_existed = home_path.exists()
+        if home_existed:
+            if not home_path.is_file() or home_path.is_symlink():
+                raise ValueError("Vault home navigation must be a regular file")
+            shutil.copy2(home_path, backup / "home.md")
         fsync_tree(backup)
         atomic_write_json(
             transaction_journal(root),
             _transaction_payload(
                 root, transaction_id, command, root_existed, map_existed,
+                home_existed,
             ),
         )
     except BaseException:
@@ -744,6 +781,79 @@ def ref_value(value: str) -> str:
     if value.startswith("[[") and value.endswith("]]" ):
         return value[2:-2].split("|", 1)[0].split("#", 1)[0]
     return value.removesuffix(".md")
+
+
+def vault_wikilink(value: str) -> str:
+    raw = value.strip()
+    if raw.startswith("[[") and raw.endswith("]]" ):
+        inner = raw[2:-2]
+        if "|" in inner:
+            return raw
+        target = inner
+    else:
+        if not raw or "|" in raw or "\n" in raw:
+            raise ValueError(
+                "Vault relation values must be note paths or wikilinks"
+            )
+        target = raw.removesuffix(".md")
+    stem = target.split("#", 1)[0].rsplit("/", 1)[-1]
+    label = stem.replace("-", " ").replace("_", " ").strip().title()
+    if not label:
+        raise ValueError("Vault relation target needs a readable link alias")
+    return f"[[{target}|{label}]]"
+
+
+def exact_reference_value(value: str) -> str:
+    raw = value.strip()
+    if raw.startswith("[[") and raw.endswith("]]" ):
+        inner = raw[2:-2]
+        _target, separator, alias = inner.rpartition("|")
+        return alias.strip() if separator else ""
+    return raw
+
+
+def exact_reference_link(root: Path, value: str) -> str:
+    reference = exact_reference_value(value)
+    match = EXACT.fullmatch(reference)
+    if match is None:
+        raise ValueError("related_to needs an exact Experience record reference")
+    target = resolve_package(root, match.group(1))
+    if target is None:
+        raise ValueError(f"related_to target is not resolvable: {reference}")
+    findings: list[str] = []
+    identifier = reference.split(":", 1)[1].split("@", 1)[0]
+    row = next((
+        item for item in records(target, findings)
+        if item.get("id") == identifier
+        and item.get("revision") == int(match.group(3))
+    ), None)
+    if findings or row is None:
+        raise ValueError(f"related_to target is not resolvable: {reference}")
+    path = str(row["path"]).removesuffix(".md")
+    return (
+        f"[[experience-design/experiences/{target.name}/{path}|{reference}]]"
+    )
+
+
+def requirement_reference_value(value: str) -> str:
+    raw = value.strip()
+    if raw.startswith("[[") and raw.endswith("]]" ):
+        inner = raw[2:-2]
+        _target, separator, alias = inner.rpartition("|")
+        return alias.strip() if separator else ""
+    return raw
+
+
+def requirement_reference_link(docs: Path, identifier: str) -> str:
+    import requirement_compile
+    matches = [
+        path for path in requirement_compile.requirement_paths(docs)
+        if requirement_compile.requirement_id(path) == identifier
+    ]
+    if len(matches) != 1:
+        raise ValueError("Requirement is not uniquely resolvable for Experience")
+    target = matches[0].relative_to(docs).with_suffix("").as_posix()
+    return f"[[{target}|{identifier}]]"
 
 
 def bindings(data: dict) -> dict[str, tuple[str, str]]:
@@ -1308,6 +1418,7 @@ def external_active_record(root: Path, source: Path, reference: str,
     so two packages in one approved action set may reference each other. The
     aggregate application gate still compiles every package before approval.
     """
+    reference = exact_reference_value(reference)
     match = EXACT.fullmatch(reference)
     if match is None:
         return False
@@ -1629,7 +1740,7 @@ def reverse_reference_packages(root: Path, target: Path) -> list[Path]:
                 + "; ".join(record_findings)
             )
         if any(
-            (match := EXACT.fullmatch(reference)) is not None
+            (match := EXACT.fullmatch(exact_reference_value(reference))) is not None
             and match.group(1) in target_aliases
             for row in rows
             for field in REFERENCE_FIELDS
@@ -1645,11 +1756,32 @@ def rewrite_live_reference_prefix(package: Path, old: str, new: str) -> None:
         changed = False
         for field in REFERENCE_FIELDS:
             values = list_value(data, field)
-            rewritten = [
-                value.replace(old + ":", new + ":", 1)
-                if value.startswith(old + ":") else value
-                for value in values
-            ]
+            rewritten = []
+            for value in values:
+                reference = exact_reference_value(value)
+                if not reference.startswith(old + ":"):
+                    rewritten.append(value)
+                    continue
+                updated_reference = reference.replace(
+                    old + ":", new + ":", 1,
+                )
+                raw = value.strip()
+                if raw.startswith("[[") and raw.endswith("]]" ):
+                    inner = raw[2:-2]
+                    target, separator, _alias = inner.rpartition("|")
+                    if not separator:
+                        rewritten.append(updated_reference)
+                        continue
+                    target = target.replace(
+                        f"experience-design/experiences/{old}/",
+                        f"experience-design/experiences/{new}/",
+                        1,
+                    )
+                    rewritten.append(
+                        f"[[{target}|{updated_reference}]]"
+                    )
+                else:
+                    rewritten.append(updated_reference)
             if rewritten != values:
                 data[field] = rewritten
                 changed = True
@@ -1710,7 +1842,10 @@ def compile_package(package: Path, gate: bool = False, *,
         problems.append("experience.md: revision must be a positive integer")
     if not str(data.get("primary_process_ref", "")).strip(): problems.append("experience.md: primary_process_ref is required")
     if data.get("origin_mode") not in {"manual", "requirement"}: problems.append("experience.md: origin_mode must be manual or requirement")
-    implemented_requirements = list_value(data, "implements")
+    implemented_requirements = [
+        requirement_reference_value(value)
+        for value in list_value(data, "implements")
+    ]
     if data.get("origin_mode") == "requirement" and (len(implemented_requirements) != 1 or not re.fullmatch(r"REQ-[0-9]{3,}", implemented_requirements[0])): problems.append("experience.md: requirement mode needs exactly one implements: REQ-###")
     if data.get("origin_mode") == "requirement" and not str(data.get("upstream_stage_receipts_hash", "")).startswith("sha256:"):
         problems.append("experience.md: requirement mode needs upstream_stage_receipts_hash")
@@ -1776,12 +1911,13 @@ def compile_package(package: Path, gate: bool = False, *,
     for row in rows:
         for field in REFERENCE_FIELDS:
             for reference in list_value(row, field):
-                if not EXACT.fullmatch(reference):
+                exact_reference = exact_reference_value(reference)
+                if not EXACT.fullmatch(exact_reference):
                     problems.append(f"{row['path']}: {field} needs exact Experience refs")
-                elif (not historical and reference not in live and not external_active_record(
-                        experience_root, package, reference, related_processes,
+                elif (not historical and exact_reference not in live and not external_active_record(
+                        experience_root, package, exact_reference, related_processes,
                         gate=gate and not allow_stale_inputs)):
-                    problems.append(f"{row['path']}: {field} targets a missing, retired, or stale Experience record: {reference}")
+                    problems.append(f"{row['path']}: {field} targets a missing, retired, or stale Experience record: {exact_reference}")
     registry = {"schema_version": 6, "experience_id": package.name, "package_revision": data.get("revision", 1), "origin_mode": data.get("origin_mode"), "implements": implemented_requirements, "primary_process_ref": data.get("primary_process_ref", ""), "related_process_refs": list_value(data, "related_process_refs"), "input_bindings": {key: list(value) for key, value in bindings(data).items()}, "source_hash": source_digest(package), "records": rows}
     registry["registry_hash"] = sha(canonical({key: value for key, value in registry.items() if key not in {"source_hash", "registry_hash", "package_hash"}}))
     registry["package_hash"] = sha(canonical({"source_hash": registry["source_hash"], "registry_hash": registry["registry_hash"]}))
@@ -2182,12 +2318,15 @@ def init(args) -> int:
     data = {"type": "experience", "experience_id": args.experience, "origin_mode": args.origin_mode, "status": "draft", "revision": 1, "primary_process_ref": primary, "input_bindings": binding_rows(receipts)}
     if related: data["related_process_refs"] = related
     if args.origin_mode == "requirement":
-        data["implements"] = [args.requirement]
+        data["implements"] = [
+            requirement_reference_link(root.parent, args.requirement)
+        ]
         data["upstream_stage_receipts_hash"] = context["upstream_stage_receipts_hash"]
     try:
         write(package / "experience.md", data, args.title or f"{args.experience.replace('-', ' ').title()} Experience", "Living process-owned Experience package.", "maps/experience-design")
         for name in [entry[0] for entry in KIND.values()] + ["artifacts", GENERATED, LEDGER]: (package / name).mkdir(parents=True, exist_ok=True)
         write_open_revision(package, plan, selected_action, args.proposal_hash)
+        render_experience_navigation(root)
     except (OSError, ValueError) as exc:
         if package.exists():
             shutil.rmtree(package)
@@ -2420,20 +2559,47 @@ def stub(args) -> int:
         return fail("state stub requires --state-class from the canonical taxonomy", 2)
     if args.kind != "state" and args.state_class:
         return fail("--state-class is valid only for state records", 2)
-    data = {"type": args.kind, "id": args.id, "revision": args.revision, "record_state": args.record_state, "derives_from": args.derives_from or [str(fields(package).get("primary_process_ref", ""))]}
+    derives_from = args.derives_from or [
+        str(fields(package).get("primary_process_ref", ""))
+    ]
+    data = {
+        "type": args.kind,
+        "id": args.id,
+        "revision": args.revision,
+        "record_state": args.record_state,
+        "derives_from": [vault_wikilink(value) for value in derives_from],
+    }
     if args.kind == "state":
         data["state_class"] = args.state_class
-    if args.criterion_ref: data["criterion_refs"] = args.criterion_ref; data["satisfies"] = args.criterion_ref
+    if args.criterion_ref:
+        data["criterion_refs"] = args.criterion_ref
+        data["satisfies"] = [
+            vault_wikilink(value) for value in args.criterion_ref
+        ]
     for key in ("uses_design", "constrained_by", "journey_refs", "flow_refs", "screen_refs", "state_refs", "transition_refs", "related_to"):
         value = getattr(args, key)
-        if value: data[key] = value
+        if not value:
+            continue
+        if key in {"uses_design", "constrained_by"}:
+            data[key] = [vault_wikilink(item) for item in value]
+        elif key == "related_to":
+            data[key] = [
+                exact_reference_link(package.parent.parent, item)
+                for item in value
+            ]
+        else:
+            data[key] = value
     if args.supersedes: data["supersedes"] = args.supersedes
     write(package / directory / f"{args.slug}{suffix}", data, args.title or args.id, "Define the bounded experience behavior and exact references.", f"experience-design/experiences/{package.name}/experience")
+    render_package_record_navigation(package)
+    render_experience_navigation(package.parent.parent)
     return 0
 
 
 def render(args) -> int:
-    package = package_for(args.experience_root); registry, problems = compile_package(package)
+    package = package_for(args.experience_root)
+    render_package_record_navigation(package)
+    registry, problems = compile_package(package)
     if [item for item in problems if "registry is stale" not in item]: return print_problems(problems, False)
     generated = package / GENERATED; generated.mkdir(exist_ok=True)
     atomic_write_bytes(generated / "registry.json", canonical(registry))
@@ -2843,6 +3009,7 @@ def rename(args) -> int:
             write_open_revision(
                 destination, plan, selected_action, args.proposal_hash,
             )
+            render_package_record_navigation(destination)
             render_experience_navigation(root)
             _registry, problems = compile_package(
                 destination, defer_lifecycle_record_revision=True,
@@ -3010,20 +3177,121 @@ def status(args) -> int:
     print(json.dumps(package_receipt(package, registry), indent=2)); return 0
 
 
+def render_package_record_navigation(package: Path) -> None:
+    data, body = fm(package / "experience.md")
+    if data.get("status") not in {"draft", "in_review"}:
+        return
+    if data.get("origin_mode") == "requirement":
+        requirements = [
+            requirement_reference_value(value)
+            for value in list_value(data, "implements")
+        ]
+        if len(requirements) == 1 and re.fullmatch(
+            r"REQ-[0-9]{3,}", requirements[0],
+        ):
+            data["implements"] = [
+                requirement_reference_link(docs_for(package), requirements[0])
+            ]
+    pattern = re.compile(
+        rf"(?ms)^## Package Records <!-- sec: records -->\n\n"
+        rf"{re.escape(RECORD_NAV_START)}\n.*?\n"
+        rf"{re.escape(RECORD_NAV_END)}\n*"
+    )
+    body = pattern.sub("", body).rstrip()
+    rows = []
+    for directory, _prefix, suffix in KIND.values():
+        base = package / directory
+        for path in sorted(base.glob(f"*{suffix}")) if base.is_dir() else []:
+            record, record_body = fm(path)
+            changed = False
+            for key in ("derives_from", "satisfies", "uses_design",
+                        "constrained_by"):
+                values = list_value(record, key)
+                if not values:
+                    continue
+                normalized = [vault_wikilink(value) for value in values]
+                if normalized != values:
+                    record[key] = normalized
+                    changed = True
+            related = list_value(record, "related_to")
+            if related:
+                normalized = [
+                    exact_reference_link(package.parent.parent, value)
+                    for value in related
+                ]
+                if normalized != related:
+                    record["related_to"] = normalized
+                    changed = True
+            if changed:
+                rewrite(path, record, record_body)
+            relative = path.relative_to(package).with_suffix("").as_posix()
+            title = str(record.get("title") or record.get("id") or path.stem)
+            title = title.replace("|", "/")
+            rows.append(
+                f"- [[experience-design/experiences/{package.name}/"
+                f"{relative}|{title}]]"
+            )
+    if rows:
+        block = "\n".join([
+            "## Package Records <!-- sec: records -->",
+            "",
+            RECORD_NAV_START,
+            *rows,
+            RECORD_NAV_END,
+        ])
+        nav = "## Navigation <!-- sec: nav -->"
+        if nav not in body:
+            raise ValueError("Experience root note is missing its navigation section")
+        before, after = body.split(nav, 1)
+        body = before.rstrip() + "\n\n" + block + "\n\n" + nav + after
+    rewrite(package / "experience.md", data, body)
+
+
 def render_experience_navigation(root: Path) -> None:
     experience_root = root_for(root)
     experience_root.mkdir(parents=True, exist_ok=True)
-    map_path = experience_root.parent / "maps" / "experience-design.md"
-    if not map_path.is_file():
+    current_packages = packages(experience_root)
+    if not current_packages:
         return
+    map_path = transaction_map(experience_root)
+    if map_path.exists() and (
+        not map_path.is_file() or map_path.is_symlink()
+    ):
+        raise ValueError("Experience navigation map must be a regular file")
+    if not map_path.is_file():
+        template = (
+            Path(__file__).resolve().parent.parent
+            / "templates/vault/maps/experience-design.md"
+        )
+        if not template.is_file() or template.is_symlink():
+            raise ValueError("Experience navigation map template is missing")
+        map_path.parent.mkdir(parents=True, exist_ok=True)
+        atomic_write_bytes(map_path, template.read_bytes())
     marker = "<!-- experience_compile.py: generated packages -->"
     retained = map_path.read_text(encoding="utf-8").split(marker, 1)[0].rstrip()
     rows = ["", marker, ""]
-    for package in packages(experience_root):
+    for package in current_packages:
         rows.append(f"- [[experience-design/experiences/{package.name}/experience|{package.name}]] — `{fields(package).get('status', 'draft')}`")
     atomic_write_bytes(
         map_path, ("\n".join([retained, *rows]).rstrip() + "\n").encode(),
     )
+    home_path = transaction_home(experience_root)
+    if home_path.exists() and (
+        not home_path.is_file() or home_path.is_symlink()
+    ):
+        raise ValueError("Vault home navigation must be a regular file")
+    if home_path.is_file():
+        text = home_path.read_text(encoding="utf-8")
+        if not re.search(
+            r"\[\[maps/experience-design(?:\|[^\]\n]+)?\]\]", text,
+        ):
+            atomic_write_bytes(
+                home_path,
+                (
+                    text.rstrip()
+                    + "\n\n- [[maps/experience-design|Experience Design]]\n"
+                ).encode(),
+            )
 
 
 def reconcile_vault_navigation(root: Path) -> None:

@@ -112,6 +112,23 @@ class ValidatorContractTests(unittest.TestCase):
                 for finding in findings
             ))
 
+    def test_vault_policy_and_types_seed_property_maps_cannot_drift(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = self.fixture(temporary)
+            path = (
+                root / "plugins/software-engineering-team/templates/vault/"
+                ".obsidian/types.json"
+            )
+            types = json.loads(path.read_text(encoding="utf-8"))
+            types["types"]["owner_role"] = "number"
+            path.write_text(json.dumps(types, indent=2) + "\n", encoding="utf-8")
+            findings = validate.run(root)
+            self.assertTrue(any(
+                finding.check == "vault_policy_shape"
+                and "types.json property map" in finding.message
+                for finding in findings
+            ))
+
     def test_delivery_contract_set_and_merge_policy_are_validated(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = self.fixture(temporary)

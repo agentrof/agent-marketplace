@@ -456,8 +456,7 @@ class VaultHookShellContractTests(unittest.TestCase):
             "# Knowledge Base\n\n"
             "- [[maps/business-analysis|Business Analysis]]\n"
             "- [[maps/solution-design|Solution Design]]\n"
-            "- [[maps/design-system|Design System]]\n"
-            "- [[maps/experience-design|Experience Design]]\n",
+            "- [[maps/design-system|Design System]]\n",
             encoding="utf-8",
         )
         map_links = {
@@ -473,9 +472,6 @@ class VaultHookShellContractTests(unittest.TestCase):
                 "solution-design/decisions/environment-decision",
             ],
             "design-system": ["design-system/MASTER"],
-            "experience-design": [
-                "experience-design/experiences/checkout/experience",
-            ],
         }
         for subtree, links in map_links.items():
             title = subtree.replace("-", " ").title()
@@ -2020,6 +2016,8 @@ class VaultHookShellContractTests(unittest.TestCase):
             ))
             package_relative = "experience-design/experiences/checkout"
             changed = [
+                "home.md",
+                "maps/experience-design.md",
                 "experience-design/_generated",
                 "experience-design/_generated/open-application-revision.json",
                 "experience-design/experiences",
@@ -2207,6 +2205,16 @@ class VaultHookShellContractTests(unittest.TestCase):
                 application_state["proposal_hash"], plan["proposal_hash"],
             )
             self.assertTrue((checkout / "experience.md").is_file())
+            self.assertIn(
+                "[[experience-design/experiences/checkout/experience|checkout]]",
+                (docs / "maps/experience-design.md").read_text(
+                    encoding="utf-8"
+                ),
+            )
+            self.assertIn(
+                "[[maps/experience-design|Experience Design]]",
+                (docs / "home.md").read_text(encoding="utf-8"),
+            )
 
     @unittest.skipUnless(sys.platform == "darwin", "bare Python fallback")
     def test_bare_python_candidate_with_invalid_result_is_restored(self):

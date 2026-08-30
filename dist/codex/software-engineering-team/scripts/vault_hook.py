@@ -1760,6 +1760,8 @@ def valid_application_writer_result(
         experience = str(spec["experience"])
         package_relative = f"experience-design/experiences/{experience}"
         allowed = {
+            "home.md",
+            "maps/experience-design.md",
             "experience-design/_generated",
             "experience-design/_generated/open-application-revision.json",
             "experience-design/experiences",

@@ -109,6 +109,10 @@ adapters.
     revision. Reviewers provide fidelity and usability advice; approval uses a
     transient attestation bound to proposal, artifact-tree, package-set and
     application hashes without treating that advice as a compiler gate.
+30. Every official compiler mutation that writes authored Markdown produces
+    an immediately legal per-write Vault result. After deterministic generated
+    views are rendered, the same tree passes both its scoped Vault gate and its
+    owning compiler gate; producer and consumer contracts are tested together.
 
 The normative Requirement and Delivery lifecycle is documented in
 [requirement-delivery-protocol.md](requirement-delivery-protocol.md).

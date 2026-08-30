@@ -106,6 +106,7 @@
     "approval_hash": "text",
     "origin_mode": "text",
     "record_state": "text",
+    "state_class": "text",
     "stage_results_hash": "text",
     "upstream_stage_receipts_hash": "text",
     "planning_mode": "text",

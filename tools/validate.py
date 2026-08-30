@@ -2092,6 +2092,22 @@ def check_vault_policy_shape(tree: Tree, findings: list[Finding]) -> None:
             vault_tpl = plugin / "templates" / "vault"
             if not vault_tpl.is_dir():
                 continue
+            types_seed = vault_tpl / ".obsidian" / "types.json"
+            if not types_seed.is_file():
+                err("templates/vault/.obsidian/types.json is missing",
+                    "ship the Obsidian property seed beside the vault policy")
+            else:
+                try:
+                    types_document = json.loads(read_text(types_seed))
+                except json.JSONDecodeError:
+                    types_document = None  # json_hygiene reports syntax
+                seed_types = types_document.get("types") \
+                    if isinstance(types_document, dict) else None
+                if seed_types != prop_types:
+                    err("types.json property map does not match policy"
+                        " property_types",
+                        "derive the complete Obsidian property seed from the"
+                        " vault-wide property type map in the same change")
             maps_dir = policy.get("maps_dir") or "maps"
             home_file = policy.get("home_file") or "home.md"
             expected_maps = set(subtrees) | set(extra_maps)

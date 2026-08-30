@@ -141,9 +141,9 @@ def activation_findings(snapshot: dict[str, Any]) -> list[str]:
     variables = snapshot.get("variables", {})
     if APPROVAL_LABEL not in labels:
         findings.append(f"missing label: {APPROVAL_LABEL}")
-    for secret in ("OPENAI_API_KEY", "ISSUE_AUTOMATION_PRIVATE_KEY"):
-        if secret not in secrets:
-            findings.append(f"missing secret: {secret}")
+    required_credentials = {"OPENAI_API_KEY", "ISSUE_AUTOMATION_PRIVATE_KEY"}
+    if not required_credentials.issubset(secrets):
+        findings.append("required Actions credentials are not configured")
     for variable in ("ISSUE_AUTOMATION_APP_ID",):
         if not isinstance(variables, dict) or not str(variables.get(variable, "")).strip():
             findings.append(f"missing variable: {variable}")

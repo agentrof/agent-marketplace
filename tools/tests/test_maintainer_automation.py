@@ -147,7 +147,7 @@ class ActivationDoctorTests(unittest.TestCase):
         findings = automation.activation_findings(snapshot)
         for marker in (
             "missing label",
-            "missing secret",
+            "required Actions credentials",
             "missing variable",
             "not true",
             "selected-actions policy must contain only",

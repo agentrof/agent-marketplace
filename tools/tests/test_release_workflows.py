@@ -71,6 +71,17 @@ class ReleaseWorkflowContracts(unittest.TestCase):
         self.assertLess(text.index("git push origin HEAD:refs/heads/release/stable"),
                         text.index("manual_url="))
 
+    def test_pull_requests_use_ordinary_checks_and_real_wsl2(self):
+        validate = self.text("validate.yml")
+        codeql = self.text("codeql.yml")
+        hosts = self.text("release-hosts.yml")
+        self.assertIn("pull_request:", validate)
+        self.assertIn("--base origin/${{ github.base_ref }}", validate)
+        self.assertIn("pull_request:", codeql)
+        self.assertIn("pull_request:\n    paths:", hosts)
+        wsl = hosts.split("  opencode-wsl2-real-host:", 1)[1]
+        self.assertNotIn("if: github.event_name != 'pull_request'", wsl)
+
     def test_bootstrap_requires_empty_tag_space_and_uses_atomic_refs(self):
         text = self.text("prepare-stable-release.yml")
         self.assertIn("verify-bootstrap", text)

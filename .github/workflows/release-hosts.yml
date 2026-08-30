@@ -184,7 +184,6 @@ jobs:
 
   opencode-wsl2-real-host:
     name: opencode terminal (real WSL2)
-    if: github.event_name != 'pull_request'
     runs-on: windows-latest
     timeout-minutes: 30
     defaults:

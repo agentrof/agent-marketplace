@@ -14,3 +14,7 @@ Describe the user-visible or operational outcome and the non-goals.
 
 List migration, rollout, compatibility or security considerations. State
 `None` only after checking each category.
+
+For a maintainer issue solution, also verify the reported root cause,
+challenged alternative, host/OS impact, exact candidate checks, and that the
+protocol stopped before merge.

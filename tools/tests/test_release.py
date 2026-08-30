@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -289,6 +290,143 @@ class ReleaseRepositoryTests(unittest.TestCase):
             identity = release.build_identity(self.root)
         self.assertEqual(identity["build_id"], "main.42.gabcdef0")
         self.assertEqual(identity["stable_versions"]["marketplace"], "0.0.1")
+
+
+class ReleaseFinalizeTests(unittest.TestCase):
+    VERSION = "1.2.3"
+    FEATURE = "codex/issue-42"
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        temporary = Path(self.tmp.name)
+        self.remote = temporary / "remote.git"
+        self.root = temporary / "work"
+        self.git_run("git", "init", "--bare", str(self.remote), cwd=temporary)
+        self.git_run("git", "init", "-b", "main", str(self.root), cwd=temporary)
+        self.git_run("git", "config", "user.name", "Release Test")
+        self.git_run("git", "config", "user.email", "release@example.test")
+        (self.root / ".release").mkdir()
+        (self.root / ".release" / "stable.json").write_text(json.dumps({
+            "schema_version": 1,
+            "version": self.VERSION,
+            "stable_base": "a" * 40,
+            "main_source": "b" * 40,
+            "impacts": {"fixture": "patch"},
+            "summaries": ["Fixture release."],
+        }), encoding="utf-8")
+        (self.root / "README.md").write_text("release fixture\n", encoding="utf-8")
+        self.git_run("git", "add", ".")
+        self.git_run("git", "commit", "-m", "release fixture")
+        self.git_run("git", "tag", "-a", f"v{self.VERSION}", "-m", "release")
+        self.git_run("git", "branch", "stable")
+        self.git_run("git", "branch", self.FEATURE)
+        self.git_run("git", "branch", "release/stable")
+        self.git_run("git", "remote", "add", "origin", str(self.remote))
+        self.git_run("git", "push", "origin", "main", "stable", self.FEATURE, f"v{self.VERSION}")
+        self.git_run("git", "fetch", "origin", "--prune", "--tags")
+        self.git_run("git", "switch", self.FEATURE)
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def git_run(self, *args: str, cwd=None) -> subprocess.CompletedProcess:
+        return subprocess.run(
+            list(args),
+            cwd=cwd or self.root,
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+
+    def test_dry_run_audits_without_mutating(self):
+        result = release.finalize_local_release(
+            self.root, self.VERSION, [self.FEATURE, "release/stable"]
+        )
+        self.assertFalse(result["apply"])
+        self.assertEqual(result["release"]["main"], result["release"]["tag"])
+        self.assertEqual(
+            self.git_run("git", "branch", "--show-current").stdout.strip(), self.FEATURE
+        )
+        self.assertTrue(release.git_ok(
+            self.root, "show-ref", "--verify", "--quiet", f"refs/heads/{self.FEATURE}"
+        ))
+
+    def test_apply_deletes_only_selected_merged_refs_and_finishes_clean_main(self):
+        result = release.finalize_local_release(
+            self.root,
+            self.VERSION,
+            [self.FEATURE, "release/stable"],
+            apply=True,
+        )
+        self.assertTrue(result["apply"])
+        self.assertEqual(
+            self.git_run("git", "branch", "--show-current").stdout.strip(), "main"
+        )
+        self.assertEqual(self.git_run("git", "status", "--porcelain").stdout, "")
+        for branch in (self.FEATURE, "release/stable"):
+            self.assertFalse(release.git_ok(
+                self.root, "show-ref", "--verify", "--quiet", f"refs/heads/{branch}"
+            ))
+            self.assertFalse(release.git_ok(
+                self.root,
+                "show-ref",
+                "--verify",
+                "--quiet",
+                f"refs/remotes/origin/{branch}",
+            ))
+        main_sha = release.git(self.root, "rev-parse", "refs/heads/main")
+        self.assertEqual(
+            release.git(self.root, "rev-parse", "refs/heads/stable"), main_sha
+        )
+
+    def test_unmerged_branch_is_never_deleted(self):
+        (self.root / "unmerged.txt").write_text("not released\n", encoding="utf-8")
+        self.git_run("git", "add", "unmerged.txt")
+        self.git_run("git", "commit", "-m", "unmerged")
+        self.git_run("git", "push", "origin", self.FEATURE)
+        with self.assertRaisesRegex(release.ReleaseError, "unmerged"):
+            release.finalize_local_release(
+                self.root, self.VERSION, [self.FEATURE], apply=True
+            )
+        self.assertTrue(release.git_ok(
+            self.root, "show-ref", "--verify", "--quiet", f"refs/heads/{self.FEATURE}"
+        ))
+
+    def test_mismatched_stable_or_unbounded_branch_fails_closed(self):
+        release.validate_finalize_branch("codex/maintainer-operations-protocol")
+        with self.assertRaisesRegex(release.ReleaseError, "bounded"):
+            release.finalize_local_release(
+                self.root, self.VERSION, ["feature/anything"]
+            )
+        with self.assertRaisesRegex(release.ReleaseError, "bounded"):
+            release.validate_finalize_branch(
+                "codex/" + "a" * release.MAX_FINALIZE_BRANCH_CHARS
+            )
+        (self.root / "stable-drift.txt").write_text("drift\n", encoding="utf-8")
+        self.git_run("git", "add", "stable-drift.txt")
+        self.git_run("git", "commit", "-m", "stable drift")
+        self.git_run("git", "push", "origin", f"HEAD:refs/heads/stable")
+        self.git_run("git", "fetch", "origin", "--prune", "--tags")
+        with self.assertRaisesRegex(release.ReleaseError, "release refs differ"):
+            release.finalize_local_release(self.root, self.VERSION, [])
+
+    def test_divergent_local_main_is_refused_before_cleanup(self):
+        self.git_run("git", "switch", "main")
+        (self.root / "local-main-only.txt").write_text("local\n", encoding="utf-8")
+        self.git_run("git", "add", "local-main-only.txt")
+        self.git_run("git", "commit", "-m", "local main only")
+        self.git_run("git", "switch", self.FEATURE)
+        with self.assertRaisesRegex(release.ReleaseError, "cannot fast-forward"):
+            release.finalize_local_release(
+                self.root, self.VERSION, [self.FEATURE], apply=True
+            )
+        self.assertTrue(release.git_ok(
+            self.root,
+            "show-ref",
+            "--verify",
+            "--quiet",
+            f"refs/remotes/origin/{self.FEATURE}",
+        ))
 
 
 if __name__ == "__main__":

@@ -49,6 +49,10 @@ the invariants behind them in [docs/architecture.md](docs/architecture.md); the
 orchestration model in [docs/orchestration.md](docs/orchestration.md); and the
 current lifecycle and Git protocol in
 [docs/requirement-delivery-protocol.md](docs/requirement-delivery-protocol.md).
+Repository maintainers use the separate, manually invoked
+[issue and release operations protocol](docs/maintainer-operations-protocol.md);
+an issue event never starts an agent and issue text never grants merge or
+release authority.
 
 ## Add a knowledge skill: walkthrough
 

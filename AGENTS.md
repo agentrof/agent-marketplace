@@ -11,3 +11,22 @@ Read `memory/me.md` and follow it before editing this repository.
 - Create components with `tools/scaffold.py`; do not hand-copy them.
 - Derived README counts are maintained by `make counts`, never by hand.
 - Run `make check` before committing; one validation error fails CI.
+
+## Maintainer operations
+
+- Follow `docs/maintainer-operations-protocol.md` for repository issue and
+  release work. This protocol is separate from the shipped project Delivery
+  flow.
+- Never scan, poll, or start work from a GitHub issue event. Begin an issue
+  operation only when the user explicitly asks to start the issue-solution
+  protocol and identifies either the issue or an unambiguous selection rule.
+- For an authorized issue task, analyze root cause, challenge the solution,
+  assess every affected host and operating system, implement and verify, open a
+  PR, then stop before merge until the user explicitly approves that PR.
+- An explicit request to start a release authorizes the complete release flow
+  for the unambiguous PR set selected in the active task, including green
+  feature and release PR merges and cleanup. It never authorizes unrelated PRs
+  or bypassing a failed gate.
+- Finish a release only after remote and local refs are audited, selected
+  merged branches are removed, the active branch is `main`, and the worktree is
+  clean.

@@ -284,6 +284,192 @@ def git(root: Path, *args: str) -> str:
     return completed.stdout.strip()
 
 
+def git_ok(root: Path, *args: str) -> bool:
+    completed = subprocess.run(
+        ["git", *args], cwd=root, capture_output=True, text=True, check=False
+    )
+    return completed.returncode == 0
+
+
+FINALIZE_BRANCH_RE = re.compile(r"^codex/[a-z0-9]+(?:-[a-z0-9]+)*$")
+MAX_FINALIZE_BRANCH_CHARS = 120
+
+
+def validate_finalize_branch(branch: str) -> None:
+    if branch == "release/stable":
+        return
+    if len(branch) > MAX_FINALIZE_BRANCH_CHARS \
+            or FINALIZE_BRANCH_RE.fullmatch(branch) is None:
+        raise ReleaseError(
+            "release cleanup branch must be release/stable or a bounded "
+            f"codex/<kebab-name> branch, got {branch!r}"
+        )
+
+
+def worktree_branch_locations(root: Path) -> dict[str, Path]:
+    locations: dict[str, Path] = {}
+    worktree = None
+    for line in git(root, "worktree", "list", "--porcelain").splitlines():
+        if line.startswith("worktree "):
+            worktree = Path(line.removeprefix("worktree ")).resolve()
+        elif line.startswith("branch refs/heads/") and worktree is not None:
+            branch = line.removeprefix("branch refs/heads/")
+            locations[branch] = worktree
+    return locations
+
+
+def release_ref_audit(root: Path, version: str) -> dict:
+    parse_semver(version, "release version")
+    main_sha = git(root, "rev-parse", "refs/remotes/origin/main")
+    stable_sha = git(root, "rev-parse", "refs/remotes/origin/stable")
+    tag_sha = git(root, "rev-list", "-n", "1", f"refs/tags/v{version}")
+    if len({main_sha, stable_sha, tag_sha}) != 1:
+        raise ReleaseError(
+            "release refs differ: "
+            f"origin/main={main_sha}, origin/stable={stable_sha}, v{version}={tag_sha}"
+        )
+    metadata = json_at_ref(root, "refs/remotes/origin/main", ".release/stable.json")
+    if not isinstance(metadata, dict) or metadata.get("version") != version:
+        raise ReleaseError(
+            f"origin/main release metadata does not attest v{version}"
+        )
+    if git_ok(root, "show-ref", "--verify", "--quiet", "refs/remotes/origin/release/stable"):
+        raise ReleaseError(
+            "origin/release/stable still exists; the publish workflow is incomplete"
+        )
+    return {
+        "version": version,
+        "commit": main_sha,
+        "main": main_sha,
+        "stable": stable_sha,
+        "tag": tag_sha,
+    }
+
+
+def finalize_local_release(
+    root: Path, version: str, branches: list[str], apply: bool = False,
+) -> dict:
+    repository_root = Path(git(root, "rev-parse", "--show-toplevel")).resolve()
+    if repository_root != root.resolve():
+        raise ReleaseError(
+            f"release cleanup root must be the Git toplevel: {repository_root}"
+        )
+    if git(root, "status", "--porcelain"):
+        raise ReleaseError("release cleanup requires a clean worktree")
+    if len(branches) != len(set(branches)):
+        raise ReleaseError("release cleanup branches must be unique")
+    for branch in branches:
+        validate_finalize_branch(branch)
+
+    if apply:
+        git(root, "fetch", "origin", "--prune", "--tags")
+    audit = release_ref_audit(root, version)
+
+    worktrees = worktree_branch_locations(root)
+    for branch in {"main", "stable", *branches}:
+        location = worktrees.get(branch)
+        if location is not None and location != root.resolve():
+            raise ReleaseError(
+                f"release cleanup branch {branch!r} is checked out at {location}"
+            )
+    if not git_ok(root, "show-ref", "--verify", "--quiet", "refs/heads/main"):
+        raise ReleaseError("local main branch is missing")
+    if not git_ok(
+        root,
+        "merge-base",
+        "--is-ancestor",
+        "refs/heads/main",
+        "refs/remotes/origin/main",
+    ):
+        raise ReleaseError("local main cannot fast-forward to the published release")
+    if git_ok(root, "show-ref", "--verify", "--quiet", "refs/heads/stable") \
+            and not git_ok(
+                root,
+                "merge-base",
+                "--is-ancestor",
+                "refs/heads/stable",
+                "refs/remotes/origin/stable",
+            ):
+        raise ReleaseError("local stable has commits outside the published release")
+
+    selected: list[dict[str, object]] = []
+    for branch in branches:
+        local_ref = f"refs/heads/{branch}"
+        remote_ref = f"refs/remotes/origin/{branch}"
+        local_exists = git_ok(root, "show-ref", "--verify", "--quiet", local_ref)
+        remote_exists = git_ok(root, "show-ref", "--verify", "--quiet", remote_ref)
+        for label, ref, exists in (
+            ("local", local_ref, local_exists),
+            ("remote", remote_ref, remote_exists),
+        ):
+            if exists and not git_ok(
+                root, "merge-base", "--is-ancestor", ref, "refs/remotes/origin/main"
+            ):
+                raise ReleaseError(
+                    f"refusing to delete unmerged {label} branch {branch!r}"
+                )
+        if branch == "release/stable" and remote_exists:
+            raise ReleaseError(
+                "origin/release/stable still exists; publish must delete it"
+            )
+        selected.append({
+            "branch": branch,
+            "local": local_exists,
+            "remote": remote_exists,
+        })
+
+    result = {
+        "schema_version": 1,
+        "apply": apply,
+        "release": audit,
+        "branches": selected,
+        "final_branch": "main",
+        "worktree": "clean",
+    }
+    if not apply:
+        return result
+
+    current = git(root, "branch", "--show-current")
+    if current != "main":
+        git(root, "switch", "main")
+    git(root, "merge", "--ff-only", "refs/remotes/origin/main")
+
+    for item in selected:
+        branch = str(item["branch"])
+        if item["remote"]:
+            git(root, "push", "origin", "--delete", branch)
+    git(root, "fetch", "origin", "--prune", "--tags")
+    for item in selected:
+        branch = str(item["branch"])
+        if item["local"]:
+            git(root, "branch", "-d", branch)
+    git(root, "branch", "-f", "stable", "refs/remotes/origin/stable")
+
+    final_audit = release_ref_audit(root, version)
+    if git(root, "branch", "--show-current") != "main":
+        raise ReleaseError("release cleanup did not finish on main")
+    if git(root, "rev-parse", "refs/heads/main") != final_audit["commit"]:
+        raise ReleaseError("local main does not match the published release")
+    if git(root, "rev-parse", "refs/heads/stable") != final_audit["commit"]:
+        raise ReleaseError("local stable does not match the published release")
+    if git(root, "status", "--porcelain"):
+        raise ReleaseError("release cleanup left a dirty worktree")
+    for item in selected:
+        branch = str(item["branch"])
+        if git_ok(root, "show-ref", "--verify", "--quiet", f"refs/heads/{branch}"):
+            raise ReleaseError(f"local cleanup branch remains: {branch}")
+        if git_ok(
+            root,
+            "show-ref",
+            "--verify",
+            "--quiet",
+            f"refs/remotes/origin/{branch}",
+        ):
+            raise ReleaseError(f"remote cleanup branch remains: {branch}")
+    result["release"] = final_audit
+    return result
+
+
 def build_identity(root: Path, sha: str = "HEAD") -> dict:
     full_sha = git(root, "rev-parse", sha)
     count = git(root, "rev-list", "--count", "--first-parent", full_sha)
@@ -557,6 +743,10 @@ def main() -> int:
     notes_parser = sub.add_parser("release-notes")
     notes_parser.add_argument("--version", required=True)
     notes_parser.add_argument("--output", type=Path)
+    finalize_parser = sub.add_parser("finalize-local")
+    finalize_parser.add_argument("--version", required=True)
+    finalize_parser.add_argument("--branch", action="append", default=[])
+    finalize_parser.add_argument("--apply", action="store_true")
     args = parser.parse_args()
     root = args.root.resolve()
     if args.command == "validate":
@@ -594,6 +784,10 @@ def main() -> int:
             args.output.write_text(notes, encoding="utf-8")
         else:
             print(notes, end="")
+    elif args.command == "finalize-local":
+        print(json.dumps(finalize_local_release(
+            root, args.version, args.branch, apply=args.apply
+        ), indent=2))
     return 0
 
 

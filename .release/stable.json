@@ -1,12 +1,13 @@
 {
   "schema_version": 1,
-  "version": "4.1.2",
-  "stable_base": "608b2a3c35f69ec83e8d72eba8ea3e65f4604b17",
-  "main_source": "c19c5cd9d9993066065cd0fdce443da32d9c0665",
+  "version": "4.1.3",
+  "stable_base": "55d10652af12b20fcd4a8ad9a422edf281a61d6b",
+  "main_source": "b38d31a80f55d1e5d6d3184f537262b886206d55",
   "impacts": {
     "software-engineering-team": "patch"
   },
   "summaries": [
-    "Align Experience compiler stubs and navigation with the closed Vault contract, including typed state classes and end-to-end producer validation."
+    "Recover stale open Experience scopes without changing authored artifacts or approved lifecycle records.",
+    "Add a manually invoked, fail-closed protocol for issue-to-PR work and explicit releases."
   ]
 }

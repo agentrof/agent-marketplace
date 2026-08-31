@@ -53,3 +53,8 @@
 ## 4.1.2
 
 - Align Experience compiler stubs and navigation with the closed Vault contract, including typed state classes and end-to-end producer validation.
+
+## 4.1.3
+
+- Recover stale open Experience scopes without changing authored artifacts or approved lifecycle records.
+- Add a manually invoked, fail-closed protocol for issue-to-PR work and explicit releases.

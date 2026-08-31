@@ -65,6 +65,16 @@ quality, accessibility, security or implementation suitability.
 - `_generated/open-application-revision.json` binds proposal, action,
   predecessor and successor revision with `draft|in_review` phase. It is
   compiler-owned; prototype files hold no lifecycle metadata.
+- When a package set composed only of `draft` or `in_review` non-retire
+  mutations is stranded on an obsolete proposal, generate a fresh recovery
+  proposal from the exact old plan plus current input and application
+  bindings, then use `recover-open-scope` with both exact plans and hashes.
+  Recovery must bind the old proposal hash into the fresh plan, prove both
+  plans and every open package name the same complete mutation set, rebind it
+  and the open application atomically, retain package revisions, reset review
+  to `draft`, preserve authored child records and prototype/package artifact
+  bytes, and leave approved ledgers and receipts untouched. A scope containing
+  `retirement_pending` or a retire action fails closed.
 - `enter-application-review` snapshots the current artifact tree. Approval
   requires a fresh exact-schema-v4 reviewer attestation bound to proposal,
   artifact-tree, package-set and application hashes. Its `advisories` remain

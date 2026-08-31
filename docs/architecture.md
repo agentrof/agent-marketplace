@@ -108,7 +108,12 @@ adapters.
     no process receipts; a later process can join through the next application
     revision. Reviewers provide fidelity and usability advice; approval uses a
     transient attestation bound to proposal, artifact-tree, package-set and
-    application hashes without treating that advice as a compiler gate.
+    application hashes without treating that advice as a compiler gate. A
+    scope composed only of stale `draft|in_review` non-retire mutations is
+    recoverable only by an atomic exact-set rebind from its hash-verified old
+    plan to a fresh plan that binds the predecessor hash, current inputs and
+    application receipt; the rebind preserves authored child-record and
+    artifact bytes plus approved ledgers, and resets review to `draft`.
 30. Every official compiler mutation that writes authored Markdown produces
     an immediately legal per-write Vault result. After deterministic generated
     views are rendered, the same tree passes both its scoped Vault gate and its

@@ -58,7 +58,7 @@ class VaultHookPrototypeTests(unittest.TestCase):
             self.assertNotIn(relative, self.hook.vault_inventory(docs))
 
     def test_recovery_snapshot_rejects_cross_platform_path_aliases(self):
-        row = {"kind": "directory", "mode": 0o755}
+        row = {"kind": "directory", "mode": 0o755, "flags": 0}
         invalid = (
             r"experience-design/C:\outside",
             r"experience-design/\\server\share",
@@ -67,6 +67,12 @@ class VaultHookPrototypeTests(unittest.TestCase):
             "experience-design/NUL",
             "experience-design/trailing.",
             "experience-design/control\nname",
+            "experience-design/less<than",
+            "experience-design/greater>than",
+            'experience-design/quote"name',
+            "experience-design/pipe|name",
+            "experience-design/question?name",
+            "experience-design/star*name",
         )
         for relative in invalid:
             with self.subTest(relative=relative):
@@ -81,6 +87,61 @@ class VaultHookPrototypeTests(unittest.TestCase):
             }),
             "",
         )
+
+    def test_native_windows_artifact_paths_reject_every_device_basename(self):
+        names = (
+            "CON", "prn.txt", "AUX", "nul.bin", "CONIN$", "conout$.log",
+            "COM1", "com9.txt", "LPT1", "lpt9.bin", "COM¹", "com².txt",
+            "LPT³.bin", "NUL .txt", "COM1 .txt", "COM¹ .txt", "CONIN$ .log",
+        )
+        with mock.patch.object(self.hook.os, "name", "nt"):
+            for name in names:
+                with self.subTest(name=name):
+                    self.assertTrue(
+                        self.hook.recovery_artifact_path_problem(name)
+                    )
+
+    def test_guard_json_escapes_surrogate_filename_bytes(self):
+        value = {"experience-design/artifacts/opaque-\udcff.bin": {}}
+
+        encoded = self.hook.canonical_json(value).encode("utf-8")
+
+        self.assertIn(b"\\udcff", encoded)
+        self.assertEqual(json.loads(encoded), value)
+
+    def test_application_inventory_encodes_surrogateescape_paths(self):
+        raw = "opaque-\udcff.bin"
+
+        row = experience_application_check.artifact_path_row(
+            Path(raw), "sha256:" + "0" * 64, 0,
+        )
+        findings = []
+        experience_application_check._inventory_valid(
+            [row], "artifact_files", findings,
+        )
+
+        self.assertFalse(
+            experience_application_check._json_contains_non_scalar(row)
+        )
+        self.assertEqual(
+            experience_application_check.artifact_row_path(row), raw,
+        )
+        self.assertEqual(findings, [])
+        self.assertTrue(
+            experience_application_check.artifact_tree_hash([row]).startswith(
+                "sha256:"
+            )
+        )
+        legacy = {
+            "path": "legal-\U000f0000.bin",
+            "sha256": "sha256:" + "1" * 64,
+            "size": 0,
+        }
+        findings = []
+        experience_application_check._inventory_valid(
+            [legacy], "artifact_files", findings,
+        )
+        self.assertEqual(findings, [])
 
     def test_recovery_target_is_lexically_contained(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -98,6 +159,370 @@ class VaultHookPrototypeTests(unittest.TestCase):
                 self.hook.experience_recovery_target(
                     vault, r"experience-design/C:\outside",
                 )
+
+    @unittest.skipIf(os.name == "nt", "POSIX opaque filename contract")
+    def test_recovery_artifact_snapshot_accepts_host_legal_opaque_names(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            docs = Path(temporary) / "workspace/docs"
+            artifacts = docs / "experience-design/artifacts"
+            artifacts.mkdir(parents=True)
+            expected = {
+                "NUL": b"reserved only on Windows\n",
+                "route:state.json": b"colon\n",
+                "trailing.": b"trailing dot\n",
+            }
+            for name, content in expected.items():
+                (artifacts / name).write_bytes(content)
+
+            snapshot = self.hook.recovery_artifact_snapshot(docs)
+
+            self.assertTrue(
+                self.hook.valid_recovery_artifact_snapshot(snapshot)
+            )
+            self.assertEqual(set(snapshot["entries"]), set(expected))
+            for path in artifacts.iterdir():
+                path.write_bytes(b"changed\n")
+            self.assertIsNone(
+                self.hook.restore_recovery_artifacts(snapshot, docs)
+            )
+            for name, content in expected.items():
+                self.assertEqual((artifacts / name).read_bytes(), content)
+
+    @unittest.skipIf(os.name == "nt", "POSIX filename-length contract")
+    def test_recovery_artifact_restore_uses_a_bounded_temporary_name(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            docs = Path(temporary) / "workspace/docs"
+            artifacts = docs / "experience-design/artifacts"
+            artifacts.mkdir(parents=True)
+            target = artifacts / ("x" * 250)
+            target.write_bytes(b"original\x00")
+            snapshot = self.hook.recovery_artifact_snapshot(docs)
+            target.write_bytes(b"changed!\x00")
+
+            error = self.hook.restore_recovery_artifacts(snapshot, docs)
+
+            self.assertIsNone(error)
+            self.assertEqual(target.read_bytes(), b"original\x00")
+
+    @unittest.skipIf(os.name == "nt", "POSIX directory-mode contract")
+    def test_recovery_artifact_restore_handles_readonly_directories(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            docs = Path(temporary) / "workspace/docs"
+            locked = docs / "experience-design/artifacts/locked"
+            locked.mkdir(parents=True)
+            target = locked / "prototype.bin"
+            target.write_bytes(b"original\x00")
+            os.chmod(locked, 0o555)
+            snapshot = self.hook.recovery_artifact_snapshot(docs)
+            os.chmod(locked, 0o755)
+            target.write_bytes(b"changed!\x00")
+            os.chmod(locked, 0o555)
+
+            error = self.hook.restore_recovery_artifacts(snapshot, docs)
+
+            self.assertIsNone(error)
+            self.assertEqual(target.read_bytes(), b"original\x00")
+            self.assertEqual(locked.stat().st_mode & 0o777, 0o555)
+
+    @unittest.skipIf(os.name == "nt", "POSIX opaque filename contract")
+    def test_recovery_tree_accepts_host_legal_package_artifact_names(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            docs = Path(temporary) / "workspace/docs"
+            artifacts = (
+                docs
+                / "experience-design/experiences/demo/screens/artifacts"
+            )
+            artifacts.mkdir(parents=True)
+            expected = {
+                "route:state.json": b"colon\n",
+                "x" * 250: b"long name\n",
+            }
+            for name, content in expected.items():
+                (artifacts / name).write_bytes(content)
+            snapshot = self.hook.experience_tree_snapshot(docs)
+
+            self.assertEqual(
+                self.hook.experience_tree_snapshot_safety_problem(snapshot),
+                "",
+            )
+            for path in artifacts.iterdir():
+                path.write_bytes(b"changed\n")
+
+            error = self.hook.restore_experience_tree(snapshot, docs)
+
+            self.assertIsNone(error)
+            for name, content in expected.items():
+                self.assertEqual((artifacts / name).read_bytes(), content)
+
+    @unittest.skipIf(os.name == "nt", "POSIX opaque filename contract")
+    def test_recovery_tree_serializes_non_utf8_artifact_names(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            docs = Path(temporary) / "workspace/docs"
+            artifacts = (
+                docs
+                / "experience-design/experiences/demo/screens/artifacts"
+            )
+            artifacts.mkdir(parents=True)
+            raw_path = os.fsencode(artifacts) + b"/opaque-\xff.bin"
+            try:
+                descriptor = os.open(
+                    raw_path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o640,
+                )
+            except OSError as exc:
+                self.skipTest(
+                    f"filesystem cannot create a non-UTF8 filename: {exc}"
+                )
+            with os.fdopen(descriptor, "wb") as handle:
+                handle.write(b"original\x00")
+
+            snapshot = self.hook.experience_tree_snapshot(docs)
+            encoded = self.hook.canonical_json(snapshot).encode("utf-8")
+
+            self.assertIn(b"\\udcff", encoded)
+            self.assertEqual(json.loads(encoded), snapshot)
+            self.assertEqual(
+                self.hook.experience_tree_snapshot_safety_problem(snapshot),
+                "",
+            )
+            descriptor = os.open(raw_path, os.O_WRONLY | os.O_TRUNC)
+            with os.fdopen(descriptor, "wb") as handle:
+                handle.write(b"changed\x00")
+            self.assertIsNone(
+                self.hook.restore_experience_tree(snapshot, docs)
+            )
+            descriptor = os.open(raw_path, os.O_RDONLY)
+            with os.fdopen(descriptor, "rb") as handle:
+                self.assertEqual(handle.read(), b"original\x00")
+
+    @unittest.skipIf(os.name == "nt", "POSIX opaque filename contract")
+    def test_application_inventory_reads_non_utf8_artifact_names(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary) / "experience-design"
+            artifacts = root / "artifacts"
+            artifacts.mkdir(parents=True)
+            raw_path = os.fsencode(artifacts) + b"/opaque-\xff.bin"
+            try:
+                descriptor = os.open(
+                    raw_path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o640,
+                )
+            except OSError as exc:
+                self.skipTest(
+                    f"filesystem cannot create a non-UTF8 filename: {exc}"
+                )
+            with os.fdopen(descriptor, "wb") as handle:
+                handle.write(b"prototype\x00")
+
+            rows, findings = experience_application_check.artifact_inventory(
+                root,
+            )
+
+            self.assertEqual(findings, [])
+            self.assertEqual(len(rows), 1)
+            self.assertFalse(
+                experience_application_check._json_contains_non_scalar(rows)
+            )
+            self.assertTrue(
+                experience_application_check.artifact_tree_hash(rows).startswith(
+                    "sha256:"
+                )
+            )
+
+    @unittest.skipIf(os.name == "nt", "POSIX parent-mode contract")
+    def test_artifact_restore_temporarily_opens_readonly_experience_parent(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            docs = Path(temporary) / "workspace/docs"
+            root = docs / "experience-design"
+            target = root / "artifacts/prototype.bin"
+            target.parent.mkdir(parents=True)
+            target.write_bytes(b"original\x00")
+            os.chmod(root, 0o555)
+            experience = self.hook.experience_tree_snapshot(docs)
+            artifacts = self.hook.recovery_artifact_snapshot(docs)
+            target.write_bytes(b"changed\x00")
+            try:
+                error = self.hook.restore_recovery_protected_state(
+                    experience, artifacts, docs,
+                )
+                self.assertIsNone(error)
+                self.assertEqual(target.read_bytes(), b"original\x00")
+                self.assertEqual(stat.S_IMODE(root.stat().st_mode), 0o555)
+            finally:
+                os.chmod(root, 0o755)
+
+    @unittest.skipIf(os.name == "nt", "POSIX restore-parent contract")
+    def test_experience_restore_rebuilds_workspace_under_readonly_project(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            project = Path(temporary)
+            docs = project / "workspace/docs"
+            note = docs / "experience-design/brief.md"
+            note.parent.mkdir(parents=True)
+            note.write_text("before\n", encoding="utf-8")
+            snapshot = self.hook.experience_tree_snapshot(docs)
+            shutil.rmtree(project / "workspace")
+            os.chmod(project, 0o555)
+            try:
+                error = self.hook.restore_experience_tree(snapshot, docs)
+
+                self.assertIsNone(error)
+                self.assertEqual(note.read_text(encoding="utf-8"), "before\n")
+                self.assertEqual(stat.S_IMODE(project.stat().st_mode), 0o555)
+            finally:
+                os.chmod(project, 0o755)
+
+    @unittest.skipIf(os.name == "nt", "POSIX restore-parent contract")
+    def test_config_restore_temporarily_opens_readonly_workspace(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            project = Path(temporary)
+            config = project / "workspace/config.json"
+            config.parent.mkdir()
+            config.write_text('{"before":true}\n', encoding="utf-8")
+            snapshot = self.hook.read_config_snapshot(config)
+            config.write_text('{"after":true}\n', encoding="utf-8")
+            os.chmod(config.parent, 0o555)
+            try:
+                error = self.hook.restore_config(snapshot, config)
+
+                self.assertIsNone(error)
+                self.assertEqual(
+                    config.read_text(encoding="utf-8"), '{"before":true}\n',
+                )
+                self.assertEqual(
+                    stat.S_IMODE(config.parent.stat().st_mode), 0o555,
+                )
+            finally:
+                os.chmod(config.parent, 0o755)
+
+    @unittest.skipUnless(
+        hasattr(os, "chflags") and bool(getattr(stat, "UF_IMMUTABLE", 0)),
+        "macOS immutable-file contract",
+    )
+    def test_artifact_restore_clears_user_immutable_files(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            docs = Path(temporary) / "workspace/docs"
+            target = docs / "experience-design/artifacts/prototype.bin"
+            target.parent.mkdir(parents=True)
+            target.write_bytes(b"original\x00")
+            snapshot = self.hook.recovery_artifact_snapshot(docs)
+            target.write_bytes(b"changed\x00")
+            try:
+                try:
+                    os.chflags(target, stat.UF_IMMUTABLE)
+                except OSError as exc:
+                    self.skipTest(f"filesystem cannot set UF_IMMUTABLE: {exc}")
+                error = self.hook.restore_recovery_artifacts(snapshot, docs)
+                self.assertIsNone(error)
+                self.assertEqual(target.read_bytes(), b"original\x00")
+                self.assertEqual(
+                    getattr(target.stat(), "st_flags", 0)
+                    & stat.UF_IMMUTABLE,
+                    0,
+                )
+            finally:
+                if target.exists():
+                    flags = getattr(target.stat(), "st_flags", 0)
+                    if flags & stat.UF_IMMUTABLE:
+                        os.chflags(target, flags & ~stat.UF_IMMUTABLE)
+
+    @unittest.skipUnless(
+        hasattr(os, "chflags") and bool(getattr(stat, "UF_IMMUTABLE", 0)),
+        "macOS immutable-file contract",
+    )
+    def test_artifact_restore_reapplies_immutable_preimage(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            docs = Path(temporary) / "workspace/docs"
+            target = docs / "experience-design/artifacts/prototype.bin"
+            target.parent.mkdir(parents=True)
+            target.write_bytes(b"original\x00")
+            try:
+                try:
+                    os.chflags(target, stat.UF_IMMUTABLE)
+                except OSError as exc:
+                    self.skipTest(f"filesystem cannot set UF_IMMUTABLE: {exc}")
+                snapshot = self.hook.recovery_artifact_snapshot(docs)
+                os.chflags(target, 0)
+                target.write_bytes(b"changed\x00")
+
+                error = self.hook.restore_recovery_artifacts(snapshot, docs)
+
+                self.assertIsNone(error)
+                self.assertEqual(target.read_bytes(), b"original\x00")
+                self.assertTrue(
+                    getattr(target.stat(), "st_flags", 0)
+                    & stat.UF_IMMUTABLE
+                )
+            finally:
+                if target.exists():
+                    flags = getattr(target.stat(), "st_flags", 0)
+                    if flags & stat.UF_IMMUTABLE:
+                        os.chflags(target, flags & ~stat.UF_IMMUTABLE)
+
+    @unittest.skipUnless(
+        hasattr(os, "chflags") and bool(getattr(stat, "UF_IMMUTABLE", 0)),
+        "macOS immutable-directory contract",
+    )
+    def test_recovery_clears_post_snapshot_immutable_experience_parent(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            docs = Path(temporary) / "workspace/docs"
+            root = docs / "experience-design"
+            target = root / "artifacts/prototype.bin"
+            target.parent.mkdir(parents=True)
+            target.write_bytes(b"original\x00")
+            experience = self.hook.experience_tree_snapshot(docs)
+            artifacts = self.hook.recovery_artifact_snapshot(docs)
+            target.write_bytes(b"changed\x00")
+            try:
+                try:
+                    os.chflags(root, stat.UF_IMMUTABLE)
+                except OSError as exc:
+                    self.skipTest(f"filesystem cannot set UF_IMMUTABLE: {exc}")
+
+                error = self.hook.restore_recovery_protected_state(
+                    experience, artifacts, docs,
+                )
+
+                self.assertIsNone(error)
+                self.assertEqual(target.read_bytes(), b"original\x00")
+                self.assertEqual(
+                    getattr(root.stat(), "st_flags", 0) & stat.UF_IMMUTABLE,
+                    0,
+                )
+            finally:
+                if root.exists():
+                    flags = getattr(root.stat(), "st_flags", 0)
+                    if flags & stat.UF_IMMUTABLE:
+                        os.chflags(root, flags & ~stat.UF_IMMUTABLE)
+
+    @unittest.skipIf(os.name == "nt", "POSIX special-mode contract")
+    def test_recovery_preserves_and_guards_special_permission_bits(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            docs = Path(temporary) / "workspace/docs"
+            root = docs / "experience-design"
+            artifact_root = root / "artifacts"
+            artifact_root.mkdir(parents=True)
+            (artifact_root / "prototype.bin").write_bytes(b"original\x00")
+            os.chmod(root, 0o1755)
+            os.chmod(artifact_root, 0o1750)
+            experience = self.hook.experience_tree_snapshot(docs)
+            artifacts = self.hook.recovery_artifact_snapshot(docs)
+            before = self.hook.vault_inventory(docs)
+
+            os.chmod(root, 0o755)
+            os.chmod(artifact_root, 0o750)
+            after = self.hook.vault_inventory(docs)
+            self.assertNotEqual(
+                before["experience-design"]["mode"],
+                after["experience-design"]["mode"],
+            )
+
+            error = self.hook.restore_recovery_protected_state(
+                experience, artifacts, docs,
+            )
+
+            self.assertIsNone(error)
+            self.assertEqual(stat.S_IMODE(root.stat().st_mode), 0o1755)
+            self.assertEqual(
+                stat.S_IMODE(artifact_root.stat().st_mode), 0o1750,
+            )
 
 
 class VaultHookShellContractTests(unittest.TestCase):
@@ -187,6 +612,352 @@ class VaultHookShellContractTests(unittest.TestCase):
             "--proposal-hash", "sha256:" + "0" * 64,
         ]
         return subprocess.list2cmdline(argv) if os.name == "nt" else shlex.join(argv)
+
+    def test_recover_open_scope_requires_exact_runtime_post_attestation(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            docs, _config = self.project(root)
+            experience_root = docs / "experience-design"
+            experience_root.mkdir()
+            source_plan = docs / "old-scope-plan.json"
+            scope_plan = docs / "fresh-scope-plan.json"
+            source_proposal_hash = "sha256:" + "7" * 64
+            proposal_hash = "sha256:" + "8" * 64
+
+            def recovery_command(*selector: str, interpreter: str) -> str:
+                argv = [
+                    interpreter,
+                    str(SCRIPTS / "experience_compile.py"),
+                    "recover-open-scope",
+                    *selector,
+                    "--from-scope-plan", str(source_plan),
+                    "--from-proposal-hash", source_proposal_hash,
+                    "--scope-plan", str(scope_plan),
+                    "--proposal-hash", proposal_hash,
+                ]
+                if os.name == "nt":
+                    return subprocess.list2cmdline(argv)
+                return shlex.join(argv)
+
+            root_payload = self.attested_writer_payload(
+                root,
+                recovery_command(
+                    "--root", str(experience_root),
+                    interpreter=sys.executable,
+                ),
+            )
+            package_payload = self.attested_writer_payload(
+                root,
+                recovery_command(
+                    "--experience-root",
+                    str(experience_root / "experiences" / "checkout"),
+                    interpreter=sys.executable,
+                ),
+            )
+            bare_payload = self.payload(
+                root,
+                recovery_command(
+                    "--root", str(experience_root), interpreter="python3",
+                ),
+            )
+
+            self.assertFalse(
+                self.hook.sanctioned_application_writer(root_payload, docs)
+            )
+            self.assertIsNotNone(
+                self.hook.attested_recovery_writer_spec(root_payload, docs)
+            )
+            self.assertIsNone(
+                self.hook.attested_recovery_writer_spec(package_payload, docs)
+            )
+            self.assertIsNone(
+                self.hook.attested_recovery_writer_spec(bare_payload, docs)
+            )
+            normalized = self.hook.normalize(root_payload)
+            primary = self.hook.inventory_path(normalized, root)
+            recovery = self.hook.recovery_path(normalized)
+            try:
+                self.assertEqual(self.hook.shell_snapshot(normalized), 0)
+                snapshot = json.loads(primary.read_text(encoding="utf-8"))
+                self.assertFalse(snapshot["application_writer_allowed"])
+                self.assertTrue(snapshot["application_writer_candidate"])
+                self.assertFalse(self.hook.valid_application_writer_result(
+                    root_payload, docs, [
+                        "experience-design/_generated/"
+                        "open-application-revision.json",
+                    ],
+                ))
+                forged = (
+                    experience_root / "_generated"
+                    / "open-application-revision.json"
+                )
+                forged.parent.mkdir()
+                forged.write_text("{}\n", encoding="utf-8")
+                self.assertEqual(self.hook.shell_verify(normalized), 2)
+                self.assertFalse(forged.exists())
+            finally:
+                self.hook.cleanup_guard_state(primary, recovery)
+
+    def test_recover_open_scope_post_attests_the_exact_compiler_result(self):
+        from tools.tests.test_experience_compile import ExperienceCompilerTests
+
+        helper = ExperienceCompilerTests()
+        with tempfile.TemporaryDirectory() as temporary:
+            fixture = helper.orphaned_create_scope(temporary)
+            fresh, fresh_path = helper.propose_recovery(fixture)
+            old = fixture["old_plan"]
+            argv = [
+                sys.executable,
+                str(SCRIPTS / "experience_compile.py"),
+                "recover-open-scope",
+                "--root", str(fixture["root"]),
+                "--from-scope-plan", str(fixture["old_plan_path"]),
+                "--from-proposal-hash", old["proposal_hash"],
+                "--scope-plan", str(fresh_path),
+                "--proposal-hash", fresh["proposal_hash"],
+            ]
+            command = (
+                subprocess.list2cmdline(argv)
+                if os.name == "nt" else shlex.join(argv)
+            )
+            payload = self.hook.normalize(self.attested_writer_payload(
+                Path(temporary), command,
+            ))
+            primary = self.hook.inventory_path(payload, Path(temporary))
+            recovery = self.hook.recovery_path(payload)
+            try:
+                self.assertEqual(self.hook.shell_snapshot(payload), 0)
+                before = self.hook.vault_inventory(fixture["docs"])
+                code, output, errors = helper.recover_scope(
+                    fixture, fresh, fresh_path,
+                )
+                self.assertEqual(code, 0, output + errors)
+                after = self.hook.vault_inventory(fixture["docs"])
+                changed = sorted(
+                    path for path in set(before) | set(after)
+                    if before.get(path) != after.get(path)
+                )
+                with helper.recovery_contract(fixture["new_receipts"]):
+                    self.assertTrue(self.hook.valid_application_writer_result(
+                        payload, fixture["docs"], changed,
+                    ))
+            finally:
+                self.hook.cleanup_guard_state(primary, recovery)
+
+    def test_recovery_attestation_accepts_a_new_root_generated_directory(self):
+        from tools.tests.test_experience_compile import ExperienceCompilerTests
+
+        helper = ExperienceCompilerTests()
+        with tempfile.TemporaryDirectory() as temporary:
+            fixture = helper.orphaned_create_scope(
+                temporary, publish_application=False,
+            )
+            self.assertFalse((fixture["root"] / "_generated").exists())
+            fresh, fresh_path = helper.propose_recovery(fixture)
+            old = fixture["old_plan"]
+            argv = [
+                sys.executable,
+                str(SCRIPTS / "experience_compile.py"),
+                "recover-open-scope",
+                "--root", str(fixture["root"]),
+                "--from-scope-plan", str(fixture["old_plan_path"]),
+                "--from-proposal-hash", old["proposal_hash"],
+                "--scope-plan", str(fresh_path),
+                "--proposal-hash", fresh["proposal_hash"],
+            ]
+            command = (
+                subprocess.list2cmdline(argv)
+                if os.name == "nt" else shlex.join(argv)
+            )
+            payload = self.hook.normalize(self.attested_writer_payload(
+                Path(temporary), command,
+            ))
+            primary = self.hook.inventory_path(payload, Path(temporary))
+            recovery = self.hook.recovery_path(payload)
+            try:
+                self.assertEqual(self.hook.shell_snapshot(payload), 0)
+                before = self.hook.vault_inventory(fixture["docs"])
+                code, output, errors = helper.recover_scope(
+                    fixture, fresh, fresh_path,
+                )
+                self.assertEqual(code, 0, output + errors)
+                after = self.hook.vault_inventory(fixture["docs"])
+                changed = sorted(
+                    path for path in set(before) | set(after)
+                    if before.get(path) != after.get(path)
+                )
+                self.assertIn("experience-design/_generated", changed)
+                with helper.recovery_contract(fixture["new_receipts"]):
+                    self.assertTrue(self.hook.valid_application_writer_result(
+                        payload, fixture["docs"], changed,
+                    ))
+            finally:
+                self.hook.cleanup_guard_state(primary, recovery)
+
+    def test_recover_open_scope_rejects_a_suppressed_no_delta_command(self):
+        from tools.tests.test_experience_compile import ExperienceCompilerTests
+
+        helper = ExperienceCompilerTests()
+        with tempfile.TemporaryDirectory() as temporary:
+            fixture = helper.orphaned_create_scope(temporary)
+            fresh, fresh_path = helper.propose_recovery(fixture)
+            old = fixture["old_plan"]
+            argv = [
+                sys.executable,
+                str(SCRIPTS / "experience_compile.py"),
+                "recover-open-scope",
+                "--root", str(fixture["root"]),
+                "--from-scope-plan", str(fixture["old_plan_path"]),
+                "--from-proposal-hash", old["proposal_hash"],
+                "--scope-plan", str(fresh_path),
+                "--proposal-hash", fresh["proposal_hash"],
+            ]
+            command = (
+                subprocess.list2cmdline(argv)
+                if os.name == "nt" else shlex.join(argv)
+            )
+            payload = self.hook.normalize(self.attested_writer_payload(
+                Path(temporary), command,
+            ))
+            primary = self.hook.inventory_path(payload, Path(temporary))
+            recovery = self.hook.recovery_path(payload)
+            try:
+                self.assertEqual(self.hook.shell_snapshot(payload), 0)
+                with helper.recovery_contract(fixture["new_receipts"]):
+                    self.assertEqual(self.hook.shell_verify(payload), 2)
+                for experience in ("checkout", "returns"):
+                    state = experience_compile.read_open_revision(
+                        fixture["root"] / "experiences" / experience,
+                    )
+                    self.assertEqual(
+                        state["proposal_hash"], old["proposal_hash"],
+                    )
+            finally:
+                self.hook.cleanup_guard_state(primary, recovery)
+
+    def test_recovery_attestation_restores_changed_prototype_bytes(self):
+        from tools.tests.test_experience_compile import ExperienceCompilerTests
+
+        helper = ExperienceCompilerTests()
+        with tempfile.TemporaryDirectory() as temporary:
+            fixture = helper.orphaned_create_scope(temporary)
+            fresh, fresh_path = helper.propose_recovery(fixture)
+            old = fixture["old_plan"]
+            argv = [
+                sys.executable,
+                str(SCRIPTS / "experience_compile.py"),
+                "recover-open-scope",
+                "--root", str(fixture["root"]),
+                "--from-scope-plan", str(fixture["old_plan_path"]),
+                "--from-proposal-hash", old["proposal_hash"],
+                "--scope-plan", str(fresh_path),
+                "--proposal-hash", fresh["proposal_hash"],
+            ]
+            command = (
+                subprocess.list2cmdline(argv)
+                if os.name == "nt" else shlex.join(argv)
+            )
+            payload = self.hook.normalize(self.attested_writer_payload(
+                Path(temporary), command,
+            ))
+            primary = self.hook.inventory_path(payload, Path(temporary))
+            recovery = self.hook.recovery_path(payload)
+            prototype = fixture["root"] / "artifacts/prototype.bin"
+            original = prototype.read_bytes()
+            try:
+                self.assertEqual(self.hook.shell_snapshot(payload), 0)
+                code, output, errors = helper.recover_scope(
+                    fixture, fresh, fresh_path,
+                )
+                self.assertEqual(code, 0, output + errors)
+                prototype.write_bytes(b"intercepted mutation\x00")
+                with helper.recovery_contract(fixture["new_receipts"]):
+                    self.assertEqual(self.hook.shell_verify(payload), 2)
+                self.assertEqual(prototype.read_bytes(), original)
+                for experience in ("checkout", "returns"):
+                    state = experience_compile.read_open_revision(
+                        fixture["root"] / "experiences" / experience,
+                    )
+                    self.assertEqual(
+                        state["proposal_hash"], old["proposal_hash"],
+                    )
+            finally:
+                self.hook.cleanup_guard_state(primary, recovery)
+
+    def test_recovery_restore_never_follows_replaced_experience_root(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            project = Path(temporary)
+            docs, _config = self.project(project)
+            experience_root = docs / "experience-design"
+            prototype = experience_root / "artifacts/prototype.bin"
+            prototype.parent.mkdir(parents=True)
+            prototype.write_bytes(b"original prototype\x00")
+            experience_snapshot = self.hook.experience_tree_snapshot(docs)
+            artifact_snapshot = self.hook.recovery_artifact_snapshot(docs)
+
+            outside = project / "outside"
+            outside_artifacts = outside / "artifacts"
+            outside_artifacts.mkdir(parents=True)
+            sentinel = outside_artifacts / "victim.txt"
+            sentinel.write_bytes(b"outside sentinel\n")
+            shutil.rmtree(experience_root)
+            self.create_directory_alias(experience_root, outside)
+
+            error = self.hook.restore_recovery_protected_state(
+                experience_snapshot, artifact_snapshot, docs,
+            )
+
+            self.assertIsNone(error)
+            self.assertEqual(sentinel.read_bytes(), b"outside sentinel\n")
+            self.assertFalse((outside_artifacts / "prototype.bin").exists())
+            self.assertFalse(self.hook.path_is_alias(experience_root))
+            self.assertEqual(prototype.read_bytes(), b"original prototype\x00")
+
+    @unittest.skipIf(os.name == "nt", "POSIX directory-mode contract")
+    def test_recovery_replaces_workspace_alias_under_readonly_project(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            project = Path(temporary)
+            docs, _config = self.project(project)
+            prototype = docs / "experience-design/artifacts/prototype.bin"
+            prototype.parent.mkdir(parents=True)
+            prototype.write_bytes(b"original prototype\x00")
+            experience_snapshot = self.hook.experience_tree_snapshot(docs)
+            artifact_snapshot = self.hook.recovery_artifact_snapshot(docs)
+
+            moved_workspace = project / "moved-workspace"
+            workspace = project / "workspace"
+            workspace.rename(moved_workspace)
+            outside_workspace = project / "outside-workspace"
+            outside_artifacts = (
+                outside_workspace
+                / "docs/experience-design/artifacts"
+            )
+            outside_artifacts.mkdir(parents=True)
+            sentinel = outside_artifacts / "outside-sentinel.bin"
+            sentinel.write_bytes(b"outside\x00")
+            self.create_directory_alias(workspace, outside_workspace)
+            original_mode = project.stat().st_mode & 0o777
+            os.chmod(project, 0o555)
+            try:
+                error = self.hook.restore_recovery_protected_state(
+                    experience_snapshot, artifact_snapshot, docs,
+                )
+                self.assertIsNone(error)
+                self.assertEqual(sentinel.read_bytes(), b"outside\x00")
+                self.assertFalse(
+                    (outside_artifacts / "prototype.bin").exists()
+                )
+                self.assertFalse(self.hook.path_is_alias(workspace))
+                self.assertEqual(
+                    prototype.read_bytes(), b"original prototype\x00",
+                )
+            finally:
+                os.chmod(project, original_mode)
+                if self.hook.path_is_alias(workspace):
+                    workspace.unlink()
+                elif workspace.exists():
+                    shutil.rmtree(workspace)
+                moved_workspace.rename(workspace)
 
     def application_draft(
         self, root: Path, package: Path,
@@ -1664,6 +2435,31 @@ class VaultHookShellContractTests(unittest.TestCase):
             self.assertEqual(after.returncode, 2)
             self.assertFalse(self.hook.path_is_alias(local_demo))
             self.assertEqual(generated.read_text(encoding="utf-8"), "before\n")
+
+    def test_dangling_artifact_root_alias_is_removed_before_restore(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            docs, _config = self.project(root)
+            experience_root = docs / "experience-design"
+            experience_root.mkdir()
+            payload = {
+                **self.payload(root, "python3 unrelated.py"),
+                "tool_use_id": "dangling-artifact-junction-event",
+            }
+            before = self.run_hook("pre", payload)
+            self.assertEqual(before.returncode, 0, before.stdout + before.stderr)
+            outside = root / "outside-artifacts"
+            outside.mkdir()
+            artifact_root = experience_root / "artifacts"
+            self.create_directory_alias(artifact_root, outside)
+            self.assertTrue(self.hook.path_is_alias(artifact_root))
+            shutil.rmtree(outside)
+
+            after = self.run_hook("post", payload)
+
+            self.assertEqual(after.returncode, 2)
+            self.assertFalse(self.hook.path_is_alias(artifact_root))
+            self.assertFalse(artifact_root.exists())
 
     @unittest.skipUnless(os.name == "nt", "native Windows READONLY contract")
     def test_windows_readonly_files_are_cleared_before_recovery(self):

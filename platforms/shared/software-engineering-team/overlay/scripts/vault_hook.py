@@ -43,7 +43,7 @@ import sys
 import tempfile
 import time
 import unicodedata
-from pathlib import Path, PurePosixPath, PureWindowsPath
+from pathlib import Path, PurePosixPath
 from types import SimpleNamespace
 
 import vault_check
@@ -525,23 +525,27 @@ def experience_tree_snapshot(vault: Path) -> dict[str, dict]:
     snapshot: dict[str, dict] = {}
     paths = local_tree_paths(root, vault)
     if root.exists():
+        root_identity = root.stat()
         snapshot[EXPERIENCE_ROOT_RELATIVE] = {
             "kind": "directory",
-            "mode": root.stat().st_mode & 0o777,
+            "mode": stat.S_IMODE(root_identity.st_mode),
+            "flags": int(getattr(root_identity, "st_flags", 0)),
         }
     for path in paths:
         relative = path.relative_to(vault).as_posix()
         if author_owned_artifact_path(relative):
             continue
         if path.is_dir():
+            identity = path.stat()
             snapshot[relative] = {
                 "kind": "directory",
-                "mode": path.stat().st_mode & 0o777,
+                "mode": stat.S_IMODE(identity.st_mode),
+                "flags": int(getattr(identity, "st_flags", 0)),
             }
             continue
         try:
             raw = path.read_bytes()
-            stat = path.stat()
+            identity = path.stat()
         except OSError as exc:
             raise OSError(
                 f"{relative}: file identity is unreadable: {exc}"
@@ -550,16 +554,17 @@ def experience_tree_snapshot(vault: Path) -> dict[str, dict]:
             "kind": "file",
             "content_base64": base64.b64encode(raw).decode("ascii"),
             "content_sha256": hashlib.sha256(raw).hexdigest(),
-            "mode": stat.st_mode & 0o777,
-            "nlink": stat.st_nlink,
-            "device": stat.st_dev,
-            "inode": stat.st_ino,
+            "mode": stat.S_IMODE(identity.st_mode),
+            "flags": int(getattr(identity, "st_flags", 0)),
+            "nlink": identity.st_nlink,
+            "device": identity.st_dev,
+            "inode": identity.st_ino,
         }
     return snapshot
 
 
-def experience_snapshot_path_problem(relative: str) -> str:
-    """Reject path identities that can alias or escape on any supported OS."""
+def portable_experience_snapshot_path_problem(relative: str) -> str:
+    """Reject a canonical Experience path that is not host-portable."""
     if relative != unicodedata.normalize("NFC", relative):
         return "path must use canonical Unicode normalization"
     if "\\" in relative or ":" in relative:
@@ -577,10 +582,35 @@ def experience_snapshot_path_problem(relative: str) -> str:
             or any(part in {"", ".", ".."} for part in parts):
         return "path escapes the Experience Design subtree"
     for part in parts:
-        windows = PureWindowsPath(part)
-        if part.endswith((" ", ".")) or windows.is_reserved():
+        if windows_path_part_is_illegal(part):
             return "path is not portable to Windows"
     return ""
+
+
+def experience_snapshot_path_problem(relative: str) -> str:
+    """Reject path identities that can alias or escape on the current host."""
+    pure = PurePosixPath(relative)
+    parts = pure.parts
+    if (
+        pure.is_absolute()
+        or pure.as_posix() != relative
+        or not parts
+        or parts[0] != EXPERIENCE_ROOT_RELATIVE
+        or any(part in {"", ".", ".."} for part in parts)
+    ):
+        return "path must use canonical relative POSIX segments"
+    try:
+        artifact_index = parts.index("artifacts", 1)
+    except ValueError:
+        return portable_experience_snapshot_path_problem(relative)
+    prefix = PurePosixPath(*parts[:artifact_index + 1]).as_posix()
+    prefix_problem = portable_experience_snapshot_path_problem(prefix)
+    if prefix_problem:
+        return prefix_problem
+    if artifact_index + 1 == len(parts):
+        return ""
+    suffix = PurePosixPath(*parts[artifact_index + 1:]).as_posix()
+    return recovery_artifact_path_problem(suffix)
 
 
 def experience_tree_snapshot_safety_problem(value: object) -> str:
@@ -597,16 +627,18 @@ def experience_tree_snapshot_safety_problem(value: object) -> str:
         if not isinstance(row, dict):
             return f"{relative}: file identity snapshot is incomplete"
         if row.get("kind") == "directory":
-            if set(row) != {"kind", "mode"} \
+            if set(row) != {"kind", "mode", "flags"} \
                     or not isinstance(row.get("mode"), int) \
-                    or not 0 <= row["mode"] <= 0o777:
+                    or not 0 <= row["mode"] <= 0o7777 \
+                    or type(row.get("flags")) is not int \
+                    or not 0 <= row["flags"] <= 0xFFFFFFFF:
                 return f"{relative}: directory snapshot is incomplete"
             continue
         if relative == EXPERIENCE_ROOT_RELATIVE:
             return f"{relative}: recovery root must remain a directory"
         if row.get("kind") != "file" or set(row) != {
-            "kind", "content_base64", "content_sha256", "mode", "nlink",
-            "device", "inode",
+            "kind", "content_base64", "content_sha256", "mode", "flags",
+            "nlink", "device", "inode",
         }:
             return f"{relative}: file identity snapshot is incomplete"
         try:
@@ -619,7 +651,9 @@ def experience_tree_snapshot_safety_problem(value: object) -> str:
             return f"{relative}: file snapshot checksum does not match"
         if (
             not isinstance(row.get("mode"), int)
-            or not 0 <= row["mode"] <= 0o777
+            or not 0 <= row["mode"] <= 0o7777
+            or type(row.get("flags")) is not int
+            or not 0 <= row["flags"] <= 0xFFFFFFFF
             or not isinstance(row.get("device"), int)
             or not isinstance(row.get("inode"), int)
         ):
@@ -634,6 +668,258 @@ def experience_tree_snapshot_safety_problem(value: object) -> str:
 
 def valid_experience_tree_snapshot(value: object) -> bool:
     return not experience_tree_snapshot_safety_problem(value)
+
+
+def recovery_artifact_path_problem(relative: str) -> str:
+    """Reject only host-local path escapes, never legal prototype names."""
+    if "\0" in relative:
+        return "path contains a null character"
+    pure = PurePosixPath(relative)
+    if (
+        not relative
+        or pure.is_absolute()
+        or pure.as_posix() != relative
+        or any(part in {"", ".", ".."} for part in pure.parts)
+    ):
+        return "path is not one contained relative artifact path"
+    if os.name == "nt":
+        for part in pure.parts:
+            if windows_path_part_is_illegal(part):
+                return "path is not a safe native Windows artifact path"
+    return ""
+
+
+def windows_device_basename(part: str) -> bool:
+    """Recognize Win32 device names missing from older pathlib versions."""
+    basename = part.split(".", 1)[0].rstrip(" ").upper()
+    if basename in {"CON", "PRN", "AUX", "NUL", "CONIN$", "CONOUT$"}:
+        return True
+    return re.fullmatch(r"(?:COM|LPT)(?:[1-9]|[¹²³])", basename) is not None
+
+
+def windows_path_part_is_illegal(part: str) -> bool:
+    """Apply stable Win32 component rules across supported Python versions."""
+    forbidden = '<>:"\\|?*'
+    return (
+        any(character in forbidden or ord(character) < 32
+            for character in part)
+        or part.endswith((" ", "."))
+        or windows_device_basename(part)
+    )
+
+
+def recovery_artifact_snapshot(vault: Path) -> dict:
+    """Capture exact opaque prototype bytes only for recovery attestation."""
+    root = vault / EXPERIENCE_ARTIFACT_ROOT_RELATIVE
+    if not root.exists() and not path_is_alias(root):
+        return {"exists": False}
+    if path_is_alias(root) or not root.is_dir():
+        raise OSError("recovery artifact root is not one local directory")
+    entries: dict[str, dict] = {}
+    pending = [root]
+    while pending:
+        directory = pending.pop()
+        with os.scandir(directory) as children:
+            rows = sorted(children, key=lambda entry: entry.name)
+        for entry in rows:
+            path = Path(entry.path)
+            relative = path.relative_to(root).as_posix()
+            full_relative = f"{EXPERIENCE_ARTIFACT_ROOT_RELATIVE}/{relative}"
+            path_problem = recovery_artifact_path_problem(relative)
+            if path_problem:
+                raise OSError(f"{full_relative}: {path_problem}")
+            if path_is_alias(path):
+                raise OSError(f"{full_relative}: aliases are not recoverable")
+            # Windows DirEntry metadata can report zero for st_nlink because
+            # its cached directory record does not carry full file identity.
+            # lstat() performs the identity query needed by the hard-link
+            # boundary and still fails closed if the path races to an alias.
+            metadata = path.lstat()
+            mode = metadata.st_mode
+            if stat.S_ISDIR(mode):
+                entries[relative] = {
+                    "kind": "directory",
+                    "mode": stat.S_IMODE(mode),
+                    "flags": int(getattr(metadata, "st_flags", 0)),
+                }
+                pending.append(path)
+                continue
+            if not stat.S_ISREG(mode) or metadata.st_nlink != 1:
+                raise OSError(
+                    f"{full_relative}: recovery artifacts must be regular, "
+                    "non-hard-linked files"
+                )
+            raw = path.read_bytes()
+            entries[relative] = {
+                "kind": "file",
+                "content_base64": base64.b64encode(raw).decode("ascii"),
+                "content_sha256": hashlib.sha256(raw).hexdigest(),
+                "mode": stat.S_IMODE(mode),
+                "flags": int(getattr(metadata, "st_flags", 0)),
+            }
+    root_identity = root.stat()
+    return {
+        "exists": True,
+        "mode": stat.S_IMODE(root_identity.st_mode),
+        "flags": int(getattr(root_identity, "st_flags", 0)),
+        "entries": dict(sorted(entries.items())),
+    }
+
+
+def valid_recovery_artifact_snapshot(value: object) -> bool:
+    if isinstance(value, dict) and set(value) == {"exists"}:
+        return type(value.get("exists")) is bool and value["exists"] is False
+    if not isinstance(value, dict) or set(value) != {
+        "exists", "mode", "flags", "entries",
+    }:
+        return False
+    if value.get("exists") is not True or type(value.get("mode")) is not int:
+        return False
+    if not 0 <= value["mode"] <= 0o7777 or not isinstance(
+        value.get("entries"), dict,
+    ) or type(value.get("flags")) is not int \
+            or not 0 <= value["flags"] <= 0xFFFFFFFF:
+        return False
+    kinds: dict[PurePosixPath, str] = {}
+    for relative, row in value["entries"].items():
+        if not isinstance(relative, str) or not relative:
+            return False
+        full_relative = f"{EXPERIENCE_ARTIFACT_ROOT_RELATIVE}/{relative}"
+        if recovery_artifact_path_problem(relative):
+            return False
+        pure = PurePosixPath(relative)
+        if not isinstance(row, dict):
+            return False
+        if row.get("kind") == "directory":
+            if set(row) != {"kind", "mode", "flags"}:
+                return False
+        elif row.get("kind") == "file":
+            if set(row) != {
+                "kind", "content_base64", "content_sha256", "mode", "flags",
+            }:
+                return False
+            try:
+                raw = base64.b64decode(
+                    str(row["content_base64"]), validate=True,
+                )
+            except (TypeError, ValueError):
+                return False
+            if hashlib.sha256(raw).hexdigest() != row.get("content_sha256"):
+                return False
+        else:
+            return False
+        if type(row.get("mode")) is not int or not 0 <= row["mode"] <= 0o7777 \
+                or type(row.get("flags")) is not int \
+                or not 0 <= row["flags"] <= 0xFFFFFFFF:
+            return False
+        kinds[pure] = str(row["kind"])
+    for path in kinds:
+        for parent in path.parents:
+            if parent == PurePosixPath("."):
+                break
+            if kinds.get(parent) != "directory":
+                return False
+    return True
+
+
+def restore_recovery_artifacts(snapshot: dict, vault: Path) -> str | None:
+    """Restore the exact prototype tree captured for a recovery candidate."""
+    if not valid_recovery_artifact_snapshot(snapshot):
+        return "recovery artifact snapshot is invalid"
+    vault = Path(os.path.abspath(vault))
+    experience_root = vault / EXPERIENCE_ROOT_RELATIVE
+    root = vault / EXPERIENCE_ARTIFACT_ROOT_RELATIVE
+    try:
+        project = (
+            vault.parents[1]
+            if vault.name == "docs" and vault.parent.name == "workspace"
+            else None
+        )
+        if project is not None and (
+            path_is_alias(project) or not project.is_dir()
+        ):
+            return "recovery project is not one local directory"
+        if path_is_alias(vault.parent) or not vault.parent.is_dir():
+            return "recovery vault parent is not one local directory"
+        if path_is_alias(vault) or not vault.is_dir():
+            return "recovery vault is not one local directory"
+        if path_is_alias(experience_root) or not experience_root.is_dir():
+            return "recovery artifact parent is not one local directory"
+        resolved_vault = vault.resolve(strict=True)
+        if experience_root.resolve(strict=True) != (
+            resolved_vault / EXPERIENCE_ROOT_RELATIVE
+        ):
+            return "recovery artifact parent escapes the local vault"
+    except (OSError, TypeError, ValueError) as exc:
+        return str(exc)
+
+    parent_mode: int | None = None
+    parent_flags = 0
+    error: str | None = None
+    try:
+        parent_identity = experience_root.stat()
+        parent_mode = stat.S_IMODE(parent_identity.st_mode)
+        parent_flags = int(getattr(parent_identity, "st_flags", 0))
+        make_local_path_writable(experience_root)
+        os.chmod(experience_root, parent_mode | stat.S_IRWXU)
+        if root.exists() or path_is_alias(root):
+            remove_local_tree(root)
+        if snapshot.get("exists") is False:
+            sync_directory(root.parent)
+        else:
+            root.mkdir()
+            entries = snapshot["entries"]
+            directories = sorted(
+                (
+                    (PurePosixPath(relative), row)
+                    for relative, row in entries.items()
+                    if row.get("kind") == "directory"
+                ),
+                key=lambda item: len(item[0].parts),
+            )
+            for relative, _row in directories:
+                root.joinpath(*relative.parts).mkdir()
+            for relative, row in sorted(entries.items()):
+                if row.get("kind") != "file":
+                    continue
+                target = root.joinpath(*PurePosixPath(relative).parts)
+                raw = base64.b64decode(row["content_base64"], validate=True)
+                fd, temporary = tempfile.mkstemp(
+                    prefix=".artifact-restore-", dir=str(target.parent),
+                )
+                try:
+                    with os.fdopen(fd, "wb") as handle:
+                        handle.write(raw)
+                        handle.flush()
+                        os.fsync(handle.fileno())
+                    os.chmod(temporary, int(row["mode"]))
+                    os.replace(temporary, target)
+                    set_local_path_flags(target, int(row["flags"]))
+                    sync_directory(target.parent)
+                finally:
+                    Path(temporary).unlink(missing_ok=True)
+            for relative, row in sorted(
+                directories, key=lambda item: len(item[0].parts), reverse=True,
+            ):
+                target = root.joinpath(*relative.parts)
+                os.chmod(target, int(row["mode"]))
+                set_local_path_flags(target, int(row["flags"]))
+            os.chmod(root, int(snapshot["mode"]))
+            set_local_path_flags(root, int(snapshot["flags"]))
+            sync_directory(root.parent)
+    except (OSError, TypeError, ValueError) as exc:
+        error = str(exc)
+    finally:
+        if parent_mode is not None and experience_root.is_dir() \
+                and not path_is_alias(experience_root):
+            try:
+                make_local_path_writable(experience_root)
+                os.chmod(experience_root, parent_mode)
+                set_local_path_flags(experience_root, parent_flags)
+            except OSError as exc:
+                if error is None:
+                    error = str(exc)
+    return error
 
 
 def written_content(tool_input: dict) -> str:
@@ -1686,6 +1972,54 @@ def relaxed_application_writer_spec(payload: dict, vault: Path) -> dict | None:
     }
 
 
+def attested_recovery_writer_spec(
+    payload: dict, vault: Path,
+) -> dict[str, str] | None:
+    """Parse only the exact-runtime recovery form that needs post-attestation."""
+    parsed = direct_shell_tokens(payload)
+    if parsed is None:
+        return None
+    tokens, cwd = parsed
+    if (
+        len(tokens) < 3
+        or not trusted_python_command(tokens[0], cwd)
+        or _installed_script_path(
+            tokens[1], cwd, "experience_compile.py",
+        ) is None
+        or tokens[2] != "recover-open-scope"
+    ):
+        return None
+    valued = {
+        "--root", "--from-scope-plan", "--from-proposal-hash",
+        "--scope-plan", "--proposal-hash",
+    }
+    options = parsed_options(tokens[3:], valued, set())
+    if options is None or set(options) != valued:
+        return None
+    root = _cli_path(options["--root"], cwd)
+    source_plan = _cli_path(options["--from-scope-plan"], cwd)
+    plan = _cli_path(options["--scope-plan"], cwd)
+    source_hash = options["--from-proposal-hash"]
+    proposal_hash = options["--proposal-hash"]
+    if (
+        root != (vault / EXPERIENCE_ROOT_RELATIVE).resolve()
+        or source_plan is None
+        or plan is None
+        or source_hash == proposal_hash
+        or re.fullmatch(r"sha256:[0-9a-f]{64}", source_hash) is None
+        or re.fullmatch(r"sha256:[0-9a-f]{64}", proposal_hash) is None
+    ):
+        return None
+    return {
+        "command": "recover-open-scope",
+        "root": str(root),
+        "source_plan": str(source_plan),
+        "source_proposal_hash": source_hash,
+        "plan": str(plan),
+        "proposal_hash": proposal_hash,
+    }
+
+
 def sanctioned_application_writer(
     payload: dict, vault: Path, allow_bare_runtime: bool = False,
 ) -> bool:
@@ -1726,6 +2060,50 @@ def valid_application_writer_result(
     payload: dict, vault: Path, changed: list[str],
 ) -> bool:
     """Attest the exact relaxed command delta through the owning compiler."""
+    recovery = attested_recovery_writer_spec(payload, vault)
+    if recovery is not None:
+        if experience_compile is None or experience_application_check is None:
+            return False
+        try:
+            root = Path(recovery["root"])
+            source_plan = experience_compile.load_scope_plan(
+                recovery["source_plan"],
+                recovery["source_proposal_hash"],
+            )
+            plan = experience_compile.load_scope_plan(
+                recovery["plan"], recovery["proposal_hash"],
+            )
+            opened = experience_compile.validate_recovered_scope_postimage(
+                root, source_plan, recovery["source_proposal_hash"],
+                plan, recovery["proposal_hash"],
+            )
+            targets = {package.name for package, _data, _state in opened}
+        except (OSError, RuntimeError, ValueError):
+            return False
+        changed_set = set(changed)
+        allowed = {
+            "home.md",
+            "maps/experience-design.md",
+            "experience-design/_generated",
+            "experience-design/_generated/application-registry.json",
+            "experience-design/_generated/open-application-revision.json",
+        }
+        required = {
+            "experience-design/_generated/open-application-revision.json",
+        }
+        for target in targets:
+            package = f"experience-design/experiences/{target}"
+            allowed.update({
+                f"{package}/experience.md",
+                f"{package}/_generated/open-revision.json",
+                f"{package}/_generated/registry.json",
+                f"{package}/_generated/coverage.json",
+            })
+            required.add(f"{package}/_generated/open-revision.json")
+        if not changed_set:
+            return True
+        return required.issubset(changed_set) and changed_set.issubset(allowed)
+
     spec = relaxed_application_writer_spec(payload, vault)
     if spec is None:
         return False
@@ -1918,15 +2296,19 @@ def read_config_snapshot(path: Path) -> dict:
     if not path.exists():
         return {
             "path": str(path), "exists": False, "text": "", "mode": 0,
+            "flags": 0,
             "guard_hash": guarded_config_hash(None, False),
         }
     try:
         text = path.read_text(encoding="utf-8")
-        mode = path.stat().st_mode & 0o777
+        identity = path.stat()
+        mode = stat.S_IMODE(identity.st_mode)
+        flags = int(getattr(identity, "st_flags", 0))
     except (OSError, UnicodeError) as exc:
         return {"path": str(path), "exists": True, "read_error": str(exc)}
     return {
         "path": str(path), "exists": True, "text": text, "mode": mode,
+        "flags": flags,
         "guard_hash": guarded_config_hash(text, True),
     }
 
@@ -1942,13 +2324,38 @@ def path_is_alias(path: Path) -> bool:
     )
 
 
-def make_windows_regular_file_writable(path: Path) -> None:
-    """Clear the Windows READONLY attribute before recovery replacement."""
-    if os.name != "nt" or path_is_alias(path) or not path.is_file():
+def set_local_path_flags(path: Path, flags: int) -> None:
+    """Apply exact BSD filesystem flags where the host exposes them."""
+    if path_is_alias(path) or not hasattr(os, "chflags"):
         return
-    mode = path.stat().st_mode
-    if not mode & stat.S_IWRITE:
-        os.chmod(path, mode | stat.S_IWRITE)
+    try:
+        os.chflags(path, flags, follow_symlinks=False)
+    except TypeError:
+        os.chflags(path, flags)
+
+
+def make_local_path_writable(path: Path) -> None:
+    """Clear host flags that prevent replacing one local file or directory."""
+    if path_is_alias(path):
+        return
+    try:
+        metadata = path.lstat()
+    except OSError:
+        return
+    blocking_flags = sum(
+        getattr(stat, name, 0)
+        for name in ("UF_IMMUTABLE", "UF_APPEND", "SF_IMMUTABLE", "SF_APPEND")
+    )
+    current_flags = getattr(metadata, "st_flags", 0)
+    if blocking_flags and current_flags & blocking_flags:
+        flags = current_flags & ~blocking_flags
+        try:
+            os.chflags(path, flags, follow_symlinks=False)
+        except TypeError:
+            os.chflags(path, flags)
+        metadata = path.lstat()
+    if os.name == "nt" and not metadata.st_mode & stat.S_IWRITE:
+        os.chmod(path, metadata.st_mode | stat.S_IWRITE)
 
 
 def remove_path_alias(path: Path) -> None:
@@ -1956,7 +2363,10 @@ def remove_path_alias(path: Path) -> None:
     metadata = path.lstat()
     if path.is_symlink():
         path.unlink()
-    elif stat.S_ISDIR(metadata.st_mode):
+    elif stat.S_ISDIR(metadata.st_mode) or (
+        os.name == "nt"
+        and bool(getattr(metadata, "st_file_attributes", 0) & 0x10)
+    ):
         os.rmdir(path)
     else:
         path.unlink()
@@ -1967,14 +2377,16 @@ def remove_local_tree(path: Path) -> None:
     if path_is_alias(path):
         remove_path_alias(path)
         return
+    make_local_path_writable(path)
     if path.is_dir():
+        mode = stat.S_IMODE(path.stat().st_mode)
+        os.chmod(path, mode | 0o700)
         with os.scandir(path) as entries:
             children = [Path(entry.path) for entry in entries]
         for child in children:
             remove_local_tree(child)
         path.rmdir()
         return
-    make_windows_regular_file_writable(path)
     path.unlink(missing_ok=True)
 
 
@@ -2005,12 +2417,51 @@ def ensure_local_directory(path: Path) -> str | None:
         if path_is_alias(path):
             remove_path_alias(path)
         elif path.exists() and not path.is_dir():
-            make_windows_regular_file_writable(path)
+            make_local_path_writable(path)
             path.unlink()
         path.mkdir(parents=True, exist_ok=True)
     except OSError as exc:
         return str(exc)
     return None
+
+
+def open_restore_directory(
+    path: Path,
+    metadata: list[tuple[Path, int, int]],
+    *,
+    replace_unsafe: bool,
+) -> None:
+    """Temporarily make one local restore parent writable."""
+    if replace_unsafe:
+        problem = ensure_local_directory(path)
+        if problem:
+            raise OSError(problem)
+    elif path_is_alias(path) or not path.is_dir():
+        raise OSError(f"restore parent is not one local directory: {path}")
+    identity = path.stat()
+    mode = stat.S_IMODE(identity.st_mode)
+    flags = int(getattr(identity, "st_flags", 0))
+    metadata.append((path, mode, flags))
+    make_local_path_writable(path)
+    os.chmod(path, mode | stat.S_IRWXU)
+
+
+def close_restore_directories(
+    metadata: list[tuple[Path, int, int]],
+) -> str | None:
+    """Reapply rollback-entry metadata to temporary restore parents."""
+    error = None
+    for path, mode, flags in reversed(metadata):
+        try:
+            if path_is_alias(path) or not path.is_dir():
+                raise OSError(f"restore parent identity changed: {path}")
+            make_local_path_writable(path)
+            os.chmod(path, mode)
+            set_local_path_flags(path, flags)
+        except OSError as exc:
+            if error is None:
+                error = str(exc)
+    return error
 
 
 def local_recovery_paths(root: Path, vault: Path) -> list[Path]:
@@ -2019,17 +2470,24 @@ def local_recovery_paths(root: Path, vault: Path) -> list[Path]:
     pending = [root]
     while pending:
         directory = pending.pop()
-        mode = directory.stat().st_mode & 0o777
+        mode = stat.S_IMODE(directory.stat().st_mode)
+        make_local_path_writable(directory)
         os.chmod(directory, mode | 0o700)
         with os.scandir(directory) as entries:
             children = sorted(entries, key=lambda entry: entry.name)
         for entry in children:
             path = Path(entry.path)
             relative = path.relative_to(vault).as_posix()
+            alias = path_is_alias(path)
             if author_owned_artifact_path(relative):
+                # Preserve every local opaque artifact tree, but remove an
+                # alias at its canonical root without ever traversing its
+                # target. This also handles dangling Windows junctions.
+                if alias:
+                    paths.append(path)
                 continue
             paths.append(path)
-            if not path_is_alias(path) and entry.is_dir(follow_symlinks=False):
+            if not alias and entry.is_dir(follow_symlinks=False):
                 pending.append(path)
     return paths
 
@@ -2059,59 +2517,84 @@ def restore_config(snapshot: dict, expected_path: Path) -> str | None:
     except (OSError, RuntimeError) as exc:
         return str(exc)
     path = expected_path
+    parent_metadata: list[tuple[Path, int, int]] = []
+    error: str | None = None
     try:
-        directory_error = ensure_local_directory(path.parent)
-        if directory_error:
-            return directory_error
+        open_restore_directory(
+            path.parent.parent, parent_metadata, replace_unsafe=False,
+        )
+        open_restore_directory(
+            path.parent, parent_metadata, replace_unsafe=True,
+        )
         if not snapshot.get("exists"):
             remove_local_tree(path)
             sync_directory(path.parent)
-            return None
-        if path_is_alias(path) or (path.exists() and not path.is_file()):
-            remove_local_tree(path)
-        make_windows_regular_file_writable(path)
-        path.parent.mkdir(parents=True, exist_ok=True)
-        fd, temporary = tempfile.mkstemp(
-            prefix=f".{path.name}.restore-", dir=str(path.parent)
-        )
-        try:
-            with os.fdopen(fd, "w", encoding="utf-8") as handle:
-                handle.write(str(snapshot.get("text") or ""))
-                handle.flush()
-                os.fsync(handle.fileno())
-            mode = snapshot.get("mode")
-            os.chmod(temporary, mode if isinstance(mode, int) else 0o644)
-            os.replace(temporary, path)
-            sync_directory(path.parent)
-        finally:
+        else:
+            if path_is_alias(path) or (path.exists() and not path.is_file()):
+                remove_local_tree(path)
+            make_local_path_writable(path)
+            fd, temporary = tempfile.mkstemp(
+                prefix=f".{path.name}.restore-", dir=str(path.parent)
+            )
             try:
-                Path(temporary).unlink()
-            except FileNotFoundError:
-                pass
+                with os.fdopen(fd, "w", encoding="utf-8") as handle:
+                    handle.write(str(snapshot.get("text") or ""))
+                    handle.flush()
+                    os.fsync(handle.fileno())
+                mode = snapshot.get("mode")
+                os.chmod(temporary, mode if isinstance(mode, int) else 0o644)
+                os.replace(temporary, path)
+                set_local_path_flags(path, int(snapshot.get("flags", 0)))
+                sync_directory(path.parent)
+            finally:
+                Path(temporary).unlink(missing_ok=True)
     except OSError as exc:
-        return str(exc)
-    return None
+        error = str(exc)
+    finally:
+        parent_error = close_restore_directories(parent_metadata)
+        if error is None:
+            error = parent_error
+    return error
 
 
 def restore_experience_tree(snapshot: dict, vault: Path) -> str | None:
     """Restore protected Experience state while preserving opaque artifacts."""
     if not valid_experience_tree_snapshot(snapshot):
         return "Experience recovery snapshot is invalid"
+    parent_metadata: list[tuple[Path, int, int]] = []
+    error: str | None = None
     try:
         vault = Path(os.path.abspath(vault))
         root = vault / EXPERIENCE_ROOT_RELATIVE
-        for directory in (vault.parent, vault):
-            directory_error = ensure_local_directory(directory)
-            if directory_error:
-                return directory_error
+        standard_vault = (
+            vault.name == "docs"
+            and vault.parent.name == "workspace"
+        )
+        project = vault.parents[1] if standard_vault else vault.parent
+        if standard_vault and (
+                path_is_alias(vault.parents[1])
+                or not vault.parents[1].is_dir()
+        ):
+            raise ValueError(
+                "Experience recovery project is not one local directory"
+            )
+        for directory in dict.fromkeys((project, vault.parent, vault)):
+            open_restore_directory(
+                directory,
+                parent_metadata,
+                replace_unsafe=directory != project,
+            )
         if path_is_alias(root):
             remove_path_alias(root)
         elif root.exists() and not root.is_dir():
-            make_windows_regular_file_writable(root)
+            make_local_path_writable(root)
             root.unlink()
         root.mkdir(parents=True, exist_ok=True)
-        if root.resolve() != root:
-            return "Experience recovery root is non-canonical"
+        resolved_vault = vault.resolve(strict=True)
+        if root.resolve(strict=True) != (
+            resolved_vault / EXPERIENCE_ROOT_RELATIVE
+        ):
+            raise ValueError("Experience recovery root is non-canonical")
 
         expected_files = {
             relative for relative, row in snapshot.items()
@@ -2130,12 +2613,12 @@ def restore_experience_tree(snapshot: dict, vault: Path) -> str | None:
             if path_is_alias(path):
                 remove_path_alias(path)
             elif path.is_file() and relative not in expected_files:
-                make_windows_regular_file_writable(path)
+                make_local_path_writable(path)
                 path.unlink()
             elif path.is_dir() and relative not in expected_directories:
                 path.rmdir()
             elif not path.is_file() and not path.is_dir():
-                make_windows_regular_file_writable(path)
+                make_local_path_writable(path)
                 path.unlink()
 
         directories = sorted(
@@ -2150,10 +2633,10 @@ def restore_experience_tree(snapshot: dict, vault: Path) -> str | None:
             if path_is_alias(target):
                 remove_path_alias(target)
             elif target.exists() and not target.is_dir():
-                make_windows_regular_file_writable(target)
+                make_local_path_writable(target)
                 target.unlink()
             target.mkdir(parents=True, exist_ok=True)
-            os.chmod(target, (target.stat().st_mode & 0o777) | 0o700)
+            os.chmod(target, stat.S_IMODE(target.stat().st_mode) | 0o700)
 
         files = (
             (relative, row) for relative, row in sorted(snapshot.items())
@@ -2162,16 +2645,18 @@ def restore_experience_tree(snapshot: dict, vault: Path) -> str | None:
         for relative, row in files:
             target = experience_recovery_target(vault, relative)
             if path_is_alias(target.parent) or not target.parent.is_dir():
-                return f"{relative}: recovery parent is not a local directory"
+                raise ValueError(
+                    f"{relative}: recovery parent is not a local directory"
+                )
             raw = base64.b64decode(row["content_base64"], validate=True)
             if path_is_alias(target):
                 remove_path_alias(target)
             if target.is_file():
-                make_windows_regular_file_writable(target)
+                make_local_path_writable(target)
             elif target.is_dir():
                 remove_local_tree(target)
             fd, temporary = tempfile.mkstemp(
-                prefix=f".{target.name}.restore-", dir=str(target.parent),
+                prefix=".artifact-restore-", dir=str(target.parent),
             )
             try:
                 with os.fdopen(fd, "wb") as handle:
@@ -2180,6 +2665,7 @@ def restore_experience_tree(snapshot: dict, vault: Path) -> str | None:
                     os.fsync(handle.fileno())
                 os.chmod(temporary, int(row["mode"]))
                 os.replace(temporary, target)
+                set_local_path_flags(target, int(row["flags"]))
                 sync_directory(target.parent)
             finally:
                 Path(temporary).unlink(missing_ok=True)
@@ -2188,15 +2674,49 @@ def restore_experience_tree(snapshot: dict, vault: Path) -> str | None:
             directories, key=lambda item: len(Path(item[0]).parts),
             reverse=True,
         ):
-            os.chmod(
-                experience_recovery_target(vault, relative), int(row["mode"]),
-            )
+            target = experience_recovery_target(vault, relative)
+            os.chmod(target, int(row["mode"]))
+            set_local_path_flags(target, int(row["flags"]))
         topology_problem = experience_topology_problem(vault)
         if topology_problem:
-            return "restored tree has an unsafe topology: " + topology_problem
+            raise ValueError(
+                "restored tree has an unsafe topology: " + topology_problem
+            )
     except (OSError, ValueError, TypeError) as exc:
-        return str(exc)
-    return None
+        error = str(exc)
+    finally:
+        parent_error = close_restore_directories(parent_metadata)
+        if error is None:
+            error = parent_error
+    return error
+
+
+def restore_recovery_protected_state(
+    experience_snapshot: object,
+    artifact_snapshot: object,
+    vault: Path,
+) -> str | None:
+    errors = []
+    # Restore the guarded tree first so a replaced Experience root cannot make
+    # the artifact restore traverse an alias into an unrelated directory.
+    if isinstance(experience_snapshot, dict):
+        restore_experience_tree(experience_snapshot, vault)
+    if isinstance(artifact_snapshot, dict):
+        artifact_error = restore_recovery_artifacts(
+            artifact_snapshot, vault,
+        )
+        if artifact_error:
+            errors.append("artifact restore failed: " + artifact_error)
+    if isinstance(experience_snapshot, dict):
+        # The first pass can legitimately report an artifact-root alias, which
+        # only the exact artifact snapshot can repair. Verify the whole tree
+        # again after that repair and report this final result.
+        experience_error = restore_experience_tree(
+            experience_snapshot, vault,
+        )
+        if experience_error:
+            errors.append("Experience restore failed: " + experience_error)
+    return "; ".join(errors) or None
 
 
 def sync_directory(path: Path) -> None:
@@ -2245,9 +2765,11 @@ def vault_inventory(root: Path) -> dict[str, dict[str, int | str]]:
             if entry.is_dir(follow_symlinks=False):
                 if rel == EXPERIENCE_ROOT_RELATIVE or rel.startswith(
                         EXPERIENCE_ROOT_RELATIVE + "/"):
+                    identity = entry.stat(follow_symlinks=False)
                     result[rel] = {
                         "kind": "directory",
-                        "mode": entry.stat(follow_symlinks=False).st_mode & 0o777,
+                        "mode": stat.S_IMODE(identity.st_mode),
+                        "flags": int(getattr(identity, "st_flags", 0)),
                     }
                 pending.append(path)
                 continue
@@ -2257,7 +2779,8 @@ def vault_inventory(root: Path) -> dict[str, dict[str, int | str]]:
             result[rel] = {
                 "kind": "file",
                 "content_sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
-                "mode": identity.st_mode & 0o777,
+                "mode": stat.S_IMODE(identity.st_mode),
+                "flags": int(getattr(identity, "st_flags", 0)),
                 "nlink": identity.st_nlink,
                 "device": identity.st_dev,
                 "inode": identity.st_ino,
@@ -2267,7 +2790,7 @@ def vault_inventory(root: Path) -> dict[str, dict[str, int | str]]:
 
 def canonical_json(value: dict) -> str:
     return json.dumps(
-        value, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+        value, ensure_ascii=True, sort_keys=True, separators=(",", ":")
     )
 
 
@@ -2439,6 +2962,9 @@ def valid_config_snapshot(snapshot: object, expected_path: Path) -> bool:
     mode = snapshot.get("mode")
     if not isinstance(mode, int) or not 0 <= mode <= 0o7777:
         return False
+    flags = snapshot.get("flags")
+    if type(flags) is not int or not 0 <= flags <= 0xFFFFFFFF:
+        return False
     expected_hash = guarded_config_hash(text if exists else None, exists)
     return snapshot.get("guard_hash") == expected_hash
 
@@ -2493,6 +3019,20 @@ def load_recovery(payload: dict, path: Path) -> tuple[dict | None, str]:
         return None, "recovery application writer authorization is invalid"
     if not isinstance(state.get("application_writer_candidate"), bool):
         return None, "recovery application writer candidate is invalid"
+    recovery_artifacts = state.get("recovery_artifacts")
+    if recovery_artifacts is not None and not valid_recovery_artifact_snapshot(
+        recovery_artifacts,
+    ):
+        return None, "recovery artifact snapshot is invalid"
+    if (
+        state.get("application_writer_candidate")
+        and vault_value
+        and attested_recovery_writer_spec(
+            payload, Path(vault_value),
+        ) is not None
+        and recovery_artifacts is None
+    ):
+        return None, "recovery artifact snapshot is missing"
     if state.get("binding") != guard_binding(payload):
         state = dict(state)
         state["config_writer_allowed"] = False
@@ -2549,11 +3089,27 @@ def shell_snapshot(payload: dict) -> int:
             "Experience Design cannot be safely snapshotted: "
             + snapshot_problem
         )
+    attested_recovery_candidate = bool(
+        root and attested_recovery_writer_spec(payload, root)
+    )
+    try:
+        recovery_artifacts = (
+            recovery_artifact_snapshot(root)
+            if root and attested_recovery_candidate else None
+        )
+    except OSError as exc:
+        return deny(
+            "Experience recovery artifacts could not be snapshotted: "
+            + str(exc)
+        )
     application_writer_allowed = bool(
-        root and sanctioned_application_writer(payload, root)
+        root
+        and not attested_recovery_candidate
+        and sanctioned_application_writer(payload, root)
     )
     application_writer_candidate = bool(
         application_writer_allowed
+        or attested_recovery_candidate
         or root and sanctioned_application_writer(
             payload, root, allow_bare_runtime=True,
         )
@@ -2566,6 +3122,7 @@ def shell_snapshot(payload: dict) -> int:
             payload, config_path
         ),
         "experience_tree": experience_tree,
+        "recovery_artifacts": recovery_artifacts,
         "application_writer_allowed": application_writer_allowed,
         "application_writer_candidate": application_writer_candidate,
     }
@@ -2581,6 +3138,7 @@ def shell_snapshot(payload: dict) -> int:
         "config": config,
         "config_writer_allowed": value["config_writer_allowed"],
         "experience_tree": experience_tree,
+        "recovery_artifacts": recovery_artifacts,
         "application_writer_allowed": value[
             "application_writer_allowed"
         ],
@@ -2632,6 +3190,7 @@ def shell_verify(payload: dict) -> int:
         config_before = recovery_state["config"]
         writer_allowed = bool(recovery_state.get("config_writer_allowed"))
         experience_before = recovery_state["experience_tree"]
+        recovery_artifacts_before = recovery_state.get("recovery_artifacts")
         application_writer_allowed = bool(
             recovery_state.get("application_writer_allowed")
         )
@@ -2668,6 +3227,17 @@ def shell_verify(payload: dict) -> int:
         )
         if not valid_experience_tree_snapshot(experience_before):
             experience_before = None
+        recovery_artifacts_before = (
+            before.get("recovery_artifacts")
+            if isinstance(before, dict) else None
+        )
+        if (
+            recovery_artifacts_before is not None
+            and not valid_recovery_artifact_snapshot(
+                recovery_artifacts_before,
+            )
+        ):
+            recovery_artifacts_before = None
         application_writer_allowed = False
         application_writer_candidate = False
         root_value = str(before.get("vault", "")) \
@@ -2705,6 +3275,8 @@ def shell_verify(payload: dict) -> int:
                 != config_before.get("guard_hash")
             ) or (
                 config_after.get("mode") != config_before.get("mode")
+            ) or (
+                config_after.get("flags") != config_before.get("flags")
             )
             if changed and (not writer_allowed or config_topology_changed):
                 restore_error = restore_config(config_before, expected_config)
@@ -2724,9 +3296,11 @@ def shell_verify(payload: dict) -> int:
                 config_violation = message
         if integrity_error and not isinstance(before, dict):
             restore_error = (
-                restore_experience_tree(experience_before, Path(root_value))
-                if root_value and isinstance(experience_before, dict)
-                else None
+                restore_recovery_protected_state(
+                    experience_before, recovery_artifacts_before,
+                    Path(root_value),
+                )
+                if root_value else None
             )
             detail = f" ({primary_error})" if primary_error else ""
             if restore_error:
@@ -2764,9 +3338,10 @@ def shell_verify(payload: dict) -> int:
             return "; ".join(details)
 
         if vault_topology_changed:
-            restore_error = (
-                restore_experience_tree(experience_before, root)
-                if isinstance(experience_before, dict)
+            restore_error = restore_recovery_protected_state(
+                experience_before, recovery_artifacts_before, root,
+            ) or (
+                None if isinstance(experience_before, dict)
                 else "the Experience recovery snapshot is unavailable"
             )
             reason = (
@@ -2785,9 +3360,10 @@ def shell_verify(payload: dict) -> int:
 
         hardlinks_after = experience_hardlink_paths(root)
         if hardlinks_after:
-            restore_error = (
-                restore_experience_tree(experience_before, root)
-                if isinstance(experience_before, dict)
+            restore_error = restore_recovery_protected_state(
+                experience_before, recovery_artifacts_before, root,
+            ) or (
+                None if isinstance(experience_before, dict)
                 else "the Experience recovery snapshot is unavailable"
             )
             reason = "Bash created a hard-link alias for Experience Design state"
@@ -2804,6 +3380,54 @@ def shell_verify(payload: dict) -> int:
         new = vault_inventory(root) if root.is_dir() else {}
         changed = sorted(key for key in set(old) | set(new)
                          if old.get(key) != new.get(key))
+        attested_recovery_request = (
+            attested_recovery_writer_spec(payload, root) is not None
+        )
+        artifact_changed = False
+        if attested_recovery_request:
+            if not isinstance(recovery_artifacts_before, dict):
+                artifact_changed = True
+            else:
+                try:
+                    artifact_changed = (
+                        recovery_artifact_snapshot(root)
+                        != recovery_artifacts_before
+                    )
+                except (OSError, RuntimeError, ValueError):
+                    artifact_changed = True
+            if artifact_changed:
+                changed.append(EXPERIENCE_ARTIFACT_ROOT_RELATIVE)
+
+        recovery_candidate_is_valid: bool | None = None
+        if attested_recovery_request:
+            recovery_candidate_is_valid = False
+            if not application_writer_allowed and application_writer_candidate:
+                try:
+                    recovery_candidate_is_valid = (
+                        valid_application_writer_result(
+                            payload, root, changed,
+                        )
+                    )
+                except Exception:
+                    recovery_candidate_is_valid = False
+            if not recovery_candidate_is_valid:
+                restore_error = (
+                    restore_recovery_protected_state(
+                        experience_before, recovery_artifacts_before, root,
+                    )
+                    if changed else None
+                )
+                if restore_error:
+                    retain_guard_state = True
+                    return deny(protected_message(
+                        "the recovery command did not produce its exact "
+                        f"fresh postimage; restore failed: {restore_error}; "
+                        "recovery state was retained"
+                    ))
+                return deny(protected_message(
+                    "the recovery command did not produce its exact fresh "
+                    "postimage"
+                ))
         if not changed:
             if integrity_error or config_violation:
                 return deny(protected_message(
@@ -2818,9 +3442,10 @@ def shell_verify(payload: dict) -> int:
                 or "/_ledger/" in f"/{key}/"
             )
         ]
-        candidate_is_valid = False
+        candidate_is_valid = bool(recovery_candidate_is_valid)
         if (
             machine_changes
+            and recovery_candidate_is_valid is None
             and not application_writer_allowed
             and application_writer_candidate
         ):
@@ -2835,9 +3460,10 @@ def shell_verify(payload: dict) -> int:
                 candidate_is_valid = False
         if machine_changes and not (
                 application_writer_allowed or candidate_is_valid):
-            restore_error = (
-                restore_experience_tree(experience_before, root)
-                if isinstance(experience_before, dict)
+            restore_error = restore_recovery_protected_state(
+                experience_before, recovery_artifacts_before, root,
+            ) or (
+                None if isinstance(experience_before, dict)
                 else "the Experience recovery snapshot is unavailable"
             )
             detail = ", ".join(machine_changes)

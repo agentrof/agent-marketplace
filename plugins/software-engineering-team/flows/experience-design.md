@@ -10,6 +10,9 @@ Every `experience_compile.py` mutation uses the active host runtime's exact
 absolute Python executable and the installed script's absolute path. Bare
 Python names, `/usr/bin/env` indirection and direct shebang execution do not
 receive machine-writer authorization.
+`recover-open-scope` additionally receives authorization only after the hook
+attests its exact lifecycle/navigation postimage and verifies that the complete
+application prototype tree is byte-identical to its pre-command snapshot.
 
 ## Entry and scope proposal
 
@@ -21,6 +24,25 @@ receive machine-writer authorization.
    process ownership, create/update/reuse/rename/retire actions, any independent
    application revision, upstream receipt hashes and current application
    receipt. Obtain approval for the entire action set.
+
+## Stale open-scope recovery
+
+If a scope consists only of `draft` or `in_review` non-retire package
+mutations bound to an obsolete proposal, generate a fresh recovery proposal
+from the old plan plus current upstream and application receipts. A scope that
+also contains `retirement_pending` or a retire action is outside this recovery
+boundary and fails closed. Use `propose --recover-scope-plan <old-plan>
+--recover-proposal-hash <old-hash>` together with the normal root, origin-mode
+and current input selectors; do not pass new package action selectors. Then run
+`recover-open-scope --from-scope-plan <old-plan> --from-proposal-hash
+<old-hash> --scope-plan <fresh-plan> --proposal-hash <fresh-hash>`. Recovery
+proves the old plan, every open package and the fresh plan name the same
+complete mutation set, binds the old proposal hash into the fresh plan,
+rebinds that set and the open application atomically, and resets review state
+to `draft`. Never recover only part of the set or edit compiler-owned state
+directly. Recovery preserves authored child records and prototype/package
+artifact bytes and does not change approved ledgers or receipts; run the full
+review flow again.
 
 ## Preflight and authoring
 

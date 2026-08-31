@@ -131,8 +131,9 @@ jobs:
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: ${{ matrix.python }}
-      - name: Exercise the shared shell-hook contract
+      - name: Exercise the shared shell-hook and recovery contracts
         run: >-
           python -m unittest
+          tools.tests.test_experience_compile
           tools.tests.test_vault_hook
           tools.tests.test_opencode_real_host_probe

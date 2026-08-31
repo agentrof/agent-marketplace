@@ -1,0 +1,6 @@
+{
+  "summary": "Recover stale open Experience scopes without changing authored artifacts or approved lifecycle records.",
+  "components": {
+    "software-engineering-team": "patch"
+  }
+}

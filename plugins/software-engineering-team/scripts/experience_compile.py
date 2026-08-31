@@ -64,8 +64,14 @@ MUTATING_COMMANDS = {
     "init", "begin-revision", "enter-review", "stub", "render",
     "render-application", "begin-application-revision",
     "enter-application-review", "approve-set", "rename", "retire",
+    "recover-open-scope",
 }
-TRANSACTION_SCHEMA_VERSION = 2
+RECOVERABLE_SCOPE_PHASES = {"draft", "in_review"}
+RECOVERY_BINDING_KEYS = (
+    "input_bindings", "expected_application",
+    "requirement_semantic_hash", "upstream_stage_receipts_hash",
+)
+TRANSACTION_SCHEMA_VERSION = 3
 TRANSACTION_TIMEOUT_SECONDS = 30.0
 RECORD_NAV_START = "<!-- experience_compile.py: generated records:start -->"
 RECORD_NAV_END = "<!-- experience_compile.py: generated records:end -->"
@@ -210,9 +216,9 @@ def validate_mutation_surface(root: Path) -> None:
     def raise_walk_error(error: OSError) -> None:
         raise error
 
-    if root.exists() or root.is_symlink():
+    if root.exists() or _path_is_alias(root):
         root_stat = os.lstat(root)
-        if stat.S_ISLNK(root_stat.st_mode) or not stat.S_ISDIR(root_stat.st_mode):
+        if _path_is_alias(root) or not stat.S_ISDIR(root_stat.st_mode):
             raise ValueError(
                 "Experience root must be one regular, non-symlink directory"
             )
@@ -224,9 +230,9 @@ def validate_mutation_surface(root: Path) -> None:
                 path = current_path / name
                 path_stat = os.lstat(path)
                 mode = path_stat.st_mode
-                if stat.S_ISLNK(mode):
+                if _path_is_alias(path):
                     raise ValueError(
-                        f"Experience mutation surface contains a symlink: {path}"
+                        f"Experience mutation surface contains an alias: {path}"
                     )
                 if name in directory_names:
                     if not stat.S_ISDIR(mode):
@@ -241,13 +247,16 @@ def validate_mutation_surface(root: Path) -> None:
                     )
 
     map_path = transaction_map(root)
-    if map_path.exists() or map_path.is_symlink():
-        _regular_directory(
-            map_path.parent, "Experience navigation owner",
-        )
+    _regular_directory(
+        map_path.parent,
+        "Experience navigation owner",
+        reserved_name="maps",
+        allow_missing=True,
+    )
+    if map_path.exists() or _path_is_alias(map_path):
         map_stat = os.lstat(map_path)
         if (
-            stat.S_ISLNK(map_stat.st_mode)
+            _path_is_alias(map_path)
             or not stat.S_ISREG(map_stat.st_mode)
             or map_stat.st_nlink != 1
         ):
@@ -275,7 +284,7 @@ def _regular_directory(
             raise ValueError(
                 f"{label} must use exact NFC spelling and case: {reserved_name}"
             )
-        if path.parent.is_dir() and not path.parent.is_symlink():
+        if path.parent.is_dir() and not _path_is_alias(path.parent):
             aliases = [
                 child.name for child in path.parent.iterdir()
                 if _reserved_path_alias(child.name, reserved_name)
@@ -283,14 +292,14 @@ def _regular_directory(
             missing_without_alias = (
                 allow_missing
                 and not path.exists()
-                and not path.is_symlink()
+                and not _path_is_alias(path)
                 and not aliases
             )
             if aliases != [reserved_name] and not missing_without_alias:
                 raise ValueError(
                     f"{label} must resolve from one exact {reserved_name} directory"
                 )
-    if path.is_symlink():
+    if _path_is_alias(path):
         raise ValueError(f"{label} must be one regular, non-symlink directory")
     if allow_missing and not path.exists():
         return
@@ -333,14 +342,14 @@ def _lexical_root(value: str | Path, *, allow_missing_root: bool) -> Path:
         _regular_directory(lexical, "project root selector")
         workspace = lexical / "workspace"
         direct = lexical / "experience-design"
-        if workspace.exists() or workspace.is_symlink():
+        if workspace.exists() or _path_is_alias(workspace):
             candidate = workspace / "docs" / "experience-design"
             chain = [
                 (workspace, "Experience workspace", "workspace"),
                 (workspace / "docs", "Experience owner", "docs"),
                 (candidate, "Experience root", "experience-design"),
             ]
-        elif direct.exists() or direct.is_symlink():
+        elif direct.exists() or _path_is_alias(direct):
             candidate = direct
             chain = [(candidate, "Experience root", "experience-design")]
         elif allow_missing_root and (workspace / "docs").is_dir():
@@ -378,7 +387,7 @@ def command_experience_root(args) -> Path:
             reserved_name="experiences",
             allow_missing=True,
         )
-        if path.is_symlink():
+        if _path_is_alias(path):
             raise ValueError(
                 "Experience package must be one regular, non-symlink directory"
             )
@@ -434,10 +443,27 @@ def _unlock_file(handle) -> None:
 
 @contextlib.contextmanager
 def project_transaction_lock(root: Path):
-    runtime = transaction_runtime(root)
-    runtime.mkdir(parents=True, exist_ok=True)
+    runtime = ensure_transaction_runtime(root)
     lock_path = runtime / "project.lock"
+    if _path_is_alias(lock_path):
+        raise ValueError("Experience transaction lock must not be an alias")
+    if lock_path.exists():
+        metadata = lock_path.stat()
+        if not stat.S_ISREG(metadata.st_mode) or metadata.st_nlink != 1:
+            raise ValueError(
+                "Experience transaction lock must be one regular local file"
+            )
     with lock_path.open("a+b") as handle:
+        opened = os.fstat(handle.fileno())
+        current = os.stat(lock_path, follow_symlinks=False)
+        if (
+            not stat.S_ISREG(opened.st_mode)
+            or opened.st_nlink != 1
+            or (opened.st_dev, opened.st_ino) != (current.st_dev, current.st_ino)
+        ):
+            raise ValueError(
+                "Experience transaction lock identity changed while opening"
+            )
         handle.seek(0, os.SEEK_END)
         if handle.tell() == 0:
             handle.write(b"\0")
@@ -463,16 +489,23 @@ def _transaction_payload(root: Path, transaction_id: str, command: str,
         "map_existed": map_existed,
         "home_path": str(transaction_home(root)),
         "home_existed": home_existed,
+        "map_parent_existed": transaction_map(root).parent.exists(),
         "phase": "prepared",
     }
 
 
 def read_transaction_journal(root: Path) -> dict | None:
+    runtime_problem = transaction_runtime_problem(root)
+    if runtime_problem:
+        raise ValueError(runtime_problem)
     journal = transaction_journal(root)
-    if not journal.exists():
+    if not journal.exists() and not _path_is_alias(journal):
         return None
-    if not journal.is_file() or journal.is_symlink():
+    if _path_is_alias(journal) or not journal.is_file():
         raise ValueError("Experience transaction journal must be a regular file")
+    metadata = journal.stat()
+    if metadata.st_nlink != 1:
+        raise ValueError("Experience transaction journal must not be hard-linked")
     try:
         value = strict_json_loads(journal.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError, ValueError) as exc:
@@ -481,14 +514,19 @@ def read_transaction_journal(root: Path) -> dict | None:
         "schema_version", "transaction_id", "command", "root",
         "root_existed", "map_path", "map_existed", "phase",
     }
-    current_keys = legacy_keys | {"home_path", "home_existed"}
+    version_two_keys = legacy_keys | {"home_path", "home_existed"}
+    current_keys = version_two_keys | {"map_parent_existed"}
     transaction_id = value.get("transaction_id") if isinstance(value, dict) else None
     schema_version = value.get("schema_version") if isinstance(value, dict) else None
     if (
         not isinstance(value, dict)
         or type(schema_version) is not int
-        or schema_version not in {1, TRANSACTION_SCHEMA_VERSION}
-        or set(value) != (legacy_keys if schema_version == 1 else current_keys)
+        or schema_version not in {1, 2, TRANSACTION_SCHEMA_VERSION}
+        or set(value) != (
+            legacy_keys if schema_version == 1
+            else version_two_keys if schema_version == 2
+            else current_keys
+        )
         or not isinstance(transaction_id, str)
         or not re.fullmatch(r"[0-9a-f]{32}", transaction_id)
         or value.get("command") not in MUTATING_COMMANDS
@@ -497,11 +535,15 @@ def read_transaction_journal(root: Path) -> dict | None:
         or value.get("map_path") != str(transaction_map(root))
         or type(value.get("map_existed")) is not bool
         or (
-            schema_version == TRANSACTION_SCHEMA_VERSION
+            schema_version >= 2
             and (
                 value.get("home_path") != str(transaction_home(root))
                 or type(value.get("home_existed")) is not bool
             )
+        )
+        or (
+            schema_version == TRANSACTION_SCHEMA_VERSION
+            and type(value.get("map_parent_existed")) is not bool
         )
         or value.get("phase") != "prepared"
     ):
@@ -513,63 +555,284 @@ def transaction_backup(root: Path, transaction_id: str) -> Path:
     return transaction_runtime(root) / "backups" / transaction_id
 
 
+def _path_is_alias(path: Path) -> bool:
+    """Recognize symlinks and Windows reparse-point directory aliases."""
+    try:
+        metadata = path.lstat()
+    except OSError:
+        return False
+    return path.is_symlink() or bool(
+        getattr(metadata, "st_file_attributes", 0) & 0x400
+    )
+
+
+def _set_path_flags(path: Path, flags: int) -> None:
+    """Apply exact BSD filesystem flags where the host exposes them."""
+    if _path_is_alias(path) or not hasattr(os, "chflags"):
+        return
+    try:
+        os.chflags(path, flags, follow_symlinks=False)
+    except TypeError:
+        os.chflags(path, flags)
+
+
+def _make_path_removable(path: Path) -> None:
+    """Clear host flags that prevent replacing one local path."""
+    if _path_is_alias(path):
+        return
+    try:
+        metadata = path.lstat()
+    except OSError:
+        return
+    blocking_flags = sum(
+        getattr(stat, name, 0)
+        for name in ("UF_IMMUTABLE", "UF_APPEND", "SF_IMMUTABLE", "SF_APPEND")
+    )
+    current_flags = getattr(metadata, "st_flags", 0)
+    if blocking_flags and current_flags & blocking_flags:
+        flags = current_flags & ~blocking_flags
+        try:
+            os.chflags(path, flags, follow_symlinks=False)
+        except TypeError:
+            os.chflags(path, flags)
+        metadata = path.lstat()
+    if os.name == "nt" and not metadata.st_mode & stat.S_IWRITE:
+        os.chmod(path, metadata.st_mode | stat.S_IWRITE)
+
+
+def _remove_path_alias(path: Path) -> None:
+    """Remove one alias itself without descending into its target."""
+    metadata = path.lstat()
+    if path.is_symlink():
+        path.unlink()
+    elif stat.S_ISDIR(metadata.st_mode):
+        os.rmdir(path)
+    else:
+        path.unlink()
+
+
+def transaction_runtime_problem(
+    root: Path, *, include_backups: bool = False,
+) -> str:
+    """Reject runtime paths that escape through a project-local alias."""
+    project = Path(os.path.abspath(transaction_project(root)))
+    if _path_is_alias(project) or not project.is_dir():
+        return "Experience transaction project is not one local directory"
+    try:
+        resolved_project = project.resolve(strict=True)
+    except (OSError, RuntimeError):
+        return "Experience transaction project identity is unreadable"
+    relative = Path(
+        ".agentrof", "agent-marketplace", ".runtime",
+        "experience-transactions",
+    )
+    if include_backups:
+        relative /= "backups"
+    current = project
+    for index, part in enumerate(relative.parts, start=1):
+        current /= part
+        if _path_is_alias(current):
+            return f"Experience transaction runtime is an alias: {current}"
+        if not current.exists():
+            return ""
+        if not current.is_dir():
+            return f"Experience transaction runtime is not a directory: {current}"
+        try:
+            expected = resolved_project.joinpath(*relative.parts[:index])
+            if current.resolve(strict=True) != expected:
+                return "Experience transaction runtime escaped its project"
+        except (OSError, RuntimeError):
+            return "Experience transaction runtime identity is unreadable"
+    return ""
+
+
+def ensure_transaction_runtime(
+    root: Path, *, include_backups: bool = False,
+) -> Path:
+    """Create each runtime directory only below a validated local parent."""
+    problem = transaction_runtime_problem(
+        root, include_backups=include_backups,
+    )
+    if problem:
+        raise ValueError(problem)
+    runtime = transaction_runtime(root)
+    target = runtime / "backups" if include_backups else runtime
+    project = Path(os.path.abspath(transaction_project(root)))
+    relative = target.relative_to(project)
+    current = project
+    for part in relative.parts:
+        current /= part
+        if not current.exists():
+            current.mkdir()
+        if _path_is_alias(current) or not current.is_dir():
+            raise ValueError(
+                f"Experience transaction runtime is not local: {current}"
+            )
+    problem = transaction_runtime_problem(
+        root, include_backups=include_backups,
+    )
+    if problem:
+        raise ValueError(problem)
+    return target
+
+
 def _remove_exact_path(path: Path) -> None:
-    if path.is_symlink() or path.is_file():
+    if _path_is_alias(path):
+        _remove_path_alias(path)
+        return
+    _make_path_removable(path)
+    if path.is_file():
         path.unlink(missing_ok=True)
     elif path.is_dir():
-        shutil.rmtree(path)
+        mode = stat.S_IMODE(path.stat().st_mode)
+        os.chmod(path, mode | 0o700)
+        with os.scandir(path) as entries:
+            children = [Path(entry.path) for entry in entries]
+        for child in children:
+            _remove_exact_path(child)
+        path.rmdir()
+
+
+def restore_transaction_file(target: Path, backup: Path) -> None:
+    """Restore navigation bytes and their portable permission preimage."""
+    _make_path_removable(target)
+    atomic_write_bytes(target, backup.read_bytes())
+    backup_identity = backup.stat()
+    os.chmod(target, stat.S_IMODE(backup_identity.st_mode))
+    _set_path_flags(target, int(getattr(backup_identity, "st_flags", 0)))
+    fsync_directory(target.parent)
+
+
+def transaction_restore_parent_problem(root: Path) -> str:
+    """Reject a rollback whose lexical parents no longer name local paths."""
+    root = Path(os.path.abspath(root))
+    project = transaction_project(root)
+    try:
+        relative_parent = root.parent.relative_to(project)
+    except ValueError:
+        return "Experience transaction root escaped its project"
+    chain = [project]
+    current = project
+    for part in relative_parent.parts:
+        current /= part
+        chain.append(current)
+    for directory in chain:
+        if _path_is_alias(directory):
+            return f"Experience transaction parent is an alias: {directory}"
+        if not directory.is_dir():
+            return f"Experience transaction parent is not a directory: {directory}"
+    try:
+        resolved_project = project.resolve(strict=True)
+        expected_parent = resolved_project.joinpath(*relative_parent.parts)
+        if root.parent.resolve(strict=True) != expected_parent:
+            return "Experience transaction parent escaped its project"
+    except (OSError, RuntimeError):
+        return "Experience transaction parent identity is unreadable"
+
+    map_parent = transaction_map(root).parent
+    if map_parent.exists() or _path_is_alias(map_parent):
+        if _path_is_alias(map_parent) or not map_parent.is_dir():
+            return "Experience transaction map parent is not one local directory"
+        try:
+            if map_parent.resolve(strict=True) != expected_parent / "maps":
+                return "Experience transaction map parent escaped its owner"
+        except (OSError, RuntimeError):
+            return "Experience transaction map parent identity is unreadable"
+    return ""
 
 
 def restore_transaction(root: Path, journal: dict) -> None:
+    parent_problem = transaction_restore_parent_problem(root)
+    if parent_problem:
+        raise ValueError(parent_problem)
+    runtime_problem = transaction_runtime_problem(root, include_backups=True)
+    if runtime_problem:
+        raise ValueError(runtime_problem)
     transaction_id = str(journal["transaction_id"])
     backup = transaction_backup(root, transaction_id)
     root_backup = backup / "experience-design"
     map_backup = backup / "experience-design.md"
-    if not backup.is_dir() or backup.is_symlink():
+    if not backup.is_dir() or _path_is_alias(backup):
         raise ValueError("Experience transaction backup is missing")
     if journal["root_existed"] and (
-        not root_backup.is_dir() or root_backup.is_symlink()
+        not root_backup.is_dir() or _path_is_alias(root_backup)
     ):
         raise ValueError("Experience transaction root backup is missing")
     if journal["map_existed"] and (
-        not map_backup.is_file() or map_backup.is_symlink()
+        not map_backup.is_file() or _path_is_alias(map_backup)
     ):
         raise ValueError("Experience transaction map backup is missing")
     home_backup = backup / "home.md"
     if journal.get("home_existed") and (
-        not home_backup.is_file() or home_backup.is_symlink()
+        not home_backup.is_file() or _path_is_alias(home_backup)
     ):
         raise ValueError("Experience home navigation backup is missing")
 
-    _remove_exact_path(root)
-    if journal["root_existed"]:
-        root.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copytree(root_backup, root, symlinks=True)
-        fsync_tree(root)
-        fsync_directory(root.parent)
+    parent_metadata: list[tuple[Path, int, int]] = []
+    map_parent = transaction_map(root).parent
+    remove_empty_map_parent = (
+        journal.get("schema_version") == TRANSACTION_SCHEMA_VERSION
+        and not journal.get("map_parent_existed")
+    )
+    try:
+        for directory in dict.fromkeys((root.parent, transaction_map(root).parent)):
+            if not directory.exists():
+                continue
+            if _path_is_alias(directory) or not directory.is_dir():
+                raise ValueError(
+                    "Experience transaction restore parent is not local: "
+                    + str(directory)
+                )
+            identity = directory.stat()
+            current_mode = stat.S_IMODE(identity.st_mode)
+            current_flags = int(getattr(identity, "st_flags", 0))
+            parent_metadata.append((directory, current_mode, current_flags))
+            _make_path_removable(directory)
+            os.chmod(directory, current_mode | stat.S_IRWXU)
 
-    map_path = transaction_map(root)
-    if journal["map_existed"]:
-        atomic_write_bytes(map_path, map_backup.read_bytes())
-    else:
-        _remove_exact_path(map_path)
-        fsync_directory(map_path.parent)
-    if "home_existed" in journal:
-        home_path = transaction_home(root)
-        if journal["home_existed"]:
-            atomic_write_bytes(home_path, home_backup.read_bytes())
+        _remove_exact_path(root)
+        if journal["root_existed"]:
+            root.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copytree(root_backup, root, symlinks=True)
+            fsync_tree(root)
+            fsync_directory(root.parent)
+
+        map_path = transaction_map(root)
+        if journal["map_existed"]:
+            restore_transaction_file(map_path, map_backup)
         else:
-            _remove_exact_path(home_path)
-            fsync_directory(home_path.parent)
+            _remove_exact_path(map_path)
+            fsync_directory(map_path.parent)
+        if "home_existed" in journal:
+            home_path = transaction_home(root)
+            if journal["home_existed"]:
+                restore_transaction_file(home_path, home_backup)
+            else:
+                _remove_exact_path(home_path)
+                fsync_directory(home_path.parent)
+    finally:
+        for directory, mode, flags in reversed(parent_metadata):
+            if directory.is_dir() and not _path_is_alias(directory):
+                _make_path_removable(directory)
+                if directory == map_parent and remove_empty_map_parent \
+                        and not any(directory.iterdir()):
+                    directory.rmdir()
+                    continue
+                os.chmod(directory, mode)
+                _set_path_flags(directory, flags)
 
 
 def cleanup_transaction(root: Path, transaction_id: str) -> None:
+    runtime_problem = transaction_runtime_problem(root, include_backups=True)
+    if runtime_problem:
+        raise ValueError(runtime_problem)
     journal = transaction_journal(root)
+    _make_path_removable(journal)
     journal.unlink(missing_ok=True)
     fsync_directory(journal.parent)
     backup = transaction_backup(root, transaction_id)
-    if backup.is_dir() and not backup.is_symlink():
-        shutil.rmtree(backup)
+    if backup.is_dir() and not _path_is_alias(backup):
+        _remove_exact_path(backup)
     backups = backup.parent
     if backups.is_dir() and not any(backups.iterdir()):
         backups.rmdir()
@@ -585,27 +848,34 @@ def recover_transaction(root: Path) -> bool:
 
 
 def begin_transaction(root: Path, command: str) -> str:
+    ensure_transaction_runtime(root, include_backups=True)
     if read_transaction_journal(root) is not None:
         raise ValueError("an unrecovered Experience transaction already exists")
     transaction_id = uuid.uuid4().hex
     backup = transaction_backup(root, transaction_id)
     backup.mkdir(parents=True, exist_ok=False)
     try:
-        root_existed = root.exists()
+        root_existed = root.exists() or _path_is_alias(root)
         if root_existed:
-            if not root.is_dir() or root.is_symlink():
+            if not root.is_dir() or _path_is_alias(root):
                 raise ValueError("Experience transaction root must be a regular directory")
             shutil.copytree(root, backup / "experience-design", symlinks=True)
         map_path = transaction_map(root)
-        map_existed = map_path.exists()
+        _regular_directory(
+            map_path.parent,
+            "Experience navigation owner",
+            reserved_name="maps",
+            allow_missing=True,
+        )
+        map_existed = map_path.exists() or _path_is_alias(map_path)
         if map_existed:
-            if not map_path.is_file() or map_path.is_symlink():
+            if not map_path.is_file() or _path_is_alias(map_path):
                 raise ValueError("Experience navigation map must be a regular file")
             shutil.copy2(map_path, backup / "experience-design.md")
         home_path = transaction_home(root)
-        home_existed = home_path.exists()
+        home_existed = home_path.exists() or _path_is_alias(home_path)
         if home_existed:
-            if not home_path.is_file() or home_path.is_symlink():
+            if not home_path.is_file() or _path_is_alias(home_path):
                 raise ValueError("Vault home navigation must be a regular file")
             shutil.copy2(home_path, backup / "home.md")
         fsync_tree(backup)
@@ -617,9 +887,12 @@ def begin_transaction(root: Path, command: str) -> str:
             ),
         )
     except BaseException:
-        if transaction_journal(root).exists():
+        if (
+            transaction_journal(root).exists()
+            or _path_is_alias(transaction_journal(root))
+        ):
             raise
-        shutil.rmtree(backup, ignore_errors=True)
+        _remove_exact_path(backup)
         raise
     return transaction_id
 
@@ -947,6 +1220,9 @@ def exact_scope_plan(plan: object) -> bool:
     }
     origin_mode = plan.get("origin_mode")
     expected_keys = set(base_keys)
+    schema_version = plan.get("schema_version")
+    if schema_version == 3:
+        expected_keys.add("recovery_from_proposal_hash")
     if origin_mode == "requirement":
         expected_keys.update({
             "requirement", "requirement_semantic_hash",
@@ -954,8 +1230,8 @@ def exact_scope_plan(plan: object) -> bool:
         })
     if (
         set(plan) != expected_keys
-        or type(plan.get("schema_version")) is not int
-        or plan.get("schema_version") != 2
+        or type(schema_version) is not int
+        or schema_version not in {2, 3}
         or origin_mode not in {"manual", "requirement"}
         or type(plan.get("input_bindings")) is not list
         or any(type(value) is not str for value in plan["input_bindings"])
@@ -965,6 +1241,15 @@ def exact_scope_plan(plan: object) -> bool:
         or re.fullmatch(
             r"sha256:[0-9a-f]{64}", str(plan.get("proposal_hash", "")),
         ) is None
+    ):
+        return False
+    if schema_version == 3 and (
+        re.fullmatch(
+            r"sha256:[0-9a-f]{64}",
+            str(plan.get("recovery_from_proposal_hash", "")),
+        ) is None
+        or plan.get("recovery_from_proposal_hash")
+        == plan.get("proposal_hash")
     ):
         return False
     if (
@@ -1018,6 +1303,19 @@ def exact_scope_plan(plan: object) -> bool:
         ):
             return False
     return True
+
+
+def recovery_bindings_changed(source_plan: dict, plan: dict) -> bool:
+    """Require a stale current binding, not merely a new recovery envelope."""
+    if tuple(sorted(source_plan.get("input_bindings", []))) != tuple(
+        sorted(plan.get("input_bindings", []))
+    ):
+        return True
+    return any(
+        source_plan.get(key) != plan.get(key)
+        for key in RECOVERY_BINDING_KEYS
+        if key != "input_bindings"
+    )
 
 
 def load_scope_plan(path_value: str, provided_hash: str) -> dict:
@@ -1408,6 +1706,269 @@ def validate_open_application_state(
 def package_record_ids(package: Path) -> list[str]:
     return sorted(str(row.get("id", "")) for row in records(package, [])
                   if str(row.get("id", "")))
+
+
+def recovery_application_preimage(root: Path) -> dict:
+    """Read the last approved receipt without inspecting open authored work."""
+    import experience_application_check
+
+    target = root / experience_application_check.LEDGER_RELATIVE
+    rows, findings = experience_application_check.verified_application_ledger(root)
+    if findings:
+        raise ValueError(
+            "approved application ledger is not recovery-ready: "
+            + "; ".join(findings)
+        )
+    if not target.exists() and not target.is_symlink():
+        return {"exists": False}
+    if not rows:
+        raise ValueError("approved application ledger has no current receipt")
+    current = rows[-1]
+    artifact_tree_hash = current.get("artifact_tree_hash")
+    if current.get("schema_version") == 2:
+        try:
+            open_state = read_open_application_state(root)
+        except ValueError as exc:
+            raise ValueError(
+                "legacy application recovery requires its intact open revision state"
+            ) from exc
+        expected = open_state.get("expected_application")
+        if (
+            not isinstance(expected, dict)
+            or expected.get("exists") is not True
+            or expected.get("revision") != current.get("application_revision")
+            or expected.get("package_set_hash") != current.get("package_set_hash")
+            or expected.get("application_hash") != current.get("application_hash")
+        ):
+            raise ValueError(
+                "legacy application open state does not bind the current receipt"
+            )
+        artifact_tree_hash = expected.get("artifact_tree_hash")
+    result = {
+        "exists": True,
+        "status": "approved",
+        "revision": current.get("application_revision"),
+        "artifact_tree_hash": artifact_tree_hash,
+        "package_set_hash": current.get("package_set_hash"),
+        "application_hash": current.get("application_hash"),
+    }
+    if not exact_application_preimage(result):
+        raise ValueError("approved application receipt cannot seed recovery")
+    return result
+
+
+def open_scope_packages(root: Path) -> list[tuple[Path, dict, dict]]:
+    """Return the one protected package scope that can be rebound in place."""
+    opened: list[tuple[Path, dict, dict]] = []
+    for package in packages(root):
+        data = fields(package)
+        if not data:
+            raise ValueError(f"{package.name} package metadata is unreadable")
+        state_path = package / GENERATED / OPEN_REVISION
+        has_state = state_path.exists() or state_path.is_symlink()
+        status = str(data.get("status", ""))
+        if status in RECOVERABLE_SCOPE_PHASES:
+            if not has_state:
+                raise ValueError(
+                    f"{package.name} is {status} without compiler-owned open revision state"
+                )
+            state = validate_open_revision_identity(
+                package, expected_status=status,
+            )
+            opened.append((package, data, state))
+        elif has_state:
+            raise ValueError(
+                f"{package.name} has open revision state in unsupported phase {status}"
+            )
+    if not opened:
+        raise ValueError("no draft or in_review Experience scope is open")
+    proposal_hashes = {str(state["proposal_hash"]) for _package, _data, state in opened}
+    if len(proposal_hashes) != 1:
+        raise ValueError(
+            "open Experience packages are split across proposal hashes"
+        )
+    return opened
+
+
+def ensure_open_scope_unpublished(
+    root: Path, opened: list[tuple[Path, dict, dict]],
+) -> None:
+    """Reject lifecycle state whose successor receipts already escaped."""
+    import experience_application_check
+
+    rows, findings = experience_application_check.verified_application_ledger(
+        root,
+    )
+    if findings:
+        raise ValueError("; ".join(findings))
+    published = {
+        str(receipt.get("result_ref", ""))
+        for application in rows
+        for receipt in application.get("packages", [])
+        if isinstance(receipt, dict)
+    }
+    collisions = sorted(
+        f"{package.name}@r{state['opened_revision']}"
+        for package, _data, state in opened
+        if f"{package.name}@r{state['opened_revision']}" in published
+    )
+    if collisions:
+        raise ValueError(
+            "open package revisions are already published by the application "
+            "ledger: " + ", ".join(collisions)
+        )
+
+
+def mutating_scope_actions(plan: dict) -> list[dict]:
+    actions = [
+        action for action in plan.get("actions", [])
+        if isinstance(action, dict)
+        and action.get("action") in {"create", "update", "rename", "retire"}
+    ]
+    targets = [action_target(action) for action in actions]
+    if len(targets) != len(set(targets)):
+        raise ValueError("scope plan contains duplicate package mutation targets")
+    return actions
+
+
+def validate_open_scope_plan(
+    plan: dict,
+    proposal_hash: str,
+    opened: list[tuple[Path, dict, dict]],
+) -> list[dict]:
+    actions = mutating_scope_actions(plan)
+    targets = {action_target(action) for action in actions}
+    packages_by_name = {package.name: package for package, _data, _state in opened}
+    expected_bindings = [
+        f"{stage}|{reference}|{digest}"
+        for stage, reference, digest in input_rows(plan)
+    ]
+    if not actions or targets != set(packages_by_name):
+        raise ValueError(
+            "scope plan must exactly match every open package mutation"
+        )
+    action_by_target = {action_target(action): action for action in actions}
+    for package, data, state in opened:
+        action = action_by_target[package.name]
+        if action.get("action") == "retire":
+            raise ValueError(
+                "recover-open-scope supports only draft and in_review packages"
+            )
+        validate_open_revision(
+            package, plan, action, proposal_hash,
+            expected_status=str(data.get("status", "")),
+        )
+        if list_value(data, "input_bindings") != expected_bindings:
+            raise ValueError(
+                f"{package.name} input bindings drifted after opening"
+            )
+        if (
+            plan.get("origin_mode") == "requirement"
+            and data.get("upstream_stage_receipts_hash")
+            != plan.get("upstream_stage_receipts_hash")
+        ):
+            raise ValueError(
+                f"{package.name} Requirement receipt binding drifted after opening"
+            )
+        if state.get("proposal_hash") != proposal_hash:
+            raise ValueError(
+                f"{package.name} is open for another scope proposal"
+            )
+    return actions
+
+
+def restore_approved_application_projection(root: Path) -> None:
+    """Discard an unapproved review projection while preserving its ledger."""
+    import experience_application_check
+
+    rows, findings = experience_application_check.verified_application_ledger(root)
+    if findings:
+        raise ValueError("; ".join(findings))
+    target = root / experience_application_check.REGISTRY_RELATIVE
+    if rows:
+        expected = canonical(rows[-1])
+        if not target.is_file() or target.read_bytes() != expected:
+            atomic_write_bytes(target, expected)
+    else:
+        target.unlink(missing_ok=True)
+        if target.parent.is_dir():
+            fsync_directory(target.parent)
+
+
+def validate_recovery_projections(
+    root: Path, opened: list[tuple[Path, dict, dict]],
+) -> None:
+    """Require every deterministic recovery projection to be byte-current."""
+    for package, _data, _state in opened:
+        registry, problems = compile_package(package)
+        if problems:
+            raise ValueError("; ".join(problems))
+        expected_coverage = canonical({
+            "experience_id": package.name,
+            "active_records": [
+                item["id"] for item in registry["records"]
+                if item.get("record_state") == "active"
+            ],
+        })
+        expected_files = {
+            package / GENERATED / "registry.json": canonical(registry),
+            package / GENERATED / "coverage.json": expected_coverage,
+        }
+        for target, expected in expected_files.items():
+            if (
+                not target.is_file()
+                or target.is_symlink()
+                or target.read_bytes() != expected
+            ):
+                raise ValueError(
+                    f"{package.name} recovered generated projection drifted"
+                )
+
+    import experience_application_check
+
+    rows, findings = experience_application_check.verified_application_ledger(
+        root,
+    )
+    if findings:
+        raise ValueError("; ".join(findings))
+    target = root / experience_application_check.REGISTRY_RELATIVE
+    if rows:
+        if (
+            not target.is_file()
+            or target.is_symlink()
+            or target.read_bytes() != canonical(rows[-1])
+        ):
+            raise ValueError("recovered application projection drifted")
+    elif target.exists() or target.is_symlink():
+        raise ValueError("recovered application projection drifted")
+
+    map_path = transaction_map(root)
+    marker = "<!-- experience_compile.py: generated packages -->"
+    if not map_path.is_file() or map_path.is_symlink():
+        raise ValueError("recovered navigation projection drifted")
+    map_text = map_path.read_text(encoding="utf-8")
+    expected_rows = [
+        f"- [[experience-design/experiences/{package.name}/experience|"
+        f"{package.name}]] — `{fields(package).get('status', 'draft')}`"
+        for package in packages(root)
+    ]
+    expected_suffix = "\n\n" + "\n".join(expected_rows) + "\n"
+    if (
+        map_text.count(marker) != 1
+        or map_text.split(marker, 1)[1] != expected_suffix
+    ):
+        raise ValueError("recovered navigation projection drifted")
+    home_path = transaction_home(root)
+    if home_path.exists() or home_path.is_symlink():
+        if (
+            not home_path.is_file()
+            or home_path.is_symlink()
+            or re.search(
+                r"\[\[maps/experience-design(?:\|[^\]\n]+)?\]\]",
+                home_path.read_text(encoding="utf-8"),
+            ) is None
+        ):
+            raise ValueError("recovered navigation projection drifted")
 
 
 def external_active_record(root: Path, source: Path, reference: str,
@@ -2335,11 +2896,120 @@ def init(args) -> int:
     print(json.dumps({"experience": args.experience, "path": str(package), "origin_mode": args.origin_mode}, indent=2)); return 0
 
 
+def recovery_proposal(
+    root: Path, args, receipts: list[dict], context: dict,
+) -> dict:
+    source_plan = load_scope_plan(
+        args.recover_scope_plan, args.recover_proposal_hash,
+    )
+    if source_plan.get("origin_mode") != args.origin_mode:
+        raise ValueError(
+            "recovery origin mode does not match the open scope"
+        )
+    opened = open_scope_packages(root)
+    proposal_hashes = {
+        str(state.get("proposal_hash", ""))
+        for _package, _data, state in opened
+    }
+    if proposal_hashes != {args.recover_proposal_hash}:
+        raise ValueError("open packages are bound to another scope proposal")
+    validate_open_scope_plan(
+        source_plan, args.recover_proposal_hash, opened,
+    )
+    ensure_open_scope_unpublished(root, opened)
+    if open_application_state_path(root).exists():
+        application_state = read_open_application_state(root)
+        application_phase = str(application_state.get("phase", ""))
+        if (
+            application_state.get("proposal_hash")
+            != args.recover_proposal_hash
+            or application_state != open_application_payload(
+                source_plan, args.recover_proposal_hash,
+                phase=application_phase,
+            )
+        ):
+            raise ValueError("application is open for another scope proposal")
+
+    for action in source_plan["actions"]:
+        process, findings = process_from_inputs(
+            root, str(action.get("primary_process_ref", "")), receipts,
+            require_committed=True,
+        )
+        if findings or process != action.get("primary_process_ref"):
+            raise ValueError("; ".join(findings) or (
+                "open scope primary process is no longer current"
+            ))
+        if action.get("action") == "reuse":
+            action_for_plan(
+                root, source_plan, action="reuse",
+                experience=str(action.get("experience", "")),
+                process=str(action.get("primary_process_ref", "")),
+            )
+    if args.origin_mode == "requirement":
+        source_requirement = str(source_plan.get("requirement", ""))
+        if source_requirement != args.requirement:
+            raise ValueError(
+                "recovery must keep the open scope Requirement identity"
+            )
+        for package, data, _state in opened:
+            implements = [
+                requirement_reference_value(value)
+                for value in list_value(data, "implements")
+            ]
+            if implements != [source_requirement]:
+                raise ValueError(
+                    f"{package.name} Requirement binding drifted after opening"
+                )
+
+    application_preimage = recovery_application_preimage(root)
+    plan = {
+        "schema_version": 3,
+        "recovery_from_proposal_hash": args.recover_proposal_hash,
+        "origin_mode": args.origin_mode,
+        "input_bindings": binding_rows(receipts),
+        "actions": source_plan["actions"],
+        "application_action": (
+            "update" if application_preimage.get("exists") else "create"
+        ),
+        "expected_application": application_preimage,
+        **context,
+    }
+    plan["proposal_hash"] = proposal_digest(plan)
+    if not recovery_bindings_changed(source_plan, plan):
+        raise ValueError(
+            "recovery proposal requires changed current inputs, Requirement, "
+            "or application receipt"
+        )
+    if not exact_scope_plan(plan):
+        raise ValueError("recovery proposal does not satisfy the scope schema")
+    return plan
+
+
 def propose(args) -> int:
     root = root_for(args.root)
     receipts, problems, context = selected_inputs(root, args)
     if problems:
         return fail("; ".join(problems), 2)
+    if args.recover_proposal_hash or args.recover_scope_plan:
+        if not args.recover_proposal_hash or not args.recover_scope_plan:
+            return fail(
+                "recovery proposal needs --recover-scope-plan and --recover-proposal-hash",
+                2,
+            )
+        if any((
+            args.process_ref, args.experience, args.to, args.action,
+            args.application_action, args.reason,
+        )):
+            return fail(
+                "recovery proposal cannot select new package actions",
+                2,
+            )
+        try:
+            plan = recovery_proposal(root, args, receipts, context)
+        except ValueError as exc:
+            return fail(str(exc), 2)
+        print(json.dumps(plan, indent=2, ensure_ascii=False, sort_keys=True))
+        return 0
     if len(args.process_ref) > 1 and args.experience:
         return fail("a multi-process create derives each Experience slug from its process; omit --experience", 2)
     actions = []
@@ -2596,9 +3266,12 @@ def stub(args) -> int:
     return 0
 
 
-def render(args) -> int:
-    package = package_for(args.experience_root)
-    render_package_record_navigation(package)
+def render_package_projection(
+    package: Path, *, normalize_record_fields: bool,
+) -> int:
+    render_package_record_navigation(
+        package, normalize_record_fields=normalize_record_fields,
+    )
     registry, problems = compile_package(package)
     if [item for item in problems if "registry is stale" not in item]: return print_problems(problems, False)
     generated = package / GENERATED; generated.mkdir(exist_ok=True)
@@ -2612,6 +3285,12 @@ def render(args) -> int:
     )
     render_experience_navigation(package.parent.parent)
     return 0
+
+
+def render(args) -> int:
+    return render_package_projection(
+        package_for(args.experience_root), normalize_record_fields=True,
+    )
 
 
 def check(args) -> int:
@@ -3078,6 +3757,255 @@ def retire(args) -> int:
     return 0
 
 
+def validate_recovery_plan_pair(
+    source_plan: dict,
+    source_proposal_hash: str,
+    plan: dict,
+    proposal_hash: str,
+) -> tuple[list[dict], list[dict]]:
+    if source_proposal_hash == proposal_hash:
+        raise ValueError("recovery requires a fresh scope proposal")
+    if plan.get("recovery_from_proposal_hash") != source_proposal_hash:
+        raise ValueError(
+            "fresh recovery plan does not bind the source proposal"
+        )
+    if (
+        source_plan.get("origin_mode") != plan.get("origin_mode")
+        or source_plan.get("actions") != plan.get("actions")
+        or source_plan.get("requirement") != plan.get("requirement")
+    ):
+        raise ValueError(
+            "recovery scope plans must preserve the complete package action set"
+        )
+    if not recovery_bindings_changed(source_plan, plan):
+        raise ValueError(
+            "recovery requires changed current inputs, Requirement, or "
+            "application receipt"
+        )
+    source_actions = mutating_scope_actions(source_plan)
+    plan_actions = mutating_scope_actions(plan)
+    if (
+        not source_actions
+        or source_actions != plan_actions
+        or {action_target(action) for action in source_actions}
+        != {action_target(action) for action in plan_actions}
+    ):
+        raise ValueError(
+            "recovery scope plans must preserve the complete package action set"
+        )
+    return source_actions, plan_actions
+
+
+def validate_recovered_scope_postimage(
+    root: Path,
+    source_plan: dict,
+    source_proposal_hash: str,
+    plan: dict,
+    proposal_hash: str,
+) -> list[tuple[Path, dict, dict]]:
+    source_actions, _plan_actions = validate_recovery_plan_pair(
+        source_plan, source_proposal_hash, plan, proposal_hash,
+    )
+    findings = verify_scope_inputs(root, plan, require_committed=True)
+    if findings:
+        raise ValueError("; ".join(findings))
+    opened = open_scope_packages(root)
+    ensure_open_scope_unpublished(root, opened)
+    if {
+        str(state.get("proposal_hash", ""))
+        for _package, _data, state in opened
+    } != {proposal_hash}:
+        raise ValueError("recovered packages do not bind the fresh proposal")
+    validate_open_scope_plan(plan, proposal_hash, opened)
+    if {package.name for package, _data, _state in opened} != {
+        action_target(action) for action in source_actions
+    }:
+        raise ValueError(
+            "recovery scope plans must preserve the complete package action set"
+        )
+    expected_application = recovery_application_preimage(root)
+    if (
+        plan.get("expected_application") != expected_application
+        or plan.get("application_action")
+        != ("update" if expected_application.get("exists") else "create")
+    ):
+        raise ValueError(
+            "recovery proposal does not bind the current approved application"
+        )
+    for action in plan["actions"]:
+        if action.get("action") == "reuse":
+            action_for_plan(
+                root, plan, action="reuse",
+                experience=str(action.get("experience", "")),
+                process=str(action.get("primary_process_ref", "")),
+            )
+    validate_open_application_state(
+        root, plan=plan, proposal_hash=proposal_hash,
+        expected_phase="draft",
+    )
+    expected_bindings = [
+        f"{stage}|{reference}|{digest}"
+        for stage, reference, digest in input_rows(plan)
+    ]
+    for package, data, _state in opened:
+        if (
+            data.get("status") != "draft"
+            or list_value(data, "input_bindings") != expected_bindings
+            or (
+                plan.get("origin_mode") == "requirement"
+                and data.get("upstream_stage_receipts_hash")
+                != plan.get("upstream_stage_receipts_hash")
+            )
+        ):
+            raise ValueError(f"{package.name} recovered package state drifted")
+    validate_recovery_projections(root, opened)
+    return opened
+
+
+def recover_open_scope(args) -> int:
+    root = root_for(args.root)
+    try:
+        source_plan = load_scope_plan(
+            args.from_scope_plan, args.from_proposal_hash,
+        )
+        plan = load_scope_plan(args.scope_plan, args.proposal_hash)
+        source_actions, plan_actions = validate_recovery_plan_pair(
+            source_plan, args.from_proposal_hash,
+            plan, args.proposal_hash,
+        )
+        findings = verify_scope_inputs(root, plan, require_committed=True)
+        if findings:
+            raise ValueError("; ".join(findings))
+
+        opened = open_scope_packages(root)
+        ensure_open_scope_unpublished(root, opened)
+        open_hashes = {
+            str(state.get("proposal_hash", ""))
+            for _package, _data, state in opened
+        }
+        if open_hashes == {args.from_proposal_hash}:
+            validate_open_scope_plan(
+                source_plan, args.from_proposal_hash, opened,
+            )
+            already_recovered = False
+        elif open_hashes == {args.proposal_hash}:
+            validate_open_scope_plan(
+                plan, args.proposal_hash, opened,
+            )
+            already_recovered = True
+        else:
+            raise ValueError("open packages are bound to another scope proposal")
+        if {package.name for package, _data, _state in opened} != {
+            action_target(action) for action in source_actions
+        }:
+            raise ValueError(
+                "recovery scope plans must preserve the complete package action set"
+            )
+
+        expected_application = recovery_application_preimage(root)
+        expected_application_action = (
+            "update" if expected_application.get("exists") else "create"
+        )
+        if (
+            plan.get("expected_application") != expected_application
+            or plan.get("application_action") != expected_application_action
+        ):
+            raise ValueError(
+                "recovery proposal does not bind the current approved application"
+            )
+        for action in plan["actions"]:
+            if action.get("action") == "reuse":
+                action_for_plan(
+                    root, plan, action="reuse",
+                    experience=str(action.get("experience", "")),
+                    process=str(action.get("primary_process_ref", "")),
+                )
+
+        application_state = None
+        if open_application_state_path(root).exists():
+            application_state = read_open_application_state(root)
+        if already_recovered:
+            opened = validate_recovered_scope_postimage(
+                root, source_plan, args.from_proposal_hash,
+                plan, args.proposal_hash,
+            )
+            print(json.dumps({
+                "previous_proposal_hash": args.from_proposal_hash,
+                "proposal_hash": args.proposal_hash,
+                "packages": sorted(package.name for package, _data, _state in opened),
+                "status": "draft",
+                "changed": False,
+            }, indent=2))
+            return 0
+        if (
+            application_state is not None
+            and application_state.get("proposal_hash")
+            != args.from_proposal_hash
+        ):
+            raise ValueError("application is open for another scope proposal")
+        if application_state is not None and application_state != (
+            open_application_payload(
+                source_plan, args.from_proposal_hash,
+                phase=str(application_state.get("phase", "")),
+            )
+        ):
+            raise ValueError(
+                "application open state drifted from the source scope plan"
+            )
+    except ValueError as exc:
+        return fail(str(exc), 2)
+
+    action_by_target = {
+        action_target(action): action for action in plan_actions
+    }
+    replacement_bindings = [
+        f"{stage}|{reference}|{digest}"
+        for stage, reference, digest in input_rows(plan)
+    ]
+    try:
+        for package, data, _state in opened:
+            data, body = fm(package / "experience.md")
+            data["status"] = "draft"
+            data["input_bindings"] = replacement_bindings
+            if plan.get("origin_mode") == "requirement":
+                data["upstream_stage_receipts_hash"] = plan[
+                    "upstream_stage_receipts_hash"
+                ]
+            status_tags(data)
+            rewrite(package / "experience.md", data, body)
+            write_open_revision(
+                package, plan, action_by_target[package.name],
+                args.proposal_hash,
+            )
+        write_open_application_state(
+            root, plan, args.proposal_hash, phase="draft",
+        )
+        restore_approved_application_projection(root)
+        for package, _data, _state in opened:
+            if render_package_projection(
+                package, normalize_record_fields=False,
+            ):
+                raise ValueError(
+                    f"cannot render recovered package {package.name}"
+                )
+        reconcile_vault_navigation(root)
+        opened = validate_recovered_scope_postimage(
+            root, source_plan, args.from_proposal_hash,
+            plan, args.proposal_hash,
+        )
+    except (OSError, ValueError) as exc:
+        return fail(f"recover-open-scope rolled back: {exc}", 2)
+
+    print(json.dumps({
+        "previous_proposal_hash": args.from_proposal_hash,
+        "proposal_hash": args.proposal_hash,
+        "packages": sorted(package.name for package, _data, _state in opened),
+        "status": "draft",
+        "changed": True,
+    }, indent=2))
+    return 0
+
+
 def resolve(args) -> int:
     root = root_for(args.root); match = EXACT.fullmatch(args.ref)
     if match:
@@ -3177,7 +4105,9 @@ def status(args) -> int:
     print(json.dumps(package_receipt(package, registry), indent=2)); return 0
 
 
-def render_package_record_navigation(package: Path) -> None:
+def render_package_record_navigation(
+    package: Path, *, normalize_record_fields: bool = True,
+) -> None:
     data, body = fm(package / "experience.md")
     if data.get("status") not in {"draft", "in_review"}:
         return
@@ -3222,7 +4152,7 @@ def render_package_record_navigation(package: Path) -> None:
                 if normalized != related:
                     record["related_to"] = normalized
                     changed = True
-            if changed:
+            if changed and normalize_record_fields:
                 rewrite(path, record, record_body)
             relative = path.relative_to(package).with_suffix("").as_posix()
             title = str(record.get("title") or record.get("id") or path.stem)
@@ -3300,7 +4230,7 @@ def reconcile_vault_navigation(root: Path) -> None:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__); sub = parser.add_subparsers(dest="command", required=True)
-    p = sub.add_parser("propose"); p.add_argument("--root", required=True); p.add_argument("--process-ref", action="append", default=[]); p.add_argument("--experience", default=""); p.add_argument("--to", default=""); p.add_argument("--action", choices=("create", "update", "reuse", "rename", "retire"), default=""); p.add_argument("--application-action", choices=("create", "update", "reuse"), default=""); p.add_argument("--reason", default=""); p.add_argument("--origin-mode", choices=("manual", "requirement"), required=True); p.add_argument("--requirement", default=""); p.add_argument("--ba-ref", action="append", default=[]); p.add_argument("--solution-ref", action="append", default=[]); p.add_argument("--design-ref", action="append", default=[]); p.set_defaults(func=propose)
+    p = sub.add_parser("propose"); p.add_argument("--root", required=True); p.add_argument("--process-ref", action="append", default=[]); p.add_argument("--experience", default=""); p.add_argument("--to", default=""); p.add_argument("--action", choices=("create", "update", "reuse", "rename", "retire"), default=""); p.add_argument("--application-action", choices=("create", "update", "reuse"), default=""); p.add_argument("--reason", default=""); p.add_argument("--origin-mode", choices=("manual", "requirement"), required=True); p.add_argument("--requirement", default=""); p.add_argument("--ba-ref", action="append", default=[]); p.add_argument("--solution-ref", action="append", default=[]); p.add_argument("--design-ref", action="append", default=[]); p.add_argument("--recover-scope-plan", default=""); p.add_argument("--recover-proposal-hash", default=""); p.set_defaults(func=propose)
     p = sub.add_parser("init"); p.add_argument("--root", required=True); p.add_argument("--experience", required=True); p.add_argument("--origin-mode", choices=("manual", "requirement"), required=True); p.add_argument("--primary-process-ref", required=True); p.add_argument("--related-process-ref", action="append", default=[]); p.add_argument("--requirement", default=""); p.add_argument("--scope-plan", required=True); p.add_argument("--proposal-hash", required=True); p.add_argument("--title", default=""); p.add_argument("--ba-ref", action="append", default=[]); p.add_argument("--solution-ref", action="append", default=[]); p.add_argument("--design-ref", action="append", default=[]); p.set_defaults(func=init)
     for name, handler in (("begin-revision", begin_revision), ("enter-review", enter_review), ("render", render), ("check", check), ("status", status), ("rename", rename), ("retire", retire)):
         p = sub.add_parser(name); p.add_argument("--experience-root", required=True)
@@ -3321,6 +4251,7 @@ def main(argv: list[str] | None = None) -> int:
     p = sub.add_parser("check-application"); p.add_argument("--root", required=True); p.add_argument("--gate", action="store_true"); p.add_argument("--json", action="store_true"); p.set_defaults(func=check_application)
     p = sub.add_parser("application-status"); p.add_argument("--root", required=True); p.set_defaults(func=application_status)
     p = sub.add_parser("approve-set"); p.add_argument("--root", required=True); p.add_argument("--experience", action="append", default=[]); p.add_argument("--scope-plan", required=True); p.add_argument("--proposal-hash", required=True); p.add_argument("--review-attestation", default=""); p.set_defaults(func=approve_set)
+    p = sub.add_parser("recover-open-scope"); p.add_argument("--root", required=True); p.add_argument("--from-scope-plan", required=True); p.add_argument("--from-proposal-hash", required=True); p.add_argument("--scope-plan", required=True); p.add_argument("--proposal-hash", required=True); p.set_defaults(func=recover_open_scope)
     p = sub.add_parser("resolve"); p.add_argument("--root", required=True); p.add_argument("--ref", required=True); p.set_defaults(func=resolve)
     args = parser.parse_args(argv)
     try:

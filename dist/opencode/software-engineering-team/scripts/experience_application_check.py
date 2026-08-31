@@ -9,6 +9,7 @@ inventory to the Experience lifecycle receipt.
 from __future__ import annotations
 
 import argparse
+import base64
 import hashlib
 import json
 import os
@@ -27,6 +28,7 @@ LEDGER_RELATIVE = Path("_ledger/application-revisions.json")
 GENESIS_APPLICATION_HASH = "sha256:" + "0" * 64
 HASH_PREFIX = "sha256:"
 HASH_LENGTH = 64
+POSIX_BYTES_PATH_ENCODING = "posix-bytes-base64"
 LEGACY_REGISTRY_FIELDS = {
     "schema_version", "application_revision", "source_hash", "package_set_hash",
     "coverage_hash", "design_system", "runtime_sha256", "packages", "coverage",
@@ -170,6 +172,44 @@ def _safe_relative(path: Path) -> bool:
     return bool(path.parts) and all(part not in {"", ".", ".."} for part in path.parts)
 
 
+def artifact_path_row(relative: Path, digest: str, size: int) -> dict:
+    """Represent host-local byte names without reinterpreting legacy paths."""
+    value = relative.as_posix()
+    if not _json_contains_non_scalar(value):
+        return {"path": value, "sha256": digest, "size": size}
+    raw = os.fsencode(value)
+    encoded = base64.b64encode(raw).decode("ascii")
+    return {
+        "path": encoded,
+        "path_encoding": POSIX_BYTES_PATH_ENCODING,
+        "sha256": digest,
+        "size": size,
+    }
+
+
+def artifact_row_path(row: dict) -> str:
+    """Return the local path represented by a normal or byte-path row."""
+    if row.get("path_encoding") != POSIX_BYTES_PATH_ENCODING:
+        return str(row.get("path", ""))
+    value = row.get("path")
+    if not isinstance(value, str):
+        raise ValueError("artifact byte path must be base64 text")
+    try:
+        raw = base64.b64decode(value, validate=True)
+    except (ValueError, TypeError) as exc:
+        raise ValueError("artifact byte path is not canonical base64") from exc
+    if base64.b64encode(raw).decode("ascii") != value:
+        raise ValueError("artifact byte path is not canonical base64")
+    parts = raw.split(b"/")
+    if not parts or any(part in {b"", b".", b".."} for part in parts) \
+            or b"\0" in raw:
+        raise ValueError("artifact byte path is not contained")
+    decoded = os.fsdecode(raw)
+    if not _json_contains_non_scalar(decoded):
+        raise ValueError("scalar artifact paths must use the legacy path row")
+    return decoded
+
+
 def artifact_inventory(root_value: str | Path) -> tuple[list[dict], list[str]]:
     """Return a byte inventory without assigning semantics to any artifact."""
     root = root_for(root_value)
@@ -186,7 +226,14 @@ def artifact_inventory(root_value: str | Path) -> tuple[list[dict], list[str]]:
         return [], [f"artifacts cannot be enumerated: {exc}"]
     for path in paths:
         relative = path.relative_to(artifacts)
-        display = f"artifacts/{relative.as_posix()}"
+        relative_text = relative.as_posix()
+        display_value = relative_text
+        if _json_contains_non_scalar(relative_text):
+            display_value = (
+                POSIX_BYTES_PATH_ENCODING + ":"
+                + base64.b64encode(os.fsencode(relative_text)).decode("ascii")
+            )
+        display = f"artifacts/{display_value}"
         if not _safe_relative(relative):
             findings.append(f"{display}: non-canonical artifact path")
             continue
@@ -211,8 +258,8 @@ def artifact_inventory(root_value: str | Path) -> tuple[list[dict], list[str]]:
         except OSError as exc:
             findings.append(f"{display}: cannot read artifact: {exc}")
             continue
-        rows.append({"path": relative.as_posix(), "sha256": sha(raw), "size": len(raw)})
-    rows.sort(key=lambda row: row["path"])
+        rows.append(artifact_path_row(relative, sha(raw), len(raw)))
+    rows.sort(key=lambda row: (str(row.get("path_encoding", "")), row["path"]))
     return rows, sorted(set(findings))
 
 
@@ -224,17 +271,43 @@ def _inventory_valid(rows: object, label: str, findings: list[str]) -> None:
     if not isinstance(rows, list):
         findings.append(f"{label} must be an array")
         return
-    paths: list[str] = []
+    paths: list[tuple[str, str]] = []
     for index, row in enumerate(rows):
         item_label = f"{label}[{index}]"
-        if not isinstance(row, dict) or set(row) != {"path", "sha256", "size"}:
+        if not isinstance(row, dict) or set(row) not in (
+            {"path", "sha256", "size"},
+            {"path", "path_encoding", "sha256", "size"},
+        ):
             findings.append(f"{item_label} must have the exact artifact file fields")
             continue
         path = row.get("path")
-        if not isinstance(path, str) or not _safe_relative(Path(path)) or Path(path).as_posix() != path:
+        try:
+            decoded_path = artifact_row_path(row)
+        except ValueError:
+            decoded_path = ""
+        encoded_variant = "path_encoding" in row
+        if encoded_variant:
+            path_is_valid = (
+                row.get("path_encoding") == POSIX_BYTES_PATH_ENCODING
+                and bool(decoded_path)
+            )
+        else:
+            path_is_valid = (
+                isinstance(path, str)
+                and bool(decoded_path)
+                and not _json_contains_non_scalar(decoded_path)
+                and _safe_relative(Path(decoded_path))
+                and Path(decoded_path).as_posix() == decoded_path
+            )
+        if not path_is_valid:
             findings.append(f"{item_label}.path must be a canonical relative path")
         else:
-            paths.append(path)
+            paths.append((str(row.get("path_encoding", "")), str(path)))
+        if (
+            not isinstance(path, str)
+            or _json_contains_non_scalar(path)
+        ):
+            findings.append(f"{item_label}.path must be JSON scalar text")
         if not _hash(row.get("sha256")):
             findings.append(f"{item_label}.sha256 must be a SHA-256 digest")
         if type(row.get("size")) is not int or int(row["size"]) < 0:
@@ -539,7 +612,13 @@ def artifact_snapshot_paths(root_value: str | Path, registry: dict) -> list[Path
     for row in files:
         if not isinstance(row, dict) or not isinstance(row.get("path"), str):
             raise ValueError("application registry has an invalid artifact inventory")
-        paths.append(root / ARTIFACTS_RELATIVE / row["path"])
+        try:
+            relative = artifact_row_path(row)
+        except ValueError as exc:
+            raise ValueError(
+                "application registry has an invalid artifact inventory"
+            ) from exc
+        paths.append(root / ARTIFACTS_RELATIVE / relative)
     return [*paths, root / REGISTRY_RELATIVE, root / LEDGER_RELATIVE]
 
 

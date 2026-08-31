@@ -152,6 +152,7 @@ class ReleaseWorkflowContracts(unittest.TestCase):
         ):
             with self.subTest(test_name=test_name):
                 self.assertIn(test_name, text)
+        self.assertIn("tools.tests.test_experience_compile", text)
         self.assertIn("tools.tests.test_vault_hook", text)
         self.assertIn("tools.tests.test_opencode_real_host_probe", text)
 

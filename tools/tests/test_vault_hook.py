@@ -67,6 +67,12 @@ class VaultHookPrototypeTests(unittest.TestCase):
             "experience-design/NUL",
             "experience-design/trailing.",
             "experience-design/control\nname",
+            "experience-design/less<than",
+            "experience-design/greater>than",
+            'experience-design/quote"name',
+            "experience-design/pipe|name",
+            "experience-design/question?name",
+            "experience-design/star*name",
         )
         for relative in invalid:
             with self.subTest(relative=relative):
@@ -2430,8 +2436,7 @@ class VaultHookShellContractTests(unittest.TestCase):
             self.assertFalse(self.hook.path_is_alias(local_demo))
             self.assertEqual(generated.read_text(encoding="utf-8"), "before\n")
 
-    @unittest.skipUnless(os.name == "nt", "native Windows junction contract")
-    def test_dangling_windows_artifact_junction_is_removed_before_restore(self):
+    def test_dangling_artifact_root_alias_is_removed_before_restore(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             docs, _config = self.project(root)

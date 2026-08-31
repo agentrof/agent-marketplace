@@ -43,7 +43,7 @@ import sys
 import tempfile
 import time
 import unicodedata
-from pathlib import Path, PurePosixPath, PureWindowsPath
+from pathlib import Path, PurePosixPath
 from types import SimpleNamespace
 
 import vault_check
@@ -582,9 +582,7 @@ def portable_experience_snapshot_path_problem(relative: str) -> str:
             or any(part in {"", ".", ".."} for part in parts):
         return "path escapes the Experience Design subtree"
     for part in parts:
-        windows = PureWindowsPath(part)
-        if part.endswith((" ", ".")) or windows.is_reserved() \
-                or windows_device_basename(part):
+        if windows_path_part_is_illegal(part):
             return "path is not portable to Windows"
     return ""
 
@@ -685,16 +683,8 @@ def recovery_artifact_path_problem(relative: str) -> str:
     ):
         return "path is not one contained relative artifact path"
     if os.name == "nt":
-        forbidden = '<>:"\\|?*'
         for part in pure.parts:
-            windows = PureWindowsPath(part)
-            if (
-                any(character in forbidden or ord(character) < 32
-                    for character in part)
-                or part.endswith((" ", "."))
-                or windows.is_reserved()
-                or windows_device_basename(part)
-            ):
+            if windows_path_part_is_illegal(part):
                 return "path is not a safe native Windows artifact path"
     return ""
 
@@ -705,6 +695,17 @@ def windows_device_basename(part: str) -> bool:
     if basename in {"CON", "PRN", "AUX", "NUL", "CONIN$", "CONOUT$"}:
         return True
     return re.fullmatch(r"(?:COM|LPT)(?:[1-9]|[¹²³])", basename) is not None
+
+
+def windows_path_part_is_illegal(part: str) -> bool:
+    """Apply stable Win32 component rules across supported Python versions."""
+    forbidden = '<>:"\\|?*'
+    return (
+        any(character in forbidden or ord(character) < 32
+            for character in part)
+        or part.endswith((" ", "."))
+        or windows_device_basename(part)
+    )
 
 
 def recovery_artifact_snapshot(vault: Path) -> dict:
@@ -729,7 +730,11 @@ def recovery_artifact_snapshot(vault: Path) -> dict:
                 raise OSError(f"{full_relative}: {path_problem}")
             if path_is_alias(path):
                 raise OSError(f"{full_relative}: aliases are not recoverable")
-            metadata = entry.stat(follow_symlinks=False)
+            # Windows DirEntry metadata can report zero for st_nlink because
+            # its cached directory record does not carry full file identity.
+            # lstat() performs the identity query needed by the hard-link
+            # boundary and still fails closed if the path races to an alias.
+            metadata = path.lstat()
             mode = metadata.st_mode
             if stat.S_ISDIR(mode):
                 entries[relative] = {
@@ -2358,7 +2363,10 @@ def remove_path_alias(path: Path) -> None:
     metadata = path.lstat()
     if path.is_symlink():
         path.unlink()
-    elif stat.S_ISDIR(metadata.st_mode):
+    elif stat.S_ISDIR(metadata.st_mode) or (
+        os.name == "nt"
+        and bool(getattr(metadata, "st_file_attributes", 0) & 0x10)
+    ):
         os.rmdir(path)
     else:
         path.unlink()
@@ -2470,10 +2478,16 @@ def local_recovery_paths(root: Path, vault: Path) -> list[Path]:
         for entry in children:
             path = Path(entry.path)
             relative = path.relative_to(vault).as_posix()
+            alias = path_is_alias(path)
             if author_owned_artifact_path(relative):
+                # Preserve every local opaque artifact tree, but remove an
+                # alias at its canonical root without ever traversing its
+                # target. This also handles dangling Windows junctions.
+                if alias:
+                    paths.append(path)
                 continue
             paths.append(path)
-            if not path_is_alias(path) and entry.is_dir(follow_symlinks=False):
+            if not alias and entry.is_dir(follow_symlinks=False):
                 pending.append(path)
     return paths
 

@@ -74,7 +74,9 @@ quality, accessibility, security or implementation suitability.
   and the open application atomically, retain package revisions, reset review
   to `draft`, preserve authored child records and prototype/package artifact
   bytes, and leave approved ledgers and receipts untouched. A scope containing
-  `retirement_pending` or a retire action fails closed.
+  `retirement_pending` or a retire action fails closed. A legacy scope may
+  already carry only the fresh plan's exact current input bindings; all other
+  package identity, revision and Requirement bindings remain exact.
 - `enter-application-review` snapshots the current artifact tree. Approval
   requires a fresh exact-schema-v4 reviewer attestation bound to proposal,
   artifact-tree, package-set and application hashes. Its `advisories` remain

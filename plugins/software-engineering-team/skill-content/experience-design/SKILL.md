@@ -25,7 +25,9 @@ user-journey, screen, flow, state, transition or prototype work.
    Recover the complete old package set atomically, reset it to `draft` for a
    new review, preserve authored child records and prototype/package artifact
    bytes, and leave approved ledgers and receipts untouched. Fail closed if
-   the scope also contains `retirement_pending` or a retire action.
+   the scope also contains `retirement_pending` or a retire action. A legacy
+   package may carry only the fresh plan's exact current input bindings; every
+   other package identity, revision and Requirement binding stays exact.
 4. Work in the selected
    `workspace/docs/experience-design/experiences/<process-slug>/` packages.
    The primary process is a canonical BA process. `application` is reserved;

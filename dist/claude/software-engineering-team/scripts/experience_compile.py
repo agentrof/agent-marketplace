@@ -1835,6 +1835,8 @@ def validate_open_scope_plan(
     plan: dict,
     proposal_hash: str,
     opened: list[tuple[Path, dict, dict]],
+    *,
+    recovery_input_bindings: list[str] | None = None,
 ) -> list[dict]:
     actions = mutating_scope_actions(plan)
     targets = {action_target(action) for action in actions}
@@ -1858,7 +1860,11 @@ def validate_open_scope_plan(
             package, plan, action, proposal_hash,
             expected_status=str(data.get("status", "")),
         )
-        if list_value(data, "input_bindings") != expected_bindings:
+        actual_bindings = list_value(data, "input_bindings")
+        if actual_bindings != expected_bindings and (
+            recovery_input_bindings is None
+            or actual_bindings != recovery_input_bindings
+        ):
             raise ValueError(
                 f"{package.name} input bindings drifted after opening"
             )
@@ -2913,8 +2919,10 @@ def recovery_proposal(
     }
     if proposal_hashes != {args.recover_proposal_hash}:
         raise ValueError("open packages are bound to another scope proposal")
+    current_bindings = binding_rows(receipts)
     validate_open_scope_plan(
         source_plan, args.recover_proposal_hash, opened,
+        recovery_input_bindings=current_bindings,
     )
     ensure_open_scope_unpublished(root, opened)
     if open_application_state_path(root).exists():
@@ -2966,7 +2974,7 @@ def recovery_proposal(
         "schema_version": 3,
         "recovery_from_proposal_hash": args.recover_proposal_hash,
         "origin_mode": args.origin_mode,
-        "input_bindings": binding_rows(receipts),
+        "input_bindings": current_bindings,
         "actions": source_plan["actions"],
         "application_action": (
             "update" if application_preimage.get("exists") else "create"
@@ -3886,6 +3894,10 @@ def recover_open_scope(args) -> int:
         if open_hashes == {args.from_proposal_hash}:
             validate_open_scope_plan(
                 source_plan, args.from_proposal_hash, opened,
+                recovery_input_bindings=[
+                    f"{stage}|{reference}|{digest}"
+                    for stage, reference, digest in input_rows(plan)
+                ],
             )
             already_recovered = False
         elif open_hashes == {args.proposal_hash}:

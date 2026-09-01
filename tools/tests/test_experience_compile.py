@@ -253,6 +253,14 @@ class ExperienceCompilerTests(unittest.TestCase):
                 "--proposal-hash", fresh["proposal_hash"],
             )
 
+    @staticmethod
+    def replace_open_scope_bindings(fixture: dict, bindings: list[str]) -> None:
+        for experience in ("checkout", "returns"):
+            package = fixture["root"] / "experiences" / experience
+            data, body = experience_compile.fm(package / "experience.md")
+            data["input_bindings"] = bindings
+            experience_compile.rewrite(package / "experience.md", data, body)
+
     def test_recover_open_create_scope_preserves_authored_bytes_and_retries(self):
         with tempfile.TemporaryDirectory() as raw:
             fixture = self.orphaned_create_scope(raw)
@@ -397,6 +405,72 @@ class ExperienceCompilerTests(unittest.TestCase):
             )
             self.assertEqual(findings, [])
             self.assertEqual(len(ledger_rows), 2)
+
+    def test_recovery_rebinds_legacy_current_input_metadata_atomically(self):
+        with tempfile.TemporaryDirectory() as raw:
+            fixture = self.orphaned_create_scope(raw)
+            replacement_bindings = experience_compile.binding_rows(
+                fixture["new_receipts"],
+            )
+            self.replace_open_scope_bindings(fixture, replacement_bindings)
+
+            fresh, fresh_path = self.propose_recovery(fixture)
+            code, output, errors = self.recover_scope(
+                fixture, fresh, fresh_path,
+            )
+
+            self.assertEqual(code, 0, output + errors)
+            self.assertTrue(json.loads(output)["changed"])
+            for experience in ("checkout", "returns"):
+                package = fixture["root"] / "experiences" / experience
+                self.assertEqual(
+                    experience_compile.fields(package)["input_bindings"],
+                    replacement_bindings,
+                )
+                self.assertEqual(
+                    experience_compile.read_open_revision(package)["proposal_hash"],
+                    fresh["proposal_hash"],
+                )
+                self.assertEqual(
+                    (package / "journeys" / f"{experience}-journey.md").read_bytes(),
+                    fixture["record_bytes"][experience],
+                )
+                self.assertEqual(
+                    (package / "artifacts" / f"{experience}.bin").read_bytes(),
+                    fixture["artifact_bytes"][experience],
+                )
+            self.assertEqual(
+                (fixture["root"] / "artifacts/prototype.bin").read_bytes(),
+                fixture["application_artifact_bytes"],
+            )
+            self.assertEqual(
+                (fixture["root"] / experience_application_check.LEDGER_RELATIVE)
+                .read_bytes(),
+                fixture["ledger_bytes"],
+            )
+
+    def test_recovery_rejects_legacy_input_metadata_that_is_not_current(self):
+        with tempfile.TemporaryDirectory() as raw:
+            fixture = self.orphaned_create_scope(raw)
+            unexpected = experience_compile.binding_rows(
+                fixture["new_receipts"],
+            )
+            unexpected[-1] = unexpected[-1][:-64] + "9" * 64
+            self.replace_open_scope_bindings(fixture, unexpected)
+
+            with self.recovery_contract(fixture["new_receipts"]):
+                code, output, errors = self.run_in_process(
+                    "propose", "--root", fixture["root"],
+                    "--recover-scope-plan", fixture["old_plan_path"],
+                    "--recover-proposal-hash", fixture["old_plan"]["proposal_hash"],
+                    "--origin-mode", "manual",
+                    "--ba-ref", fixture["new_receipts"][0]["result_ref"],
+                    "--solution-ref", fixture["new_receipts"][1]["result_ref"],
+                    "--design-ref", fixture["new_receipts"][2]["result_ref"],
+                )
+
+            self.assertEqual(code, 2, output + errors)
+            self.assertIn("input bindings drifted after opening", errors)
 
     def test_recover_open_scope_rejects_partial_plan_and_rolls_back_tree(self):
         with tempfile.TemporaryDirectory() as raw:

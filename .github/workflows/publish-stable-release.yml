@@ -5,7 +5,7 @@ on:
     types: [closed]
 
 permissions:
-  contents: write
+  contents: read
   pull-requests: read
 
 concurrency:
@@ -13,6 +13,49 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  verify-release-candidate:
+    if: >-
+      github.event.pull_request.merged == true &&
+      github.event.pull_request.base.ref == 'main' &&
+      github.event.pull_request.head.ref == 'release/stable' &&
+      github.event.pull_request.head.repo.full_name == github.repository
+    permissions:
+      contents: read
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          ref: ${{ github.event.pull_request.merge_commit_sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.9"
+      - name: Prove the release head and merge topology
+        env:
+          RELEASE_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          EXPECTED_MERGE_SHA: ${{ github.event.pull_request.merge_commit_sha }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_MERGE_SHA"
+          merge_parents="$(git rev-list --parents -n 1 "$EXPECTED_MERGE_SHA")"
+          set -- $merge_parents
+          test "$#" -eq 3
+          test "$1" = "$EXPECTED_MERGE_SHA"
+          base_sha="$2"
+          test "$3" = "$RELEASE_HEAD_SHA"
+          metadata="$RUNNER_TEMP/release-metadata.json"
+          git show "$RELEASE_HEAD_SHA:.release/stable.json" > "$metadata"
+          stable_base="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["stable_base"])' "$metadata")"
+          git checkout --detach "$base_sha"
+          python3 tools/release.py verify-release-pr \
+            --base-sha "$base_sha" \
+            --head-sha "$RELEASE_HEAD_SHA" \
+            --stable-sha "$stable_base"
+          test "$(git rev-parse "$EXPECTED_MERGE_SHA^{tree}")" = \
+            "$(git rev-parse "$RELEASE_HEAD_SHA^{tree}")"
+
   exact-sha-host-gates:
     if: >-
       github.event.pull_request.merged == true &&
@@ -23,58 +66,173 @@ jobs:
     with:
       candidate_sha: ${{ github.event.pull_request.merge_commit_sha }}
 
-  publish:
+  stage-publication:
     if: >-
       github.event.pull_request.merged == true &&
       github.event.pull_request.base.ref == 'main' &&
       github.event.pull_request.head.ref == 'release/stable' &&
       github.event.pull_request.head.repo.full_name == github.repository
-    needs: exact-sha-host-gates
-    runs-on: macos-latest
-    timeout-minutes: 35
+    needs: [verify-release-candidate, exact-sha-host-gates]
+    permissions:
+      contents: write
+      pull-requests: read
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      phase: ${{ steps.stage.outputs.phase }}
+      version: ${{ steps.stage.outputs.version }}
+      stable_base: ${{ steps.stage.outputs.stable_base }}
+      main_source: ${{ steps.stage.outputs.main_source }}
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
           ref: ${{ github.event.pull_request.merge_commit_sha }}
           fetch-depth: 0
+      - name: Configure release author
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+      - name: Stage exact stable and tag refs with trusted code
+        id: stage
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          EXPECTED_MERGE_SHA: ${{ github.event.pull_request.merge_commit_sha }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_MERGE_SHA"
+          merge_parents="$(git rev-list --parents -n 1 "$EXPECTED_MERGE_SHA")"
+          set -- $merge_parents
+          test "$#" -eq 3
+          test "$1" = "$EXPECTED_MERGE_SHA"
+          main_source="$2"
+          test "$3" = "$RELEASE_HEAD_SHA"
+          test "$(git rev-parse "$EXPECTED_MERGE_SHA^{tree}")" = \
+            "$(git rev-parse "$RELEASE_HEAD_SHA^{tree}")"
+          metadata="$RUNNER_TEMP/release-metadata.json"
+          git show "$RELEASE_HEAD_SHA:.release/stable.json" > "$metadata"
+          version="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["version"])' "$metadata")"
+          stable_base="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["stable_base"])' "$metadata")"
+          metadata_main_source="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["main_source"])' "$metadata")"
+          test "$metadata_main_source" = "$main_source"
+          git show "$main_source:tools/release_publish.py" > "$RUNNER_TEMP/release_publish.py"
+          if ! stage_json="$(
+            python3 "$RUNNER_TEMP/release_publish.py" stage \
+              --version "$version" \
+              --candidate-sha "$EXPECTED_MERGE_SHA" \
+              --prior-stable-sha "$stable_base"
+          )"; then
+            echo "$stage_json"
+            exit 1
+          fi
+          echo "$stage_json"
+          phase="$(python3 -c 'import json,sys; print(json.loads(sys.argv[1])["phase"])' "$stage_json")"
+          echo "phase=$phase" >> "$GITHUB_OUTPUT"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "stable_base=$stable_base" >> "$GITHUB_OUTPUT"
+          echo "main_source=$main_source" >> "$GITHUB_OUTPUT"
+
+  public-stable-smoke:
+    if: needs.stage-publication.outputs.phase == 'staged'
+    needs: stage-publication
+    permissions:
+      contents: read
+    runs-on: macos-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          ref: ${{ github.event.pull_request.merge_commit_sha }}
+          persist-credentials: false
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.x"
-      - name: Verify and publish the exact merge commit
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "24"
+          package-manager-cache: false
+      - name: Install pinned host CLIs
+        run: |
+          set -euo pipefail
+          claude_version="$(python3 -c 'import json; print(json.load(open("tools/data/host-cli-versions.json"))["claude_code"])')"
+          codex_version="$(python3 -c 'import json; print(json.load(open("tools/data/host-cli-versions.json"))["codex"])')"
+          npm install --global "@anthropic-ai/claude-code@${claude_version}" "@openai/codex@${codex_version}"
+          claude --version | grep -F "${claude_version}"
+          codex --version | grep -F "${codex_version}"
+      - name: Exercise the real public stable channel
+        env:
+          EXPECTED_RELEASE_SHA: ${{ github.event.pull_request.merge_commit_sha }}
+        run: make public-release-check EXPECTED_RELEASE_SHA="$EXPECTED_RELEASE_SHA"
+
+  rollback-publication:
+    if: >-
+      always() &&
+      needs.stage-publication.result == 'success' &&
+      needs.stage-publication.outputs.phase == 'staged' &&
+      needs.public-stable-smoke.result != 'success'
+    needs: [stage-publication, public-stable-smoke]
+    permissions:
+      contents: write
+      pull-requests: read
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          ref: ${{ github.event.pull_request.merge_commit_sha }}
+          fetch-depth: 0
+      - name: Roll back only the exact unpublished candidate refs
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EXPECTED_MERGE_SHA: ${{ github.event.pull_request.merge_commit_sha }}
+          MAIN_SOURCE: ${{ needs.stage-publication.outputs.main_source }}
+          STABLE_BASE: ${{ needs.stage-publication.outputs.stable_base }}
+          VERSION: ${{ needs.stage-publication.outputs.version }}
+        run: |
+          set -euo pipefail
+          git show "$MAIN_SOURCE:tools/release_publish.py" > "$RUNNER_TEMP/release_publish.py"
+          python3 "$RUNNER_TEMP/release_publish.py" rollback \
+            --version "$VERSION" \
+            --candidate-sha "$EXPECTED_MERGE_SHA" \
+            --prior-stable-sha "$STABLE_BASE"
+
+  finalize-publication:
+    if: >-
+      always() &&
+      needs.stage-publication.result == 'success' &&
+      (
+        needs.stage-publication.outputs.phase == 'published' ||
+        needs.public-stable-smoke.result == 'success'
+      )
+    needs: [stage-publication, public-stable-smoke]
+    permissions:
+      contents: write
+      pull-requests: read
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          ref: ${{ github.event.pull_request.merge_commit_sha }}
+          fetch-depth: 0
+      - name: Reconcile the immutable Release and clean the exact release branch
         env:
           GH_TOKEN: ${{ github.token }}
           EXPECTED_MERGE_SHA: ${{ github.event.pull_request.merge_commit_sha }}
           RELEASE_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          MAIN_SOURCE: ${{ needs.stage-publication.outputs.main_source }}
+          STABLE_BASE: ${{ needs.stage-publication.outputs.stable_base }}
+          VERSION: ${{ needs.stage-publication.outputs.version }}
         run: |
           set -euo pipefail
-          test "$(git rev-parse HEAD)" = "$EXPECTED_MERGE_SHA"
-          make release-check
-          version="$(python3 -c 'import json; print(json.load(open("versions.json"))["marketplace"])')"
-          python3 tools/release.py verify-release --version "$version"
-          python3 tools/release.py release-notes --version "$version" --output release-notes.md
-          stable_base="$(python3 -c 'import json; print(json.load(open(".release/stable.json"))["stable_base"])')"
-          main_source="$(python3 -c 'import json; print(json.load(open(".release/stable.json"))["main_source"])')"
-          remote_stable="$(git ls-remote --heads origin refs/heads/stable | awk '{print $1}')"
-          test "$remote_stable" = "$stable_base"
-          git merge-base --is-ancestor "$stable_base" HEAD
-          git merge-base --is-ancestor "$main_source" HEAD
-          if git ls-remote --exit-code --tags origin "refs/tags/v${version}" >/dev/null 2>&1; then
-            echo "Tag v${version} already exists." >&2
-            exit 1
-          fi
-          if gh release view "v${version}" >/dev/null 2>&1; then
-            echo "GitHub Release v${version} already exists." >&2
-            exit 1
-          fi
-          remote_release_head="$(git ls-remote --heads origin refs/heads/release/stable | awk '{print $1}')"
-          if [ -n "$remote_release_head" ]; then
-            test "$remote_release_head" = "$RELEASE_HEAD_SHA"
-          fi
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git tag -a "v${version}" -m "Agent Marketplace v${version}"
-          git push --atomic origin HEAD:refs/heads/stable "refs/tags/v${version}"
-          gh release create "v${version}" --verify-tag --title "Agent Marketplace v${version}" --notes-file release-notes.md
-          if [ -n "$remote_release_head" ]; then
-            git push --force-with-lease="refs/heads/release/stable:${RELEASE_HEAD_SHA}" origin :refs/heads/release/stable
-          fi
+          git show "$MAIN_SOURCE:tools/release_publish.py" > "$RUNNER_TEMP/release_publish.py"
+          metadata="$RUNNER_TEMP/release-metadata.json"
+          git show "$RELEASE_HEAD_SHA:.release/stable.json" > "$metadata"
+          python3 -c 'import json,pathlib,sys; data=json.load(open(sys.argv[1])); pathlib.Path(sys.argv[2]).write_text("".join(f"- {item}\n" for item in data["summaries"]), encoding="utf-8")' \
+            "$metadata" "$RUNNER_TEMP/release-notes.md"
+          python3 "$RUNNER_TEMP/release_publish.py" finalize \
+            --version "$VERSION" \
+            --candidate-sha "$EXPECTED_MERGE_SHA" \
+            --prior-stable-sha "$STABLE_BASE" \
+            --notes-file "$RUNNER_TEMP/release-notes.md" \
+            --release-branch-sha "$RELEASE_HEAD_SHA"

@@ -4,9 +4,11 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import queue
+import re
 import shutil
 import subprocess
 import sys
@@ -23,10 +25,13 @@ except ModuleNotFoundError:  # Imported as tools.smoke_plugin_installs in tests.
 
 TEAM = "software-engineering-team"
 MARKETPLACE = "agent-marketplace"
+VERIFIER_ROOT = Path(__file__).resolve().parent.parent
 PUBLIC_MARKETPLACES = {
     "claude": "https://github.com/agentrof/agent-marketplace.git#stable",
     "codex": "agentrof/agent-marketplace@stable",
 }
+PUBLIC_REPOSITORY = "https://github.com/agentrof/agent-marketplace.git"
+SHA_RE = re.compile(r"^[0-9a-f]{40}$")
 APPLICATION_RESOURCES = (
     "skill-content/experience-modeling/data/experience-schema.json",
 )
@@ -52,6 +57,61 @@ def run(command: list[str], env: dict[str, str]) -> str:
 def require_cli(name: str) -> None:
     if shutil.which(name) is None:
         raise SmokeFailure(f"required host CLI is unavailable: {name}")
+
+
+def public_stable_sha(env: dict[str, str]) -> str:
+    rows = run([
+        "git", "ls-remote", "--heads", PUBLIC_REPOSITORY, "refs/heads/stable",
+    ], env).splitlines()
+    if len(rows) != 1:
+        raise SmokeFailure("public stable ref is missing or ambiguous")
+    fields = rows[0].split()
+    if len(fields) != 2 or fields[1] != "refs/heads/stable" \
+            or SHA_RE.fullmatch(fields[0]) is None:
+        raise SmokeFailure("public stable ref response is invalid")
+    return fields[0]
+
+
+def require_public_stable(expected_sha: str, env: dict[str, str]) -> None:
+    actual = public_stable_sha(env)
+    if actual != expected_sha:
+        raise SmokeFailure(
+            f"public stable ref differs: expected {expected_sha}, got {actual}"
+        )
+
+
+def verify_installed_package(
+    installed: Path, expected: Path, host: str,
+) -> None:
+    provenance_name = build_distributions.PROVENANCE
+    try:
+        actual_provenance = json.loads(
+            (installed / provenance_name).read_text(encoding="utf-8")
+        )
+        expected_provenance = json.loads(
+            (expected / provenance_name).read_text(encoding="utf-8")
+        )
+    except (OSError, json.JSONDecodeError) as exc:
+        raise SmokeFailure(f"{host} install has invalid package provenance") from exc
+    if actual_provenance != expected_provenance:
+        raise SmokeFailure(f"{host} installed package provenance differs from candidate")
+    if actual_provenance.get("host") != host \
+            or actual_provenance.get("component") != TEAM:
+        raise SmokeFailure(f"{host} installed package provenance has wrong identity")
+    files = actual_provenance.get("files")
+    if not isinstance(files, dict) or not files:
+        raise SmokeFailure(f"{host} installed package provenance has no file hashes")
+    for relative, expected_digest in files.items():
+        path = Path(relative) if isinstance(relative, str) else Path("..")
+        if path.is_absolute() or ".." in path.parts \
+                or not isinstance(expected_digest, str):
+            raise SmokeFailure(f"{host} installed package provenance is unsafe")
+        installed_path = installed / path
+        if not installed_path.is_file() or installed_path.is_symlink():
+            raise SmokeFailure(f"{host} installed package is missing {relative}")
+        actual_digest = hashlib.sha256(installed_path.read_bytes()).hexdigest()
+        if actual_digest != expected_digest:
+            raise SmokeFailure(f"{host} installed package hash differs for {relative}")
 
 
 def init_project(path: Path, env: dict[str, str]) -> None:
@@ -277,7 +337,7 @@ def codex_skill_names(env: dict[str, str], project: Path) -> set[str]:
             process.kill()
 
 
-def smoke_claude(source: str | Path) -> None:
+def smoke_claude(source: str | Path, expected: Path | None = None) -> None:
     require_cli("claude")
     with tempfile.TemporaryDirectory(prefix="marketplace-claude-smoke.") as temporary:
         state = Path(temporary)
@@ -288,13 +348,20 @@ def smoke_claude(source: str | Path) -> None:
         run(["claude", "plugin", "install", f"{TEAM}@{MARKETPLACE}"], env)
         inventory = json.loads(run(["claude", "plugin", "list", "--json"], env))
         root = installed_root(inventory, "claude")
+        if expected is not None:
+            verify_installed_package(root, expected, "claude")
         exercise_package(root, project, env)
         run(["claude", "plugin", "update", f"{TEAM}@{MARKETPLACE}"], env)
-        exercise_package(installed_root(json.loads(run(
-            ["claude", "plugin", "list", "--json"], env)), "claude"), project, env)
+        updated = installed_root(json.loads(run(
+            ["claude", "plugin", "list", "--json"], env)), "claude")
+        if expected is not None:
+            verify_installed_package(updated, expected, "claude")
+        exercise_package(updated, project, env)
 
 
-def smoke_codex(root: Path, source: str | Path) -> None:
+def smoke_codex(
+    root: Path, source: str | Path, expected: Path | None = None,
+) -> None:
     require_cli("codex")
     with tempfile.TemporaryDirectory(prefix="marketplace-codex-smoke.") as temporary:
         state = Path(temporary)
@@ -307,23 +374,75 @@ def smoke_codex(root: Path, source: str | Path) -> None:
         run(["codex", "plugin", "add", f"{TEAM}@{MARKETPLACE}", "--json"], env)
         inventory = json.loads(run(["codex", "plugin", "list", "--json"], env))
         team_root = installed_root(inventory, "codex")
+        if expected is not None:
+            verify_installed_package(team_root, expected, "codex")
         exercise_package(team_root, project, env)
-        expected = {
+        expected_skills = {
             f"{TEAM}:{path.parent.name}"
             for path in (root / "plugins" / TEAM / "skill-content").glob("*/SKILL.md")
             if "exposure: entry" in path.read_text(encoding="utf-8")
         }
         names = codex_skill_names(env, project)
-        if not expected <= names:
-            raise SmokeFailure("Codex omitted entry skills: " + ", ".join(sorted(expected - names)))
+        if not expected_skills <= names:
+            raise SmokeFailure(
+                "Codex omitted entry skills: "
+                + ", ".join(sorted(expected_skills - names))
+            )
         if isinstance(source, Path):
             # Local marketplaces are refreshed by reinstalling the plugin;
             # Codex reserves `marketplace upgrade` for Git-backed sources.
             run(["codex", "plugin", "add", f"{TEAM}@{MARKETPLACE}", "--json"], env)
         else:
             run(["codex", "plugin", "marketplace", "upgrade", MARKETPLACE, "--json"], env)
-        exercise_package(installed_root(json.loads(run(
-            ["codex", "plugin", "list", "--json"], env)), "codex"), project, env)
+        updated = installed_root(json.loads(run(
+            ["codex", "plugin", "list", "--json"], env)), "codex")
+        if expected is not None:
+            verify_installed_package(updated, expected, "codex")
+        exercise_package(updated, project, env)
+
+
+def smoke_public(
+    root: Path,
+    selected: set[str],
+    expected_sha: str,
+    *,
+    attempts: int = 3,
+    retry_delay: float = 5,
+) -> None:
+    if SHA_RE.fullmatch(expected_sha) is None:
+        raise SmokeFailure("public smoke requires an exact lowercase 40-hex SHA")
+    if attempts < 1 or attempts > 5:
+        raise SmokeFailure("public smoke attempts must be between 1 and 5")
+    # Adapter discovery is verifier policy. A historical candidate may supply
+    # package bytes, but its Python adapters must not define or alter the gate.
+    adapters = set(build_distributions.load_adapters(VERIFIER_ROOT))
+    if set(PUBLIC_MARKETPLACES) != adapters:
+        raise SmokeFailure("public marketplace sources differ from registered hosts")
+    last_error: SmokeFailure | None = None
+    for attempt in range(1, attempts + 1):
+        try:
+            for host in sorted(selected):
+                require_public_stable(expected_sha, os.environ.copy())
+                expected = root / "dist" / host / TEAM
+                if host == "claude":
+                    smoke_claude(PUBLIC_MARKETPLACES[host], expected)
+                elif host == "codex":
+                    smoke_codex(root, PUBLIC_MARKETPLACES[host], expected)
+                else:
+                    raise SmokeFailure(
+                        f"{host} public marketplace smoke is not implemented"
+                    )
+                require_public_stable(expected_sha, os.environ.copy())
+            return
+        except SmokeFailure as exc:
+            last_error = exc
+            if attempt == attempts:
+                break
+            time.sleep(retry_delay)
+    assert last_error is not None
+    raise SmokeFailure(
+        f"public stable smoke failed after {attempts} fresh attempt(s): {last_error}"
+    )
 
 
 def checkout_marketplace(root: Path, target: Path) -> Path:
@@ -335,21 +454,29 @@ def checkout_marketplace(root: Path, target: Path) -> Path:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    root_default = Path(__file__).resolve().parent.parent
+    root_default = VERIFIER_ROOT
     host_choices = ("all", *build_distributions.load_adapters(root_default))
     parser.add_argument("--host", choices=host_choices, default="all")
     parser.add_argument("--channel", choices=("checkout", "public"), default="checkout")
     parser.add_argument("--root", type=Path, default=Path(__file__).resolve().parent.parent)
+    parser.add_argument("--expected-sha", default="")
+    parser.add_argument("--attempts", type=int, default=3)
+    parser.add_argument("--retry-delay", type=float, default=5)
     args = parser.parse_args()
     root = args.root.resolve()
-    adapters = build_distributions.load_adapters(root)
+    adapters = build_distributions.load_adapters(VERIFIER_ROOT)
     selected = set(adapters) if args.host == "all" else {args.host}
     if args.channel == "public":
-        if "claude" in selected:
-            smoke_claude(PUBLIC_MARKETPLACES["claude"])
-        if "codex" in selected:
-            smoke_codex(root, PUBLIC_MARKETPLACES["codex"])
+        smoke_public(
+            root,
+            selected,
+            args.expected_sha,
+            attempts=args.attempts,
+            retry_delay=args.retry_delay,
+        )
         return 0
+    if args.expected_sha:
+        raise SmokeFailure("--expected-sha is only valid for the public channel")
     with tempfile.TemporaryDirectory(prefix="marketplace-checkout.") as temporary:
         source = checkout_marketplace(root, Path(temporary))
         for host in sorted(selected):

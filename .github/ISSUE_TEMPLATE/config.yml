@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Security vulnerability
+    url: https://github.com/agentrof/agent-marketplace/security/advisories/new
+    about: Report vulnerabilities privately. Do not use a public issue.
+  - name: Workflow documentation
+    url: https://github.com/agentrof/agent-marketplace/blob/main/docs/authoring.md
+    about: Read the authoring and workflow contracts before opening a question.

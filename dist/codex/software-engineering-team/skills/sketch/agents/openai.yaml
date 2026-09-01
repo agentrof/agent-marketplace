@@ -1,0 +1,6 @@
+interface:
+  display_name: "Sketch"
+  short_description: "Start the Sketch guided workflow"
+  default_prompt: "Use $software-engineering-team:sketch to start this workflow."
+policy:
+  allow_implicit_invocation: false

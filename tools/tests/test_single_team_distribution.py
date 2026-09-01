@@ -1,0 +1,301 @@
+"""Standalone-team and cross-host distribution contracts."""
+
+from __future__ import annotations
+
+import hashlib
+import json
+import os
+import subprocess
+import sys
+import tempfile
+import unittest
+from pathlib import Path
+from unittest import mock
+
+
+TESTS_DIR = Path(__file__).resolve().parent
+sys.path.insert(0, str(TESTS_DIR))
+sys.path.insert(0, str(TESTS_DIR.parent))
+
+import build_distributions  # noqa: E402
+import fixtures  # noqa: E402
+
+
+class SingleTeamDistributionTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.temporary = tempfile.TemporaryDirectory()
+        self.root = Path(self.temporary.name)
+        fixtures.make_valid_root(self.root)
+
+    def tearDown(self) -> None:
+        self.temporary.cleanup()
+
+    def test_session_marker_publishes_exact_writer_invocation_binding(self):
+        repository = TESTS_DIR.parents[1]
+        for host in build_distributions.HOSTS:
+            with self.subTest(host=host):
+                script = (
+                    repository / "dist" / host / "software-engineering-team"
+                    / "scripts" / "team_guard.py"
+                )
+                result = subprocess.run(
+                    [sys.executable, str(script), "register"],
+                    capture_output=True, text=True, check=False,
+                )
+                self.assertEqual(
+                    result.returncode, 0, result.stdout + result.stderr,
+                )
+                payload = json.loads(result.stdout)
+                context = payload["hookSpecificOutput"]["additionalContext"]
+                self.assertIn(
+                    "AGENT_MARKETPLACE_HOOKS_ACTIVE: software-engineering-team",
+                    context,
+                )
+                self.assertIn(
+                    "AGENT_MARKETPLACE_PYTHON: "
+                    f"{Path(os.path.abspath(sys.executable))}",
+                    context,
+                )
+                self.assertIn(
+                    f"AGENT_MARKETPLACE_SCRIPTS: {script.resolve().parent}",
+                    context,
+                )
+
+    def test_catalogs_versions_and_packages_name_one_standalone_team(self):
+        versions = json.loads(
+            (self.root / "versions.json").read_text(encoding="utf-8")
+        )
+        self.assertEqual(set(versions["plugins"]), {fixtures.PLUGIN})
+
+        claude = json.loads(
+            (self.root / ".claude-plugin/marketplace.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        codex = json.loads(
+            (self.root / ".agents/plugins/marketplace.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        self.assertEqual(
+            [entry["name"] for entry in claude["plugins"]],
+            [fixtures.PLUGIN],
+        )
+        self.assertEqual(
+            [entry["name"] for entry in codex["plugins"]],
+            [fixtures.PLUGIN],
+        )
+
+        for host in build_distributions.HOSTS:
+            with self.subTest(host=host):
+                self.assertEqual(
+                    sorted(path.name for path in (self.root / "dist" / host).iterdir()),
+                    [fixtures.PLUGIN],
+                )
+                adapter = build_distributions.load_adapters(self.root)[host]
+                manifest_path = (
+                    self.root / "platforms" / host / fixtures.PLUGIN / "manifest.json"
+                )
+                if adapter.metadata["artifact_kind"] == "native_marketplace":
+                    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+                    self.assertIn(manifest.get("dependencies"), (None, []))
+                else:
+                    self.assertFalse(manifest_path.exists())
+
+    def test_hosts_share_snapshot_and_host_neutral_canonical_payload(self):
+        snapshots = []
+        for host in build_distributions.HOSTS:
+            package = self.root / "dist" / host / fixtures.PLUGIN
+            adapter = build_distributions.load_adapters(self.root)[host]
+            manifest_dir = adapter.module.native_manifest_directory(host)
+            if manifest_dir is not None:
+                manifest = json.loads(
+                    (package / manifest_dir / "plugin.json").read_text(encoding="utf-8")
+                )
+                self.assertNotIn("agent_marketplace", manifest)
+            else:
+                self.assertFalse((package / f".{host}-plugin").exists())
+            provenance = json.loads(
+                (package / ".agent-marketplace-package.json").read_text(
+                    encoding="utf-8"
+                )
+            )
+            self.assertEqual(
+                provenance["delivery_protocol"],
+                build_distributions.DELIVERY_PROTOCOL_CAPABILITY,
+            )
+            snapshots.append({
+                key: provenance[key] for key in (
+                    "build_id",
+                    "marketplace_release",
+                    "source_channel",
+                    "source_ref",
+                    "source_commit",
+                )
+            })
+            self.assertEqual(
+                json.loads((package / "product.json").read_text(encoding="utf-8")),
+                build_distributions.load_product_contract(self.root),
+            )
+        self.assertTrue(all(snapshot == snapshots[0] for snapshot in snapshots))
+
+        for relative in (
+            "scripts/experience_application_check.py",
+            "skill-content/experience-modeling/data/experience-schema.json",
+        ):
+            expected = (self.root / "plugins" / fixtures.PLUGIN / relative).read_bytes()
+            for host in build_distributions.HOSTS:
+                packaged = self.root / "dist" / host / fixtures.PLUGIN / relative
+                self.assertEqual(packaged.read_bytes(), expected, packaged)
+
+        source = self.root / "plugins" / fixtures.PLUGIN
+        for relative in ("constitution.md", "flows", "skill-content"):
+            canonical = source / relative
+            for host in build_distributions.HOSTS:
+                packaged = self.root / "dist" / host / fixtures.PLUGIN / relative
+                if canonical.is_file():
+                    expected = canonical.read_bytes().replace(b"\r\n", b"\n").replace(
+                        b"\r", b"\n"
+                    )
+                    self.assertEqual(packaged.read_bytes(), expected)
+                    continue
+                for path in sorted(
+                    candidate
+                    for candidate in canonical.rglob("*")
+                    if candidate.is_file()
+                    and not build_distributions.is_python_cache(candidate)
+                ):
+                    expected = path.read_bytes()
+                    if b"\0" not in expected:
+                        expected = expected.replace(b"\r\n", b"\n").replace(
+                            b"\r", b"\n"
+                        )
+                    target = packaged / path.relative_to(canonical)
+                    self.assertEqual(target.read_bytes(), expected, target)
+
+    def test_provenance_hashes_and_rebuild_are_deterministic(self):
+        for host in build_distributions.HOSTS:
+            with self.subTest(host=host):
+                package = self.root / "dist" / host / fixtures.PLUGIN
+                provenance = json.loads(
+                    (package / build_distributions.PROVENANCE).read_text(
+                        encoding="utf-8"
+                    )
+                )
+                self.assertEqual(provenance["component"], fixtures.PLUGIN)
+                self.assertEqual(provenance["host"], host)
+                for relative, expected in provenance["files"].items():
+                    actual = hashlib.sha256((package / relative).read_bytes()).hexdigest()
+                    self.assertEqual(actual, expected, relative)
+
+        self.assertEqual(
+            build_distributions.check(self.root, self.root / "dist"),
+            [],
+        )
+
+    def test_independent_builds_are_byte_identical(self):
+        with tempfile.TemporaryDirectory() as first_dir, \
+                tempfile.TemporaryDirectory() as second_dir:
+            first = Path(first_dir) / "dist"
+            second = Path(second_dir) / "dist"
+            build_distributions.build(self.root, first)
+            build_distributions.build(self.root, second)
+            self.assertEqual(build_distributions.compare_dirs(first, second), [])
+
+    def test_canonical_source_rejects_unknown_component_and_symlink(self):
+        plugin = self.root / "plugins" / fixtures.PLUGIN
+        unknown = plugin / "runtime-state"
+        unknown.mkdir()
+        with self.assertRaisesRegex(ValueError, "unsupported canonical top-level"):
+            build_distributions.validate_canonical(self.root)
+        unknown.rmdir()
+        target = plugin / "constitution.md"
+        link = plugin / "flows" / "linked.md"
+        link.symlink_to(target)
+        with self.assertRaisesRegex(ValueError, "symbolic link"):
+            build_distributions.validate_canonical(self.root)
+
+    def test_python_runtime_caches_never_enter_distributions(self):
+        cache = self.root / "plugins" / fixtures.PLUGIN / "scripts/__pycache__"
+        cache.mkdir(exist_ok=True)
+        (cache / "probe.cpython-39.pyc").write_bytes(b"cache")
+        output = self.root / "cache-build"
+        build_distributions.build(self.root, output)
+        self.assertEqual(list(output.rglob("__pycache__")), [])
+        self.assertEqual(list(output.rglob("*.pyc")), [])
+
+    def test_issue_reporting_is_external_and_has_no_project_artifacts(self):
+        for host in build_distributions.HOSTS:
+            with self.subTest(host=host):
+                package = self.root / "dist" / host / fixtures.PLUGIN
+                wrapper = (
+                    package / "skills/issue-report/SKILL.md"
+                ).read_text(encoding="utf-8")
+                setup_wrapper = (
+                    package / "skills/setup/SKILL.md"
+                ).read_text(encoding="utf-8")
+                canonical = (
+                    package / "skill-content/issue-report/SKILL.md"
+                ).read_text(encoding="utf-8")
+                self.assertIn("project_scope: external", canonical)
+                self.assertNotIn("workspace config", wrapper)
+                self.assertIn("workspace config", setup_wrapper)
+                self.assertTrue((package / "scripts/file_issue.py").is_file())
+                self.assertFalse((package / "scripts/issue_compile.py").exists())
+                self.assertFalse(
+                    (package / "templates/vault/maps/issues.md").exists()
+                )
+
+                policy = json.loads((
+                    package
+                    / "skill-content/obsidian-vault/data/vault-policy.json"
+                ).read_text(encoding="utf-8"))
+                self.assertNotIn("issues", policy["subtrees"])
+                self.assertNotIn("issue-report", policy["extra_doc_types"])
+                self.assertNotIn("issue_report", policy["type_path_patterns"])
+                self.assertNotIn("issue_report", policy["status_values"])
+                self.assertNotIn(
+                    "issue-report", policy["fragment_graph_groups"]["backlog"]
+                )
+                self.assertNotIn(
+                    "issue-report",
+                    {group["id"] for group in policy["graph_color_groups"]},
+                )
+
+    def test_fixture_copy_ignores_python_runtime_caches(self):
+        with tempfile.TemporaryDirectory() as source_dir, \
+                tempfile.TemporaryDirectory() as target_dir:
+            source_root = Path(source_dir)
+            plugin_root = source_root / "plugins" / fixtures.PLUGIN
+            script = plugin_root / "scripts" / "runner.py"
+            script.parent.mkdir(parents=True)
+            script.write_text("print('fixture')\n", encoding="utf-8")
+            cache = script.parent / "__pycache__"
+            cache.mkdir()
+            (cache / "runner.cpython-39.pyc").write_bytes(b"cache")
+
+            with mock.patch.object(fixtures, "REAL_REPOSITORY", source_root):
+                fixtures.copy(f"plugins/{fixtures.PLUGIN}", Path(target_dir))
+
+            copied = Path(target_dir) / "plugins" / fixtures.PLUGIN
+            self.assertTrue((copied / "scripts/runner.py").is_file())
+            self.assertFalse((copied / "scripts/__pycache__").exists())
+
+    def test_agent_metadata_is_projected_for_each_host(self):
+        canonical = self.root / "plugins" / fixtures.PLUGIN / "agents"
+        for source in canonical.glob("*.md"):
+            name = source.stem
+            claude = (
+                self.root / "dist/claude" / fixtures.PLUGIN / "agents" / source.name
+            ).read_text(encoding="utf-8")
+            codex = (
+                self.root / "dist/codex" / fixtures.PLUGIN / "agents" / source.name
+            ).read_text(encoding="utf-8")
+            self.assertIn(f"name: {name}", claude)
+            self.assertIn(f"name: {name}", codex)
+            self.assertIn("model:", claude)
+            self.assertIn("reasoning:", codex)
+
+
+if __name__ == "__main__":
+    unittest.main()

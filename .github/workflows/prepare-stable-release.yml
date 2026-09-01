@@ -1,0 +1,89 @@
+name: Prepare stable release
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: stable-release
+  cancel-in-progress: false
+
+jobs:
+  exact-sha-host-gates:
+    if: github.ref == 'refs/heads/main'
+    uses: ./.github/workflows/release-hosts.yml
+    with:
+      candidate_sha: ${{ github.sha }}
+
+  prepare:
+    if: github.ref == 'refs/heads/main'
+    needs: exact-sha-host-gates
+    runs-on: macos-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.x"
+      - name: Configure release author
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+      - name: Prepare bootstrap or verified release branch
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          git fetch origin --prune --tags
+          stable_sha="$(git ls-remote --heads origin refs/heads/stable | awk '{print $1}')"
+          if [ -z "$stable_sha" ]; then
+            if git ls-remote --tags origin 'refs/tags/v*' | grep -q .; then
+              echo "Bootstrap refused: SemVer tags exist without a stable branch." >&2
+              exit 1
+            fi
+            python3 tools/release.py verify-bootstrap
+            make release-check
+            python3 tools/release.py release-notes --version 0.0.1 --output release-notes.md
+            git tag -a v0.0.1 -m "Agent Marketplace v0.0.1"
+            git push --atomic origin HEAD:refs/heads/stable refs/tags/v0.0.1
+            if ! make public-release-check; then
+              remote_stable="$(git ls-remote --heads origin refs/heads/stable | awk '{print $1}')"
+              remote_tag="$(git ls-remote --tags origin refs/tags/v0.0.1 | awk '{print $1}')"
+              test "$remote_stable" = "$(git rev-parse HEAD)"
+              test -n "$remote_tag"
+              git push --atomic origin :refs/heads/stable :refs/tags/v0.0.1
+              exit 1
+            fi
+            gh release create v0.0.1 --verify-tag --title "Agent Marketplace v0.0.1" --notes-file release-notes.md
+            exit 0
+          fi
+
+          if git ls-remote --exit-code --heads origin refs/heads/release/stable >/dev/null 2>&1; then
+            echo "release/stable already exists; finish or close the existing release PR." >&2
+            exit 1
+          fi
+          main_sha="$(git rev-parse HEAD)"
+          python3 tools/release.py prepare --stable-sha "$stable_sha" --main-sha "$main_sha"
+          python3 tools/build_distributions.py
+          make release-check
+          version="$(python3 -c 'import json; print(json.load(open("versions.json"))["marketplace"])')"
+          git switch -c release/stable
+          git add --all
+          git commit -m "chore: prepare stable v${version}"
+          git push origin HEAD:refs/heads/release/stable
+          manual_url="https://github.com/${GITHUB_REPOSITORY}/compare/main...release/stable?expand=1"
+          echo "::notice title=Maintainer release PR required::$manual_url"
+          {
+            echo "### Maintainer release PR required"
+            echo
+            echo "The verified release branch was pushed successfully."
+            echo "Open the pull request as a maintainer so the pull_request validation event runs."
+            echo
+            echo "Open: ${manual_url}"
+            echo
+            echo "Title: chore: prepare stable v${version}"
+          } >> "$GITHUB_STEP_SUMMARY"

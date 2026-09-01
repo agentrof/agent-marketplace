@@ -1,0 +1,137 @@
+name: validate
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  changeset:
+    if: github.event_name == 'pull_request' && github.head_ref != 'release/stable'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.9"
+      - name: Require a release-impact declaration
+        run: >-
+          python3 tools/release.py check-pr
+          --base origin/${{ github.base_ref }}
+          --allow-bootstrap
+
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.x"
+      - name: Run all gates
+        run: make check
+
+  build-metadata:
+    if: github.event_name == 'push'
+    needs: [check, compatibility, vault-hook-platforms]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.9"
+      - name: Create immutable main build identity
+        id: build
+        run: |
+          python3 tools/release.py build-info --output build-info.json
+          echo "id=$(python3 -c 'import json; print(json.load(open("build-info.json"))["build_id"])')" >> "$GITHUB_OUTPUT"
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: ${{ steps.build.outputs.id }}
+          path: |
+            build-info.json
+            dist/claude
+            dist/codex
+          if-no-files-found: error
+
+  compatibility:
+    name: compatibility (${{ matrix.os }}, Python ${{ matrix.python }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            python: "3.9"
+          - os: macos-latest
+            python: "3.x"
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: ${{ matrix.python }}
+      - name: Run all gates
+        run: make check
+
+  vault-hook-platforms:
+    name: vault hook (${{ matrix.os }}, Python ${{ matrix.python }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            python: "3.9"
+          - os: ubuntu-latest
+            python: "3.x"
+          - os: macos-latest
+            python: "3.9"
+          - os: macos-latest
+            python: "3.x"
+          - os: windows-latest
+            python: "3.9"
+          - os: windows-latest
+            python: "3.x"
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - name: Exercise the Apple system Python launcher
+        if: runner.os == 'macOS'
+        env:
+          AGENT_MARKETPLACE_REQUIRE_APPLE_PYTHON3: "1"
+          DEVELOPER_DIR: ""
+          PATH: /usr/bin:/bin:/usr/sbin:/sbin
+          SDKROOT: ""
+          TOOLCHAINS: ""
+        run: >-
+          /usr/bin/python3 -m unittest
+          tools.tests.test_vault_hook.VaultHookShellContractTests.test_system_macos_python3_launcher_is_accepted
+          tools.tests.test_vault_hook.VaultHookShellContractTests.test_issue_77_bare_python_cmd_preserves_attested_codex_result
+          tools.tests.test_vault_hook.VaultHookShellContractTests.test_bare_python_candidate_with_invalid_result_is_restored
+          tools.tests.test_vault_hook.VaultHookShellContractTests.test_bare_render_cannot_publish_a_different_valid_transition
+          tools.tests.test_vault_hook.VaultHookShellContractTests.test_bare_render_with_forged_registry_is_restored
+          tools.tests.test_vault_hook.VaultHookShellContractTests.test_issue_77_bare_init_has_an_exact_attested_delta
+          tools.tests.test_vault_hook.VaultHookShellContractTests.test_issue_77_bare_init_preserves_real_codex_draft
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: ${{ matrix.python }}
+      - name: Exercise the shared shell-hook and recovery contracts
+        run: >-
+          python -m unittest
+          tools.tests.test_experience_compile
+          tools.tests.test_vault_hook

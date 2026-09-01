@@ -1,0 +1,20 @@
+{
+  "name": "agent-marketplace",
+  "owner": {
+    "name": "Agentrof",
+    "url": "https://github.com/agentrof"
+  },
+  "metadata": {
+    "description": "A catalog of curated agent teams for Claude Code and Codex.",
+    "version": "0.0.1"
+  },
+  "plugins": [
+    {
+      "name": "software-engineering-team",
+      "source": "./dist/claude/software-engineering-team",
+      "description": "Software Engineering Team for approved analysis, solution and experience design, and a delivery-ready Obsidian backlog.",
+      "version": "0.0.1",
+      "license": "MIT"
+    }
+  ]
+}

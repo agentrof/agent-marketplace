@@ -1,0 +1,19 @@
+{
+  "version": "4.1.1",
+  "templates": {
+    "common": {
+      "main": "title",
+      "fallback": null
+    }
+  },
+  "features": {
+    "explorer": {"enabled": true},
+    "graph": {"enabled": true},
+    "search": {"enabled": true},
+    "suggest": {"enabled": true},
+    "tab": {"enabled": true},
+    "canvas": {"enabled": true},
+    "noteLink": {"enabled": false},
+    "alias": {"enabled": false}
+  }
+}

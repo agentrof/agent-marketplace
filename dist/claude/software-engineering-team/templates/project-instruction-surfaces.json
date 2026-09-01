@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "surfaces": [
+    {
+      "filename": "CLAUDE.md",
+      "host_id": "claude",
+      "migrates_from_owners": [],
+      "owner_host": "claude",
+      "user_companion": "CLAUDE.user.md"
+    },
+    {
+      "filename": "AGENTS.override.md",
+      "host_id": "codex",
+      "migrates_from_owners": [],
+      "owner_host": "codex",
+      "user_companion": "AGENTS.user.md"
+    }
+  ]
+}

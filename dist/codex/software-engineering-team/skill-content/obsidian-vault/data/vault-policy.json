@@ -1,0 +1,710 @@
+{
+  "schema_version": 8,
+  "vault_root_dirname": "docs",
+  "home_file": "home.md",
+  "maps_dir": "maps",
+  "subtrees": [
+    "business-analysis",
+    "solution-design",
+    "system-architecture",
+    "design-system",
+    "experience-design",
+    "operation",
+    "requirements",
+    "delivery",
+    "backlog"
+  ],
+  "extra_maps": [],
+  "machine_dirs": [
+    "_generated",
+    "_relations",
+    "_navigation",
+    "_ledger"
+  ],
+  "banned_basenames": [
+    "index.md",
+    "notes.md",
+    "overview.md",
+    "readme.md",
+    "registry.md",
+    "status.md"
+  ],
+  "community_plugins": [
+    "obsidian-front-matter-title-plugin"
+  ],
+  "graph_search": "-path:_generated -path:_ledger",
+  "graph_color_groups": [
+    {
+      "id": "space",
+      "query": "tag:#doc/space",
+      "rgb": 16733986
+    },
+    {
+      "id": "domain",
+      "query": "tag:#doc/domain",
+      "rgb": 16752640
+    },
+    {
+      "id": "glossary",
+      "query": "tag:#doc/glossary",
+      "rgb": 16498733
+    },
+    {
+      "id": "actor-roster",
+      "query": "tag:#doc/actor-roster",
+      "rgb": 9268835
+    },
+    {
+      "id": "budget-set",
+      "query": "tag:#doc/budget-set",
+      "rgb": 15483002
+    },
+    {
+      "id": "entity",
+      "query": "tag:#doc/entity",
+      "rgb": 2201331
+    },
+    {
+      "id": "process",
+      "query": "tag:#doc/process",
+      "rgb": 48340
+    },
+    {
+      "id": "rule-set",
+      "query": "tag:#doc/rule-set",
+      "rgb": 4149685
+    },
+    {
+      "id": "acceptance-set",
+      "query": "tag:#doc/acceptance-set",
+      "rgb": 5431378
+    },
+    {
+      "id": "decision",
+      "query": "tag:#doc/decision",
+      "rgb": 10233776
+    },
+    {
+      "id": "system-architecture",
+      "query": "tag:#doc/system-architecture OR tag:#doc/architecture-component OR tag:#doc/architecture-module OR tag:#doc/interface-contract OR tag:#doc/data-model OR tag:#doc/threat-model OR tag:#doc/runtime-view OR tag:#doc/reliability-view OR tag:#doc/observability-view OR tag:#doc/architecture-connection OR tag:#doc/architecture-standard",
+      "rgb": 3447003
+    },
+    {
+      "id": "integration",
+      "query": "tag:#doc/integration",
+      "rgb": 38536
+    },
+    {
+      "id": "landscape",
+      "query": "tag:#doc/landscape",
+      "rgb": 5227511
+    },
+    {
+      "id": "solution-component",
+      "query": "tag:#doc/solution-component",
+      "rgb": 5227511
+    },
+    {
+      "id": "engagement",
+      "query": "tag:#doc/engagement",
+      "rgb": 8280002
+    },
+    {
+      "id": "design-master",
+      "query": "tag:#doc/design-master",
+      "rgb": 11342935
+    },
+    {
+      "id": "page-override",
+      "query": "tag:#doc/page-override",
+      "rgb": 13538264
+    },
+    {
+      "id": "experience",
+      "query": "tag:#doc/experience OR tag:#doc/journey OR tag:#doc/flow-set OR tag:#doc/screen OR tag:#doc/state OR tag:#doc/transition",
+      "rgb": 3108513
+    },
+    {
+      "id": "navigation",
+      "query": "tag:#doc/moc OR tag:#doc/home",
+      "rgb": 9741240
+    },
+    {
+      "id": "backlog",
+      "query": "tag:#doc/backlog",
+      "rgb": 11032055
+    },
+    {
+      "id": "backlog-review",
+      "query": "tag:#doc/backlog-review",
+      "rgb": 16007006
+    },
+    {
+      "id": "epic",
+      "query": "tag:#doc/epic",
+      "rgb": 3900150
+    },
+    {
+      "id": "epic-review",
+      "query": "tag:#doc/epic-review",
+      "rgb": 16096779
+    },
+    {
+      "id": "story",
+      "query": "tag:#doc/story",
+      "rgb": 1357990
+    },
+    {
+      "id": "test-plan",
+      "query": "tag:#doc/test-plan",
+      "rgb": 2278750
+    },
+    {
+      "id": "requirement",
+      "query": "tag:#doc/requirement",
+      "rgb": 9323693
+    },
+    {
+      "id": "definition-of-done",
+      "query": "tag:#doc/definition-of-done",
+      "rgb": 1482885
+    },
+    {
+      "id": "delivery",
+      "query": "tag:#doc/delivery",
+      "rgb": 2388387
+    },
+    {
+      "id": "execution-plan",
+      "query": "tag:#doc/execution-plan",
+      "rgb": 14059792
+    },
+    {
+      "id": "delivery-item",
+      "query": "tag:#doc/delivery-item",
+      "rgb": 2267476
+    },
+    {
+      "id": "code-review",
+      "query": "tag:#doc/code-review",
+      "rgb": 6000633
+    },
+    {
+      "id": "verification",
+      "query": "tag:#doc/verification",
+      "rgb": 1549705
+    },
+    {
+      "id": "delivery-review",
+      "query": "tag:#doc/delivery-review",
+      "rgb": 12154638
+    },
+    {
+      "id": "operation",
+      "query": "tag:#doc/verification-contract OR tag:#doc/environment-contract",
+      "rgb": 1549705
+    },
+    {
+      "id": "delivery-governance",
+      "query": "tag:#doc/delivery-governance",
+      "rgb": 2388387
+    }
+  ],
+  "hubs": [],
+  "tag_namespaces": [
+    "doc",
+    "status"
+  ],
+  "generated_marker_prefix": "<!-- generated by",
+  "decision_trees": {
+    "solution_design": {
+      "path": "solution-design/decisions",
+      "id_prefix": "SD",
+      "id_min_width": 3,
+      "render_index": true,
+      "extra_column": "territory",
+      "id_source": "alias"
+    },
+    "system_architecture": {
+      "path": "system-architecture/decisions",
+      "id_prefix": "ADR",
+      "id_min_width": 3,
+      "render_index": true,
+      "extra_column": "story",
+      "id_source": "alias"
+    },
+    "ba_space": {
+      "path": "business-analysis/*/decisions",
+      "id_prefix": "DEC",
+      "id_min_width": 3,
+      "render_index": false,
+      "id_source": "alias"
+    },
+    "ba_domain": {
+      "path": "business-analysis/*/domains/*/decisions",
+      "id_prefix": "DEC",
+      "id_min_width": 3,
+      "render_index": false,
+      "id_source": "alias"
+    },
+    "ba_domain_nested": {
+      "path": "business-analysis/*/domains/*/domains/*/decisions",
+      "id_prefix": "DEC",
+      "id_min_width": 3,
+      "render_index": false,
+      "id_source": "alias"
+    }
+  },
+  "generated_views": [
+    "solution-design/decision-log.md",
+    "system-architecture/decision-log.md"
+  ],
+  "generated_subtrees": [
+    "api/"
+  ],
+  "attachments_dir": "_attachments",
+  "artifact_directory_name": "artifacts",
+  "artifact_path_restrictions": [],
+  "artifact_forbidden_extensions": [],
+  "attachment_extensions": [
+    ".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg", ".pdf",
+    ".mp3", ".wav", ".m4a", ".mp4", ".webm"
+  ],
+  "property_types": {
+    "type": "text",
+    "title": "text",
+    "status": "text",
+    "owner_role": "text",
+    "approved_at": "date",
+    "decided_at": "date",
+    "superseded_by": "text",
+    "supersedes": "text",
+    "engagement": "text",
+    "territory": "text",
+    "revisit_trigger": "text",
+    "story": "text",
+    "governs": "multitext",
+    "verifies": "multitext",
+    "code": "text",
+    "scope": "text",
+    "review_scope": "text",
+    "verdict": "text",
+    "system_name": "text",
+    "direction": "text",
+    "round": "number",
+    "baseline_hash": "text",
+    "supersedes_hash": "text",
+    "tags": "tags",
+    "aliases": "aliases",
+    "origin_mode": "text",
+    "record_state": "text",
+    "state_class": "text",
+    "analysis_scopes": "multitext",
+    "criterion_refs": "multitext",
+    "revision": "number",
+    "registry_hash": "text",
+    "approved_at_utc": "datetime",
+    "approval_revision": "number",
+    "source_hash": "text",
+    "stage_results_hash": "text",
+    "planning_mode": "text",
+    "requirement_ref": "text",
+    "input_package_refs": "multitext",
+    "input_bindings": "multitext",
+    "introduced_in_revision": "number",
+    "stamped_at": "datetime",
+    "id": "text",
+    "analysis_node": "text",
+    "analysis_revision": "number",
+    "analysis_hash": "text",
+    "criterion_set": "multitext",
+    "experience_coverage": "multitext",
+    "states": "multitext",
+    "transitions": "multitext",
+    "non_ui_criteria": "multitext",
+    "journey_refs": "multitext",
+    "flow_refs": "multitext",
+    "screen_refs": "multitext",
+    "flows": "multitext",
+    "from_state": "text",
+    "to_state": "text",
+    "edges": "multitext",
+    "derives_from": "multitext",
+    "satisfies": "multitext",
+    "constrained_by": "multitext",
+    "implements": "multitext",
+    "uses_design": "multitext",
+    "related_to": "multitext",
+    "goal": "text",
+    "priority": "text",
+    "priority_reason": "text",
+    "work_kind": "text",
+    "supporting_roles": "multitext",
+    "experience_refs": "multitext",
+    "package_hash": "text",
+    "package_contract_version": "number",
+    "depends_on": "multitext",
+    "dependency_refs": "multitext",
+    "scenario_refs": "multitext",
+    "request_kind": "text",
+    "urgency": "text",
+    "definition_of_done": "text",
+    "definition_of_done_source_hash": "text",
+    "definition_of_done_commit": "text",
+    "target_branch": "text",
+    "backlog_commit": "text",
+    "scope_hash": "text",
+    "plan_hash": "text",
+    "item_plan_hash": "text",
+    "target_impact_hash": "text",
+    "story_source_hash": "text",
+    "test_plan_source_hash": "text",
+    "integration_base_commit": "text",
+    "execution_after": "multitext",
+    "dependency_bindings": "multitext",
+    "waits_for": "multitext",
+    "waits_for_bindings": "multitext",
+    "path_claims": "multitext",
+    "contract_claims": "multitext",
+    "runtime_required": "checkbox",
+    "verification_contract_ref": "text",
+    "verification_contract_hash": "text",
+    "environment_contract_ref": "text",
+    "environment_contract_hash": "text",
+    "operation_contract_hashes": "multitext",
+    "role_sequence": "multitext",
+    "reviewed_commit": "text",
+    "reviewed_integration_commit": "text",
+    "verified_commit": "text",
+    "cancellation_intent_hash": "text",
+    "cancellation_disposition": "text",
+    "cancellation_previous_tip": "text",
+    "pull_request_url": "text",
+    "approval_hash": "text",
+    "test_command": "text",
+    "test_workdir": "text",
+    "mutation_disposition": "text",
+    "mutation_command": "text",
+    "mutation_workdir": "text",
+    "mutation_rationale": "text",
+    "dependency_audit_disposition": "text",
+    "dependency_audit_command": "text",
+    "dependency_audit_workdir": "text",
+    "dependency_audit_rationale": "text",
+    "env_command": "text",
+    "env_workdir": "text",
+    "scenarios": "multitext",
+    "tolerated_warnings": "multitext",
+    "service_catalog": "multitext",
+    "max_parallel": "number",
+    "governance_hash": "text",
+    "decision_kind": "text",
+    "applies_to": "multitext",
+    "selected_technology": "text",
+    "method_skills": "multitext"
+    ,"component_id": "text"
+    ,"component_class": "text"
+    ,"sourcing": "text"
+    ,"app_kind": "text"
+    ,"code_path": "text"
+    ,"depends_on_component": "multitext"
+    ,"technology_bindings": "multitext"
+    ,"topology_selected": "checkbox"
+    ,"topology_contract_version": "number"
+    ,"topology_confirmation_hash": "text"
+    ,"owned_ba_refs": "multitext"
+    ,"not_technical_allocations": "multitext"
+    ,"data_store_disposition": "text"
+    ,"experience_id": "text"
+    ,"primary_process_ref": "text"
+    ,"related_process_refs": "multitext"
+    ,"retired_at_utc": "datetime"
+    ,"component_ref": "text"
+    ,"record_id": "text"
+    ,"introduced_by": "multitext"
+    ,"architecture_impact": "text"
+    ,"architecture_components": "multitext"
+    ,"architecture_record_kinds": "multitext"
+    ,"architecture_reason": "text"
+    ,"architecture_delta_hash": "text"
+    ,"revision_state": "text"
+    ,"connects": "multitext"
+    ,"affected_scopes": "multitext"
+    ,"upstream_stage_receipts_hash": "text"
+    ,"package_status": "text"
+    ,"package_approved_at_utc": "datetime"
+    ,"contract_version": "number"
+  },
+  "retired_managed_properties": [
+    "locked",
+    "challenge_status",
+    "challenge_hash",
+    "baseline_id",
+    "inherits",
+    "program_id",
+    "release_id",
+    "artifact_path",
+    "artifact_sha256",
+    "artifact_owner",
+    "declared_ids",
+    "manifest_hash"
+  ],
+  "lazy_fragments": {
+    "base": ["type", "title", "status", "tags", "aliases", "derives_from", "satisfies", "constrained_by", "implements", "uses_design", "related_to", "origin_mode", "record_state", "stage_results_hash", "upstream_stage_receipts_hash", "planning_mode", "requirement_ref", "input_package_refs", "input_bindings"],
+    "business_analysis": ["code", "scope", "round", "package_status", "package_hash", "package_approved_at_utc", "package_contract_version"],
+    "solution_design": ["engagement", "territory", "revisit_trigger", "decision_kind", "applies_to", "selected_technology", "method_skills", "component_id", "component_class", "sourcing", "app_kind", "code_path", "depends_on_component", "technology_bindings", "owned_ba_refs", "not_technical_allocations", "data_store_disposition", "topology_selected", "topology_contract_version", "topology_confirmation_hash"],
+    "system_architecture": ["story", "governs", "verifies", "component_ref", "record_id", "revision", "record_state", "revision_state", "introduced_by", "supersedes", "connects", "affected_scopes"],
+    "design_system": [
+      "revision",
+      "contract_version",
+      "approved_at_utc",
+      "baseline_hash",
+      "supersedes_hash"
+    ],
+    "experience_design": [
+      "origin_mode",
+      "record_state",
+      "state_class",
+      "experience_id",
+      "primary_process_ref",
+      "related_process_refs",
+      "analysis_scopes",
+      "criterion_refs",
+      "revision",
+      "registry_hash",
+      "approved_at_utc"
+    ],
+    "backlog": [
+      "goal",
+      "analysis_scopes",
+      "priority",
+      "priority_reason",
+      "work_kind",
+      "source_hash",
+      "supporting_roles",
+      "depends_on",
+      "dependency_refs",
+      "experience_refs",
+      "package_hash",
+      "scenario_refs",
+      "criterion_refs",
+      "revision",
+      "approved_at_utc"
+    ],
+    "requirements": ["request_kind", "urgency", "revision", "approved_at_utc", "source_hash"],
+    "definition_of_done": ["revision", "approved_at_utc", "source_hash", "definition_of_done_source_hash", "definition_of_done_commit"],
+    "delivery": ["goal", "definition_of_done", "definition_of_done_source_hash", "definition_of_done_commit", "target_branch", "backlog_commit", "scope_hash", "revision", "approved_at_utc", "source_hash"],
+    "execution_plan": ["revision", "plan_hash", "operation_contract_hashes", "approved_at_utc", "source_hash"],
+    "delivery_item": ["story_source_hash", "test_plan_source_hash", "integration_base_commit", "item_plan_hash", "verification_contract_ref", "verification_contract_hash", "environment_contract_ref", "environment_contract_hash", "execution_after", "dependency_bindings", "waits_for", "waits_for_bindings", "path_claims", "contract_claims", "role_sequence", "architecture_impact", "architecture_components", "architecture_record_kinds", "architecture_reason", "architecture_delta_hash", "source_hash"],
+    "code_review": ["item_plan_hash", "reviewed_commit", "source_hash"],
+    "verification": ["item_plan_hash", "verified_commit", "test_plan_source_hash", "source_hash"],
+    "delivery_review": ["plan_hash", "reviewed_commit", "reviewed_integration_commit", "approved_at_utc", "approval_hash", "source_hash"],
+    "operation": ["revision", "constrained_by", "source_hash", "approved_at_utc", "test_command", "test_workdir", "mutation_disposition", "mutation_command", "mutation_workdir", "mutation_rationale", "dependency_audit_disposition", "dependency_audit_command", "dependency_audit_workdir", "dependency_audit_rationale", "env_command", "env_workdir", "scenarios", "tolerated_warnings", "service_catalog"],
+    "delivery_governance": ["revision", "max_parallel", "governance_hash", "source_hash", "approved_at_utc"]
+  },
+  "fragment_graph_groups": {
+    "base": ["navigation"],
+    "business_analysis": ["space", "domain", "glossary", "actor-roster", "budget-set", "entity", "process", "rule-set", "acceptance-set", "decision", "integration"],
+    "solution_design": ["landscape", "solution-component", "engagement", "decision"],
+    "system_architecture": ["decision", "system-architecture"],
+    "design_system": ["design-master", "page-override"],
+    "experience_design": ["experience"],
+    "backlog": ["backlog", "backlog-review", "epic", "epic-review", "story", "test-plan"],
+    "requirements": ["requirement"],
+    "delivery": ["definition-of-done", "delivery", "execution-plan", "delivery-item", "code-review", "verification", "delivery-review", "delivery-governance"],
+    "operation": ["operation"]
+  },
+  "extra_doc_types": [
+    "moc",
+    "home",
+    "landscape",
+    "engagement",
+    "design-master",
+    "page-override",
+    "solution-component",
+    "experience",
+    "journey",
+    "flow-set",
+    "screen",
+    "state",
+    "transition",
+    "system-architecture",
+    "architecture-component",
+    "architecture-module",
+    "interface-contract",
+    "data-model",
+    "threat-model",
+    "runtime-view",
+    "reliability-view",
+    "observability-view",
+    "architecture-connection",
+    "architecture-standard",
+    "backlog",
+    "backlog-review",
+    "epic",
+    "epic-review",
+    "story",
+    "test-plan",
+    "requirement",
+    "definition-of-done",
+    "delivery",
+    "execution-plan",
+    "delivery-item",
+    "code-review",
+    "verification",
+    "delivery-review",
+    "verification-contract",
+    "environment-contract",
+    "delivery-governance"
+  ],
+  "type_path_patterns": {
+    "home": ["^home\\.md$"],
+    "moc": ["^maps/[a-z0-9-]+\\.md$", "^maps/_relations/[a-f0-9]{12}/relations-[0-9]{3}\\.md$"],
+    "landscape": ["^solution-design/landscape\\.md$"],
+    "solution_component": ["^solution-design/components/[a-z0-9]+(?:-[a-z0-9]+)*/component\\.md$"],
+    "engagement": ["^solution-design/engagements/[a-z0-9]+(?:-[a-z0-9]+)*\\.md$"],
+    "design_master": ["^design-system/MASTER\\.md$"],
+    "page_override": ["^design-system/pages/[a-z0-9]+(?:-[a-z0-9]+)*\\.md$"],
+    "experience": ["^experience-design/experiences/(?!exp-)[a-z0-9]+(?:-[a-z0-9]+)*/experience\\.md$"],
+    "journey": ["^experience-design/experiences/(?!exp-)[a-z0-9]+(?:-[a-z0-9]+)*/journeys/[a-z0-9]+(?:-[a-z0-9]+)*-journey\\.md$"],
+    "flow_set": ["^experience-design/experiences/(?!exp-)[a-z0-9]+(?:-[a-z0-9]+)*/flows/[a-z0-9]+(?:-[a-z0-9]+)*-flow-set\\.md$"],
+    "screen": ["^experience-design/experiences/(?!exp-)[a-z0-9]+(?:-[a-z0-9]+)*/screens/[a-z0-9]+(?:-[a-z0-9]+)*-screen\\.md$"],
+    "state": ["^experience-design/experiences/(?!exp-)[a-z0-9]+(?:-[a-z0-9]+)*/states/[a-z0-9]+(?:-[a-z0-9]+)*-state\\.md$"],
+    "transition": ["^experience-design/experiences/(?!exp-)[a-z0-9]+(?:-[a-z0-9]+)*/transitions/[a-z0-9]+(?:-[a-z0-9]+)*-transition\\.md$"],
+    "system_architecture": ["^system-architecture/architecture\\.md$"],
+    "architecture_component": ["^system-architecture/components/[a-z0-9]+(?:-[a-z0-9]+)*/component\\.md$"],
+    "architecture_module": ["^system-architecture/components/[a-z0-9]+(?:-[a-z0-9]+)*/(?:modules/[a-z0-9]+(?:-[a-z0-9]+)*/)*modules/[a-z0-9]+(?:-[a-z0-9]+)*/module\\.md$"],
+    "interface_contract": ["^system-architecture/components/[a-z0-9]+(?:-[a-z0-9]+)*/(?:modules/[a-z0-9]+(?:-[a-z0-9]+)*/)*interfaces/[a-z0-9]+(?:-[a-z0-9]+)*/interface\\.md$"],
+    "data_model": ["^system-architecture/components/[a-z0-9]+(?:-[a-z0-9]+)*/(?:modules/[a-z0-9]+(?:-[a-z0-9]+)*/)*data/[a-z0-9]+(?:-[a-z0-9]+)*/data-model\\.md$"],
+    "threat_model": ["^system-architecture/components/[a-z0-9]+(?:-[a-z0-9]+)*/(?:modules/[a-z0-9]+(?:-[a-z0-9]+)*/)*security/[a-z0-9]+(?:-[a-z0-9]+)*/threat-model\\.md$"],
+    "runtime_view": ["^system-architecture/components/[a-z0-9]+(?:-[a-z0-9]+)*/(?:modules/[a-z0-9]+(?:-[a-z0-9]+)*/)*runtime/[a-z0-9]+(?:-[a-z0-9]+)*/runtime\\.md$"],
+    "reliability_view": ["^system-architecture/components/[a-z0-9]+(?:-[a-z0-9]+)*/(?:modules/[a-z0-9]+(?:-[a-z0-9]+)*/)*reliability/[a-z0-9]+(?:-[a-z0-9]+)*/reliability\\.md$"],
+    "observability_view": ["^system-architecture/components/[a-z0-9]+(?:-[a-z0-9]+)*/(?:modules/[a-z0-9]+(?:-[a-z0-9]+)*/)*observability/[a-z0-9]+(?:-[a-z0-9]+)*/observability\\.md$"],
+    "architecture_connection": ["^system-architecture/connections/[a-z0-9]+(?:-[a-z0-9]+)*/connection\\.md$"],
+    "architecture_standard": ["^system-architecture/standards/[a-z0-9]+(?:-[a-z0-9]+)*-standard\\.md$"],
+    "decision": ["^(?:solution-design|system-architecture)/decisions/[a-z0-9]+(?:-[a-z0-9]+)*-decision\\.md$", "^system-architecture/components/[a-z0-9]+(?:-[a-z0-9]+)*/(?:modules/[a-z0-9]+(?:-[a-z0-9]+)*/)*decisions/[a-z0-9]+(?:-[a-z0-9]+)*-decision\\.md$", "^business-analysis/.+/decisions/[a-z0-9]+(?:-[a-z0-9]+)*-decision\\.md$"],
+    "backlog": ["^backlog/backlog\\.md$"],
+    "backlog_review": ["^backlog/reviews/round-[0-9]+-backlog-review\\.md$"],
+    "epic": ["^backlog/epics/[a-z0-9]+(?:-[a-z0-9]+)*/epic\\.md$"],
+    "epic_review": ["^backlog/epics/[a-z0-9]+(?:-[a-z0-9]+)*/reviews/round-[0-9]+-epic-review\\.md$"],
+    "story": ["^backlog/epics/[a-z0-9]+(?:-[a-z0-9]+)*/stories/[a-z0-9]+(?:-[a-z0-9]+)*/story\\.md$"],
+    "test_plan": ["^backlog/epics/[a-z0-9]+(?:-[a-z0-9]+)*/stories/[a-z0-9]+(?:-[a-z0-9]+)*/test-plan\\.md$"],
+    "requirement": ["^requirements/req-[0-9]{3,}-[a-z0-9]+(?:-[a-z0-9]+)*\\.md$"],
+    "definition_of_done": ["^delivery/definition-of-done\\.md$"],
+    "delivery": ["^delivery/deliveries/dlv-[0-9]{3,}-[a-z0-9]+(?:-[a-z0-9]+)*/delivery\\.md$"],
+    "execution_plan": ["^delivery/deliveries/dlv-[0-9]{3,}-[a-z0-9]+(?:-[a-z0-9]+)*/execution-plan\\.md$"],
+    "delivery_item": ["^delivery/deliveries/dlv-[0-9]{3,}-[a-z0-9]+(?:-[a-z0-9]+)*/items/[a-z0-9]+(?:-[a-z0-9]+)*/item\\.md$"],
+    "code_review": ["^delivery/deliveries/dlv-[0-9]{3,}-[a-z0-9]+(?:-[a-z0-9]+)*/items/[a-z0-9]+(?:-[a-z0-9]+)*/code-review\\.md$"],
+    "verification": ["^delivery/deliveries/dlv-[0-9]{3,}-[a-z0-9]+(?:-[a-z0-9]+)*/items/[a-z0-9]+(?:-[a-z0-9]+)*/verification\\.md$"],
+    "delivery_review": ["^delivery/deliveries/dlv-[0-9]{3,}-[a-z0-9]+(?:-[a-z0-9]+)*/delivery-review\\.md$"],
+    "verification_contract": ["^operation/verification-contract\\.md$"],
+    "environment_contract": ["^operation/environment-contract\\.md$"],
+    "delivery_governance": ["^delivery/governance/governance\\.md$"]
+  },
+  "status_values": {
+    "decision": ["draft", "in_review", "proposed", "accepted", "rejected", "approved", "superseded"],
+    "landscape": ["draft", "in_review", "approved", "superseded"],
+    "experience": ["draft", "in_review", "approved", "retirement_pending", "retired"],
+    "transition": ["draft", "in_review", "approved", "retired"],
+    "data_model": ["draft", "in_review", "approved", "retired"],
+    "threat_model": ["draft", "in_review", "approved", "retired"],
+    "backlog": ["draft", "approved", "superseded"],
+    "backlog_review": ["draft", "changes_requested", "approved"],
+    "epic": ["draft", "approved", "superseded"],
+    "epic_review": ["draft", "changes_requested", "approved"],
+    "story": ["planned"],
+    "test_plan": ["draft", "approved", "superseded", "retired"],
+    "requirement": ["draft", "approved", "resolved_no_change", "superseded", "withdrawn"],
+    "definition_of_done": ["draft", "approved"],
+    "delivery": ["scope_proposed", "scope_approved", "execution_approved", "active", "review", "pr_handoff", "awaiting_merge", "merged", "cancelled"],
+    "execution_plan": ["draft", "approved", "changes_requested"],
+    "delivery_item": ["in_scope", "claimed", "active", "blocked", "paused", "integrated", "cancelled"],
+    "code_review": ["draft", "changes_requested", "approved"],
+    "verification": ["draft", "failed", "passed"],
+    "delivery_review": ["draft", "changes_requested", "approved"],
+    "verification_contract": ["draft", "approved"],
+    "environment_contract": ["draft", "approved"],
+    "delivery_governance": ["draft", "approved"]
+  },
+  "backlog_contract": {
+    "story_owner_roles": [
+      "backend_developer",
+      "frontend_developer",
+      "devops_engineer"
+    ],
+    "story_supporting_roles": [
+      "backend_developer",
+      "frontend_developer",
+      "devops_engineer",
+      "software_architect",
+      "ux_designer"
+    ],
+    "required_story_sections": [
+      "User Value",
+      "Scope",
+      "Non-Goals",
+      "Implementation Responsibilities",
+      "Acceptance",
+      "Dependencies",
+      "Delivery Notes"
+    ],
+    "required_epic_review_sections": [
+      "Scope",
+      "Slicing",
+      "Criteria Coverage",
+      "Test Design",
+      "Dependencies",
+      "Role Ownership",
+      "Findings",
+      "Verdict"
+    ],
+    "required_backlog_review_sections": [
+      "Epic Coverage",
+      "Cross-Epic Overlap",
+      "Cross-Epic Dependencies",
+      "Delivery Sequencing",
+      "Shared Contracts",
+      "Deferred Criteria",
+      "Global Test Coverage",
+      "Findings",
+      "Verdict"
+    ],
+    "experience_ref_types": [
+      "experience",
+      "journey",
+      "flow-set",
+      "screen",
+      "state",
+      "transition"
+    ]
+  },
+  "relation_contract": {
+    "inverse_inline_max": 100,
+    "catalog_page_size": 100,
+    "catalog_root": "maps/_relations",
+    "keys": {
+      "derives_from": {"targets": ["*"], "inverse_label": "Derived knowledge"},
+      "satisfies": {"targets": ["acceptance-set", "rule-set", "budget-set"], "inverse_label": "Satisfied by"},
+      "constrained_by": {"targets": ["budget-set", "decision", "landscape", "design-master", "page-override", "solution-component", "interface-contract", "data-model", "threat-model", "runtime-view", "reliability-view", "observability-view"], "inverse_label": "Constrains"},
+      "implements": {"targets": ["landscape", "decision", "journey", "flow-set", "screen", "state", "transition", "requirement", "interface-contract", "data-model", "threat-model", "runtime-view", "reliability-view", "observability-view"], "inverse_label": "Implemented by"},
+      "uses_design": {"targets": ["design-master", "page-override"], "inverse_label": "Used by"},
+      "related_to": {"targets": ["*"], "inverse_label": "Related from"},
+      "verifies": {"targets": ["process", "story", "acceptance-set", "rule-set", "test-plan"], "inverse_label": "Verified by"}
+    },
+    "required_by_type_status": {
+      "landscape": {"approved": ["derives_from"]},
+      "page_override": {"all_statuses": ["uses_design"]},
+      "journey": {"approved": ["derives_from", "satisfies"]},
+      "flow_set": {"approved": ["derives_from", "satisfies"]},
+      "screen": {"all_statuses": ["derives_from", "uses_design"], "approved": ["satisfies"]}
+    },
+    "cardinality_by_type": {
+      "page_override": {"uses_design": {"min": 1, "max": 1}},
+      "screen": {"uses_design": {"min": 1, "max": 1}},
+      "backlog_review": {"derives_from": {"min": 1, "max": 1}},
+      "epic_review": {"derives_from": {"min": 1, "max": 1}},
+      "story": {"derives_from": {"min": 1, "max": 20}},
+      "test_plan": {"derives_from": {"min": 1, "max": 1}, "verifies": {"min": 1, "max": 100}}
+    }
+  }
+}

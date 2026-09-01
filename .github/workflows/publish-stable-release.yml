@@ -1,0 +1,80 @@
+name: Publish stable release
+
+on:
+  pull_request_target:
+    types: [closed]
+
+permissions:
+  contents: write
+  pull-requests: read
+
+concurrency:
+  group: stable-release
+  cancel-in-progress: false
+
+jobs:
+  exact-sha-host-gates:
+    if: >-
+      github.event.pull_request.merged == true &&
+      github.event.pull_request.base.ref == 'main' &&
+      github.event.pull_request.head.ref == 'release/stable' &&
+      github.event.pull_request.head.repo.full_name == github.repository
+    uses: ./.github/workflows/release-hosts.yml
+    with:
+      candidate_sha: ${{ github.event.pull_request.merge_commit_sha }}
+
+  publish:
+    if: >-
+      github.event.pull_request.merged == true &&
+      github.event.pull_request.base.ref == 'main' &&
+      github.event.pull_request.head.ref == 'release/stable' &&
+      github.event.pull_request.head.repo.full_name == github.repository
+    needs: exact-sha-host-gates
+    runs-on: macos-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          ref: ${{ github.event.pull_request.merge_commit_sha }}
+          fetch-depth: 0
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.x"
+      - name: Verify and publish the exact merge commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EXPECTED_MERGE_SHA: ${{ github.event.pull_request.merge_commit_sha }}
+          RELEASE_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_MERGE_SHA"
+          make release-check
+          version="$(python3 -c 'import json; print(json.load(open("versions.json"))["marketplace"])')"
+          python3 tools/release.py verify-release --version "$version"
+          python3 tools/release.py release-notes --version "$version" --output release-notes.md
+          stable_base="$(python3 -c 'import json; print(json.load(open(".release/stable.json"))["stable_base"])')"
+          main_source="$(python3 -c 'import json; print(json.load(open(".release/stable.json"))["main_source"])')"
+          remote_stable="$(git ls-remote --heads origin refs/heads/stable | awk '{print $1}')"
+          test "$remote_stable" = "$stable_base"
+          git merge-base --is-ancestor "$stable_base" HEAD
+          git merge-base --is-ancestor "$main_source" HEAD
+          if git ls-remote --exit-code --tags origin "refs/tags/v${version}" >/dev/null 2>&1; then
+            echo "Tag v${version} already exists." >&2
+            exit 1
+          fi
+          if gh release view "v${version}" >/dev/null 2>&1; then
+            echo "GitHub Release v${version} already exists." >&2
+            exit 1
+          fi
+          remote_release_head="$(git ls-remote --heads origin refs/heads/release/stable | awk '{print $1}')"
+          if [ -n "$remote_release_head" ]; then
+            test "$remote_release_head" = "$RELEASE_HEAD_SHA"
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -a "v${version}" -m "Agent Marketplace v${version}"
+          git push --atomic origin HEAD:refs/heads/stable "refs/tags/v${version}"
+          gh release create "v${version}" --verify-tag --title "Agent Marketplace v${version}" --notes-file release-notes.md
+          if [ -n "$remote_release_head" ]; then
+            git push --force-with-lease="refs/heads/release/stable:${RELEASE_HEAD_SHA}" origin :refs/heads/release/stable
+          fi

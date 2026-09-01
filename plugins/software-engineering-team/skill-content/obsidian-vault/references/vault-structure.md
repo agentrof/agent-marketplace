@@ -1,0 +1,132 @@
+# Vault Structure
+
+The graph reads as deliberate architecture because the topology is law:
+home into map notes, maps into their trees' hubs, hubs into leaves,
+leaves linking back up and sideways.
+
+## The layout
+
+```text
+workspace/docs/            the vault root (open THIS in the vault app)
+  home.md                  the knowledge-base root; dynamic, links the
+                           content-bearing subtrees' maps
+  maps/                    one map note per content-bearing subtree
+  business-analysis/       analysis spaces (space standard governs)
+    shop/                  a space: space.md, glossary.md, actors.md,
+                           budgets.md, domains/, decisions/,
+                           _generated/
+  solution-design/         landscape, engagements, decisions/, index
+  system-architecture/     Delivery-owned architecture root, component/module facets, decisions/, ledger and generated registry
+  design-system/           MASTER and page overrides
+  backlog/                 delivery backlog, nested by epic
+    backlog.md             canonical project backlog hub
+    reviews/               cross-epic backlog reviews
+    epics/<epic-slug>/     one epic package per folder
+      epic.md              epic hub and scope
+      reviews/             reviews of the epic and every child story
+      stories/<story-slug>/
+        story.md           story scope, criteria and delivery metadata
+        test-plan.md       executable/manual scenario design for the story
+  api/                     generated schema exports (non-note subtree)
+  _attachments/            embedded binaries only
+  .obsidian/               committed payload + local UI state
+```
+
+Subtrees, map names, machine directories, generated views and the
+attachments directory are policy (`data/vault-policy.json`); an unknown
+top-level directory is a layout error, so new trees enter through
+policy, never ad hoc.
+
+## Naming
+
+- Named files are plain per-folder contracts: a space root holds
+  `space.md`, `glossary.md`, `actors.md`, `budgets.md`; every domain
+  folder holds its own `domain.md`
+  (`domains/inventory/domain.md`, nested
+  `domains/finance/domains/accounts-payable/domain.md`). Live challenge
+  feedback is resolved into canonical records and is not stored as a BA
+  review-round file.
+- Typed content carries its type as the schema's English filename
+  suffix: `<slug>-rules.md`, `<slug>-acceptance.md`,
+  `<slug>-process.md`, `<slug>-entity.md`, `<slug>-decision.md`,
+  `<slug>-integration.md` (`checkout-rules.md`,
+  `order-events-decision.md`). No chain prefixes, no id prefixes: ids
+  live in frontmatter aliases, display identity lives in titles.
+- Basenames repeat freely across folders (every domain holds a
+  `domain.md`); only a policy-banned generic basename where a
+  meaningful slug is due is a per-file error, so a scoped gate repairs
+  its own subtree. Renames go through `normalize --rename`, which renames
+  per the grammar and rewrites every referrer in one operation.
+
+## Home and maps
+
+- `home.md` is the single knowledge-base root and DYNAMIC: it links
+  the map of every subtree that BEARS notes and nothing else; linking
+  an empty tree's map is an error, exactly like omitting a
+  content-bearing one. The seed links nothing. The entry that births a
+  tree materializes its map seed from the templates and adds the home
+  line in the same session; template seeds ship for every map, copy
+  time is the tree's birth.
+- Maps link HUBS, hubs link leaves, leaves are NOT required on maps.
+  Each map note (`type: moc`, no status) curates its subtree: it links
+  the policy-ladder hubs (a space's overview, each domain's overview)
+  plus the tree's top documents (the landscape, MASTER); deep leaves
+  get their edges from their hubs, nav sections and generated index
+  rows. Every policy hub MUST have an inbound link from its subtree
+  map (`map_coverage`); the producing persona updates the map in the
+  same session that creates, renames or retires docs.
+- Delivery input is canonical Markdown in `backlog/` and is
+  versioned with the project. The compiler derives registry, board, dependency
+  and coverage views under `backlog/_generated/`; these views are disposable
+  and never hand-edited. Execution results belong to the later delivery flow,
+  while story test plans are authored before delivery and are required for
+  backlog approval.
+
+## Nav sections
+
+Every authored leaf ends with the nav section:
+
+```markdown
+## Links <!-- sec: nav -->
+[[business-analysis/shop/domains/inventory/domain|Inventory]] -
+[[business-analysis/shop/domains/inventory/entities/stock-item-entity|Stock Item]] -
+[[business-analysis/shop/glossary|Glossary]]
+```
+
+The marker line is the fixed machine layer; the heading text above it
+follows the project's output language. The FIRST wikilink is the owning
+HUB per the policy hubs ladder: the deepest existing hub note covering
+this file (above, the domain overview). Hubs themselves and notes no
+ladder entry covers keep the subtree map first:
+
+```markdown
+## Links <!-- sec: nav -->
+[[maps/solution-design|Solution Design]] -
+[[solution-design/landscape|Landscape]] -
+[[solution-design/decisions/order-events-decision|SD-007]]
+```
+
+After the first link come 2-5 peers a reader would jump to next (policy
+range; the floor relaxes while a subtree holds fewer than three notes).
+Home and map notes carry no nav section.
+
+## Generated surfaces
+
+- A first-line marker (`<!-- generated by ...; do not edit by hand -->`)
+  makes a file a generated view: exempt from authoring invariants as a
+  subject, legal as a link target, guard-denied to hand edits, healed
+  only by its owning render verb. Index merge conflicts are resolved by
+  re-rendering, never by hand.
+- Policy `machine_dirs` (`_generated/`) are compiler-owned directories
+  the layout check tolerates wholesale, including non-note files such
+  as `registry.json`; authored docs never link into them, and the
+  global graph filters them out.
+- `api/` and other policy-listed generated subtrees hold non-note
+  exports; they are never orphans and never carry frontmatter.
+
+## Attachments
+
+Binaries live under `_attachments/` and exist only while at least one
+resolving embed references them; an unreferenced attachment is a layout
+error. Transient working files (candidate galleries, scratch exports)
+leave the vault before the gate.

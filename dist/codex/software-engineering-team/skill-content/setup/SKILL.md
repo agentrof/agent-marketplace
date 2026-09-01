@@ -1,0 +1,93 @@
+---
+name: setup
+description: Inspect, check and apply one convergent project bootstrap or package refresh without replacing authored project truth.
+exposure: entry
+---
+
+# Setup
+
+Setup never writes executable test or environment placeholders into a consuming
+project. Approved Operation Contracts supply those commands at Delivery time.
+Delivery activation replaces `{{test_command}}`, `{{dependency_audit_job}}`
+and `{{environment_smoke_job}}` in its private CI template, while setup alone
+replaces `{{project_local_ignores}}` in its managed gitignore block. No
+placeholder is allowed to reach a consuming repository.
+
+## When to Use
+
+- First run after installing the team in a repository.
+- A clone or host change needs local instructions regenerated.
+- A package refresh needs managed-file drift previewed and reconciled.
+
+## Procedure
+
+1. Resolve the Git root. The only workspace is `workspace/`; never ask for or
+   create an alternate vault location. One team owns one project. Run:
+
+   ```text
+   <absolute-python> <absolute-package-scripts>/setup_project.py inspect --project-root <root> --json
+   ```
+
+   Present its pre-mutation operation list. Requirement Flow determines which
+   stages apply for each request; setup does not infer request routing.
+2. Resolve any reported blocker, then run:
+
+   ```text
+   <absolute-python> <absolute-package-scripts>/setup_project.py apply --project-root <root> --json
+   ```
+
+   Apply creates the project-local
+   `.agentrof/agent-marketplace/.runtime/` scratch directory, reconciles the
+   managed workspace surfaces and runs its closing gate. A disposable OS guard
+   serializes mutating setup apply processes. Apply rebuilds its authoritative
+   plan under that guard, and each target is rechecked immediately before its
+   atomic replacement. If the gate fails, setup restores only exact unchanged
+   postimages; an observed concurrent edit is preserved and reported as a
+   rollback conflict. Pause non-setup editors on all setup-managed targets for
+   the short apply window because portable filesystems provide no conditional
+   replace against a non-cooperating writer. Repeating apply with the same
+   package and project must produce no operation.
+   Use the active host runtime's exact absolute Python executable and the
+   installed package script's absolute path. A bare Python command name,
+   `/usr/bin/env` indirection or direct shebang invocation cannot receive
+   machine-writer authorization because a shell alias or function can replace
+   it before execution.
+3. Run `<absolute-python> <absolute-package-scripts>/setup_project.py check
+   --project-root <root> --json`. Check
+   uses the same convergence planner as inspect and apply. A stale portable
+   gate, payload key or package projection fails even when the file exists.
+4. Run the generated host project `inspect`, resolve every declared
+   preserve/discard choice for user-owned instruction companions, then run its
+   `apply` and `check`. Never overwrite companions silently. This is a host
+   adapter projection; project truth remains the canonical workspace.
+5. Read the `obsidian-vault` skill completely. Refresh materializes its vault
+   payload under `workspace/docs/`, rebuilds the closed `workspace/config.json`
+   shape, preserves valid language values, and converges compiler-owned
+   relation reports. Retired command fields migrate to draft `docs/operation/`
+   contracts and a valid legacy `max_parallel` becomes Governance revision 1.
+   It never edits authored notes during refresh. The policy includes the fixed
+   backlog keys `backlog`, `backlog-review`, `epic`, `epic-review`, `story`
+   and `test-plan`, plus all analysis/design types. Issue reporting is external
+   and stateless, so setup never creates an issue type, tree, map or runtime
+   record. Type keys and graph colors stay stable; taxonomy changes do not
+   expand project configuration.
+6. Policy-owned keys in `app.json`, `core-plugins.json`, `graph.json` and
+   `types.json` converge while unrelated user knobs remain untouched. The
+   vetted community-plugin enable list and the policy-owned plugin directories
+   are ignored, package-projected local files. Refresh replaces changed files
+   and removes assets retired by the package while preserving unrelated plugin
+   directories. Never commit this local projection to the consuming project.
+7. Ensure the managed root `.gitignore` block ignores only project-local
+   runtime, host projections, local Obsidian UI state and the community-plugin
+   projection. The contract JSON files and CSS snippet remain tracked,
+   reviewable project changes.
+8. Run the portable vault gate and relevant Requirement compilers. Delivery
+   execution owns its own test and provider gates; setup never emits a
+   template with unresolved command placeholders.
+   Read [ci-bootstrap](references/ci-bootstrap.md) when an approved Delivery
+   is ready to materialize project CI.
+9. Review and commit the exact tracked refresh diff before a workflow handoff.
+   Report `requirement` as the next entry. `/requirement` evaluates the
+   request-specific impact matrix and routes only the required stages and
+   backlog handoff; setup never infers routing from repository history.
+   Start a fresh host session after setup.

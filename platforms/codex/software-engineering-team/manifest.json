@@ -1,0 +1,36 @@
+{
+  "name": "software-engineering-team",
+  "version": "0.0.1",
+  "description": "Software Engineering Team for Requirement Flow, approved backlog planning and coordinated Delivery execution.",
+  "author": {
+    "name": "Agentrof",
+    "url": "https://github.com/agentrof"
+  },
+  "homepage": "https://github.com/agentrof/agent-marketplace",
+  "repository": "https://github.com/agentrof/agent-marketplace",
+  "license": "MIT",
+  "keywords": [
+    "software-engineering",
+    "product-development",
+    "multi-agent"
+  ],
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "Software Engineering Team",
+    "shortDescription": "An orchestrated product and engineering team",
+    "longDescription": "Drive product work through analysis, architecture, design, test planning, and an approved project-local Obsidian backlog with Codex-native agents.",
+    "developerName": "Agentrof",
+    "category": "Engineering",
+    "capabilities": [
+      "Read",
+      "Write",
+      "Interactive"
+    ],
+    "websiteURL": "https://github.com/agentrof/agent-marketplace",
+    "defaultPrompt": [
+      "Set up this repository for the Software Engineering Team.",
+      "Prepare this project through the Software Engineering Team workflow."
+    ],
+    "brandColor": "#2563EB"
+  }
+}

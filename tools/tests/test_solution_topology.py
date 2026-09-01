@@ -1,0 +1,228 @@
+import tempfile
+import unittest
+from contextlib import redirect_stderr, redirect_stdout
+from io import StringIO
+from pathlib import Path
+import sys
+
+ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(ROOT / "plugins/software-engineering-team/scripts"))
+import landscape_check
+import stage_package
+
+
+class SolutionTopologyTests(unittest.TestCase):
+    def write_processes(self, docs):
+        space = docs / "business-analysis/marketplace"
+        process_root = space / "processes"
+        process_root.mkdir(parents=True)
+        (space / "space.md").write_text(
+            "---\ntype: space\npackage_status: approved\n---\n# Marketplace\n",
+            encoding="utf-8",
+        )
+        for slug in ("checkout", "returns"):
+            (process_root / f"{slug}-process.md").write_text(
+                "---\ntype: process\nstatus: approved\n---\n# Process\n",
+                encoding="utf-8",
+            )
+
+    def write_nested_process(self, docs):
+        space = docs / "business-analysis/marketplace"
+        process_root = space / "domains/orders/processes"
+        process_root.mkdir(parents=True)
+        (space / "space.md").write_text(
+            "---\ntype: space\npackage_status: approved\n---\n# Marketplace\n",
+            encoding="utf-8",
+        )
+        (process_root / "checkout-process.md").write_text(
+            "---\ntype: process\nstatus: approved\n---\n# Process\n",
+            encoding="utf-8",
+        )
+
+    def topology(self):
+        return [{
+            "component_id": "orders-api", "sourcing": "build",
+            "owned_ba_refs": ["business-analysis/marketplace/processes/checkout-process"],
+            "depends_on_component": [],
+            "technology_bindings": [
+                "solution-design/decisions/runtime-decision",
+                "solution-design/decisions/environment-decision",
+            ],
+            "data_store_disposition": "not_applicable",
+        }]
+
+    def decisions(self):
+        return [
+            {"path": "runtime-decision", "status": "accepted", "kind": "technology-selection"},
+            {"path": "environment-decision", "status": "accepted", "kind": "environment"},
+        ]
+
+    def test_every_approved_ba_process_needs_owner_or_disposition(self):
+        with tempfile.TemporaryDirectory() as raw:
+            docs = Path(raw) / "workspace/docs"
+            self.write_processes(docs)
+            findings = landscape_check.topology_findings(
+                docs / "solution-design", self.topology(), self.decisions(), {}
+            )
+            self.assertIn(
+                "BA process business-analysis/marketplace/processes/returns-process has no topology owner or not_technical disposition",
+                findings,
+            )
+
+    def test_nested_approved_ba_process_is_resolved(self):
+        with tempfile.TemporaryDirectory() as raw:
+            docs = Path(raw) / "workspace/docs"
+            self.write_nested_process(docs)
+            topology = self.topology()
+            topology[0]["owned_ba_refs"] = [
+                "business-analysis/marketplace/domains/orders/processes/checkout-process"
+            ]
+            findings = landscape_check.topology_findings(
+                docs / "solution-design", topology, self.decisions(), {}
+            )
+            self.assertFalse(findings)
+
+    def test_explicit_empty_ba_ownership_is_valid_when_coverage_is_disposed(self):
+        with tempfile.TemporaryDirectory() as raw:
+            docs = Path(raw) / "workspace/docs"
+            self.write_processes(docs)
+            topology = self.topology()
+            topology[0]["owned_ba_refs"] = []
+            findings = landscape_check.topology_findings(
+                docs / "solution-design", topology, self.decisions(), {
+                    "not_technical_allocations": [
+                        "business-analysis/marketplace/processes/checkout-process|Handled outside the technical topology",
+                        "business-analysis/marketplace/processes/returns-process|Handled outside the technical topology",
+                    ]
+                }
+            )
+            self.assertFalse(findings)
+
+    def test_missing_ba_ownership_is_still_rejected(self):
+        with tempfile.TemporaryDirectory() as raw:
+            docs = Path(raw) / "workspace/docs"
+            self.write_processes(docs)
+            topology = self.topology()
+            del topology[0]["owned_ba_refs"]
+            findings = landscape_check.topology_findings(
+                docs / "solution-design", topology, self.decisions(), {}
+            )
+            self.assertIn(
+                "components/orders-api/component.md: modern topology needs owned_ba_refs",
+                findings,
+            )
+
+    def test_not_technical_allocation_needs_a_rationale_and_closes_coverage(self):
+        with tempfile.TemporaryDirectory() as raw:
+            docs = Path(raw) / "workspace/docs"
+            self.write_processes(docs)
+            findings = landscape_check.topology_findings(
+                docs / "solution-design", self.topology(), self.decisions(), {
+                    "not_technical_allocations": [
+                        "business-analysis/marketplace/processes/returns-process|Handled by an existing manual operation"
+                    ]
+                }
+            )
+            self.assertFalse(findings)
+
+    def test_confirm_topology_keeps_component_rows_separate_from_markdown_section(self):
+        """Regression: parsing the Components section must not overwrite rows."""
+        with tempfile.TemporaryDirectory() as raw:
+            docs = Path(raw) / "workspace/docs"
+            self.write_processes(docs)
+            tree = docs / "solution-design"
+            (tree / "components/orders-api").mkdir(parents=True)
+            (tree / "decisions").mkdir()
+            (tree / "components/orders-api/component.md").write_text(
+                "---\ncomponent_id: orders-api\ncomponent_class: application\n"
+                "sourcing: build\napp_kind: backend-api\ncode_path: workspace/apps/orders-api\n"
+                "owned_ba_refs:\n  - business-analysis/marketplace/processes/checkout-process\n"
+                "technology_bindings:\n  - solution-design/decisions/runtime-decision\n"
+                "  - solution-design/decisions/environment-decision\n"
+                "data_store_disposition: not_applicable\n---\n# Orders\n",
+                encoding="utf-8",
+            )
+            for slug, identifier, kind, technology, skill in (
+                ("runtime", "SD-001", "technology-selection", "python-fastapi", "python-fastapi"),
+                ("environment", "SD-002", "environment", "docker", "docker-compose"),
+            ):
+                (tree / f"decisions/{slug}-decision.md").write_text(
+                    f"---\nstatus: accepted\naliases:\n  - {identifier}\n"
+                    f"decision_kind: {kind}\napplies_to:\n  - orders-api\n"
+                    f"selected_technology: {technology}\nmethod_skills:\n  - {skill}\n---\n# {slug}\n",
+                    encoding="utf-8",
+                )
+            (tree / "decision-log.md").write_text("<!-- generated by test -->\n", encoding="utf-8")
+            (tree / "landscape.md").write_text(
+                "---\ntopology_selected: true\nnot_technical_allocations:\n"
+                "  - business-analysis/marketplace/processes/returns-process|manual operation\n"
+                "---\n# Landscape\n\n## Target\n\nSD-001 establishes the target.\n"
+                "\n## Transition\n\nMove safely.\n\n## Components\n\n"
+                "| component | decision | verdict |\n|---|---|---|\n"
+                "| orders-api | [[solution-design/decisions/runtime-decision|SD-001]] and "
+                "[[solution-design/decisions/environment-decision|SD-002]] | accepted |\n",
+                encoding="utf-8",
+            )
+            stdout, stderr = StringIO(), StringIO()
+            with redirect_stdout(stdout), redirect_stderr(stderr):
+                code = landscape_check.main(["confirm-topology", "--tree", str(tree)])
+            self.assertEqual(code, 0, stdout.getvalue() + stderr.getvalue())
+            props, _line, error = landscape_check.parse_frontmatter(
+                (tree / "landscape.md").read_text(encoding="utf-8")
+            )
+            self.assertFalse(error)
+            self.assertEqual(props["topology_contract_version"], 3)
+
+    def test_legacy_solution_is_readonly_and_cannot_satisfy_strict_handoff(self):
+        with tempfile.TemporaryDirectory() as raw:
+            docs = Path(raw) / "workspace/docs"
+            tree = docs / "solution-design"
+            tree.mkdir(parents=True)
+            landscape = tree / "landscape.md"
+            landscape.write_text(
+                "---\ntype: landscape\npackage_status: approved\n"
+                "topology_contract_version: 2\n---\n# Legacy\n",
+                encoding="utf-8",
+            )
+            digest = landscape_check.package_hash(tree)
+            landscape.write_text(
+                landscape.read_text(encoding="utf-8").replace(
+                    "topology_contract_version: 2\n", 
+                    f"topology_contract_version: 2\npackage_hash: {digest}\n",
+                ), encoding="utf-8",
+            )
+            receipt = stage_package.solution_candidates(docs)[0]
+            self.assertEqual(receipt["verification_profile"], "legacy-readonly")
+            _receipt, errors = stage_package.verify(
+                docs, "solution-design", "solution-design/landscape",
+                require_strict_current=True,
+            )
+            self.assertTrue(any("legacy-readonly" in error for error in errors))
+
+    def test_in_review_decision_is_not_a_topology_binding(self):
+        with tempfile.TemporaryDirectory() as raw:
+            docs = Path(raw) / "workspace/docs"
+            self.write_processes(docs)
+            decisions = self.decisions()
+            decisions[0]["status"] = "in_review"
+            decisions[0].update({
+                "id": "SD-001", "applies_to": ["orders-api"],
+                "selected_technology": "python-fastapi",
+                "method_skills": ["python-fastapi"],
+            })
+            decisions[1].update({
+                "id": "SD-002", "applies_to": ["orders-api"],
+                "selected_technology": "docker",
+                "method_skills": ["docker-compose"],
+            })
+            registry = landscape_check.capability_registry(
+                docs / "solution-design", decisions)
+            self.assertNotIn("runtime-decision", registry)
+            findings = landscape_check.topology_findings(
+                docs / "solution-design", self.topology(), decisions, {}
+            )
+            self.assertTrue(any("accepted" in finding for finding in findings))
+
+
+if __name__ == "__main__":
+    unittest.main()

@@ -1,0 +1,64 @@
+name: release-hosts
+
+on:
+  workflow_call:
+    inputs:
+      candidate_sha:
+        description: Exact trusted candidate commit to exercise
+        required: false
+        type: string
+        default: ""
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - '.agents/**'
+      - '.claude-plugin/**'
+      - '.github/workflows/release-hosts.yml'
+      - 'Makefile'
+      - 'platforms/**'
+      - 'plugins/**'
+      - 'product.json'
+      - 'tools/**'
+      - 'versions.json'
+  schedule:
+    - cron: "17 4 * * 1"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  native-host-lifecycle:
+    name: Claude Code and Codex lifecycle
+    runs-on: macos-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          ref: ${{ inputs.candidate_sha || github.sha }}
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.x"
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "24"
+          package-manager-cache: false
+      - name: Install pinned host CLIs
+        run: |
+          set -euo pipefail
+          claude_version="$(python3 -c 'import json; print(json.load(open("tools/data/host-cli-versions.json"))["claude_code"])')"
+          codex_version="$(python3 -c 'import json; print(json.load(open("tools/data/host-cli-versions.json"))["codex"])')"
+          npm install --global "@anthropic-ai/claude-code@${claude_version}" "@openai/codex@${codex_version}"
+          claude --version | grep -F "${claude_version}"
+          codex --version | grep -F "${codex_version}"
+      - name: Record host versions
+        run: |
+          claude --version
+          codex --version
+      - name: Run deterministic and public stable lifecycle gates
+        run: |
+          make public-release-check
+          python3 tools/smoke_plugin_installs.py --channel checkout

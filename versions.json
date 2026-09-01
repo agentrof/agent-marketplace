@@ -1,0 +1,7 @@
+{
+  "schema_version": 1,
+  "marketplace": "0.0.1",
+  "plugins": {
+    "software-engineering-team": "0.0.1"
+  }
+}

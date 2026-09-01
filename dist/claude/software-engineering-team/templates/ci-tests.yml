@@ -1,0 +1,23 @@
+# Materialized by Delivery activation from approved Operation Contracts.
+# No double-braced token may be written into a consuming repository.
+name: tests
+
+on:
+  pull_request:
+
+jobs:
+  vault_gate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify the single-vault knowledge contract
+        run: python3 .github/agentrof/vault-gate.pyz check --project-root . --json
+
+  tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run the approved verification suite
+        run: {{test_command}}
+{{dependency_audit_job}}
+{{environment_smoke_job}}

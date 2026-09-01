@@ -1,0 +1,20 @@
+{
+  "name": "agent-marketplace",
+  "interface": {
+    "displayName": "Agent Marketplace"
+  },
+  "plugins": [
+    {
+      "name": "software-engineering-team",
+      "source": {
+        "source": "local",
+        "path": "./dist/codex/software-engineering-team"
+      },
+      "policy": {
+        "installation": "INSTALLED_BY_DEFAULT",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Engineering"
+    }
+  ]
+}

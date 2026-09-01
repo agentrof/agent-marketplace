@@ -1,0 +1,26 @@
+# macOS
+.DS_Store
+
+# Logs
+*.log
+
+# Python runtime caches
+__pycache__/
+*.py[cod]
+
+# Environment
+.env
+.env.*
+!.env.example
+
+# Local agent workspaces, never tracked
+.claude/
+.codex/
+.agentrof/
+
+# Research and source material: local only, never in git (architecture invariant)
+assets/
+
+# Obsidian local UI state (machine-specific, noisy diffs)
+**/.obsidian/workspace.json
+**/.obsidian/workspace-mobile.json

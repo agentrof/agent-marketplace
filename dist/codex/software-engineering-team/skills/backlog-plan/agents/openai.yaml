@@ -1,0 +1,6 @@
+interface:
+  display_name: "Backlog Plan"
+  short_description: "Start the Backlog Plan guided workflow"
+  default_prompt: "Use $software-engineering-team:backlog-plan to start this workflow."
+policy:
+  allow_implicit_invocation: false

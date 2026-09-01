@@ -1,0 +1,267 @@
+{
+  "collapse-filter": false,
+  "search": "-path:_generated -path:_ledger",
+  "showTags": false,
+  "showAttachments": false,
+  "hideUnresolved": false,
+  "showOrphans": true,
+  "collapse-color-groups": false,
+  "colorGroups": [
+    {
+      "query": "tag:#doc/space",
+      "color": {
+        "a": 1,
+        "rgb": 16733986
+      }
+    },
+    {
+      "query": "tag:#doc/domain",
+      "color": {
+        "a": 1,
+        "rgb": 16752640
+      }
+    },
+    {
+      "query": "tag:#doc/glossary",
+      "color": {
+        "a": 1,
+        "rgb": 16498733
+      }
+    },
+    {
+      "query": "tag:#doc/actor-roster",
+      "color": {
+        "a": 1,
+        "rgb": 9268835
+      }
+    },
+    {
+      "query": "tag:#doc/budget-set",
+      "color": {
+        "a": 1,
+        "rgb": 15483002
+      }
+    },
+    {
+      "query": "tag:#doc/entity",
+      "color": {
+        "a": 1,
+        "rgb": 2201331
+      }
+    },
+    {
+      "query": "tag:#doc/process",
+      "color": {
+        "a": 1,
+        "rgb": 48340
+      }
+    },
+    {
+      "query": "tag:#doc/rule-set",
+      "color": {
+        "a": 1,
+        "rgb": 4149685
+      }
+    },
+    {
+      "query": "tag:#doc/acceptance-set",
+      "color": {
+        "a": 1,
+        "rgb": 5431378
+      }
+    },
+    {
+      "query": "tag:#doc/decision",
+      "color": {
+        "a": 1,
+        "rgb": 10233776
+      }
+    },
+    {
+      "query": "tag:#doc/system-architecture OR tag:#doc/architecture-component OR tag:#doc/architecture-module OR tag:#doc/interface-contract OR tag:#doc/data-model OR tag:#doc/threat-model OR tag:#doc/runtime-view OR tag:#doc/reliability-view OR tag:#doc/observability-view OR tag:#doc/architecture-connection OR tag:#doc/architecture-standard",
+      "color": {
+        "a": 1,
+        "rgb": 3447003
+      }
+    },
+    {
+      "query": "tag:#doc/integration",
+      "color": {
+        "a": 1,
+        "rgb": 38536
+      }
+    },
+    {
+      "query": "tag:#doc/landscape",
+      "color": {
+        "a": 1,
+        "rgb": 5227511
+      }
+    },
+    {
+      "query": "tag:#doc/solution-component",
+      "color": {
+        "a": 1,
+        "rgb": 5227511
+      }
+    },
+    {
+      "query": "tag:#doc/engagement",
+      "color": {
+        "a": 1,
+        "rgb": 8280002
+      }
+    },
+    {
+      "query": "tag:#doc/design-master",
+      "color": {
+        "a": 1,
+        "rgb": 11342935
+      }
+    },
+    {
+      "query": "tag:#doc/page-override",
+      "color": {
+        "a": 1,
+        "rgb": 13538264
+      }
+    },
+    {
+      "query": "tag:#doc/experience OR tag:#doc/journey OR tag:#doc/flow-set OR tag:#doc/screen OR tag:#doc/state OR tag:#doc/transition",
+      "color": {
+        "a": 1,
+        "rgb": 3108513
+      }
+    },
+    {
+      "query": "tag:#doc/moc OR tag:#doc/home",
+      "color": {
+        "a": 1,
+        "rgb": 9741240
+      }
+    },
+    {
+      "query": "tag:#doc/backlog",
+      "color": {
+        "a": 1,
+        "rgb": 11032055
+      }
+    },
+    {
+      "query": "tag:#doc/backlog-review",
+      "color": {
+        "a": 1,
+        "rgb": 16007006
+      }
+    },
+    {
+      "query": "tag:#doc/epic",
+      "color": {
+        "a": 1,
+        "rgb": 3900150
+      }
+    },
+    {
+      "query": "tag:#doc/epic-review",
+      "color": {
+        "a": 1,
+        "rgb": 16096779
+      }
+    },
+    {
+      "query": "tag:#doc/story",
+      "color": {
+        "a": 1,
+        "rgb": 1357990
+      }
+    },
+    {
+      "query": "tag:#doc/test-plan",
+      "color": {
+        "a": 1,
+        "rgb": 2278750
+      }
+    },
+    {
+      "query": "tag:#doc/requirement",
+      "color": {
+        "a": 1,
+        "rgb": 9323693
+      }
+    },
+    {
+      "query": "tag:#doc/definition-of-done",
+      "color": {
+        "a": 1,
+        "rgb": 1482885
+      }
+    },
+    {
+      "query": "tag:#doc/delivery",
+      "color": {
+        "a": 1,
+        "rgb": 2388387
+      }
+    },
+    {
+      "query": "tag:#doc/execution-plan",
+      "color": {
+        "a": 1,
+        "rgb": 14059792
+      }
+    },
+    {
+      "query": "tag:#doc/delivery-item",
+      "color": {
+        "a": 1,
+        "rgb": 2267476
+      }
+    },
+    {
+      "query": "tag:#doc/code-review",
+      "color": {
+        "a": 1,
+        "rgb": 6000633
+      }
+    },
+    {
+      "query": "tag:#doc/verification",
+      "color": {
+        "a": 1,
+        "rgb": 1549705
+      }
+    },
+    {
+      "query": "tag:#doc/delivery-review",
+      "color": {
+        "a": 1,
+        "rgb": 12154638
+      }
+    },
+    {
+      "query": "tag:#doc/verification-contract OR tag:#doc/environment-contract",
+      "color": {
+        "a": 1,
+        "rgb": 1549705
+      }
+    },
+    {
+      "query": "tag:#doc/delivery-governance",
+      "color": {
+        "a": 1,
+        "rgb": 2388387
+      }
+    }
+  ],
+  "collapse-display": false,
+  "showArrow": true,
+  "textFadeMultiplier": 0,
+  "nodeSizeMultiplier": 1.1,
+  "lineSizeMultiplier": 1,
+  "collapse-forces": false,
+  "centerStrength": 0.45,
+  "repelStrength": 12,
+  "linkStrength": 1,
+  "linkDistance": 220,
+  "scale": 1
+}

@@ -1,0 +1,28 @@
+# OS noise
+.DS_Store
+
+# Logs
+*.log
+
+# Environment
+.env
+.env.*
+!.env.example
+
+# agent-marketplace:software-engineering-team:gitignore:start
+/.agentrof/
+/.claude/
+/.codex/
+workspace/junit-*.xml
+workspace/docs/.obsidian/*
+!workspace/docs/.obsidian/app.json
+!workspace/docs/.obsidian/appearance.json
+!workspace/docs/.obsidian/core-plugins.json
+!workspace/docs/.obsidian/graph.json
+!workspace/docs/.obsidian/types.json
+!workspace/docs/.obsidian/snippets/
+!workspace/docs/.obsidian/snippets/**
+workspace/docs/.obsidian/workspace.json
+workspace/docs/.obsidian/workspace-mobile.json
+workspace/docs/.trash/
+# agent-marketplace:software-engineering-team:gitignore:end

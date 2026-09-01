@@ -1,0 +1,10 @@
+{
+  "protocol_version": "delivery-protocol-1",
+  "wire_hash_algorithm": "sha256",
+  "target_branch_policy": "one resolved protected target branch",
+  "integration_policy": "one integration branch and one final PR per Delivery",
+  "merge_policy": "merge-commit-only; squash and rebase fail closed",
+  "coordination_policy": "Fence and item/slot refs are compiler-owned; no database or event ledger",
+  "release_management": "out_of_scope",
+  "host_parity": "all supported host distributions consume the same canonical contracts"
+}

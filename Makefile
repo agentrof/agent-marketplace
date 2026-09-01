@@ -18,10 +18,10 @@ dist-check:
 	$(PY) tools/build_distributions.py --check
 
 test:
-	$(PY) -m unittest discover -s tools/tests -p 'test_*.py' -v
+	PYTHONDONTWRITEBYTECODE=1 $(PY) -m unittest discover -s tools/tests -p 'test_*.py' -v
 
 eval:
-	$(PY) -m unittest tools.tests.test_scenario_report tools.tests.test_runtime_scripts tools.tests.test_ba_compile -v
+	PYTHONDONTWRITEBYTECODE=1 $(PY) -m unittest tools.tests.test_scenario_report tools.tests.test_runtime_scripts tools.tests.test_ba_compile -v
 	@echo "eval: deterministic behavior assertions green"
 
 check: validate release-validate counts-check dist-check test

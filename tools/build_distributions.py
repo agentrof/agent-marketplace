@@ -15,6 +15,7 @@ import json
 import re
 import shutil
 import stat
+import sys
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
@@ -210,7 +211,14 @@ def _load_adapter_module(path: Path, host_id: str) -> ModuleType:
     if spec is None or spec.loader is None:
         raise ValueError(f"{path}: adapter module cannot be loaded")
     module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
+    previous = sys.dont_write_bytecode
+    try:
+        # Adapter discovery is a read-only policy operation. Never mutate a
+        # checkout merely because the host Python stores caches beside source.
+        sys.dont_write_bytecode = True
+        spec.loader.exec_module(module)
+    finally:
+        sys.dont_write_bytecode = previous
     return module
 
 

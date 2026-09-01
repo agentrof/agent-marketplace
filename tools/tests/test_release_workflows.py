@@ -342,6 +342,10 @@ class ReleaseWorkflowContracts(unittest.TestCase):
         makefile = (REPO / "Makefile").read_text(encoding="utf-8")
         self.assertRegex(makefile, r"(?m)^release-check: check$")
         self.assertRegex(makefile, r"(?m)^public-release-check: release-check$")
+        self.assertRegex(
+            makefile,
+            r"(?m)^\s*PYTHONDONTWRITEBYTECODE=1 \$\(PY\) -m unittest",
+        )
         self.assertIn(
             'tools/smoke_plugin_installs.py --channel public --expected-sha',
             makefile,

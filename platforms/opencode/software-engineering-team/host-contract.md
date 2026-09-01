@@ -26,7 +26,9 @@
   real-binary release gate, not an unproven runtime claim. Runtime binding
   also accepts exactly the generated effective OpenCode plugin; a different
   project or global plugin set is unsupported. New or experimental mutating
-  tools fail closed.
+  tools fail closed. Effective-config discovery is read-only and retries only
+  bounded transient runtime failures; invalid configuration and exhausted
+  attempts still fail closed.
 - Every supported `write`, `edit`, `apply_patch`, and `bash` call invokes
   the hash-pinned canonical package `scripts/vault_hook.py` before execution
   and invokes its matching post phase after success. Session/call identity and

@@ -42,7 +42,9 @@ rebinds that set and the open application atomically, and resets review state
 to `draft`. Never recover only part of the set or edit compiler-owned state
 directly. Recovery preserves authored child records and prototype/package
 artifact bytes and does not change approved ledgers or receipts; run the full
-review flow again.
+review flow again. For a legacy scope only, packages may already carry the
+fresh plan's exact current input bindings; every other package identity,
+revision, Requirement binding and scope guard remains exact.
 
 ## Preflight and authoring
 

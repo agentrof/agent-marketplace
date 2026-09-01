@@ -1,5 +1,5 @@
 {
-  "build_id": "snapshot.a7998e474ba90c87a86ca47ae83822231ee77707e1877bd61d43b07ba2a4f53f",
+  "build_id": "snapshot.0508c52e03ed5d35a27add0fecdaadc42da0d0562c458d3a67edaddd69a7afd4",
   "component": "software-engineering-team",
   "delivery_protocol": {
     "read_max": 1,
@@ -38,7 +38,7 @@
     "flows/design-system.md": "d8beee971392da1f39f91627999cbf0dbec948eb27947c1eb2aed3960c0e8773",
     "flows/design.md": "5e87edb63497b9b06deff9bf210b6674bc7990245d70b4f7e2be1b1fad9dfbca",
     "flows/execution-planning.md": "98f5644074665f4b7ac5a045a107aff4dddf50be081da37e089c39f19a70f458",
-    "flows/experience-design.md": "f5505820b8dcf486fd8de041e725e6d4160610d50f40557add92fea47e21ea52",
+    "flows/experience-design.md": "cd3b027fd77f25dad23f11db93b691cdff900910e8eca63c940422f3117dd682",
     "flows/operation.md": "f96c83c59e1ce5cbb4f4e9451867fadf10f5b3e9d8ac0202b85c58a53b6cd35a",
     "flows/requirement.md": "fc7930f17daf899ed2375d4c67bf0fefcc86be7894f0f8d02b276527e67a3c04",
     "flows/solution-design.md": "5d1d4e2ead2ee8458b4f6498f39afd91447e91ed50b66ee79e3c71d224736f10",
@@ -56,7 +56,7 @@
     "scripts/delivery_result.py": "ec591462319c871ffc97e5b5c9296be9c6f559a9608201d55d48509b8a689b89",
     "scripts/design_system_compile.py": "77bd9ea0d1d34d1768aa3d73685fc0a6001d47c520da86cf9435ebe594894dfc",
     "scripts/experience_application_check.py": "171a950aa83092ad703cff4ad28e2e20952fc37cf613a069cb65178a669dc6d8",
-    "scripts/experience_compile.py": "a53338e1bba7a97c46e80f193afdf7d06255c871211c9c6a4f0ccabd18d4a5a1",
+    "scripts/experience_compile.py": "21ebd6c5e1e4274736695fcca563d0aa5604e1ef2acc93fe2fccdc82c966330d",
     "scripts/file_issue.py": "9dabf91796c416be8909e517f9a9859faff12c24c868c0c0e037739820bee02e",
     "scripts/generate_claude_project.py": "9258954d09757f36a51ac022c1dd8e915b3b831025f24d887d01be2ca2e02d29",
     "scripts/landscape_check.py": "64fe7922c5fd3b26c1fd0648f046af1ccc521339eefdab39714bc4908865c4a3",
@@ -104,8 +104,8 @@
     "skill-content/docker-compose/references/review-checklist.md": "ecb277b0f85af3a4944681cf92b30906eceaa37cbc8cc0b20bda75a46f4cd5b8",
     "skill-content/docker-compose/references/seed-scenarios.md": "695931bd10a84eae5652455e9ba798856b1d340d56de3de0409c2fc86556b106",
     "skill-content/execution-plan/SKILL.md": "792efa6ce680c66b1b56dc82aa485806341c6c406f4cb8732699ea9feb103185",
-    "skill-content/experience-design/SKILL.md": "0689ba86d90bdb44dae445491fd298397b35405689e40bc78812e1ae02d37b9b",
-    "skill-content/experience-modeling/SKILL.md": "ef0068417baec587b0f191e0c106198d7aa1af61d5e58e40204d33628670ff6b",
+    "skill-content/experience-design/SKILL.md": "fd2c85f2080c4ba52819cddf66f1ff430bd2f5d27413ccf616eda6ed8dd2edf5",
+    "skill-content/experience-modeling/SKILL.md": "bf202383c0388d1e9463df3adee048920c8cfcbb0ee806b35871f39a877c0ca2",
     "skill-content/experience-modeling/data/experience-schema.json": "c05089c16ae0708f42fc3ca1a199dd83fd04403dd98ac3305e2be881f0b70b64",
     "skill-content/issue-report/SKILL.md": "80e51a863d2ae6730ff09bf4d6beaf820b1dd45d3eb36e9a9a6bb15f4d501734",
     "skill-content/nosql-database-design/SKILL.md": "ef96e517e938a477d77f63c7b9f8a59d5e52ad92c6d308bf83f581367c7e5d37",
@@ -280,6 +280,6 @@
   "schema_version": 2,
   "source_channel": "snapshot",
   "source_commit": "",
-  "source_ref": "snapshot.a7998e474ba90c87a86ca47ae83822231ee77707e1877bd61d43b07ba2a4f53f",
+  "source_ref": "snapshot.0508c52e03ed5d35a27add0fecdaadc42da0d0562c458d3a67edaddd69a7afd4",
   "version": "4.1.3"
 }

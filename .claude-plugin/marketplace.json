@@ -6,14 +6,14 @@
   },
   "metadata": {
     "description": "A catalog of curated agent teams for Claude Code and Codex.",
-    "version": "4.1.3"
+    "version": "4.1.4"
   },
   "plugins": [
     {
       "name": "software-engineering-team",
       "source": "./dist/claude/software-engineering-team",
       "description": "Software Engineering Team for approved analysis, solution and experience design, and a delivery-ready Obsidian backlog.",
-      "version": "4.1.3",
+      "version": "4.1.4",
       "license": "MIT"
     }
   ]

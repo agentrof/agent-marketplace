@@ -58,3 +58,8 @@
 
 - Recover stale open Experience scopes without changing authored artifacts or approved lifecycle records.
 - Add a manually invoked, fail-closed protocol for issue-to-PR work and explicit releases.
+
+## 4.1.4
+
+- Recover legacy open Experience scopes whose package metadata already has the exact current input bindings.
+- Retry a second transient OpenCode effective-config startup failure during bounded runtime binding.

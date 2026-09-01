@@ -1,6 +1,0 @@
-{
-  "summary": "Recover legacy open Experience scopes whose package metadata already has the exact current input bindings.",
-  "components": {
-    "software-engineering-team": "patch"
-  }
-}

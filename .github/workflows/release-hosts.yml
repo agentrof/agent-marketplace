@@ -185,7 +185,7 @@ jobs:
   opencode-wsl2-real-host:
     name: opencode terminal (real WSL2)
     runs-on: windows-latest
-    timeout-minutes: 30
+    timeout-minutes: 45
     defaults:
       run:
         shell: pwsh

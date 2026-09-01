@@ -212,6 +212,10 @@ class ReleaseWorkflowContracts(unittest.TestCase):
         self.assertIn("opencode-windows-conpty", workflow)
         self.assertIn('"pywinpty==3.0.5"', workflow)
         self.assertIn("opencode-wsl2-real-host", workflow)
+        self.assertRegex(
+            workflow,
+            r"(?ms)^  opencode-wsl2-real-host:\n.*?^    timeout-minutes: 45$",
+        )
         self.assertEqual(
             workflow.count('npm install --global --allow-scripts=opencode-ai "opencode-ai@$version"'),
             2,

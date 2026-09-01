@@ -38,7 +38,7 @@ class OpenCodeManageTests(unittest.TestCase):
 
         terminate.assert_called_once_with(process)
 
-    def test_effective_config_retries_a_transient_runtime_failure_once(self):
+    def test_effective_config_survives_two_transient_runtime_failures(self):
         with tempfile.TemporaryDirectory() as temporary:
             project = Path(temporary)
             plugin = project / ".opencode/plugins/agent-marketplace-software-engineering-team.js"
@@ -52,7 +52,7 @@ class OpenCodeManageTests(unittest.TestCase):
                 nonlocal calls
                 calls += 1
                 timeouts.append(timeout)
-                if calls == 1:
+                if calls < 3:
                     raise RuntimeError("runtime_unbound")
                 assert stdout is not None
                 stdout.write(json.dumps({"plugin": [str(plugin)]}).encode())
@@ -61,8 +61,9 @@ class OpenCodeManageTests(unittest.TestCase):
             with mock.patch.object(MANAGE, "run_opencode", side_effect=fake_run):
                 fingerprint, plugins = MANAGE.effective_config("opencode", project)
 
-        self.assertEqual(calls, 2)
-        self.assertEqual(timeouts, [MANAGE.OPENCODE_CONFIG_TIMEOUT] * 2)
+        self.assertEqual(calls, 3)
+        self.assertEqual(MANAGE.OPENCODE_CONFIG_ATTEMPTS, 3)
+        self.assertEqual(timeouts, [MANAGE.OPENCODE_CONFIG_TIMEOUT] * 3)
         self.assertEqual(len(fingerprint), 64)
         self.assertEqual(plugins, [plugin.resolve()])
 

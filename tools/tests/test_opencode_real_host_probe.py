@@ -18,6 +18,16 @@ SPEC = importlib.util.spec_from_file_location("opencode_real_host_probe", PROBE_
 assert SPEC is not None and SPEC.loader is not None
 PROBE = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(PROBE)
+MANAGE_PATH = (
+    ROOT
+    / "platforms/opencode/software-engineering-team/overlay/scripts/opencode_manage.py"
+)
+MANAGE_SPEC = importlib.util.spec_from_file_location(
+    "opencode_manage_probe_budget", MANAGE_PATH,
+)
+assert MANAGE_SPEC is not None and MANAGE_SPEC.loader is not None
+MANAGE = importlib.util.module_from_spec(MANAGE_SPEC)
+MANAGE_SPEC.loader.exec_module(MANAGE)
 
 
 class OpenCodeRealHostProbeTests(unittest.TestCase):
@@ -91,6 +101,16 @@ class OpenCodeRealHostProbeTests(unittest.TestCase):
         self.assertEqual(calls[-1][0][3], "bind-runtime")
         self.assertEqual(calls[-1][1], PROBE.CONFIGURATION_TIMEOUT)
         self.assertGreater(PROBE.CONFIGURATION_TIMEOUT, 45.0)
+
+    def test_bind_runtime_budget_covers_every_bounded_config_attempt(self):
+        worst_case = MANAGE.OPENCODE_COMMAND_TIMEOUT + (
+            MANAGE.OPENCODE_CONFIG_ATTEMPTS * (
+                MANAGE.OPENCODE_CONFIG_TIMEOUT
+                + 3 * MANAGE.PROCESS_TERMINATION_TIMEOUT
+            )
+        )
+
+        self.assertGreater(PROBE.CONFIGURATION_TIMEOUT, worst_case)
 
     def test_windows_tui_cleanup_terminates_the_process_tree(self):
         with mock.patch.object(PROBE.subprocess, "run") as run:

@@ -22,7 +22,7 @@ from typing import Any
 
 TEAM = "software-engineering-team"
 EXPECTED_VERSION = "1.18.17"
-CONFIGURATION_TIMEOUT = 180.0
+CONFIGURATION_TIMEOUT = 360.0
 CLEANUP_TIMEOUT = 30.0
 TUI_COMMAND = "/issue-report Prepare a deterministic probe issue\r"
 TUI_READY_MARKERS = (b"ctrl+p", b"commands")

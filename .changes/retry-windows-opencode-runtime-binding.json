@@ -1,6 +1,0 @@
-{
-  "summary": "Retry a second transient OpenCode effective-config startup failure during bounded runtime binding.",
-  "components": {
-    "software-engineering-team": "patch"
-  }
-}

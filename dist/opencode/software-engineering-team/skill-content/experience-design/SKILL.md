@@ -28,24 +28,31 @@ user-journey, screen, flow, state, transition or prototype work.
    the scope also contains `retirement_pending` or a retire action. A legacy
    package may carry only the fresh plan's exact current input bindings; every
    other package identity, revision and Requirement binding stays exact.
-4. Work in the selected
+4. If recovery reports that those exact open package revisions were already
+   published by `application@rN`, run `rehydrate-published-scope` with the old
+   plan, its hash and that exact application ref. It proves the complete scope
+   still reproduces every published package hash, restores only the published
+   approved package roots, leaves application receipts and artifacts unchanged,
+   then requires a normal current `begin-revision`. Hash drift, a partial
+   scope, a conflicting receipt or stale open application state fails closed.
+5. Work in the selected
    `workspace/docs/experience-design/experiences/<process-slug>/` packages.
    The primary process is a canonical BA process. `application` is reserved;
    there are no EXP IDs, baselines, programs, releases or inheritance chains.
-5. Use stable child IDs and exact refs. Package records express process and
+6. Use stable child IDs and exact refs. Package records express process and
    product intent; the separate prototype demonstrates it for review.
-6. Treat `workspace/docs/experience-design/artifacts/` as the UX designer's
+7. Treat `workspace/docs/experience-design/artifacts/` as the UX designer's
    free prototype workspace. It may contain any structure, files, pages,
    technologies, dependencies and assets. Recommend useful conventions, but
    never require them or make their absence a compiler finding. Do not put
    lifecycle metadata in those files.
-7. Keep `_generated/` and `_ledger/` compiler-owned. The compiler snapshots
+8. Keep `_generated/` and `_ledger/` compiler-owned. The compiler snapshots
    artifact paths and bytes, then binds the snapshot to its process receipt
    set. It does not validate UI structure, CSS, scripts, network behavior,
    tokens, framework choices, routes or accessibility claims.
-8. Run the fresh read-only reviewer challenge loop. Review actual usability,
+9. Run the fresh read-only reviewer challenge loop. Review actual usability,
    coherence, accessibility, responsive behavior and risks as judgment, not
    as a substitute parser contract.
-9. Atomically approve the complete action set. The result is `application@rN`
+10. Atomically approve the complete action set. The result is `application@rN`
    plus the exact current process receipts. Requirement mode binds that set;
    manual mode hands it to backlog planning.

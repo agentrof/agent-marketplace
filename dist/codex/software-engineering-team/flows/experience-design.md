@@ -13,6 +13,10 @@ receive machine-writer authorization.
 `recover-open-scope` additionally receives authorization only after the hook
 attests its exact lifecycle/navigation postimage and verifies that the complete
 application prototype tree is byte-identical to its pre-command snapshot.
+`rehydrate-published-scope` uses the same post-attestation boundary. It may
+restore only package roots whose exact historic source bytes reproduce the
+immutable application receipt selected by `application@rN`; it never changes
+that application receipt or author-owned artifacts.
 
 ## Entry and scope proposal
 
@@ -45,6 +49,16 @@ artifact bytes and does not change approved ledgers or receipts; run the full
 review flow again. For a legacy scope only, packages may already carry the
 fresh plan's exact current input bindings; every other package identity,
 revision, Requirement binding and scope guard remains exact.
+
+If recovery reports that the exact open package revisions are already
+published by an immutable application receipt, do not reset the scope or edit
+compiler-owned files. Run `rehydrate-published-scope --scope-plan <old-plan>
+--proposal-hash <old-hash> --application-ref application@rN`. It proves every
+package in the complete old scope still reproduces its published package hash,
+restores those package roots to the published approved revision, and leaves the
+application receipt unchanged. Then create a current scope and use the normal
+`begin-revision` path. A hash mismatch, partial scope, conflicting receipt or
+stale open application state fails closed.
 
 ## Preflight and authoring
 

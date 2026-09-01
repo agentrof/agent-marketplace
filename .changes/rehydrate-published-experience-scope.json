@@ -1,0 +1,6 @@
+{
+  "summary": "Recover package roots whose immutable application receipt was published before their lifecycle state completed.",
+  "components": {
+    "software-engineering-team": "patch"
+  }
+}

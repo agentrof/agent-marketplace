@@ -64,7 +64,7 @@ MUTATING_COMMANDS = {
     "init", "begin-revision", "enter-review", "stub", "render",
     "render-application", "begin-application-revision",
     "enter-application-review", "approve-set", "rename", "retire",
-    "recover-open-scope",
+    "recover-open-scope", "rehydrate-published-scope",
 }
 RECOVERABLE_SCOPE_PHASES = {"draft", "in_review"}
 RECOVERY_BINDING_KEYS = (
@@ -1817,6 +1817,270 @@ def ensure_open_scope_unpublished(
             "open package revisions are already published by the application "
             "ledger: " + ", ".join(collisions)
         )
+
+
+def published_application_receipt(root: Path, application_ref: str) -> dict:
+    """Return one immutable historical application receipt by exact ref."""
+    match = re.fullmatch(r"application@r([1-9][0-9]*)", application_ref)
+    if match is None:
+        raise ValueError("application ref must use application@rN")
+    import experience_application_check
+
+    rows, findings = experience_application_check.verified_application_ledger(root)
+    if findings:
+        raise ValueError("approved application ledger is invalid: " + "; ".join(findings))
+    revision = int(match.group(1))
+    receipt = next(
+        (
+            row for row in rows
+            if row.get("application_revision") == revision
+        ),
+        None,
+    )
+    if receipt is None:
+        raise ValueError(f"approved application ledger has no {application_ref} receipt")
+    return receipt
+
+
+def rehydration_scope_actions(plan: dict) -> list[dict]:
+    """Limit rehydration to historic create or update package receipts."""
+    actions = mutating_scope_actions(plan)
+    if not actions:
+        raise ValueError("rehydration scope plan needs package actions")
+    if any(action.get("action") not in {"create", "update"} for action in actions):
+        raise ValueError(
+            "rehydrate-published-scope supports only create and update packages"
+        )
+    if plan.get("application_action") not in {"create", "update"}:
+        raise ValueError(
+            "rehydration scope plan must create or update the application"
+        )
+    return actions
+
+
+def published_scope_packages(
+    root: Path, plan: dict, proposal_hash: str, application_ref: str,
+) -> tuple[list[tuple[Path, dict, dict]], dict, bool]:
+    """Bind one complete stranded scope to the receipt that already published it."""
+    if open_application_state_path(root).exists():
+        raise ValueError(
+            "published scope still has compiler-owned open application revision state"
+        )
+    actions = rehydration_scope_actions(plan)
+    action_by_target = {action_target(action): action for action in actions}
+    application = published_application_receipt(root, application_ref)
+    if application.get("application_revision") != opened_application_revision(plan):
+        raise ValueError(
+            "published application receipt does not match the scope-plan revision"
+        )
+    receipts = {
+        str(receipt.get("result_ref", "")): str(receipt.get("package_hash", ""))
+        for receipt in application.get("packages", [])
+        if isinstance(receipt, dict)
+    }
+    selected: list[tuple[Path, dict, dict]] = []
+    phases: set[str] = set()
+    for name, action in sorted(action_by_target.items()):
+        package = root / "experiences" / name
+        data = fields(package)
+        if not data:
+            raise ValueError(f"{name} package metadata is unreadable")
+        status = str(data.get("status", ""))
+        state_path = package / GENERATED / OPEN_REVISION
+        if status in RECOVERABLE_SCOPE_PHASES:
+            if not state_path.exists() or state_path.is_symlink():
+                raise ValueError(
+                    f"{name} is {status} without compiler-owned open revision state"
+                )
+            validate_open_revision(
+                package, plan, action, proposal_hash, expected_status=status,
+            )
+            state = read_open_revision(package)
+            phases.add("open")
+        elif status == "approved":
+            if state_path.exists() or state_path.is_symlink():
+                raise ValueError(
+                    f"{name} approved package retains open revision state"
+                )
+            state = {
+                "opened_revision": data.get("revision"),
+                "proposal_hash": proposal_hash,
+            }
+            phases.add("approved")
+        else:
+            raise ValueError(
+                f"{name} must be draft, in_review, or approved for rehydration"
+            )
+        result_ref = f"{name}@r{state.get('opened_revision')}"
+        if result_ref not in receipts:
+            raise ValueError(
+                f"{application_ref} does not publish {result_ref}"
+            )
+        selected.append((package, data, state))
+    if len(phases) != 1:
+        raise ValueError("rehydration scope mixes open and already rehydrated packages")
+    if phases == {"open"}:
+        open_targets = set()
+        for package in packages(root):
+            state_path = package / GENERATED / OPEN_REVISION
+            if not state_path.exists() and not state_path.is_symlink():
+                continue
+            state = read_open_revision(package)
+            if state.get("proposal_hash") == proposal_hash:
+                open_targets.add(package.name)
+        if open_targets != set(action_by_target):
+            raise ValueError(
+                "rehydration scope plan must name every package bound to the "
+                "published proposal"
+            )
+    return selected, application, phases == {"open"}
+
+
+def historical_scope_bindings(plan: dict) -> list[str]:
+    return [
+        f"{stage}|{reference}|{digest}"
+        for stage, reference, digest in input_rows(plan)
+    ]
+
+
+def rehydrated_published_scope_postimage(
+    root: Path, plan: dict, proposal_hash: str, application_ref: str,
+) -> list[tuple[Path, dict, dict]]:
+    """Prove that local package histories now anchor the selected receipt."""
+    selected, application, _open = published_scope_packages(
+        root, plan, proposal_hash, application_ref,
+    )
+    bindings = historical_scope_bindings(plan)
+    receipts = {
+        str(receipt.get("result_ref", "")): str(receipt.get("package_hash", ""))
+        for receipt in application.get("packages", [])
+        if isinstance(receipt, dict)
+    }
+    for package, data, state in selected:
+        if data.get("status") != "approved":
+            raise ValueError(f"{package.name} published package was not rehydrated")
+        if list_value(data, "input_bindings") != bindings:
+            raise ValueError(f"{package.name} does not restore its published input bindings")
+        if (
+            plan.get("origin_mode") == "requirement"
+            and data.get("upstream_stage_receipts_hash")
+            != plan.get("upstream_stage_receipts_hash")
+        ):
+            raise ValueError(
+                f"{package.name} does not restore its published Requirement binding"
+            )
+        registry, problems = compile_package(
+            package, True, allow_stale_inputs=True,
+        )
+        if problems:
+            raise ValueError("; ".join(problems))
+        result_ref = f"{package.name}@r{state['opened_revision']}"
+        if registry.get("package_hash") != receipts.get(result_ref):
+            raise ValueError(
+                f"{package.name} package hash does not match {application_ref}"
+            )
+        _history, ledger_problems = validate_process_ledger(
+            package, int(state["opened_revision"]),
+        )
+        if ledger_problems:
+            raise ValueError(
+                f"{package.name} published package ledger was not restored"
+            )
+    return selected
+
+
+def rehydrate_published_scope(args) -> int:
+    root = root_for(args.root)
+    try:
+        plan = load_scope_plan(args.scope_plan, args.proposal_hash)
+        selected, application, is_open = published_scope_packages(
+            root, plan, args.proposal_hash, args.application_ref,
+        )
+        if not is_open:
+            selected = rehydrated_published_scope_postimage(
+                root, plan, args.proposal_hash, args.application_ref,
+            )
+            print(json.dumps({
+                "application_ref": args.application_ref,
+                "packages": sorted(package.name for package, _data, _state in selected),
+                "changed": False,
+            }, indent=2))
+            return 0
+    except ValueError as exc:
+        return fail(str(exc), 2)
+
+    bindings = historical_scope_bindings(plan)
+    receipts = {
+        str(receipt.get("result_ref", "")): str(receipt.get("package_hash", ""))
+        for receipt in application.get("packages", [])
+        if isinstance(receipt, dict)
+    }
+    prepared: list[tuple[Path, dict, str, dict]] = []
+    try:
+        for package, _data, state in selected:
+            data, body = fm(package / "experience.md")
+            data["input_bindings"] = bindings
+            if plan.get("origin_mode") == "requirement":
+                data["upstream_stage_receipts_hash"] = plan[
+                    "upstream_stage_receipts_hash"
+                ]
+            status_tags(data)
+            rewrite(package / "experience.md", data, body)
+            registry, problems = compile_package(
+                package, allow_stale_inputs=True,
+            )
+            hard = [item for item in problems if "registry is stale" not in item]
+            if hard:
+                raise ValueError("; ".join(hard))
+            result_ref = f"{package.name}@r{state['opened_revision']}"
+            if registry.get("package_hash") != receipts.get(result_ref):
+                raise ValueError(
+                    f"{package.name} package hash does not match {args.application_ref}"
+                )
+            prepared.append((package, data, body, registry))
+        approved_at = datetime.now(timezone.utc).replace(
+            microsecond=0
+        ).isoformat()
+        for package, data, body, registry in prepared:
+            data.update({
+                "status": "approved",
+                "approval_revision": 1,
+                "registry_hash": registry["registry_hash"],
+                "package_hash": registry["package_hash"],
+                "source_hash": registry["source_hash"],
+                "approved_at_utc": approved_at,
+            })
+            status_tags(data)
+            rewrite(package / "experience.md", data, body)
+            (package / GENERATED / OPEN_REVISION).unlink(missing_ok=True)
+            fsync_directory(package / GENERATED)
+        for package, _data, _body, registry in prepared:
+            atomic_write_bytes(
+                package / GENERATED / "registry.json", canonical(registry),
+            )
+            atomic_write_bytes(
+                package / GENERATED / "coverage.json",
+                canonical({
+                    "experience_id": package.name,
+                    "active_records": [
+                        row["id"] for row in registry["records"]
+                        if row.get("record_state") == "active"
+                    ],
+                }),
+            )
+        render_experience_navigation(root)
+        selected = rehydrated_published_scope_postimage(
+            root, plan, args.proposal_hash, args.application_ref,
+        )
+    except (OSError, ValueError) as exc:
+        return fail(f"rehydrate-published-scope rolled back: {exc}", 2)
+
+    print(json.dumps({
+        "application_ref": args.application_ref,
+        "packages": sorted(package.name for package, _data, _state in selected),
+        "changed": True,
+    }, indent=2))
+    return 0
 
 
 def mutating_scope_actions(plan: dict) -> list[dict]:
@@ -4264,6 +4528,7 @@ def main(argv: list[str] | None = None) -> int:
     p = sub.add_parser("application-status"); p.add_argument("--root", required=True); p.set_defaults(func=application_status)
     p = sub.add_parser("approve-set"); p.add_argument("--root", required=True); p.add_argument("--experience", action="append", default=[]); p.add_argument("--scope-plan", required=True); p.add_argument("--proposal-hash", required=True); p.add_argument("--review-attestation", default=""); p.set_defaults(func=approve_set)
     p = sub.add_parser("recover-open-scope"); p.add_argument("--root", required=True); p.add_argument("--from-scope-plan", required=True); p.add_argument("--from-proposal-hash", required=True); p.add_argument("--scope-plan", required=True); p.add_argument("--proposal-hash", required=True); p.set_defaults(func=recover_open_scope)
+    p = sub.add_parser("rehydrate-published-scope"); p.add_argument("--root", required=True); p.add_argument("--scope-plan", required=True); p.add_argument("--proposal-hash", required=True); p.add_argument("--application-ref", required=True); p.set_defaults(func=rehydrate_published_scope)
     p = sub.add_parser("resolve"); p.add_argument("--root", required=True); p.add_argument("--ref", required=True); p.set_defaults(func=resolve)
     args = parser.parse_args(argv)
     try:

@@ -744,6 +744,49 @@ class VaultHookShellContractTests(unittest.TestCase):
             finally:
                 self.hook.cleanup_guard_state(primary, recovery)
 
+    def test_rehydrate_published_scope_post_attests_the_exact_compiler_result(self):
+        from tools.tests.test_experience_compile import ExperienceCompilerTests
+
+        helper = ExperienceCompilerTests()
+        with tempfile.TemporaryDirectory() as temporary:
+            fixture = helper.orphaned_create_scope(
+                temporary, publish_open_packages=True,
+            )
+            old = fixture["old_plan"]
+            argv = [
+                sys.executable,
+                str(SCRIPTS / "experience_compile.py"),
+                "rehydrate-published-scope",
+                "--root", str(fixture["root"]),
+                "--scope-plan", str(fixture["old_plan_path"]),
+                "--proposal-hash", old["proposal_hash"],
+                "--application-ref", "application@r1",
+            ]
+            command = (
+                subprocess.list2cmdline(argv)
+                if os.name == "nt" else shlex.join(argv)
+            )
+            payload = self.hook.normalize(self.attested_writer_payload(
+                Path(temporary), command,
+            ))
+            primary = self.hook.inventory_path(payload, Path(temporary))
+            recovery = self.hook.recovery_path(payload)
+            try:
+                self.assertEqual(self.hook.shell_snapshot(payload), 0)
+                before = self.hook.vault_inventory(fixture["docs"])
+                code, output, errors = helper.rehydrate_published_scope(fixture)
+                self.assertEqual(code, 0, output + errors)
+                after = self.hook.vault_inventory(fixture["docs"])
+                changed = sorted(
+                    path for path in set(before) | set(after)
+                    if before.get(path) != after.get(path)
+                )
+                self.assertTrue(self.hook.valid_application_writer_result(
+                    payload, fixture["docs"], changed,
+                ))
+            finally:
+                self.hook.cleanup_guard_state(primary, recovery)
+
     def test_recovery_attestation_accepts_a_new_root_generated_directory(self):
         from tools.tests.test_experience_compile import ExperienceCompilerTests
 

@@ -1986,8 +1986,35 @@ def attested_recovery_writer_spec(
         or _installed_script_path(
             tokens[1], cwd, "experience_compile.py",
         ) is None
-        or tokens[2] != "recover-open-scope"
     ):
+        return None
+    command = tokens[2]
+    if command == "rehydrate-published-scope":
+        valued = {
+            "--root", "--scope-plan", "--proposal-hash", "--application-ref",
+        }
+        options = parsed_options(tokens[3:], valued, set())
+        if options is None or set(options) != valued:
+            return None
+        root = _cli_path(options["--root"], cwd)
+        plan = _cli_path(options["--scope-plan"], cwd)
+        proposal_hash = options["--proposal-hash"]
+        application_ref = options["--application-ref"]
+        if (
+            root != (vault / EXPERIENCE_ROOT_RELATIVE).resolve()
+            or plan is None
+            or re.fullmatch(r"sha256:[0-9a-f]{64}", proposal_hash) is None
+            or re.fullmatch(r"application@r[1-9][0-9]*", application_ref) is None
+        ):
+            return None
+        return {
+            "command": command,
+            "root": str(root),
+            "plan": str(plan),
+            "proposal_hash": proposal_hash,
+            "application_ref": application_ref,
+        }
+    if command != "recover-open-scope":
         return None
     valued = {
         "--root", "--from-scope-plan", "--from-proposal-hash",
@@ -2011,7 +2038,7 @@ def attested_recovery_writer_spec(
     ):
         return None
     return {
-        "command": "recover-open-scope",
+        "command": command,
         "root": str(root),
         "source_plan": str(source_plan),
         "source_proposal_hash": source_hash,
@@ -2066,21 +2093,57 @@ def valid_application_writer_result(
             return False
         try:
             root = Path(recovery["root"])
-            source_plan = experience_compile.load_scope_plan(
-                recovery["source_plan"],
-                recovery["source_proposal_hash"],
-            )
-            plan = experience_compile.load_scope_plan(
-                recovery["plan"], recovery["proposal_hash"],
-            )
-            opened = experience_compile.validate_recovered_scope_postimage(
-                root, source_plan, recovery["source_proposal_hash"],
-                plan, recovery["proposal_hash"],
-            )
-            targets = {package.name for package, _data, _state in opened}
+            if recovery["command"] == "rehydrate-published-scope":
+                plan = experience_compile.load_scope_plan(
+                    recovery["plan"], recovery["proposal_hash"],
+                )
+                opened = experience_compile.rehydrated_published_scope_postimage(
+                    root, plan, recovery["proposal_hash"],
+                    recovery["application_ref"],
+                )
+                targets = {package.name for package, _data, _state in opened}
+            else:
+                source_plan = experience_compile.load_scope_plan(
+                    recovery["source_plan"],
+                    recovery["source_proposal_hash"],
+                )
+                plan = experience_compile.load_scope_plan(
+                    recovery["plan"], recovery["proposal_hash"],
+                )
+                opened = experience_compile.validate_recovered_scope_postimage(
+                    root, source_plan, recovery["source_proposal_hash"],
+                    plan, recovery["proposal_hash"],
+                )
+                targets = {package.name for package, _data, _state in opened}
         except (OSError, RuntimeError, ValueError):
             return False
         changed_set = set(changed)
+        if recovery["command"] == "rehydrate-published-scope":
+            allowed = {
+                "home.md",
+                "maps/experience-design.md",
+                "experience-design/experiences",
+            }
+            required = set()
+            for target in targets:
+                package = f"experience-design/experiences/{target}"
+                allowed.update({
+                    package,
+                    f"{package}/experience.md",
+                    f"{package}/_generated",
+                    f"{package}/_generated/open-revision.json",
+                    f"{package}/_generated/registry.json",
+                    f"{package}/_generated/coverage.json",
+                })
+                required.update({
+                    f"{package}/experience.md",
+                    f"{package}/_generated/open-revision.json",
+                    f"{package}/_generated/registry.json",
+                    f"{package}/_generated/coverage.json",
+                })
+            if not changed_set:
+                return True
+            return required.issubset(changed_set) and changed_set.issubset(allowed)
         allowed = {
             "home.md",
             "maps/experience-design.md",

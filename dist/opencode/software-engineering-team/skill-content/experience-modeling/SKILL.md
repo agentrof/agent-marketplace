@@ -77,6 +77,12 @@ quality, accessibility, security or implementation suitability.
   `retirement_pending` or a retire action fails closed. A legacy scope may
   already carry only the fresh plan's exact current input bindings; all other
   package identity, revision and Requirement bindings remain exact.
+- If an immutable `application@rN` already publishes the exact open package
+  revisions, `recover-open-scope` must fail closed. Use
+  `rehydrate-published-scope` with the exact old scope plan, proposal hash and
+  application ref. It restores package roots only after their historic source
+  bytes reproduce every published package hash, leaves application receipts and
+  artifacts untouched, and returns to the ordinary successor-revision flow.
 - `enter-application-review` snapshots the current artifact tree. Approval
   requires a fresh exact-schema-v4 reviewer attestation bound to proposal,
   artifact-tree, package-set and application hashes. Its `advisories` remain

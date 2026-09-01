@@ -70,6 +70,10 @@ class ReleaseWorkflowContracts(unittest.TestCase):
         self.assertIn("pull_request validation event runs", text)
         self.assertIn("publish-release-branch", text)
         self.assertIn('--main-sha "$main_sha"', text)
+        self.assertIn("git config core.autocrlf false", text)
+        self.assertIn("git config core.eol lf", text)
+        self.assertIn("git checkout-index --all --force", text)
+        self.assertIn('test -z "$(git status --porcelain)"', text)
         self.assertLess(
             text.index("publish-release-branch"),
             text.index("manual_url="),
@@ -101,6 +105,7 @@ class ReleaseWorkflowContracts(unittest.TestCase):
     def test_bootstrap_requires_empty_tag_space_and_uses_atomic_refs(self):
         text = self.text("prepare-stable-release.yml")
         self.assertIn("verify-bootstrap", text)
+        self.assertIn("verify-bootstrap-candidate", text)
         self.assertIn("refs/tags/v*", text)
         self.assertIn("tools/release_publish.py stage", text)
         self.assertIn("tools/release_publish.py rollback", text)
@@ -122,6 +127,10 @@ class ReleaseWorkflowContracts(unittest.TestCase):
         text = self.text("prepare-stable-release.yml")
         self.assertIn('bootstrap_candidate="$stable_sha"', text)
         self.assertIn('--candidate-sha "$bootstrap_candidate"', text)
+        self.assertIn("tools/release_publish.py rollback", text)
+        self.assertIn("git tag -d v0.0.1", text)
+        self.assertIn('bootstrap_candidate="$candidate_sha"', text)
+        self.assertIn('json.load(sys.stdin)["has_release"]', text)
         self.assertIn(
             'echo "candidate_sha=$bootstrap_candidate"', text
         )

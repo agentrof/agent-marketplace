@@ -39,10 +39,12 @@ def make_valid_root(
     root: Path, version: str = "0.0.1", *, build: bool = True
 ) -> None:
     copy("product.json", root)
+    copy("package-modes.json", root)
     copy("tools/data/limits.json", root)
     copy("tools/data/models.json", root)
     copy("AGENTS.md", root)
     copy("CLAUDE.md", root)
+    copy(".gitattributes", root)
     copy(f"plugins/{PLUGIN}", root)
     # The fixture must exercise the same dynamic adapter registry as production.
     # Copying only individual legacy host trees would make product.json and the

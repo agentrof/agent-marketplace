@@ -14,6 +14,11 @@ are under `dist/` and are never edited by hand.
   `.claude/`, and `.codex/` are ignored runtime surfaces.
 - Keep the Software Engineering Team standalone and scoped to the current
   project checkout.
+- Declare package executable paths in root `package-modes.json`; source
+  filesystem modes are not a portable package contract.
+- Treat `.gitattributes` and the builder text allowlist as one checkout
+  boundary: known UTF-8 text is canonicalized, while unknown and binary paths
+  are byte-exact.
 
 ## Requirement Flow contract
 

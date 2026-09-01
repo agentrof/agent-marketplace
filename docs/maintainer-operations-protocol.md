@@ -143,6 +143,10 @@ reaches them.
 4. Regenerate every registered distribution with
    `python3 tools/build_distributions.py` when canonical content changes.
 5. Add exactly the release-impact declaration required by repository policy.
+   Changes limited to generated `.agent-marketplace-package.json` provenance
+   may be release-free only when the deterministic distribution gate proves
+   every non-provenance package byte and executable mode is unchanged. Every
+   other generated distribution change requires its component impact.
 6. Run focused tests while iterating, then run `make check` before commit.
 7. Review the final diff for unrelated changes, generated drift, secrets,
    unsafe permissions, and stale documentation.
@@ -212,14 +216,19 @@ approval unless scope becomes ambiguous or a gate fails:
    `main` raced. For the first stable baseline, it instead stages the bootstrap
    stable/tag refs with exact leases, exercises both real public host channels
    through the current trusted smoke harness, and creates or reconciles the
-   immutable GitHub Release.
+   immutable GitHub Release. A resumed unpublished bootstrap candidate is
+   rebuilt with current trusted adapters without executing candidate code; an
+   invalid staged candidate is exact-lease rolled back and current `main` is
+   restaged. A matching immutable Release is reconciled instead of rolled back.
 4. Open the release PR from `release/stable` to `main` with the maintainer's
    GitHub identity so ordinary pull-request validation runs.
 5. Wait for all checks on the exact release PR head. The release-policy gate
    must prove that the head is exactly one commit on its attested `main_source`
    and that its complete tree equals a deterministic replay of release
-   preparation. Merge it with a merge commit only when green; the explicit
-   release instruction authorizes this release PR merge.
+   preparation. That replay disables ambient Git attributes, excludes and
+   replacement refs, fixes checkout text/mode policy, and compares the complete
+   byte-and-mode tree without following links. Merge it with a merge commit only when green; the explicit release
+   instruction authorizes this release PR merge.
 6. Wait for `Publish stable release`. It verifies the exact two-parent merge
    topology and release tree, then uses only the transaction helper from the
    attested main parent while write credentials are present. The workflow

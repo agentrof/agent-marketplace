@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import json
+import os
+import stat
 import subprocess
 import sys
 import tempfile
@@ -166,6 +168,24 @@ class ReleaseRepositoryTests(unittest.TestCase):
             with self.assertRaisesRegex(release.ReleaseError, fixtures.PLUGIN):
                 release.check_pr_changeset(self.root, "origin/main")
 
+    def test_derived_provenance_only_change_is_release_free(self):
+        self.write_changeset("ci-hardening", {})
+        provenance = build_distributions.packaging_names(self.root)[1]
+        with mock.patch.object(release, "changed_paths", return_value=[
+            ("A", ".changes/ci-hardening.json"),
+            ("M", f"dist/claude/{fixtures.PLUGIN}/{provenance}"),
+            ("M", f"dist/codex/{fixtures.PLUGIN}/{provenance}"),
+        ]):
+            release.check_pr_changeset(self.root, "origin/main")
+
+    def test_non_provenance_distribution_change_requires_component(self):
+        self.write_changeset("ci-hardening", {})
+        with mock.patch.object(release, "changed_paths", return_value=[
+            ("A", ".changes/ci-hardening.json"),
+            ("M", f"dist/claude/{fixtures.PLUGIN}/constitution.md"),
+        ]), self.assertRaisesRegex(release.ReleaseError, fixtures.PLUGIN):
+            release.check_pr_changeset(self.root, "origin/main")
+
     def test_normal_pr_rejects_a_registry_reset(self):
         self.write_changeset("new", {})
         with mock.patch.object(release, "changed_paths", return_value=[
@@ -284,6 +304,133 @@ class ReleaseRepositoryTests(unittest.TestCase):
         self.assertEqual(identity["stable_versions"]["marketplace"], "0.0.1")
 
 
+class BootstrapCandidatePolicyTests(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self.tmp.name) / "repository"
+        self.root.mkdir()
+        fixtures.make_valid_root(self.root)
+        self.git("init", "-b", "main")
+        self.git("config", "user.name", "Bootstrap Policy Test")
+        self.git("config", "user.email", "bootstrap-policy@example.test")
+        self.git("add", "--all")
+        self.git("commit", "-m", "bootstrap candidate")
+        self.candidate_sha = self.git("rev-parse", "HEAD")
+        constitution = (
+            self.root / "plugins" / fixtures.PLUGIN / "constitution.md"
+        )
+        constitution.write_bytes(
+            constitution.read_bytes() + b"\nRelease-free bootstrap replay probe.\n"
+        )
+        build_distributions.replace_generated(self.root, self.root / "dist")
+        fixtures.write(self.root / "README.md", "release-free main advance\n")
+        self.git("add", "--all")
+        self.git("commit", "-m", "test: advance package and main")
+        self.main_sha = self.git("rev-parse", "HEAD")
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def git(self, *args: str) -> str:
+        completed = subprocess.run(
+            ["git", *args], cwd=self.root, capture_output=True, text=True,
+            check=True,
+        )
+        return completed.stdout.strip()
+
+    def verify(self, candidate: str | None = None) -> dict:
+        return release.verify_bootstrap_candidate(
+            self.root,
+            candidate or self.candidate_sha,
+            self.git("rev-parse", "HEAD"),
+        )
+
+    def test_release_free_main_advance_keeps_exact_candidate_valid(self):
+        result = self.verify()
+        self.assertEqual(result["candidate"], self.candidate_sha)
+        self.assertEqual(result["main"], self.main_sha)
+
+    def test_candidate_with_prior_stable_metadata_is_rejected(self):
+        fixtures.write(
+            self.root / ".release" / "stable.json",
+            json.dumps({"version": "0.0.1"}) + "\n",
+        )
+        self.git("add", ".release/stable.json")
+        self.git("commit", "-m", "inject prior stable metadata")
+        candidate = self.git("rev-parse", "HEAD")
+        (self.root / ".release" / "stable.json").unlink()
+        self.git("add", "--all")
+        self.git("commit", "-m", "remove prior stable metadata")
+        with self.assertRaisesRegex(release.ReleaseError, "prior stable"):
+            self.verify(candidate)
+
+    def test_candidate_with_wrong_package_surface_is_rejected(self):
+        versions_path = self.root / "versions.json"
+        original = versions_path.read_bytes()
+        versions = json.loads(original)
+        versions["marketplace"] = "9.9.9"
+        versions_path.write_bytes((json.dumps(versions, indent=2) + "\n").encode())
+        self.git("add", "versions.json")
+        self.git("commit", "-m", "inject wrong bootstrap version")
+        candidate = self.git("rev-parse", "HEAD")
+        versions_path.write_bytes(original)
+        self.git("add", "versions.json")
+        self.git("commit", "-m", "restore bootstrap version")
+        with self.assertRaisesRegex(release.ReleaseError, "first stable release"):
+            self.verify(candidate)
+
+    def test_candidate_with_release_impact_changeset_is_rejected(self):
+        self.write_changeset = self.root / ".changes" / "stranded.json"
+        fixtures.write(self.write_changeset, json.dumps({
+            "summary": "Stranded impact.",
+            "components": {fixtures.PLUGIN: "patch"},
+        }, indent=2) + "\n")
+        self.git("add", str(self.write_changeset.relative_to(self.root)))
+        self.git("commit", "-m", "inject stranded changeset")
+        candidate = self.git("rev-parse", "HEAD")
+        self.write_changeset.unlink()
+        self.git("add", "--all")
+        self.git("commit", "-m", "remove stranded changeset")
+        with self.assertRaisesRegex(release.ReleaseError, "release-impact changeset"):
+            self.verify(candidate)
+
+    def test_candidate_adapter_code_is_never_executed(self):
+        sentinel = Path(self.tmp.name) / "candidate-code-executed"
+        adapter = self.root / "platforms" / "claude" / "adapter.py"
+        original = adapter.read_bytes()
+        adapter.write_bytes(original + (
+            "\nfrom pathlib import Path as _CandidatePath\n"
+            f"_CandidatePath({str(sentinel)!r}).write_text('executed')\n"
+        ).encode("utf-8"))
+        self.git("add", str(adapter.relative_to(self.root)))
+        self.git("commit", "-m", "inject candidate adapter side effect")
+        candidate = self.git("rev-parse", "HEAD")
+        adapter.write_bytes(original)
+        self.git("add", str(adapter.relative_to(self.root)))
+        self.git("commit", "-m", "restore trusted adapter")
+
+        with self.assertRaisesRegex(release.ReleaseError, "trusted replay"):
+            self.verify(candidate)
+        self.assertFalse(sentinel.exists())
+
+    def test_candidate_distribution_rejects_force_tracked_python_cache(self):
+        cache = (
+            self.root / "dist" / "claude" / fixtures.PLUGIN
+            / "__pycache__" / "payload.cpython-39.pyc"
+        )
+        cache.parent.mkdir()
+        cache.write_bytes(b"unattested candidate bytecode")
+        relative = cache.relative_to(self.root).as_posix()
+        self.git("add", "--force", relative)
+        self.git("commit", "-m", "inject candidate bytecode")
+        candidate = self.git("rev-parse", "HEAD")
+        self.git("rm", "--force", relative)
+        self.git("commit", "-m", "remove candidate bytecode")
+
+        with self.assertRaisesRegex(release.ReleaseError, "trusted replay"):
+            self.verify(candidate)
+
+
 class ReleasePullRequestPolicyTests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
@@ -293,6 +440,8 @@ class ReleasePullRequestPolicyTests(unittest.TestCase):
         fixtures.copy("tools/release.py", self.root)
         fixtures.copy("tools/build_distributions.py", self.root)
         self.git("init", "-b", "main")
+        # Hosted runners may materialize text with a different checkout EOL.
+        self.git("config", "core.autocrlf", "true")
         self.git("config", "user.name", "Release Policy Test")
         self.git("config", "user.email", "release-policy@example.test")
         self.git("add", "--all")
@@ -348,6 +497,123 @@ class ReleasePullRequestPolicyTests(unittest.TestCase):
         result = self.verify()
         self.assertEqual(result["head"], self.head_sha)
         self.assertEqual(result["expected_tree"], result["head_tree"])
+
+    def test_replay_ignores_global_excludes(self):
+        excludes = Path(self.tmp.name) / "global-excludes"
+        fixtures.write(excludes, ".release/stable.json\n")
+        config = Path(self.tmp.name) / "global-gitconfig"
+        self.git("config", "--file", str(config), "core.excludesFile", str(excludes))
+        with mock.patch.dict(os.environ, {"GIT_CONFIG_GLOBAL": str(config)}):
+            self.verify()
+
+    def test_replay_ignores_global_attributes_and_filters(self):
+        attributes = Path(self.tmp.name) / "global-attributes"
+        fixtures.write(
+            attributes, ".release/stable.json filter=release-replay-poison\n",
+        )
+        config = Path(self.tmp.name) / "global-gitconfig"
+        self.git(
+            "config", "--file", str(config), "core.attributesFile",
+            str(attributes),
+        )
+        self.git(
+            "config", "--file", str(config),
+            "filter.release-replay-poison.clean", "git hash-object --stdin",
+        )
+        self.git(
+            "config", "--file", str(config),
+            "filter.release-replay-poison.required", "true",
+        )
+        with mock.patch.dict(os.environ, {"GIT_CONFIG_GLOBAL": str(config)}):
+            self.verify()
+
+    def test_replay_ignores_filesystem_execute_bit_loss(self):
+        replace_generated = build_distributions.replace_generated
+
+        def replace_without_execute_bits(root: Path, output: Path) -> None:
+            replace_generated(root, output)
+            for path in output.rglob("*"):
+                if path.is_file():
+                    path.chmod(path.stat().st_mode & ~(
+                        stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH
+                    ))
+
+        with mock.patch.object(
+            build_distributions,
+            "replace_generated",
+            side_effect=replace_without_execute_bits,
+        ):
+            self.verify()
+
+    def test_replay_is_independent_of_windows_text_translation(self):
+        self.git("config", "core.autocrlf", "false")
+        self.git("checkout-index", "--all", "--force")
+
+        def windows_write_text(path: Path, value: str, *args, **kwargs) -> int:
+            encoding = kwargs.get("encoding") or (args[0] if args else "utf-8")
+            normalized = value.replace("\r\n", "\n").replace("\r", "\n")
+            return path.write_bytes(
+                normalized.replace("\n", "\r\n").encode(encoding)
+            )
+
+        released = release.changeset_paths_at_ref(self.root, self.stable_sha)
+        with mock.patch.object(Path, "write_text", new=windows_write_text):
+            metadata = release.prepare(
+                self.root,
+                self.stable_sha,
+                self.base_sha,
+                released_paths=released,
+            )
+            build_distributions.replace_generated(self.root, self.root / "dist")
+        self.git("add", "--all")
+        self.git("commit", "-m", f"chore: prepare stable v{metadata['version']}")
+        translated_head = self.git("rev-parse", "HEAD")
+        self.git("checkout", "--detach", self.base_sha)
+
+        result = self.verify(translated_head)
+        self.assertEqual(result["head"], translated_head)
+
+    def test_replacement_ref_cannot_substitute_the_candidate_commit(self):
+        self.git("checkout", "--detach", self.head_sha)
+        fixtures.write(self.root / "extra.txt", "not deterministic\n")
+        self.git("add", "extra.txt")
+        self.git("commit", "--amend", "--no-edit")
+        tampered = self.git("rev-parse", "HEAD")
+        self.git("checkout", "--detach", self.base_sha)
+        self.git("replace", tampered, self.head_sha)
+        with self.assertRaisesRegex(release.ReleaseError, "tree differs"):
+            self.verify(tampered)
+
+    def test_legacy_graft_overlay_is_rejected(self):
+        graft_value = self.git("rev-parse", "--git-path", "info/grafts")
+        graft_path = Path(graft_value)
+        if not graft_path.is_absolute():
+            graft_path = self.root / graft_path
+        fixtures.write(graft_path, f"{self.head_sha} {self.stable_sha}\n")
+        with self.assertRaisesRegex(release.ReleaseError, "graft overlays"):
+            self.verify()
+
+    def test_shallow_repository_is_rejected(self):
+        shallow_value = self.git("rev-parse", "--git-path", "shallow")
+        shallow_path = Path(shallow_value)
+        if not shallow_path.is_absolute():
+            shallow_path = self.root / shallow_path
+        fixtures.write(shallow_path, f"{self.stable_sha}\n")
+        with self.assertRaisesRegex(release.ReleaseError, "complete Git history"):
+            self.verify()
+
+    def test_ambient_repository_environment_is_scrubbed(self):
+        poisoned = {
+            "GIT_ATTR_SOURCE": self.head_sha,
+            "GIT_CONFIG": str(Path(self.tmp.name) / "poisoned-config"),
+            "GIT_DIR": str(Path(self.tmp.name) / "poisoned-git-dir"),
+            "GIT_REPLACE_REF_BASE": "refs/poisoned/",
+        }
+        with mock.patch.dict(os.environ, poisoned):
+            environment = release.hermetic_git_environment()
+        for name in poisoned:
+            self.assertNotIn(name, environment)
+        self.assertEqual(environment["GIT_NO_REPLACE_OBJECTS"], "1")
 
     def test_extra_release_commit_is_rejected(self):
         self.git("checkout", "--detach", self.head_sha)

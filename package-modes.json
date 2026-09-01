@@ -1,0 +1,10 @@
+{
+  "schema_version": 1,
+  "packages": {
+    "software-engineering-team": {
+      "executables": [
+        "scripts/backlog_compile.py"
+      ]
+    }
+  }
+}

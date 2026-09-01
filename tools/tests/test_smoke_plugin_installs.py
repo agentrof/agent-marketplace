@@ -59,6 +59,61 @@ class HostSmokeContracts(unittest.TestCase):
                 (root / "scripts/delivery_compile.py").unlink()
                 smoke.exercise_package(root, Path(temporary) / "project", os.environ.copy())
 
+    def test_package_execution_disables_local_bytecode_caches(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary) / "package"
+            root.mkdir()
+            for relative in (
+                "scripts/setup_project.py", "scripts/setup_check.py",
+                "scripts/requirement_route.py", "scripts/backlog_compile.py",
+                "scripts/stage_package.py", "scripts/ba_compile.py",
+                "scripts/landscape_check.py", "scripts/design_system_compile.py",
+                "scripts/experience_compile.py",
+                "scripts/experience_application_check.py",
+                "scripts/architecture_compile.py", "scripts/delivery_compile.py",
+                "scripts/delivery_git.py", "scripts/delivery_provider.py",
+                "skill-content/experience-modeling/data/experience-schema.json",
+            ):
+                path = root / relative
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text("", encoding="utf-8")
+            with mock.patch.object(
+                smoke, "run", side_effect=smoke.SmokeFailure("stop after env capture")
+            ) as runner, self.assertRaises(smoke.SmokeFailure):
+                smoke.exercise_package(
+                    root, Path(temporary) / "project", os.environ.copy()
+                )
+            self.assertEqual(
+                runner.call_args.args[1]["PYTHONDONTWRITEBYTECODE"], "1"
+            )
+
+    def test_real_host_smokes_disable_bytecode_for_every_command(self):
+        installed = Path("/installed/software-engineering-team")
+        expected_skills = {
+            f"{smoke.TEAM}:{path.parent.name}"
+            for path in (
+                ROOT / "plugins" / smoke.TEAM / "skill-content"
+            ).glob("*/SKILL.md")
+            if "exposure: entry" in path.read_text(encoding="utf-8")
+        }
+        with mock.patch.object(smoke, "require_cli"), \
+                mock.patch.object(smoke, "init_project"), \
+                mock.patch.object(smoke, "run", return_value="{}") as runner, \
+                mock.patch.object(smoke, "installed_root", return_value=installed), \
+                mock.patch.object(smoke, "exercise_package"), \
+                mock.patch.object(
+                    smoke, "codex_skill_names", return_value=expected_skills
+                ):
+            smoke.smoke_claude("agentrof/agent-marketplace@stable")
+            smoke.smoke_codex(
+                ROOT, "agentrof/agent-marketplace@stable"
+            )
+        self.assertTrue(runner.call_args_list)
+        self.assertTrue(all(
+            call.args[1].get("PYTHONDONTWRITEBYTECODE") == "1"
+            for call in runner.call_args_list
+        ))
+
     def test_real_host_workflow_runs_the_install_smoke(self):
         workflow = (ROOT / ".github/workflows/release-hosts.yml").read_text(
             encoding="utf-8"
@@ -77,6 +132,30 @@ class HostSmokeContracts(unittest.TestCase):
                     "tampered package\n", encoding="utf-8"
                 )
                 with self.assertRaisesRegex(smoke.SmokeFailure, "hash differs"):
+                    smoke.verify_installed_package(installed, expected, host)
+
+    def test_installed_package_must_match_attested_executable_modes(self):
+        for host in ("claude", "codex"):
+            with self.subTest(host=host), tempfile.TemporaryDirectory() as temporary:
+                expected = ROOT / "dist" / host / smoke.TEAM
+                installed = Path(temporary) / smoke.TEAM
+                shutil.copytree(expected, installed)
+                script = installed / "scripts/backlog_compile.py"
+                if not build_distributions.is_executable(script):
+                    self.skipTest("fixture filesystem has no executable mode")
+                script.chmod(script.stat().st_mode & ~0o111)
+                with self.assertRaisesRegex(smoke.SmokeFailure, "mode differs"):
+                    smoke.verify_installed_package(installed, expected, host)
+
+    def test_installed_package_rejects_unattested_extra_entries(self):
+        for host in ("claude", "codex"):
+            with self.subTest(host=host), tempfile.TemporaryDirectory() as temporary:
+                expected = ROOT / "dist" / host / smoke.TEAM
+                installed = Path(temporary) / smoke.TEAM
+                shutil.copytree(expected, installed)
+                rogue = installed / "agents/rogue-release-agent.md"
+                rogue.write_text("unattested\n", encoding="utf-8")
+                with self.assertRaisesRegex(smoke.SmokeFailure, "tree differs"):
                     smoke.verify_installed_package(installed, expected, host)
 
     def test_codex_upgrade_rechecks_the_candidate_package_not_skill_names(self):

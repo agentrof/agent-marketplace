@@ -1,5 +1,5 @@
 {
-  "build_id": "snapshot.6bbc5acbdf7063464b5227a28409a6b81bd03de38c3b64b4a06d40304519e591",
+  "build_id": "snapshot.69218cd78b1e7114ff022e4e6f24458d475ef1772837d48ea8c8c05edda1e754",
   "component": "software-engineering-team",
   "delivery_protocol": {
     "read_max": 1,
@@ -9,6 +9,9 @@
     ],
     "write": 1
   },
+  "executables": [
+    "scripts/backlog_compile.py"
+  ],
   "files": {
     ".agent-marketplace-generated-distribution": "bc5e5ffd58e656c315fc4230e335b1acaaeba4b3a6871fc57e84144035567474",
     ".codex-plugin/plugin.json": "d1655ce4f1e83db85f8862a9145e036b85f378e69e1daec47708365bd4783425",
@@ -274,9 +277,9 @@
   "host": "codex",
   "marketplace_release": "0.0.1",
   "runtime_contracts": [],
-  "schema_version": 2,
+  "schema_version": 3,
   "source_channel": "snapshot",
   "source_commit": "",
-  "source_ref": "snapshot.6bbc5acbdf7063464b5227a28409a6b81bd03de38c3b64b4a06d40304519e591",
+  "source_ref": "snapshot.69218cd78b1e7114ff022e4e6f24458d475ef1772837d48ea8c8c05edda1e754",
   "version": "0.0.1"
 }

@@ -38,6 +38,10 @@ jobs:
           python-version: "3.x"
       - name: Configure release author
         run: |
+          git config core.autocrlf false
+          git config core.eol lf
+          git checkout-index --all --force
+          test -z "$(git status --porcelain)"
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
       - name: Prepare bootstrap or verified release branch
@@ -72,25 +76,76 @@ jobs:
           fi
 
           if [ "$bootstrap" = true ]; then
-            if [ "$bootstrap_candidate" = "$candidate_sha" ]; then
-              python3 tools/release.py verify-bootstrap
-              make release-check
+            make release-check
+            stage_json=""
+            phase=""
+
+            if [ -n "$stable_sha" ]; then
+              if ! stage_json="$(
+                python3 tools/release_publish.py stage \
+                  --version 0.0.1 \
+                  --candidate-sha "$bootstrap_candidate" \
+                  --bootstrap
+              )"; then
+                echo "$stage_json"
+                exit 1
+              fi
+              phase="$(python3 -c 'import json,sys; print(json.loads(sys.argv[1])["phase"])' "$stage_json")"
             fi
-            if ! stage_json="$(
-              python3 tools/release_publish.py stage \
-                --version 0.0.1 \
-                --candidate-sha "$bootstrap_candidate" \
-                --bootstrap
-            )"; then
-              echo "$stage_json"
-              exit 1
-            fi
-            echo "$stage_json"
-            phase="$(python3 -c 'import json,sys; print(json.loads(sys.argv[1])["phase"])' "$stage_json")"
+
             if [ "$phase" = "published" ] &&
-               [ "$bootstrap_candidate" != "$candidate_sha" ]; then
+               [ "$bootstrap_candidate" != "$candidate_sha" ] &&
+               [ "$(
+                 python3 -c \
+                   'import json,sys; print("true" if json.load(sys.stdin)["has_release"] else "false")' \
+                   <<< "$(python3 tools/release.py plan)"
+               )" = "true" ]; then
               bootstrap=false
             else
+              if [ "$bootstrap_candidate" = "$candidate_sha" ] ||
+                 [ "$phase" = "published" ]; then
+                python3 tools/release.py verify-bootstrap
+              fi
+              if [ "$phase" != "published" ] &&
+                 ! candidate_verification="$(
+                   python3 tools/release.py verify-bootstrap-candidate \
+                     --candidate-sha "$bootstrap_candidate" \
+                     --main-sha "$candidate_sha" 2>&1
+                 )"; then
+                echo "$candidate_verification" >&2
+                if [ -z "$stable_sha" ]; then
+                  exit 1
+                fi
+                python3 tools/release_publish.py rollback \
+                  --version 0.0.1 \
+                  --candidate-sha "$bootstrap_candidate" \
+                  --bootstrap
+                if git show-ref --verify --quiet refs/tags/v0.0.1; then
+                  test "$(git rev-parse 'refs/tags/v0.0.1^{commit}')" = \
+                    "$bootstrap_candidate"
+                  git tag -d v0.0.1
+                fi
+                bootstrap_candidate="$candidate_sha"
+                python3 tools/release.py verify-bootstrap
+                python3 tools/release.py verify-bootstrap-candidate \
+                  --candidate-sha "$bootstrap_candidate" \
+                  --main-sha "$candidate_sha"
+                stage_json=""
+                phase=""
+              fi
+              if [ -z "$stage_json" ]; then
+                if ! stage_json="$(
+                  python3 tools/release_publish.py stage \
+                    --version 0.0.1 \
+                    --candidate-sha "$bootstrap_candidate" \
+                    --bootstrap
+                )"; then
+                  echo "$stage_json"
+                  exit 1
+                fi
+                phase="$(python3 -c 'import json,sys; print(json.loads(sys.argv[1])["phase"])' "$stage_json")"
+              fi
+              echo "$stage_json"
               echo "mode=bootstrap" >> "$GITHUB_OUTPUT"
               echo "phase=$phase" >> "$GITHUB_OUTPUT"
               echo "candidate_sha=$bootstrap_candidate" >> "$GITHUB_OUTPUT"

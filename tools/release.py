@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
 import subprocess
 import tempfile
@@ -52,7 +53,7 @@ def read_json(path: Path) -> dict:
 
 def write_json(path: Path, value: dict) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(value, indent=2) + "\n", encoding="utf-8")
+    path.write_bytes((json.dumps(value, indent=2) + "\n").encode("utf-8"))
 
 
 def parse_semver(value: str, label: str = "version") -> tuple[int, int, int]:
@@ -185,8 +186,11 @@ def channel_source(host: str, plugin: str) -> str | dict:
     return resolver(plugin)
 
 
-def catalog_adapters(root: Path) -> dict[str, build_distributions.HostAdapter]:
-    adapters = build_distributions.load_adapters(root)
+def catalog_adapters(
+    root: Path,
+    adapters: dict[str, build_distributions.HostAdapter] | None = None,
+) -> dict[str, build_distributions.HostAdapter]:
+    adapters = adapters or build_distributions.load_adapters(root)
     result = {}
     for host, adapter in adapters.items():
         if not adapter.metadata.get("marketplace_catalog"):
@@ -229,19 +233,22 @@ def sync_version_surfaces(root: Path, versions: dict) -> None:
 
 
 
-def validate_version_surfaces(root: Path) -> list[str]:
+def validate_version_surfaces(
+    root: Path,
+    adapters: dict[str, build_distributions.HostAdapter] | None = None,
+) -> list[str]:
     problems: list[str] = []
     try:
         versions = load_versions(root)
         changesets = load_changesets(root, versions)
         release_plan(versions, changesets)
-        adapters = build_distributions.load_adapters(root)
+        adapters = adapters or build_distributions.load_adapters(root)
     except ReleaseError as exc:
         return [str(exc)]
     try:
         catalogs = {
             host: read_json(adapter.module.marketplace_catalog_path(root))
-            for host, adapter in catalog_adapters(root).items()
+            for host, adapter in catalog_adapters(root, adapters).items()
         }
     except ReleaseError as exc:
         return [str(exc)]
@@ -251,7 +258,7 @@ def validate_version_surfaces(root: Path) -> list[str]:
     }
     for plugin, expected in versions["plugins"].items():
         surfaces: list[tuple[str, str]] = []
-        for host, adapter in catalog_adapters(root).items():
+        for host, adapter in catalog_adapters(root, adapters).items():
             catalog_entry = catalog_entries[host].get(plugin, {})
             value = adapter.module.catalog_component_version(catalog_entry)
             if value is not None:
@@ -273,7 +280,7 @@ def validate_version_surfaces(root: Path) -> list[str]:
                 )
         for host, catalog in catalog_entries.items():
             source = catalog.get(plugin, {}).get("source")
-            expected_source = build_distributions.load_adapters(root)[host].module.channel_source(plugin)
+            expected_source = adapters[host].module.channel_source(plugin)
             if source != expected_source:
                 problems.append(
                     f"{plugin} {host} marketplace source must stay inside the selected channel"
@@ -281,20 +288,85 @@ def validate_version_surfaces(root: Path) -> list[str]:
     return problems
 
 
-def git(root: Path, *args: str) -> str:
+def git(
+    root: Path, *args: str, environment: dict[str, str] | None = None,
+) -> str:
     completed = subprocess.run(
-        ["git", *args], cwd=root, capture_output=True, text=True, check=False
+        ["git", *args], cwd=root, capture_output=True, text=True, check=False,
+        env=environment,
     )
     if completed.returncode != 0:
         raise ReleaseError(completed.stderr.strip() or "git command failed")
     return completed.stdout.strip()
 
 
-def git_ok(root: Path, *args: str) -> bool:
+def git_ok(
+    root: Path, *args: str, environment: dict[str, str] | None = None,
+) -> bool:
     completed = subprocess.run(
-        ["git", *args], cwd=root, capture_output=True, text=True, check=False
+        ["git", *args], cwd=root, capture_output=True, text=True, check=False,
+        env=environment,
     )
     return completed.returncode == 0
+
+
+def hermetic_git_environment() -> dict[str, str]:
+    """Isolate provenance checks from caller Git policy and replacement refs."""
+    environment = os.environ.copy()
+    repository_overrides = {
+        "GIT_ALTERNATE_OBJECT_DIRECTORIES",
+        "GIT_ATTR_SOURCE",
+        "GIT_CEILING_DIRECTORIES",
+        "GIT_COMMON_DIR",
+        "GIT_CONFIG",
+        "GIT_DIR",
+        "GIT_DISCOVERY_ACROSS_FILESYSTEM",
+        "GIT_INDEX_FILE",
+        "GIT_NAMESPACE",
+        "GIT_OBJECT_DIRECTORY",
+        "GIT_REPLACE_REF_BASE",
+        "GIT_SHALLOW_FILE",
+        "GIT_TEMPLATE_DIR",
+        "GIT_WORK_TREE",
+    }
+    for name in tuple(environment):
+        if name in repository_overrides \
+                or name == "GIT_CONFIG_PARAMETERS" \
+                or name.startswith("GIT_CONFIG_KEY_") \
+                or name.startswith("GIT_CONFIG_VALUE_"):
+            environment.pop(name)
+    environment.update({
+        "GIT_ATTR_NOSYSTEM": "1",
+        "GIT_CONFIG_COUNT": "0",
+        "GIT_CONFIG_GLOBAL": os.devnull,
+        "GIT_CONFIG_NOSYSTEM": "1",
+        "GIT_CONFIG_SYSTEM": os.devnull,
+        "GIT_NO_REPLACE_OBJECTS": "1",
+    })
+    return environment
+
+
+def reject_graph_overlays(root: Path, environment: dict[str, str]) -> None:
+    """Reject legacy graph overlays that can rewrite exact commit ancestry."""
+    shallow = git(
+        root, "rev-parse", "--is-shallow-repository", environment=environment,
+    )
+    if shallow != "false":
+        raise ReleaseError("release PR verification requires complete Git history")
+    graft_value = git(
+        root, "rev-parse", "--git-path", "info/grafts", environment=environment,
+    )
+    graft_path = Path(graft_value)
+    if not graft_path.is_absolute():
+        graft_path = root / graft_path
+    try:
+        grafts = graft_path.read_bytes()
+    except FileNotFoundError:
+        return
+    except OSError as exc:
+        raise ReleaseError("release PR verification cannot inspect Git grafts") from exc
+    if grafts.strip():
+        raise ReleaseError("release PR verification rejects Git graft overlays")
 
 
 FINALIZE_BRANCH_RE = re.compile(r"^codex/[a-z0-9]+(?:-[a-z0-9]+)*$")
@@ -703,15 +775,18 @@ def check_pr_changeset(root: Path, base: str) -> None:
     selected = [item for item in load_changesets(root, versions) if item.path.relative_to(root).as_posix() in added]
     declared = {component for item in selected for component in item.components}
     required: set[str] = set()
+    adapters = build_distributions.load_adapters(root)
+    _, provenance_name = build_distributions.packaging_names(root)
     for _status, path in changed:
         parts = Path(path).parts
         if len(parts) >= 2 and parts[0] == "plugins" and parts[1] in versions["plugins"]:
             required.add(parts[1])
-        adapters = build_distributions.load_adapters(root)
         if len(parts) >= 3 and parts[0] == "platforms" and parts[1] in adapters and parts[2] in versions["plugins"]:
             required.add(parts[2])
         if len(parts) >= 3 and parts[0] == "dist" and parts[1] in adapters and parts[2] in versions["plugins"]:
-            required.add(parts[2])
+            derived_provenance = len(parts) == 4 and parts[3] == provenance_name
+            if not derived_provenance:
+                required.add(parts[2])
         if path in {".claude-plugin/marketplace.json", ".agents/plugins/marketplace.json"}:
             required.add(MARKETPLACE_COMPONENT)
     if not added:
@@ -765,11 +840,18 @@ def append_changelog(root: Path, plan: dict) -> None:
     lines = ["", f"## {plan['marketplace']}", ""]
     for summary in plan["summaries"]:
         lines.append(f"- {summary}")
-    path.write_text(existing.rstrip() + "\n" + "\n".join(lines) + "\n", encoding="utf-8")
+    path.write_bytes(
+        (existing.rstrip() + "\n" + "\n".join(lines) + "\n").encode("utf-8")
+    )
 
 
-def changeset_paths_at_ref(root: Path, ref: str) -> set[str]:
-    output = git(root, "ls-tree", "-r", "--name-only", ref, "--", ".changes")
+def changeset_paths_at_ref(
+    root: Path, ref: str, *, environment: dict[str, str] | None = None,
+) -> set[str]:
+    output = git(
+        root, "ls-tree", "-r", "--name-only", ref, "--", ".changes",
+        environment=environment,
+    )
     return {line for line in output.splitlines() if line.endswith(".json")}
 
 
@@ -832,22 +914,33 @@ def verify_release_pr(
     is replayed from the trusted base in a disposable clone and the resulting
     tree is compared byte-for-byte with the candidate commit.
     """
+    git_environment = hermetic_git_environment()
     base_sha = require_sha(base_sha, "release PR base")
     head_sha = require_sha(head_sha, "release PR head")
     stable_sha = require_sha(stable_sha, "stable base")
-    if git(root, "rev-parse", "HEAD") != base_sha:
+    reject_graph_overlays(root, git_environment)
+    if git(root, "rev-parse", "HEAD", environment=git_environment) != base_sha:
         raise ReleaseError("release PR verification must run from the exact base SHA")
-    if git(root, "status", "--porcelain"):
+    if git(root, "status", "--porcelain", environment=git_environment):
         raise ReleaseError("release PR verification requires a clean base worktree")
-    parents = git(root, "rev-list", "--parents", "-n", "1", head_sha).split()
+    parents = git(
+        root, "rev-list", "--parents", "-n", "1", head_sha,
+        environment=git_environment,
+    ).split()
     if parents != [head_sha, base_sha]:
         raise ReleaseError(
             "release PR head must be exactly one non-merge commit on the current base"
         )
-    if not git_ok(root, "merge-base", "--is-ancestor", stable_sha, base_sha):
+    if not git_ok(
+        root, "merge-base", "--is-ancestor", stable_sha, base_sha,
+        environment=git_environment,
+    ):
         raise ReleaseError("stable base must be an ancestor of the release PR base")
 
-    raw_metadata = git(root, "show", f"{head_sha}:.release/stable.json")
+    raw_metadata = git(
+        root, "show", f"{head_sha}:.release/stable.json",
+        environment=git_environment,
+    )
     try:
         metadata = json.loads(raw_metadata)
     except json.JSONDecodeError as exc:
@@ -882,7 +975,10 @@ def verify_release_pr(
         raise ReleaseError("release PR summaries are invalid")
 
     expected_message = f"chore: prepare stable v{version}"
-    if git(root, "show", "-s", "--format=%B", head_sha) != expected_message:
+    if git(
+        root, "show", "-s", "--format=%B", head_sha,
+        environment=git_environment,
+    ) != expected_message:
         raise ReleaseError("release PR commit message differs from the release contract")
 
     with tempfile.TemporaryDirectory(prefix="release-pr-verify.") as temporary:
@@ -892,12 +988,29 @@ def verify_release_pr(
             capture_output=True,
             text=True,
             check=False,
+            env=git_environment,
         )
         if completed.returncode != 0:
             raise ReleaseError(completed.stderr.strip() or "release replay clone failed")
-        git(expected_root, "config", "core.autocrlf", "false")
-        git(expected_root, "checkout", "--detach", base_sha)
-        released_paths = changeset_paths_at_ref(root, stable_sha)
+        git(
+            expected_root, "config", "core.autocrlf", "false",
+            environment=git_environment,
+        )
+        git(
+            expected_root, "config", "core.eol", "lf",
+            environment=git_environment,
+        )
+        git(
+            expected_root, "config", "core.filemode", "false",
+            environment=git_environment,
+        )
+        git(
+            expected_root, "checkout", "--detach", base_sha,
+            environment=git_environment,
+        )
+        released_paths = changeset_paths_at_ref(
+            root, stable_sha, environment=git_environment,
+        )
         replay = prepare(
             expected_root,
             stable_sha,
@@ -908,9 +1021,14 @@ def verify_release_pr(
         verify_release(expected_root, replay["version"])
         if replay != metadata:
             raise ReleaseError("release PR metadata differs from deterministic replay")
-        git(expected_root, "add", "--all")
-        expected_tree = git(expected_root, "write-tree")
-    head_tree = git(root, "rev-parse", f"{head_sha}^{{tree}}")
+        git(expected_root, "add", "--all", environment=git_environment)
+        expected_tree = git(
+            expected_root, "write-tree", environment=git_environment,
+        )
+    head_tree = git(
+        root, "rev-parse", f"{head_sha}^{{tree}}",
+        environment=git_environment,
+    )
     if head_tree != expected_tree:
         raise ReleaseError("release PR tree differs from deterministic replay")
     return {
@@ -924,8 +1042,11 @@ def verify_release_pr(
     }
 
 
-def verify_bootstrap(root: Path) -> dict:
-    problems = validate_version_surfaces(root)
+def verify_bootstrap(
+    root: Path,
+    adapters: dict[str, build_distributions.HostAdapter] | None = None,
+) -> dict:
+    problems = validate_version_surfaces(root, adapters)
     if problems:
         raise ReleaseError("; ".join(problems))
     versions = load_versions(root)
@@ -950,6 +1071,91 @@ def verify_bootstrap(root: Path) -> dict:
             + ", ".join(impactful)
         )
     return versions
+
+
+def verify_bootstrap_candidate(
+    root: Path, candidate_sha: str, main_sha: str,
+) -> dict:
+    """Validate a staged bootstrap ancestor using only trusted current code."""
+    environment = hermetic_git_environment()
+    candidate_sha = require_sha(candidate_sha, "bootstrap candidate")
+    main_sha = require_sha(main_sha, "bootstrap main")
+    reject_graph_overlays(root, environment)
+    if git(root, "rev-parse", "HEAD", environment=environment) != main_sha:
+        raise ReleaseError(
+            "bootstrap candidate verification must run from the exact main SHA"
+        )
+    if git(root, "status", "--porcelain", environment=environment):
+        raise ReleaseError("bootstrap candidate verification requires a clean worktree")
+    if not git_ok(
+        root, "merge-base", "--is-ancestor", candidate_sha, main_sha,
+        environment=environment,
+    ):
+        raise ReleaseError("bootstrap candidate must be an ancestor of current main")
+    trusted_adapters = build_distributions.load_adapters(root)
+    with tempfile.TemporaryDirectory(prefix="bootstrap-candidate-verify.") as temporary:
+        temporary_root = Path(temporary)
+        candidate_root = temporary_root / "candidate"
+        expected_dist = temporary_root / "expected-dist"
+        completed = subprocess.run(
+            [
+                "git", "clone", "--no-checkout", "--local", "--no-hardlinks",
+                str(root), str(candidate_root),
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+            env=environment,
+        )
+        if completed.returncode != 0:
+            raise ReleaseError(
+                completed.stderr.strip() or "bootstrap candidate clone failed"
+            )
+        git(
+            candidate_root, "config", "core.autocrlf", "false",
+            environment=environment,
+        )
+        git(
+            candidate_root, "config", "core.eol", "lf",
+            environment=environment,
+        )
+        git(
+            candidate_root, "config", "core.filemode", "false",
+            environment=environment,
+        )
+        git(
+            candidate_root, "checkout", "--detach", candidate_sha,
+            environment=environment,
+        )
+        if git(
+            candidate_root, "status", "--porcelain", environment=environment,
+        ):
+            raise ReleaseError("bootstrap candidate checkout is not canonical")
+        try:
+            candidate_versions = verify_bootstrap(
+                candidate_root, adapters=trusted_adapters,
+            )
+            build_distributions.build(
+                candidate_root, expected_dist, adapters=trusted_adapters,
+            )
+        except (OSError, ValueError) as exc:
+            raise ReleaseError(f"bootstrap candidate is invalid: {exc}") from exc
+        problems = build_distributions.compare_dirs(
+            expected_dist, candidate_root / "dist",
+        )
+        if problems:
+            raise ReleaseError(
+                "bootstrap candidate distribution differs from trusted replay: "
+                + "; ".join(problems)
+            )
+        snapshot = build_distributions.marketplace_snapshot(candidate_root)
+    return {
+        "schema_version": 1,
+        "candidate": candidate_sha,
+        "main": main_sha,
+        "version": candidate_versions["marketplace"],
+        "build_id": snapshot["build_id"],
+    }
 
 
 def release_notes(root: Path, version: str) -> str:
@@ -989,6 +1195,9 @@ def main() -> int:
     branch_parser.add_argument("--main-sha", required=True)
     branch_parser.add_argument("--release-sha", required=True)
     sub.add_parser("verify-bootstrap")
+    bootstrap_candidate_parser = sub.add_parser("verify-bootstrap-candidate")
+    bootstrap_candidate_parser.add_argument("--candidate-sha", required=True)
+    bootstrap_candidate_parser.add_argument("--main-sha", required=True)
     notes_parser = sub.add_parser("release-notes")
     notes_parser.add_argument("--version", required=True)
     notes_parser.add_argument("--output", type=Path)
@@ -1011,7 +1220,7 @@ def main() -> int:
         result = build_identity(root, args.sha)
         payload = json.dumps(result, indent=2) + "\n"
         if args.output:
-            args.output.write_text(payload, encoding="utf-8")
+            args.output.write_bytes(payload.encode("utf-8"))
         else:
             print(payload, end="")
     elif args.command == "check-pr":
@@ -1038,10 +1247,14 @@ def main() -> int:
         ), indent=2))
     elif args.command == "verify-bootstrap":
         print(json.dumps(verify_bootstrap(root), indent=2))
+    elif args.command == "verify-bootstrap-candidate":
+        print(json.dumps(verify_bootstrap_candidate(
+            root, args.candidate_sha, args.main_sha,
+        ), indent=2))
     elif args.command == "release-notes":
         notes = release_notes(root, args.version)
         if args.output:
-            args.output.write_text(notes, encoding="utf-8")
+            args.output.write_bytes(notes.encode("utf-8"))
         else:
             print(notes, end="")
     elif args.command == "finalize-local":

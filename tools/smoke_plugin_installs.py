@@ -10,6 +10,7 @@ import os
 import queue
 import re
 import shutil
+import stat
 import subprocess
 import sys
 import tempfile
@@ -80,6 +81,43 @@ def require_public_stable(expected_sha: str, env: dict[str, str]) -> None:
         )
 
 
+def package_inventory(root: Path, host: str) -> dict[str, str]:
+    """Return a closed regular-file/directory inventory without following links."""
+    try:
+        if not root.exists() or root.is_symlink() or not root.is_dir():
+            raise SmokeFailure(f"{host} package root is not a real directory")
+    except OSError as exc:
+        raise SmokeFailure(f"{host} package root cannot be inspected") from exc
+    inventory: dict[str, str] = {}
+    pending = [root]
+    while pending:
+        directory = pending.pop()
+        try:
+            entries = sorted(directory.iterdir(), key=lambda path: path.name)
+        except OSError as exc:
+            raise SmokeFailure(f"{host} package tree cannot be inspected") from exc
+        for entry in entries:
+            relative = entry.relative_to(root).as_posix()
+            try:
+                mode = entry.lstat().st_mode
+            except OSError as exc:
+                raise SmokeFailure(
+                    f"{host} package entry cannot be inspected: {relative}"
+                ) from exc
+            if stat.S_ISLNK(mode):
+                raise SmokeFailure(f"{host} package tree contains a link: {relative}")
+            if stat.S_ISDIR(mode):
+                inventory[relative] = "directory"
+                pending.append(entry)
+            elif stat.S_ISREG(mode):
+                inventory[relative] = "file"
+            else:
+                raise SmokeFailure(
+                    f"{host} package tree contains a special entry: {relative}"
+                )
+    return inventory
+
+
 def verify_installed_package(
     installed: Path, expected: Path, host: str,
 ) -> None:
@@ -98,9 +136,28 @@ def verify_installed_package(
     if actual_provenance.get("host") != host \
             or actual_provenance.get("component") != TEAM:
         raise SmokeFailure(f"{host} installed package provenance has wrong identity")
+    actual_inventory = package_inventory(installed, host)
+    expected_inventory = package_inventory(expected, host)
+    if actual_inventory != expected_inventory:
+        raise SmokeFailure(f"{host} installed package tree differs from candidate")
     files = actual_provenance.get("files")
     if not isinstance(files, dict) or not files:
         raise SmokeFailure(f"{host} installed package provenance has no file hashes")
+    executables = actual_provenance.get("executables")
+    if actual_provenance.get("schema_version") != 3 \
+            or not isinstance(executables, list) \
+            or any(not isinstance(path, str) for path in executables) \
+            or len(executables) != len(set(executables)):
+        raise SmokeFailure(f"{host} installed package provenance has invalid modes")
+    executable_paths = set(executables)
+    if not executable_paths <= set(files):
+        raise SmokeFailure(f"{host} installed package provenance has unsafe modes")
+    expected_attested_files = {
+        relative for relative, kind in expected_inventory.items()
+        if kind == "file" and relative != provenance_name
+    }
+    if set(files) != expected_attested_files:
+        raise SmokeFailure(f"{host} package provenance does not cover its full tree")
     for relative, expected_digest in files.items():
         path = Path(relative) if isinstance(relative, str) else Path("..")
         if path.is_absolute() or ".." in path.parts \
@@ -112,6 +169,15 @@ def verify_installed_package(
         actual_digest = hashlib.sha256(installed_path.read_bytes()).hexdigest()
         if actual_digest != expected_digest:
             raise SmokeFailure(f"{host} installed package hash differs for {relative}")
+        expected_path = expected / path
+        expected_executable = build_distributions.is_executable(expected_path)
+        actual_executable = build_distributions.is_executable(installed_path)
+        attested_executable = relative in executable_paths
+        if expected_executable != attested_executable \
+                or actual_executable != attested_executable:
+            raise SmokeFailure(
+                f"{host} installed package mode differs for {relative}"
+            )
 
 
 def init_project(path: Path, env: dict[str, str]) -> None:
@@ -157,6 +223,7 @@ def exercise_application_resources(
 
 
 def exercise_package(team_root: Path, project: Path, env: dict[str, str]) -> None:
+    env = dict(env, PYTHONDONTWRITEBYTECODE="1")
     setup = team_root / "scripts" / "setup_project.py"
     check = team_root / "scripts" / "setup_check.py"
     route = team_root / "scripts" / "requirement_route.py"
@@ -341,7 +408,11 @@ def smoke_claude(source: str | Path, expected: Path | None = None) -> None:
     require_cli("claude")
     with tempfile.TemporaryDirectory(prefix="marketplace-claude-smoke.") as temporary:
         state = Path(temporary)
-        env = {**os.environ, "CLAUDE_CONFIG_DIR": str(state / "claude")}
+        env = {
+            **os.environ,
+            "CLAUDE_CONFIG_DIR": str(state / "claude"),
+            "PYTHONDONTWRITEBYTECODE": "1",
+        }
         project = state / "project"
         init_project(project, env)
         run(["claude", "plugin", "marketplace", "add", str(source)], env)
@@ -367,7 +438,11 @@ def smoke_codex(
         state = Path(temporary)
         codex_home = state / "codex"
         codex_home.mkdir()
-        env = {**os.environ, "CODEX_HOME": str(codex_home)}
+        env = {
+            **os.environ,
+            "CODEX_HOME": str(codex_home),
+            "PYTHONDONTWRITEBYTECODE": "1",
+        }
         project = state / "project"
         init_project(project, env)
         run(["codex", "plugin", "marketplace", "add", str(source), "--json"], env)

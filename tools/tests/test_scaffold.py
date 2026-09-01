@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import json
 import tempfile
 import unittest
 from pathlib import Path
 import sys
+from unittest import mock
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "tools"))
@@ -29,10 +31,38 @@ class ScaffoldContracts(unittest.TestCase):
             )
             for host in ("claude", "codex"):
                 self.assertTrue((root / "dist" / host / "sample-team").is_dir())
+            package_modes_path = root / "package-modes.json"
+            package_modes = json.loads(
+                package_modes_path.read_text(encoding="utf-8")
+            )
+            self.assertEqual(
+                package_modes["packages"]["sample-team"], {"executables": []}
+            )
+            self.assertEqual(
+                package_modes_path.read_bytes(),
+                (json.dumps(
+                    package_modes, indent=2, sort_keys=True
+                ) + "\n").encode("utf-8"),
+            )
             claude = (root / "platforms/claude/sample-team/manifest.json").read_text(
                 encoding="utf-8"
             )
             self.assertNotIn('"dependencies"', claude)
+
+    def test_new_plugin_failure_restores_package_mode_registry_exactly(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            fixtures.make_valid_root(root)
+            package_modes_path = root / "package-modes.json"
+            before = package_modes_path.read_bytes()
+            with mock.patch.object(
+                scaffold, "sync_distributions", side_effect=RuntimeError("injected")
+            ), self.assertRaisesRegex(RuntimeError, "injected"):
+                scaffold.new_plugin(root, "sample-team")
+            self.assertEqual(package_modes_path.read_bytes(), before)
+            self.assertFalse((root / "plugins/sample-team").exists())
+            for host in ("claude", "codex"):
+                self.assertFalse((root / "platforms" / host / "sample-team").exists())
 
     def test_new_agent_has_no_hidden_runtime_language(self):
         with tempfile.TemporaryDirectory() as temporary:

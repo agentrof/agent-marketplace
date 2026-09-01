@@ -85,10 +85,13 @@ recreate it without changing Requirement or Delivery state.
   only writer that bumps `versions.json`; host manifests expose that semantic
   plugin version.
 - Each generated package carries `.agent-marketplace-package.json` with a
-  deterministic snapshot `build_id`, source provenance, file hashes and the
-  closed `delivery_protocol` read/write capability. This metadata verifies the
-  package and selects compatible Delivery record adapters; it is not project
-  state.
+  deterministic snapshot `build_id`, source provenance, the closed file/hash
+  inventory, executable paths and the closed `delivery_protocol` read/write
+  capability. This schema-v3 metadata verifies the complete package and selects
+  compatible Delivery record adapters; it is not project state. Generated
+  UTF-8 text uses canonical LF bytes and release preparation rematerializes
+  tracked files under its fixed Git checkout policy; unknown and binary
+  payloads remain byte-exact.
 - Setup never copies a package version or build ID into project configuration,
   and upgrade never compares an old project build ID with a new one. Active
   Delivery compatibility is proven from package metadata plus the remote Fence

@@ -138,10 +138,17 @@ def new_plugin(root: Path, name: str) -> None:
         raise SystemExit(f"scaffold: plugin '{name}' already exists")
     adapters = build_distributions.load_adapters(root)
     versions_path = root / "versions.json"
+    package_modes_path = root / "package-modes.json"
     try:
         versions = json.loads(versions_path.read_text(encoding="utf-8"))
+        package_modes = json.loads(package_modes_path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as exc:
         raise SystemExit(f"scaffold: marketplace registry is unreadable: {exc}") from exc
+    try:
+        for component in sorted(versions.get("plugins", {})):
+            build_distributions.load_package_executables(root, component)
+    except ValueError as exc:
+        raise SystemExit(f"scaffold: {exc}") from exc
     catalogs: dict[Path, dict] = {}
     catalog_before: dict[Path, bytes] = {}
     for adapter in adapters.values():
@@ -159,6 +166,7 @@ def new_plugin(root: Path, name: str) -> None:
             raise SystemExit(f"scaffold: marketplace registry is unreadable: {exc}") from exc
         catalog_before[path] = path.read_bytes()
     versions_before = versions_path.read_bytes()
+    package_modes_before = package_modes_path.read_bytes()
     platforms = {
         host: root / "platforms" / host / name for host in adapters
     }
@@ -236,11 +244,19 @@ def new_plugin(root: Path, name: str) -> None:
         versions_path.write_text(
             json.dumps(versions, indent=2) + "\n", encoding="utf-8"
         )
+        registered_modes = package_modes["packages"]
+        if name in registered_modes:
+            raise RuntimeError(f"package-modes.json already registers {name}")
+        registered_modes[name] = {"executables": []}
+        package_modes_path.write_bytes(
+            (json.dumps(package_modes, indent=2, sort_keys=True) + "\n").encode("utf-8")
+        )
         sync_distributions(root)
     except BaseException:
         for path, contents in catalog_before.items():
             path.write_bytes(contents)
         versions_path.write_bytes(versions_before)
+        package_modes_path.write_bytes(package_modes_before)
         rollback_created(root, created)
         raise
     print(f"scaffold: created plugins/{name} and all registered platform adapters")

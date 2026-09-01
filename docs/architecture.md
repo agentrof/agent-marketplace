@@ -109,8 +109,16 @@ behavior is host-neutral; Claude Code and Codex are packaging adapters.
     active maintainer session; GitHub issue events never start an agent. The
     protocol may prepare a pull request but never merge one without explicit
     approval. Stable release authority comes only from an explicit user request
-    bound to an unambiguous PR set; exact-SHA host gates, release provenance,
-    and clean-ref completion remain mandatory.
+    bound to an unambiguous PR set. Every pull request emits the required
+    aggregate and two-host lifecycle contexts. Release branches are accepted
+    only when their sole commit tree is the deterministic replay of the
+    attested main source. Replay ignores ambient Git attributes, excludes,
+    replacement refs and graph overlays. Snapshot records are prefix-free;
+    generated text uses LF, unknown/binary payloads remain byte-exact, and the
+    tracked `package-modes.json` contract supplies platform-neutral executable
+    modes. Schema-v3 package provenance binds the closed file inventory, hashes
+    and executable set. Public stable installs, exact-lease ref transactions,
+    immutable Release reconciliation and clean-ref completion remain mandatory.
 
 The normative Requirement and Delivery lifecycle is documented in
 [requirement-delivery-protocol.md](requirement-delivery-protocol.md).

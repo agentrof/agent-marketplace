@@ -40,6 +40,14 @@ class AdapterRegistryTests(unittest.TestCase):
             for adapter in adapters.values()
         ))
 
+    def test_registry_discovery_never_writes_python_bytecode(self):
+        build_distributions.load_adapters(self.root)
+        self.assertEqual(
+            [path for path in self.root.rglob("*")
+             if build_distributions.is_python_cache(path)],
+            [],
+        )
+
     def test_duplicate_projection_root_is_rejected(self):
         path, value = self.adapter_json("claude")
         value["projection_root"] = ".codex"

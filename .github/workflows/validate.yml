@@ -15,7 +15,13 @@ concurrency:
 
 jobs:
   changeset:
-    if: github.event_name == 'pull_request' && github.head_ref != 'release/stable'
+    if: >-
+      github.event_name == 'pull_request' &&
+      !(
+        github.event.pull_request.base.ref == 'main' &&
+        github.event.pull_request.head.ref == 'release/stable' &&
+        github.event.pull_request.head.repo.full_name == github.repository
+      )
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -29,9 +35,40 @@ jobs:
         run: >-
           python3 tools/release.py check-pr
           --base origin/${{ github.base_ref }}
-          --allow-bootstrap
 
-  check:
+  release-pr-policy:
+    if: >-
+      github.event_name == 'pull_request' &&
+      github.event.pull_request.base.ref == 'main' &&
+      github.event.pull_request.head.ref == 'release/stable' &&
+      github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.9"
+      - name: Verify the deterministic release branch
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          git fetch --no-tags origin \
+            "+refs/heads/stable:refs/remotes/origin/stable" \
+            "+refs/heads/release/stable:refs/remotes/origin/release/stable"
+          test "$(git rev-parse refs/remotes/origin/release/stable)" = "$HEAD_SHA"
+          python3 tools/release.py verify-release-pr \
+            --base-sha "$BASE_SHA" \
+            --head-sha "$HEAD_SHA" \
+            --stable-sha "$(git rev-parse refs/remotes/origin/stable)"
+
+  deterministic-check:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -41,32 +78,6 @@ jobs:
           python-version: "3.x"
       - name: Run all gates
         run: make check
-
-  build-metadata:
-    if: github.event_name == 'push'
-    needs: [check, compatibility, vault-hook-platforms]
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
-        with:
-          fetch-depth: 0
-      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
-        with:
-          python-version: "3.9"
-      - name: Create immutable main build identity
-        id: build
-        run: |
-          python3 tools/release.py build-info --output build-info.json
-          echo "id=$(python3 -c 'import json; print(json.load(open("build-info.json"))["build_id"])')" >> "$GITHUB_OUTPUT"
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: ${{ steps.build.outputs.id }}
-          path: |
-            build-info.json
-            dist/claude
-            dist/codex
-          if-no-files-found: error
 
   compatibility:
     name: compatibility (${{ matrix.os }}, Python ${{ matrix.python }})
@@ -135,3 +146,73 @@ jobs:
           python -m unittest
           tools.tests.test_experience_compile
           tools.tests.test_vault_hook
+
+  check:
+    name: check
+    if: always()
+    needs:
+      - changeset
+      - release-pr-policy
+      - deterministic-check
+      - compatibility
+      - vault-hook-platforms
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Require every validation result
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BASE_REF: ${{ github.base_ref }}
+          HEAD_REF: ${{ github.head_ref }}
+          HEAD_REPOSITORY: ${{ github.event.pull_request.head.repo.full_name }}
+          REPOSITORY: ${{ github.repository }}
+          CHANGESET_RESULT: ${{ needs.changeset.result }}
+          RELEASE_POLICY_RESULT: ${{ needs.release-pr-policy.result }}
+          DETERMINISTIC_RESULT: ${{ needs.deterministic-check.result }}
+          COMPATIBILITY_RESULT: ${{ needs.compatibility.result }}
+          VAULT_RESULT: ${{ needs.vault-hook-platforms.result }}
+        run: |
+          set -euo pipefail
+          test "$DETERMINISTIC_RESULT" = success
+          test "$COMPATIBILITY_RESULT" = success
+          test "$VAULT_RESULT" = success
+
+          expected_changeset=skipped
+          expected_release_policy=skipped
+          if [ "$EVENT_NAME" = pull_request ]; then
+            if [ "$BASE_REF" = main ] &&
+               [ "$HEAD_REF" = release/stable ] &&
+               [ "$HEAD_REPOSITORY" = "$REPOSITORY" ]; then
+              expected_release_policy=success
+            else
+              expected_changeset=success
+            fi
+          fi
+          test "$CHANGESET_RESULT" = "$expected_changeset"
+          test "$RELEASE_POLICY_RESULT" = "$expected_release_policy"
+
+  build-metadata:
+    if: github.event_name == 'push'
+    needs: [check]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.9"
+      - name: Create immutable main build identity
+        id: build
+        run: |
+          python3 tools/release.py build-info --output build-info.json
+          echo "id=$(python3 -c 'import json; print(json.load(open("build-info.json"))["build_id"])')" >> "$GITHUB_OUTPUT"
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: ${{ steps.build.outputs.id }}
+          path: |
+            build-info.json
+            dist/claude
+            dist/codex
+          if-no-files-found: error

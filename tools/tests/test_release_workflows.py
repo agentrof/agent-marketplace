@@ -57,6 +57,8 @@ class ReleaseWorkflowContracts(unittest.TestCase):
         text = self.text("prepare-stable-release.yml")
         self.assertIn("workflow_dispatch", text)
         self.assertIn("if: github.ref == 'refs/heads/main'", text)
+        self.assertIn("permissions:\n  contents: read", text)
+        self.assertIn("permissions:\n      contents: write", text)
         self.assertIn("GH_TOKEN: ${{ github.token }}", text)
         self.assertNotIn("pull_request_target", text)
         self.assertNotIn("gh pr merge", text)
@@ -66,9 +68,18 @@ class ReleaseWorkflowContracts(unittest.TestCase):
         self.assertIn("compare/main...release/stable?expand=1", text)
         self.assertIn("Maintainer release PR required", text)
         self.assertIn("pull_request validation event runs", text)
-        self.assertLess(text.index("git push origin HEAD:refs/heads/release/stable"),
-                        text.index("manual_url="))
-        self.assertNotIn("actions/setup-node@", text)
+        self.assertIn("publish-release-branch", text)
+        self.assertIn('--main-sha "$main_sha"', text)
+        self.assertIn("git config core.autocrlf false", text)
+        self.assertIn("git config core.eol lf", text)
+        self.assertIn("git checkout-index --all --force", text)
+        self.assertIn('test -z "$(git status --porcelain)"', text)
+        self.assertLess(
+            text.index("publish-release-branch"),
+            text.index("manual_url="),
+        )
+        self.assertIn("bootstrap-public-smoke", text)
+        self.assertIn("persist-credentials: false", text)
 
     def test_pull_requests_use_ordinary_checks_and_exact_host_gate(self):
         validate = self.text("validate.yml")
@@ -76,43 +87,127 @@ class ReleaseWorkflowContracts(unittest.TestCase):
         hosts = self.text("release-hosts.yml")
         self.assertIn("pull_request:", validate)
         self.assertIn("--base origin/${{ github.base_ref }}", validate)
+        self.assertNotIn("--allow-bootstrap", validate)
         self.assertIn("pull_request:", codeql)
-        self.assertIn("pull_request:\n    paths:", hosts)
+        self.assertIn("pull_request:\n", hosts)
+        self.assertNotIn("pull_request:\n    paths:", hosts)
         self.assertIn("candidate_sha:", hosts)
         self.assertIn("inputs.candidate_sha || github.sha", hosts)
         self.assertIn("native-host-lifecycle", hosts)
+        self.assertIn("release-pr-policy", validate)
+        self.assertIn("if: always()", validate)
+        for dependency in (
+            "changeset", "release-pr-policy", "deterministic-check",
+            "compatibility", "vault-hook-platforms",
+        ):
+            self.assertIn(f"      - {dependency}", validate)
 
     def test_bootstrap_requires_empty_tag_space_and_uses_atomic_refs(self):
         text = self.text("prepare-stable-release.yml")
         self.assertIn("verify-bootstrap", text)
+        self.assertIn("verify-bootstrap-candidate", text)
         self.assertIn("refs/tags/v*", text)
-        self.assertIn("git push --atomic origin HEAD:refs/heads/stable", text)
-        self.assertIn("make public-release-check", text)
-        self.assertIn(":refs/heads/stable :refs/tags/v0.0.1", text)
+        self.assertIn("tools/release_publish.py stage", text)
+        self.assertIn("tools/release_publish.py rollback", text)
+        self.assertIn("tools/release_publish.py finalize", text)
+        self.assertIn("--bootstrap", text)
+        self.assertIn("python3 trusted/tools/smoke_plugin_installs.py", text)
+        self.assertNotIn("make -C candidate release-check", text)
+        self.assertIn("needs.prepare.outputs.phase == 'published'", text)
+        self.assertLess(
+            text.index("tools/release_publish.py stage"),
+            text.index("python3 trusted/tools/smoke_plugin_installs.py"),
+        )
+        self.assertLess(
+            text.index("python3 trusted/tools/smoke_plugin_installs.py"),
+            text.rindex("tools/release_publish.py finalize"),
+        )
 
-    def test_publish_binds_exact_merge_stable_base_and_tag_collision(self):
+    def test_bootstrap_rerun_reconciles_the_exact_staged_candidate(self):
+        text = self.text("prepare-stable-release.yml")
+        self.assertIn('bootstrap_candidate="$stable_sha"', text)
+        self.assertIn('--candidate-sha "$bootstrap_candidate"', text)
+        self.assertIn("tools/release_publish.py rollback", text)
+        self.assertIn("git tag -d v0.0.1", text)
+        self.assertIn('bootstrap_candidate="$candidate_sha"', text)
+        self.assertIn('json.load(sys.stdin)["has_release"]', text)
+        self.assertIn(
+            'echo "candidate_sha=$bootstrap_candidate"', text
+        )
+        rollback = text.split("\n  bootstrap-rollback:", 1)[1].split(
+            "\n  bootstrap-finalize:", 1
+        )[0]
+        finalize = text.split("\n  bootstrap-finalize:", 1)[1]
+        for write_job in (rollback, finalize):
+            self.assertIn("ref: ${{ github.sha }}", write_job)
+            self.assertNotIn(
+                "ref: ${{ needs.prepare.outputs.candidate_sha }}", write_job
+            )
+
+    def test_publish_binds_exact_merge_and_recoverable_ref_transaction(self):
         text = self.text("publish-stable-release.yml")
         for required in (
-            "merge_commit_sha", "test \"$remote_stable\" = \"$stable_base\"",
-            "merge-base --is-ancestor", "refs/tags/v${version}",
-            "gh release view", "make release-check", "verify-release",
-            "git push --atomic origin HEAD:refs/heads/stable",
+            "merge_commit_sha", "verify-release-pr", "merge_parents=",
+            "release_publish.py\" stage", "--prior-stable-sha",
+            "rollback-publication", "finalize-publication",
+            "--release-branch-sha",
         ):
             self.assertIn(required, text)
-        self.assertLess(text.index("make release-check"),
-                        text.index("git push --atomic origin HEAD:refs/heads/stable"))
-        self.assertLess(text.index("gh release view"),
-                        text.index("git push --atomic origin HEAD:refs/heads/stable"))
-        self.assertNotIn("actions/setup-node@", text)
+        self.assertLess(text.index("stage-publication:"),
+                        text.index("public-stable-smoke:"))
+        self.assertLess(text.index("public-stable-smoke:"),
+                        text.index("finalize-publication:"))
+        self.assertIn("EXPECTED_RELEASE_SHA", text)
 
     def test_publish_refuses_fork_or_wrong_base_release_prs(self):
         text = self.text("publish-stable-release.yml")
         self.assertIn("github.event.pull_request.base.ref == 'main'", text)
         self.assertIn("github.event.pull_request.head.repo.full_name == github.repository", text)
-        self.assertLess(
-            text.index('test "$(git rev-parse HEAD)" = "$EXPECTED_MERGE_SHA"'),
-            text.index("make release-check"),
+        self.assertIn('test "$#" -eq 3', text)
+        self.assertIn('test "$3" = "$RELEASE_HEAD_SHA"', text)
+        self.assertIn('"$EXPECTED_MERGE_SHA^{tree}"', text)
+
+    def test_post_merge_verification_survives_exact_branch_cleanup(self):
+        text = self.text("publish-stable-release.yml")
+        verify = text.split("\n  verify-release-candidate:", 1)[1].split(
+            "\n  exact-sha-host-gates:", 1
+        )[0]
+        self.assertNotIn("refs/remotes/origin/release/stable", verify)
+        self.assertIn('test "$3" = "$RELEASE_HEAD_SHA"', verify)
+        self.assertIn(
+            'git show "$RELEASE_HEAD_SHA:.release/stable.json"', verify
         )
+        self.assertIn('--stable-sha "$stable_base"', verify)
+        self.assertIn("verify-release-pr", verify)
+
+    def test_publish_write_jobs_execute_only_attested_main_source_helper(self):
+        text = self.text("publish-stable-release.yml")
+        verify = text.split("\n  verify-release-candidate:", 1)[1].split(
+            "\n  exact-sha-host-gates:", 1
+        )[0]
+        stage = text.split("\n  stage-publication:", 1)[1].split(
+            "\n  public-stable-smoke:", 1
+        )[0]
+        public = text.split("\n  public-stable-smoke:", 1)[1].split(
+            "\n  rollback-publication:", 1
+        )[0]
+        self.assertIn("contents: read", verify)
+        self.assertIn("verify-release-pr", verify)
+        self.assertIn("contents: write", stage)
+        self.assertIn(
+            'git show "$main_source:tools/release_publish.py"', stage
+        )
+        self.assertIn('git config user.name "github-actions[bot]"', stage)
+        self.assertIn(
+            'git config user.email '
+            '"41898282+github-actions[bot]@users.noreply.github.com"',
+            stage,
+        )
+        self.assertNotIn("make ", stage)
+        self.assertNotIn("python3 tools/", stage)
+        self.assertIn("contents: read", public)
+        self.assertIn("persist-credentials: false", public)
+        self.assertIn("make public-release-check", public)
 
     def test_main_validation_uploads_build_id_and_native_artifacts(self):
         text = self.text("validate.yml")
@@ -122,7 +217,7 @@ class ReleaseWorkflowContracts(unittest.TestCase):
             text.count(
                 "actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0"
             ),
-            5,
+            6,
         )
         self.assertGreaterEqual(text.count('python-version: "3.9"'), 2)
         self.assertIn("actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1", text)
@@ -131,7 +226,9 @@ class ReleaseWorkflowContracts(unittest.TestCase):
 
     def test_vault_hook_matrix_gates_platforms_and_apple_launcher(self):
         text = self.text("validate.yml")
-        self.assertIn("needs: [check, compatibility, vault-hook-platforms]", text)
+        self.assertIn("needs: [check]", text)
+        self.assertIn("VAULT_RESULT: ${{ needs.vault-hook-platforms.result }}", text)
+        self.assertIn('test "$VAULT_RESULT" = success', text)
         for runner in ("ubuntu-latest", "macos-latest", "windows-latest"):
             with self.subTest(runner=runner):
                 self.assertGreaterEqual(text.count(f"os: {runner}"), 2)
@@ -211,6 +308,8 @@ class ReleaseWorkflowContracts(unittest.TestCase):
         self.assertIn("claude --version", workflow)
         self.assertIn("codex --version", workflow)
         self.assertIn("tools/smoke_plugin_installs.py --channel checkout", workflow)
+        self.assertIn("make release-check", workflow)
+        self.assertNotIn("make public-release-check", workflow)
         self.assertIn("runs-on: macos-latest", workflow)
         self.assertIn("workflow_call", workflow)
 
@@ -219,7 +318,11 @@ class ReleaseWorkflowContracts(unittest.TestCase):
             with self.subTest(workflow=release_workflow):
                 self.assertIn("exact-sha-host-gates", text)
                 self.assertIn("uses: ./.github/workflows/release-hosts.yml", text)
-                self.assertIn("needs: exact-sha-host-gates", text)
+                self.assertIn("exact-sha-host-gates", text)
+        self.assertIn(
+            "needs: [verify-release-candidate, exact-sha-host-gates]",
+            self.text("publish-stable-release.yml"),
+        )
 
         prepare = self.text("prepare-stable-release.yml")
         publish = self.text("publish-stable-release.yml")
@@ -228,32 +331,39 @@ class ReleaseWorkflowContracts(unittest.TestCase):
             "candidate_sha: ${{ github.event.pull_request.merge_commit_sha }}",
             publish,
         )
+        self.assertIn("python3 trusted/tools/smoke_plugin_installs.py", prepare)
+        self.assertIn("path: trusted", prepare)
+        self.assertIn("path: candidate", prepare)
+        self.assertIn("make public-release-check", publish)
+        for text in (prepare, publish):
+            self.assertIn("EXPECTED_RELEASE_SHA", text)
 
     def test_release_check_requires_deterministic_gates(self):
         makefile = (REPO / "Makefile").read_text(encoding="utf-8")
         self.assertRegex(makefile, r"(?m)^release-check: check$")
+        self.assertRegex(makefile, r"(?m)^public-release-check: release-check$")
+        self.assertRegex(
+            makefile,
+            r"(?m)^\s*PYTHONDONTWRITEBYTECODE=1 \$\(PY\) -m unittest",
+        )
+        self.assertIn(
+            'tools/smoke_plugin_installs.py --channel public --expected-sha',
+            makefile,
+        )
 
-    def test_real_host_smoke_covers_its_complete_control_plane(self):
+    def test_required_host_smoke_has_no_event_level_path_filter(self):
         workflow = self.text("release-hosts.yml")
-        for path in (
-            "'.agents/**'",
-            "'.claude-plugin/**'",
-            "'.github/workflows/release-hosts.yml'",
-            "'Makefile'",
-            "'platforms/**'",
-            "'plugins/**'",
-            "'product.json'",
-            "'tools/**'",
-            "'versions.json'",
-        ):
-            with self.subTest(path=path):
-                self.assertIn(path, workflow)
+        self.assertIn("  pull_request:\n", workflow)
+        self.assertNotIn("    paths:", workflow)
+        self.assertNotIn("    paths-ignore:", workflow)
 
     def test_validate_jobs_are_time_bounded(self):
         text = self.text("validate.yml")
         expectations = {
             "changeset": "10",
-            "check": "20",
+            "release-pr-policy": "10",
+            "deterministic-check": "20",
+            "check": "5",
             "build-metadata": "10",
             "compatibility": "20",
             "vault-hook-platforms": "10",

@@ -9,15 +9,16 @@ Host manifests, contracts, overlays, and append-only fragments live under
 from __future__ import annotations
 
 import argparse
-import filecmp
 import hashlib
 import importlib.util
 import json
 import re
 import shutil
+import stat
+import sys
 import tempfile
 from dataclasses import dataclass
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from types import ModuleType
 
 
@@ -59,6 +60,11 @@ CANONICAL_HOST_TOKENS = (
 )
 SUPPORTED_HOSTS = {"claude", "codex"}
 PLATFORM_ROOTS = SUPPORTED_HOSTS | {"shared"}
+GENERATED_TEXT_SUFFIXES = {
+    ".css", ".csv", ".html", ".js", ".json", ".md", ".ps1", ".py",
+    ".sh", ".svg", ".toml", ".txt", ".xml", ".yaml", ".yml",
+}
+GENERATED_TEXT_NAMES = {"LICENSE", "gitignore"}
 CANONICAL_COMPONENTS = {
     "agents",
     "constitution.md",
@@ -167,7 +173,7 @@ def sync_marketplace_paths_sources(root: Path) -> None:
     expected = marketplace_paths_source(load_product_contract(root))
     for target in marketplace_paths_targets(root):
         target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_text(expected, encoding="utf-8")
+        target.write_bytes(expected.encode("utf-8"))
 
 
 def marketplace_paths_source_drift(root: Path) -> list[str]:
@@ -205,7 +211,14 @@ def _load_adapter_module(path: Path, host_id: str) -> ModuleType:
     if spec is None or spec.loader is None:
         raise ValueError(f"{path}: adapter module cannot be loaded")
     module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
+    previous = sys.dont_write_bytecode
+    try:
+        # Adapter discovery is a read-only policy operation. Never mutate a
+        # checkout merely because the host Python stores caches beside source.
+        sys.dont_write_bytecode = True
+        spec.loader.exec_module(module)
+    finally:
+        sys.dont_write_bytecode = previous
     return module
 
 
@@ -373,7 +386,7 @@ def apply_appends(root: Path, target: Path) -> None:
             raise ValueError(f"{fragment}: append target does not exist: {relative}")
         base = destination.read_text(encoding="utf-8").rstrip("\n")
         extra = fragment.read_text(encoding="utf-8").strip("\n")
-        destination.write_text(f"{base}\n\n{extra}\n", encoding="utf-8")
+        destination.write_bytes(f"{base}\n\n{extra}\n".encode("utf-8"))
 
 
 def write_artifacts(target: Path, artifacts: list[tuple[str, str]]) -> None:
@@ -385,7 +398,7 @@ def write_artifacts(target: Path, artifacts: list[tuple[str, str]]) -> None:
         except ValueError as exc:
             raise ValueError(f"adapter output escapes package: {relative}") from exc
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(content, encoding="utf-8")
+        path.write_bytes(content.encode("utf-8"))
 
 
 def skill_records(source: Path) -> list[tuple[str, str, str, str]]:
@@ -477,7 +490,7 @@ def compose_project_instructions(
                 f"{source.name}/{template_host} generated project instructions "
                 f"exceed cap: {size} bytes, {lines} lines"
             )
-        (templates / filename).write_text(rendered, encoding="utf-8")
+        (templates / filename).write_bytes(rendered.encode("utf-8"))
         surfaces.append({
             "host_id": template_host,
             "filename": filename,
@@ -485,9 +498,12 @@ def compose_project_instructions(
             "user_companion": companion,
             "migrates_from_owners": migrations,
         })
-    (templates / "project-instruction-surfaces.json").write_text(
-        json.dumps({"schema_version": 1, "surfaces": surfaces}, indent=2, sort_keys=True) + "\n",
-        encoding="utf-8",
+    (templates / "project-instruction-surfaces.json").write_bytes(
+        (json.dumps(
+            {"schema_version": 1, "surfaces": surfaces},
+            indent=2,
+            sort_keys=True,
+        ) + "\n").encode("utf-8")
     )
 
     memory_source = source / "templates" / "memory"
@@ -496,21 +512,115 @@ def compose_project_instructions(
     shutil.copytree(memory_source, templates / "memory", dirs_exist_ok=True)
 
 
+def normalized_content(path: Path, data: bytes) -> bytes:
+    """Normalize only explicitly text-shaped generated paths to LF bytes."""
+    if path.name not in GENERATED_TEXT_NAMES \
+            and path.suffix.lower() not in GENERATED_TEXT_SUFFIXES:
+        return data
+    try:
+        text = data.decode("utf-8")
+    except UnicodeDecodeError:
+        return data
+    return text.replace("\r\n", "\n").replace("\r", "\n").encode("utf-8")
+
+
+def snapshot_files(root: Path, relative_root: str) -> list[Path]:
+    """List one snapshot surface in platform-neutral POSIX path order."""
+    base = root / relative_root
+    return sorted(
+        (
+            candidate for candidate in base.rglob("*")
+            if candidate.is_file() and not is_python_cache(candidate)
+        ),
+        key=lambda candidate: candidate.relative_to(root).as_posix(),
+    )
+
+
+def snapshot_content(path: Path) -> bytes:
+    """Hash the same canonical bytes that the generated package will contain."""
+    return normalized_content(path, path.read_bytes())
+
+
+def is_executable(path: Path) -> bool:
+    """Return the platform package's Git-style executable-bit class."""
+    return bool(path.stat().st_mode & stat.S_IXUSR)
+
+
+def update_snapshot_digest(
+    digest, relative: str, content: bytes,
+) -> None:
+    """Add one prefix-free, typed file record."""
+    relative_bytes = relative.encode("utf-8")
+    digest.update(b"file\0")
+    digest.update(len(relative_bytes).to_bytes(8, "big"))
+    digest.update(relative_bytes)
+    digest.update(len(content).to_bytes(8, "big"))
+    digest.update(content)
+
+
+def load_package_executables(root: Path, component: str) -> set[str]:
+    """Load the platform-neutral executable-mode contract for one package."""
+    contract = root / "package-modes.json"
+    try:
+        data = json.loads(contract.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise ValueError(f"{contract}: missing or invalid package mode contract") from exc
+    packages = data.get("packages") if isinstance(data, dict) else None
+    expected_packages = {
+        path.name for path in (root / "plugins").iterdir() if path.is_dir()
+    }
+    if not isinstance(data, dict) \
+            or set(data) != {"schema_version", "packages"} \
+            or data.get("schema_version") != 1 \
+            or not isinstance(packages, dict) \
+            or set(packages) != expected_packages:
+        raise ValueError(f"{contract}: invalid package mode contract")
+    package = packages.get(component)
+    values = package.get("executables") if isinstance(package, dict) else None
+    if not isinstance(package, dict) \
+            or set(package) != {"executables"} \
+            or not isinstance(values, list) \
+            or values != sorted(values) \
+            or len(values) != len(set(values)):
+        raise ValueError(f"{contract}: invalid package mode contract")
+    for value in values:
+        path = PurePosixPath(value) if isinstance(value, str) else PurePosixPath("..")
+        if path.is_absolute() or not path.parts or ".." in path.parts \
+                or str(path) != value:
+            raise ValueError(f"{contract}: unsafe executable path {value!r}")
+    return set(values)
+
+
+def apply_package_modes(target: Path, executables: set[str]) -> None:
+    """Materialize the declared Git executable class independent of checkout OS."""
+    present: set[str] = set()
+    for path in sorted(
+        (candidate for candidate in target.rglob("*") if candidate.is_file()),
+        key=lambda candidate: candidate.relative_to(target).as_posix(),
+    ):
+        relative = path.relative_to(target).as_posix()
+        present.add(relative)
+        mode = path.stat().st_mode
+        if relative in executables:
+            path.chmod(mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
+        else:
+            path.chmod(mode & ~(stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH))
+    missing = executables - present
+    if missing:
+        raise ValueError(
+            "package mode contract names missing files: " + ", ".join(sorted(missing))
+        )
+
+
 def normalize_generated_text(root: Path) -> None:
     for path in sorted(
         candidate for candidate in root.rglob("*")
         if candidate.is_file() and not is_python_cache(candidate)
     ):
         data = path.read_bytes()
-        if b"\0" in data:
-            continue
-        try:
-            text = data.decode("utf-8")
-        except UnicodeDecodeError:
-            continue
-        normalized = text.replace("\r\n", "\n").replace("\r", "\n")
-        if normalized != text:
-            path.write_text(normalized, encoding="utf-8")
+        normalized = normalized_content(path, data)
+        if normalized != data:
+            path.write_bytes(normalized)
 
 
 def write_provenance(
@@ -520,47 +630,48 @@ def write_provenance(
     version: str,
     provenance_name: str,
     snapshot: dict[str, str],
+    executables: set[str],
 ) -> None:
     files = {}
-    for path in sorted(candidate for candidate in target.rglob("*") if candidate.is_file()):
+    for path in sorted(
+        (candidate for candidate in target.rglob("*") if candidate.is_file()),
+        key=lambda candidate: candidate.relative_to(target).as_posix(),
+    ):
         if path.name == provenance_name or is_python_cache(path):
             continue
-        files[path.relative_to(target).as_posix()] = hashlib.sha256(
+        relative = path.relative_to(target).as_posix()
+        files[relative] = hashlib.sha256(
             path.read_bytes()
         ).hexdigest()
-    (target / provenance_name).write_text(json.dumps({
-        "schema_version": 2,
+    payload = json.dumps({
+        "schema_version": 3,
         "component": component,
         "host": adapter.host_id,
         "version": version,
         **snapshot,
         "files": files,
+        "executables": sorted(executables),
         "runtime_contracts": adapter.module.runtime_contracts(),
         "delivery_protocol": DELIVERY_PROTOCOL_CAPABILITY,
-    }, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    }, indent=2, sort_keys=True) + "\n"
+    (target / provenance_name).write_bytes(payload.encode("utf-8"))
 
 
 def marketplace_snapshot(root: Path) -> dict[str, str]:
     """Return one deterministic identity shared by all host builds."""
     digest = hashlib.sha256()
+    digest.update(b"agent-marketplace-snapshot-v2\0")
     for relative_root in ("plugins", "platforms"):
-        base = root / relative_root
-        for path in sorted(
-            candidate for candidate in base.rglob("*") if candidate.is_file()
-        ):
-            if is_python_cache(path):
-                continue
+        for path in snapshot_files(root, relative_root):
             relative = path.relative_to(root).as_posix()
-            digest.update(relative.encode("utf-8"))
-            digest.update(b"\0")
-            digest.update(path.read_bytes())
-            digest.update(b"\0")
-    for relative in ("product.json", "versions.json"):
+            update_snapshot_digest(
+                digest, relative, snapshot_content(path),
+            )
+    for relative in ("package-modes.json", "product.json", "versions.json"):
         path = root / relative
-        digest.update(relative.encode("utf-8"))
-        digest.update(b"\0")
-        digest.update(path.read_bytes())
-        digest.update(b"\0")
+        update_snapshot_digest(
+            digest, relative, snapshot_content(path),
+        )
     versions = json.loads((root / "versions.json").read_text(encoding="utf-8"))
     build_id = "snapshot." + digest.hexdigest()
     return {
@@ -601,6 +712,7 @@ def build_plugin(
     marker_name: str,
     provenance_name: str,
     snapshot: dict[str, str],
+    adapters: dict[str, HostAdapter],
 ) -> None:
     host = adapter.host_id
     platform = root / "platforms" / host / source.name
@@ -619,7 +731,7 @@ def build_plugin(
             "{{project_local_ignores}}",
             "\n".join(f"/{value}/" for value in roots),
         )
-        gitignore.write_text(text, encoding="utf-8")
+        gitignore.write_bytes(text.encode("utf-8"))
     copy_overlay(root / "platforms" / "shared" / "_team" / "overlay", target)
     copy_overlay(root / "platforms" / host / "_team" / "overlay", target)
     copy_overlay(shared / "overlay", target)
@@ -639,19 +751,21 @@ def build_plugin(
         manifest_data["version"] = version
         manifest_dir = target / manifest_directory
         manifest_dir.mkdir()
-        (manifest_dir / "plugin.json").write_text(
-            json.dumps(manifest_data, indent=2) + "\n", encoding="utf-8"
+        (manifest_dir / "plugin.json").write_bytes(
+            (json.dumps(manifest_data, indent=2) + "\n").encode("utf-8")
         )
     generate_skills(source, target, adapter)
     generate_agents(source, target, adapter)
-    compose_project_instructions(root, source, target, load_adapters(root))
-    (target / marker_name).write_text(
-        "Generated by tools/build_distributions.py; do not edit.\n",
-        encoding="utf-8",
+    compose_project_instructions(root, source, target, adapters)
+    (target / marker_name).write_bytes(
+        b"Generated by tools/build_distributions.py; do not edit.\n"
     )
     normalize_generated_text(target)
+    executables = load_package_executables(root, source.name)
+    apply_package_modes(target, executables)
     write_provenance(
-        target, source.name, adapter, version, provenance_name, snapshot
+        target, source.name, adapter, version, provenance_name, snapshot,
+        executables,
     )
 
 
@@ -665,7 +779,15 @@ def validate_canonical(root: Path) -> None:
             )
     for surface_name in ("plugins", "platforms"):
         surface = root / surface_name
-        if not surface.is_dir():
+        try:
+            surface_mode = surface.lstat().st_mode
+        except OSError:
+            problems.append(f"{surface}: canonical surface is missing")
+            continue
+        if not stat.S_ISDIR(surface_mode):
+            problems.append(
+                f"{surface}: canonical surface must be a real directory"
+            )
             continue
         for candidate in sorted(surface.rglob("*")):
             if candidate.is_symlink():
@@ -708,9 +830,14 @@ def validate_canonical(root: Path) -> None:
         raise ValueError("\n".join(problems))
 
 
-def build(root: Path, output: Path) -> None:
+def build(
+    root: Path, output: Path,
+    *, adapters: dict[str, HostAdapter] | None = None,
+) -> None:
     validate_canonical(root)
-    adapters = load_adapters(root)
+    adapters = adapters or load_adapters(root)
+    if set(adapters) != set(load_product_contract(root)["hosts"]):
+        raise ValueError("trusted adapter set differs from the package host contract")
     marker_name, provenance_name = packaging_names(root)
     versions = load_plugin_versions(root)
     snapshot = marketplace_snapshot(root)
@@ -720,7 +847,7 @@ def build(root: Path, output: Path) -> None:
         for source in sorted(path for path in (root / "plugins").iterdir() if path.is_dir()):
             build_plugin(
                 root, source, adapter, host_root / source.name, versions[source.name],
-                marker_name, provenance_name, snapshot,
+                marker_name, provenance_name, snapshot, adapters,
             )
 
 
@@ -742,6 +869,7 @@ def generated_tree_owned(output: Path, marker_name: str) -> bool:
 
 
 def replace_generated(root: Path, output: Path) -> None:
+    validate_canonical(root)
     sync_marketplace_paths_sources(root)
     marker_name, _ = packaging_names(root)
     if output.exists():
@@ -752,24 +880,51 @@ def replace_generated(root: Path, output: Path) -> None:
 
 
 def compare_dirs(expected: Path, actual: Path) -> list[str]:
+    """Compare generated trees without shallow stat caches or symlink following."""
     problems: list[str] = []
-    comparison = filecmp.dircmp(expected, actual)
-    for name in comparison.left_only:
-        if is_python_cache(Path(name)):
-            continue
+    try:
+        expected_mode = expected.lstat().st_mode
+        actual_mode = actual.lstat().st_mode
+        if not stat.S_ISDIR(expected_mode) or not stat.S_ISDIR(actual_mode):
+            return [f"generated tree root is not a real directory: {actual}"]
+        expected_entries = {path.name: path for path in expected.iterdir()}
+        actual_entries = {path.name: path for path in actual.iterdir()}
+    except OSError as exc:
+        return [f"cannot inspect generated tree: {actual}: {exc}"]
+    expected_names = set(expected_entries)
+    actual_names = set(actual_entries)
+    for name in sorted(expected_names - actual_names):
         problems.append(f"missing from generated tree: {actual / name}")
-    for name in comparison.right_only:
-        if is_python_cache(Path(name)):
-            continue
+    for name in sorted(actual_names - expected_names):
         problems.append(f"stale in generated tree: {actual / name}")
-    for name in comparison.diff_files + comparison.funny_files:
-        if is_python_cache(Path(name)):
+    for name in sorted(expected_names & actual_names):
+        expected_path = expected_entries[name]
+        actual_path = actual_entries[name]
+        try:
+            expected_mode = expected_path.lstat().st_mode
+            actual_mode = actual_path.lstat().st_mode
+        except OSError as exc:
+            problems.append(f"cannot inspect generated entry: {actual_path}: {exc}")
             continue
-        problems.append(f"out of sync: {actual / name}")
-    for name in comparison.common_dirs:
-        if is_python_cache(Path(name)):
+        if stat.S_ISLNK(expected_mode) or stat.S_ISLNK(actual_mode):
+            problems.append(f"generated tree contains a symbolic link: {actual_path}")
             continue
-        problems.extend(compare_dirs(expected / name, actual / name))
+        if stat.S_ISDIR(expected_mode) and stat.S_ISDIR(actual_mode):
+            problems.extend(compare_dirs(expected_path, actual_path))
+            continue
+        if not stat.S_ISREG(expected_mode) or not stat.S_ISREG(actual_mode):
+            problems.append(f"out of sync entry type: {actual_path}")
+            continue
+        try:
+            if expected_path.read_bytes() != actual_path.read_bytes():
+                problems.append(f"out of sync: {actual_path}")
+        except OSError as exc:
+            problems.append(f"cannot read generated file: {actual_path}: {exc}")
+            continue
+        expected_executable = bool(expected_mode & stat.S_IXUSR)
+        actual_executable = bool(actual_mode & stat.S_IXUSR)
+        if expected_executable != actual_executable:
+            problems.append(f"out of sync executable mode: {actual_path}")
     return problems
 
 

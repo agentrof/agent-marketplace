@@ -10,16 +10,6 @@ on:
         default: ""
   workflow_dispatch:
   pull_request:
-    paths:
-      - '.agents/**'
-      - '.claude-plugin/**'
-      - '.github/workflows/release-hosts.yml'
-      - 'Makefile'
-      - 'platforms/**'
-      - 'plugins/**'
-      - 'product.json'
-      - 'tools/**'
-      - 'versions.json'
   schedule:
     - cron: "17 4 * * 1"
 
@@ -58,7 +48,7 @@ jobs:
         run: |
           claude --version
           codex --version
-      - name: Run deterministic and public stable lifecycle gates
+      - name: Run deterministic and checkout lifecycle gates
         run: |
-          make public-release-check
+          make release-check
           python3 tools/smoke_plugin_installs.py --channel checkout

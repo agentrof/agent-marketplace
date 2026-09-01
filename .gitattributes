@@ -1,1 +1,27 @@
+# Fail closed for checkout conversion: unknown and binary payloads are byte-exact.
+* -text
+
+# Only the same explicit UTF-8 text surface normalized by the distribution
+# builder may receive Git line-ending conversion.
+*.css text eol=lf
+# These tracked legacy CRLF sources are preserved in Git; the builder emits
+# their package copies as canonical LF without relying on checkout conversion.
+*.csv -text
+*.html text eol=lf
+*.js text eol=lf
+*.json text eol=lf
+*.md text eol=lf
+*.ps1 text eol=lf
+*.py text eol=lf
+*.sh text eol=lf
+*.svg text eol=lf
+*.toml text eol=lf
+*.txt text eol=lf
+*.xml text eol=lf
+*.yaml text eol=lf
+*.yml text eol=lf
+LICENSE -text
+gitignore text eol=lf
+
+# Generated artifacts are committed byte-for-byte after canonicalization.
 dist/** -text

@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import stat
 import subprocess
 import sys
 import tempfile
@@ -202,6 +203,267 @@ class SingleTeamDistributionTests(unittest.TestCase):
             build_distributions.build(self.root, second)
             self.assertEqual(build_distributions.compare_dirs(first, second), [])
 
+    def test_snapshot_normalizes_checkout_only_eol_drift(self):
+        # Exercise the snapshot normalizer independently of the repository's
+        # fail-closed LF checkout policy.
+        (self.root / ".gitattributes").write_bytes(
+            b"*.csv -text\ndist/** -text\n"
+        )
+        subprocess.run(
+            ["git", "init", "-b", "main"], cwd=self.root, check=True,
+            capture_output=True, text=True,
+        )
+        subprocess.run(
+            ["git", "config", "core.autocrlf", "true"],
+            cwd=self.root, check=True, capture_output=True, text=True,
+        )
+        subprocess.run(
+            ["git", "add", "--all"], cwd=self.root, check=True,
+            capture_output=True, text=True,
+        )
+        subprocess.run(
+            ["git", "checkout-index", "--all", "--force"],
+            cwd=self.root, check=True, capture_output=True, text=True,
+        )
+        checkout_identity = build_distributions.marketplace_snapshot(
+            self.root
+        )["build_id"]
+
+        subprocess.run(
+            ["git", "config", "core.autocrlf", "false"],
+            cwd=self.root, check=True, capture_output=True, text=True,
+        )
+        subprocess.run(
+            ["git", "checkout-index", "--all", "--force"],
+            cwd=self.root, check=True, capture_output=True, text=True,
+        )
+        blob_identity = build_distributions.marketplace_snapshot(
+            self.root
+        )["build_id"]
+        self.assertEqual(checkout_identity, blob_identity)
+
+    def test_snapshot_is_stable_across_staging_a_crlf_text_edit(self):
+        subprocess.run(
+            ["git", "init", "-b", "main"], cwd=self.root, check=True,
+            capture_output=True, text=True,
+        )
+        subprocess.run(
+            ["git", "config", "core.autocrlf", "true"],
+            cwd=self.root, check=True, capture_output=True, text=True,
+        )
+        subprocess.run(
+            ["git", "add", "--all"], cwd=self.root, check=True,
+            capture_output=True, text=True,
+        )
+        subprocess.run(
+            ["git", "checkout-index", "--all", "--force"],
+            cwd=self.root, check=True, capture_output=True, text=True,
+        )
+        source = self.root / "plugins" / fixtures.PLUGIN / "constitution.md"
+        source.write_bytes(source.read_bytes() + b"\r\nSubstantive edit\r\n")
+
+        before_staging = build_distributions.marketplace_snapshot(self.root)
+        with tempfile.TemporaryDirectory() as first_dir:
+            first = Path(first_dir) / "dist"
+            build_distributions.build(self.root, first)
+            subprocess.run(
+                ["git", "add", "--all"], cwd=self.root, check=True,
+                capture_output=True, text=True,
+            )
+            after_staging = build_distributions.marketplace_snapshot(self.root)
+            with tempfile.TemporaryDirectory() as second_dir:
+                second = Path(second_dir) / "dist"
+                build_distributions.build(self.root, second)
+                self.assertEqual(
+                    build_distributions.compare_dirs(first, second), []
+                )
+        self.assertEqual(before_staging, after_staging)
+
+    def test_snapshot_paths_use_case_sensitive_posix_order(self):
+        paths = build_distributions.snapshot_files(self.root, "plugins")
+        relative = [path.relative_to(self.root).as_posix() for path in paths]
+        self.assertEqual(relative, sorted(relative))
+        self.assertNotEqual(relative, sorted(relative, key=str.casefold))
+
+    def test_snapshot_framing_separates_binary_file_boundaries(self):
+        with tempfile.TemporaryDirectory() as other_dir:
+            other = Path(other_dir) / "repository"
+            fixtures.make_valid_root(other)
+            first_relative = Path(
+                f"plugins/{fixtures.PLUGIN}/skill-content/zz-collision-a.bin"
+            )
+            second_relative = Path(
+                f"plugins/{fixtures.PLUGIN}/skill-content/zz-collision-b.bin"
+            )
+            first_payload = (
+                b"prefix\0" + second_relative.as_posix().encode("utf-8")
+                + b"\0suffix"
+            )
+            first_path = self.root / first_relative
+            second_first_path = other / first_relative
+            second_path = other / second_relative
+            first_path.write_bytes(first_payload)
+            second_first_path.write_bytes(b"prefix")
+            second_path.write_bytes(b"suffix")
+
+            self.assertNotEqual(
+                build_distributions.marketplace_snapshot(self.root)["build_id"],
+                build_distributions.marketplace_snapshot(other)["build_id"],
+            )
+
+    def test_binary_payload_survives_autocrlf_checkout_and_build(self):
+        relative = Path(
+            "skill-content/ui-ux-design/data/binary-contract.pdf"
+        )
+        payload = (
+            b"%PDF-1.4\n1 0 obj\n<< /Type /Catalog >>\nendobj\n"
+            b"xref\n0 1\n0000000000 65535 f\n%%EOF\n"
+        )
+        source = self.root / "plugins" / fixtures.PLUGIN / relative
+        source.write_bytes(payload)
+        subprocess.run(
+            ["git", "init", "-b", "main"], cwd=self.root, check=True,
+            capture_output=True, text=True,
+        )
+        subprocess.run(
+            ["git", "config", "core.autocrlf", "true"],
+            cwd=self.root, check=True, capture_output=True, text=True,
+        )
+        subprocess.run(
+            ["git", "add", "--all"], cwd=self.root, check=True,
+            capture_output=True, text=True,
+        )
+        source.unlink()
+        subprocess.run(
+            ["git", "checkout-index", "--force", "--", source.relative_to(self.root)],
+            cwd=self.root, check=True, capture_output=True, text=True,
+        )
+        self.assertEqual(source.read_bytes(), payload)
+        with tempfile.TemporaryDirectory() as output_dir:
+            output = Path(output_dir) / "dist"
+            build_distributions.build(self.root, output)
+            for host in build_distributions.HOSTS:
+                packaged = output / host / fixtures.PLUGIN / relative
+                self.assertEqual(packaged.read_bytes(), payload)
+
+    def test_snapshot_and_provenance_bind_the_package_mode_contract(self):
+        relative = "scripts/backlog_compile.py"
+        source = self.root / "plugins" / fixtures.PLUGIN / relative
+        original_mode = source.stat().st_mode
+        if not original_mode & 0o111:
+            self.skipTest("fixture filesystem has no executable mode")
+        before = build_distributions.marketplace_snapshot(self.root)["build_id"]
+        baseline = json.loads((
+            self.root / "dist" / "claude" / fixtures.PLUGIN
+            / build_distributions.PROVENANCE
+        ).read_text(encoding="utf-8"))
+        self.assertIn(relative, baseline["executables"])
+
+        source.chmod(original_mode & ~stat.S_IXUSR)
+        checkout_mode_only = build_distributions.marketplace_snapshot(
+            self.root
+        )["build_id"]
+        self.assertEqual(before, checkout_mode_only)
+        mode_contract = self.root / "package-modes.json"
+        mode_contract.write_bytes((json.dumps({
+            "schema_version": 1,
+            "packages": {fixtures.PLUGIN: {"executables": []}},
+        }, indent=2) + "\n").encode("utf-8"))
+        after = build_distributions.marketplace_snapshot(self.root)["build_id"]
+        self.assertNotEqual(before, after)
+        with tempfile.TemporaryDirectory() as output_dir:
+            output = Path(output_dir) / "dist"
+            build_distributions.build(self.root, output)
+            changed = json.loads((
+                output / "claude" / fixtures.PLUGIN
+                / build_distributions.PROVENANCE
+            ).read_text(encoding="utf-8"))
+        self.assertNotIn(relative, changed["executables"])
+
+    def test_distribution_check_binds_executable_modes(self):
+        source = (
+            self.root / "dist" / "claude" / fixtures.PLUGIN
+            / "scripts/backlog_compile.py"
+        )
+        original_mode = source.stat().st_mode
+        if not original_mode & 0o111:
+            self.skipTest("fixture filesystem has no executable mode")
+        source.chmod(original_mode & ~stat.S_IXUSR)
+        problems = build_distributions.check(self.root, self.root / "dist")
+        self.assertTrue(
+            any("out of sync executable mode" in problem for problem in problems),
+            problems,
+        )
+
+    def test_distribution_check_reads_bytes_not_shallow_metadata(self):
+        target = (
+            self.root / "dist" / "claude" / fixtures.PLUGIN
+            / "constitution.md"
+        )
+        original = target.read_bytes()
+        metadata = target.stat()
+        replacement = bytes([original[0] ^ 1]) + original[1:]
+        target.write_bytes(replacement)
+        os.utime(target, ns=(metadata.st_atime_ns, metadata.st_mtime_ns))
+
+        problems = build_distributions.check(self.root, self.root / "dist")
+        self.assertTrue(
+            any(str(target) in problem and "out of sync" in problem
+                for problem in problems),
+            problems,
+        )
+
+    def test_distribution_check_rejects_python_runtime_cache(self):
+        target = (
+            self.root / "dist" / "claude" / fixtures.PLUGIN
+            / "__pycache__" / "payload.cpython-39.pyc"
+        )
+        target.parent.mkdir()
+        target.write_bytes(b"unattested runtime cache")
+
+        problems = build_distributions.check(self.root, self.root / "dist")
+        self.assertTrue(
+            any(str(target.parent) in problem and "stale" in problem
+                for problem in problems),
+            problems,
+        )
+
+    def test_distribution_check_rejects_symlinked_generated_file(self):
+        target = (
+            self.root / "dist" / "claude" / fixtures.PLUGIN
+            / "constitution.md"
+        )
+        canonical = (
+            self.root / "plugins" / fixtures.PLUGIN / "constitution.md"
+        )
+        target.unlink()
+        try:
+            target.symlink_to(canonical)
+        except OSError as exc:
+            self.skipTest(f"fixture filesystem cannot create symlinks: {exc}")
+
+        problems = build_distributions.check(self.root, self.root / "dist")
+        self.assertTrue(
+            any(str(target) in problem and "symbolic link" in problem
+                for problem in problems),
+            problems,
+        )
+
+    def test_distribution_check_rejects_symlinked_dist_root(self):
+        moved = self.root / "assets" / "moved-dist"
+        moved.parent.mkdir()
+        (self.root / "dist").rename(moved)
+        try:
+            (self.root / "dist").symlink_to(moved, target_is_directory=True)
+        except OSError as exc:
+            self.skipTest(f"fixture filesystem cannot create symlinks: {exc}")
+
+        problems = build_distributions.check(self.root, self.root / "dist")
+        self.assertTrue(
+            any("not a real directory" in problem for problem in problems),
+            problems,
+        )
+
     def test_canonical_source_rejects_unknown_component_and_symlink(self):
         plugin = self.root / "plugins" / fixtures.PLUGIN
         unknown = plugin / "runtime-state"
@@ -214,6 +476,22 @@ class SingleTeamDistributionTests(unittest.TestCase):
         link.symlink_to(target)
         with self.assertRaisesRegex(ValueError, "symbolic link"):
             build_distributions.validate_canonical(self.root)
+
+    def test_canonical_source_rejects_symlinked_surface_roots(self):
+        for surface_name in ("plugins", "platforms"):
+            with self.subTest(surface=surface_name), tempfile.TemporaryDirectory() as tmp:
+                root = Path(tmp) / "repository"
+                fixtures.make_valid_root(root)
+                surface = root / surface_name
+                moved = root / "assets" / f"moved-{surface_name}"
+                moved.parent.mkdir()
+                surface.rename(moved)
+                try:
+                    surface.symlink_to(moved, target_is_directory=True)
+                except OSError as exc:
+                    self.skipTest(f"fixture filesystem cannot create symlinks: {exc}")
+                with self.assertRaisesRegex(ValueError, "real directory"):
+                    build_distributions.validate_canonical(root)
 
     def test_python_runtime_caches_never_enter_distributions(self):
         cache = self.root / "plugins" / fixtures.PLUGIN / "scripts/__pycache__"

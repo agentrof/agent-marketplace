@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
 
 concurrency:
   group: stable-release
@@ -20,8 +20,15 @@ jobs:
   prepare:
     if: github.ref == 'refs/heads/main'
     needs: exact-sha-host-gates
+    permissions:
+      contents: write
     runs-on: macos-latest
     timeout-minutes: 35
+    outputs:
+      mode: ${{ steps.prepare.outputs.mode }}
+      phase: ${{ steps.prepare.outputs.phase }}
+      candidate_sha: ${{ steps.prepare.outputs.candidate_sha }}
+      version: ${{ steps.prepare.outputs.version }}
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
@@ -31,42 +38,127 @@ jobs:
           python-version: "3.x"
       - name: Configure release author
         run: |
+          git config core.autocrlf false
+          git config core.eol lf
+          git checkout-index --all --force
+          test -z "$(git status --porcelain)"
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
       - name: Prepare bootstrap or verified release branch
+        id: prepare
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           git fetch origin --prune --tags
+          candidate_sha="$(git rev-parse HEAD)"
+          test "$candidate_sha" = "$GITHUB_SHA"
           stable_sha="$(git ls-remote --heads origin refs/heads/stable | awk '{print $1}')"
+          current_version="$(python3 -c 'import json; print(json.load(open("versions.json"))["marketplace"])')"
+          bootstrap=false
+          bootstrap_candidate="$candidate_sha"
+
           if [ -z "$stable_sha" ]; then
             if git ls-remote --tags origin 'refs/tags/v*' | grep -q .; then
               echo "Bootstrap refused: SemVer tags exist without a stable branch." >&2
               exit 1
             fi
-            python3 tools/release.py verify-bootstrap
+            bootstrap=true
+          elif [ "$current_version" = "0.0.1" ] &&
+               [ ! -f .release/stable.json ]; then
+            unexpected_tags="$(
+              git ls-remote --tags origin 'refs/tags/v*' |
+                awk '$2 != "refs/tags/v0.0.1" && $2 != "refs/tags/v0.0.1^{}"'
+            )"
+            test -z "$unexpected_tags"
+            bootstrap=true
+            bootstrap_candidate="$stable_sha"
+          fi
+
+          if [ "$bootstrap" = true ]; then
             make release-check
-            python3 tools/release.py release-notes --version 0.0.1 --output release-notes.md
-            git tag -a v0.0.1 -m "Agent Marketplace v0.0.1"
-            git push --atomic origin HEAD:refs/heads/stable refs/tags/v0.0.1
-            if ! make public-release-check; then
-              remote_stable="$(git ls-remote --heads origin refs/heads/stable | awk '{print $1}')"
-              remote_tag="$(git ls-remote --tags origin refs/tags/v0.0.1 | awk '{print $1}')"
-              test "$remote_stable" = "$(git rev-parse HEAD)"
-              test -n "$remote_tag"
-              git push --atomic origin :refs/heads/stable :refs/tags/v0.0.1
-              exit 1
+            stage_json=""
+            phase=""
+
+            if [ -n "$stable_sha" ]; then
+              if ! stage_json="$(
+                python3 tools/release_publish.py stage \
+                  --version 0.0.1 \
+                  --candidate-sha "$bootstrap_candidate" \
+                  --bootstrap
+              )"; then
+                echo "$stage_json"
+                exit 1
+              fi
+              phase="$(python3 -c 'import json,sys; print(json.loads(sys.argv[1])["phase"])' "$stage_json")"
             fi
-            gh release create v0.0.1 --verify-tag --title "Agent Marketplace v0.0.1" --notes-file release-notes.md
-            exit 0
+
+            if [ "$phase" = "published" ] &&
+               [ "$bootstrap_candidate" != "$candidate_sha" ] &&
+               [ "$(
+                 python3 -c \
+                   'import json,sys; print("true" if json.load(sys.stdin)["has_release"] else "false")' \
+                   <<< "$(python3 tools/release.py plan)"
+               )" = "true" ]; then
+              bootstrap=false
+            else
+              if [ "$bootstrap_candidate" = "$candidate_sha" ] ||
+                 [ "$phase" = "published" ]; then
+                python3 tools/release.py verify-bootstrap
+              fi
+              if [ "$phase" != "published" ] &&
+                 ! candidate_verification="$(
+                   python3 tools/release.py verify-bootstrap-candidate \
+                     --candidate-sha "$bootstrap_candidate" \
+                     --main-sha "$candidate_sha" 2>&1
+                 )"; then
+                echo "$candidate_verification" >&2
+                if [ -z "$stable_sha" ]; then
+                  exit 1
+                fi
+                python3 tools/release_publish.py rollback \
+                  --version 0.0.1 \
+                  --candidate-sha "$bootstrap_candidate" \
+                  --bootstrap
+                if git show-ref --verify --quiet refs/tags/v0.0.1; then
+                  test "$(git rev-parse 'refs/tags/v0.0.1^{commit}')" = \
+                    "$bootstrap_candidate"
+                  git tag -d v0.0.1
+                fi
+                bootstrap_candidate="$candidate_sha"
+                python3 tools/release.py verify-bootstrap
+                python3 tools/release.py verify-bootstrap-candidate \
+                  --candidate-sha "$bootstrap_candidate" \
+                  --main-sha "$candidate_sha"
+                stage_json=""
+                phase=""
+              fi
+              if [ -z "$stage_json" ]; then
+                if ! stage_json="$(
+                  python3 tools/release_publish.py stage \
+                    --version 0.0.1 \
+                    --candidate-sha "$bootstrap_candidate" \
+                    --bootstrap
+                )"; then
+                  echo "$stage_json"
+                  exit 1
+                fi
+                phase="$(python3 -c 'import json,sys; print(json.loads(sys.argv[1])["phase"])' "$stage_json")"
+              fi
+              echo "$stage_json"
+              echo "mode=bootstrap" >> "$GITHUB_OUTPUT"
+              echo "phase=$phase" >> "$GITHUB_OUTPUT"
+              echo "candidate_sha=$bootstrap_candidate" >> "$GITHUB_OUTPUT"
+              echo "version=0.0.1" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
           fi
 
           if git ls-remote --exit-code --heads origin refs/heads/release/stable >/dev/null 2>&1; then
             echo "release/stable already exists; finish or close the existing release PR." >&2
             exit 1
           fi
-          main_sha="$(git rev-parse HEAD)"
+          main_sha="$candidate_sha"
           python3 tools/release.py prepare --stable-sha "$stable_sha" --main-sha "$main_sha"
           python3 tools/build_distributions.py
           make release-check
@@ -74,8 +166,14 @@ jobs:
           git switch -c release/stable
           git add --all
           git commit -m "chore: prepare stable v${version}"
-          git push origin HEAD:refs/heads/release/stable
+          python3 tools/release.py publish-release-branch \
+            --main-sha "$main_sha" \
+            --release-sha "$(git rev-parse HEAD)"
           manual_url="https://github.com/${GITHUB_REPOSITORY}/compare/main...release/stable?expand=1"
+          echo "mode=release-pr" >> "$GITHUB_OUTPUT"
+          echo "phase=prepared" >> "$GITHUB_OUTPUT"
+          echo "candidate_sha=$candidate_sha" >> "$GITHUB_OUTPUT"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
           echo "::notice title=Maintainer release PR required::$manual_url"
           {
             echo "### Maintainer release PR required"
@@ -87,3 +185,107 @@ jobs:
             echo
             echo "Title: chore: prepare stable v${version}"
           } >> "$GITHUB_STEP_SUMMARY"
+
+  bootstrap-public-smoke:
+    if: >-
+      needs.prepare.outputs.mode == 'bootstrap' &&
+      needs.prepare.outputs.phase == 'staged'
+    needs: prepare
+    permissions:
+      contents: read
+    runs-on: macos-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          ref: ${{ github.sha }}
+          path: trusted
+          persist-credentials: false
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          ref: ${{ needs.prepare.outputs.candidate_sha }}
+          path: candidate
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.x"
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "24"
+          package-manager-cache: false
+      - name: Install pinned host CLIs
+        run: |
+          set -euo pipefail
+          claude_version="$(python3 -c 'import json; print(json.load(open("trusted/tools/data/host-cli-versions.json"))["claude_code"])')"
+          codex_version="$(python3 -c 'import json; print(json.load(open("trusted/tools/data/host-cli-versions.json"))["codex"])')"
+          npm install --global "@anthropic-ai/claude-code@${claude_version}" "@openai/codex@${codex_version}"
+          claude --version | grep -F "${claude_version}"
+          codex --version | grep -F "${codex_version}"
+      - name: Exercise the real public stable channel
+        env:
+          EXPECTED_RELEASE_SHA: ${{ needs.prepare.outputs.candidate_sha }}
+        run: |
+          set -euo pipefail
+          python3 trusted/tools/smoke_plugin_installs.py \
+            --root candidate \
+            --channel public \
+            --expected-sha "$EXPECTED_RELEASE_SHA"
+
+  bootstrap-rollback:
+    if: >-
+      always() &&
+      needs.prepare.result == 'success' &&
+      needs.prepare.outputs.mode == 'bootstrap' &&
+      needs.prepare.outputs.phase == 'staged' &&
+      needs.bootstrap-public-smoke.result != 'success'
+    needs: [prepare, bootstrap-public-smoke]
+    permissions:
+      contents: write
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+      - name: Roll back only the exact unpublished bootstrap refs
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CANDIDATE_SHA: ${{ needs.prepare.outputs.candidate_sha }}
+        run: >-
+          python3 tools/release_publish.py rollback
+          --version 0.0.1
+          --candidate-sha "$CANDIDATE_SHA"
+          --bootstrap
+
+  bootstrap-finalize:
+    if: >-
+      always() &&
+      needs.prepare.result == 'success' &&
+      needs.prepare.outputs.mode == 'bootstrap' &&
+      (
+        needs.prepare.outputs.phase == 'published' ||
+        needs.bootstrap-public-smoke.result == 'success'
+      )
+    needs: [prepare, bootstrap-public-smoke]
+    permissions:
+      contents: write
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+      - name: Reconcile the immutable bootstrap Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CANDIDATE_SHA: ${{ needs.prepare.outputs.candidate_sha }}
+        run: |
+          set -euo pipefail
+          python3 tools/release.py release-notes --version 0.0.1 --output release-notes.md
+          python3 tools/release_publish.py finalize \
+            --version 0.0.1 \
+            --candidate-sha "$CANDIDATE_SHA" \
+            --bootstrap \
+            --notes-file release-notes.md

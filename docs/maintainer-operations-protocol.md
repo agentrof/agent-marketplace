@@ -143,6 +143,10 @@ reaches them.
 4. Regenerate every registered distribution with
    `python3 tools/build_distributions.py` when canonical content changes.
 5. Add exactly the release-impact declaration required by repository policy.
+   Changes limited to generated `.agent-marketplace-package.json` provenance
+   may be release-free only when the deterministic distribution gate proves
+   every non-provenance package byte and executable mode is unchanged. Every
+   other generated distribution change requires its component impact.
 6. Run focused tests while iterating, then run `make check` before commit.
 7. Review the final diff for unrelated changes, generated drift, secrets,
    unsafe permissions, and stale documentation.
@@ -207,32 +211,57 @@ approval unless scope becomes ambiguous or a gate fails:
 3. Dispatch `Prepare stable release` on that verified `main`. Wait for its
    exact-SHA host gates and preparation job. It consumes pending changesets,
    generates distributions, runs `make release-check`, and publishes
-   `release/stable`.
+   `release/stable`. Branch publication re-observes `main` after the
+   exact-absence push and exact-lease removes only the just-created branch if
+   `main` raced. For the first stable baseline, it instead stages the bootstrap
+   stable/tag refs with exact leases, exercises both real public host channels
+   through the current trusted smoke harness, and creates or reconciles the
+   immutable GitHub Release. A resumed unpublished bootstrap candidate is
+   rebuilt with current trusted adapters without executing candidate code; an
+   invalid staged candidate is exact-lease rolled back and current `main` is
+   restaged. A matching immutable Release is reconciled instead of rolled back.
 4. Open the release PR from `release/stable` to `main` with the maintainer's
    GitHub identity so ordinary pull-request validation runs.
-5. Wait for all checks on the exact release PR head. Merge it only when green;
-   the explicit release instruction authorizes this release PR merge.
-6. Wait for `Publish stable release`. It verifies the merge commit, stable-base
-   ancestry, host behavior, tag and release collision absence, then atomically
-   updates `stable` and the version tag, creates the GitHub Release, and removes
-   remote `release/stable`.
+5. Wait for all checks on the exact release PR head. The release-policy gate
+   must prove that the head is exactly one commit on its attested `main_source`
+   and that its complete tree equals a deterministic replay of release
+   preparation. That replay disables ambient Git attributes, excludes and
+   replacement refs, fixes checkout text/mode policy, and compares the complete
+   byte-and-mode tree without following links. Merge it with a merge commit only when green; the explicit release
+   instruction authorizes this release PR merge.
+6. Wait for `Publish stable release`. It verifies the exact two-parent merge
+   topology and release tree, then uses only the transaction helper from the
+   attested main parent while write credentials are present. The workflow
+   stages `stable` and the annotated version tag atomically with exact leases,
+   exercises fresh Claude Code and Codex installs from the real public
+   `stable` channel, creates or reconciles the immutable GitHub Release, and
+   removes remote `release/stable` with an exact lease. A pre-Release smoke
+   failure rolls refs back atomically; an uncertain Release response is
+   observed and left in a safely resumable state rather than repaired blindly.
+   The candidate must be the attested merge or dispatch commit and an exact
+   ancestor of the observed `main` at initial staging. A later `main` advance
+   does not invalidate that already-verified release; the release commit
+   remains an ancestor of `main`.
 7. Verify the GitHub Release is published and not a draft or prerelease. Require
-   the tag, `origin/main`, and `origin/stable` to resolve to the same commit.
-   Audit issue states and remote refs before cleanup.
+   the tag and `origin/stable` to resolve to the same commit, and require that
+   commit to be an ancestor of `origin/main`. Audit issue states and remote
+   refs before cleanup.
 8. Delete only explicitly selected feature branches that are proven ancestors
-   of `origin/main`. Align local `main` and `stable`, prune tracking refs, switch
-   to `main`, and require an empty worktree. Use the fail-closed finalizer with
-   each selected branch named explicitly:
+   of `origin/main`. Align local `main` with `origin/main` and local `stable`
+   with `origin/stable`, prune tracking refs, switch to `main`, and require an
+   empty worktree. Use the fail-closed finalizer with each selected branch
+   named explicitly:
 
    ```console
    python3 tools/release.py finalize-local --version X.Y.Z \
      --branch codex/issue-123-summary --branch release/stable --apply
    ```
 
-The finalizer refuses dirty state, mismatched main/stable/tag refs, an
-incomplete remote release branch, unsupported or duplicate branch names,
-branches checked out in another worktree, divergent local protected branches,
-and any selected branch not proven merged into `origin/main`.
+The finalizer refuses dirty state, mismatched stable/tag refs, a stable release
+that is not an ancestor of main, an incomplete remote release branch,
+unsupported or duplicate branch names, branches checked out in another
+worktree, divergent local protected branches, and any selected branch not
+proven merged into `origin/main`.
 
 If an invariant fails, stop at the current recoverable state and report the
 exact gate. Never repair a release by moving an existing tag, force-pushing
@@ -244,9 +273,9 @@ exact gate. Never repair a release by moving an existing tag, force-pushing
 | --- | --- | --- |
 | Issue intake | No background consumption or model/API invocation | Maintainer must explicitly select each issue; live issue evidence prevents stale assumptions |
 | Agent behavior | One short instruction expands to a repository-defined procedure | Scope and irreversible transitions remain bound to explicit user authority |
-| CI | Candidate and release PRs use ordinary repository checks | Readiness is bound to the exact head SHA; failures block progression |
-| Hosts and operating systems | Relevant PRs run Linux, macOS, and Windows evidence | Path filters bound cost; impact analysis must justify unaffected surfaces |
-| Releases | One explicit command can perform several related mutations | Selected-set rule, exact-SHA gates, release provenance, and no force repair |
+| CI | One stable-name aggregate requires changeset/release policy, deterministic, compatibility and every vault matrix result | Every PR emits the aggregate and lifecycle contexts; skipped or cancelled dependencies fail closed |
+| Hosts and operating systems | Every PR runs the required Claude Code and Codex lifecycle, while Linux, macOS and Windows vault evidence is aggregated | Runner or host regressions block readiness instead of being hidden by path filters |
+| Releases | One explicit command can perform several related mutations | Selected-set rule, deterministic release replay, public-host smoke, exact leases, resumable reconciliation and no force repair |
 | Branch cleanup | Deletes merged refs after a published release | Only named, bounded branches proven merged are eligible; ambiguity or drift stops cleanup |
 
 Manual invocation is deliberate. It removes unattended API cost and public

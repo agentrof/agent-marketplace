@@ -18,10 +18,10 @@ dist-check:
 	$(PY) tools/build_distributions.py --check
 
 test:
-	$(PY) -m unittest discover -s tools/tests -p 'test_*.py' -v
+	PYTHONDONTWRITEBYTECODE=1 $(PY) -m unittest discover -s tools/tests -p 'test_*.py' -v
 
 eval:
-	$(PY) -m unittest tools.tests.test_scenario_report tools.tests.test_runtime_scripts tools.tests.test_ba_compile -v
+	PYTHONDONTWRITEBYTECODE=1 $(PY) -m unittest tools.tests.test_scenario_report tools.tests.test_runtime_scripts tools.tests.test_ba_compile -v
 	@echo "eval: deterministic behavior assertions green"
 
 check: validate release-validate counts-check dist-check test
@@ -30,7 +30,9 @@ check: validate release-validate counts-check dist-check test
 release-check: check
 	@echo "release-check: deterministic gates green"
 
-public-release-check: check
+public-release-check: release-check
+	@test -n "$(EXPECTED_RELEASE_SHA)" || (echo "EXPECTED_RELEASE_SHA is required" >&2; exit 1)
+	$(PY) tools/smoke_plugin_installs.py --channel public --expected-sha "$(EXPECTED_RELEASE_SHA)"
 	@echo "public-release-check: stable channel gates green"
 
 scaffold:

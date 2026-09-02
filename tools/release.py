@@ -1099,7 +1099,7 @@ def verify_bootstrap_candidate(
         expected_dist = temporary_root / "expected-dist"
         completed = subprocess.run(
             [
-                "git", "clone", "--no-checkout", "--local", "--no-hardlinks",
+                "git", "clone", "--no-checkout", "--no-local",
                 str(root), str(candidate_root),
             ],
             capture_output=True,

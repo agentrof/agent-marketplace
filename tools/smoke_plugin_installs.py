@@ -33,6 +33,11 @@ PUBLIC_MARKETPLACES = {
 }
 PUBLIC_REPOSITORY = "https://github.com/agentrof/agent-marketplace.git"
 SHA_RE = re.compile(r"^[0-9a-f]{40}$")
+CLAUDE_RUNTIME_CONTRACTS = ["in_use_pid_marker_v1"]
+CLAUDE_IN_USE_ROOT = ".in_use"
+CLAUDE_PID_RE = re.compile(r"^[1-9][0-9]*$")
+CLAUDE_PID_MAX = (1 << 32) - 1
+CLAUDE_MARKER_MAX_BYTES = 512
 APPLICATION_RESOURCES = (
     "skill-content/experience-modeling/data/experience-schema.json",
 )
@@ -118,6 +123,80 @@ def package_inventory(root: Path, host: str) -> dict[str, str]:
     return inventory
 
 
+def claude_runtime_inventory_entries(
+    installed: Path,
+    inventory: dict[str, str],
+    provenance: dict,
+    host: str,
+) -> set[str]:
+    """Validate and return only Claude's attested host-runtime entries."""
+    runtime_inventory = {
+        relative: kind for relative, kind in inventory.items()
+        if relative == CLAUDE_IN_USE_ROOT
+        or relative.startswith(f"{CLAUDE_IN_USE_ROOT}/")
+    }
+    if not runtime_inventory:
+        return set()
+    if host != "claude" \
+            or provenance.get("runtime_contracts") != CLAUDE_RUNTIME_CONTRACTS:
+        return set()
+    if runtime_inventory.get(CLAUDE_IN_USE_ROOT) != "directory":
+        raise SmokeFailure("claude install has invalid .in_use runtime directory")
+
+    def closed_object(pairs: list[tuple[str, object]]) -> dict[str, object]:
+        payload: dict[str, object] = {}
+        for key, value in pairs:
+            if key in payload:
+                raise ValueError(f"duplicate marker key: {key}")
+            payload[key] = value
+        return payload
+
+    for relative, kind in runtime_inventory.items():
+        if relative == CLAUDE_IN_USE_ROOT:
+            continue
+        marker_name = relative.removeprefix(f"{CLAUDE_IN_USE_ROOT}/")
+        if "/" in marker_name or kind != "file" \
+                or CLAUDE_PID_RE.fullmatch(marker_name) is None:
+            raise SmokeFailure("claude install has invalid .in_use runtime entry")
+        marker = installed / relative
+        try:
+            marker_stat = marker.lstat()
+            if not stat.S_ISREG(marker_stat.st_mode) \
+                    or marker_stat.st_mode & 0o111 \
+                    or not 0 < marker_stat.st_size <= CLAUDE_MARKER_MAX_BYTES:
+                raise SmokeFailure("claude install has invalid .in_use runtime marker")
+            marker_bytes = marker.read_bytes()
+            if len(marker_bytes) != marker_stat.st_size:
+                raise SmokeFailure("claude install has unstable .in_use runtime marker")
+            payload = json.loads(
+                marker_bytes.decode("utf-8"), object_pairs_hook=closed_object,
+            )
+        except SmokeFailure:
+            raise
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError, ValueError) as exc:
+            raise SmokeFailure(
+                "claude install has invalid .in_use runtime marker"
+            ) from exc
+        if not isinstance(payload, dict) \
+                or set(payload) != {"pid", "procStart"}:
+            raise SmokeFailure("claude install has invalid .in_use marker schema")
+        pid = payload["pid"]
+        proc_start = payload["procStart"]
+        if type(pid) is not int or not 0 < pid <= CLAUDE_PID_MAX \
+                or str(pid) != marker_name or not isinstance(proc_start, str) \
+                or not proc_start or not proc_start.isprintable():
+            raise SmokeFailure("claude install has invalid .in_use marker values")
+        try:
+            proc_start_size = len(proc_start.encode("utf-8"))
+        except UnicodeEncodeError as exc:
+            raise SmokeFailure(
+                "claude install has invalid .in_use marker values"
+            ) from exc
+        if proc_start_size > 256:
+            raise SmokeFailure("claude install has invalid .in_use marker values")
+    return set(runtime_inventory)
+
+
 def verify_installed_package(
     installed: Path, expected: Path, host: str,
 ) -> None:
@@ -138,7 +217,12 @@ def verify_installed_package(
         raise SmokeFailure(f"{host} installed package provenance has wrong identity")
     actual_inventory = package_inventory(installed, host)
     expected_inventory = package_inventory(expected, host)
-    if actual_inventory != expected_inventory:
+    normalized_inventory = dict(actual_inventory)
+    for relative in claude_runtime_inventory_entries(
+        installed, actual_inventory, actual_provenance, host,
+    ):
+        normalized_inventory.pop(relative)
+    if normalized_inventory != expected_inventory:
         raise SmokeFailure(f"{host} installed package tree differs from candidate")
     files = actual_provenance.get("files")
     if not isinstance(files, dict) or not files:

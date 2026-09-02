@@ -60,6 +60,12 @@ application receipt unchanged. Then create a current scope and use the normal
 `begin-revision` path. A hash mismatch, partial scope, conflicting receipt or
 stale open application state fails closed.
 
+For a package at r2 or later, its complete prior `_ledger/` history must also
+remain available. An application receipt stores package hashes, not the prior
+registry or record-snapshot bytes, so the compiler cannot safely recreate a
+missing history. Restore the complete package ledger from a trusted backup
+before rerunning rehydration.
+
 ## Preflight and authoring
 
 1. Validate the selected upstream receipts and canonical BA primary process.

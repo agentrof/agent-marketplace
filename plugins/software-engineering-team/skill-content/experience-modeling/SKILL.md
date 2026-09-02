@@ -83,6 +83,10 @@ quality, accessibility, security or implementation suitability.
   application ref. It restores package roots only after their historic source
   bytes reproduce every published package hash, leaves application receipts and
   artifacts untouched, and returns to the ordinary successor-revision flow.
+  For r2+ packages, rehydration also needs an intact prior `_ledger/` history.
+  The application receipt stores hashes, not historic registry or record
+  snapshot bytes, so restore the complete package ledger from a trusted backup
+  before retrying if that history is absent.
 - `enter-application-review` snapshots the current artifact tree. Approval
   requires a fresh exact-schema-v4 reviewer attestation bound to proposal,
   artifact-tree, package-set and application hashes. Its `advisories` remain

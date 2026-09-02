@@ -35,6 +35,10 @@ user-journey, screen, flow, state, transition or prototype work.
    approved package roots, leaves application receipts and artifacts unchanged,
    then requires a normal current `begin-revision`. Hash drift, a partial
    scope, a conflicting receipt or stale open application state fails closed.
+   For r2+ packages, prior `_ledger/` history must be intact. Application
+   receipts contain package hashes, not historic registry or record-snapshot
+   bytes, so restore the complete package ledger from a trusted backup before
+   retrying when that history is missing.
 5. Work in the selected
    `workspace/docs/experience-design/experiences/<process-slug>/` packages.
    The primary process is a canonical BA process. `application` is reserved;

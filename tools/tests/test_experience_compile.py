@@ -707,6 +707,9 @@ class ExperienceCompilerTests(unittest.TestCase):
                 )
                 self.assertEqual(ledger_problems, [])
                 self.assertEqual(history, [])
+                self.assertFalse(
+                    (package / "_ledger/package-revisions.json").exists()
+                )
                 for record in registry["records"]:
                     self.assertIsNone(experience_compile.snapshots(
                         package, record["id"], record["revision"],
@@ -760,6 +763,18 @@ class ExperienceCompilerTests(unittest.TestCase):
                     experience_compile.read_open_revision(package)["proposal_hash"],
                     successor["proposal_hash"],
                 )
+
+    def test_rehydration_requires_verifiable_history_before_r2(self):
+        with tempfile.TemporaryDirectory() as raw:
+            package = Path(raw) / "checkout"
+            package.mkdir()
+
+            experience_compile.require_rehydration_history(package, 1)
+            with self.assertRaisesRegex(
+                ValueError,
+                "application receipt stores package hashes, not the prior registry",
+            ):
+                experience_compile.require_rehydration_history(package, 2)
 
     def test_rehydrate_published_scope_rejects_unprovable_package_bytes(self):
         with tempfile.TemporaryDirectory() as raw:

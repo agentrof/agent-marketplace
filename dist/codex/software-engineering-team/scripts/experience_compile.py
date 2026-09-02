@@ -1943,6 +1943,25 @@ def historical_scope_bindings(plan: dict) -> list[str]:
     ]
 
 
+def require_rehydration_history(package: Path, opened_revision: int) -> None:
+    """Reject recovery when the receipt cannot prove earlier package history."""
+    _history, findings = validate_process_ledger(package, opened_revision)
+    if not findings:
+        return
+    if opened_revision > 1:
+        raise ValueError(
+            f"{package.name} cannot rehydrate r{opened_revision}: its historic "
+            "package ledger is missing or invalid. The selected application "
+            "receipt stores package hashes, not the prior registry or record "
+            "snapshot bytes needed to recreate that ledger. Restore the complete "
+            "package _ledger from a trusted backup, then rerun rehydration."
+        )
+    raise ValueError(
+        f"{package.name} cannot rehydrate r{opened_revision}: "
+        + "; ".join(findings)
+    )
+
+
 def rehydrated_published_scope_postimage(
     root: Path, plan: dict, proposal_hash: str, application_ref: str,
 ) -> list[tuple[Path, dict, dict]]:
@@ -1979,13 +1998,7 @@ def rehydrated_published_scope_postimage(
             raise ValueError(
                 f"{package.name} package hash does not match {application_ref}"
             )
-        _history, ledger_problems = validate_process_ledger(
-            package, int(state["opened_revision"]),
-        )
-        if ledger_problems:
-            raise ValueError(
-                f"{package.name} published package ledger was not restored"
-            )
+        require_rehydration_history(package, int(state["opened_revision"]))
     return selected
 
 
@@ -2017,6 +2030,8 @@ def rehydrate_published_scope(args) -> int:
     }
     prepared: list[tuple[Path, dict, str, dict]] = []
     try:
+        for package, _data, state in selected:
+            require_rehydration_history(package, int(state["opened_revision"]))
         for package, _data, state in selected:
             data, body = fm(package / "experience.md")
             data["input_bindings"] = bindings

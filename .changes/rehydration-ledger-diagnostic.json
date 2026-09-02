@@ -1,0 +1,6 @@
+{
+  "summary": "Diagnose unrecoverable missing Experience package history before rehydration writes.",
+  "components": {
+    "software-engineering-team": "patch"
+  }
+}

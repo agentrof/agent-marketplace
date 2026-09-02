@@ -430,6 +430,26 @@ class BootstrapCandidatePolicyTests(unittest.TestCase):
         with self.assertRaisesRegex(release.ReleaseError, "trusted replay"):
             self.verify(candidate)
 
+    def test_candidate_clone_uses_file_transport_not_local_object_copy(self):
+        calls: list[list[str]] = []
+        real_run = subprocess.run
+
+        def record(command, *args, **kwargs):
+            calls.append(command)
+            return real_run(command, *args, **kwargs)
+
+        with mock.patch.object(release.subprocess, "run", side_effect=record):
+            self.verify()
+
+        clone_calls = [
+            command for command in calls
+            if command[:2] == ["git", "clone"]
+        ]
+        self.assertEqual(len(clone_calls), 1)
+        self.assertIn("--no-local", clone_calls[0])
+        self.assertNotIn("--local", clone_calls[0])
+        self.assertNotIn("--no-hardlinks", clone_calls[0])
+
 
 class ReleasePullRequestPolicyTests(unittest.TestCase):
     def setUp(self):

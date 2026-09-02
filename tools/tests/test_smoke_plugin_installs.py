@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import json
 import os
 import shutil
+import stat
 import sys
 import tempfile
 import unittest
@@ -14,6 +16,21 @@ from tools import smoke_plugin_installs as smoke
 
 
 ROOT = Path(__file__).resolve().parents[2]
+
+
+def write_claude_runtime_marker(
+    root: Path, pid: int = 123, proc_start: str = "Tue Sep  1 22:49:42 2026",
+) -> Path:
+    directory = root / smoke.CLAUDE_IN_USE_ROOT
+    directory.mkdir(exist_ok=True)
+    marker = directory / str(pid)
+    marker.write_text(
+        json.dumps(
+            {"pid": pid, "procStart": proc_start}, separators=(",", ":"),
+        ),
+        encoding="utf-8",
+    )
+    return marker
 
 
 class HostSmokeContracts(unittest.TestCase):
@@ -157,6 +174,123 @@ class HostSmokeContracts(unittest.TestCase):
                 rogue.write_text("unattested\n", encoding="utf-8")
                 with self.assertRaisesRegex(smoke.SmokeFailure, "tree differs"):
                     smoke.verify_installed_package(installed, expected, host)
+
+    def test_claude_install_accepts_only_attested_runtime_markers(self):
+        expected = ROOT / "dist" / "claude" / smoke.TEAM
+        with tempfile.TemporaryDirectory() as temporary:
+            installed = Path(temporary) / smoke.TEAM
+            shutil.copytree(expected, installed)
+            (installed / smoke.CLAUDE_IN_USE_ROOT).mkdir()
+            smoke.verify_installed_package(installed, expected, "claude")
+            write_claude_runtime_marker(installed, 123)
+            write_claude_runtime_marker(installed, 456, "process-start-token")
+            smoke.verify_installed_package(installed, expected, "claude")
+
+    def test_runtime_marker_namespace_requires_exact_claude_contract(self):
+        for host in ("claude", "codex"):
+            with self.subTest(host=host), tempfile.TemporaryDirectory() as temporary:
+                expected_source = ROOT / "dist" / host / smoke.TEAM
+                expected = Path(temporary) / "expected"
+                installed = Path(temporary) / "installed"
+                shutil.copytree(expected_source, expected)
+                shutil.copytree(expected_source, installed)
+                if host == "claude":
+                    for root in (expected, installed):
+                        provenance = root / build_distributions.PROVENANCE
+                        payload = json.loads(provenance.read_text(encoding="utf-8"))
+                        payload["runtime_contracts"].append("unknown_contract_v1")
+                        provenance.write_text(
+                            json.dumps(payload, indent=2, sort_keys=True) + "\n",
+                            encoding="utf-8",
+                        )
+                write_claude_runtime_marker(installed)
+                with self.assertRaisesRegex(smoke.SmokeFailure, "tree differs"):
+                    smoke.verify_installed_package(installed, expected, host)
+
+    def test_claude_runtime_marker_contract_rejects_malformed_entries(self):
+        invalid_markers = {
+            "nondigit name": ("worker", b'{"pid":123,"procStart":"start"}'),
+            "leading zero": ("0123", b'{"pid":123,"procStart":"start"}'),
+            "pid mismatch": ("123", b'{"pid":456,"procStart":"start"}'),
+            "boolean pid": ("1", b'{"pid":true,"procStart":"start"}'),
+            "pid overflow": (
+                "4294967296", b'{"pid":4294967296,"procStart":"start"}'
+            ),
+            "missing field": ("123", b'{"pid":123}'),
+            "extra field": (
+                "123", b'{"pid":123,"procStart":"start","extra":true}'
+            ),
+            "duplicate field": (
+                "123", b'{"pid":123,"pid":123,"procStart":"start"}'
+            ),
+            "invalid json": ("123", b"{"),
+            "empty start": ("123", b'{"pid":123,"procStart":""}'),
+            "control start": ("123", b'{"pid":123,"procStart":"line\\n"}'),
+            "surrogate start": ("123", b'{"pid":123,"procStart":"\\ud800"}'),
+            "long start": (
+                "123",
+                b'{"pid":123,"procStart":"' + (b"x" * 257) + b'"}',
+            ),
+            "oversized marker": ("123", b"x" * 513),
+        }
+        provenance = {"runtime_contracts": smoke.CLAUDE_RUNTIME_CONTRACTS}
+        for label, (name, content) in invalid_markers.items():
+            with self.subTest(label=label), tempfile.TemporaryDirectory() as temporary:
+                installed = Path(temporary)
+                directory = installed / smoke.CLAUDE_IN_USE_ROOT
+                directory.mkdir()
+                (directory / name).write_bytes(content)
+                inventory = smoke.package_inventory(installed, "claude")
+                with self.assertRaises(smoke.SmokeFailure):
+                    smoke.claude_runtime_inventory_entries(
+                        installed, inventory, provenance, "claude",
+                    )
+
+    def test_claude_runtime_marker_contract_rejects_unsafe_tree_shapes(self):
+        provenance = {"runtime_contracts": smoke.CLAUDE_RUNTIME_CONTRACTS}
+        with tempfile.TemporaryDirectory() as temporary:
+            installed = Path(temporary)
+            nested = installed / smoke.CLAUDE_IN_USE_ROOT / "123"
+            nested.mkdir(parents=True)
+            (nested / "payload").write_text("rogue", encoding="utf-8")
+            inventory = smoke.package_inventory(installed, "claude")
+            with self.assertRaisesRegex(smoke.SmokeFailure, "runtime entry"):
+                smoke.claude_runtime_inventory_entries(
+                    installed, inventory, provenance, "claude",
+                )
+        with tempfile.TemporaryDirectory() as temporary:
+            installed = Path(temporary)
+            (installed / smoke.CLAUDE_IN_USE_ROOT).write_text(
+                "not a directory", encoding="utf-8"
+            )
+            inventory = smoke.package_inventory(installed, "claude")
+            with self.assertRaisesRegex(smoke.SmokeFailure, "runtime directory"):
+                smoke.claude_runtime_inventory_entries(
+                    installed, inventory, provenance, "claude",
+                )
+        with tempfile.TemporaryDirectory() as temporary:
+            installed = Path(temporary)
+            directory = installed / smoke.CLAUDE_IN_USE_ROOT
+            directory.mkdir()
+            target = installed / "target"
+            target.write_text("{}", encoding="utf-8")
+            try:
+                (directory / "123").symlink_to(target)
+            except OSError as exc:
+                self.skipTest(f"fixture filesystem cannot create symlinks: {exc}")
+            with self.assertRaisesRegex(smoke.SmokeFailure, "contains a link"):
+                smoke.package_inventory(installed, "claude")
+        with tempfile.TemporaryDirectory() as temporary:
+            installed = Path(temporary)
+            marker = write_claude_runtime_marker(installed)
+            marker.chmod(marker.stat().st_mode | stat.S_IXUSR)
+            if not marker.stat().st_mode & 0o111:
+                self.skipTest("fixture filesystem has no executable mode")
+            inventory = smoke.package_inventory(installed, "claude")
+            with self.assertRaisesRegex(smoke.SmokeFailure, "runtime marker"):
+                smoke.claude_runtime_inventory_entries(
+                    installed, inventory, provenance, "claude",
+                )
 
     def test_codex_upgrade_rechecks_the_candidate_package_not_skill_names(self):
         expected_package = ROOT / "dist" / "codex" / smoke.TEAM

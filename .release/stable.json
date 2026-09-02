@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "version": "0.0.2",
+  "stable_base": "2c773a9d8223fc94b926c1737df0ba0a8b81d372",
+  "main_source": "9facd01a6f1f484f86fee6f4b12bd650f956e088",
+  "impacts": {
+    "software-engineering-team": "patch"
+  },
+  "summaries": [
+    "Diagnose unrecoverable missing Experience package history before rehydration writes."
+  ]
+}

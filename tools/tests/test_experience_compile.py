@@ -655,6 +655,16 @@ class ExperienceCompilerTests(unittest.TestCase):
             fixture = self.orphaned_create_scope(
                 raw, publish_open_packages=True,
             )
+            for experience in ("checkout", "returns"):
+                package = fixture["root"] / "experiences" / experience
+                self.assertFalse(
+                    (package / "_ledger/package-revisions.json").exists()
+                )
+                history, problems = experience_compile.validate_process_ledger(
+                    package, 1,
+                )
+                self.assertEqual(problems, [])
+                self.assertEqual(history, [])
             replacement_bindings = experience_compile.binding_rows(
                 fixture["new_receipts"],
             )
@@ -764,6 +774,172 @@ class ExperienceCompilerTests(unittest.TestCase):
                     successor["proposal_hash"],
                 )
 
+    def test_rehydrate_r1_uses_hash_verified_generated_bindings_after_plan_drift(
+        self,
+    ):
+        with tempfile.TemporaryDirectory() as raw:
+            fixture = self.orphaned_create_scope(
+                raw, publish_open_packages=True,
+            )
+            root = fixture["root"]
+            application_ledger = (
+                root / experience_application_check.LEDGER_RELATIVE
+            )
+            application_registry = (
+                root / experience_application_check.REGISTRY_RELATIVE
+            )
+            application_ledger_before = application_ledger.read_bytes()
+            application_registry_before = application_registry.read_bytes()
+            published = {
+                row["result_ref"]: row["package_hash"]
+                for row in json.loads(application_ledger_before)["revisions"][0][
+                    "packages"
+                ]
+            }
+            historic_bindings = fixture["old_plan"]["input_bindings"]
+            stored_registries = {}
+            for experience in ("checkout", "returns"):
+                package = root / "experiences" / experience
+                registry, problems = experience_compile.compile_package(
+                    package, allow_stale_inputs=True,
+                )
+                self.assertEqual(problems, [])
+                self.assertEqual(
+                    registry["package_hash"], published[f"{experience}@r1"],
+                )
+                target = package / "_generated/registry.json"
+                target.write_bytes(experience_compile.canonical(registry))
+                stored_registries[experience] = target.read_bytes()
+
+            current_plan = dict(fixture["old_plan"])
+            current_bindings = experience_compile.binding_rows(
+                fixture["new_receipts"],
+            )
+            current_plan["input_bindings"] = current_bindings
+            current_plan["proposal_hash"] = (
+                experience_compile.proposal_digest(current_plan)
+            )
+            current_plan_path = fixture["docs"] / "current-experience-scope.json"
+            current_plan_path.write_bytes(
+                experience_compile.canonical(current_plan)
+            )
+            self.replace_open_scope_bindings(fixture, current_bindings)
+            for action in current_plan["actions"]:
+                package = root / "experiences" / action["experience"]
+                experience_compile.write_open_revision(
+                    package, current_plan, action,
+                    current_plan["proposal_hash"],
+                )
+                self.assertFalse(
+                    (package / "_ledger/package-revisions.json").exists()
+                )
+
+            before_preflight = self.tree_snapshot(fixture["docs"])
+            _selected, _application, is_open, prepared = (
+                experience_compile.preflight_rehydrate_published_scope(
+                    root, current_plan, current_plan["proposal_hash"],
+                    "application@r1",
+                )
+            )
+            self.assertTrue(is_open)
+            self.assertEqual(
+                [package.name for package, _data, _registry in prepared],
+                ["checkout", "returns"],
+            )
+            for package, candidate, registry in prepared:
+                self.assertEqual(candidate["input_bindings"], historic_bindings)
+                self.assertEqual(
+                    registry["package_hash"], published[f"{package.name}@r1"],
+                )
+            self.assertEqual(
+                self.tree_snapshot(fixture["docs"]), before_preflight,
+            )
+
+            def rehydrate() -> tuple[int, str, str]:
+                return self.run_in_process(
+                    "rehydrate-published-scope", "--root", root,
+                    "--scope-plan", current_plan_path,
+                    "--proposal-hash", current_plan["proposal_hash"],
+                    "--application-ref", "application@r1",
+                )
+
+            code, output, errors = rehydrate()
+
+            self.assertEqual(code, 0, output + errors)
+            self.assertTrue(json.loads(output)["changed"])
+            self.assertEqual(
+                application_ledger.read_bytes(), application_ledger_before,
+            )
+            self.assertEqual(
+                application_registry.read_bytes(), application_registry_before,
+            )
+            for experience in ("checkout", "returns"):
+                package = root / "experiences" / experience
+                data = experience_compile.fields(package)
+                self.assertEqual(data["status"], "approved")
+                self.assertEqual(data["input_bindings"], historic_bindings)
+                self.assertEqual(
+                    (package / "_generated/registry.json").read_bytes(),
+                    stored_registries[experience],
+                )
+                self.assertFalse(
+                    (package / "_generated/open-revision.json").exists()
+                )
+                self.assertFalse(
+                    (package / "_ledger/package-revisions.json").exists()
+                )
+                history, problems = experience_compile.validate_process_ledger(
+                    package, 1,
+                )
+                self.assertEqual(problems, [])
+                self.assertEqual(history, [])
+
+            code, output, errors = rehydrate()
+            self.assertEqual(code, 0, output + errors)
+            self.assertFalse(json.loads(output)["changed"])
+
+            with self.recovery_contract(fixture["new_receipts"]):
+                code, output, errors = self.run_in_process(
+                    "propose", "--root", root,
+                    "--origin-mode", "manual",
+                    "--process-ref",
+                    fixture["old_plan"]["actions"][0]["primary_process_ref"],
+                    "--process-ref",
+                    fixture["old_plan"]["actions"][1]["primary_process_ref"],
+                    "--ba-ref", fixture["new_receipts"][0]["result_ref"],
+                    "--solution-ref", fixture["new_receipts"][1]["result_ref"],
+                    "--design-ref", fixture["new_receipts"][2]["result_ref"],
+                )
+            self.assertEqual(code, 0, output + errors)
+            successor = json.loads(output)
+            self.assertEqual(
+                [action["action"] for action in successor["actions"]],
+                ["update", "update"],
+            )
+            successor_path = fixture["docs"] / "successor-scope-plan.json"
+            successor_path.write_bytes(experience_compile.canonical(successor))
+            with self.recovery_contract(fixture["new_receipts"]), mock.patch.object(
+                experience_compile.stage_package, "is_committed",
+                return_value=True,
+            ), mock.patch.object(
+                experience_compile.stage_package, "paths_are_committed",
+                return_value=True,
+            ):
+                for experience in ("checkout", "returns"):
+                    code, output, errors = self.run_in_process(
+                        "begin-revision", "--experience-root",
+                        root / "experiences" / experience,
+                        "--scope-plan", successor_path,
+                        "--proposal-hash", successor["proposal_hash"],
+                    )
+                    self.assertEqual(code, 0, output + errors)
+            for experience in ("checkout", "returns"):
+                package = root / "experiences" / experience
+                data = experience_compile.fields(package)
+                self.assertEqual(data["status"], "draft")
+                self.assertEqual(data["revision"], 2)
+                self.assertEqual(data["input_bindings"], current_bindings)
+
     def test_rehydration_requires_verifiable_history_before_r2(self):
         with tempfile.TemporaryDirectory() as raw:
             package = Path(raw) / "checkout"
@@ -782,18 +958,94 @@ class ExperienceCompilerTests(unittest.TestCase):
                 raw, publish_open_packages=True,
             )
             package = fixture["root"] / "experiences" / "checkout"
+            package_ledger = package / "_ledger/package-revisions.json"
+            self.assertFalse(package_ledger.exists())
+            stored_registry, stored_problems = (
+                experience_compile.compile_package(
+                    package, allow_stale_inputs=True,
+                )
+            )
+            self.assertEqual(stored_problems, [])
+            (package / "_generated/registry.json").write_bytes(
+                experience_compile.canonical(stored_registry)
+            )
             record = package / "journeys/checkout-journey.md"
             record.write_text(
                 record.read_text(encoding="utf-8") + "changed\n",
                 encoding="utf-8",
             )
+            application = experience_compile.published_application_receipt(
+                fixture["root"], "application@r1",
+            )
+            anchored_hash = next(
+                row["package_hash"] for row in application["packages"]
+                if row["result_ref"] == "checkout@r1"
+            )
+            self.assertEqual(stored_registry["package_hash"], anchored_hash)
+            candidate = experience_compile.fields(package)
+            candidate["input_bindings"] = (
+                experience_compile.historical_scope_bindings(
+                    fixture["old_plan"],
+                )
+            )
+            experience_compile.status_tags(candidate)
+            registry, problems = experience_compile.compile_package(
+                package, allow_stale_inputs=True, root_data=candidate,
+            )
+            self.assertEqual(
+                [problem for problem in problems if "registry is stale" not in problem],
+                [],
+            )
+            produced_hash = registry["package_hash"]
+            self.assertNotEqual(produced_hash, anchored_hash)
             before = self.tree_snapshot(fixture["docs"])
 
-            code, output, errors = self.rehydrate_published_scope(fixture)
+            args = mock.Mock(
+                root=str(fixture["root"]),
+                scope_plan=str(fixture["old_plan_path"]),
+                proposal_hash=fixture["old_plan"]["proposal_hash"],
+                application_ref="application@r1",
+            )
+            output, errors = io.StringIO(), io.StringIO()
+            preflight_impl = (
+                experience_compile.preflight_rehydrate_published_scope
+            )
+            with mock.patch.object(
+                experience_compile,
+                "preflight_rehydrate_published_scope",
+                wraps=preflight_impl,
+            ) as preflight, mock.patch.object(
+                experience_compile, "rewrite",
+            ) as rewrite, mock.patch.object(
+                experience_compile, "atomic_write_bytes",
+            ) as atomic_write, mock.patch.object(
+                experience_compile, "render_experience_navigation",
+            ) as render_navigation, redirect_stdout(output), redirect_stderr(errors):
+                code = experience_compile.rehydrate_published_scope(args)
 
-            self.assertEqual(code, 2, output + errors)
-            self.assertIn("package hash does not match application@r1", errors)
+            self.assertEqual(code, 2, output.getvalue() + errors.getvalue())
+            preflight.assert_called_once()
+            preflight_args = preflight.call_args.args
+            self.assertEqual(preflight_args[0], fixture["root"].resolve())
+            self.assertEqual(preflight_args[1:], (
+                fixture["old_plan"],
+                fixture["old_plan"]["proposal_hash"], "application@r1",
+            ))
+            rewrite.assert_not_called()
+            atomic_write.assert_not_called()
+            render_navigation.assert_not_called()
+            self.assertIn(
+                f"produce {produced_hash}, but application@r1 anchors "
+                f"{anchored_hash}",
+                errors.getvalue(),
+            )
+            self.assertIn(
+                "registry and receipt hashes cannot reconstruct those bytes",
+                errors.getvalue(),
+            )
+            self.assertNotIn("historic package ledger", errors.getvalue())
             self.assertEqual(self.tree_snapshot(fixture["docs"]), before)
+            self.assertFalse(package_ledger.exists())
 
     def test_recovery_proposal_rejects_a_scope_with_current_bindings(self):
         with tempfile.TemporaryDirectory() as raw:

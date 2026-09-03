@@ -86,7 +86,14 @@ quality, accessibility, security or implementation suitability.
   For r2+ packages, rehydration also needs an intact prior `_ledger/` history.
   The application receipt stores hashes, not historic registry or record
   snapshot bytes, so restore the complete package ledger from a trusted backup
-  before retrying if that history is absent.
+  before retrying if that history is absent. At r1, no prior history exists, so
+  an absent ledger is valid and no current ledger row or snapshots are
+  synthesized. Before any package write, the compiler requires a fresh compile
+  to reproduce the immutable receipt; for an exact recovery command eligible
+  for attestation, the hook runs the same proof before shell execution. A
+  generated registry may supply candidate historic input bindings only when the
+  authored package reproduces that registry and receipt hash exactly; otherwise
+  restore the exact plan and authored source from a trusted backup.
 - `enter-application-review` snapshots the current artifact tree. Approval
   requires a fresh exact-schema-v4 reviewer attestation bound to proposal,
   artifact-tree, package-set and application hashes. Its `advisories` remain

@@ -66,6 +66,17 @@ registry or record-snapshot bytes, so the compiler cannot safely recreate a
 missing history. Restore the complete package ledger from a trusted backup
 before rerunning rehydration.
 
+At r1, an absent package ledger is the valid empty-history state. Rehydration
+does not invent a current ledger row or orphaned record snapshots. Before any
+package write, the compiler proves a complete candidate against the immutable
+application receipt. For an exact recovery command eligible for attestation,
+the vault hook runs the same proof before shell execution. A current generated
+registry may suggest historic input bindings only when a fresh compile of the
+authored package reproduces that registry and the published package hash
+exactly. If no candidate does, restore the exact scope plan and authored package
+source from a trusted backup; registry and receipt hashes cannot reconstruct
+those bytes.
+
 ## Preflight and authoring
 
 1. Validate the selected upstream receipts and canonical BA primary process.

@@ -77,6 +77,15 @@ RECORD_NAV_START = "<!-- experience_compile.py: generated records:start -->"
 RECORD_NAV_END = "<!-- experience_compile.py: generated records:end -->"
 
 
+class RehydrationPreflightError(ValueError):
+    """Carry one bounded compiler diagnostic that a shell hook may display."""
+
+    def __init__(self, message: str):
+        if re.fullmatch(r"[\x20-\x7e]{1,1024}", message) is None:
+            message = "published Experience scope cannot be rehydrated"
+        super().__init__(message)
+
+
 def valid_experience_slug(value: str) -> bool:
     return (
         bool(SLUG.fullmatch(value))
@@ -1969,7 +1978,6 @@ def rehydrated_published_scope_postimage(
     selected, application, _open = published_scope_packages(
         root, plan, proposal_hash, application_ref,
     )
-    bindings = historical_scope_bindings(plan)
     receipts = {
         str(receipt.get("result_ref", "")): str(receipt.get("package_hash", ""))
         for receipt in application.get("packages", [])
@@ -1978,16 +1986,6 @@ def rehydrated_published_scope_postimage(
     for package, data, state in selected:
         if data.get("status") != "approved":
             raise ValueError(f"{package.name} published package was not rehydrated")
-        if list_value(data, "input_bindings") != bindings:
-            raise ValueError(f"{package.name} does not restore its published input bindings")
-        if (
-            plan.get("origin_mode") == "requirement"
-            and data.get("upstream_stage_receipts_hash")
-            != plan.get("upstream_stage_receipts_hash")
-        ):
-            raise ValueError(
-                f"{package.name} does not restore its published Requirement binding"
-            )
         registry, problems = compile_package(
             package, True, allow_stale_inputs=True,
         )
@@ -2002,17 +2000,152 @@ def rehydrated_published_scope_postimage(
     return selected
 
 
+def generated_rehydration_candidate(
+    package: Path,
+    data: dict,
+    plan: dict,
+    revision: int,
+    expected_hash: str,
+) -> tuple[dict, dict] | None:
+    """Try one disposable registry as a hash-verified metadata candidate."""
+    target = package / GENERATED / "registry.json"
+    if (
+        not target.is_file()
+        or target.is_symlink()
+        or target.stat().st_nlink != 1
+    ):
+        return None
+    try:
+        stored = strict_json_loads(target.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError, ValueError):
+        return None
+    if (
+        not isinstance(stored, dict)
+        or stored.get("schema_version") != 6
+        or set(stored) != PROCESS_REGISTRY_FIELDS
+        or stored.get("experience_id") != package.name
+        or stored.get("package_revision") != revision
+        or stored.get("package_hash") != expected_hash
+        or not isinstance(stored.get("input_bindings"), dict)
+    ):
+        return None
+    stored_bindings = stored["input_bindings"]
+    try:
+        plan_rows = input_rows(plan)
+    except ValueError:
+        return None
+    if set(stored_bindings) != {stage for stage, _reference, _digest in plan_rows}:
+        return None
+    candidate_rows = []
+    for stage, _reference, _digest in plan_rows:
+        value = stored_bindings.get(stage)
+        if (
+            not isinstance(value, list)
+            or len(value) != 2
+            or not all(isinstance(item, str) for item in value)
+        ):
+            return None
+        candidate_rows.append(f"{stage}|{value[0]}|{value[1]}")
+    candidate = dict(data)
+    candidate["input_bindings"] = candidate_rows
+    if plan.get("origin_mode") == "requirement":
+        candidate["upstream_stage_receipts_hash"] = plan[
+            "upstream_stage_receipts_hash"
+        ]
+    registry, problems = compile_package(
+        package,
+        allow_stale_inputs=True,
+        root_data=candidate,
+    )
+    hard = [item for item in problems if "registry is stale" not in item]
+    if hard or registry != stored:
+        return None
+    return candidate, registry
+
+
+def preflight_rehydrate_published_scope(
+    root: Path, plan: dict, proposal_hash: str, application_ref: str,
+) -> tuple[
+    list[tuple[Path, dict, dict]],
+    dict,
+    bool,
+    list[tuple[Path, dict, dict]],
+]:
+    """Prove the exact candidate package hashes without changing the vault."""
+    selected, application, is_open = published_scope_packages(
+        root, plan, proposal_hash, application_ref,
+    )
+    if not is_open:
+        selected = rehydrated_published_scope_postimage(
+            root, plan, proposal_hash, application_ref,
+        )
+        return selected, application, False, []
+
+    plan_bindings = historical_scope_bindings(plan)
+    receipts = {
+        str(receipt.get("result_ref", "")): str(receipt.get("package_hash", ""))
+        for receipt in application.get("packages", [])
+        if isinstance(receipt, dict)
+    }
+    prepared: list[tuple[Path, dict, dict]] = []
+    recovered_bindings: list[str] | None = None
+    for package, data, state in selected:
+        revision = int(state["opened_revision"])
+        require_rehydration_history(package, revision)
+        candidate = dict(data)
+        candidate["input_bindings"] = plan_bindings
+        if plan.get("origin_mode") == "requirement":
+            candidate["upstream_stage_receipts_hash"] = plan[
+                "upstream_stage_receipts_hash"
+            ]
+        registry, problems = compile_package(
+            package,
+            allow_stale_inputs=True,
+            root_data=candidate,
+        )
+        hard = [item for item in problems if "registry is stale" not in item]
+        if hard:
+            raise ValueError("; ".join(hard))
+        result_ref = f"{package.name}@r{revision}"
+        expected_hash = receipts.get(result_ref)
+        if registry.get("package_hash") != expected_hash:
+            generated = generated_rehydration_candidate(
+                package, data, plan, revision, str(expected_hash),
+            )
+            if generated is not None:
+                candidate, registry = generated
+        if registry.get("package_hash") != expected_hash:
+            raise RehydrationPreflightError(
+                f"{package.name} cannot rehydrate r{revision}: the selected "
+                "scope plan and current authored package bytes produce "
+                f"{registry.get('package_hash', '')}, but {application_ref} "
+                f"anchors {expected_hash}. Restore the exact scope plan and "
+                "authored package source that produced the published receipt "
+                "from a trusted backup; registry and receipt hashes cannot "
+                "reconstruct those bytes."
+            )
+        candidate_bindings = list_value(candidate, "input_bindings")
+        if recovered_bindings is None:
+            recovered_bindings = candidate_bindings
+        elif candidate_bindings != recovered_bindings:
+            raise RehydrationPreflightError(
+                "published scope packages do not reproduce one shared "
+                "historical input binding set"
+            )
+        prepared.append((package, candidate, registry))
+    return selected, application, True, prepared
+
+
 def rehydrate_published_scope(args) -> int:
     root = root_for(args.root)
     try:
         plan = load_scope_plan(args.scope_plan, args.proposal_hash)
-        selected, application, is_open = published_scope_packages(
-            root, plan, args.proposal_hash, args.application_ref,
-        )
-        if not is_open:
-            selected = rehydrated_published_scope_postimage(
+        selected, _application, is_open, prepared = (
+            preflight_rehydrate_published_scope(
                 root, plan, args.proposal_hash, args.application_ref,
             )
+        )
+        if not is_open:
             print(json.dumps({
                 "application_ref": args.application_ref,
                 "packages": sorted(package.name for package, _data, _state in selected),
@@ -2022,41 +2155,16 @@ def rehydrate_published_scope(args) -> int:
     except ValueError as exc:
         return fail(str(exc), 2)
 
-    bindings = historical_scope_bindings(plan)
-    receipts = {
-        str(receipt.get("result_ref", "")): str(receipt.get("package_hash", ""))
-        for receipt in application.get("packages", [])
-        if isinstance(receipt, dict)
-    }
-    prepared: list[tuple[Path, dict, str, dict]] = []
+    approved: list[tuple[Path, dict, str, dict]] = []
     try:
-        for package, _data, state in selected:
-            require_rehydration_history(package, int(state["opened_revision"]))
-        for package, _data, state in selected:
-            data, body = fm(package / "experience.md")
-            data["input_bindings"] = bindings
-            if plan.get("origin_mode") == "requirement":
-                data["upstream_stage_receipts_hash"] = plan[
-                    "upstream_stage_receipts_hash"
-                ]
-            status_tags(data)
+        for package, data, registry in prepared:
+            _current, body = fm(package / "experience.md")
             rewrite(package / "experience.md", data, body)
-            registry, problems = compile_package(
-                package, allow_stale_inputs=True,
-            )
-            hard = [item for item in problems if "registry is stale" not in item]
-            if hard:
-                raise ValueError("; ".join(hard))
-            result_ref = f"{package.name}@r{state['opened_revision']}"
-            if registry.get("package_hash") != receipts.get(result_ref):
-                raise ValueError(
-                    f"{package.name} package hash does not match {args.application_ref}"
-                )
-            prepared.append((package, data, body, registry))
+            approved.append((package, data, body, registry))
         approved_at = datetime.now(timezone.utc).replace(
             microsecond=0
         ).isoformat()
-        for package, data, body, registry in prepared:
+        for package, data, body, registry in approved:
             data.update({
                 "status": "approved",
                 "approval_revision": 1,
@@ -2069,7 +2177,7 @@ def rehydrate_published_scope(args) -> int:
             rewrite(package / "experience.md", data, body)
             (package / GENERATED / OPEN_REVISION).unlink(missing_ok=True)
             fsync_directory(package / GENERATED)
-        for package, _data, _body, registry in prepared:
+        for package, _data, _body, registry in approved:
             atomic_write_bytes(
                 package / GENERATED / "registry.json", canonical(registry),
             )
@@ -2295,11 +2403,18 @@ def authored(package: Path) -> list[Path]:
     return sorted(path for path in package.rglob("*.md") if GENERATED not in path.parts and LEDGER not in path.parts)
 
 
-def source_digest(package: Path, *, historical_revision: int | None = None) -> str:
+def source_digest(
+    package: Path,
+    *,
+    historical_revision: int | None = None,
+    root_data: dict | None = None,
+) -> str:
     ignored = {"status", "approval_revision", "registry_hash", "package_hash", "source_hash", "approved_at_utc", "tags"}
     digest = hashlib.sha256()
     for path in authored(package):
         data, body = fm(path)
+        if path == package / "experience.md" and root_data is not None:
+            data = dict(root_data)
         stable = {key: value for key, value in data.items() if key not in ignored}
         if historical_revision is not None and path == package / "experience.md":
             stable["revision"] = historical_revision
@@ -2665,12 +2780,14 @@ def require_lifecycle_dependents_open(
 
 def compile_package(package: Path, gate: bool = False, *,
                     allow_stale_inputs: bool = False,
-                    defer_lifecycle_record_revision: bool = False) -> tuple[dict, list[str]]:
+                    defer_lifecycle_record_revision: bool = False,
+                    root_data: dict | None = None) -> tuple[dict, list[str]]:
     problems = []
     try:
-        data, _body = fm(package / "experience.md")
+        current_data, _body = fm(package / "experience.md")
     except (OSError, ValueError) as exc:
         return {}, [f"experience.md: {exc}"]
+    data = current_data if root_data is None else dict(root_data)
     if data.get("type") != "experience": problems.append("experience.md: root type must be experience")
     if (not valid_experience_slug(str(data.get("experience_id", "")))
             or data.get("experience_id") != package.name):
@@ -2764,7 +2881,7 @@ def compile_package(package: Path, gate: bool = False, *,
                         experience_root, package, exact_reference, related_processes,
                         gate=gate and not allow_stale_inputs)):
                     problems.append(f"{row['path']}: {field} targets a missing, retired, or stale Experience record: {exact_reference}")
-    registry = {"schema_version": 6, "experience_id": package.name, "package_revision": data.get("revision", 1), "origin_mode": data.get("origin_mode"), "implements": implemented_requirements, "primary_process_ref": data.get("primary_process_ref", ""), "related_process_refs": list_value(data, "related_process_refs"), "input_bindings": {key: list(value) for key, value in bindings(data).items()}, "source_hash": source_digest(package), "records": rows}
+    registry = {"schema_version": 6, "experience_id": package.name, "package_revision": data.get("revision", 1), "origin_mode": data.get("origin_mode"), "implements": implemented_requirements, "primary_process_ref": data.get("primary_process_ref", ""), "related_process_refs": list_value(data, "related_process_refs"), "input_bindings": {key: list(value) for key, value in bindings(data).items()}, "source_hash": source_digest(package, root_data=data if root_data is not None else None), "records": rows}
     registry["registry_hash"] = sha(canonical({key: value for key, value in registry.items() if key not in {"source_hash", "registry_hash", "package_hash"}}))
     registry["package_hash"] = sha(canonical({"source_hash": registry["source_hash"], "registry_hash": registry["registry_hash"]}))
     current_revision = data.get("revision") if type(data.get("revision")) is int else 0

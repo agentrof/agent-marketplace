@@ -1,5 +1,5 @@
 {
-  "build_id": "snapshot.ffdbeec4df59a26a826e5cecdc33e6272c46a475a37db6e40c227d93ee911c03",
+  "build_id": "snapshot.788c41eed5b9089f026025e75c6592d47cd12822bcbcd59c1f1bb1be1f00394b",
   "component": "software-engineering-team",
   "delivery_protocol": {
     "read_max": 1,
@@ -41,7 +41,7 @@
     "flows/design-system.md": "d8beee971392da1f39f91627999cbf0dbec948eb27947c1eb2aed3960c0e8773",
     "flows/design.md": "5e87edb63497b9b06deff9bf210b6674bc7990245d70b4f7e2be1b1fad9dfbca",
     "flows/execution-planning.md": "98f5644074665f4b7ac5a045a107aff4dddf50be081da37e089c39f19a70f458",
-    "flows/experience-design.md": "9847a2eafa6eb516c3bbfc8aa6c3d15c8bbb37371fba89ea3e6d7ac11713c6fa",
+    "flows/experience-design.md": "16ffcab7734697336aae64933966af063bcb9e4ee7941d48f9d44fbef4d1289c",
     "flows/operation.md": "f96c83c59e1ce5cbb4f4e9451867fadf10f5b3e9d8ac0202b85c58a53b6cd35a",
     "flows/requirement.md": "fc7930f17daf899ed2375d4c67bf0fefcc86be7894f0f8d02b276527e67a3c04",
     "flows/solution-design.md": "5d1d4e2ead2ee8458b4f6498f39afd91447e91ed50b66ee79e3c71d224736f10",
@@ -59,7 +59,7 @@
     "scripts/delivery_result.py": "ec591462319c871ffc97e5b5c9296be9c6f559a9608201d55d48509b8a689b89",
     "scripts/design_system_compile.py": "77bd9ea0d1d34d1768aa3d73685fc0a6001d47c520da86cf9435ebe594894dfc",
     "scripts/experience_application_check.py": "171a950aa83092ad703cff4ad28e2e20952fc37cf613a069cb65178a669dc6d8",
-    "scripts/experience_compile.py": "1bc3148f220e1e774a3512e24f9daad63f157ee1263f79d8cba0246d95588be1",
+    "scripts/experience_compile.py": "2ba12b330842fa675c73b34c08fcff0aadd4b60f05ff480e8649061715b6e013",
     "scripts/file_issue.py": "9dabf91796c416be8909e517f9a9859faff12c24c868c0c0e037739820bee02e",
     "scripts/generate_claude_project.py": "9258954d09757f36a51ac022c1dd8e915b3b831025f24d887d01be2ca2e02d29",
     "scripts/landscape_check.py": "64fe7922c5fd3b26c1fd0648f046af1ccc521339eefdab39714bc4908865c4a3",
@@ -75,7 +75,7 @@
     "scripts/team_guard.py": "b001c78b460ed623523738699882061f37ef73e616c7100af84d1f299d5b45c6",
     "scripts/vault_check.py": "b9fd9a7f5eedca51f134643b80e455d01d6bdd8914733d41d73ef99e0662d758",
     "scripts/vault_gate.py": "2624df7cae40066e1f7ce022dd6f1986841a65c7a28aada0ebfa565aca0832b2",
-    "scripts/vault_hook.py": "3328c11796234487e27ffb3d093cc6c4f8bebd936db892befd87cd4daf9b5cbe",
+    "scripts/vault_hook.py": "45521d971e60fef0f7236de89bab49927a5d177a10119fbe987bb8745a64b8ac",
     "skill-content/backlog-plan/SKILL.md": "7366c7341ee539f7ada5b4e38e36e07f6f29fb687f66a60a18b49341af6ea3c3",
     "skill-content/business-analysis/SKILL.md": "58005f6bfbfc7c95bb1ef8d9e8a746fbe486fd518bc55fa6fcf6e691fbf46de0",
     "skill-content/business-analysis/data/space-schema.json": "8bec0bb3025459143f52a8255d542ee52fcf99217e8c61fb770b407f1caa0936",
@@ -107,8 +107,8 @@
     "skill-content/docker-compose/references/review-checklist.md": "ecb277b0f85af3a4944681cf92b30906eceaa37cbc8cc0b20bda75a46f4cd5b8",
     "skill-content/docker-compose/references/seed-scenarios.md": "695931bd10a84eae5652455e9ba798856b1d340d56de3de0409c2fc86556b106",
     "skill-content/execution-plan/SKILL.md": "792efa6ce680c66b1b56dc82aa485806341c6c406f4cb8732699ea9feb103185",
-    "skill-content/experience-design/SKILL.md": "7c978a2624d557de6d91447ee6ea200e267fb535ffe5c7c5793b7c8ab4a87828",
-    "skill-content/experience-modeling/SKILL.md": "2a95cfce1001a6e6bd740c3d634ddcfa61bb0823cdf5999731bb408b98f4ead8",
+    "skill-content/experience-design/SKILL.md": "dbaea9d1cd62a7c95a1f3dce5a0a917a77c009650ff0b613ec25ac90173fe849",
+    "skill-content/experience-modeling/SKILL.md": "3d31e2b203b831fc131dfca9f5548f735a106335acc792e347ea207fee56c057",
     "skill-content/experience-modeling/data/experience-schema.json": "c05089c16ae0708f42fc3ca1a199dd83fd04403dd98ac3305e2be881f0b70b64",
     "skill-content/issue-report/SKILL.md": "80e51a863d2ae6730ff09bf4d6beaf820b1dd45d3eb36e9a9a6bb15f4d501734",
     "skill-content/nosql-database-design/SKILL.md": "ef96e517e938a477d77f63c7b9f8a59d5e52ad92c6d308bf83f581367c7e5d37",
@@ -282,6 +282,6 @@
   "schema_version": 3,
   "source_channel": "snapshot",
   "source_commit": "",
-  "source_ref": "snapshot.ffdbeec4df59a26a826e5cecdc33e6272c46a475a37db6e40c227d93ee911c03",
+  "source_ref": "snapshot.788c41eed5b9089f026025e75c6592d47cd12822bcbcd59c1f1bb1be1f00394b",
   "version": "0.0.2"
 }

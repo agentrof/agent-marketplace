@@ -1,0 +1,6 @@
+{
+  "summary": "Preflight published Experience rehydration and recover hash-verified historic r1 bindings without synthesizing ledger history.",
+  "components": {
+    "software-engineering-team": "patch"
+  }
+}

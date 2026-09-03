@@ -38,7 +38,14 @@ user-journey, screen, flow, state, transition or prototype work.
    For r2+ packages, prior `_ledger/` history must be intact. Application
    receipts contain package hashes, not historic registry or record-snapshot
    bytes, so restore the complete package ledger from a trusted backup before
-   retrying when that history is missing.
+   retrying when that history is missing. At r1, an absent ledger is the valid
+   empty-history state; never synthesize a current ledger row or record
+   snapshots. The compiler preflights a candidate before any package write; for
+   an exact recovery command eligible for attestation, the hook runs the same
+   proof before shell execution. A generated registry may suggest historic
+   input bindings only when a fresh compile of the authored package reproduces
+   both that registry and the immutable receipt hash. Otherwise restore the
+   exact scope plan and authored package source from a trusted backup.
 5. Work in the selected
    `workspace/docs/experience-design/experiences/<process-slug>/` packages.
    The primary process is a canonical BA process. `application` is reserved;

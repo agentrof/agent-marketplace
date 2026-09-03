@@ -2046,6 +2046,41 @@ def attested_recovery_writer_spec(
     }
 
 
+def attested_recovery_preflight_problem(
+    payload: dict, vault: Path,
+) -> str:
+    """Return one compiler-derived reason an exact recovery cannot run."""
+    recovery = attested_recovery_writer_spec(payload, vault)
+    if recovery is None or recovery["command"] != "rehydrate-published-scope":
+        return ""
+    if experience_compile is None:
+        return "rehydrate-published-scope compiler preflight is unavailable"
+    try:
+        experience_root = Path(recovery["root"])
+        with experience_compile.project_transaction_lock(experience_root):
+            experience_compile.recover_transaction(experience_root)
+            plan = experience_compile.load_scope_plan(
+                recovery["plan"], recovery["proposal_hash"],
+            )
+            experience_compile.preflight_rehydrate_published_scope(
+                experience_root,
+                plan,
+                recovery["proposal_hash"],
+                recovery["application_ref"],
+            )
+    except Exception as exc:
+        safe_error = getattr(
+            experience_compile, "RehydrationPreflightError", None,
+        )
+        if safe_error is not None and isinstance(exc, safe_error):
+            return "rehydrate-published-scope preflight failed: " + str(exc)
+        return (
+            "rehydrate-published-scope preflight rejected the current vault "
+            "state; run the compiler command directly for details"
+        )
+    return ""
+
+
 def sanctioned_application_writer(
     payload: dict, vault: Path, allow_bare_runtime: bool = False,
 ) -> bool:
@@ -3138,6 +3173,13 @@ def shell_snapshot(payload: dict) -> int:
             "workspace/config.json could not be snapshotted before Bash;"
             " refusing a command whose config effects could not be restored"
         )
+    attested_recovery_candidate = bool(
+        root and attested_recovery_writer_spec(payload, root)
+    )
+    if root and attested_recovery_candidate:
+        preflight_problem = attested_recovery_preflight_problem(payload, root)
+        if preflight_problem:
+            return deny(preflight_problem)
     try:
         experience_tree = experience_tree_snapshot(root or config_path.parent / "docs")
     except OSError as exc:
@@ -3151,9 +3193,6 @@ def shell_snapshot(payload: dict) -> int:
             "Experience Design cannot be safely snapshotted: "
             + snapshot_problem
         )
-    attested_recovery_candidate = bool(
-        root and attested_recovery_writer_spec(payload, root)
-    )
     try:
         recovery_artifacts = (
             recovery_artifact_snapshot(root)

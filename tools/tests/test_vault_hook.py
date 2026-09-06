@@ -3161,7 +3161,11 @@ class VaultHookShellContractTests(unittest.TestCase):
                     ),
                 )
             ]
-            plan = {"origin_mode": "manual", "actions": [package_state]}
+            plan = {
+                "origin_mode": "manual",
+                "input_bindings": experience_compile.binding_rows(receipts),
+                "actions": [package_state],
+            }
             package_fields = {
                 "experience_id": "checkout",
                 "origin_mode": "manual",

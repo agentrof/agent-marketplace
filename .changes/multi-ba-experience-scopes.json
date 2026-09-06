@@ -1,0 +1,6 @@
+{
+  "summary": "Allow manual Experience scopes to coordinate processes from multiple BA packages.",
+  "components": {
+    "software-engineering-team": "minor"
+  }
+}

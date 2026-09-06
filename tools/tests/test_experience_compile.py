@@ -986,6 +986,7 @@ class ExperienceCompilerTests(unittest.TestCase):
             candidate["input_bindings"] = (
                 experience_compile.historical_scope_bindings(
                     fixture["old_plan"],
+                    str(fixture["old_plan"]["actions"][0]["primary_process_ref"]),
                 )
             )
             experience_compile.status_tags(candidate)
@@ -1131,6 +1132,161 @@ class ExperienceCompilerTests(unittest.TestCase):
             self.assertEqual(fresh["input_bindings"], old["input_bindings"])
             self.assertEqual(fresh["application_action"], "update")
             self.assertEqual(fresh["expected_application"]["revision"], 1)
+
+    def test_manual_multi_ba_scope_binds_each_package_to_its_owner(self):
+        receipts = [
+            {
+                "stage": stage,
+                "result_ref": reference,
+                "package_hash": "sha256:" + character * 64,
+            }
+            for stage, reference, character in (
+                ("business-analysis", "business-analysis/commerce/space", "a"),
+                ("business-analysis", "business-analysis/support/space", "b"),
+                ("solution-design", "solution-design/landscape", "c"),
+                ("design-system", "design-system/MASTER", "d"),
+            )
+        ]
+        by_ref = {receipt["result_ref"]: receipt for receipt in receipts}
+        process_owner = {
+            "business-analysis/commerce/processes/checkout-process": (
+                "business-analysis/commerce/space", "sha256:" + "a" * 64,
+            ),
+            "business-analysis/support/domains/service/processes/return-process": (
+                "business-analysis/support/space", "sha256:" + "b" * 64,
+            ),
+        }
+        actions = [
+            {
+                "primary_process_ref": process,
+                "experience": experience,
+                "target_experience": "",
+                "action": "create",
+                "affected_records": [],
+                "expected_package": {},
+                "reason": "Create the process-owned Experience package.",
+            }
+            for experience, process in (
+                ("checkout", "business-analysis/commerce/processes/checkout-process"),
+                (
+                    "returns",
+                    "business-analysis/support/domains/service/processes/return-process",
+                ),
+            )
+        ]
+        plan = {
+            "schema_version": 2,
+            "origin_mode": "manual",
+            "input_bindings": experience_compile.binding_rows(receipts),
+            "actions": actions,
+            "application_action": "create",
+            "expected_application": {"exists": False},
+        }
+        plan["proposal_hash"] = experience_compile.proposal_digest(plan)
+
+        def verify(_docs, _stage, reference, expected_hash="", *_args, **_kwargs):
+            receipt = by_ref.get(reference)
+            if receipt is None:
+                return None, [f"unexpected receipt {reference}"]
+            if expected_hash and expected_hash != receipt["package_hash"]:
+                return None, [f"stale receipt {reference}"]
+            return receipt, []
+
+        def resolve(_docs, process, *, expected_ba_ref="", expected_ba_hash="", **_kwargs):
+            expected = process_owner.get(process)
+            if expected is None or expected != (expected_ba_ref, expected_ba_hash):
+                return None, ["primary process belongs to another BA package"]
+            return process, []
+
+        with mock.patch.object(
+                experience_compile.stage_package, "verify", side_effect=verify), \
+                mock.patch.object(
+                    experience_compile.stage_package,
+                    "resolve_ba_process",
+                    side_effect=resolve,
+                ):
+            self.assertEqual(
+                experience_compile.verify_scope_inputs(
+                    Path("/fixture/experience-design"), plan,
+                    require_committed=True,
+                ),
+                [],
+            )
+            self.assertEqual(
+                experience_compile.package_binding_rows(
+                    plan, actions[0]["primary_process_ref"],
+                ),
+                [
+                    "business-analysis|business-analysis/commerce/space|"
+                    + "sha256:" + "a" * 64,
+                    "solution-design|solution-design/landscape|"
+                    + "sha256:" + "c" * 64,
+                    "design-system|design-system/MASTER|"
+                    + "sha256:" + "d" * 64,
+                ],
+            )
+            self.assertEqual(
+                experience_compile.package_binding_rows(
+                    plan, actions[1]["primary_process_ref"],
+                ),
+                [
+                    "business-analysis|business-analysis/support/space|"
+                    + "sha256:" + "b" * 64,
+                    "solution-design|solution-design/landscape|"
+                    + "sha256:" + "c" * 64,
+                    "design-system|design-system/MASTER|"
+                    + "sha256:" + "d" * 64,
+                ],
+            )
+            with self.assertRaisesRegex(
+                ValueError, "input bindings do not match",
+            ):
+                experience_compile.validate_package_input_bindings(
+                    {
+                        "input_bindings": experience_compile.package_binding_rows(
+                            plan, actions[0]["primary_process_ref"],
+                        ),
+                    },
+                    plan,
+                    actions[1],
+                )
+
+            with tempfile.TemporaryDirectory() as raw:
+                root = Path(raw) / "workspace/docs/experience-design"
+                root.mkdir(parents=True)
+                plan_path = root.parent / "multi-ba-plan.json"
+                plan_path.write_bytes(experience_compile.canonical(plan))
+                for action in actions:
+                    code, output, errors = self.run_in_process(
+                        "init", "--root", root,
+                        "--experience", action["experience"],
+                        "--origin-mode", "manual",
+                        "--primary-process-ref", action["primary_process_ref"],
+                        "--scope-plan", plan_path,
+                        "--proposal-hash", plan["proposal_hash"],
+                        "--ba-ref", "business-analysis/commerce/space",
+                        "--ba-ref", "business-analysis/support/space",
+                        "--solution-ref", "solution-design/landscape",
+                        "--design-ref", "design-system/MASTER",
+                    )
+                    self.assertEqual(code, 0, output + errors)
+                    package = root / "experiences" / action["experience"]
+                    self.assertEqual(
+                        experience_compile.fields(package)["input_bindings"],
+                        experience_compile.package_binding_rows(
+                            plan, action["primary_process_ref"],
+                        ),
+                    )
+
+        missing_owner = dict(plan)
+        missing_owner["input_bindings"] = [
+            value for value in plan["input_bindings"]
+            if "business-analysis/support/space" not in value
+        ]
+        with self.assertRaisesRegex(ValueError, "does not bind the owning"):
+            experience_compile.package_binding_rows(
+                missing_owner, actions[1]["primary_process_ref"],
+            )
 
     def test_legacy_program_commands_are_rejected(self):
         result = self.run_cli("init-program", "--root", "/tmp/x", "--program", "PRG-001")
@@ -1752,7 +1908,11 @@ class ExperienceCompilerTests(unittest.TestCase):
                 "target_experience": "checkout",
                 "proposal_hash": "sha256:" + "1" * 64,
             }
-            plan = {"origin_mode": "manual", "actions": [action]}
+            plan = {
+                "origin_mode": "manual",
+                "input_bindings": experience_compile.binding_rows(receipts),
+                "actions": [action],
+            }
             init_args = [
                 "init", "--root", str(root), "--experience", "checkout",
                 "--origin-mode", "manual", "--primary-process-ref", process,

@@ -27,7 +27,10 @@ that application receipt or author-owned artifacts.
 3. Run `experience_compile.py propose` before mutation. It binds primary
    process ownership, create/update/reuse/rename/retire actions, any independent
    application revision, upstream receipt hashes and current application
-   receipt. Obtain approval for the entire action set.
+   receipt. Manual mode may select several BA packages with repeated `--ba-ref`;
+   each action then binds only its primary process owner plus the shared Solution
+   and Design receipts. Requirement mode keeps one BA receipt. Obtain approval
+   for the entire action set.
 
 ## Stale open-scope recovery
 

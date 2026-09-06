@@ -2328,7 +2328,7 @@ def valid_application_writer_result(
             ) != related
             or experience_compile.list_value(
                 fields, "input_bindings",
-            ) != experience_compile.binding_rows(receipts)
+            ) != experience_compile.package_binding_rows(plan, primary)
         ):
             return False
         if spec["origin_mode"] == "requirement":

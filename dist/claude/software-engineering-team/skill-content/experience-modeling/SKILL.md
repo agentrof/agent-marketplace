@@ -28,6 +28,11 @@ backlog planning.
   ledgers. Package approval belongs only to the root package.
 - Requirement and manual modes share proposal, authoring, challenge and
   approval. Requirement mode alone adds traceability and binds final receipts.
+- A manual proposal may bind multiple current Business Analysis packages, but
+  every selected process resolves through exactly one owner. Its Experience
+  package binds that owner plus the one shared Solution and Design System
+  receipt, never every BA receipt in the proposal. Requirement mode still
+  binds exactly one Business Analysis receipt.
 - A transient scope proposal binds the full action set, selected input receipt
   hashes, primary processes, process set and current application receipt. Pass
   its exact file and hash to every mutation and approval.

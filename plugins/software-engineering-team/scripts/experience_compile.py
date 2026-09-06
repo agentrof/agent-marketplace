@@ -1171,14 +1171,88 @@ def proposal_digest(plan: dict) -> str:
 
 
 def input_rows(plan: dict) -> list[tuple[str, str, str]]:
+    return input_rows_from_bindings(plan.get("input_bindings", []))
+
+
+def input_rows_from_bindings(values: object) -> list[tuple[str, str, str]]:
+    if not isinstance(values, list):
+        raise ValueError("scope plan input bindings must be a list")
     rows = []
-    for value in plan.get("input_bindings", []):
+    for value in values:
         stage, marker, remainder = str(value).partition("|")
         reference, marker2, digest = remainder.partition("|")
         if not marker or not marker2:
             raise ValueError("scope plan contains an invalid input binding")
         rows.append((stage, reference, digest))
     return rows
+
+
+def package_binding_rows_from_input_rows(
+    rows: list[tuple[str, str, str]], primary_process_ref: str,
+) -> list[str]:
+    expected_stages = {
+        "business-analysis", "solution-design", "design-system",
+    }
+    present = {stage for stage, _reference, _digest in rows}
+    if (
+        present != expected_stages
+        or not any(stage == "business-analysis" for stage, _reference, _digest in rows)
+        or len({(stage, reference) for stage, reference, _digest in rows}) != len(rows)
+    ):
+        raise ValueError("scope plan has invalid input bindings")
+    parsed = stage_package.canonical_ba_process_ref(primary_process_ref)
+    if parsed is None:
+        raise ValueError(
+            "scope plan action primary process is not a canonical Business "
+            "Analysis process reference"
+        )
+    _canonical, space, _relative = parsed
+    owner_ref = f"business-analysis/{space}/space"
+    owner_rows = [
+        row for row in rows
+        if row[0] == "business-analysis" and row[1] == owner_ref
+    ]
+    if len(owner_rows) != 1:
+        raise ValueError(
+            "scope plan does not bind the owning Business Analysis package "
+            f"for {primary_process_ref}"
+        )
+    supporting = {
+        stage: [row for row in rows if row[0] == stage]
+        for stage in ("solution-design", "design-system")
+    }
+    if any(len(values) != 1 for values in supporting.values()):
+        raise ValueError(
+            "scope plan must bind exactly one shared Solution and Design input"
+        )
+    return [
+        f"{stage}|{reference}|{digest}"
+        for stage, reference, digest in rows
+        if stage != "business-analysis" or reference == owner_ref
+    ]
+
+
+def package_binding_rows(plan: dict, primary_process_ref: str) -> list[str]:
+    rows = input_rows(plan)
+    if (
+        plan.get("origin_mode") == "requirement"
+        and sum(stage == "business-analysis" for stage, _reference, _digest in rows) != 1
+    ):
+        raise ValueError("Requirement scope plan must pin exactly one Business Analysis input")
+    return package_binding_rows_from_input_rows(rows, primary_process_ref)
+
+
+def validate_package_input_bindings(
+    data: dict, plan: dict, action: dict,
+) -> None:
+    expected = package_binding_rows(
+        plan, str(action.get("primary_process_ref", "")),
+    )
+    if list_value(data, "input_bindings") != expected:
+        raise ValueError(
+            "Experience package input bindings do not match its approved "
+            "scope-plan process owner"
+        )
 
 
 def exact_package_preimage(value: object, *, create: bool) -> bool:
@@ -1359,9 +1433,28 @@ def verify_scope_inputs(root: Path, plan: dict, *, require_committed: bool) -> l
         rows = input_rows(plan)
     except ValueError as exc:
         return [str(exc)]
+    grouped = {
+        stage: [row for row in rows if row[0] == stage]
+        for stage in expected
+    }
     present = {stage for stage, _reference, _digest in rows}
-    if present != expected or len(rows) != len(expected):
-        return ["scope plan must pin exactly one Business Analysis, Solution and Design input"]
+    ba_count = len(grouped["business-analysis"])
+    if (
+        present != expected
+        or ba_count < 1
+        or len(grouped["solution-design"]) != 1
+        or len(grouped["design-system"]) != 1
+        or (
+            plan.get("origin_mode") == "requirement"
+            and ba_count != 1
+        )
+    ):
+        return [
+            "scope plan must pin one or more Business Analysis inputs and "
+            "exactly one Solution and Design input"
+        ]
+    if len({(stage, reference) for stage, reference, _digest in rows}) != len(rows):
+        return ["scope plan must pin unique, non-conflicting input references"]
     for stage, reference, digest in rows:
         _receipt, findings = stage_package.verify(
             root.parent, stage, reference, digest, require_committed,
@@ -1945,11 +2038,10 @@ def published_scope_packages(
     return selected, application, phases == {"open"}
 
 
-def historical_scope_bindings(plan: dict) -> list[str]:
-    return [
-        f"{stage}|{reference}|{digest}"
-        for stage, reference, digest in input_rows(plan)
-    ]
+def historical_scope_bindings(
+    plan: dict, primary_process_ref: str,
+) -> list[str]:
+    return package_binding_rows(plan, primary_process_ref)
 
 
 def require_rehydration_history(package: Path, opened_revision: int) -> None:
@@ -2031,7 +2123,11 @@ def generated_rehydration_candidate(
         return None
     stored_bindings = stored["input_bindings"]
     try:
-        plan_rows = input_rows(plan)
+        plan_rows = input_rows_from_bindings(
+            package_binding_rows(
+                plan, str(data.get("primary_process_ref", "")),
+            )
+        )
     except ValueError:
         return None
     if set(stored_bindings) != {stage for stage, _reference, _digest in plan_rows}:
@@ -2081,19 +2177,19 @@ def preflight_rehydrate_published_scope(
         )
         return selected, application, False, []
 
-    plan_bindings = historical_scope_bindings(plan)
     receipts = {
         str(receipt.get("result_ref", "")): str(receipt.get("package_hash", ""))
         for receipt in application.get("packages", [])
         if isinstance(receipt, dict)
     }
     prepared: list[tuple[Path, dict, dict]] = []
-    recovered_bindings: list[str] | None = None
     for package, data, state in selected:
         revision = int(state["opened_revision"])
         require_rehydration_history(package, revision)
         candidate = dict(data)
-        candidate["input_bindings"] = plan_bindings
+        candidate["input_bindings"] = historical_scope_bindings(
+            plan, str(data.get("primary_process_ref", "")),
+        )
         if plan.get("origin_mode") == "requirement":
             candidate["upstream_stage_receipts_hash"] = plan[
                 "upstream_stage_receipts_hash"
@@ -2123,14 +2219,6 @@ def preflight_rehydrate_published_scope(
                 "authored package source that produced the published receipt "
                 "from a trusted backup; registry and receipt hashes cannot "
                 "reconstruct those bytes."
-            )
-        candidate_bindings = list_value(candidate, "input_bindings")
-        if recovered_bindings is None:
-            recovered_bindings = candidate_bindings
-        elif candidate_bindings != recovered_bindings:
-            raise RehydrationPreflightError(
-                "published scope packages do not reproduce one shared "
-                "historical input binding set"
             )
         prepared.append((package, candidate, registry))
     return selected, application, True, prepared
@@ -2228,10 +2316,6 @@ def validate_open_scope_plan(
     actions = mutating_scope_actions(plan)
     targets = {action_target(action) for action in actions}
     packages_by_name = {package.name: package for package, _data, _state in opened}
-    expected_bindings = [
-        f"{stage}|{reference}|{digest}"
-        for stage, reference, digest in input_rows(plan)
-    ]
     if not actions or targets != set(packages_by_name):
         raise ValueError(
             "scope plan must exactly match every open package mutation"
@@ -2247,10 +2331,20 @@ def validate_open_scope_plan(
             package, plan, action, proposal_hash,
             expected_status=str(data.get("status", "")),
         )
+        expected_bindings = package_binding_rows(
+            plan, str(action.get("primary_process_ref", "")),
+        )
+        recovery_bindings = (
+            package_binding_rows_from_input_rows(
+                input_rows_from_bindings(recovery_input_bindings),
+                str(action.get("primary_process_ref", "")),
+            )
+            if recovery_input_bindings is not None else None
+        )
         actual_bindings = list_value(data, "input_bindings")
         if actual_bindings != expected_bindings and (
-            recovery_input_bindings is None
-            or actual_bindings != recovery_input_bindings
+            recovery_bindings is None
+            or actual_bindings != recovery_bindings
         ):
             raise ValueError(
                 f"{package.name} input bindings drifted after opening"
@@ -2979,14 +3073,32 @@ def historical_package_receipt(registry: dict) -> dict:
 
 def manual_inputs(root: Path, args) -> tuple[list[dict], list[str]]:
     receipts, errors = [], []
-    for stage, refs in (("business-analysis", args.ba_ref), ("solution-design", args.solution_ref), ("design-system", args.design_ref)):
-        if len(refs) != 1:
-            errors.append(f"manual mode needs exactly one {stage} reference"); continue
-        receipt, invalid = stage_package.verify(root.parent, stage, ref_value(refs[0]),
-                                                require_committed=True,
-                                                require_strict_current=True)
-        if receipt is None or invalid: errors.extend(invalid or [f"invalid {stage} input"])
-        else: receipts.append(receipt)
+    for stage, refs in (
+        ("business-analysis", args.ba_ref),
+        ("solution-design", args.solution_ref),
+        ("design-system", args.design_ref),
+    ):
+        if stage == "business-analysis":
+            if not refs:
+                errors.append("manual mode needs at least one business-analysis reference")
+                continue
+        elif len(refs) != 1:
+            errors.append(f"manual mode needs exactly one {stage} reference")
+            continue
+        stage_receipts = []
+        for raw_ref in refs:
+            receipt, invalid = stage_package.verify(
+                root.parent, stage, ref_value(raw_ref), require_committed=True,
+                require_strict_current=True,
+            )
+            if receipt is None or invalid:
+                errors.extend(invalid or [f"invalid {stage} input"])
+            else:
+                stage_receipts.append(receipt)
+        if len({str(item.get("result_ref", "")) for item in stage_receipts}) != len(stage_receipts):
+            errors.append(f"manual mode needs unique {stage} references")
+        else:
+            receipts.extend(stage_receipts)
     return receipts, errors
 
 
@@ -3032,9 +3144,22 @@ def selected_inputs(root: Path, args) -> tuple[list[dict], list[str], dict]:
 
 
 def process_from_inputs(root: Path, value: str, receipts: list[dict], *, require_committed: bool) -> tuple[str | None, list[str]]:
-    ba = next((row for row in receipts if row.get("stage") == "business-analysis"), None)
-    if ba is None:
+    parsed = stage_package.canonical_ba_process_ref(value)
+    if parsed is None:
+        return None, [
+            "primary_process_ref must be a vault-relative Business Analysis process "
+            "under business-analysis/<space>/(domains/<domain>/)*/processes/"
+        ]
+    _canonical, space, _relative = parsed
+    expected_ref = f"business-analysis/{space}/space"
+    matches = [
+        row for row in receipts
+        if row.get("stage") == "business-analysis"
+        and row.get("result_ref") == expected_ref
+    ]
+    if len(matches) != 1:
         return None, ["Business Analysis input is required before selecting a primary process"]
+    ba = matches[0]
     return stage_package.resolve_ba_process(
         root.parent, value, expected_ba_ref=str(ba["result_ref"]),
         expected_ba_hash=str(ba["package_hash"]), require_committed=require_committed,
@@ -3278,7 +3403,7 @@ def init(args) -> int:
         open_application(root, plan, args.proposal_hash)
     except ValueError as exc:
         return fail(str(exc), 2)
-    data = {"type": "experience", "experience_id": args.experience, "origin_mode": args.origin_mode, "status": "draft", "revision": 1, "primary_process_ref": primary, "input_bindings": binding_rows(receipts)}
+    data = {"type": "experience", "experience_id": args.experience, "origin_mode": args.origin_mode, "status": "draft", "revision": 1, "primary_process_ref": primary, "input_bindings": package_binding_rows(plan, primary)}
     if related: data["related_process_refs"] = related
     if args.origin_mode == "requirement":
         data["implements"] = [
@@ -3572,8 +3697,9 @@ def begin_revision(args) -> int:
             root, plan, action="update", experience=package.name,
             process=str(data.get("primary_process_ref", "")),
         )
-        replacement_bindings = [f"{stage}|{reference}|{digest}"
-                                for stage, reference, digest in input_rows(plan)]
+        replacement_bindings = package_binding_rows(
+            plan, str(selected_action.get("primary_process_ref", "")),
+        )
     except ValueError as exc:
         return fail(str(exc), 2)
     # The plan has already verified the successor receipts. Preserve the last
@@ -3765,9 +3891,20 @@ def enter_application_review(args) -> int:
         for row in plan["actions"] if isinstance(row, dict)
         and row.get("action") == "retire"
     }
+    actions_by_target = {
+        action_target(row): row
+        for row in plan["actions"] if isinstance(row, dict)
+    }
     effective = []
     for package in packages(root):
-        if fields(package).get("status") != "retired" and package.name not in retiring:
+        data = fields(package)
+        if data.get("status") != "retired" and package.name not in retiring:
+            action = actions_by_target.get(package.name)
+            if action is not None and action.get("action") != "reuse":
+                try:
+                    validate_package_input_bindings(data, plan, action)
+                except ValueError as exc:
+                    return fail(str(exc), 2)
             rendered = render(argparse.Namespace(experience_root=str(package)))
             if rendered:
                 return rendered
@@ -3921,6 +4058,7 @@ def approve_set(args) -> int:
                     package, plan, action, args.proposal_hash,
                     expected_status="in_review",
                 )
+                validate_package_input_bindings(data, plan, action)
                 if render(argparse.Namespace(experience_root=str(package))):
                     raise ValueError(f"cannot render {package.name}")
                 registry, problems = compile_package(package)
@@ -4247,11 +4385,10 @@ def validate_recovered_scope_postimage(
         root, plan=plan, proposal_hash=proposal_hash,
         expected_phase="draft",
     )
-    expected_bindings = [
-        f"{stage}|{reference}|{digest}"
-        for stage, reference, digest in input_rows(plan)
-    ]
     for package, data, _state in opened:
+        expected_bindings = package_binding_rows(
+            plan, str(data.get("primary_process_ref", "")),
+        )
         if (
             data.get("status") != "draft"
             or list_value(data, "input_bindings") != expected_bindings
@@ -4290,10 +4427,7 @@ def recover_open_scope(args) -> int:
         if open_hashes == {args.from_proposal_hash}:
             validate_open_scope_plan(
                 source_plan, args.from_proposal_hash, opened,
-                recovery_input_bindings=[
-                    f"{stage}|{reference}|{digest}"
-                    for stage, reference, digest in input_rows(plan)
-                ],
+                recovery_input_bindings=list(plan["input_bindings"]),
             )
             already_recovered = False
         elif open_hashes == {args.proposal_hash}:
@@ -4366,15 +4500,13 @@ def recover_open_scope(args) -> int:
     action_by_target = {
         action_target(action): action for action in plan_actions
     }
-    replacement_bindings = [
-        f"{stage}|{reference}|{digest}"
-        for stage, reference, digest in input_rows(plan)
-    ]
     try:
         for package, data, _state in opened:
             data, body = fm(package / "experience.md")
             data["status"] = "draft"
-            data["input_bindings"] = replacement_bindings
+            data["input_bindings"] = package_binding_rows(
+                plan, str(data.get("primary_process_ref", "")),
+            )
             if plan.get("origin_mode") == "requirement":
                 data["upstream_stage_receipts_hash"] = plan[
                     "upstream_stage_receipts_hash"

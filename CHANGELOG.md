@@ -11,3 +11,8 @@
 ## 0.0.3
 
 - Preflight published Experience rehydration and recover hash-verified historic r1 bindings without synthesizing ledger history.
+
+## 0.1.0
+
+- Allow manual Experience scopes to coordinate processes from multiple BA packages.
+- Keep generated relation catalogs within the validated link limit.

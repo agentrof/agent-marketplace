@@ -1,6 +1,0 @@
-{
-  "summary": "Keep generated relation catalogs within the validated link limit.",
-  "components": {
-    "software-engineering-team": "patch"
-  }
-}

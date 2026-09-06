@@ -1,12 +1,13 @@
 {
   "schema_version": 1,
-  "version": "0.0.3",
-  "stable_base": "15589ac9ae5709d7ea18b15d00a320ab2bf0cbe6",
-  "main_source": "fa89466c4901ab012058d13c2f7255dc3fc72aee",
+  "version": "0.1.0",
+  "stable_base": "0e25ccfe47a2218dbcbbdd3cb1058f7eb3382776",
+  "main_source": "d03a749dbb98c7f0791c26ae8360a79b9c73861e",
   "impacts": {
-    "software-engineering-team": "patch"
+    "software-engineering-team": "minor"
   },
   "summaries": [
-    "Preflight published Experience rehydration and recover hash-verified historic r1 bindings without synthesizing ledger history."
+    "Allow manual Experience scopes to coordinate processes from multiple BA packages.",
+    "Keep generated relation catalogs within the validated link limit."
   ]
 }

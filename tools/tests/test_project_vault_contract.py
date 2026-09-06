@@ -302,6 +302,69 @@ class ProjectVaultContractTests(unittest.TestCase):
             self.assertEqual(second.returncode, 0, second.stdout + second.stderr)
             self.assertEqual(target.read_bytes(), rendered)
 
+    def test_relation_catalogs_reserve_the_target_link_budget(self):
+        for incoming_relations in (100, 101, 198, 199, 200):
+            with self.subTest(incoming_relations=incoming_relations), \
+                    tempfile.TemporaryDirectory() as temporary:
+                workspace = self.setup_project(Path(temporary))
+                decisions = workspace / "docs/solution-design/decisions"
+                decisions.mkdir(parents=True)
+                target = decisions / "target-decision.md"
+                target.write_text(
+                    self.decision_note("Target decision", "DEC-000"),
+                    encoding="utf-8",
+                )
+                for index in range(1, incoming_relations + 1):
+                    (decisions / f"source-{index:03d}.md").write_text(
+                        self.decision_note(
+                            f"Source decision {index:03d}",
+                            f"DEC-{index:03d}",
+                            "[[solution-design/decisions/target-decision|"
+                            "Target decision]]",
+                        ),
+                        encoding="utf-8",
+                    )
+
+                rendered = self.run_vault(
+                    "render-relations", "--vault", str(workspace / "docs")
+                )
+                self.assertEqual(
+                    rendered.returncode, 0, rendered.stdout + rendered.stderr
+                )
+                catalogs = sorted(
+                    (workspace / "docs/maps/_relations").rglob(
+                        "relations-*.md"
+                    )
+                )
+                self.assertEqual(
+                    len(catalogs), (
+                        0 if incoming_relations <= 100
+                        else (incoming_relations + 98) // 99
+                    )
+                )
+                catalog_text = [
+                    path.read_text(encoding="utf-8") for path in catalogs
+                ]
+                self.assertTrue(
+                    all(text.count("[[") <= 100 for text in catalog_text)
+                )
+                projection_text = catalog_text or [
+                    target.read_text(encoding="utf-8")
+                ]
+                for index in range(1, incoming_relations + 1):
+                    needle = (
+                        "[[solution-design/decisions/"
+                        f"source-{index:03d}|Source decision {index:03d}]]"
+                    )
+                    self.assertEqual(
+                        sum(text.count(needle) for text in projection_text), 1
+                    )
+                checked = self.check_vault(workspace)
+                self.assertNotIn(
+                    "generated navigation catalog exceeds 100 links",
+                    checked.stdout,
+                )
+
     def test_design_system_fragment_registers_contract_version(self):
         with tempfile.TemporaryDirectory() as temporary:
             workspace = self.setup_project(Path(temporary))

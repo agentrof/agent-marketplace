@@ -1,5 +1,5 @@
 {
-  "build_id": "snapshot.beb83351c9e5d7305102d5e4abf531cbaaf69453bd294dba5e836dad2292753e",
+  "build_id": "snapshot.14fa32b2b94a6b28f78bf148fb8813c7708a04e2d631aecfe6b7b3ac26158977",
   "component": "software-engineering-team",
   "delivery_protocol": {
     "read_max": 1,
@@ -73,7 +73,7 @@
     "scripts/setup_project.py": "a2f077040ff1da1f0f71231e273aa8118f1c642b6265444bc12f04b2174174d6",
     "scripts/stage_package.py": "312d33b43311cb1dd9138f7f0a0c70b10aab8533edc6a53b857e7984515f8afc",
     "scripts/team_guard.py": "b001c78b460ed623523738699882061f37ef73e616c7100af84d1f299d5b45c6",
-    "scripts/vault_check.py": "b9fd9a7f5eedca51f134643b80e455d01d6bdd8914733d41d73ef99e0662d758",
+    "scripts/vault_check.py": "c34061a261e81176c1444884bd7704f7162efe6577ef7379c97acae9e6ce98d9",
     "scripts/vault_gate.py": "2624df7cae40066e1f7ce022dd6f1986841a65c7a28aada0ebfa565aca0832b2",
     "scripts/vault_hook.py": "45521d971e60fef0f7236de89bab49927a5d177a10119fbe987bb8745a64b8ac",
     "skill-content/backlog-plan/SKILL.md": "7366c7341ee539f7ada5b4e38e36e07f6f29fb687f66a60a18b49341af6ea3c3",
@@ -280,6 +280,6 @@
   "schema_version": 3,
   "source_channel": "snapshot",
   "source_commit": "",
-  "source_ref": "snapshot.beb83351c9e5d7305102d5e4abf531cbaaf69453bd294dba5e836dad2292753e",
+  "source_ref": "snapshot.14fa32b2b94a6b28f78bf148fb8813c7708a04e2d631aecfe6b7b3ac26158977",
   "version": "0.0.3"
 }

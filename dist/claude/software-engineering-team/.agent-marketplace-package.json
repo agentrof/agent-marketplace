@@ -1,5 +1,5 @@
 {
-  "build_id": "snapshot.b0c341b33d308290bbe55f42f3e76f360764a6d59dba69d0ac23986e806b9ce4",
+  "build_id": "snapshot.78336b97748163008ea911ab583df901fd1de74f25b65e95623add58257b63b3",
   "component": "software-engineering-team",
   "delivery_protocol": {
     "read_max": 1,
@@ -14,7 +14,7 @@
   ],
   "files": {
     ".agent-marketplace-generated-distribution": "bc5e5ffd58e656c315fc4230e335b1acaaeba4b3a6871fc57e84144035567474",
-    ".claude-plugin/plugin.json": "6636a94a17fce01bc312588fd962bc6937f78506a9c3bf3dfba5d243c41b24b5",
+    ".claude-plugin/plugin.json": "257178870437af9d849481038362eaf4f9a61c37ebf3764d9bccbc9594023ae6",
     "agents/analysis-challenger.md": "f977d743fe88116ad505093c3c3567b5157ca87d6930ed6a0cf898bec9d18c34",
     "agents/backend-developer.md": "35fecfc12fa3cdf2f92e97376140888d71657872379f7ccad6add92326ab8a87",
     "agents/backlog-reviewer.md": "1d4848b58d9aa9d222baf84ecae2ad6e582569162f217ffaaeb4b410359c79cc",
@@ -275,13 +275,13 @@
     "templates/vault/maps/system-architecture.md": "6608e750755077fc1828b1fe40456f9828ca1fc1da82234c5864f5e996e41d77"
   },
   "host": "claude",
-  "marketplace_release": "0.1.0",
+  "marketplace_release": "0.1.1",
   "runtime_contracts": [
     "in_use_pid_marker_v1"
   ],
   "schema_version": 3,
   "source_channel": "snapshot",
   "source_commit": "",
-  "source_ref": "snapshot.b0c341b33d308290bbe55f42f3e76f360764a6d59dba69d0ac23986e806b9ce4",
-  "version": "0.1.0"
+  "source_ref": "snapshot.78336b97748163008ea911ab583df901fd1de74f25b65e95623add58257b63b3",
+  "version": "0.1.1"
 }

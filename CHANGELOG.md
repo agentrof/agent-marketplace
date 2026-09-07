@@ -16,3 +16,7 @@
 
 - Allow manual Experience scopes to coordinate processes from multiple BA packages.
 - Keep generated relation catalogs within the validated link limit.
+
+## 0.1.1
+
+- Restore supported revision of existing Experience children and their exact reference dependents within an approved scope.

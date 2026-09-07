@@ -1,13 +1,12 @@
 {
   "schema_version": 1,
-  "version": "0.1.0",
-  "stable_base": "0e25ccfe47a2218dbcbbdd3cb1058f7eb3382776",
-  "main_source": "d03a749dbb98c7f0791c26ae8360a79b9c73861e",
+  "version": "0.1.1",
+  "stable_base": "16f870dbfca9eff6a4241488d7c09f489025cbb3",
+  "main_source": "4fc40756035d38fc015c8fc9ecdc5523ea3032cc",
   "impacts": {
-    "software-engineering-team": "minor"
+    "software-engineering-team": "patch"
   },
   "summaries": [
-    "Allow manual Experience scopes to coordinate processes from multiple BA packages.",
-    "Keep generated relation catalogs within the validated link limit."
+    "Restore supported revision of existing Experience children and their exact reference dependents within an approved scope."
   ]
 }

@@ -1,6 +1,0 @@
-{
-  "summary": "Restore supported revision of existing Experience children and their exact reference dependents within an approved scope.",
-  "components": {
-    "software-engineering-team": "patch"
-  }
-}

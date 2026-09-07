@@ -90,6 +90,7 @@ SANCTIONED_PROJECT_CONFIG_COMMANDS = {"set"}
 SANCTIONED_SHELL_ASSIGNMENTS = {"PYTHONDONTWRITEBYTECODE": "1"}
 APPLICATION_ROOT_WRITERS = {
     "init",
+    "revise-records",
     "begin-application-revision",
     "render-application",
     "enter-application-review",

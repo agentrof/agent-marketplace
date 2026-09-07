@@ -86,6 +86,17 @@ those bytes.
    One active Experience owns one primary process.
 2. Author stable journey, flow, screen, state and transition records in their
    process-owned package. Keep `_generated/` and `_ledger/` compiler-owned.
+   For existing active children in an update/reuse-only scope, first open every
+   planned package update, then run `revise-records --root <root> --scope-plan
+   <plan> --proposal-hash <hash> --record-ref <process>:<ID>@rN` with repeated
+   exact predecessor refs for the intended semantic changes. The compiler
+   advances those records and their transitive reverse-reference dependents
+   atomically, assigns predecessor links and updates typed exact references.
+   Every affected owner must be an open draft update in the approved scope;
+   an omitted owner is rejected before writing. Repeating predecessor refs is
+   idempotent within that open revision. Unaffected children, approved ledgers
+   and all prototype files are preserved. The author separately aligns any
+   prototype evidence references and edits the intended record bodies.
 3. Begin the proposal-bound application revision. The compiler creates only
    machine lifecycle state; it neither creates nor edits prototype content.
 4. Build or revise the prototype freely below

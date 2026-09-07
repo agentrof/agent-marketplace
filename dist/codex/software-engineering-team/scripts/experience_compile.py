@@ -62,6 +62,7 @@ PROCESS_REGISTRY_FIELDS_V5 = {
 }
 MUTATING_COMMANDS = {
     "init", "begin-revision", "enter-review", "stub", "render",
+    "revise-records",
     "render-application", "begin-application-revision",
     "enter-application-review", "approve-set", "rename", "retire",
     "recover-open-scope", "rehydrate-published-scope",
@@ -3737,6 +3738,162 @@ def begin_revision(args) -> int:
     return 0
 
 
+def revise_records(args) -> int:
+    """Advance existing children and their exact reverse-reference closure."""
+    root = root_for(args.root)
+    plan = load_scope_plan(args.scope_plan, args.proposal_hash)
+    problems = verify_scope_inputs(root, plan, require_committed=True)
+    if problems:
+        return print_problems(problems, False)
+    validate_open_application_state(
+        root, plan=plan, proposal_hash=args.proposal_hash,
+        expected_phase="draft",
+    )
+    requested = list(args.record_ref)
+    if (not requested or len(requested) != len(set(requested))
+            or any(EXACT.fullmatch(ref) is None for ref in requested)):
+        raise ValueError("record refs must be unique exact predecessor references")
+    if any(action["action"] not in {"update", "reuse"}
+           for action in plan["actions"]):
+        raise ValueError("record revision requires an update/reuse-only scope")
+    actions = {action["experience"]: action for action in plan["actions"]
+               if action["action"] == "update"}
+    owners = {package.name: package for package in packages(root)}
+    predecessors = {}
+    for name, action in actions.items():
+        package = owners.get(name)
+        if package is None:
+            raise ValueError(f"missing update package {name}")
+        validate_open_revision(
+            package, plan, action, args.proposal_hash, expected_status="draft",
+        )
+        data = fields(package)
+        if list_value(data, "input_bindings") != package_binding_rows(
+                plan, str(action["primary_process_ref"])):
+            raise ValueError(f"{name} open input bindings differ from the scope")
+        history, findings = validate_process_ledger(package, data["revision"])
+        if findings or not history:
+            raise ValueError(f"{name} needs intact predecessor history: {findings}")
+        prior = history[-1]
+        if (prior["package_revision"] != action["expected_package"]["revision"]
+                or prior["source_hash"] != action["expected_package"]["source_hash"]):
+            raise ValueError(f"{name} predecessor differs from the approved scope")
+        predecessors[name] = {row["id"]: row for row in prior["records"]}
+
+    current, prior_refs, ref_keys = {}, {}, {}
+    retired = []
+    for name, package in owners.items():
+        if fields(package).get("status") == "retired":
+            continue
+        findings = []
+        rows = records(package, findings)
+        if findings:
+            raise ValueError(f"{name} invalid records: {'; '.join(findings)}")
+        for row in rows:
+            if row["record_state"] != "active":
+                retired.append((name, row))
+                continue
+            key = (name, row["id"])
+            current[key] = row
+            ref_keys[f"{name}:{row['id']}@r{row['revision']}"] = key
+            prior = predecessors.get(name, {}).get(row["id"])
+            if prior is not None:
+                old_ref = f"{name}:{row['id']}@r{prior['revision']}"
+                prior_refs[old_ref] = key
+                ref_keys[old_ref] = key
+    unknown = sorted(set(requested) - set(prior_refs))
+    if unknown:
+        raise ValueError("records must name active predecessors in open updates: "
+                         + ", ".join(unknown))
+    selected = {prior_refs[ref] for ref in requested}
+    while True:
+        expanded = selected | {
+            key for key, row in current.items()
+            if any(ref_keys.get(exact_reference_value(ref)) in selected
+                   for field in REFERENCE_FIELDS
+                   for ref in list_value(row, field))
+        }
+        if expanded == selected:
+            break
+        selected = expanded
+
+    for name, row in retired:
+        if any(ref_keys.get(exact_reference_value(ref)) in selected
+               for field in REFERENCE_FIELDS
+               for ref in list_value(row, field)):
+            raise ValueError(
+                f"retired dependent {name}:{row['id']} cannot be revised"
+            )
+
+    replacements = {}
+    for name, ident in sorted(selected):
+        action = actions.get(name)
+        prior = predecessors.get(name, {}).get(ident)
+        if action is None or prior is None or ident not in action["affected_records"]:
+            raise ValueError(f"dependent {name}:{ident} is outside the open update scope")
+        row = current[(name, ident)]
+        for field in REFERENCE_FIELDS:
+            for value in list_value(row, field):
+                if not value.strip().startswith("[["):
+                    continue
+                ref = exact_reference_value(value)
+                target_key = ref_keys.get(ref)
+                target = current.get(target_key)
+                if target is None:
+                    raise ValueError(f"{name}:{ident} has an unresolved typed link")
+                target_path = str(target["path"]).removesuffix(".md")
+                expected_link = (
+                    f"[[experience-design/experiences/{target_key[0]}/"
+                    f"{target_path}|{ref}]]"
+                )
+                if value.strip() != expected_link:
+                    raise ValueError(f"{name}:{ident} typed link target differs from its exact reference")
+        old_ref = f"{name}:{ident}@r{prior['revision']}"
+        if (row["path"] != prior["path"] or prior["record_state"] != "active"
+                or not (row["revision"] == prior["revision"] or (
+                    row["revision"] == prior["revision"] + 1
+                    and row.get("supersedes") == old_ref))):
+            raise ValueError(f"{name}:{ident} has stale identity or revision")
+        replacements[old_ref] = f"{name}:{ident}@r{prior['revision'] + 1}"
+
+    pending = []
+    for name, ident in sorted(selected):
+        row = current[(name, ident)]
+        prior = predecessors[name][ident]
+        old_ref = f"{name}:{ident}@r{prior['revision']}"
+        path = owners[name] / row["path"]
+        data, body = fm(path)
+        data["revision"] = prior["revision"] + 1
+        data["supersedes"] = old_ref
+        for field in REFERENCE_FIELDS:
+            if field not in data:
+                continue
+            updated = []
+            for value in list_value(data, field):
+                ref = exact_reference_value(value)
+                replacement = replacements.get(ref)
+                if replacement is None:
+                    updated.append(value)
+                elif value.strip().startswith("[["):
+                    target = value.strip()[2:-2].rpartition("|")[0]
+                    updated.append(f"[[{target}|{replacement}]]")
+                else:
+                    updated.append(replacement)
+            data[field] = updated
+        postimage = render_fm(data, body).encode()
+        if path.read_bytes() != postimage:
+            pending.append((path, postimage))
+    for path, postimage in pending:
+        atomic_write_bytes(path, postimage)
+    for name in sorted({name for name, _ident in selected}):
+        code = render_package_projection(owners[name], normalize_record_fields=False)
+        if code:
+            return code
+    print(json.dumps({"ok": True, "record_refs": replacements,
+                      "changed_records": len(pending)}, indent=2, sort_keys=True))
+    return 0
+
+
 def enter_review(args) -> int:
     package = package_for(args.experience_root); data, body = fm(package / "experience.md")
     if data.get("status") != "draft": return fail("only draft Experience may enter review", 2)
@@ -4779,6 +4936,7 @@ def main(argv: list[str] | None = None) -> int:
         if name in {"begin-revision", "rename", "retire"}:
             p.add_argument("--scope-plan", required=True); p.add_argument("--proposal-hash", required=True)
         p.set_defaults(func=handler)
+    p = sub.add_parser("revise-records"); p.add_argument("--root", required=True); p.add_argument("--scope-plan", required=True); p.add_argument("--proposal-hash", required=True); p.add_argument("--record-ref", action="append", required=True); p.set_defaults(func=revise_records)
     p = sub.add_parser("stub"); p.add_argument("--experience-root", required=True); p.add_argument("--kind", choices=sorted(KIND), required=True); p.add_argument("--id", required=True); p.add_argument("--slug", required=True); p.add_argument("--title", default=""); p.add_argument("--revision", type=int, default=1); p.add_argument("--record-state", choices=("active", "retired"), default="active"); p.add_argument("--state-class", choices=sorted(STATE_CLASSES), default=""); p.add_argument("--derives-from", action="append", default=[]); p.add_argument("--criterion-ref", action="append", default=[]); p.add_argument("--supersedes", default="")
     for key in ("uses_design", "constrained_by", "journey_refs", "flow_refs", "screen_refs", "state_refs", "transition_refs", "related_to"): p.add_argument("--" + key.replace("_", "-"), action="append", default=[])
     p.set_defaults(func=stub)

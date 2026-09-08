@@ -287,6 +287,33 @@ def note_status_and_type(path: Path) -> tuple[str, str]:
     return str(props.get("status", "")), type_name
 
 
+def planning_source_status_and_type(docs: Path, target: str, label: str,
+                                    errors: list[str]) -> tuple[str, str]:
+    path = docs / f"{target}.md"
+    status, type_name = note_status_and_type(path)
+    if target != "solution-design/landscape":
+        return status, type_name
+    props, _body = parse_front_matter(path)
+    raw_version = props.get("topology_contract_version", 0)
+    if (isinstance(raw_version, bool)
+            or not isinstance(raw_version, (int, str))
+            or not re.fullmatch(r"[+-]?\d+", str(raw_version))):
+        errors.append(f"{label} Solution topology_contract_version must be an integer")
+        return "", type_name
+    version = int(raw_version)
+    if version < 3:
+        # Preserve the existing document-status contract for legacy notes.
+        return status, type_name
+    if type_name != "landscape":
+        errors.append(f"{label} canonical Solution package must have type: landscape")
+        return "", type_name
+    receipt, package_errors = stage_package.verify(
+        docs, "solution-design", target,
+        require_strict_current=True, require_committed=True)
+    errors.extend(f"{label}: {error}" for error in package_errors)
+    return (str(receipt["status"]) if receipt and not package_errors else ""), type_name
+
+
 def validate_criterion_ref(docs: Path, value: str, label: str,
                            errors: list[str]) -> tuple[str, str, str] | None:
     parsed = read_link(docs, value, label, errors)
@@ -333,7 +360,7 @@ def validate_upstream_ref(docs: Path, value: str, label: str,
     if not target.startswith(roots):
         errors.append(f"{label} targets the wrong vault subtree: {target}")
         return parsed
-    status, type_name = note_status_and_type(docs / f"{target}.md")
+    status, type_name = planning_source_status_and_type(docs, target, label, errors)
     if status != "approved":
         errors.append(f"{label} target is not approved: {target}")
     if allowed_types and type_name not in allowed_types:
@@ -1135,7 +1162,7 @@ def validate_evidence_ref(docs: Path, value: str, label: str,
     if parsed is None:
         return None
     target = parsed[0]
-    status, type_name = note_status_and_type(docs / f"{target}.md")
+    status, type_name = planning_source_status_and_type(docs, target, label, errors)
     if type_name not in EVIDENCE_TYPES:
         errors.append(
             f"{label} targets unsupported evidence type "

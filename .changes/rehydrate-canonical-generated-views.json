@@ -1,0 +1,6 @@
+{
+  "summary": "Accept verified published-scope rehydration when canonical generated package views need no rewrite.",
+  "components": {
+    "software-engineering-team": "patch"
+  }
+}

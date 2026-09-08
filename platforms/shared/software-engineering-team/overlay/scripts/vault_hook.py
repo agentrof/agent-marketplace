@@ -2159,7 +2159,6 @@ def valid_application_writer_result(
                 "maps/experience-design.md",
                 "experience-design/experiences",
             }
-            required = set()
             for target in targets:
                 package = f"experience-design/experiences/{target}"
                 allowed.update({
@@ -2170,15 +2169,9 @@ def valid_application_writer_result(
                     f"{package}/_generated/registry.json",
                     f"{package}/_generated/coverage.json",
                 })
-                required.update({
-                    f"{package}/experience.md",
-                    f"{package}/_generated/open-revision.json",
-                    f"{package}/_generated/registry.json",
-                    f"{package}/_generated/coverage.json",
-                })
             if not changed_set:
                 return True
-            return required.issubset(changed_set) and changed_set.issubset(allowed)
+            return changed_set.issubset(allowed)
         allowed = {
             "home.md",
             "maps/experience-design.md",

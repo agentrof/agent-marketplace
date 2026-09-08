@@ -794,6 +794,47 @@ class VaultHookShellContractTests(unittest.TestCase):
             finally:
                 self.hook.cleanup_guard_state(primary, recovery)
 
+    def test_rehydrate_post_accepts_canonical_generated_views_without_rewrites(self):
+        from tools.tests.test_experience_compile import ExperienceCompilerTests
+
+        helper = ExperienceCompilerTests()
+        with tempfile.TemporaryDirectory() as temporary:
+            fixture = helper.orphaned_create_scope(
+                temporary, publish_open_packages=True,
+            )
+            payload = self.rehydrate_payload(temporary, fixture)
+            primary = self.hook.inventory_path(payload, Path(temporary))
+            recovery = self.hook.recovery_path(payload)
+            try:
+                self.assertEqual(self.hook.shell_snapshot(payload), 0)
+                before = self.hook.vault_inventory(fixture["docs"])
+                code, output, errors = helper.rehydrate_published_scope(fixture)
+                self.assertEqual(code, 0, output + errors)
+                after = self.hook.vault_inventory(fixture["docs"])
+                changed = sorted(
+                    path for path in set(before) | set(after)
+                    if before.get(path) != after.get(path)
+                )
+                canonical_views = {
+                    f"experience-design/experiences/{experience}/_generated/{view}"
+                    for experience in ("checkout", "returns")
+                    for view in ("registry.json", "coverage.json")
+                }
+                self.assertTrue(canonical_views.issubset(changed))
+                changed_without_rewrites = [
+                    path for path in changed if path not in canonical_views
+                ]
+                self.assertTrue(self.hook.valid_application_writer_result(
+                    payload, fixture["docs"], changed_without_rewrites,
+                ))
+                self.assertFalse(self.hook.valid_application_writer_result(
+                    payload, fixture["docs"], changed_without_rewrites + [
+                        "experience-design/_ledger/application-revisions.json",
+                    ],
+                ))
+            finally:
+                self.hook.cleanup_guard_state(primary, recovery)
+
     def test_rehydrate_pre_recovers_a_pending_compiler_transaction(self):
         from tools.tests.test_experience_compile import ExperienceCompilerTests
 

@@ -1,12 +1,13 @@
 {
   "schema_version": 1,
-  "version": "0.1.1",
-  "stable_base": "16f870dbfca9eff6a4241488d7c09f489025cbb3",
-  "main_source": "4fc40756035d38fc015c8fc9ecdc5523ea3032cc",
+  "version": "0.1.2",
+  "stable_base": "59db9c50ee3a268609273c7e9c33e8bd7851b30c",
+  "main_source": "7f6d21d061157a2d158f96377081f704110bbd9f",
   "impacts": {
     "software-engineering-team": "patch"
   },
   "summaries": [
-    "Restore supported revision of existing Experience children and their exact reference dependents within an approved scope."
+    "Validate modern backlog Solution landscape constraints and evidence through strict-current committed package receipts.",
+    "Accept verified published-scope rehydration when canonical generated package views need no rewrite."
   ]
 }

@@ -82,6 +82,12 @@ quality, accessibility, security or implementation suitability.
   `retirement_pending` or a retire action fails closed. A legacy scope may
   already carry only the fresh plan's exact current input bindings; all other
   package identity, revision and Requirement bindings remain exact.
+- If an unpublished `update` scope is incomplete, do not broaden recovery. Use
+  `abort-open-scope` with its plan, exact hash and `--confirm discard-uncommitted`,
+  then prepare a replacement. Abort accepts only approved packages unchanged in
+  `HEAD`, with no staged changes or untracked author files; it restores each
+  exact preimage, removes open state and rebuilds approved projections. Create,
+  rename, retire, published, tampered and partially untracked scopes fail closed.
 - If an immutable `application@rN` already publishes the exact open package
   revisions, `recover-open-scope` must fail closed. Use
   `rehydrate-published-scope` with the exact old scope plan, proposal hash and

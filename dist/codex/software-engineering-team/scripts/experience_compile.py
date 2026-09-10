@@ -15,6 +15,7 @@ import os
 import re
 import shutil
 import stat
+import subprocess
 import sys
 import tempfile
 import time
@@ -65,7 +66,7 @@ MUTATING_COMMANDS = {
     "revise-records",
     "render-application", "begin-application-revision",
     "enter-application-review", "approve-set", "rename", "retire",
-    "recover-open-scope", "rehydrate-published-scope",
+    "recover-open-scope", "rehydrate-published-scope", "abort-open-scope",
 }
 RECOVERABLE_SCOPE_PHASES = {"draft", "in_review"}
 RECOVERY_BINDING_KEYS = (
@@ -4703,6 +4704,148 @@ def recover_open_scope(args) -> int:
     return 0
 
 
+def abort_open_scope(args) -> int:
+    """Discard one unapproved update scope from the checked-in preimage.
+
+    Recovery deliberately keeps a complete package set unchanged.  This is the
+    complementary escape hatch for an operator-approved planning mistake:
+    only existing, Git-tracked update packages are restored, and any untracked
+    author content vetoes the command rather than being discarded implicitly.
+    """
+    root = root_for(args.root)
+    try:
+        plan = load_scope_plan(args.scope_plan, args.proposal_hash)
+        opened = open_scope_packages(root)
+        actions = validate_open_scope_plan(plan, args.proposal_hash, opened)
+        if any(action.get("action") != "update" for action in actions):
+            raise ValueError(
+                "abort-open-scope supports only unapproved update packages"
+            )
+        ensure_open_scope_unpublished(root, opened)
+        application_state = read_open_application_state(root)
+        phase = str(application_state.get("phase", ""))
+        validate_open_application_state(
+            root, plan=plan, proposal_hash=args.proposal_hash,
+            expected_phase=phase,
+        )
+        if args.confirm != "discard-uncommitted":
+            raise ValueError(
+                "abort-open-scope requires --confirm discard-uncommitted"
+            )
+        project = next(
+            (parent for parent in (root.parent, *root.parents)
+             if (parent / ".git").exists()),
+            None,
+        )
+        if project is None:
+            raise ValueError(
+                "abort-open-scope requires the Experience tree to be in a Git repository"
+            )
+        relative_packages = [
+            package.relative_to(project).as_posix()
+            for package, _data, _state in opened
+        ]
+        staged = subprocess.run(
+            ["git", "diff", "--cached", "--quiet", "--",
+             *relative_packages],
+            cwd=project, capture_output=True, check=False,
+        )
+        if staged.returncode == 1:
+            raise ValueError(
+                "abort-open-scope requires target package paths to have no "
+                "staged changes"
+            )
+        if staged.returncode != 0:
+            raise ValueError(
+                "abort-open-scope could not inspect staged package files"
+            )
+        for relative in relative_packages:
+            tracked = subprocess.run(
+                ["git", "cat-file", "-e", f"HEAD:{relative}"],
+                cwd=project, capture_output=True, check=False,
+            )
+            if tracked.returncode != 0:
+                raise ValueError(
+                    "abort-open-scope requires every update package to exist in HEAD"
+                )
+        allowed_untracked = {
+            (package / GENERATED / OPEN_REVISION).relative_to(project).as_posix()
+            for package, _data, _state in opened
+        }
+        untracked = subprocess.run(
+            ["git", "ls-files", "--others", "--exclude-standard", "-z", "--",
+             *relative_packages],
+            cwd=project, capture_output=True, check=False,
+        )
+        if untracked.returncode != 0:
+            raise ValueError("abort-open-scope could not inspect untracked package files")
+        unexpected = sorted(
+            item.decode("utf-8", errors="surrogateescape")
+            for item in untracked.stdout.split(b"\0") if item
+            and item.decode("utf-8", errors="surrogateescape")
+            not in allowed_untracked
+        )
+        if unexpected:
+            raise ValueError(
+                "abort-open-scope refuses to discard untracked author files: "
+                + ", ".join(unexpected)
+            )
+    except (OSError, ValueError) as exc:
+        return fail(str(exc), 2)
+
+    try:
+        restored = subprocess.run(
+            ["git", "restore", "--source=HEAD", "--worktree", "--",
+             *relative_packages],
+            cwd=project, capture_output=True, text=True, check=False,
+        )
+        if restored.returncode != 0:
+            raise ValueError(
+                "abort-open-scope could not restore the checked-in package preimage: "
+                + (restored.stderr.strip() or restored.stdout.strip())
+            )
+        for package, _data, _state in opened:
+            (package / GENERATED / OPEN_REVISION).unlink(missing_ok=True)
+        open_application_state_path(root).unlink(missing_ok=True)
+        restore_approved_application_projection(root)
+        reconcile_vault_navigation(root)
+        actions_by_target = {
+            action_target(action): action for action in actions
+        }
+        for package, _data, _state in opened:
+            action = actions_by_target.get(package.name)
+            expected = (
+                action.get("expected_package")
+                if isinstance(action, dict) else None
+            )
+            if not exact_package_preimage(expected, create=False):
+                raise ValueError(
+                    f"{package.name} has no exact approved package preimage"
+                )
+            _registry, problems = compile_package(
+                package, True, allow_stale_inputs=True,
+            )
+            data = fields(package)
+            if (
+                problems
+                or data.get("status") != expected["status"]
+                or data.get("revision") != expected["revision"]
+                or source_digest(package) != expected["source_hash"]
+            ):
+                raise ValueError(
+                    "; ".join(problems)
+                    or f"{package.name} was not restored to its exact approved preimage"
+                )
+    except (OSError, ValueError) as exc:
+        return fail(f"abort-open-scope rolled back: {exc}", 2)
+
+    print(json.dumps({
+        "packages": sorted(package.name for package, _data, _state in opened),
+        "status": "aborted",
+    }, indent=2))
+    return 0
+
+
 def resolve(args) -> int:
     root = root_for(args.root); match = EXACT.fullmatch(args.ref)
     if match:
@@ -4951,6 +5094,7 @@ def main(argv: list[str] | None = None) -> int:
     p = sub.add_parser("approve-set"); p.add_argument("--root", required=True); p.add_argument("--experience", action="append", default=[]); p.add_argument("--scope-plan", required=True); p.add_argument("--proposal-hash", required=True); p.add_argument("--review-attestation", default=""); p.set_defaults(func=approve_set)
     p = sub.add_parser("recover-open-scope"); p.add_argument("--root", required=True); p.add_argument("--from-scope-plan", required=True); p.add_argument("--from-proposal-hash", required=True); p.add_argument("--scope-plan", required=True); p.add_argument("--proposal-hash", required=True); p.set_defaults(func=recover_open_scope)
     p = sub.add_parser("rehydrate-published-scope"); p.add_argument("--root", required=True); p.add_argument("--scope-plan", required=True); p.add_argument("--proposal-hash", required=True); p.add_argument("--application-ref", required=True); p.set_defaults(func=rehydrate_published_scope)
+    p = sub.add_parser("abort-open-scope"); p.add_argument("--root", required=True); p.add_argument("--scope-plan", required=True); p.add_argument("--proposal-hash", required=True); p.add_argument("--confirm", required=True); p.set_defaults(func=abort_open_scope)
     p = sub.add_parser("resolve"); p.add_argument("--root", required=True); p.add_argument("--ref", required=True); p.set_defaults(func=resolve)
     args = parser.parse_args(argv)
     try:

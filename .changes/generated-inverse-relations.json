@@ -1,6 +1,0 @@
-{
-  "summary": "Preserve generated inverse relations in strict-current package checks.",
-  "components": {
-    "software-engineering-team": "patch"
-  }
-}

@@ -1,6 +1,0 @@
-{
-  "summary": "Add BA review entry, recognize required Python -B writers, and cache read-only backlog validation candidates.",
-  "components": {
-    "software-engineering-team": "patch"
-  }
-}

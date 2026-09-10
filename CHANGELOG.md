@@ -30,3 +30,8 @@
 
 - Add BA review entry, recognize required Python -B writers, and cache read-only backlog validation candidates.
 - Preserve generated inverse relations in strict-current package checks.
+
+## 0.2.0
+
+- Add a safe abort path for incomplete unpublished Experience update scopes.
+- Add a safe return-to-draft path for unpublished Experience review scopes.

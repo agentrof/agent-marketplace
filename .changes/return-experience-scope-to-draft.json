@@ -1,6 +1,0 @@
-{
-  "summary": "Add a safe return-to-draft path for unpublished Experience review scopes.",
-  "components": {
-    "software-engineering-team": "minor"
-  }
-}

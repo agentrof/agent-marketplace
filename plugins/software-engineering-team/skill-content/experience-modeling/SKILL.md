@@ -83,11 +83,15 @@ quality, accessibility, security or implementation suitability.
   already carry only the fresh plan's exact current input bindings; all other
   package identity, revision and Requirement bindings remain exact.
 - If an unpublished `update` scope is incomplete, do not broaden recovery. Use
-  `abort-open-scope` with its plan, exact hash and `--confirm discard-uncommitted`,
-  then prepare a replacement. Abort accepts only approved packages unchanged in
-  `HEAD`, with no staged changes or untracked author files; it restores each
-  exact preimage, removes open state and rebuilds approved projections. Create,
-  rename, retire, published, tampered and partially untracked scopes fail closed.
+  `abort-open-scope` with its plan, exact hash and `--confirm discard-uncommitted`.
+  It accepts only approved packages unchanged in `HEAD`, with no staged or
+  untracked author files; restores each preimage and rebuilds approved projections.
+  Create, rename, retire, published, tampered and partial scopes fail closed.
+- For a reviewer correction in a complete unpublished `in_review` scope, use
+  `return-to-draft` with its exact plan and proposal hash. It requires every scoped
+  package and application in review, preserves bindings, authored content and
+  approved ledgers, then atomically returns phases to `draft`. Stale, split,
+  retirement and published scopes fail closed; correct content and re-enter review.
 - If an immutable `application@rN` already publishes the exact open package
   revisions, `recover-open-scope` must fail closed. Use
   `rehydrate-published-scope` with the exact old scope plan, proposal hash and
@@ -105,15 +109,12 @@ quality, accessibility, security or implementation suitability.
   generated registry may supply candidate historic input bindings only when the
   authored package reproduces that registry and receipt hash exactly; otherwise
   restore the exact plan and authored source from a trusted backup.
-- `enter-application-review` snapshots the current artifact tree. Approval
-  requires a fresh exact-schema-v4 reviewer attestation bound to proposal,
-  artifact-tree, package-set and application hashes. Its `advisories` remain
-  informational and cannot become compiler rejection rules.
-- Reviewers judge fidelity, usability, accessibility, interaction quality,
-  visual quality, architecture and risks from the actual prototype. A passing
-  compiler check is only evidence of snapshot integrity.
+- `enter-application-review` snapshots the current artifact tree. Approval requires
+  a fresh exact-schema-v4 attestation bound to proposal, artifact-tree, package-set
+  and application hashes; its `advisories` remain informational, never compiler rules.
+- Reviewers judge fidelity, usability, accessibility, interaction quality, visual
+  quality, architecture and risks; a passing compiler check only proves snapshot integrity.
 - An `application` reuse action is read-only. If the final process retires,
   approval records an empty artifact inventory and no process receipts.
 - Create, update, rename and retire are one crash-recoverable transaction over
-  packages, artifact receipt state and generated lifecycle state. A newer
-  application receipt makes old Requirement and backlog bindings non-current.
+  packages, artifact receipt and generated lifecycle state; newer receipts make prior Requirement/backlog bindings non-current.

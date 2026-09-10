@@ -265,6 +265,28 @@ class ExperienceCompilerTests(unittest.TestCase):
             "--application-ref", "application@r1",
         )
 
+    def reviewed_recovered_scope(
+        self, temporary: str,
+    ) -> tuple[dict, dict, Path]:
+        fixture = self.orphaned_create_scope(temporary)
+        plan, plan_path = self.propose_recovery(fixture)
+        code, output, errors = self.recover_scope(fixture, plan, plan_path)
+        self.assertEqual(code, 0, output + errors)
+        with self.recovery_contract(fixture["new_receipts"]):
+            for experience in ("checkout", "returns"):
+                code, output, errors = self.run_in_process(
+                    "enter-review", "--experience-root",
+                    fixture["root"] / "experiences" / experience,
+                )
+                self.assertEqual(code, 0, output + errors)
+            code, output, errors = self.run_in_process(
+                "enter-application-review", "--root", fixture["root"],
+                "--scope-plan", plan_path,
+                "--proposal-hash", plan["proposal_hash"],
+            )
+            self.assertEqual(code, 0, output + errors)
+        return fixture, plan, plan_path
+
     @staticmethod
     def replace_open_scope_bindings(fixture: dict, bindings: list[str]) -> None:
         for experience in ("checkout", "returns"):
@@ -874,6 +896,166 @@ class ExperienceCompilerTests(unittest.TestCase):
                 check=False,
             )
             self.assertEqual(cached.returncode, 1)
+
+    def test_return_to_draft_reopens_review_without_changing_authored_content(self):
+        with tempfile.TemporaryDirectory() as raw:
+            fixture, plan, plan_path = self.reviewed_recovered_scope(raw)
+            root = fixture["root"]
+            open_revisions = {
+                experience: (
+                    root / "experiences" / experience / "_generated/open-revision.json"
+                ).read_bytes()
+                for experience in ("checkout", "returns")
+            }
+            package_artifacts = {
+                experience: (
+                    root / "experiences" / experience / "artifacts"
+                    / f"{experience}.bin"
+                ).read_bytes()
+                for experience in ("checkout", "returns")
+            }
+            package_records = {
+                experience: (
+                    root / "experiences" / experience / "journeys"
+                    / f"{experience}-journey.md"
+                ).read_bytes()
+                for experience in ("checkout", "returns")
+            }
+            application_artifact = (root / "artifacts/prototype.bin").read_bytes()
+            application_ledger = (
+                root / experience_application_check.LEDGER_RELATIVE
+            ).read_bytes()
+
+            with self.recovery_contract(fixture["new_receipts"]):
+                code, output, errors = self.run_in_process(
+                    "return-to-draft", "--root", root,
+                    "--scope-plan", plan_path,
+                    "--proposal-hash", plan["proposal_hash"],
+                )
+
+            self.assertEqual(code, 0, output + errors)
+            self.assertEqual(json.loads(output), {
+                "packages": ["checkout", "returns"],
+                "status": "draft",
+            })
+            for experience in ("checkout", "returns"):
+                package = root / "experiences" / experience
+                self.assertEqual(experience_compile.fields(package)["status"], "draft")
+                self.assertEqual(
+                    (package / "_generated/open-revision.json").read_bytes(),
+                    open_revisions[experience],
+                )
+                self.assertEqual(
+                    (package / "artifacts" / f"{experience}.bin").read_bytes(),
+                    package_artifacts[experience],
+                )
+                self.assertEqual(
+                    (package / "journeys" / f"{experience}-journey.md").read_bytes(),
+                    package_records[experience],
+                )
+            self.assertEqual(
+                (root / "artifacts/prototype.bin").read_bytes(),
+                application_artifact,
+            )
+            self.assertEqual(
+                (root / experience_application_check.LEDGER_RELATIVE).read_bytes(),
+                application_ledger,
+            )
+            self.assertEqual(
+                experience_compile.read_open_application_state(root),
+                experience_compile.open_application_payload(
+                    plan, plan["proposal_hash"], phase="draft",
+                ),
+            )
+
+            with self.recovery_contract(fixture["new_receipts"]):
+                for experience in ("checkout", "returns"):
+                    code, output, errors = self.run_in_process(
+                        "enter-review", "--experience-root",
+                        root / "experiences" / experience,
+                    )
+                    self.assertEqual(code, 0, output + errors)
+                code, output, errors = self.run_in_process(
+                    "enter-application-review", "--root", root,
+                    "--scope-plan", plan_path,
+                    "--proposal-hash", plan["proposal_hash"],
+                )
+                self.assertEqual(code, 0, output + errors)
+
+    def test_return_to_draft_rejects_a_stale_scope_plan_without_writes(self):
+        with tempfile.TemporaryDirectory() as raw:
+            fixture, plan, _plan_path = self.reviewed_recovered_scope(raw)
+            stale = json.loads(json.dumps(plan))
+            stale["actions"][0]["reason"] += " Reviewer revision."
+            stale["proposal_hash"] = experience_compile.proposal_digest(stale)
+            stale_path = fixture["docs"] / "stale-experience-scope.json"
+            stale_path.write_bytes(experience_compile.canonical(stale))
+            before = self.tree_snapshot(fixture["docs"])
+
+            code, output, errors = self.run_in_process(
+                "return-to-draft", "--root", fixture["root"],
+                "--scope-plan", stale_path,
+                "--proposal-hash", stale["proposal_hash"],
+            )
+
+            self.assertEqual(code, 2, output + errors)
+            self.assertIn("open revision is not bound", errors)
+            self.assertEqual(self.tree_snapshot(fixture["docs"]), before)
+
+    def test_return_to_draft_rejects_mixed_package_phases_without_writes(self):
+        with tempfile.TemporaryDirectory() as raw:
+            fixture, plan, plan_path = self.reviewed_recovered_scope(raw)
+            package = fixture["root"] / "experiences/checkout"
+            data, body = experience_compile.fm(package / "experience.md")
+            data["status"] = "draft"
+            experience_compile.status_tags(data)
+            experience_compile.rewrite(package / "experience.md", data, body)
+            before = self.tree_snapshot(fixture["docs"])
+
+            code, output, errors = self.run_in_process(
+                "return-to-draft", "--root", fixture["root"],
+                "--scope-plan", plan_path,
+                "--proposal-hash", plan["proposal_hash"],
+            )
+
+            self.assertEqual(code, 2, output + errors)
+            self.assertIn("every scoped package to be in_review", errors)
+            self.assertEqual(self.tree_snapshot(fixture["docs"]), before)
+
+    def test_return_to_draft_rejects_a_nonreview_application_without_writes(self):
+        with tempfile.TemporaryDirectory() as raw:
+            fixture, plan, plan_path = self.reviewed_recovered_scope(raw)
+            experience_compile.write_open_application_state(
+                fixture["root"], plan, plan["proposal_hash"], phase="draft",
+            )
+            before = self.tree_snapshot(fixture["docs"])
+
+            code, output, errors = self.run_in_process(
+                "return-to-draft", "--root", fixture["root"],
+                "--scope-plan", plan_path,
+                "--proposal-hash", plan["proposal_hash"],
+            )
+
+            self.assertEqual(code, 2, output + errors)
+            self.assertEqual(self.tree_snapshot(fixture["docs"]), before)
+
+    def test_return_to_draft_rolls_back_after_a_render_failure(self):
+        with tempfile.TemporaryDirectory() as raw:
+            fixture, plan, plan_path = self.reviewed_recovered_scope(raw)
+            before = self.tree_snapshot(fixture["docs"])
+
+            with mock.patch.object(
+                experience_compile, "render_package_projection", return_value=1,
+            ):
+                code, output, errors = self.run_in_process(
+                    "return-to-draft", "--root", fixture["root"],
+                    "--scope-plan", plan_path,
+                    "--proposal-hash", plan["proposal_hash"],
+                )
+
+            self.assertEqual(code, 2, output + errors)
+            self.assertIn("return-to-draft rolled back", errors)
+            self.assertEqual(self.tree_snapshot(fixture["docs"]), before)
 
     def test_recovery_proposal_rejects_already_published_open_revisions(self):
         with tempfile.TemporaryDirectory() as raw:

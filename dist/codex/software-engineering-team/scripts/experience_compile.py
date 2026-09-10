@@ -67,6 +67,7 @@ MUTATING_COMMANDS = {
     "render-application", "begin-application-revision",
     "enter-application-review", "approve-set", "rename", "retire",
     "recover-open-scope", "rehydrate-published-scope", "abort-open-scope",
+    "return-to-draft",
 }
 RECOVERABLE_SCOPE_PHASES = {"draft", "in_review"}
 RECOVERY_BINDING_KEYS = (
@@ -4846,6 +4847,48 @@ def abort_open_scope(args) -> int:
     return 0
 
 
+def return_to_draft(args) -> int:
+    """Reopen one exact, unpublished review scope for an author correction."""
+    root = root_for(args.root)
+    try:
+        plan = load_scope_plan(args.scope_plan, args.proposal_hash)
+        opened = open_scope_packages(root)
+        actions = validate_open_scope_plan(plan, args.proposal_hash, opened)
+        ensure_open_scope_unpublished(root, opened)
+        validate_open_application_state(
+            root, plan=plan, proposal_hash=args.proposal_hash,
+            expected_phase="in_review",
+        )
+        if any(fields(package).get("status") != "in_review"
+               for package, _data, _state in opened):
+            raise ValueError(
+                "return-to-draft requires every scoped package to be in_review"
+            )
+    except ValueError as exc:
+        return fail(str(exc), 2)
+
+    try:
+        for package, _data, _state in opened:
+            data, body = fm(package / "experience.md")
+            data["status"] = "draft"
+            status_tags(data)
+            rewrite(package / "experience.md", data, body)
+            if render_package_projection(package, normalize_record_fields=False):
+                raise ValueError(f"cannot render reopened package {package.name}")
+        write_open_application_state(
+            root, plan, args.proposal_hash, phase="draft",
+        )
+        reconcile_vault_navigation(root)
+    except (OSError, ValueError) as exc:
+        return fail(f"return-to-draft rolled back: {exc}", 2)
+
+    print(json.dumps({
+        "packages": sorted(package.name for package, _data, _state in opened),
+        "status": "draft",
+    }, indent=2))
+    return 0
+
+
 def resolve(args) -> int:
     root = root_for(args.root); match = EXACT.fullmatch(args.ref)
     if match:
@@ -5095,6 +5138,7 @@ def main(argv: list[str] | None = None) -> int:
     p = sub.add_parser("recover-open-scope"); p.add_argument("--root", required=True); p.add_argument("--from-scope-plan", required=True); p.add_argument("--from-proposal-hash", required=True); p.add_argument("--scope-plan", required=True); p.add_argument("--proposal-hash", required=True); p.set_defaults(func=recover_open_scope)
     p = sub.add_parser("rehydrate-published-scope"); p.add_argument("--root", required=True); p.add_argument("--scope-plan", required=True); p.add_argument("--proposal-hash", required=True); p.add_argument("--application-ref", required=True); p.set_defaults(func=rehydrate_published_scope)
     p = sub.add_parser("abort-open-scope"); p.add_argument("--root", required=True); p.add_argument("--scope-plan", required=True); p.add_argument("--proposal-hash", required=True); p.add_argument("--confirm", required=True); p.set_defaults(func=abort_open_scope)
+    p = sub.add_parser("return-to-draft"); p.add_argument("--root", required=True); p.add_argument("--scope-plan", required=True); p.add_argument("--proposal-hash", required=True); p.set_defaults(func=return_to_draft)
     p = sub.add_parser("resolve"); p.add_argument("--root", required=True); p.add_argument("--ref", required=True); p.set_defaults(func=resolve)
     args = parser.parse_args(argv)
     try:

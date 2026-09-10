@@ -25,3 +25,8 @@
 
 - Validate modern backlog Solution landscape constraints and evidence through strict-current committed package receipts.
 - Accept verified published-scope rehydration when canonical generated package views need no rewrite.
+
+## 0.1.3
+
+- Add BA review entry, recognize required Python -B writers, and cache read-only backlog validation candidates.
+- Preserve generated inverse relations in strict-current package checks.

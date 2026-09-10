@@ -187,13 +187,44 @@ def tree_hash(root: Path, omitted_fields: set[str]) -> str:
 
 
 def is_committed(package_root: Path) -> bool:
-    """Check the whole published package, not only its overview note."""
+    """Check that a package has no authored changes.
+
+    Inverse relation blocks are compiler-owned projections, deliberately
+    excluded from package hashes.  A relation render after a downstream
+    candidate edit must not make an otherwise unchanged upstream package fail
+    a strict-current handoff.
+    """
     root = next((p for p in (package_root, *package_root.parents)
                  if (p / ".git").exists()), package_root.parent)
-    result = subprocess.run(["git", "status", "--porcelain=v1", "--",
-                             str(package_root)], cwd=root, capture_output=True,
-                            text=True, check=False)
-    return result.returncode == 0 and not result.stdout.strip()
+    relative = package_root.relative_to(root)
+    changed = subprocess.run(
+        ["git", "diff", "--name-only", "-z", "HEAD", "--", str(relative)],
+        cwd=root, capture_output=True, check=False,
+    )
+    untracked = subprocess.run(
+        ["git", "ls-files", "--others", "--exclude-standard", "-z", "--",
+         str(relative)],
+        cwd=root, capture_output=True, check=False,
+    )
+    if changed.returncode != 0 or untracked.returncode != 0 or untracked.stdout:
+        return False
+    for raw in changed.stdout.split(b"\0"):
+        if not raw:
+            continue
+        path = root / raw.decode("utf-8", errors="surrogateescape")
+        if path.suffix != ".md" or path.is_symlink() or not path.is_file():
+            return False
+        head = subprocess.run(
+            ["git", "show", f"HEAD:{path.relative_to(root).as_posix()}"],
+            cwd=root, capture_output=True, check=False,
+        )
+        if head.returncode != 0:
+            return False
+        current = path.read_text(encoding="utf-8")
+        previous = head.stdout.decode("utf-8", errors="surrogateescape")
+        if without_generated_relations(current) != without_generated_relations(previous):
+            return False
+    return True
 
 
 def paths_are_committed(paths: list[Path]) -> bool:

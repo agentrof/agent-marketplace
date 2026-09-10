@@ -8,6 +8,7 @@ Authored Markdown is the only durable backlog source. Files under
 from __future__ import annotations
 
 import argparse
+import contextlib
 import hashlib
 import json
 import re
@@ -61,6 +62,51 @@ REVIEW_PLACEHOLDER_RE = re.compile(
     r"looks good|all good|approved|pass(?:ed)?)\.?$",
     re.IGNORECASE,
 )
+
+
+_EXPERIENCE_APPLICATION_CACHE_STACK: list[dict[Path, tuple[dict, list[str]]]] = []
+_EXPERIENCE_PACKAGE_CACHE_STACK: list[dict[Path, tuple[dict, list[str]]]] = []
+
+
+@contextlib.contextmanager
+def experience_validation_session():
+    """Reuse immutable Experience validation results during one backlog read."""
+    if _EXPERIENCE_APPLICATION_CACHE_STACK:
+        yield
+        return
+    _EXPERIENCE_APPLICATION_CACHE_STACK.append({})
+    _EXPERIENCE_PACKAGE_CACHE_STACK.append({})
+    try:
+        yield
+    finally:
+        _EXPERIENCE_PACKAGE_CACHE_STACK.pop()
+        _EXPERIENCE_APPLICATION_CACHE_STACK.pop()
+
+
+def current_experience_application(root: Path) -> tuple[dict, list[str]]:
+    import experience_application_check
+    key = root.resolve()
+    cache = (_EXPERIENCE_APPLICATION_CACHE_STACK[-1]
+             if _EXPERIENCE_APPLICATION_CACHE_STACK else None)
+    if cache is not None and key in cache:
+        return cache[key]
+    result = experience_application_check.compile_application(root, True)
+    if cache is not None:
+        cache[key] = result
+    return result
+
+
+def current_experience_package(package: Path) -> tuple[dict, list[str]]:
+    import experience_compile
+    key = package.resolve()
+    cache = (_EXPERIENCE_PACKAGE_CACHE_STACK[-1]
+             if _EXPERIENCE_PACKAGE_CACHE_STACK else None)
+    if cache is not None and key in cache:
+        return cache[key]
+    result = experience_compile.compile_package(package, gate=True)
+    if cache is not None:
+        cache[key] = result
+    return result
 GENERIC_REVIEW_RE = re.compile(
     r"^(?:(?:the )?complete package (?:has been )?reviewed carefully|"
     r"no blocking gap remains(?: after reviewing (?:the )?complete package)?|"
@@ -560,11 +606,8 @@ def validate_experience_ref(docs: Path, value: str, label: str,
     experience_root = docs / "experience-design"
     if require_current:
         try:
-            import experience_application_check
-            _application, application_findings = (
-                experience_application_check.compile_application(
-                    experience_root, True
-                )
+            _application, application_findings = current_experience_application(
+                experience_root
             )
         except (ImportError, OSError, ValueError) as exc:
             errors.append(f"{label} canonical application cannot be verified: {exc}")
@@ -591,9 +634,7 @@ def validate_experience_ref(docs: Path, value: str, label: str,
         return
     if require_current:
         try:
-            registry, findings = experience_compile.compile_package(
-                package, gate=True,
-            )
+            registry, findings = current_experience_package(package)
         except (OSError, ValueError) as exc:
             errors.append(f"{label} owning Experience registry is missing: {exc}")
             return
@@ -2029,27 +2070,35 @@ def init(args) -> int:
         print("backlog_compile: requirement init needs --requirement-ref and no --input-ref", file=sys.stderr)
         return 2
     input_bindings: list[str] = []
-    if planning_mode == "manual":
-        input_bindings, binding_errors = resolve_manual_input_bindings(
-            docs, input_ref, "backlog/backlog.md")
-        if binding_errors:
-            print(json.dumps({"ok": False, "errors": binding_errors},
-                             indent=2, ensure_ascii=False), file=sys.stderr)
-            return 1
-    # Resolve all upstreams before creating the backlog directory.  A failed
-    # selection must not leave a half-created manual or Requirement package.
-    if planning_mode:
-        candidate_props = {"planning_mode": planning_mode}
-        if requirement_ref:
-            candidate_props["requirement_ref"] = requirement_ref
-        if input_bindings:
-            candidate_props["input_bindings"] = input_bindings
-        _mode, _refs, preflight = planning_package_findings(
-            docs, candidate_props, "backlog/backlog.md")
-        if preflight:
-            print(json.dumps({"ok": False, "errors": sorted(set(preflight))},
-                             indent=2, ensure_ascii=False), file=sys.stderr)
-            return 1
+    # Resolve every selected receipt against one immutable graph snapshot.
+    # Recompiling that graph per receipt turns a valid manual handoff into a
+    # quadratic preflight without increasing its freshness guarantee.
+    session = (
+        stage_package.candidate_session()
+        if planning_mode == "manual" else contextlib.nullcontext()
+    )
+    with session:
+        if planning_mode == "manual":
+            input_bindings, binding_errors = resolve_manual_input_bindings(
+                docs, input_ref, "backlog/backlog.md")
+            if binding_errors:
+                print(json.dumps({"ok": False, "errors": binding_errors},
+                                 indent=2, ensure_ascii=False), file=sys.stderr)
+                return 1
+        # Resolve all upstreams before creating the backlog directory.  A failed
+        # selection must not leave a half-created manual or Requirement package.
+        if planning_mode:
+            candidate_props = {"planning_mode": planning_mode}
+            if requirement_ref:
+                candidate_props["requirement_ref"] = requirement_ref
+            if input_bindings:
+                candidate_props["input_bindings"] = input_bindings
+            _mode, _refs, preflight = planning_package_findings(
+                docs, candidate_props, "backlog/backlog.md")
+            if preflight:
+                print(json.dumps({"ok": False, "errors": sorted(set(preflight))},
+                                 indent=2, ensure_ascii=False), file=sys.stderr)
+                return 1
     root = docs / "backlog"
     (root / "reviews").mkdir(parents=True, exist_ok=True)
     (root / "epics").mkdir(parents=True, exist_ok=True)
@@ -2116,7 +2165,10 @@ def status_tag(props: dict, status: str) -> None:
 def check(args) -> int:
     docs = docs_root(args.docs)
     try:
-        record, errors = collect(docs)
+        # Collecting manual bindings resolves a recursive upstream graph. Keep
+        # that read-only graph snapshot stable for this one verification pass.
+        with stage_package.candidate_session(), experience_validation_session():
+            record, errors = collect(docs)
     except RuntimeError as exc:
         record = {"epics": [], "stories": [], "test_plans": [],
                   "backlog_reviews": [], "epic_reviews": [], "backlog": None}
@@ -2138,7 +2190,8 @@ def check(args) -> int:
             render_backlog_navigation(record, docs)
             result["rendered"] = True
             if args.approved:
-                record, closing_errors = collect(docs)
+                with stage_package.candidate_session(), experience_validation_session():
+                    record, closing_errors = collect(docs)
                 closing_errors.extend(approval_findings(record, docs))
                 errors.extend(closing_errors)
         except RuntimeError as exc:
@@ -2301,12 +2354,13 @@ def begin_revision(args) -> int:
         return 2
     input_bindings: list[str] = []
     if args.planning_mode == "manual":
-        input_bindings, binding_errors = resolve_manual_input_bindings(
-            docs, list(args.input_ref), "backlog/backlog.md")
-        if binding_errors:
-            print(json.dumps({"ok": False, "errors": binding_errors},
-                             indent=2, ensure_ascii=False), file=sys.stderr)
-            return 1
+        with stage_package.candidate_session():
+            input_bindings, binding_errors = resolve_manual_input_bindings(
+                docs, list(args.input_ref), "backlog/backlog.md")
+            if binding_errors:
+                print(json.dumps({"ok": False, "errors": binding_errors},
+                                 indent=2, ensure_ascii=False), file=sys.stderr)
+                return 1
     old_revision = int(root_props.get("revision", 0) or 0)
     revision = old_revision + 1
     status_tag(root_props, "draft")

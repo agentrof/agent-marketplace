@@ -2,9 +2,11 @@ import subprocess
 import sys
 import tempfile
 import unittest
-from contextlib import redirect_stderr, redirect_stdout
+from contextlib import contextmanager, redirect_stderr, redirect_stdout
 from io import StringIO
 from pathlib import Path
+from types import SimpleNamespace
+from unittest import mock
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -36,6 +38,177 @@ class BacklogCompilerTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as raw:
             result = self.run_cli("init", "--docs", Path(raw) / "docs", "--planning-mode", "requirement")
             self.assertNotEqual(result.returncode, 0)
+
+    def test_candidate_session_reuses_each_stage_only_within_preflight(self):
+        with tempfile.TemporaryDirectory() as raw:
+            docs = Path(raw) / "workspace" / "docs"
+            docs.mkdir(parents=True)
+            calls = []
+            expected = [{"result_ref": "business-analysis/foundation/space"}]
+
+            def compile_candidates(_docs):
+                calls.append(_docs)
+                return expected
+
+            with mock.patch.object(
+                stage_package, "ba_candidates", side_effect=compile_candidates,
+            ):
+                with stage_package.candidate_session():
+                    self.assertIs(stage_package.candidates(docs, "business-analysis"), expected)
+                    self.assertIs(stage_package.candidates(docs, "business-analysis"), expected)
+                self.assertIs(stage_package.candidates(docs, "business-analysis"), expected)
+
+            self.assertEqual(len(calls), 2)
+
+    def test_experience_validation_session_reuses_application_and_package_compiles(self):
+        with tempfile.TemporaryDirectory() as raw:
+            docs = Path(raw) / "workspace" / "docs"
+            package = docs / "experience-design" / "experiences" / "checkout"
+            package.mkdir(parents=True)
+            application = mock.Mock()
+            application.compile_application.return_value = ({}, [])
+            experience = mock.Mock()
+            experience.resolve_package.return_value = package
+            experience.compile_package.return_value = ({
+                "registry_hash": "registry-hash",
+                "records": [{"id": "SCR-001", "revision": 1,
+                             "record_state": "active"}],
+            }, [])
+            errors: list[str] = []
+            with (
+                mock.patch.dict(sys.modules, {
+                    "experience_application_check": application,
+                    "experience_compile": experience,
+                }),
+                mock.patch.object(
+                    backlog_compile, "parse_front_matter",
+                    return_value=({"status": "approved",
+                                   "registry_hash": "registry-hash"}, ""),
+                ),
+                backlog_compile.experience_validation_session(),
+            ):
+                backlog_compile.validate_experience_ref(
+                    docs, "checkout:SCR-001@r1", "first", errors,
+                )
+                backlog_compile.validate_experience_ref(
+                    docs, "checkout:SCR-001@r1", "second", errors,
+                )
+
+            self.assertFalse(errors, errors)
+            self.assertEqual(application.compile_application.call_count, 1)
+            self.assertEqual(experience.compile_package.call_count, 1)
+
+    def test_manual_init_candidate_session_covers_all_preflight_reads(self):
+        with tempfile.TemporaryDirectory() as raw:
+            docs = Path(raw) / "workspace" / "docs"
+            docs.mkdir(parents=True)
+            events = []
+
+            @contextmanager
+            def session():
+                events.append("enter")
+                try:
+                    yield
+                finally:
+                    events.append("exit")
+
+            def bindings(*_args):
+                events.append("bindings")
+                return ["business-analysis|business-analysis/foundation|sha256:x"], []
+
+            def findings(*_args):
+                events.append("findings")
+                return "manual", [], ["preflight rejection"]
+
+            args = SimpleNamespace(
+                docs=docs, planning_mode="manual", requirement_ref="",
+                input_ref=["one", "two", "three", "four"],
+            )
+            with (
+                mock.patch.object(
+                    stage_package, "candidate_session", side_effect=session,
+                ),
+                mock.patch.object(
+                    backlog_compile, "resolve_manual_input_bindings",
+                    side_effect=bindings,
+                ),
+                mock.patch.object(
+                    backlog_compile, "planning_package_findings",
+                    side_effect=findings,
+                ),
+                redirect_stdout(StringIO()),
+                redirect_stderr(StringIO()),
+            ):
+                self.assertEqual(backlog_compile.init(args), 1)
+
+            self.assertEqual(events, ["enter", "bindings", "findings", "exit"])
+            self.assertFalse((docs / "backlog").exists())
+
+    def test_requirement_init_never_opens_a_candidate_session(self):
+        with tempfile.TemporaryDirectory() as raw:
+            docs = Path(raw) / "workspace" / "docs"
+            docs.mkdir(parents=True)
+            args = SimpleNamespace(
+                docs=docs, planning_mode="requirement", requirement_ref="REQ-001",
+                input_ref=[],
+            )
+            with (
+                mock.patch.object(
+                    stage_package, "candidate_session",
+                    side_effect=AssertionError("Requirement init must not cache candidates"),
+                ),
+                mock.patch.object(
+                    backlog_compile, "planning_package_findings",
+                    return_value=("requirement", [], ["preflight rejection"]),
+                ),
+                redirect_stdout(StringIO()),
+                redirect_stderr(StringIO()),
+            ):
+                self.assertEqual(backlog_compile.init(args), 1)
+
+    def test_manual_begin_revision_candidate_session_ends_before_writes(self):
+        with tempfile.TemporaryDirectory() as raw:
+            docs = Path(raw) / "workspace" / "docs"
+            docs.mkdir(parents=True)
+            events = []
+
+            @contextmanager
+            def session():
+                events.append("enter")
+                try:
+                    yield
+                finally:
+                    events.append("exit")
+
+            def bindings(*_args):
+                events.append("bindings")
+                return [], ["preflight rejection"]
+
+            args = SimpleNamespace(
+                docs=docs, delivery_snapshot="", planning_mode="manual",
+                requirement_ref="", input_ref=["one", "two", "three", "four"],
+            )
+            record = {"backlog": {"path": "backlog/backlog.md"}}
+            with (
+                mock.patch.object(backlog_compile, "collect", return_value=(record, [])),
+                mock.patch.object(backlog_compile, "approval_findings", return_value=[]),
+                mock.patch.object(
+                    backlog_compile, "parse_front_matter", return_value=({"revision": 1}, ""),
+                ),
+                mock.patch.object(
+                    stage_package, "candidate_session", side_effect=session,
+                ),
+                mock.patch.object(
+                    backlog_compile, "resolve_manual_input_bindings",
+                    side_effect=bindings,
+                ),
+                redirect_stdout(StringIO()),
+                redirect_stderr(StringIO()),
+            ):
+                self.assertEqual(backlog_compile.begin_revision(args), 1)
+
+            self.assertEqual(events, ["enter", "bindings", "exit"])
+            self.assertFalse((docs / "backlog").exists())
 
 
 class BacklogUpstreamApprovalTests(unittest.TestCase):

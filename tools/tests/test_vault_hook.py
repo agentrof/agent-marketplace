@@ -2187,6 +2187,71 @@ class VaultHookShellContractTests(unittest.TestCase):
                 )
             )
 
+    def test_writer_consumers_accept_only_the_required_no_bytecode_flag(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            docs, config = self.project(root)
+            experience_root = docs / "experience-design"
+            experience_root.mkdir()
+            script = str(SCRIPTS / "experience_compile.py")
+
+            def command(argv: list[str]) -> str:
+                return subprocess.list2cmdline(argv) if os.name == "nt" else shlex.join(argv)
+
+            config_payload = self.payload(root, command([
+                sys.executable, "-B", str(SCRIPTS / "project_config.py"),
+                "set", "--config", str(config), "--field", "output_language",
+                "--value", "Turkish",
+            ]), field="cmd")
+            package_payload = self.attested_writer_payload(root, command([
+                sys.executable, "-B", script, "begin-revision",
+                "--experience-root",
+                str(experience_root / "experiences" / "checkout"),
+                "--scope-plan", str(docs / "scope-plan.json"),
+                "--proposal-hash", "sha256:" + "0" * 64,
+            ]))
+            application_payload = self.attested_writer_payload(root, command([
+                sys.executable, "-B", script, "begin-application-revision",
+                "--root", str(experience_root),
+                "--scope-plan", str(docs / "scope-plan.json"),
+                "--proposal-hash", "sha256:" + "0" * 64,
+            ]))
+            recovery_payload = self.attested_writer_payload(root, command([
+                sys.executable, "-B", script, "rehydrate-published-scope",
+                "--root", str(experience_root),
+                "--scope-plan", str(docs / "scope-plan.json"),
+                "--proposal-hash", "sha256:" + "0" * 64,
+                "--application-ref", "application@r1",
+            ]))
+            unsupported_flag = self.attested_writer_payload(root, command([
+                sys.executable, "-I", script, "begin-application-revision",
+                "--root", str(experience_root),
+                "--scope-plan", str(docs / "scope-plan.json"),
+                "--proposal-hash", "sha256:" + "0" * 64,
+            ]))
+            if os.name == "nt":
+                for payload in (
+                    config_payload, package_payload, application_payload,
+                    recovery_payload, unsupported_flag,
+                ):
+                    payload["shell_family"] = "cmd"
+
+            self.assertTrue(self.hook.sanctioned_config_writer(
+                config_payload, config,
+            ))
+            self.assertTrue(self.hook.sanctioned_application_writer(
+                package_payload, docs,
+            ))
+            self.assertTrue(self.hook.sanctioned_application_writer(
+                application_payload, docs,
+            ))
+            self.assertIsNotNone(self.hook.attested_recovery_writer_spec(
+                recovery_payload, docs,
+            ))
+            self.assertFalse(self.hook.sanctioned_application_writer(
+                unsupported_flag, docs,
+            ))
+
     def test_cmd_pre_and_command_post_preserve_official_config_change(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)

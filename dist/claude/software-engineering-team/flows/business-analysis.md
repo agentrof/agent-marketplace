@@ -14,7 +14,10 @@ mode. Manual mode never reads, creates or binds Requirement state.
    read-only reviewer for the complete space and `domain-expert` only for an
    explicitly named domain. Each prompt includes exact paths, review lens,
    output contract and `SELF-CHECK`.
-3. Render, close individual document gates, then run `approve-package`.
+3. Render, move each ready draft through `ba_compile.py enter-review --space
+   <space> --doc <relative-doc>`, close individual document gates with `approve`,
+   then run `approve-package`. Review entry changes only document status and its
+   tag mirror; it does not approve, stamp a date, render or publish a receipt.
    Compiler approval plus a committed package are required before handoff.
    An open package revision is `package_status: draft`: repeat
    `begin-revision` for every approved or superseded document that joins the

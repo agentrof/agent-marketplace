@@ -1826,6 +1826,28 @@ def direct_shell_tokens(payload: dict) -> tuple[list[str], Path] | None:
     return tokens, Path(str(payload.get("cwd") or ".")).resolve()
 
 
+def trusted_python_script_tokens(
+    payload: dict, *, allow_bare: bool = False,
+) -> tuple[str, list[str], Path] | None:
+    """Parse an exact trusted Python writer invocation and its script args."""
+    parsed = direct_shell_tokens(payload)
+    if parsed is None:
+        return None
+    tokens, cwd = parsed
+    if len(tokens) < 2 or not trusted_python_command(
+            tokens[0], cwd, allow_bare=allow_bare):
+        return None
+    script_index = 1
+    # The host contract invokes machine writers with ``python -B``.  ``-B``
+    # only disables bytecode emission, so recognize exactly that one inert
+    # interpreter flag without widening the writer authorization surface.
+    if tokens[script_index] == "-B":
+        script_index += 1
+    if len(tokens) <= script_index:
+        return None
+    return tokens[script_index], tokens[script_index + 1:], cwd
+
+
 def parsed_options(
         args: list[str], valued: set[str], flags: set[str]
 ) -> dict[str, str] | None:
@@ -1849,16 +1871,13 @@ def parsed_options(
 
 def sanctioned_config_writer(payload: dict, config_path: Path) -> bool:
     """Recognize one direct, scoped config writer and no shell composition."""
-    parsed = direct_shell_tokens(payload)
+    parsed = trusted_python_script_tokens(payload)
     if parsed is None:
         return False
-    tokens, cwd = parsed
-    if len(tokens) < 2 or not trusted_python_command(tokens[0], cwd):
+    script_token, args, cwd = parsed
+    script = Path(script_token).name
+    if _installed_script_path(script_token, cwd, script) is None:
         return False
-    script = Path(tokens[1]).name
-    if _installed_script_path(tokens[1], cwd, script) is None:
-        return False
-    args = tokens[2:]
     project = config_path.parent.parent.resolve()
     if script == "setup_project.py":
         target = _cli_path(_option_value(args, "--project-root"), cwd)
@@ -1886,18 +1905,17 @@ def sanctioned_config_writer(payload: dict, config_path: Path) -> bool:
 
 def relaxed_application_writer_spec(payload: dict, vault: Path) -> dict | None:
     """Parse the two legacy bare-runtime commands with attestable deltas."""
-    parsed = direct_shell_tokens(payload)
+    parsed = trusted_python_script_tokens(payload, allow_bare=True)
     if parsed is None:
         return None
-    tokens, cwd = parsed
-    if len(tokens) < 3 or not trusted_python_command(
-            tokens[0], cwd, allow_bare=True):
-        return None
+    script_token, args, cwd = parsed
     if _installed_script_path(
-            tokens[1], cwd, "experience_compile.py") is None:
+            script_token, cwd, "experience_compile.py") is None:
         return None
-    command_name = tokens[2]
-    args = tokens[3:]
+    if not args:
+        return None
+    command_name = args[0]
+    args = args[1:]
     experience_root = (vault / EXPERIENCE_ROOT_RELATIVE).resolve()
     if command_name == "render-application":
         options = parsed_options(args, {"--root"}, {"--json"})
@@ -1976,24 +1994,20 @@ def attested_recovery_writer_spec(
     payload: dict, vault: Path,
 ) -> dict[str, str] | None:
     """Parse only the exact-runtime recovery form that needs post-attestation."""
-    parsed = direct_shell_tokens(payload)
+    parsed = trusted_python_script_tokens(payload)
     if parsed is None:
         return None
-    tokens, cwd = parsed
-    if (
-        len(tokens) < 3
-        or not trusted_python_command(tokens[0], cwd)
-        or _installed_script_path(
-            tokens[1], cwd, "experience_compile.py",
-        ) is None
-    ):
+    script_token, args, cwd = parsed
+    if _installed_script_path(
+            script_token, cwd, "experience_compile.py",
+    ) is None or not args:
         return None
-    command = tokens[2]
+    command = args[0]
     if command == "rehydrate-published-scope":
         valued = {
             "--root", "--scope-plan", "--proposal-hash", "--application-ref",
         }
-        options = parsed_options(tokens[3:], valued, set())
+        options = parsed_options(args[1:], valued, set())
         if options is None or set(options) != valued:
             return None
         root = _cli_path(options["--root"], cwd)
@@ -2020,7 +2034,7 @@ def attested_recovery_writer_spec(
         "--root", "--from-scope-plan", "--from-proposal-hash",
         "--scope-plan", "--proposal-hash",
     }
-    options = parsed_options(tokens[3:], valued, set())
+    options = parsed_options(args[1:], valued, set())
     if options is None or set(options) != valued:
         return None
     root = _cli_path(options["--root"], cwd)
@@ -2088,18 +2102,15 @@ def sanctioned_application_writer(
     """Recognize only direct invocations of application lifecycle writers."""
     if allow_bare_runtime:
         return relaxed_application_writer_spec(payload, vault) is not None
-    parsed = direct_shell_tokens(payload)
+    parsed = trusted_python_script_tokens(payload)
     if parsed is None:
         return False
-    tokens, cwd = parsed
-    if len(tokens) < 3 or not trusted_python_command(
-            tokens[0], cwd, allow_bare=allow_bare_runtime):
-        return False
+    script_token, args, cwd = parsed
     if _installed_script_path(
-            tokens[1], cwd, "experience_compile.py") is None:
+            script_token, cwd, "experience_compile.py") is None or not args:
         return False
-    command_name = tokens[2]
-    args = tokens[3:]
+    command_name = args[0]
+    args = args[1:]
     experience_root = (vault / "experience-design").resolve()
     if command_name in APPLICATION_ROOT_WRITERS:
         target = _cli_path(_option_value(args, "--root"), cwd)

@@ -703,6 +703,252 @@ class ApproveTests(unittest.TestCase):
                             "--doc", "nope.md"])
         self.assertEqual(code, 2, err)
 
+class EnterReviewTests(unittest.TestCase):
+    setUp = ApproveTests.setUp
+    tearDown = ApproveTests.tearDown
+    relative = "domains/inventory/entities/stock-item-entity.md"
+
+    def draft(self):
+        target = self.space / self.relative
+        if not hasattr(self, "draft_source"):
+            self.draft_source = target.read_text(encoding="utf-8")
+        text = ba.draft_document_text(self.draft_source)
+        text = text.replace("owner_role: business_analyst\n",
+                            "owner_role: business_analyst\ntags:\n"
+                            "  - doc/entity\n  - status/draft\n")
+        target.write_text(text, encoding="utf-8")
+        return target
+
+    def enter(self, relative=None):
+        return run(["enter-review", "--space", str(self.space),
+                    "--doc", relative or self.relative, "--json"])
+
+    def snapshot(self):
+        return {p.relative_to(self.space).as_posix(): p.read_bytes()
+                for p in self.space.rglob("*") if p.is_file()}
+
+    def test_review_changes_only_status_and_tag_without_approval(self):
+        target = self.draft()
+        target.write_text(target.read_text() + "\n- status/draft\n", encoding="utf-8")
+        before = self.snapshot()
+        code, out, err = self.enter()
+        self.assertEqual(code, 0, out + err)
+        expected = before[self.relative].replace(b"status: draft", b"status: in_review", 1)
+        expected = expected.replace(b"  - status/draft", b"  - status/in-review", 1)
+        after = self.snapshot()
+        self.assertEqual(after.pop(self.relative), expected)
+        before.pop(self.relative)
+        self.assertEqual(after, before)
+        self.assertNotIn("approved_at:", target.read_text())
+        self.assertEqual(json.loads(out)["status"], "in_review")
+        code, out, err = run(["approve", "--space", str(self.space), "--doc", self.relative])
+        self.assertEqual(code, 0, out + err)
+
+    def test_review_refuses_non_draft_without_writes(self):
+        for state in ("approved", "in_review", "superseded"):
+            with self.subTest(state=state):
+                target = self.draft()
+                target.write_text(target.read_text().replace("status: draft", f"status: {state}"))
+                before = self.snapshot()
+                code, out, err = self.enter()
+                self.assertEqual(code, 1, out + err)
+                self.assertEqual(self.snapshot(), before)
+
+    def test_review_refuses_unknown_or_escaping_target(self):
+        self.draft()
+        for relative in ("nope.md", "../outside.md", str(self.space / self.relative)):
+            before = self.snapshot()
+            code, out, err = self.enter(relative)
+            self.assertEqual(code, 2, out + err)
+            self.assertEqual(self.snapshot(), before)
+
+    def test_review_requires_open_package(self):
+        self.draft()
+        root = self.space / "space.md"
+        root.write_text(ba.restamp_frontmatter(root.read_text(), {"package_status": "approved"}))
+        before = self.snapshot()
+        code, out, err = self.enter()
+        self.assertEqual(code, 1, out + err)
+        self.assertIn("begin-revision", out + err)
+        self.assertEqual(self.snapshot(), before)
+
+    def test_invalid_document_is_rejected_before_write(self):
+        target = self.draft()
+        edit(target, "<!-- sec: fields -->", "<!-- sec: absent -->")
+        before = self.snapshot()
+        code, out, err = self.enter()
+        self.assertEqual(code, 1, out + err)
+        self.assertEqual(self.snapshot(), before)
+
+    def test_missing_tag_is_not_replaced_in_body(self):
+        target = self.draft()
+        edit(target, "  - status/draft\n", "")
+        target.write_text(target.read_text() + "\n  - status/draft\n")
+        before = self.snapshot()
+        code, out, err = self.enter()
+        self.assertEqual(code, 1, out + err)
+        self.assertEqual(self.snapshot(), before)
+
+    def test_atomic_write_failure_preserves_document(self):
+        self.draft()
+        before = self.snapshot()
+        with mock.patch.object(ba.os, "replace", side_effect=OSError("injected")):
+            code, out, err = self.enter()
+        self.assertEqual(code, 1, out + err)
+        self.assertIn("injected", err)
+        self.assertEqual(self.snapshot(), before)
+
+    def test_symlink_target_is_rejected_without_external_write(self):
+        target = self.draft()
+        outside = self.space.parent / "outside.md"
+        outside.write_bytes(target.read_bytes())
+        target.unlink()
+        try:
+            target.symlink_to(outside)
+        except OSError:
+            self.skipTest("symlinks unavailable")
+        before = outside.read_bytes()
+        code, out, err = self.enter()
+        self.assertEqual(code, 2, out + err)
+        self.assertEqual(outside.read_bytes(), before)
+
+    def test_fresh_space_overview_can_enter_review(self):
+        space = self.space.parent / "new-topic"
+        code, out, err = run(["init", "--space", str(space), "--title", "New Topic", "--code", "NEW"])
+        self.assertEqual(code, 0, out + err)
+        code, out, err = run(["enter-review", "--space", str(space), "--doc", "space.md"])
+        self.assertEqual(code, 0, out + err)
+        text = (space / "space.md").read_text()
+        self.assertIn("status: in_review", text)
+        self.assertIn("  - status/in-review", text)
+        self.assertNotIn("approved_at:", text)
+
+    def test_ambiguous_lifecycle_keys_or_wrong_tag_list_reject_without_writes(self):
+        for mutation in ("duplicate-status", "duplicate-tags", "alias-tag"):
+            with self.subTest(mutation=mutation):
+                target = self.draft()
+                text = target.read_text()
+                if mutation == "duplicate-status":
+                    text = text.replace("status: draft", "status: draft\nstatus: draft")
+                elif mutation == "duplicate-tags":
+                    text = text.replace("tags:\n", "tags:\n  - doc/entity\n  - status/draft\ntags:\n")
+                else:
+                    text = text.replace("  - status/draft", "aliases:\n  - status/draft")
+                target.write_text(text)
+                before = self.snapshot()
+                code, out, err = self.enter()
+                self.assertEqual(code, 1, out + err)
+                self.assertEqual(self.snapshot(), before)
+
+    def test_lf_crlf_and_mixed_line_endings_are_preserved(self):
+        for ending in ("lf", "crlf", "mixed"):
+            with self.subTest(ending=ending):
+                target = self.draft()
+                raw = target.read_bytes()
+                if ending == "crlf":
+                    raw = raw.replace(b"\n", b"\r\n")
+                elif ending == "mixed":
+                    raw = b"".join(line.replace(b"\n", b"\r\n") if index % 2 else line
+                                   for index, line in enumerate(raw.splitlines(keepends=True)))
+                target.write_bytes(raw)
+                code, out, err = self.enter()
+                self.assertEqual(code, 0, out + err)
+                expected = raw.replace(b"status: draft", b"status: in_review", 1)
+                expected = expected.replace(b"  - status/draft", b"  - status/in-review", 1)
+                self.assertEqual(target.read_bytes(), expected)
+
+    def test_symlinked_space_ancestor_is_rejected(self):
+        self.draft()
+        business_analysis = self.space.parent
+        external = Path(self.tmp.name) / "external"
+        business_analysis.rename(external)
+        try:
+            business_analysis.symlink_to(external, target_is_directory=True)
+        except OSError:
+            self.skipTest("directory symlinks unavailable")
+        before = (external / "erp" / self.relative).read_bytes()
+        code, out, err = run(["enter-review", "--space", str(self.space),
+            "--vault-root", str(business_analysis.parent), "--doc", self.relative])
+        self.assertEqual(code, 2, out + err)
+        self.assertEqual((external / "erp" / self.relative).read_bytes(), before)
+
+    @unittest.skipUnless(sys.platform == "win32", "native Windows directory junction")
+    def test_windows_junction_space_ancestor_is_rejected(self):
+        self.draft()
+        business_analysis = self.space.parent
+        external = Path(self.tmp.name) / "external"
+        business_analysis.rename(external)
+        created = subprocess.run(["cmd", "/c", "mklink", "/J", str(business_analysis), str(external)],
+                                 capture_output=True, text=True)
+        self.assertEqual(created.returncode, 0, created.stdout + created.stderr)
+        before = (external / "erp" / self.relative).read_bytes()
+        try:
+            code, out, err = run(["enter-review", "--space", str(self.space),
+                "--vault-root", str(business_analysis.parent), "--doc", self.relative])
+            self.assertEqual(code, 2, out + err)
+            self.assertEqual((external / "erp" / self.relative).read_bytes(), before)
+        finally:
+            business_analysis.rmdir()
+
+    def test_full_review_lifecycle_in_canonical_and_both_distributions(self):
+        paths = [COMPILER, *(REPO / "dist" / host / "software-engineering-team/scripts/ba_compile.py"
+                              for host in ("claude", "codex"))]
+        relative = "domains/inventory/decisions/batch-sizing-decision.md"
+        for index, path in enumerate(paths):
+            with self.subTest(compiler=str(path)), tempfile.TemporaryDirectory() as raw:
+                compiler = load_compiler(path, f"review_entry_{index}")
+                docs = Path(raw) / "docs"
+                space = docs / "business-analysis/erp"
+                make_valid_space(space)
+                code, out, err = run_compiler(compiler, ["stub", "--space", str(space),
+                    "--type", "decision", "--node", "domains/inventory",
+                    "--slug", "batch-sizing", "--title", "Batch sizing"])
+                self.assertEqual(code, 0, out + err)
+                for cycle in range(2):
+                    if cycle:
+                        code, out, err = run_compiler(compiler, ["begin-revision", "--space", str(space), "--doc", relative])
+                        self.assertEqual(code, 0, out + err)
+                    for command in ("enter-review", "approve"):
+                        code, out, err = run_compiler(compiler, [command, "--space", str(space), "--doc", relative])
+                        self.assertEqual(code, 0, out + err)
+                        checked = subprocess.run([sys.executable, str(VAULT_CHECK), "check", "--vault", str(docs),
+                            "--impact", f"business-analysis/erp/{relative}"], capture_output=True, text=True)
+                        self.assertEqual(checked.returncode, 0, checked.stdout + checked.stderr)
+                    code, out, err = run_compiler(compiler, ["approve-package", "--space", str(space)])
+                    self.assertEqual(code, 0, out + err)
+                    result = compiler.classify_package(space, vault_root=docs)
+                    self.assertEqual(result["profile"], "strict-current")
+
+    def test_tag_list_comments_preserve_bytes_in_every_distribution(self):
+        paths = [COMPILER, *(REPO / "dist" / host / "software-engineering-team/scripts/ba_compile.py"
+                              for host in ("claude", "codex"))]
+        relative = "domains/inventory/decisions/batch-sizing-decision.md"
+        for index, path in enumerate(paths):
+            with self.subTest(compiler=str(path)), tempfile.TemporaryDirectory() as raw:
+                compiler = load_compiler(path, f"review_comments_{index}")
+                docs = Path(raw) / "docs"
+                space = docs / "business-analysis/erp"
+                make_valid_space(space)
+                code, out, err = run_compiler(compiler, ["stub", "--space", str(space),
+                    "--type", "decision", "--node", "domains/inventory",
+                    "--slug", "batch-sizing", "--title", "Batch sizing"])
+                self.assertEqual(code, 0, out + err)
+                target = space / relative
+                before = target.read_bytes().replace(b"tags:\n", b"tags:\n  # type mirror\n")
+                before = before.replace(b"  - status/draft\n", b"  # lifecycle mirror\n  - status/draft\n  # end mirror\n")
+                target.write_bytes(before)
+                for phase in ("before", "after"):
+                    if phase == "after":
+                        code, out, err = run_compiler(compiler, ["enter-review", "--space", str(space), "--doc", relative])
+                        self.assertEqual(code, 0, out + err)
+                        expected = before.replace(b"status: draft", b"status: in_review", 1)
+                        expected = expected.replace(b"  - status/draft", b"  - status/in-review", 1)
+                        self.assertEqual(target.read_bytes(), expected)
+                    checked = subprocess.run([sys.executable, str(VAULT_CHECK), "check", "--vault", str(docs),
+                        "--impact", f"business-analysis/erp/{relative}"], capture_output=True, text=True)
+                    self.assertEqual(checked.returncode, 0, checked.stdout + checked.stderr)
+
+
 class SubcommandTests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()

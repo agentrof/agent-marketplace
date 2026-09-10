@@ -159,8 +159,12 @@ frontmatter, unique across the whole space. LEG is reserved.
 
 ## Lifecycle and gates
 
-Per-doc status walks draft -> in_review -> approved; approved -> draft
-reopens for rework; any -> superseded retires a doc (successor named).
+Per-doc status walks draft -> in_review through `ba_compile.py enter-review
+--space <space> --doc <relative-doc>`, then in_review -> approved through
+`approve`. Review entry atomically changes status and its tag mirror, without
+an approval date or package receipt. Re-render after lifecycle changes.
+Approved -> draft reopens through `begin-revision`; any -> superseded retires
+a doc (successor named).
 A doc cannot approve while it holds an open assumption or open question
 row, a dead link, or a missing section.
 

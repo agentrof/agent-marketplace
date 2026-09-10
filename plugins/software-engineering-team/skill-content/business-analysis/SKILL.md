@@ -64,8 +64,10 @@ checker are the only mechanical authorities.
 
    - foundation documents and their links are complete;
    - each domain has no unresolved blocking question or challenge finding;
-   - the complete space passes `ba_compile.py check --gate approval`;
+   - each ready draft enters review through
+     `ba_compile.py enter-review --space <space> --doc <relative-doc>`;
    - individual records are approved through the compiler's `approve` command;
+   - the complete space passes `ba_compile.py check --gate approval`;
    - every decision is `approved` or `superseded` before package closure;
    - `ba_compile.py approve-package --space <space> --vault-root workspace/docs`
      stamps the immutable package receipt.

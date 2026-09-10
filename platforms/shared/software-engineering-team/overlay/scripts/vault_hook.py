@@ -96,6 +96,7 @@ APPLICATION_ROOT_WRITERS = {
     "enter-application-review",
     "approve-set",
     "abort-open-scope",
+    "return-to-draft",
 }
 APPLICATION_PACKAGE_WRITERS = {
     "begin-revision", "enter-review", "stub", "render", "rename", "retire",

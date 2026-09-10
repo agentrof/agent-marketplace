@@ -2230,6 +2230,12 @@ class VaultHookShellContractTests(unittest.TestCase):
                 "--proposal-hash", "sha256:" + "0" * 64,
                 "--confirm", "discard-uncommitted",
             ]))
+            return_to_draft_payload = self.attested_writer_payload(root, command([
+                sys.executable, "-B", script, "return-to-draft",
+                "--root", str(experience_root),
+                "--scope-plan", str(docs / "scope-plan.json"),
+                "--proposal-hash", "sha256:" + "0" * 64,
+            ]))
             unsupported_flag = self.attested_writer_payload(root, command([
                 sys.executable, "-I", script, "begin-application-revision",
                 "--root", str(experience_root),
@@ -2239,7 +2245,8 @@ class VaultHookShellContractTests(unittest.TestCase):
             if os.name == "nt":
                 for payload in (
                     config_payload, package_payload, application_payload,
-                    recovery_payload, abort_payload, unsupported_flag,
+                    recovery_payload, abort_payload, return_to_draft_payload,
+                    unsupported_flag,
                 ):
                     payload["shell_family"] = "cmd"
 
@@ -2257,6 +2264,9 @@ class VaultHookShellContractTests(unittest.TestCase):
             ))
             self.assertTrue(self.hook.sanctioned_application_writer(
                 abort_payload, docs,
+            ))
+            self.assertTrue(self.hook.sanctioned_application_writer(
+                return_to_draft_payload, docs,
             ))
             self.assertFalse(self.hook.sanctioned_application_writer(
                 unsupported_flag, docs,

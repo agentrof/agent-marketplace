@@ -1,0 +1,6 @@
+{
+  "summary": "Add an atomic BA document review-entry command before approval and document the complete lifecycle.",
+  "components": {
+    "software-engineering-team": "patch"
+  }
+}

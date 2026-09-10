@@ -14,6 +14,7 @@ Subcommands:
   init          create a new space skeleton
   stub          create one born-compliant typed document
   check         structural validation; --gate approval adds the gate rules
+  enter-review  move one draft document into review without approving it
   render        (re)generate the _generated/ views deterministically
   resolve       map ids to owning docs, statuses and statement hashes
   verify-import validate a backlog import's criterion ids against the space
@@ -30,6 +31,7 @@ import hashlib
 import json
 import os
 import re
+import stat
 import sys
 import tempfile
 import unicodedata
@@ -1792,14 +1794,14 @@ def remove_frontmatter_keys(text: str, keys: set[str]) -> str | None:
     return "".join(kept)
 
 
-def atomic_replace(path: Path, text: str) -> None:
+def atomic_replace(path: Path, text: str, *, newline: str | None = None) -> None:
     """Replace one authored note atomically without leaving a partial file."""
     mode = path.stat().st_mode & 0o777
     descriptor, temporary = tempfile.mkstemp(prefix=f".{path.name}.",
                                              dir=path.parent)
     temporary_path = Path(temporary)
     try:
-        with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
+        with os.fdopen(descriptor, "w", encoding="utf-8", newline=newline) as handle:
             handle.write(text)
             handle.flush()
             os.fsync(handle.fileno())
@@ -1920,6 +1922,95 @@ def classify_package(space_dir: Path, schema: dict | None = None,
     }
 
 
+def cmd_enter_review(args, schema: dict) -> int:
+    """Enter document review with one atomic, unstamped lifecycle write."""
+    space_dir = Path(os.path.abspath(args.space))
+    lexical_vault = (Path(os.path.abspath(args.vault_root)) if args.vault_root else
+                     next((parent for parent in space_dir.parents if parent.name == "docs"), None))
+    relative = Path(args.doc)
+    if lexical_vault is None or relative.is_absolute() or ".." in relative.parts:
+        print("ba_compile: FAIL: --doc must name a document within the space",
+              file=sys.stderr)
+        return 2
+    try:
+        within_vault = (space_dir / relative).relative_to(lexical_vault)
+        vault_root = lexical_vault.resolve(strict=True)
+        (space_dir / relative).resolve(strict=True).relative_to(vault_root)
+        for index in range(len(within_vault.parts) + 1):
+            info = lexical_vault.joinpath(*within_vault.parts[:index]).lstat()
+            if stat.S_ISLNK(info.st_mode) or (getattr(info, "st_file_attributes", 0)
+                    & getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0)):
+                raise ValueError("review target must not traverse a symlink or reparse point")
+    except (OSError, ValueError) as exc:
+        print(f"ba_compile: FAIL: invalid review path: {exc}", file=sys.stderr)
+        return 2
+    space, base = scan_space(space_dir, schema)
+    space.vault_root = vault_root
+    doc = space.docs.get(args.doc)
+    if doc is None:
+        print(f"ba_compile: FAIL: unknown doc '{args.doc}'", file=sys.stderr)
+        return 2
+    overview = space.docs.get(space_overview_rel(schema))
+    if overview is None or overview.fm.get("package_status", "") not in {"", "draft"}:
+        print("ba_compile: FAIL: review needs an open package; use begin-revision first",
+              file=sys.stderr)
+        return 1
+    if doc_status(doc) != "draft":
+        print("ba_compile: FAIL: enter-review requires a draft document",
+              file=sys.stderr)
+        return 1
+    findings = run_checks(space, base)
+    blocking = [item for item in findings if item.severity == "error"
+                and (space.broken or item.path == args.doc)]
+    if blocking:
+        emit(blocking, args.json)
+        return 1
+    original = doc.abs_path.read_bytes().decode("utf-8")
+    lines = original.splitlines(keepends=True)
+    close = next(index for index in range(1, len(lines)) if lines[index].strip() == "---")
+    keys = [line.strip().partition(":")[0] for line in lines[:close]]
+    if keys.count("status") != 1 or keys.count("tags") != 1:
+        print("ba_compile: FAIL: review needs unambiguous status and tags keys",
+              file=sys.stderr)
+        return 1
+    tags = doc.fm.get("tags")
+    if not isinstance(tags, list) or len(tags) != 2 or set(tags) != {
+            f"doc/{doc.doc_type.replace('_', '-')}", "status/draft"}:
+        print("ba_compile: FAIL: review needs the exact draft tag mirror", file=sys.stderr)
+        return 1
+    status_index = keys.index("status")
+    lines[status_index], status_count = re.subn(
+        r"^([ \t]*status:[ \t]*)([\"']?)draft\2([ \t]*(?:\r?\n)?)$",
+        r"\1\2in_review\2\3", lines[status_index])
+    tag_count = 0
+    for index in range(keys.index("tags") + 1, close):
+        if lines[index].lstrip().startswith("#"):
+            continue
+        if lines[index].strip() and not lines[index].lstrip().startswith("- "):
+            break
+        lines[index], count = re.subn(
+            r"^([ \t]*-[ \t]*)([\"']?)status/draft\2([ \t]*(?:\r?\n)?)$",
+            r"\1\2status/in-review\2\3", lines[index])
+        tag_count += count
+    updated = "".join(lines)
+    candidate, _, error = parse_frontmatter(updated)
+    expected = dict(doc.fm, status="in_review", tags=[
+        "status/in-review" if tag == "status/draft" else tag for tag in tags])
+    if error or status_count != 1 or tag_count != 1 or candidate != expected:
+        print("ba_compile: FAIL: invalid review lifecycle postimage", file=sys.stderr)
+        return 1
+    try:
+        atomic_replace(doc.abs_path, updated, newline="")
+    except OSError as exc:
+        print(f"ba_compile: FAIL: review write failed: {exc}", file=sys.stderr)
+        return 1
+    if args.json:
+        print(json.dumps({"doc": args.doc, "status": "in_review"}, sort_keys=True))
+    else:
+        print(f"ba_compile: entered review for {args.doc}")
+    return 0
+
+
 def cmd_approve(args, schema: dict) -> int:
     """Approve a doc: the script stamps status and the UTC date, then
     re-runs the checks; a doc the compiler rejects is restored untouched.
@@ -1942,7 +2033,7 @@ def cmd_approve(args, schema: dict) -> int:
         return 1
     if status != "in_review":
         print(f"ba_compile: FAIL: {rel} is '{status}', not in_review;"
-              " approval follows review, flip the doc to in_review first",
+              " approval follows review, use enter-review first",
               file=sys.stderr)
         return 1
     target = doc.abs_path
@@ -2255,6 +2346,12 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--node", default="")
     p.add_argument("--json", action="store_true")
 
+    p = sub.add_parser("enter-review")
+    p.add_argument("--space", required=True)
+    p.add_argument("--vault-root", default="", dest="vault_root")
+    p.add_argument("--doc", required=True)
+    p.add_argument("--json", action="store_true")
+
     p = sub.add_parser("approve")
     p.add_argument("--space", required=True)
     p.add_argument("--vault-root", default="", dest="vault_root")
@@ -2294,6 +2391,7 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     schema = load_schema(args.schema)
     handlers = {"init": cmd_init, "stub": cmd_stub, "check": cmd_check,
+                "enter-review": cmd_enter_review,
                 "approve": cmd_approve, "approve-package": cmd_approve_package,
                 "begin-revision": cmd_begin_revision, "status": cmd_status,
                 "render": cmd_render,

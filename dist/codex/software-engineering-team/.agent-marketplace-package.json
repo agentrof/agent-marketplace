@@ -1,5 +1,5 @@
 {
-  "build_id": "snapshot.a0c145396f118df372643fface54da05b869f36f67b9c47e0bb39ea9bb7fc0c7",
+  "build_id": "snapshot.cd06a89a1b8118f25055350e1510775ff98a49b59b8359d6becda210ed1e060b",
   "component": "software-engineering-team",
   "delivery_protocol": {
     "read_max": 1,
@@ -34,7 +34,7 @@
     "agents/ux-designer.md": "1d990eb8f773a941b6b7df31c0aa75b6cdd992fedd872f185500d77d4e04e6bc",
     "constitution.md": "32177174a6855417d1bfca8ffdb91011b525443c696d824e7ccad4cd4e457cde",
     "flows/backlog-planning.md": "460b0f723b51b843ade32ee45d125212a1f9f63bd5df6e69007600f0824df091",
-    "flows/business-analysis.md": "17d316b5d3c8fb425132478d9e578a18ea35846b32507f436ba3c11a46440dd6",
+    "flows/business-analysis.md": "67b69348c59746263ded358459f51ab9653914ba1a4d597c3fb31d7b2557e2c3",
     "flows/delivery-execution.md": "4430616a86ac2cbd038139a37ce49fd7b297f56ee4964775eebf1274263c46db",
     "flows/delivery-governance.md": "35bb00cea1ad2a11cde0f522c3fcca117db74dc4dff3a314cd4bba45b8c37f2d",
     "flows/delivery-planning.md": "762602b10827aca3b43c0e662c2105c02da9e152a85e5cc1e22e89da57bcec3a",
@@ -50,7 +50,7 @@
     "product.json": "16202a292f9cf80ddbfc1eb1c74a9e7d8f37e96089808d323613405c50d2155c",
     "scripts/architecture_compile.py": "6efad5f1d59d5f0debb6c8693be6c262e80489703dccc08ba91e1abe2ad588ea",
     "scripts/artifact_check.py": "d95f51158f98e56fab55a083f240a2de612ae5cf5f2b73aeaee848721793e860",
-    "scripts/ba_compile.py": "fde7ad9d2a981d654a7694f64a3f25830489ee46951262970127c8b4a2aaa045",
+    "scripts/ba_compile.py": "53c0abab2358b4980908b5cdcedac6153ce53a5fc5fe60573360dc6a727e1d20",
     "scripts/backlog_compile.py": "ffb22ce260a30a79cf64f2c0e2fb51e9392f5af7a84477ea6e288c2187ab272b",
     "scripts/delivery_compile.py": "f8f15ead679cb8292d038f44ec8b0dfc04cafc06157453575e9cb7947633df01",
     "scripts/delivery_git.py": "cad45e8aeca5909dc5ce98691f80c546500a0836cb86f274805713680b327b88",
@@ -77,7 +77,7 @@
     "scripts/vault_gate.py": "2624df7cae40066e1f7ce022dd6f1986841a65c7a28aada0ebfa565aca0832b2",
     "scripts/vault_hook.py": "9c1e6ccd6b4933f1f9104d6f24f6c5430f3b36c8b6a8c2c540962bab57acc836",
     "skill-content/backlog-plan/SKILL.md": "7366c7341ee539f7ada5b4e38e36e07f6f29fb687f66a60a18b49341af6ea3c3",
-    "skill-content/business-analysis/SKILL.md": "58005f6bfbfc7c95bb1ef8d9e8a746fbe486fd518bc55fa6fcf6e691fbf46de0",
+    "skill-content/business-analysis/SKILL.md": "a2e836689bfafa46817564bc1744215d190e54adb54ebcef989513676969d76d",
     "skill-content/business-analysis/data/space-schema.json": "8bec0bb3025459143f52a8255d542ee52fcf99217e8c61fb770b407f1caa0936",
     "skill-content/challenge-review/SKILL.md": "08eecc5ff550106c6a5e65d1d8092214bd35a05335336643c9ac38a092372221",
     "skill-content/challenge-review/references/expert-casting.md": "c43557a3cd48d3734c614e8a78c8d94d18df37e5f0e5a56c610962ca89f86f02",
@@ -162,7 +162,7 @@
     "skill-content/requirements-analysis/references/modeling.md": "9ec0d37ac04ddd74c10ce772e54ab1462c81619e7ac6277a632693ae8890e737",
     "skill-content/requirements-analysis/references/nfr-elicitation.md": "154730b8b546e3e0e538e6eb3dab21b1304d5a2657148352cda02e19e0c2ecb8",
     "skill-content/requirements-analysis/references/research-methods.md": "fa08b909a2863a7162a9199f21c234c3c58da40afb3cb31e5ad05a109fdc172f",
-    "skill-content/requirements-analysis/references/space-standard.md": "9ad8e73137d0f1df6324be608dac1340de7916b263b85b6ed456b318537ee649",
+    "skill-content/requirements-analysis/references/space-standard.md": "cc8eab275082721a22c16d4d0d545e62faefdab626e7cdfefffc899f8abb28c8",
     "skill-content/setup/SKILL.md": "e866f7b57c647f04615dec583882aff1c48c7d69f3ed8c8a3e1ec828a6c97d23",
     "skill-content/setup/references/ci-bootstrap.md": "dc83f62ab0a971cc025c1a2996e7eb5dd07087df81be79ea56382aed762f64d6",
     "skill-content/sketch/SKILL.md": "998f77390ae24f85ff6cff4b22fedf4d0cbaf7ae581a2a089261b1a52abed606",
@@ -280,6 +280,6 @@
   "schema_version": 3,
   "source_channel": "snapshot",
   "source_commit": "",
-  "source_ref": "snapshot.a0c145396f118df372643fface54da05b869f36f67b9c47e0bb39ea9bb7fc0c7",
+  "source_ref": "snapshot.cd06a89a1b8118f25055350e1510775ff98a49b59b8359d6becda210ed1e060b",
   "version": "0.1.2"
 }

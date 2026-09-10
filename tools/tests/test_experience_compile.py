@@ -9,6 +9,7 @@ import unittest
 from contextlib import ExitStack, redirect_stderr, redirect_stdout
 from datetime import datetime, timezone
 from pathlib import Path
+from types import SimpleNamespace
 from unittest import mock
 
 
@@ -625,6 +626,254 @@ class ExperienceCompilerTests(unittest.TestCase):
                 "application is open for another scope proposal", errors,
             )
             self.assertEqual(self.tree_snapshot(fixture["docs"]), before)
+
+    def test_abort_open_scope_restores_only_tracked_updates(self):
+        with tempfile.TemporaryDirectory() as raw:
+            project = Path(raw)
+            root = project / "workspace/docs/experience-design"
+            package = root / "experiences/checkout"
+            package.mkdir(parents=True)
+            experience = package / "experience.md"
+            approved = {
+                "type": "experience",
+                "title": "Checkout Experience",
+                "experience_id": "checkout",
+                "origin_mode": "manual",
+                "status": "approved",
+                "revision": 1,
+                "primary_process_ref": "commerce/checkout",
+                "input_bindings": [],
+                "tags": ["doc/experience", "status/approved"],
+            }
+            body = "# Checkout Experience\n"
+            approved_preimage = experience_compile.render_fm(approved, body)
+            experience.write_text(approved_preimage, encoding="utf-8")
+            approved_source = experience_compile.source_digest(package)
+            initialized = subprocess.run(
+                ["git", "init", "-q", str(project)],
+                cwd=ROOT, text=True, capture_output=True, check=False,
+            )
+            self.assertEqual(initialized.returncode, 0, initialized.stderr)
+            committed = subprocess.run(
+                ["git", "-C", str(project), "add", "."],
+                text=True, capture_output=True, check=False,
+            )
+            self.assertEqual(committed.returncode, 0, committed.stderr)
+            committed = subprocess.run(
+                [
+                    "git", "-C", str(project), "-c", "user.name=Test",
+                    "-c", "user.email=test@example.com", "commit", "-qm",
+                    "approved preimage",
+                ], text=True, capture_output=True, check=False,
+            )
+            self.assertEqual(committed.returncode, 0, committed.stderr)
+            experience.write_text(experience_compile.render_fm({
+                **approved,
+                "status": "draft",
+                "revision": 2,
+                "tags": ["doc/experience", "status/draft"],
+            }, body), encoding="utf-8")
+            open_revision = package / "_generated/open-revision.json"
+            open_revision.parent.mkdir()
+            open_revision.write_text("{}\n", encoding="utf-8")
+            application_state = experience_compile.open_application_state_path(root)
+            application_state.parent.mkdir(exist_ok=True)
+            application_state.write_text("{}\n", encoding="utf-8")
+            expected = {
+                "status": "approved",
+                "revision": 1,
+                "source_hash": approved_source,
+            }
+            plan = {"actions": [{
+                "action": "update",
+                "target_experience": "checkout",
+                "expected_package": expected,
+            }]}
+            args = SimpleNamespace(
+                root=str(root), scope_plan="scope.json",
+                proposal_hash="sha256:" + "1" * 64,
+                confirm="discard-uncommitted",
+            )
+            opened = [(package.resolve(), {}, {})]
+            with ExitStack() as stack:
+                stack.enter_context(mock.patch.object(
+                    experience_compile, "load_scope_plan", return_value=plan,
+                ))
+                stack.enter_context(mock.patch.object(
+                    experience_compile, "open_scope_packages", return_value=opened,
+                ))
+                stack.enter_context(mock.patch.object(
+                    experience_compile, "validate_open_scope_plan",
+                    return_value=plan["actions"],
+                ))
+                stack.enter_context(mock.patch.object(
+                    experience_compile, "ensure_open_scope_unpublished",
+                ))
+                stack.enter_context(mock.patch.object(
+                    experience_compile, "read_open_application_state",
+                    return_value={"phase": "draft"},
+                ))
+                stack.enter_context(mock.patch.object(
+                    experience_compile, "validate_open_application_state",
+                ))
+                stack.enter_context(mock.patch.object(
+                    experience_compile, "restore_approved_application_projection",
+                ))
+                stack.enter_context(mock.patch.object(
+                    experience_compile, "reconcile_vault_navigation",
+                ))
+                stack.enter_context(mock.patch.object(
+                    experience_compile, "compile_package", return_value=({}, []),
+                ))
+                code = experience_compile.abort_open_scope(args)
+
+            self.assertEqual(code, 0)
+            self.assertEqual(
+                experience.read_text(encoding="utf-8"), approved_preimage,
+            )
+            self.assertFalse(open_revision.exists())
+            self.assertFalse(application_state.exists())
+
+    def test_abort_open_scope_refuses_untracked_author_content(self):
+        with tempfile.TemporaryDirectory() as raw:
+            project = Path(raw)
+            root = project / "workspace/docs/experience-design"
+            package = root / "experiences/checkout"
+            package.mkdir(parents=True)
+            experience = package / "experience.md"
+            experience.write_text("approved preimage\n", encoding="utf-8")
+            initialized = subprocess.run(
+                ["git", "init", "-q", str(project)],
+                cwd=ROOT, text=True, capture_output=True, check=False,
+            )
+            self.assertEqual(initialized.returncode, 0, initialized.stderr)
+            subprocess.run(["git", "-C", str(project), "add", "."], check=True)
+            subprocess.run([
+                "git", "-C", str(project), "-c", "user.name=Test",
+                "-c", "user.email=test@example.com", "commit", "-qm",
+                "approved preimage",
+            ], check=True)
+            experience.write_text("unapproved draft\n", encoding="utf-8")
+            author_note = package / "author-note.md"
+            author_note.write_text("keep me\n", encoding="utf-8")
+            expected = {
+                "status": "approved",
+                "revision": 1,
+                "source_hash": "sha256:" + "a" * 64,
+            }
+            plan = {"actions": [{
+                "action": "update",
+                "target_experience": "checkout",
+                "expected_package": expected,
+            }]}
+            args = SimpleNamespace(
+                root=str(root), scope_plan="scope.json",
+                proposal_hash="sha256:" + "1" * 64,
+                confirm="discard-uncommitted",
+            )
+            opened = [(package.resolve(), {}, {})]
+            with ExitStack() as stack:
+                stack.enter_context(mock.patch.object(
+                    experience_compile, "load_scope_plan", return_value=plan,
+                ))
+                stack.enter_context(mock.patch.object(
+                    experience_compile, "open_scope_packages", return_value=opened,
+                ))
+                stack.enter_context(mock.patch.object(
+                    experience_compile, "validate_open_scope_plan",
+                    return_value=plan["actions"],
+                ))
+                stack.enter_context(mock.patch.object(
+                    experience_compile, "ensure_open_scope_unpublished",
+                ))
+                stack.enter_context(mock.patch.object(
+                    experience_compile, "read_open_application_state",
+                    return_value={"phase": "draft"},
+                ))
+                stack.enter_context(mock.patch.object(
+                    experience_compile, "validate_open_application_state",
+                ))
+                code = experience_compile.abort_open_scope(args)
+
+            self.assertEqual(code, 2)
+            self.assertEqual(
+                experience.read_text(encoding="utf-8"), "unapproved draft\n",
+            )
+            self.assertTrue(author_note.is_file())
+
+    def test_abort_open_scope_refuses_staged_package_content(self):
+        with tempfile.TemporaryDirectory() as raw:
+            project = Path(raw)
+            root = project / "workspace/docs/experience-design"
+            package = root / "experiences/checkout"
+            package.mkdir(parents=True)
+            experience = package / "experience.md"
+            experience.write_text("approved preimage\n", encoding="utf-8")
+            initialized = subprocess.run(
+                ["git", "init", "-q", str(project)],
+                cwd=ROOT, text=True, capture_output=True, check=False,
+            )
+            self.assertEqual(initialized.returncode, 0, initialized.stderr)
+            subprocess.run(["git", "-C", str(project), "add", "."], check=True)
+            subprocess.run([
+                "git", "-C", str(project), "-c", "user.name=Test",
+                "-c", "user.email=test@example.com", "commit", "-qm",
+                "approved preimage",
+            ], check=True)
+            experience.write_text("staged draft\n", encoding="utf-8")
+            staged = subprocess.run(
+                ["git", "-C", str(project), "add", "."],
+                text=True, capture_output=True, check=False,
+            )
+            self.assertEqual(staged.returncode, 0, staged.stderr)
+            expected = {
+                "status": "approved",
+                "revision": 1,
+                "source_hash": "sha256:" + "a" * 64,
+            }
+            plan = {"actions": [{
+                "action": "update",
+                "target_experience": "checkout",
+                "expected_package": expected,
+            }]}
+            args = SimpleNamespace(
+                root=str(root), scope_plan="scope.json",
+                proposal_hash="sha256:" + "1" * 64,
+                confirm="discard-uncommitted",
+            )
+            opened = [(package.resolve(), {}, {})]
+            with ExitStack() as stack:
+                stack.enter_context(mock.patch.object(
+                    experience_compile, "load_scope_plan", return_value=plan,
+                ))
+                stack.enter_context(mock.patch.object(
+                    experience_compile, "open_scope_packages", return_value=opened,
+                ))
+                stack.enter_context(mock.patch.object(
+                    experience_compile, "validate_open_scope_plan",
+                    return_value=plan["actions"],
+                ))
+                stack.enter_context(mock.patch.object(
+                    experience_compile, "ensure_open_scope_unpublished",
+                ))
+                stack.enter_context(mock.patch.object(
+                    experience_compile, "read_open_application_state",
+                    return_value={"phase": "draft"},
+                ))
+                stack.enter_context(mock.patch.object(
+                    experience_compile, "validate_open_application_state",
+                ))
+                code = experience_compile.abort_open_scope(args)
+
+            self.assertEqual(code, 2)
+            self.assertEqual(
+                experience.read_text(encoding="utf-8"), "staged draft\n",
+            )
+            cached = subprocess.run(
+                ["git", "-C", str(project), "diff", "--cached", "--quiet"],
+                check=False,
+            )
+            self.assertEqual(cached.returncode, 1)
 
     def test_recovery_proposal_rejects_already_published_open_revisions(self):
         with tempfile.TemporaryDirectory() as raw:

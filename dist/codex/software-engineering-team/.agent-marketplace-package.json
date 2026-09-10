@@ -1,5 +1,5 @@
 {
-  "build_id": "snapshot.915ac79ecb8186803c732048f643a9de2c2990828913b624f2236e34c23ff0b7",
+  "build_id": "snapshot.c4ef87fc11a34c61a47a207cbfbf2736523726a056277699fb2ecb3844dc0e86",
   "component": "software-engineering-team",
   "delivery_protocol": {
     "read_max": 1,
@@ -71,7 +71,7 @@
     "scripts/requirement_route.py": "d71f32972262ce90e1266620ebb3512288a109e5e451904182a313c84f74977d",
     "scripts/setup_check.py": "c6bc36741e6e9d357a4f9ed6b2e1094340233cd12a79542bea3799b7a19a5444",
     "scripts/setup_project.py": "a2f077040ff1da1f0f71231e273aa8118f1c642b6265444bc12f04b2174174d6",
-    "scripts/stage_package.py": "5f410a7af8ee8da928613ad6107194ddf5c99b827016b57ff8e24c50710e8254",
+    "scripts/stage_package.py": "0273a5cf361e4807935bacbf8bcb4f54e26b44b2eced5b518c02c57566be1f9d",
     "scripts/team_guard.py": "b001c78b460ed623523738699882061f37ef73e616c7100af84d1f299d5b45c6",
     "scripts/vault_check.py": "c34061a261e81176c1444884bd7704f7162efe6577ef7379c97acae9e6ce98d9",
     "scripts/vault_gate.py": "2624df7cae40066e1f7ce022dd6f1986841a65c7a28aada0ebfa565aca0832b2",
@@ -280,6 +280,6 @@
   "schema_version": 3,
   "source_channel": "snapshot",
   "source_commit": "",
-  "source_ref": "snapshot.915ac79ecb8186803c732048f643a9de2c2990828913b624f2236e34c23ff0b7",
+  "source_ref": "snapshot.c4ef87fc11a34c61a47a207cbfbf2736523726a056277699fb2ecb3844dc0e86",
   "version": "0.1.2"
 }

@@ -3,6 +3,7 @@ import unittest
 from contextlib import redirect_stderr, redirect_stdout
 from io import StringIO
 from pathlib import Path
+import subprocess
 import sys
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -12,6 +13,63 @@ import stage_package
 
 
 class SolutionTopologyTests(unittest.TestCase):
+    def test_inverse_relation_projection_does_not_dirty_stage_receipt(self):
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw) / "project"
+            package = root / "workspace/docs/solution-design"
+            note = package / "decisions/runtime.md"
+            asset = package / "artifacts/diagram.bin"
+            note.parent.mkdir(parents=True)
+            note.write_text("# Runtime\n", encoding="utf-8")
+            asset.parent.mkdir(parents=True)
+            asset.write_bytes(b"approved artifact")
+            for command in (
+                ("git", "init", "-q"),
+                ("git", "config", "user.email", "test@example.com"),
+                ("git", "config", "user.name", "Test User"),
+                ("git", "add", "."),
+                ("git", "commit", "-qm", "initial package"),
+            ):
+                subprocess.run(command, cwd=root, check=True)
+
+            note.write_text(
+                "# Runtime\n\n"
+                "## Related knowledge <!-- sec: relations:generated:start -->\n\n"
+                "- Related from: [[backlog/epics/example/stories/example/story|Example]]\n\n"
+                "<!-- sec: relations:generated:end -->\n",
+                encoding="utf-8",
+            )
+            self.assertTrue(stage_package.is_committed(package))
+
+            note.write_text(note.read_text(encoding="utf-8") + "\nAuthor change.\n",
+                            encoding="utf-8")
+            self.assertFalse(stage_package.is_committed(package))
+
+            subprocess.run(("git", "checkout", "--",
+                            str(note.relative_to(root))), cwd=root, check=True)
+            transient = package / "decisions/transient.md"
+            transient.write_text("# Untracked\n", encoding="utf-8")
+            self.assertFalse(stage_package.is_committed(package))
+            transient.unlink()
+
+            note.unlink()
+            self.assertFalse(stage_package.is_committed(package))
+            subprocess.run(("git", "checkout", "--",
+                            str(note.relative_to(root))), cwd=root, check=True)
+
+            asset.write_bytes(b"authored artifact change")
+            self.assertFalse(stage_package.is_committed(package))
+            subprocess.run(("git", "checkout", "--",
+                            str(asset.relative_to(root))), cwd=root, check=True)
+
+            replacement = root / "replacement.md"
+            replacement.write_text("# Runtime\n", encoding="utf-8")
+            note.unlink()
+            try:
+                note.symlink_to(replacement)
+            except OSError as exc:
+                self.skipTest(f"filesystem cannot create a symlink: {exc}")
+            self.assertFalse(stage_package.is_committed(package))
     def write_processes(self, docs):
         space = docs / "business-analysis/marketplace"
         process_root = space / "processes"

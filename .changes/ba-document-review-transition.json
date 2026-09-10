@@ -1,5 +1,5 @@
 {
-  "summary": "Add an atomic BA document review-entry command before approval and document the complete lifecycle.",
+  "summary": "Add an atomic BA review-entry command and recognize the required Python -B lifecycle writers.",
   "components": {
     "software-engineering-team": "patch"
   }

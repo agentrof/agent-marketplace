@@ -2229,6 +2229,12 @@ class VaultHookShellContractTests(unittest.TestCase):
                 "--scope-plan", str(docs / "scope-plan.json"),
                 "--proposal-hash", "sha256:" + "0" * 64,
             ]))
+            if os.name == "nt":
+                for payload in (
+                    config_payload, package_payload, application_payload,
+                    recovery_payload, unsupported_flag,
+                ):
+                    payload["shell_family"] = "cmd"
 
             self.assertTrue(self.hook.sanctioned_config_writer(
                 config_payload, config,

@@ -36,6 +36,22 @@ STAGES = {
 BA_PROCESS_REF = "business-analysis/{space}/(domains/<domain>/)*/processes/<slug>-process"
 
 
+_CANDIDATE_SESSION_STACK: list[dict[tuple[Path, str], list[dict]]] = []
+
+
+@contextlib.contextmanager
+def candidate_session():
+    """Reuse immutable candidate compilations during one read-only preflight."""
+    if _CANDIDATE_SESSION_STACK:
+        yield
+        return
+    _CANDIDATE_SESSION_STACK.append({})
+    try:
+        yield
+    finally:
+        _CANDIDATE_SESSION_STACK.pop()
+
+
 def _reserved_path_alias(name: str, expected: str) -> bool:
     return unicodedata.normalize("NFC", name).casefold() == expected.casefold()
 
@@ -711,13 +727,20 @@ def candidates(docs: Path, stage: str) -> list[dict]:
     if stage not in STAGES:
         raise ValueError(f"unsupported stage: {stage}")
     docs = docs_root(docs)
-    return {
+    cache = _CANDIDATE_SESSION_STACK[-1] if _CANDIDATE_SESSION_STACK else None
+    key = (docs, stage)
+    if cache is not None and key in cache:
+        return cache[key]
+    result = {
         "business-analysis": ba_candidates,
         "solution-design": solution_candidates,
         "design-system": design_candidates,
         "experience-design": experience_candidates,
         "backlog-plan": backlog_candidates,
     }[stage](docs)
+    if cache is not None:
+        cache[key] = result
+    return result
 
 
 def verify(docs: Path, stage: str, ref: str, expected_hash: str = "",

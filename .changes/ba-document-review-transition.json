@@ -1,5 +1,5 @@
 {
-  "summary": "Add an atomic BA review-entry command and recognize the required Python -B lifecycle writers.",
+  "summary": "Add BA review entry, recognize required Python -B writers, and cache read-only backlog validation candidates.",
   "components": {
     "software-engineering-team": "patch"
   }

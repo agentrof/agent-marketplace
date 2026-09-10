@@ -1,6 +1,0 @@
-{
-  "summary": "Add a safe abort path for incomplete unpublished Experience update scopes.",
-  "components": {
-    "software-engineering-team": "minor"
-  }
-}

@@ -1,5 +1,5 @@
 {
-  "build_id": "snapshot.9a865aeff7fe18b847abff9c277e917eb37b57de1ffa6c1782fcf09ccfadf5a9",
+  "build_id": "snapshot.f547d6ba89ac58dc51add7b2c4a42d1b88a9eba6712421d3942d0f08a24152a8",
   "component": "software-engineering-team",
   "delivery_protocol": {
     "read_max": 1,
@@ -51,7 +51,7 @@
     "scripts/architecture_compile.py": "6efad5f1d59d5f0debb6c8693be6c262e80489703dccc08ba91e1abe2ad588ea",
     "scripts/artifact_check.py": "d95f51158f98e56fab55a083f240a2de612ae5cf5f2b73aeaee848721793e860",
     "scripts/ba_compile.py": "53c0abab2358b4980908b5cdcedac6153ce53a5fc5fe60573360dc6a727e1d20",
-    "scripts/backlog_compile.py": "6c581da86fdc2b3b5763b9ac71cdd79e1bf82bf3fc566671899b106072c70caf",
+    "scripts/backlog_compile.py": "ce7ec6e74dfec8528443f525dba930a51b6b9e3cc23c82549d5e3c9c57868cd1",
     "scripts/delivery_compile.py": "f8f15ead679cb8292d038f44ec8b0dfc04cafc06157453575e9cb7947633df01",
     "scripts/delivery_git.py": "cad45e8aeca5909dc5ce98691f80c546500a0836cb86f274805713680b327b88",
     "scripts/delivery_governance.py": "6ed43781101ac08c6a8c06d4acc4a2275c22d6722256567639a1e0d550fd241a",
@@ -59,7 +59,7 @@
     "scripts/delivery_result.py": "ec591462319c871ffc97e5b5c9296be9c6f559a9608201d55d48509b8a689b89",
     "scripts/design_system_compile.py": "77bd9ea0d1d34d1768aa3d73685fc0a6001d47c520da86cf9435ebe594894dfc",
     "scripts/experience_application_check.py": "171a950aa83092ad703cff4ad28e2e20952fc37cf613a069cb65178a669dc6d8",
-    "scripts/experience_compile.py": "2eb8f00a071aa13d3a10e7c7c2c663f21ae3bc4d26cb10de5e40f32a86aa8668",
+    "scripts/experience_compile.py": "94c6e09063c1a3198171c7c6958422112ec655051a3f8ce1e6eb48a7240dc735",
     "scripts/file_issue.py": "9dabf91796c416be8909e517f9a9859faff12c24c868c0c0e037739820bee02e",
     "scripts/generate_codex_project.py": "11a82ab6f04507c46486c8bd018bff2310cde5fb93013f414cbaa60709bc43e8",
     "scripts/landscape_check.py": "64fe7922c5fd3b26c1fd0648f046af1ccc521339eefdab39714bc4908865c4a3",
@@ -75,7 +75,7 @@
     "scripts/team_guard.py": "b001c78b460ed623523738699882061f37ef73e616c7100af84d1f299d5b45c6",
     "scripts/vault_check.py": "c34061a261e81176c1444884bd7704f7162efe6577ef7379c97acae9e6ce98d9",
     "scripts/vault_gate.py": "2624df7cae40066e1f7ce022dd6f1986841a65c7a28aada0ebfa565aca0832b2",
-    "scripts/vault_hook.py": "2cb41ff156a62efe5f1fb83d8792c229747558ff4c8d3a5450be6585bbf98661",
+    "scripts/vault_hook.py": "4667936b2af6713d3985ababf9f1f32224e7a965bc96ffb059c56e3f8627ad11",
     "skill-content/backlog-plan/SKILL.md": "7366c7341ee539f7ada5b4e38e36e07f6f29fb687f66a60a18b49341af6ea3c3",
     "skill-content/business-analysis/SKILL.md": "a2e836689bfafa46817564bc1744215d190e54adb54ebcef989513676969d76d",
     "skill-content/business-analysis/data/space-schema.json": "8bec0bb3025459143f52a8255d542ee52fcf99217e8c61fb770b407f1caa0936",
@@ -280,6 +280,6 @@
   "schema_version": 3,
   "source_channel": "snapshot",
   "source_commit": "",
-  "source_ref": "snapshot.9a865aeff7fe18b847abff9c277e917eb37b57de1ffa6c1782fcf09ccfadf5a9",
+  "source_ref": "snapshot.f547d6ba89ac58dc51add7b2c4a42d1b88a9eba6712421d3942d0f08a24152a8",
   "version": "0.2.0"
 }

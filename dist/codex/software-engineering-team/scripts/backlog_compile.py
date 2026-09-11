@@ -2240,7 +2240,12 @@ def restore_tree(root: Path, snapshot: tuple[dict[Path, bytes], set[Path]]) -> N
 
 def approve(args) -> int:
     docs = docs_root(args.docs)
-    record, errors = collect(docs)
+    # Experience receipt validation is expensive but immutable during this
+    # preflight. Reuse both candidate and Experience compiler results here;
+    # each later post-write read opens a fresh session so it cannot reuse
+    # stale receipt data after the approval transition mutates Markdown.
+    with stage_package.candidate_session(), experience_validation_session():
+        record, errors = collect(docs)
     errors.extend(approval_readiness_findings(record))
     errors = sorted(set(errors))
     if errors:
@@ -2265,12 +2270,14 @@ def approve(args) -> int:
             props.pop("package_hash", None)
             path.write_text(front_matter(props, body), encoding="utf-8")
 
-        refreshed, close_errors = collect(docs)
+        with stage_package.candidate_session(), experience_validation_session():
+            refreshed, close_errors = collect(docs)
         if close_errors:
             raise ApprovalFailure("; ".join(close_errors))
         render_backlog_navigation(refreshed, docs)
 
-        refreshed, close_errors = collect(docs)
+        with stage_package.candidate_session(), experience_validation_session():
+            refreshed, close_errors = collect(docs)
         if close_errors:
             raise ApprovalFailure("; ".join(close_errors))
         paths = package_paths(refreshed, docs)
@@ -2289,12 +2296,14 @@ def approve(args) -> int:
         props["package_hash"] = package_digest(docs, paths)
         root_path.write_text(front_matter(props, body), encoding="utf-8")
 
-        refreshed, close_errors = collect(docs)
+        with stage_package.candidate_session(), experience_validation_session():
+            refreshed, close_errors = collect(docs)
         close_errors.extend(approval_findings(refreshed, docs))
         if close_errors:
             raise ApprovalFailure("; ".join(sorted(set(close_errors))))
         render(refreshed, docs)
-        final_record, close_errors = collect(docs)
+        with stage_package.candidate_session(), experience_validation_session():
+            final_record, close_errors = collect(docs)
         close_errors.extend(approval_findings(final_record, docs))
         if close_errors:
             raise ApprovalFailure("; ".join(sorted(set(close_errors))))

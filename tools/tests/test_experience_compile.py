@@ -440,6 +440,195 @@ class ExperienceCompilerTests(unittest.TestCase):
             self.assertEqual(findings, [])
             self.assertEqual(len(ledger_rows), 2)
 
+    def test_resume_interrupted_update_approval_publishes_application_receipt(self):
+        with tempfile.TemporaryDirectory() as raw:
+            fixture, initial, initial_path = self.reviewed_recovered_scope(raw)
+            root = fixture["root"]
+
+            with self.recovery_contract(fixture["new_receipts"]):
+                reviewed, findings = experience_application_check.compile_application(root)
+                self.assertEqual(findings, [])
+                initial_attestation = fixture["docs"] / "initial-attestation.json"
+                initial_attestation.write_text(json.dumps({
+                    "schema_version": 4,
+                    "proposal_hash": initial["proposal_hash"],
+                    "artifact_tree_hash": reviewed["artifact_tree_hash"],
+                    "application_package_set_hash": reviewed["package_set_hash"],
+                    "application_hash": reviewed["application_hash"],
+                    "application_revision": reviewed["application_revision"],
+                    "reviewed_at_utc": datetime.now(timezone.utc).isoformat(),
+                    "reviewer_role": "experience-reviewer",
+                    "advisories": [],
+                }) + "\n", encoding="utf-8")
+                code, output, errors = self.run_in_process(
+                    "approve-set", "--root", root,
+                    "--experience", "checkout",
+                    "--experience", "returns",
+                    "--scope-plan", initial_path,
+                    "--proposal-hash", initial["proposal_hash"],
+                    "--review-attestation", initial_attestation,
+                )
+                self.assertEqual(code, 0, output + errors)
+
+                predecessor = experience_compile.expected_application(root)
+                for experience in ("checkout", "returns"):
+                    package = root / "experiences" / experience
+                    registry, findings = experience_compile.compile_package(
+                        package, True,
+                    )
+                    self.assertEqual(findings, [])
+                    experience_compile.archive_process_registry(package, registry)
+
+            successor_receipts = [
+                {
+                    "stage": stage,
+                    "result_ref": reference,
+                    "package_hash": "sha256:" + character * 64,
+                }
+                for stage, reference, character in (
+                    ("business-analysis", "business-analysis/commerce/space", "d"),
+                    ("solution-design", "solution-design/landscape", "e"),
+                    ("design-system", "design-system/MASTER", "f"),
+                )
+            ]
+            actions = []
+            for original in initial["actions"]:
+                package = root / "experiences" / original["experience"]
+                actions.append({
+                    **original,
+                    "action": "update",
+                    "expected_package": {
+                        "status": "approved",
+                        "revision": experience_compile.fields(package)["revision"],
+                        "source_hash": experience_compile.source_digest(package),
+                    },
+                    "reason": "Refresh the unchanged package inputs.",
+                })
+            update = {
+                "schema_version": 2,
+                "origin_mode": "manual",
+                "input_bindings": experience_compile.binding_rows(successor_receipts),
+                "actions": actions,
+                "application_action": "update",
+                "expected_application": predecessor,
+            }
+            update["proposal_hash"] = experience_compile.proposal_digest(update)
+            update_path = fixture["docs"] / "update-experience-scope.json"
+            update_path.write_bytes(experience_compile.canonical(update))
+
+            with self.recovery_contract(successor_receipts):
+                for action in actions:
+                    package = root / "experiences" / action["experience"]
+                    data, body = experience_compile.fm(package / "experience.md")
+                    data["status"] = "in_review"
+                    data["revision"] = int(data["revision"]) + 1
+                    data["input_bindings"] = experience_compile.package_binding_rows(
+                        update, data["primary_process_ref"],
+                    )
+                    experience_compile.status_tags(data)
+                    experience_compile.rewrite(package / "experience.md", data, body)
+                    experience_compile.write_open_revision(
+                        package, update, action, update["proposal_hash"],
+                    )
+                    code, output, errors = self.run_in_process(
+                        "render", "--experience-root", package,
+                    )
+                    self.assertEqual(code, 0, output + errors)
+                experience_compile.write_open_application_state(
+                    root, update, update["proposal_hash"], phase="in_review",
+                )
+                reviewed, findings = experience_application_check.compile_application(root)
+                self.assertEqual(findings, [])
+                attestation = fixture["docs"] / "update-attestation.json"
+                attestation.write_text(json.dumps({
+                    "schema_version": 4,
+                    "proposal_hash": update["proposal_hash"],
+                    "artifact_tree_hash": reviewed["artifact_tree_hash"],
+                    "application_package_set_hash": reviewed["package_set_hash"],
+                    "application_hash": reviewed["application_hash"],
+                    "application_revision": reviewed["application_revision"],
+                    "reviewed_at_utc": datetime.now(timezone.utc).isoformat(),
+                    "reviewer_role": "experience-reviewer",
+                    "advisories": [],
+                }) + "\n", encoding="utf-8")
+                interrupted = SimpleNamespace(
+                    root=str(root),
+                    experience=["checkout", "returns"],
+                    scope_plan=str(update_path),
+                    proposal_hash=update["proposal_hash"],
+                    review_attestation=str(attestation),
+                )
+                with mock.patch.object(
+                    experience_application_check,
+                    "write_registry_and_ledger",
+                    side_effect=KeyboardInterrupt,
+                ), self.assertRaises(KeyboardInterrupt):
+                    experience_compile.approve_set(interrupted)
+
+                _registry, findings = experience_application_check.compile_application(
+                    root, True,
+                )
+                self.assertIn(
+                    "application revision ledger does not contain the approved artifact receipt",
+                    findings,
+                )
+                self.assertIn(
+                    "approved application still has an open lifecycle revision",
+                    findings,
+                )
+                current, findings = experience_application_check.compile_application(root)
+                self.assertEqual(findings, [])
+                process_receipts = []
+                for experience in ("checkout", "returns"):
+                    package = root / "experiences" / experience
+                    registry, findings = experience_compile.compile_package(
+                        package, True,
+                    )
+                    self.assertEqual(findings, [])
+                    process_receipts.append(
+                        experience_compile.package_receipt(package, registry)
+                    )
+                self.assertEqual(
+                    [
+                        {
+                            "result_ref": row["result_ref"],
+                            "package_hash": row["package_hash"],
+                        }
+                        for row in sorted(
+                            process_receipts,
+                            key=lambda row: row["result_ref"],
+                        )
+                    ],
+                    current["packages"],
+                )
+
+                code, output, errors = self.run_in_process(
+                    "resume-interrupted-approval", "--root", root,
+                    "--experience", "checkout",
+                    "--experience", "returns",
+                    "--scope-plan", update_path,
+                    "--proposal-hash", update["proposal_hash"],
+                    "--review-attestation", attestation,
+                )
+                self.assertEqual(code, 0, output + errors)
+                self.assertTrue(json.loads(output)["changed"])
+                checked, findings = experience_application_check.compile_application(
+                    root, True,
+                )
+                self.assertEqual(findings, [])
+                self.assertEqual(checked["application_revision"], 3)
+
+                code, output, errors = self.run_in_process(
+                    "resume-interrupted-approval", "--root", root,
+                    "--experience", "checkout",
+                    "--experience", "returns",
+                    "--scope-plan", update_path,
+                    "--proposal-hash", update["proposal_hash"],
+                    "--review-attestation", attestation,
+                )
+                self.assertEqual(code, 0, output + errors)
+                self.assertFalse(json.loads(output)["changed"])
+
     def test_recovery_rebinds_legacy_current_input_metadata_atomically(self):
         with tempfile.TemporaryDirectory() as raw:
             fixture = self.orphaned_create_scope(raw)

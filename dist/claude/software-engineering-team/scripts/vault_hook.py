@@ -95,6 +95,7 @@ APPLICATION_ROOT_WRITERS = {
     "render-application",
     "enter-application-review",
     "approve-set",
+    "resume-interrupted-approval",
     "abort-open-scope",
     "return-to-draft",
 }

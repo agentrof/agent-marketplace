@@ -66,6 +66,7 @@ MUTATING_COMMANDS = {
     "revise-records",
     "render-application", "begin-application-revision",
     "enter-application-review", "approve-set", "rename", "retire",
+    "resume-interrupted-approval",
     "recover-open-scope", "rehydrate-published-scope", "abort-open-scope",
     "return-to-draft",
 }
@@ -4110,6 +4111,150 @@ def application_status(args) -> int:
     return 0
 
 
+def resume_interrupted_approval(args) -> int:
+    """Publish the application receipt after an interrupted update approval."""
+    root = root_for(args.root)
+    selected = [resolve_package(root, item) for item in args.experience]
+    if any(item is None for item in selected) or len(set(selected)) != len(selected):
+        return fail(
+            "resume-interrupted-approval needs unique resolvable Experience packages",
+            2,
+        )
+    try:
+        plan = load_scope_plan(args.scope_plan, args.proposal_hash)
+        findings = verify_scope_inputs(root, plan, require_committed=True)
+        if findings:
+            raise ValueError("; ".join(findings))
+        changed_actions = [
+            row for row in plan["actions"] if isinstance(row, dict)
+            and row.get("action") in {"create", "update", "rename", "retire"}
+        ]
+        if any(row.get("action") != "update" for row in changed_actions):
+            raise ValueError(
+                "resume-interrupted-approval supports only update package actions"
+            )
+        changed_targets = [action_target(row) for row in changed_actions]
+        if len(changed_targets) != len(set(changed_targets)):
+            raise ValueError("scope plan contains duplicate package mutation targets")
+        if {item.name for item in selected if item is not None} != set(changed_targets):
+            raise ValueError(
+                "resume-interrupted-approval packages must exactly match the approved scope-plan action set"
+            )
+        action_by_target = dict(zip(changed_targets, changed_actions))
+        application_action = str(plan.get("application_action", ""))
+        if application_action != "update":
+            raise ValueError(
+                "resume-interrupted-approval supports only an application update"
+            )
+        expected_application = plan.get("expected_application", {})
+        if not exact_application_preimage(expected_application):
+            raise ValueError("scope plan has an invalid application preimage")
+        try:
+            application_state = read_open_application_state(root)
+        except ValueError:
+            application_state = None
+        if application_state is not None:
+            verify_application_preimage(root, plan, args.proposal_hash)
+            validate_open_application_state(
+                root, plan=plan, proposal_hash=args.proposal_hash,
+                expected_phase="in_review",
+            )
+        import experience_application_check
+        application_registry, problems = experience_application_check.compile_application(root)
+        if problems:
+            raise ValueError("; ".join(problems))
+        if (
+            application_registry.get("application_revision")
+            != opened_application_revision(plan)
+            or application_registry.get("previous_application_hash")
+            != expected_application.get("application_hash")
+        ):
+            raise ValueError(
+                "interrupted application receipt does not bind the expected successor"
+            )
+        receipts = []
+        for package in selected:
+            data = fields(package)
+            action = action_by_target[package.name]
+            expected = action.get("expected_package")
+            if not exact_package_preimage(expected, create=False):
+                raise ValueError(f"{package.name} has an invalid package preimage")
+            if (
+                data.get("status") != "approved"
+                or data.get("revision") != int(expected["revision"]) + 1
+            ):
+                raise ValueError(
+                    f"{package.name} is not the exact approved successor expected by the scope plan"
+                )
+            validate_package_input_bindings(data, plan, action)
+            registry, package_problems = compile_package(package, True)
+            if package_problems:
+                raise ValueError("; ".join(package_problems))
+            previous, ledger_problems = validate_process_ledger(
+                package, int(data["revision"]),
+            )
+            if ledger_problems or not previous or (
+                previous[-1].get("package_revision") != expected["revision"]
+                or previous[-1].get("source_hash") != expected["source_hash"]
+            ):
+                raise ValueError(
+                    f"{package.name} predecessor receipt does not match the scope plan"
+                )
+            receipts.append(package_receipt(package, registry))
+        receipts.sort(key=lambda row: row["result_ref"])
+        application_packages = [
+            {
+                "result_ref": row["result_ref"],
+                "package_hash": row["package_hash"],
+            }
+            for row in receipts
+        ]
+        if application_packages != application_registry.get("packages"):
+            raise ValueError(
+                "interrupted application receipt does not match approved package receipts"
+            )
+        if all((
+            application_registry["artifact_tree_hash"]
+            == expected_application.get("artifact_tree_hash"),
+            application_registry["package_set_hash"]
+            == expected_application.get("package_set_hash"),
+        )):
+            raise ValueError("application update has no prototype or package-set delta")
+        if application_state is None:
+            checked, problems = experience_application_check.compile_application(root, True)
+            if problems or checked != application_registry:
+                raise ValueError(
+                    "; ".join(problems)
+                    or "completed application receipt differs from its successor"
+                )
+            print(json.dumps({"changed": False, "receipts": [
+                experience_application_check.application_receipt(root, checked),
+                *receipts,
+            ]}, indent=2))
+            return 0
+        validate_reviewer_attestation(
+            args.review_attestation, args.proposal_hash, application_registry,
+        )
+    except ValueError as exc:
+        return fail(str(exc), 2)
+    try:
+        experience_application_check.write_registry_and_ledger(root, application_registry)
+        open_state = open_application_state_path(root)
+        open_state.unlink(missing_ok=True)
+        fsync_directory(open_state.parent)
+        checked, problems = experience_application_check.compile_application(root, True)
+        if problems:
+            raise ValueError("; ".join(problems))
+        render_experience_navigation(root)
+    except (OSError, ValueError) as exc:
+        return fail(f"resume-interrupted-approval rolled back: {exc}", 2)
+    print(json.dumps({"changed": True, "receipts": [
+        experience_application_check.application_receipt(root, checked),
+        *receipts,
+    ]}, indent=2))
+    return 0
+
+
 def approve_set(args) -> int:
     root = root_for(args.root)
     selected = [resolve_package(root, item) for item in args.experience]
@@ -5135,6 +5280,7 @@ def main(argv: list[str] | None = None) -> int:
     p = sub.add_parser("check-application"); p.add_argument("--root", required=True); p.add_argument("--gate", action="store_true"); p.add_argument("--json", action="store_true"); p.set_defaults(func=check_application)
     p = sub.add_parser("application-status"); p.add_argument("--root", required=True); p.set_defaults(func=application_status)
     p = sub.add_parser("approve-set"); p.add_argument("--root", required=True); p.add_argument("--experience", action="append", default=[]); p.add_argument("--scope-plan", required=True); p.add_argument("--proposal-hash", required=True); p.add_argument("--review-attestation", default=""); p.set_defaults(func=approve_set)
+    p = sub.add_parser("resume-interrupted-approval"); p.add_argument("--root", required=True); p.add_argument("--experience", action="append", default=[]); p.add_argument("--scope-plan", required=True); p.add_argument("--proposal-hash", required=True); p.add_argument("--review-attestation", default=""); p.set_defaults(func=resume_interrupted_approval)
     p = sub.add_parser("recover-open-scope"); p.add_argument("--root", required=True); p.add_argument("--from-scope-plan", required=True); p.add_argument("--from-proposal-hash", required=True); p.add_argument("--scope-plan", required=True); p.add_argument("--proposal-hash", required=True); p.set_defaults(func=recover_open_scope)
     p = sub.add_parser("rehydrate-published-scope"); p.add_argument("--root", required=True); p.add_argument("--scope-plan", required=True); p.add_argument("--proposal-hash", required=True); p.add_argument("--application-ref", required=True); p.set_defaults(func=rehydrate_published_scope)
     p = sub.add_parser("abort-open-scope"); p.add_argument("--root", required=True); p.add_argument("--scope-plan", required=True); p.add_argument("--proposal-hash", required=True); p.add_argument("--confirm", required=True); p.set_defaults(func=abort_open_scope)

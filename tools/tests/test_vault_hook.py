@@ -2216,6 +2216,14 @@ class VaultHookShellContractTests(unittest.TestCase):
                 "--scope-plan", str(docs / "scope-plan.json"),
                 "--proposal-hash", "sha256:" + "0" * 64,
             ]))
+            resume_payload = self.attested_writer_payload(root, command([
+                sys.executable, "-B", script, "resume-interrupted-approval",
+                "--root", str(experience_root),
+                "--experience", "checkout",
+                "--scope-plan", str(docs / "scope-plan.json"),
+                "--proposal-hash", "sha256:" + "0" * 64,
+                "--review-attestation", str(docs / "review-attestation.json"),
+            ]))
             recovery_payload = self.attested_writer_payload(root, command([
                 sys.executable, "-B", script, "rehydrate-published-scope",
                 "--root", str(experience_root),
@@ -2245,7 +2253,8 @@ class VaultHookShellContractTests(unittest.TestCase):
             if os.name == "nt":
                 for payload in (
                     config_payload, package_payload, application_payload,
-                    recovery_payload, abort_payload, return_to_draft_payload,
+                    resume_payload, recovery_payload, abort_payload,
+                    return_to_draft_payload,
                     unsupported_flag,
                 ):
                     payload["shell_family"] = "cmd"
@@ -2258,6 +2267,9 @@ class VaultHookShellContractTests(unittest.TestCase):
             ))
             self.assertTrue(self.hook.sanctioned_application_writer(
                 application_payload, docs,
+            ))
+            self.assertTrue(self.hook.sanctioned_application_writer(
+                resume_payload, docs,
             ))
             self.assertIsNotNone(self.hook.attested_recovery_writer_spec(
                 recovery_payload, docs,

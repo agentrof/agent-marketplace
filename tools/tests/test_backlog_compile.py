@@ -39,6 +39,32 @@ class BacklogCompilerTests(unittest.TestCase):
             result = self.run_cli("init", "--docs", Path(raw) / "docs", "--planning-mode", "requirement")
             self.assertNotEqual(result.returncode, 0)
 
+    def test_changes_requested_status_tag_uses_kebab_case(self):
+        props = {
+            "status": "changes_requested",
+            "tags": ["doc/backlog-review", "status/changes-requested"],
+        }
+        contract = backlog_compile.backlog_contract()
+
+        self.assertEqual(
+            backlog_compile.status_findings(
+                props, "backlog-review", "review.md", contract,
+            ),
+            [],
+        )
+
+        backlog_compile.status_tag(props, "changes_requested")
+
+        self.assertEqual(
+            props["tags"], ["doc/backlog-review", "status/changes-requested"],
+        )
+        self.assertEqual(
+            backlog_compile.status_findings(
+                props, "backlog-review", "review.md", contract,
+            ),
+            [],
+        )
+
     def test_candidate_session_reuses_each_stage_only_within_preflight(self):
         with tempfile.TemporaryDirectory() as raw:
             docs = Path(raw) / "workspace" / "docs"

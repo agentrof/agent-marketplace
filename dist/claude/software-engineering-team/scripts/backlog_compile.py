@@ -985,6 +985,10 @@ def deferred_criteria(docs: Path, body: str,
     return result, errors
 
 
+def status_tag_name(status: str) -> str:
+    return f"status/{status.replace('_', '-')}"
+
+
 def status_findings(props: dict, type_name: str, path: str,
                     contract: dict) -> list[str]:
     allowed = set(contract["_status_values"].get(type_name.replace("-", "_"), []))
@@ -994,7 +998,7 @@ def status_findings(props: dict, type_name: str, path: str,
         errors.append(f"{path} has invalid {type_name} status: {status or '(missing)'}")
     tags = values(props, "tags")
     status_tags = [tag for tag in tags if tag.startswith("status/")]
-    if status_tags != [f"status/{status}"]:
+    if status_tags != [status_tag_name(status)]:
         errors.append(f"{path} status tag does not mirror status: {status}")
     return errors
 
@@ -2158,7 +2162,7 @@ def init(args) -> int:
 def status_tag(props: dict, status: str) -> None:
     tags = values(props, "tags")
     props["tags"] = [tag for tag in tags if not tag.startswith("status/")]
-    props["tags"].append(f"status/{status}")
+    props["tags"].append(status_tag_name(status))
     props["status"] = status
 
 

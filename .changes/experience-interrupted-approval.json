@@ -1,0 +1,6 @@
+{
+  "summary": "Recover an interrupted Experience update approval without accepting ambiguous lifecycle state.",
+  "components": {
+    "software-engineering-team": "patch"
+  }
+}

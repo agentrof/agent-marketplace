@@ -1,0 +1,6 @@
+{
+  "summary": "Parse escaped Requirement Stage Impact wikilink aliases as their canonical package references.",
+  "components": {
+    "software-engineering-team": "patch"
+  }
+}

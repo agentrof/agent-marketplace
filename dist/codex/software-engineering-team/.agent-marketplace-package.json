@@ -1,5 +1,5 @@
 {
-  "build_id": "snapshot.71009f93eb71e89885ae556df3609b37d39c717fbb42b3d3d6f1c8efc6837770",
+  "build_id": "snapshot.ac7d8778fb70ee03029701942bb9d646a5033356b9786bb3c730b46676e2451c",
   "component": "software-engineering-team",
   "delivery_protocol": {
     "read_max": 1,
@@ -51,7 +51,7 @@
     "scripts/architecture_compile.py": "6efad5f1d59d5f0debb6c8693be6c262e80489703dccc08ba91e1abe2ad588ea",
     "scripts/artifact_check.py": "d95f51158f98e56fab55a083f240a2de612ae5cf5f2b73aeaee848721793e860",
     "scripts/ba_compile.py": "53c0abab2358b4980908b5cdcedac6153ce53a5fc5fe60573360dc6a727e1d20",
-    "scripts/backlog_compile.py": "255fc2d45331ee12e945fbfafaa1e7a4cfdc01132ba29e0139a5e8e1c22bde23",
+    "scripts/backlog_compile.py": "6c581da86fdc2b3b5763b9ac71cdd79e1bf82bf3fc566671899b106072c70caf",
     "scripts/delivery_compile.py": "f8f15ead679cb8292d038f44ec8b0dfc04cafc06157453575e9cb7947633df01",
     "scripts/delivery_git.py": "cad45e8aeca5909dc5ce98691f80c546500a0836cb86f274805713680b327b88",
     "scripts/delivery_governance.py": "6ed43781101ac08c6a8c06d4acc4a2275c22d6722256567639a1e0d550fd241a",
@@ -280,6 +280,6 @@
   "schema_version": 3,
   "source_channel": "snapshot",
   "source_commit": "",
-  "source_ref": "snapshot.71009f93eb71e89885ae556df3609b37d39c717fbb42b3d3d6f1c8efc6837770",
+  "source_ref": "snapshot.ac7d8778fb70ee03029701942bb9d646a5033356b9786bb3c730b46676e2451c",
   "version": "0.2.0"
 }

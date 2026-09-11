@@ -270,7 +270,7 @@ def bind_stage(path: Path, stage: str, result_refs: list[str] | str,
     for raw in raw_refs:
         target = raw.strip()
         if target.startswith("[[") and target.endswith("]]" ):
-            target = target[2:-2].split("|", 1)[0]
+            target = wikilink_target(target[2:-2])
         if target:
             targets.append(target)
     if not targets or len(set(targets)) != len(targets):
@@ -340,6 +340,10 @@ def split_cells(line: str) -> list[str]:
     return cells
 
 
+def wikilink_target(value: str) -> str:
+    return value.replace("\\|", "|").split("|", 1)[0].split("#", 1)[0].strip()
+
+
 def impact_rows(body: str) -> list[tuple[str, str, list[str], str]]:
     text = section_text(body, "Stage Impact")
     rows = []
@@ -350,7 +354,7 @@ def impact_rows(body: str) -> list[tuple[str, str, list[str], str]]:
         if len(cells) != 4 or cells[0].casefold() == "stage":
             continue
         refs = [
-            match.group(1).split("|", 1)[0].split("#", 1)[0].strip()
+            wikilink_target(match.group(1))
             for match in WIKILINK_RE.finditer(cells[2])
         ]
         # A Stage Impact receipt is an exact package ref, not necessarily a

@@ -7,6 +7,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest import mock
 from pathlib import Path
 
 
@@ -167,6 +168,42 @@ class RequirementCompilerTests(unittest.TestCase):
         props, _ = requirement_compile.split_note(path)
         self.assertEqual(props["status"], "resolved_no_change")
         self.assertEqual(requirement_compile.requirement_findings(path, require_approved=True), [])
+
+    def test_reuse_stage_accepts_escaped_wikilink_aliases(self):
+        path = self.complete_draft()
+        props, body = requirement_compile.split_note(path)
+        body = body.replace(
+            "| business-analysis | required |  | The business-analysis output constrains this change. |",
+            "| business-analysis | reuse | [[business-analysis/foundation/space\\|Foundation]] | Existing approved package. |",
+        )
+        path.write_text(requirement_compile.render_note(props, body), encoding="utf-8")
+        requirement_compile.approve_requirement(path)
+        receipt = {
+            "result_ref": "business-analysis/foundation/space",
+            "package_hash": "sha256:" + "a" * 64,
+        }
+
+        with mock.patch.object(
+            requirement_compile.stage_package, "verify", return_value=(receipt, []),
+        ) as verify:
+            requirement_compile.bind_stage(
+                path,
+                "business-analysis",
+                "[[business-analysis/foundation/space\\|Foundation]]",
+            )
+        verify.assert_called_once_with(
+            path.parents[1],
+            "business-analysis",
+            "business-analysis/foundation/space",
+            "",
+            require_committed=True,
+        )
+
+        _props, bound_body = requirement_compile.split_note(path)
+        self.assertEqual(
+            requirement_compile.stage_results(bound_body)["business-analysis"],
+            [("business-analysis/foundation/space", "sha256:" + "a" * 64)],
+        )
 
 
 if __name__ == "__main__":

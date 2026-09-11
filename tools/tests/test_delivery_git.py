@@ -76,6 +76,7 @@ class DeliveryGitTests(unittest.TestCase):
         temporary = tempfile.TemporaryDirectory()
         project = Path(temporary.name)
         subprocess.run(["git", "init", "-q", "-b", "main", str(project)], check=True)
+        subprocess.run(["git", "-C", str(project), "config", "gc.auto", "0"], check=True)
         subprocess.run(["git", "-C", str(project), "config", "user.email", "test@example.com"], check=True)
         subprocess.run(["git", "-C", str(project), "config", "user.name", "Test"], check=True)
         (project / "workspace" / "docs").mkdir(parents=True)
@@ -90,10 +91,26 @@ class DeliveryGitTests(unittest.TestCase):
         subprocess.run(["git", "-C", str(project), "commit", "-qm", "init"], check=True)
         remote = project / "remote.git"
         subprocess.run(["git", "init", "-q", "--bare", str(remote)], check=True)
+        subprocess.run(["git", "--git-dir", str(remote), "config", "gc.auto", "0"], check=True)
         subprocess.run(["git", "-C", str(project), "remote", "add", "origin", str(remote)], check=True)
         subprocess.run(["git", "-C", str(project), "push", "-q", "-u", "origin", "main"], check=True)
         subprocess.run(["git", "--git-dir", str(remote), "symbolic-ref", "HEAD", "refs/heads/main"], check=True)
         return temporary, project
+
+    def test_project_fixture_disables_automatic_git_maintenance(self):
+        temporary, project = self.make_project()
+        self.addCleanup(temporary.cleanup)
+        remote = project / "remote.git"
+        local_auto_gc = subprocess.run(
+            ["git", "-C", str(project), "config", "--get", "gc.auto"],
+            check=True, capture_output=True, text=True,
+        ).stdout.strip()
+        remote_auto_gc = subprocess.run(
+            ["git", "--git-dir", str(remote), "config", "--get", "gc.auto"],
+            check=True, capture_output=True, text=True,
+        ).stdout.strip()
+        self.assertEqual(local_auto_gc, "0")
+        self.assertEqual(remote_auto_gc, "0")
 
     def prepare_pr_intent(self):
         """Build one real remote Delivery through its durable PR intent."""
@@ -558,125 +575,122 @@ class DeliveryGitTests(unittest.TestCase):
                 delivery_git.reserve_delivery(project, "DLV-001")
 
     def test_execution_publication_claim_and_start_use_global_slot(self):
-        with tempfile.TemporaryDirectory() as temporary:
-            project = Path(temporary)
-            subprocess.run(["git", "init", "-q", "-b", "main", str(project)], check=True)
-            subprocess.run(["git", "-C", str(project), "config", "user.email", "test@example.com"], check=True)
-            subprocess.run(["git", "-C", str(project), "config", "user.name", "Test"], check=True)
-            docs = project / "workspace" / "docs"; (docs / "maps").mkdir(parents=True)
-            (project / "workspace" / "config.json").write_text(json.dumps({"schema_version": 2, "team_id": "software-engineering-team", "output_language": "English", "terminology_language": "English"}), encoding="utf-8")
-            self.approve_governance(docs)
-            make_approved_backlog(docs)
-            subprocess.run(["git", "-C", str(project), "add", "."], check=True); subprocess.run(["git", "-C", str(project), "commit", "-qm", "init"], check=True)
-            remote = project / "remote.git"; subprocess.run(["git", "init", "-q", "--bare", str(remote)], check=True)
-            subprocess.run(["git", "-C", str(project), "remote", "add", "origin", str(remote)], check=True); subprocess.run(["git", "-C", str(project), "push", "-q", "-u", "origin", "main"], check=True)
-            dod = type("Args", (), {"docs": str(docs), "title": "Project", "file": None})
-            delivery_compile.init_dod(dod); delivery_compile.approve_dod(dod)
-            init = type("Args", (), {"docs": str(docs), "id": None, "slug": None, "goal": "SAML authentication", "outcome": None, "target_branch": "main", "story": ["AUTH-01"]})
-            delivery_compile.init_delivery(init)
-            scope = type("Args", (), {"docs": str(docs), "delivery": "DLV-001"}); delivery_compile.approve_scope(scope)
-            subprocess.run(["git", "-C", str(project), "add", "workspace/docs"], check=True); subprocess.run(["git", "-C", str(project), "commit", "-qm", "scope"], check=True); subprocess.run(["git", "-C", str(project), "push", "-q"], check=True)
-            delivery_git.reserve_delivery(project, "DLV-001")
-            self.author_execution_topology(docs)
-            delivery_compile.approve_execution(scope)
-            subprocess.run(["git", "-C", str(project), "add", "workspace/docs"], check=True); subprocess.run(["git", "-C", str(project), "commit", "-qm", "plan"], check=True); subprocess.run(["git", "-C", str(project), "push", "-q"], check=True)
-            delivery_git.publish_execution_plan(project, "DLV-001")
-            delivery_git.refresh_target(project, "DLV-001")
-            result = delivery_git.claim_items(project, "DLV-001")
-            self.assertEqual(result["claims"], ["AUTH-01"])
-            governance = docs / "delivery" / "governance" / "governance.md"
-            before_governance = governance.read_text(encoding="utf-8")
-            governance.write_text(before_governance.replace("max_parallel: 1", "max_parallel: 2"), encoding="utf-8")
-            with self.assertRaisesRegex(RuntimeError, "(?i)governance"):
-                delivery_git.start_item(project, "DLV-001", "AUTH-01")
-            governance.write_text(before_governance, encoding="utf-8")
-            receipt, errors = delivery_governance.status(docs)
-            self.assertEqual(errors, [])
-            self.assertTrue(receipt.get("current"), receipt)
-            activation = delivery_git.start_item(project, "DLV-001", "AUTH-01")
-            self.assertEqual(activation["slot"], "001")
-            self.assertEqual(activation["receipt"]["state"], "verified")
-            self.assertTrue(Path(activation["worktree"]).is_dir())
-            self.assertEqual(
-                subprocess.run(
-                    ["git", "-C", activation["worktree"], "rev-parse", "HEAD"],
-                    check=True, capture_output=True, text=True,
-                ).stdout.strip(),
-                activation["item"],
-            )
-            delivery_git.clear_verified_writer_receipt(project, "DLV-001", "AUTH-01")
-            delivery_git.remove_item_worktree(project, "DLV-001", "AUTH-01")
-            takeover = delivery_git.takeover_item(project, "DLV-001", "AUTH-01", confirm=True)
-            self.assertNotEqual(takeover["writer_epoch"], activation["writer_epoch"])
-            self.assertEqual(takeover["receipt"]["state"], "verified")
-            blocked = delivery_git.block_item(project, "DLV-001", "AUTH-01")
-            self.assertEqual(blocked["status"], "blocked")
-            unblocked = delivery_git.unblock_item(project, "DLV-001", "AUTH-01")
-            self.assertEqual(unblocked["status"], "active")
-            paused = delivery_git.pause_item(project, "DLV-001", "AUTH-01")
-            self.assertEqual(paused["status"], "paused")
-            self.assertFalse(Path(activation["worktree"]).exists())
-            self.assertIsNone(delivery_git.read_writer_receipt(project, "DLV-001", "AUTH-01"))
-            resumed = delivery_git.resume_item(project, "DLV-001", "AUTH-01")
-            self.assertEqual(resumed["receipt"]["state"], "verified")
-            self.assertNotEqual(resumed["writer_epoch"], activation["writer_epoch"])
-            first_product = self.commit_item_product_change(resumed["worktree"], "def authenticate():\n    return 'v1'\n")
-            self.assertEqual(self.approve_item_evidence(resumed["worktree"]), 0)
-            pushed = delivery_git.push_item(project, "DLV-001", "AUTH-01")
-            self.assertEqual(pushed["product_tip"], first_product)
-            first_evidence = delivery_git.commit_message(project, pushed["item"])
-            self.assertEqual(delivery_git.trailer(first_evidence, "Record"), "item-evidence-v1")
-            self.assertEqual(delivery_git.trailer(first_evidence, "Product-Tip"), first_product)
-            integrated = delivery_git.integrate_item(project, "DLV-001", "AUTH-01")
-            self.assertTrue(integrated["ok"])
-            self.assertEqual(
-                subprocess.run(
-                    ["git", "show", f"{integrated['integration']}:src/auth.py"],
-                    cwd=project, check=True, capture_output=True, text=True,
-                ).stdout,
-                "def authenticate():\n    return 'v1'\n",
-            )
-            reopened = delivery_git.reopen_item(project, "DLV-001", "AUTH-01")
-            self.assertEqual(reopened["status"], "active")
-            self.assertEqual(delivery_git.trailer(delivery_git.commit_message(project, reopened["item"]), "Record"), "item-reopen-v1")
-            second_product = self.commit_item_product_change(reopened["worktree"], "def authenticate():\n    return 'v2'\n")
-            self.assertEqual(self.approve_item_evidence(reopened["worktree"]), 0)
-            pushed = delivery_git.push_item(project, "DLV-001", "AUTH-01")
-            self.assertEqual(pushed["product_tip"], second_product)
-            integrated = delivery_git.integrate_item(project, "DLV-001", "AUTH-01")
-            integration_oid = delivery_git.remote_oid(
-                project, "origin", delivery_git.canonical_refs("DLV-001")["integration"]
-            )
-            review_args = type("Args", (), {
-                "docs": str(docs), "delivery": "DLV-001",
-                "reviewed_commit": integrated["integration"],
-                "reviewed_integration_commit": integration_oid,
-            })
-            delivery_compile.approve_review(review_args)
-            published = delivery_git.publish_delivery_review(project, "DLV-001")
-            self.assertTrue(published["ok"])
-            intent = delivery_git.prepare_pr_creation(project, "DLV-001")
-            self.assertEqual(intent["provider"], "github")
-            pr_url = "https://github.com/agentrof/example/pull/17"
-            record_args = type("Args", (), {"docs": str(docs), "delivery": "DLV-001", "url": pr_url})
-            delivery_compile.record_pr(record_args)
-            recorded = delivery_git.record_pr_remote(project, "DLV-001", pr_url)
-            self.assertEqual(recorded["pull_request"], "17")
-            refs = subprocess.run(["git", "--git-dir", str(remote), "show-ref"], check=True, text=True, capture_output=True).stdout
-            self.assertIn("refs/heads/agentrof/items/auth-01", refs)
-            self.assertNotIn("refs/heads/agentrof/slots/001", refs)
-            cancelled = delivery_git.cancel_delivery(
-                project, "DLV-001", "Target no longer requires this Delivery"
-            )
-            self.assertEqual(cancelled["status"], "cancelled")
-            self.assertTrue(cancelled["reverts"])
-            self.assertEqual(
-                delivery_git.trailer(
-                    delivery_git.commit_message(project, cancelled["finalization"]),
-                    "Record",
-                ),
-                "cancellation-finalized-v1",
-            )
+        temporary, project = self.make_project()
+        self.addCleanup(temporary.cleanup)
+        docs = project / "workspace" / "docs"
+        (docs / "maps").mkdir(parents=True, exist_ok=True)
+        make_approved_backlog(docs)
+        subprocess.run(["git", "-C", str(project), "add", "workspace"], check=True)
+        subprocess.run(["git", "-C", str(project), "commit", "-qm", "approved backlog"], check=True)
+        subprocess.run(["git", "-C", str(project), "push", "-q"], check=True)
+        remote = project / "remote.git"
+        dod = type("Args", (), {"docs": str(docs), "title": "Project", "file": None})
+        delivery_compile.init_dod(dod); delivery_compile.approve_dod(dod)
+        init = type("Args", (), {"docs": str(docs), "id": None, "slug": None, "goal": "SAML authentication", "outcome": None, "target_branch": "main", "story": ["AUTH-01"]})
+        delivery_compile.init_delivery(init)
+        scope = type("Args", (), {"docs": str(docs), "delivery": "DLV-001"}); delivery_compile.approve_scope(scope)
+        subprocess.run(["git", "-C", str(project), "add", "workspace/docs"], check=True); subprocess.run(["git", "-C", str(project), "commit", "-qm", "scope"], check=True); subprocess.run(["git", "-C", str(project), "push", "-q"], check=True)
+        delivery_git.reserve_delivery(project, "DLV-001")
+        self.author_execution_topology(docs)
+        delivery_compile.approve_execution(scope)
+        subprocess.run(["git", "-C", str(project), "add", "workspace/docs"], check=True); subprocess.run(["git", "-C", str(project), "commit", "-qm", "plan"], check=True); subprocess.run(["git", "-C", str(project), "push", "-q"], check=True)
+        delivery_git.publish_execution_plan(project, "DLV-001")
+        delivery_git.refresh_target(project, "DLV-001")
+        result = delivery_git.claim_items(project, "DLV-001")
+        self.assertEqual(result["claims"], ["AUTH-01"])
+        governance = docs / "delivery" / "governance" / "governance.md"
+        before_governance = governance.read_text(encoding="utf-8")
+        governance.write_text(before_governance.replace("max_parallel: 1", "max_parallel: 2"), encoding="utf-8")
+        with self.assertRaisesRegex(RuntimeError, "(?i)governance"):
+            delivery_git.start_item(project, "DLV-001", "AUTH-01")
+        governance.write_text(before_governance, encoding="utf-8")
+        receipt, errors = delivery_governance.status(docs)
+        self.assertEqual(errors, [])
+        self.assertTrue(receipt.get("current"), receipt)
+        activation = delivery_git.start_item(project, "DLV-001", "AUTH-01")
+        self.assertEqual(activation["slot"], "001")
+        self.assertEqual(activation["receipt"]["state"], "verified")
+        self.assertTrue(Path(activation["worktree"]).is_dir())
+        self.assertEqual(
+            subprocess.run(
+                ["git", "-C", activation["worktree"], "rev-parse", "HEAD"],
+                check=True, capture_output=True, text=True,
+            ).stdout.strip(),
+            activation["item"],
+        )
+        delivery_git.clear_verified_writer_receipt(project, "DLV-001", "AUTH-01")
+        delivery_git.remove_item_worktree(project, "DLV-001", "AUTH-01")
+        takeover = delivery_git.takeover_item(project, "DLV-001", "AUTH-01", confirm=True)
+        self.assertNotEqual(takeover["writer_epoch"], activation["writer_epoch"])
+        self.assertEqual(takeover["receipt"]["state"], "verified")
+        blocked = delivery_git.block_item(project, "DLV-001", "AUTH-01")
+        self.assertEqual(blocked["status"], "blocked")
+        unblocked = delivery_git.unblock_item(project, "DLV-001", "AUTH-01")
+        self.assertEqual(unblocked["status"], "active")
+        paused = delivery_git.pause_item(project, "DLV-001", "AUTH-01")
+        self.assertEqual(paused["status"], "paused")
+        self.assertFalse(Path(activation["worktree"]).exists())
+        self.assertIsNone(delivery_git.read_writer_receipt(project, "DLV-001", "AUTH-01"))
+        resumed = delivery_git.resume_item(project, "DLV-001", "AUTH-01")
+        self.assertEqual(resumed["receipt"]["state"], "verified")
+        self.assertNotEqual(resumed["writer_epoch"], activation["writer_epoch"])
+        first_product = self.commit_item_product_change(resumed["worktree"], "def authenticate():\n    return 'v1'\n")
+        self.assertEqual(self.approve_item_evidence(resumed["worktree"]), 0)
+        pushed = delivery_git.push_item(project, "DLV-001", "AUTH-01")
+        self.assertEqual(pushed["product_tip"], first_product)
+        first_evidence = delivery_git.commit_message(project, pushed["item"])
+        self.assertEqual(delivery_git.trailer(first_evidence, "Record"), "item-evidence-v1")
+        self.assertEqual(delivery_git.trailer(first_evidence, "Product-Tip"), first_product)
+        integrated = delivery_git.integrate_item(project, "DLV-001", "AUTH-01")
+        self.assertTrue(integrated["ok"])
+        self.assertEqual(
+            subprocess.run(
+                ["git", "show", f"{integrated['integration']}:src/auth.py"],
+                cwd=project, check=True, capture_output=True, text=True,
+            ).stdout,
+            "def authenticate():\n    return 'v1'\n",
+        )
+        reopened = delivery_git.reopen_item(project, "DLV-001", "AUTH-01")
+        self.assertEqual(reopened["status"], "active")
+        self.assertEqual(delivery_git.trailer(delivery_git.commit_message(project, reopened["item"]), "Record"), "item-reopen-v1")
+        second_product = self.commit_item_product_change(reopened["worktree"], "def authenticate():\n    return 'v2'\n")
+        self.assertEqual(self.approve_item_evidence(reopened["worktree"]), 0)
+        pushed = delivery_git.push_item(project, "DLV-001", "AUTH-01")
+        self.assertEqual(pushed["product_tip"], second_product)
+        integrated = delivery_git.integrate_item(project, "DLV-001", "AUTH-01")
+        integration_oid = delivery_git.remote_oid(
+            project, "origin", delivery_git.canonical_refs("DLV-001")["integration"]
+        )
+        review_args = type("Args", (), {
+            "docs": str(docs), "delivery": "DLV-001",
+            "reviewed_commit": integrated["integration"],
+            "reviewed_integration_commit": integration_oid,
+        })
+        delivery_compile.approve_review(review_args)
+        published = delivery_git.publish_delivery_review(project, "DLV-001")
+        self.assertTrue(published["ok"])
+        intent = delivery_git.prepare_pr_creation(project, "DLV-001")
+        self.assertEqual(intent["provider"], "github")
+        pr_url = "https://github.com/agentrof/example/pull/17"
+        record_args = type("Args", (), {"docs": str(docs), "delivery": "DLV-001", "url": pr_url})
+        delivery_compile.record_pr(record_args)
+        recorded = delivery_git.record_pr_remote(project, "DLV-001", pr_url)
+        self.assertEqual(recorded["pull_request"], "17")
+        refs = subprocess.run(["git", "--git-dir", str(remote), "show-ref"], check=True, text=True, capture_output=True).stdout
+        self.assertIn("refs/heads/agentrof/items/auth-01", refs)
+        self.assertNotIn("refs/heads/agentrof/slots/001", refs)
+        cancelled = delivery_git.cancel_delivery(
+            project, "DLV-001", "Target no longer requires this Delivery"
+        )
+        self.assertEqual(cancelled["status"], "cancelled")
+        self.assertTrue(cancelled["reverts"])
+        self.assertEqual(
+            delivery_git.trailer(
+                delivery_git.commit_message(project, cancelled["finalization"]),
+                "Record",
+            ),
+            "cancellation-finalized-v1",
+        )
 
 
 if __name__ == "__main__":

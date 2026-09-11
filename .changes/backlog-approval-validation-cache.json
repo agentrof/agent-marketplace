@@ -1,0 +1,6 @@
+{
+  "summary": "Reuse immutable receipt validation during backlog approval so large approved input sets complete without repeated compiler scans.",
+  "components": {
+    "software-engineering-team": "patch"
+  }
+}

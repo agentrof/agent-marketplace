@@ -236,6 +236,48 @@ class BacklogCompilerTests(unittest.TestCase):
             self.assertEqual(events, ["enter", "bindings", "exit"])
             self.assertFalse((docs / "backlog").exists())
 
+    def test_approve_preflight_reuses_candidate_and_experience_sessions(self):
+        with tempfile.TemporaryDirectory() as raw:
+            docs = Path(raw)
+            args = SimpleNamespace(docs=docs)
+            events = []
+
+            @contextmanager
+            def candidate_session():
+                events.append("candidate-enter")
+                try:
+                    yield
+                finally:
+                    events.append("candidate-exit")
+
+            @contextmanager
+            def experience_session():
+                events.append("experience-enter")
+                try:
+                    yield
+                finally:
+                    events.append("experience-exit")
+
+            with (
+                mock.patch.object(
+                    backlog_compile, "collect",
+                    return_value=({"backlog_reviews": [], "epics": []}, ["reject"]),
+                ),
+                mock.patch.object(
+                    stage_package, "candidate_session", side_effect=candidate_session,
+                ),
+                mock.patch.object(
+                    backlog_compile, "experience_validation_session",
+                    side_effect=experience_session,
+                ),
+                redirect_stdout(StringIO()),
+            ):
+                self.assertEqual(backlog_compile.approve(args), 1)
+
+            self.assertEqual(events, [
+                "candidate-enter", "experience-enter", "experience-exit", "candidate-exit",
+            ])
+
 
 class BacklogUpstreamApprovalTests(unittest.TestCase):
     LINK = "[[solution-design/landscape|Solution Landscape]]"

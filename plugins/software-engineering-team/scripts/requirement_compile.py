@@ -55,6 +55,11 @@ EXPERIENCE_PACKAGE_RE = re.compile(
 )
 
 
+def status_tag_name(status: str) -> str:
+    """Return the vault-safe tag mirror for a Requirement lifecycle status."""
+    return f"status/{status.replace('_', '-')}"
+
+
 def valid_experience_receipt_refs(
     refs: list[str], docs: Path | None = None, *, allow_historical: bool = False,
 ) -> bool:
@@ -199,6 +204,19 @@ def authored_body(body: str) -> str:
         "", value,
     )
     return value.rstrip() + "\n"
+
+
+def navigation_body(body: str) -> str:
+    """Replace only the compiler-owned Navigation tail of a Requirement."""
+    heading = "## Navigation " + NAV_MARKER
+    prefix, marker, _tail = body.partition(heading)
+    preserved = prefix if marker else body
+    return (
+        preserved.rstrip()
+        + "\n\n"
+        + heading
+        + "\n\n- [[maps/requirements|Requirements]]\n"
+    )
 
 
 def semantic_hash(props: dict, body: str) -> str:
@@ -404,9 +422,7 @@ def render_navigation(docs: Path) -> int:
             changed += 1
     for path in requirement_paths(docs):
         props, body = split_note(path)
-        nav = "\n\n## Navigation " + NAV_MARKER + "\n\n"
-        nav += "- [[maps/requirements|Requirements]]\n"
-        updated = authored_body(body).rstrip() + nav
+        updated = navigation_body(body)
         rendered = render_note(props, updated)
         if rendered != path.read_text(encoding="utf-8"):
             atomic_text(path, rendered)
@@ -471,10 +487,9 @@ def requirement_findings(
     if not isinstance(aliases, list) or aliases != [identifier]:
         findings.append("aliases must contain exactly the Requirement id")
     tags = props.get("tags")
-    if not isinstance(tags, list) or "doc/requirement" not in tags:
-        findings.append("tags must contain doc/requirement")
-    if not isinstance(tags, list) or f"status/{status}" not in tags:
-        findings.append("tags must mirror the Requirement status")
+    expected_tags = {"doc/requirement", status_tag_name(str(status))}
+    if not isinstance(tags, list) or set(tags) != expected_tags:
+        findings.append("tags must mirror the Requirement type and status")
     derives = props.get("derives_from", [])
     if not isinstance(derives, list):
         findings.append("derives_from must be a list when present")
@@ -635,7 +650,7 @@ def create_requirement(docs: Path, slug: str, title: str, request_kind: str,
         "type": "requirement", "id": identifier, "title": title,
         "status": "draft", "owner_role": "product_owner",
         "request_kind": request_kind, "urgency": urgency, "revision": 1,
-        "tags": ["doc/requirement", "status/draft"], "aliases": [identifier],
+        "tags": ["doc/requirement", status_tag_name("draft")], "aliases": [identifier],
     }
     if derives_from:
         props["derives_from"] = derives_from
@@ -680,7 +695,7 @@ def approve_requirement(path: Path) -> None:
     props["tags"] = [
         tag for tag in props.get("tags", [])
         if isinstance(tag, str) and not tag.startswith("status/")
-    ] + ["status/approved"]
+    ] + [status_tag_name("approved")]
     atomic_text(path, render_note(props, body))
     closing = requirement_findings(path, require_approved=True)
     if closing:
@@ -712,7 +727,7 @@ def begin_revision(path: Path) -> None:
     props["tags"] = [
         tag for tag in props.get("tags", [])
         if isinstance(tag, str) and not tag.startswith("status/")
-    ] + ["status/draft"]
+    ] + [status_tag_name("draft")]
     body = stage_results_body(body, {})
     atomic_text(path, render_note(props, body))
 
@@ -757,7 +772,7 @@ def transition_terminal(path: Path, status: str, reason: str,
     props["tags"] = [
         tag for tag in props.get("tags", [])
         if isinstance(tag, str) and not tag.startswith("status/")
-    ] + [f"status/{status}"]
+    ] + [status_tag_name(status)]
     original = path.read_text(encoding="utf-8")
     atomic_text(path, render_note(props, body))
     closing = requirement_findings(path, require_approved=True)
@@ -831,7 +846,7 @@ def supersede_requirement(old_path: Path, replacement_path: Path) -> None:
         old_props["tags"] = [
             tag for tag in old_props.get("tags", [])
             if isinstance(tag, str) and not tag.startswith("status/")
-        ] + ["status/superseded"]
+        ] + [status_tag_name("superseded")]
         atomic_text(old_path, render_note(old_props, old_body))
         if requirement_findings(old_path, require_approved=True):
             raise ValueError("superseded Requirement closing check failed")

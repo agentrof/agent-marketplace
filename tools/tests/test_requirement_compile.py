@@ -17,6 +17,7 @@ sys.path.insert(0, str(SCRIPTS))
 
 import requirement_compile  # noqa: E402
 import requirement_route  # noqa: E402
+import vault_check  # noqa: E402
 
 
 class RequirementCompilerTests(unittest.TestCase):
@@ -168,6 +169,71 @@ class RequirementCompilerTests(unittest.TestCase):
         props, _ = requirement_compile.split_note(path)
         self.assertEqual(props["status"], "resolved_no_change")
         self.assertEqual(requirement_compile.requirement_findings(path, require_approved=True), [])
+
+    def test_no_change_uses_a_kebab_case_status_tag(self):
+        path = self.complete_draft()
+        requirement_compile.approve_requirement(path)
+        requirement_compile.transition_terminal(
+            path, "resolved_no_change", "The approved behavior already exists.",
+            [],
+        )
+
+        props, body = requirement_compile.split_note(path)
+        self.assertEqual(
+            props["tags"], ["doc/requirement", "status/resolved-no-change"],
+        )
+        findings = []
+        vault_check.check_tags_mirror(
+            vault_check.build_vault(self.docs, {}), findings,
+        )
+        self.assertEqual(findings, [])
+
+        props["tags"] = ["doc/requirement", "status/resolved_no_change"]
+        path.write_text(
+            requirement_compile.render_note(props, body),
+            encoding="utf-8",
+        )
+        self.assertIn(
+            "tags must mirror the Requirement type and status",
+            requirement_compile.requirement_findings(path, require_approved=True),
+        )
+
+    def test_render_navigation_preserves_stage_receipts_and_is_idempotent(self):
+        path = self.complete_draft()
+        requirement_compile.approve_requirement(path)
+        receipt = {
+            "result_ref": "business-analysis/foundation/space",
+            "package_hash": "sha256:" + "a" * 64,
+        }
+        with mock.patch.object(
+            requirement_compile.stage_package, "verify", return_value=(receipt, []),
+        ):
+            requirement_compile.bind_stage(
+                path, "business-analysis", "business-analysis/foundation/space",
+            )
+
+        before = path.read_text(encoding="utf-8")
+        props_before, body_before = requirement_compile.split_note(path)
+        self.assertIn("## Stage Results <!-- compiler-owned -->", body_before)
+        self.assertTrue(props_before["stage_results_hash"])
+
+        self.assertEqual(requirement_compile.render_navigation(self.docs), 0)
+        self.assertEqual(path.read_text(encoding="utf-8"), before)
+        self.assertEqual(requirement_compile.render_navigation(self.docs), 0)
+
+        props_after, body_after = requirement_compile.split_note(path)
+        self.assertEqual(props_after["source_hash"], props_before["source_hash"])
+        self.assertEqual(
+            props_after["stage_results_hash"], props_before["stage_results_hash"],
+        )
+        self.assertEqual(
+            requirement_compile.section_text(body_after, "Stage Results"),
+            requirement_compile.section_text(body_before, "Stage Results"),
+        )
+        self.assertEqual(body_after.count("## Navigation "), 1)
+        self.assertEqual(
+            requirement_compile.requirement_findings(path, require_approved=True), [],
+        )
 
     def test_reuse_stage_accepts_escaped_wikilink_aliases(self):
         path = self.complete_draft()

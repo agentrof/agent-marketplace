@@ -2522,7 +2522,7 @@ class VaultHookShellContractTests(unittest.TestCase):
             reader = self.hook.normalize(self.payload(
                 root, "python3 read_only_validation.py",
             ))
-            writer = self.hook.normalize(self.payload(
+            writer = self.hook.normalize(self.attested_writer_payload(
                 root, self.application_command(docs),
                 field="cmd",
             ))
@@ -2547,11 +2547,11 @@ class VaultHookShellContractTests(unittest.TestCase):
             root = Path(temporary)
             docs, _config = self.project(root)
             (docs / "experience-design").mkdir()
-            first = self.hook.normalize(self.payload(
+            first = self.hook.normalize(self.attested_writer_payload(
                 root, self.application_command(docs), field="cmd",
             ))
             first["tool_use_id"] = "first-writer"
-            second = self.hook.normalize(self.payload(
+            second = self.hook.normalize(self.attested_writer_payload(
                 root, self.application_command(docs), field="cmd",
             ))
             second["tool_use_id"] = "second-writer"
@@ -2570,7 +2570,7 @@ class VaultHookShellContractTests(unittest.TestCase):
             reader = self.hook.normalize(self.payload(
                 root, "python3 read_only_validation.py",
             ))
-            writer = self.hook.normalize(self.payload(
+            writer = self.hook.normalize(self.attested_writer_payload(
                 root, self.application_command(docs), field="cmd",
             ))
             writer["tool_use_id"] = "active-writer"
@@ -2597,7 +2597,7 @@ class VaultHookShellContractTests(unittest.TestCase):
             reader = self.hook.normalize(self.payload(
                 root, "python3 read_only_validation.py",
             ))
-            writer = self.hook.normalize(self.payload(
+            writer = self.hook.normalize(self.attested_writer_payload(
                 root, self.application_command(docs), field="cmd",
             ))
             writer["tool_use_id"] = "postimage-writer"

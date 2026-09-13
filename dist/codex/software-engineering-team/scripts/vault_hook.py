@@ -3066,6 +3066,23 @@ def atomic_create_text(path: Path, text: str) -> None:
         Path(temporary).unlink(missing_ok=True)
 
 
+def exclusive_create_text(path: Path, text: str) -> None:
+    """Create one small private lock file without platform link semantics."""
+    descriptor = os.open(
+        path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600,
+    )
+    try:
+        with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
+            handle.write(text)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.chmod(path, 0o600)
+        sync_directory(path.parent)
+    except Exception:
+        path.unlink(missing_ok=True)
+        raise
+
+
 def valid_config_snapshot(snapshot: object, expected_path: Path) -> bool:
     if not isinstance(snapshot, dict):
         return False
@@ -3223,7 +3240,7 @@ def acquire_experience_writer_lock(project: Path, payload: dict) -> str:
         "binding": guard_binding(payload),
     }
     try:
-        atomic_create_text(
+        exclusive_create_text(
             experience_writer_lock_path(project), canonical_json(state),
         )
     except FileExistsError:
@@ -3256,9 +3273,13 @@ def release_experience_writer_lock(project: Path, payload: dict) -> None:
 
 def another_experience_writer_is_active(project: Path, payload: dict) -> bool:
     """Report a live lifecycle lock owned by another shell event."""
-    state, _raw, _error = load_json_file(experience_writer_lock_path(project))
+    path = experience_writer_lock_path(project)
+    if path.exists():
+        state, _raw, _error = load_json_file(path)
+    else:
+        state = None
     if not isinstance(state, dict):
-        return False
+        return path.exists()
     return state.get("project") == str(project.resolve()) \
         and state.get("owner") != guard_locator(payload)
 

@@ -76,7 +76,9 @@ def parse(path: Path) -> tuple[dict, str]:
 
 def scalar(value: object) -> str:
     if isinstance(value, list):
-        return "\n".join(f"  - {item}" for item in value)
+        return "\n".join(f"  - {scalar(item)}" for item in value)
+    if isinstance(value, str) and value.startswith("[["):
+        return f'"{value}"'
     return str(value)
 
 
@@ -85,9 +87,9 @@ def render(props: dict, body: str) -> str:
     for key, value in props.items():
         if isinstance(value, list):
             lines.append(f"{key}:")
-            lines.extend(f"  - {item}" for item in value)
+            lines.extend(f"  - {scalar(item)}" for item in value)
         else:
-            lines.append(f"{key}: {value}")
+            lines.append(f"{key}: {scalar(value)}")
     lines.extend(["---", "", body.strip(), ""])
     return "\n".join(lines)
 

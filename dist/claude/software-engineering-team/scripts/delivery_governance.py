@@ -99,7 +99,6 @@ def init(args) -> int:
         raise ValueError("max_parallel must be a positive integer")
     props = {"type": "delivery-governance", "title": "Delivery Governance",
              "status": "draft", "revision": 1, "max_parallel": value,
-             "governance_hash": "", "source_hash": "",
              "tags": ["doc/delivery-governance", "status/draft"]}
     body = "# Delivery Governance\n\n## Coordination\n\nThis document owns the hard maximum number of active Delivery slots.\n\n## Navigation <!-- sec: nav -->\n\n[[maps/delivery|Delivery]]"
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -121,8 +120,8 @@ def begin_revision(args) -> int:
         raise ValueError("begin-revision requires approved governance")
     props["status"] = "draft"
     props["revision"] = int(props.get("revision", 0)) + 1
-    props["governance_hash"] = ""
-    props["source_hash"] = ""
+    props.pop("governance_hash", None)
+    props.pop("source_hash", None)
     props.pop("approved_at_utc", None)
     props["tags"] = ["doc/delivery-governance", "status/draft"]
     path.write_text(render(props, body), encoding="utf-8")

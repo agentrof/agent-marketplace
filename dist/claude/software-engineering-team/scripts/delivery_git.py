@@ -607,7 +607,8 @@ def run_git(root: Path, *args: str) -> str:
 
 
 def commit_tree(root: Path, base: str, paths: list[str], subject: str,
-                trailers: dict[str, str], *, delivery_projections: bool = False) -> str:
+                trailers: dict[str, str], *, delivery_projections: bool = False,
+                operation_bindings: dict[str, dict] | None = None) -> str:
     """Create an unreferenced candidate tree from *base* plus exact paths."""
     trailers = _normalise_control_trailers(trailers)
     with tempfile.TemporaryDirectory(prefix="agentrof-index-") as temporary:
@@ -628,21 +629,13 @@ def commit_tree(root: Path, base: str, paths: list[str], subject: str,
         if tree.returncode:
             raise RuntimeError(tree.stderr.strip() or "cannot write candidate tree")
         if delivery_projections:
-            for path, (mode, content) in delivery_projection_changes(root, tree.stdout.strip()).items():
-                if content is None:
-                    args = ["git", "update-index", "--force-remove", "--", path]
-                else:
-                    blob = subprocess.run(["git", "hash-object", "-w", "--stdin"], cwd=root,
-                                          input=content, capture_output=True, check=True)
-                    args = ["git", "update-index", "--add", "--cacheinfo",
-                            mode, blob.stdout.decode().strip(), path]
-                subprocess.run(args, cwd=root, env=env, capture_output=True, check=True)
-            tree = subprocess.run(["git", "write-tree"], cwd=root, env=env,
-                                  text=True, capture_output=True, check=True)
+            projected = write_delivery_projection_tree(root, env, tree.stdout.strip(), operation_bindings)
+        else:
+            projected = tree.stdout.strip()
         message = subject + "\n\n" + "\n".join(
             f"Agentrof-{key}: {value}" for key, value in trailers.items()
         ) + "\n"
-        commit = subprocess.run(["git", "commit-tree", tree.stdout.strip(), "-p", base],
+        commit = subprocess.run(["git", "commit-tree", projected, "-p", base],
                                 cwd=root, env=env, input=message, text=True,
                                 capture_output=True, check=False)
         if commit.returncode:
@@ -650,7 +643,23 @@ def commit_tree(root: Path, base: str, paths: list[str], subject: str,
         return commit.stdout.strip()
 
 
-def delivery_projection_changes(root: Path, tree: str) -> dict[str, tuple[str, bytes | None]]:
+def write_delivery_projection_tree(root: Path, env: dict, tree: str,
+                                   operation_bindings: dict[str, dict] | None = None) -> str:
+    for path, (mode, content) in delivery_projection_changes(root, tree, operation_bindings).items():
+        if content is None:
+            args = ["git", "update-index", "--force-remove", "--", path]
+        else:
+            blob = subprocess.run(["git", "hash-object", "-w", "--stdin"], cwd=root,
+                                  input=content, capture_output=True, check=True)
+            args = ["git", "update-index", "--add", "--cacheinfo",
+                    mode, blob.stdout.decode().strip(), path]
+        subprocess.run(args, cwd=root, env=env, capture_output=True, check=True)
+    return subprocess.run(["git", "write-tree"], cwd=root, env=env,
+                          text=True, capture_output=True, check=True).stdout.strip()
+
+
+def delivery_projection_changes(root: Path, tree: str,
+                                operation_bindings: dict[str, dict] | None = None) -> dict[str, tuple[str, bytes | None]]:
     """Derive only owned projections from raw candidate blobs, never local notes."""
     import vault_check
     from delivery_compile import render_map
@@ -716,6 +725,22 @@ def delivery_projection_changes(root: Path, tree: str) -> dict[str, tuple[str, b
                 changes[path] = (previous_mode, encoded)
         for rel in removed:
             changes["workspace/docs/" + rel] = ("100644", None)
+        if operation_bindings is not None:
+            from delivery_compile import item_operation_findings, split_note
+            for path, (_mode, content) in changes.items():
+                target = candidate / path
+                if content is None:
+                    target.unlink(missing_ok=True)
+                else:
+                    target.parent.mkdir(parents=True, exist_ok=True)
+                    target.write_bytes(content)
+            for relative, expected in operation_bindings.items():
+                actual, _body = split_note(docs / relative)
+                if any(actual.get(key) != value for key, value in expected.items()):
+                    raise RuntimeError(f"Delivery candidate changed approved Operation bindings: {relative}")
+                errors = item_operation_findings(docs, actual)
+                if errors:
+                    raise RuntimeError("Delivery candidate Operation bindings are invalid: " + "; ".join(errors))
         return changes
 
 
@@ -1721,6 +1746,31 @@ def reserve_delivery(project_root: Path, delivery_id: str, remote: str = "origin
             "refs": short_refs(delivery_id)}
 
 
+def execution_operation_inputs(root: Path, directory: Path, docs: Path) -> tuple[list[str], dict[str, dict]]:
+    """Select only canonical contracts bound by the approved execution Items."""
+    import operation_compile
+    from delivery_compile import OPERATION_BINDING_FIELDS, item_operation_findings, split_note
+
+    bindings = {}
+    kinds = {"verification"}
+    for item in sorted(directory.glob("items/*/item.md")):
+        props, _body = split_note(item)
+        errors = item_operation_findings(docs, props)
+        if errors:
+            raise RuntimeError("Item Operation bindings are invalid: " + "; ".join(errors))
+        bindings[item.relative_to(docs).as_posix()] = {
+            key: props.get(key) for key in (*OPERATION_BINDING_FIELDS, "runtime_required")}
+        if props.get("runtime_required"):
+            kinds.add("environment")
+    paths = []
+    for kind in sorted(kinds):
+        path = operation_compile.contract_path(docs, kind)
+        if not path.is_file() or path.is_symlink() or path.parent.is_symlink():
+            raise RuntimeError(f"Execution publication requires a regular canonical {kind} contract")
+        paths.append(path.relative_to(root).as_posix())
+    return paths, bindings
+
+
 def publish_execution_plan(project_root: Path, delivery_id: str,
                            remote: str = "origin") -> dict:
     root = main_worktree(project_root.resolve())
@@ -1741,12 +1791,14 @@ def publish_execution_plan(project_root: Path, delivery_id: str,
     if trailer(fence_message, "Record") != "project-fence-v2" or trailer(fence_message, "Mode") != "open":
         raise RuntimeError("publish-execution-plan requires an open Fence")
     package = package_paths(root, directory, docs, include_map=False)
+    operation_paths, operation_bindings = execution_operation_inputs(root, directory, docs)
     integration_candidate = commit_tree(
-        root, integration_oid, sorted(package), f"Publish execution plan for {delivery_id}",
+        root, integration_oid, sorted(set(package + operation_paths)), f"Publish execution plan for {delivery_id}",
         {"Record": "execution-plan-published-v1", "Protocol": "1", "Delivery": delivery_id,
          "Scope-Hash": str(props.get("scope_hash", "none")),
          "Plan-Hash": str(props.get("plan_hash", "none")), "Target": trailer(fence_message, "Target") or "none"},
         delivery_projections=True,
+        operation_bindings=operation_bindings,
     )
     epoch = trailer(fence_message, "Epoch") or epoch_token()
     fence_candidate = commit_tree(
@@ -1788,17 +1840,101 @@ def _changed_target_paths(root: Path, previous_target: str, target: str) -> list
     return sorted(path for path in result.stdout.splitlines() if path)
 
 
+def fetch_target(root: Path, remote: str) -> tuple[str, str]:
+    branch, _advertised = resolve_target(root, remote)
+    tracking = f"refs/remotes/{remote}/{branch}"
+    run_git(root, "fetch", "--no-tags", remote, f"refs/heads/{branch}:{tracking}")
+    return branch, run_git(root, "rev-parse", tracking)
+
+
+def require_target_ancestry(root: Path, remote: str, fence_message: str,
+                            integration_oid: str, item_oid: str | None = None) -> str:
+    if trailer(fence_message, "Record") != "project-fence-v2" or trailer(fence_message, "Mode") != "open":
+        raise RuntimeError("writer readiness requires an open Fence")
+    _branch, target = fetch_target(root, remote)
+    if trailer(fence_message, "Target") != target:
+        raise RuntimeError("target advanced; refresh the Delivery before Item activation")
+    if not is_ancestor(root, target, integration_oid):
+        raise RuntimeError("target convergence required: Integration does not contain the current target")
+    if item_oid is not None and not is_ancestor(root, target, item_oid):
+        raise RuntimeError("target convergence required: Item does not contain the current target")
+    return target
+
+
+def integration_item_paths(root: Path, directory: Path, integration: str) -> list[Path]:
+    """Enumerate exact canonical Item files from the authoritative Git tree."""
+    prefix = (directory / "items").relative_to(root).as_posix() + "/"
+    listing = subprocess.run(["git", "ls-tree", "-rz", integration, "--", prefix],
+                             cwd=root, capture_output=True, check=True).stdout
+    paths = []
+    for row in listing.split(b"\0"):
+        if not row:
+            continue
+        metadata, raw_path = row.split(b"\t", 1)
+        path = raw_path.decode("utf-8")
+        parts = path.removeprefix(prefix).split("/")
+        if len(parts) != 2 or parts[1] != "item.md":
+            continue
+        mode, kind, _oid = metadata.decode().split()
+        if mode not in {"100644", "100755"} or kind != "blob":
+            raise RuntimeError("Integration Item must be a regular file")
+        paths.append(root / path)
+    return paths
+
+
+def target_input_bindings(root: Path, directory: Path, integration: str,
+                          target: str, changed: list[str]) -> dict[str, dict]:
+    """Reject changed pinned inputs while leaving unchanged target drafts alone."""
+    import backlog_compile
+    import operation_compile
+    from delivery_compile import OPERATION_BINDING_FIELDS, split_note, content_hash, _is_normalized_claim
+
+    def backlog_record(path):
+        return backlog_compile.parse_front_matter(path)[0], backlog_compile.digest(path)
+
+    def dod_record(path):
+        props, body = split_note(path)
+        return props, content_hash(props, body)
+
+    def operation_record(path):
+        props, body = operation_compile.parse(path)
+        return props, operation_compile.source_hash(props, body)
+
+    delivery, _body = split_remote_note(root, integration, str((directory / "delivery.md").relative_to(root)), split_note)
+    inputs = {str(delivery["definition_of_done_path"]): (delivery["definition_of_done_source_hash"], dod_record, "approved")}
+    bindings = {}
+    for item in integration_item_paths(root, directory, integration):
+        props, _body = split_remote_note(root, integration, str(item.relative_to(root)), split_note)
+        for kind in ("story", "test_plan"):
+            inputs[str(props[kind + "_path"])] = (props[kind + "_source_hash"], backlog_record, "planned" if kind == "story" else "approved")
+        if props.get("verification_contract_hash"):
+            bindings[item.relative_to(root / "workspace/docs").as_posix()] = {
+                key: props.get(key) for key in (*OPERATION_BINDING_FIELDS, "runtime_required")}
+            for kind in ("verification", "environment"):
+                if props.get(kind + "_contract_hash"):
+                    inputs["operation/" + operation_compile.FILE_FOR[kind]] = (
+                        props[kind + "_contract_hash"], operation_record, "approved")
+    for relative, (expected, reader, status) in inputs.items():
+        if not _is_normalized_claim(relative):
+            raise RuntimeError("target refresh contains an invalid pinned input path")
+        path = "workspace/docs/" + relative
+        if path not in changed:
+            continue
+        props, digest = split_remote_note(root, target, path, reader)
+        if props.get("status") != status or props.get("source_hash") != expected or digest != expected:
+            raise RuntimeError("target changed a pinned source or Operation receipt: " + path)
+    return bindings
+
+
 def refresh_target(project_root: Path, delivery_id: str,
                    remote: str = "origin") -> dict:
     """Merge a fresh target tip into one open Delivery under the Fence lease.
 
-    Disjoint target movement is fully supported. A path/contract overlap with
-    an already claimed Item is rejected before any ref mutation. A relevant
-    pre-claim overlap invalidates the published Plan and returns the package to
-    scope-approved state; a fresh Execution Plan approval is then required.
+    Claimed-path and pinned-input changes fail before ref mutation. Compiler-owned
+    projections are regenerated from the merged candidate without revising approvals.
     """
     root = main_worktree(project_root.resolve())
-    from delivery_compile import docs_root, find_delivery, split_note, frontmatter, content_hash
+    from delivery_compile import docs_root, find_delivery, split_note
     docs = docs_root(root)
     directory = find_delivery(docs, delivery_id)
     if directory is None:
@@ -1812,65 +1948,40 @@ def refresh_target(project_root: Path, delivery_id: str,
     previous_target = trailer(fence_message, "Target")
     if not previous_target or not OID_RE.fullmatch(previous_target):
         raise RuntimeError("Fence has no valid target baseline")
-    target_branch, target = resolve_target(root, remote)
-    if target == previous_target:
+    _target_branch, target = fetch_target(root, remote)
+    integrated = is_ancestor(root, target, integration_oid)
+    if target == previous_target and integrated:
         return {"ok": True, "delivery": delivery_id, "changed": False,
                 "target": target, "refs": short_refs(delivery_id)}
-    # Ensure the target objects exist locally without changing any semantic ref.
-    run_git(root, "fetch", "--no-tags", remote, f"refs/heads/{target_branch}:refs/remotes/{remote}/{target_branch}")
+    if not integrated:
+        previous_target = unique_merge_base(root, integration_oid, target)
     changed = _changed_target_paths(root, previous_target, target)
+    operation_bindings = target_input_bindings(root, directory, integration_oid, target, changed)
     claimed: dict[str, str] = {}
-    for item_path in sorted(directory.glob("items/*/item.md")):
+    for item_path in integration_item_paths(root, directory, integration_oid):
         story = item_path.parent.name.upper()
         item_ref = canonical_refs(delivery_id, story)["item"]
         if not remote_has_ref(root, remote, item_ref):
             continue
         item_oid = remote_oid(root, remote, item_ref)
         item_props, _ = split_remote_note(root, item_oid, str(item_path.relative_to(root)), split_note)
+        from delivery_compile import _is_normalized_claim
         for claim in item_props.get("path_claims", []) or []:
-            claimed[str(claim).lstrip("./")] = story
-    overlaps = sorted(path for path in changed if path in claimed)
+            if not isinstance(claim, str) or not _is_normalized_claim(claim):
+                raise RuntimeError("claimed Item has an invalid path claim")
+            claimed[claim] = story
+    from delivery_compile import _claims_overlap
+    overlaps = sorted(path for path in changed if any(_claims_overlap(path, claim) for claim in claimed))
     if overlaps:
         raise RuntimeError("claimed_source_violation: target changed claimed paths " + ", ".join(overlaps))
-    relevant = [
-        path for path in changed
-        if path in {
-            "workspace/docs/maps/delivery.md",
-            "workspace/docs/delivery/definition-of-done.md",
-        }
-    ]
-    merge = merge_candidate(
+    final_candidate = merge_candidate(
         root, integration_oid, target, f"Refresh target for {delivery_id}",
         {"Record": "target-refresh-v1", "Protocol": "1", "Delivery": delivery_id,
          "Previous-Target": previous_target, "Target": target,
          "Target-Impact-Hash": "none", "Refresh-Kind": "disjoint"},
+        delivery_projections=True, operation_bindings=operation_bindings,
+        preserve_delivery=directory,
     )
-    final_candidate = merge
-    invalidated = bool(relevant)
-    if invalidated:
-        delivery_path = directory / "delivery.md"
-        plan_path = directory / "execution-plan.md"
-        replacements = {}
-        remote_delivery_props, remote_delivery_body = split_remote_note(root, merge, str(delivery_path.relative_to(root)), split_note)
-        remote_delivery_props["status"] = "scope_approved"
-        remote_delivery_props.pop("plan_hash", None)
-        remote_delivery_props["source_hash"] = content_hash(remote_delivery_props, remote_delivery_body)
-        replacements[str(delivery_path.relative_to(root))] = frontmatter(remote_delivery_props, remote_delivery_body)
-        if plan_path.exists():
-            try:
-                plan_props, plan_body = split_remote_note(root, merge, str(plan_path.relative_to(root)), split_note)
-                plan_props["status"] = "draft"
-                plan_props["source_hash"] = content_hash(plan_props, plan_body)
-                replacements[str(plan_path.relative_to(root))] = frontmatter(plan_props, plan_body)
-            except RuntimeError:
-                pass
-        final_candidate = commit_replacements(
-            root, merge, replacements, f"Invalidate execution plan for {delivery_id}",
-            {"Record": "target-refresh-v1", "Protocol": "1", "Delivery": delivery_id,
-             "Previous-Target": previous_target, "Target": target,
-             "Target-Impact-Hash": "none", "Refresh-Kind": "plan_invalidated",
-             "Plan-Invalidated": "true"},
-        )
     fence_candidate = commit_tree(
         root, fence_oid, [], "Refresh project target",
         {"Record": "project-fence-v2", "Protocol": "2", "Mode": "open",
@@ -1883,7 +1994,7 @@ def refresh_target(project_root: Path, delivery_id: str,
     partial = observed_target != target
     return {"ok": True, "delivery": delivery_id, "changed": True, "target": target,
             "previous_target": previous_target, "paths": changed,
-            "plan_invalidated": invalidated, "integration": final_candidate,
+            "plan_invalidated": False, "integration": final_candidate,
             "fence": fence_candidate, "current_target": observed_target,
             "partial": partial, "writer_ready": not partial,
             "refs": short_refs(delivery_id)}
@@ -2595,6 +2706,7 @@ def claim_items(project_root: Path, delivery_id: str, remote: str = "origin") ->
     fence_message = commit_message(root, fence_oid)
     if trailer(fence_message, "Record") != "project-fence-v2" or trailer(fence_message, "Mode") != "open":
         raise RuntimeError("claim-items requires an open Fence")
+    require_target_ancestry(root, remote, fence_message, integration_oid)
     marker = commit_tree(root, integration_oid, [], f"Establish claims for {delivery_id}",
                          {"Record": "claims-established-v1", "Protocol": "1", "Delivery": delivery_id,
                           "Scope-Hash": str(delivery_props.get("scope_hash", "none")),
@@ -2691,6 +2803,37 @@ def require_item_architecture_binding(worktree: Path, item_props: dict,
         raise RuntimeError("Item Architecture binding is invalid: " + str(exc)) from exc
 
 
+def require_current_activation_target(root: Path, remote: str, delivery_id: str,
+                                      story_id: str, target_before: str, slot: str,
+                                      item_candidate: str, relative_item: str,
+                                      item_props: dict, item_body: str) -> None:
+    """Quiesce an exact granted Item/Slot pair if target moved during its CAS."""
+    from delivery_compile import frontmatter, content_hash
+    refs = canonical_refs(delivery_id, story_id, slot)
+    slot_ref = refs["slot"]
+    _target_branch, target_after = resolve_target(root, remote)
+    if target_after != target_before:
+        paused_props = dict(item_props)
+        paused_props["status"] = "paused"
+        paused_props["tags"] = [tag for tag in paused_props.get("tags", [])
+                                  if not str(tag).startswith("status/")] + ["status/paused"]
+        paused_props["source_hash"] = content_hash(paused_props, item_body)
+        paused = commit_replacements(
+            root, item_candidate,
+            {relative_item: frontmatter(paused_props, item_body)},
+            f"Quiesce {story_id} after target advance",
+            {"Record": "item-quiesce-v1", "Protocol": "1", "Delivery": delivery_id,
+             "Story": story_id, "Kind": "target-drift", "Previous-Tip": item_candidate,
+             "Slot": slot},
+        )
+        atomic_push(root, remote, [(refs["item"], item_candidate, paused),
+                                   (slot_ref, item_candidate, "")])
+        discard_pending_writer_receipt(root, delivery_id, story_id, item_candidate)
+        raise RuntimeError(
+            "target advanced after Item activation; Item was paused before worktree creation"
+        )
+
+
 def start_item(project_root: Path, delivery_id: str, story_id: str,
                remote: str = "origin", allowed_statuses: set[str] | None = None) -> dict:
     root = main_worktree(project_root.resolve())
@@ -2708,9 +2851,7 @@ def start_item(project_root: Path, delivery_id: str, story_id: str,
     fence_target = trailer(fence_message, "Target")
     if not fence_target or not OID_RE.fullmatch(fence_target):
         raise RuntimeError("start-item requires a valid Fence target baseline")
-    _target_branch, target_before = resolve_target(root, remote)
-    if target_before != fence_target:
-        raise RuntimeError("target advanced; refresh the Delivery before Item activation")
+    target_before = require_target_ancestry(root, remote, fence_message, integration_oid, item_oid)
     max_parallel = project_max_parallel(root, trailer(fence_message, "Governance-Hash") or "none")
     occupied = remote_slot_oids(root, remote)
     free = next((slot for slot in range(1, max_parallel + 1) if slot_key(slot) not in occupied), None)
@@ -2768,31 +2909,14 @@ def start_item(project_root: Path, delivery_id: str, story_id: str,
         if observed_item is None and observed_slot is None:
             discard_pending_writer_receipt(root, delivery_id, story_id, item_candidate)
         elif observed_item == item_candidate and observed_slot == item_candidate:
+            require_current_activation_target(root, remote, delivery_id, story_id, target_before,
+                                              slot, item_candidate, relative_item, item_props, item_body)
             promote_writer_receipt(root, delivery_id, story_id, item_candidate)
         raise
     if remote_oid(root, remote, refs["item"]) != item_candidate or remote_oid(root, remote, slot_ref) != item_candidate:
         raise RuntimeError("activation refs did not converge to the receipt candidate")
-    _target_branch, target_after = resolve_target(root, remote)
-    if target_after != fence_target:
-        paused_props = dict(item_props)
-        paused_props["status"] = "paused"
-        paused_props["tags"] = [tag for tag in paused_props.get("tags", [])
-                                  if not str(tag).startswith("status/")] + ["status/paused"]
-        paused_props["source_hash"] = content_hash(paused_props, item_body)
-        paused = commit_replacements(
-            root, item_candidate,
-            {str(item_path.relative_to(root)): frontmatter(paused_props, item_body)},
-            f"Quiesce {story_id} after target advance",
-            {"Record": "item-quiesce-v1", "Protocol": "1", "Delivery": delivery_id,
-             "Story": story_id, "Kind": "target-drift", "Previous-Tip": item_candidate,
-             "Slot": slot},
-        )
-        atomic_push(root, remote, [(refs["item"], item_candidate, paused),
-                                   (slot_ref, item_candidate, "")])
-        discard_pending_writer_receipt(root, delivery_id, story_id, item_candidate)
-        raise RuntimeError(
-            "target advanced after Item activation; Item was paused before worktree creation"
-        )
+    require_current_activation_target(root, remote, delivery_id, story_id, target_before,
+                                      slot, item_candidate, relative_item, item_props, item_body)
     receipt = promote_writer_receipt(root, delivery_id, story_id, item_candidate)
     worktree = materialize_item_worktree(root, delivery_id, story_id, item_candidate)
     return {"ok": True, "delivery": delivery_id, "story": story_id, "slot": slot,
@@ -2873,6 +2997,7 @@ def reopen_item(project_root: Path, delivery_id: str, story_id: str,
     fence_message = commit_message(root, fence_oid)
     if trailer(fence_message, "Mode") != "open":
         raise RuntimeError("reopen-item requires an open Fence")
+    target_before = require_target_ancestry(root, remote, fence_message, integration_oid, item_oid)
     if any(oid == item_oid for oid in remote_slot_oids(root, remote).values()):
         raise RuntimeError("reopen-item requires a sealed, slotless Item")
     relative_item = str((directory / "items" / story_key(story_id) / "item.md").relative_to(root))
@@ -2920,6 +3045,8 @@ def reopen_item(project_root: Path, delivery_id: str, story_id: str,
                                (refs["integration"], integration_oid, integration_candidate),
                                (refs["item"], item_oid, item_candidate),
                                (slot_ref, "", item_candidate)])
+    require_current_activation_target(root, remote, delivery_id, story_id, target_before,
+                                      slot, item_candidate, relative_item, props, body)
     receipt = promote_writer_receipt(root, delivery_id, story_id, item_candidate)
     worktree = materialize_item_worktree(root, delivery_id, story_id, item_candidate)
     return {"ok": True, "delivery": delivery_id, "story": story_id, "status": "active",
@@ -3010,6 +3137,7 @@ def takeover_item(project_root: Path, delivery_id: str, story_id: str,
     fence_oid = remote_oid(root, remote, refs["fence"])
     integration_oid = remote_oid(root, remote, refs["integration"])
     item_oid = remote_oid(root, remote, refs["item"])
+    target_before = require_target_ancestry(root, remote, commit_message(root, fence_oid), integration_oid, item_oid)
     slots = remote_slot_oids(root, remote)
     slot = next((key for key, oid in slots.items() if oid == item_oid), None)
     if slot is None:
@@ -3062,6 +3190,8 @@ def takeover_item(project_root: Path, delivery_id: str, story_id: str,
                                (slot_ref, item_oid, item_candidate)])
     if remote_oid(root, remote, refs["item"]) != item_candidate or remote_oid(root, remote, slot_ref) != item_candidate:
         raise RuntimeError("takeover refs did not converge to the receipt candidate")
+    require_current_activation_target(root, remote, delivery_id, story_id, target_before,
+                                      slot, item_candidate, relative_item, item_props, item_body)
     receipt = promote_writer_receipt(root, delivery_id, story_id, item_candidate)
     materialized = materialize_item_worktree(root, delivery_id, story_id, item_candidate)
     return {"ok": True, "delivery": delivery_id, "story": story_id, "slot": slot,
@@ -3225,21 +3355,136 @@ def integrate_item(project_root: Path, delivery_id: str, story_id: str,
             "slot_released": slot_ref}
 
 
+def unique_merge_base(root: Path, first_parent: str, second_parent: str) -> str:
+    result = subprocess.run(["git", "merge-base", "--all", first_parent, second_parent],
+                            cwd=root, text=True, capture_output=True, check=False)
+    if result.returncode not in {0, 1}:
+        raise RuntimeError(result.stderr.strip() or "cannot inspect merge ancestry")
+    bases = result.stdout.splitlines()
+    if len(bases) != 1:
+        raise RuntimeError("merge requires one unambiguous common base")
+    return bases[0]
+
+
+def require_delivery_controls_unchanged(root: Path, directory: Path, reference: str, candidate: str) -> None:
+    """Preserve the selected package's control paths, authored content and receipts."""
+    from ba_compile import without_generated_relations
+
+    def snapshot(tree):
+        prefix = directory.relative_to(root).as_posix() + "/"
+        listing = subprocess.run(["git", "ls-tree", "-rz", tree, "--", prefix],
+                                 cwd=root, capture_output=True, check=True).stdout
+        controls = {}
+        for row in listing.split(b"\0"):
+            if not row:
+                continue
+            metadata, raw_path = row.split(b"\t", 1)
+            path = raw_path.decode("utf-8")
+            if not path.endswith(".md"):
+                continue
+            mode, kind, oid = metadata.decode().split()
+            if kind != "blob" or mode not in {"100644", "100755"}:
+                raise RuntimeError("selected Delivery control must remain a regular file: " + path)
+            content = subprocess.run(["git", "cat-file", "blob", oid], cwd=root,
+                                     capture_output=True, check=True).stdout.decode("utf-8")
+            controls[path] = (mode, without_generated_relations(content))
+        return controls
+
+    before, after = snapshot(reference), snapshot(candidate)
+    changed = sorted(path for path in before.keys() | after.keys() if before.get(path) != after.get(path))
+    if changed:
+        raise RuntimeError("target changed selected Delivery control content or path set: " + ", ".join(changed))
+
+
+def reconcile_delivery_projection_conflicts(root: Path, env: dict) -> None:
+    """Resolve only owned projections, preserving ordinary authored merge conflicts."""
+    import vault_check
+    from ba_compile import without_generated_relations
+
+    policy = vault_check.load_policy(vault_check.DEFAULT_POLICY)
+    prefix = "workspace/docs/"
+    reports = vault_check.relation_reports(vault_check.Vault(
+        root=Path(env["GIT_INDEX_FILE"]).parent, policy=policy))
+    owned_files = {prefix + "maps/delivery.md", *(prefix + path for path in reports)}
+    catalog_root = prefix + str(policy.get("relation_contract", {}).get(
+        "catalog_root", "maps/_relations")).rstrip("/") + "/"
+    listing = subprocess.run(["git", "ls-files", "--unmerged", "-z"], cwd=root, env=env,
+                             capture_output=True, check=True).stdout
+    conflicts = {}
+    for row in listing.split(b"\0"):
+        if row:
+            metadata, raw_path = row.split(b"\t", 1)
+            mode, oid, stage = metadata.decode().split()
+            conflicts.setdefault(raw_path.decode("utf-8"), {})[int(stage)] = (mode, oid)
+    for path, stages in conflicts.items():
+        if any(mode not in {"100644", "100755"} for mode, _oid in stages.values()):
+            continue
+        if path in owned_files or (path.startswith(catalog_root) and path.endswith(".md")):
+            subprocess.run(["git", "update-index", "--force-remove", "--", path],
+                           cwd=root, env=env, capture_output=True, check=True)
+            continue
+        if (not path.startswith(prefix) or not path.endswith(".md")
+                or path.startswith(prefix + ".obsidian/")
+                or vault_check.is_artifact_location(policy, path.removeprefix(prefix))):
+            continue
+        semantic = {}
+        has_projection = False
+        for stage, (mode, oid) in stages.items():
+            if mode not in {"100644", "100755"}:
+                break
+            raw = subprocess.run(["git", "cat-file", "blob", oid], cwd=root,
+                                 capture_output=True, check=True).stdout
+            try:
+                text = raw.decode("utf-8")
+            except UnicodeDecodeError:
+                break
+            if text.startswith(policy.get("generated_marker_prefix", "<!-- generated by")):
+                break
+            start, end = vault_check.RELATION_START, vault_check.RELATION_END
+            if start in text or end in text:
+                lines = text.splitlines()
+                if lines.count(start) != 1 or lines.count(end) != 1 or lines.index(start) > lines.index(end):
+                    break
+                has_projection = True
+            semantic[stage] = (mode, without_generated_relations(text))
+        if len(semantic) != len(stages) or not has_projection:
+            continue
+        base, ours, theirs = (semantic.get(stage) for stage in (1, 2, 3))
+        chosen = 2 if ours == theirs or theirs == base else 3 if ours == base else None
+        if chosen is None:
+            continue
+        subprocess.run(["git", "update-index", "--force-remove", "--", path],
+                       cwd=root, env=env, capture_output=True, check=True)
+        if chosen in stages:
+            mode, oid = stages[chosen]
+            subprocess.run(["git", "update-index", "--add", "--cacheinfo", mode, oid, path],
+                           cwd=root, env=env, capture_output=True, check=True)
+
+
 def merge_candidate(root: Path, first_parent: str, second_parent: str,
-                    subject: str, trailers: dict[str, str]) -> str:
+                    subject: str, trailers: dict[str, str], *, delivery_projections: bool = False,
+                    operation_bindings: dict[str, dict] | None = None,
+                    preserve_delivery: Path | None = None) -> str:
+    merge_base = unique_merge_base(root, first_parent, second_parent)
     with tempfile.TemporaryDirectory(prefix="agentrof-merge-index-") as temporary:
         index = Path(temporary) / "index"
         env = os.environ.copy(); env["GIT_INDEX_FILE"] = str(index)
-        merge = subprocess.run(["git", "read-tree", "-m", first_parent, second_parent], cwd=root, env=env,
+        merge = subprocess.run(["git", "read-tree", "-m", merge_base, first_parent, second_parent], cwd=root, env=env,
                                text=True, capture_output=True, check=False)
         if merge.returncode:
             raise RuntimeError(merge.stderr.strip() or "Item and Integration trees conflict")
+        if delivery_projections:
+            reconcile_delivery_projection_conflicts(root, env)
         tree = subprocess.run(["git", "write-tree"], cwd=root, env=env, text=True,
                               capture_output=True, check=False)
         if tree.returncode:
             raise RuntimeError(tree.stderr.strip() or "cannot write integration tree")
+        if preserve_delivery is not None:
+            require_delivery_controls_unchanged(root, preserve_delivery, first_parent, tree.stdout.strip())
+        projected = (write_delivery_projection_tree(root, env, tree.stdout.strip(), operation_bindings)
+                     if delivery_projections else tree.stdout.strip())
         message = subject + "\n\n" + "\n".join(f"Agentrof-{key}: {value}" for key, value in trailers.items()) + "\n"
-        commit = subprocess.run(["git", "commit-tree", tree.stdout.strip(), "-p", first_parent, "-p", second_parent],
+        commit = subprocess.run(["git", "commit-tree", projected, "-p", first_parent, "-p", second_parent],
                                 cwd=root, env=env, input=message, text=True, capture_output=True, check=False)
         if commit.returncode:
             raise RuntimeError(commit.stderr.strip() or "cannot create integration commit")

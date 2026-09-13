@@ -410,10 +410,19 @@ def link(path: str, label: str) -> str:
 
 
 def render_map(docs: Path) -> None:
+    from delivery_governance import path_for as governance_path
+
     map_path = docs / "maps" / "delivery.md"
     rows = ["---", "type: moc", "title: Delivery", "tags:", "  - doc/moc", "---", "",
-            "# Delivery", "", "Target-resident Delivery packages and their current semantic outcomes.",
-            "", "## Records", "", "<!-- delivery_compile.py: generated deliveries -->", ""]
+            "# Delivery", "", "Target-resident Delivery packages and their current semantic outcomes.", ""]
+    rules = [(governance_path(docs), "Governance"),
+             (delivery_root(docs) / "definition-of-done.md", "Definition of Done")]
+    existing = [(path, title) for path, title in rules if path.is_file()]
+    if existing:
+        rows.extend(["## Project Rules", ""])
+        rows.extend(f"- {link(path.relative_to(docs).as_posix(), title)}" for path, title in existing)
+        rows.append("")
+    rows.extend(["## Records", "", "<!-- delivery_compile.py: generated deliveries -->", ""])
     for directory in delivery_dirs(docs):
         path = directory / "delivery.md"
         try:

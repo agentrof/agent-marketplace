@@ -1,6 +1,0 @@
-{
-  "summary": "Preserve approved Requirement stage evidence during navigation rendering and normalize terminal status tags.",
-  "components": {
-    "software-engineering-team": "patch"
-  }
-}

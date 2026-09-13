@@ -35,3 +35,12 @@
 
 - Add a safe abort path for incomplete unpublished Experience update scopes.
 - Add a safe return-to-draft path for unpublished Experience review scopes.
+
+## 0.2.1
+
+- Reuse immutable receipt validation during backlog approval so large approved input sets complete without repeated compiler scans.
+- Keep backlog compiler status tags aligned with vault validation.
+- Stabilize temporary Git repository cleanup in delivery tests.
+- Recover an interrupted Experience update approval without accepting ambiguous lifecycle state.
+- Preserve approved Requirement stage evidence during navigation rendering and normalize terminal status tags.
+- Parse escaped Requirement Stage Impact wikilink aliases as their canonical package references.

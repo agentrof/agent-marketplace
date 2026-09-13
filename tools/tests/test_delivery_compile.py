@@ -15,6 +15,7 @@ sys.path.insert(0, str(SCRIPTS))
 sys.path.insert(0, str(ROOT / "tools" / "tests"))
 
 import delivery_compile  # noqa: E402
+import architecture_compile  # noqa: E402
 import backlog_compile  # noqa: E402
 import operation_compile  # noqa: E402
 import stage_package  # noqa: E402
@@ -194,6 +195,143 @@ class DeliveryCompilerTests(unittest.TestCase):
         )
         self.assertEqual(delivery_compile.check_delivery(plan_args), 0)
         self.assert_delivery_vault_contract()
+
+    def execution_topology_fixture(self):
+        self.approve_verification_contract()
+        self.approve_dod()
+        args = type("Args", (), {
+            "docs": str(self.docs), "id": None, "slug": "auth", "goal": "Authenticate",
+            "outcome": None, "target_branch": "main", "story": ["AUTH-01"],
+        })
+        self.assertEqual(delivery_compile.init_delivery(args), 0)
+        root = delivery_compile.find_delivery(self.docs, "DLV-001")
+        item = root / "items/auth-01/item.md"
+        props, body = delivery_compile.split_note(item)
+        props.update({
+            "architecture_impact": "required", "architecture_components": ["api-tools"],
+            "architecture_record_kinds": ["runtime-view"],
+            "architecture_reason": "Declare the application runtime and shared development harness.",
+            "path_claims": ["workspace/apps/api-tools"],
+        })
+        sources, _snapshot, findings = delivery_compile.approved_backlog_sources(self.docs, ["AUTH-01"])
+        self.assertEqual(findings, [])
+        props["role_sequence"] = delivery_compile.execution_roles(sources["AUTH-01"], True)
+        components = {
+            "api": {"sourcing": "build", "code_path": "workspace/apps/api"},
+            "api-tools": {"sourcing": "build", "code_path": "workspace/apps/api-tools"},
+            "database": {"sourcing": "managed"},
+        }
+        return root, item, props, body, sources, components
+
+    def test_architect_role_moves_first_once_and_preserves_other_source_roles(self):
+        root, item, props, body, sources, components = self.execution_topology_fixture()
+        backlog_before = {path: path.read_bytes() for path in (self.docs / "backlog").rglob("*") if path.is_file()}
+        for supporters in ([], ["software_architect"],
+                           ["frontend_developer", "software_architect", "devops_engineer"]):
+            with self.subTest(supporters=supporters):
+                source = {**sources["AUTH-01"], "supporting_roles": supporters}
+                selected = {"AUTH-01": source}
+                before = json.dumps(selected, sort_keys=True)
+                expected = ["software_architect", source["owner_role"],
+                            *(role for role in supporters if role != "software_architect"),
+                            "code_reviewer", "qa_engineer"]
+                self.assertEqual(delivery_compile.execution_roles(source, True), expected)
+                self.assertEqual(delivery_compile.execution_roles(source),
+                                 [source["owner_role"], *supporters, "code_reviewer", "qa_engineer"])
+                props["role_sequence"] = expected
+                delivery_compile.atomic_text(item, delivery_compile.frontmatter(props, body))
+                with mock.patch.object(architecture_compile, "solution_components", return_value=components):
+                    self.assertEqual(delivery_compile.execution_plan_findings(root, selected, self.docs), [])
+                self.assertEqual(json.dumps(selected, sort_keys=True), before)
+        self.assertEqual({path: path.read_bytes() for path in (self.docs / "backlog").rglob("*") if path.is_file()}, backlog_before)
+
+    def test_execution_roles_reject_wrong_order_unknown_missing_and_duplicate_roles(self):
+        root, item, props, body, sources, components = self.execution_topology_fixture()
+        sources["AUTH-01"]["supporting_roles"] = ["software_architect", "devops_engineer"]
+        expected = ["software_architect", sources["AUTH-01"]["owner_role"],
+                    "devops_engineer", "code_reviewer", "qa_engineer"]
+        invalid = [
+            [expected[1], expected[0], *expected[2:]],
+            [*expected[:2], "unknown_role", *expected[2:]],
+            [*expected[:2], *expected[3:]],
+            [*expected[:2], "software_architect", *expected[2:]],
+            [*expected[:-2], "qa_engineer", "code_reviewer"],
+        ]
+        with mock.patch.object(architecture_compile, "solution_components", return_value=components):
+            for roles in invalid:
+                with self.subTest(roles=roles):
+                    props["role_sequence"] = roles
+                    delivery_compile.atomic_text(item, delivery_compile.frontmatter(props, body))
+                    findings = delivery_compile.execution_plan_findings(root, sources, self.docs)
+                    self.assertTrue(any("role_sequence must be" in finding for finding in findings), findings)
+                    if len(roles) != len(set(roles)):
+                        self.assertTrue(any("duplicate roles" in finding for finding in findings), findings)
+
+    def test_execution_approval_accepts_shared_paths_without_rebinding_approved_scope(self):
+        root, item, props, body, _sources, components = self.execution_topology_fixture()
+        args = type("Args", (), {"docs": str(self.docs), "delivery": "DLV-001"})
+        self.assertEqual(delivery_compile.approve_scope(args), 0)
+        scope_hash = delivery_compile.split_note(root / "delivery.md")[0]["scope_hash"]
+        backlog_before = {path: path.read_bytes() for path in (self.docs / "backlog").rglob("*") if path.is_file()}
+        props["path_claims"] = ["workspace/apps/api-tools", "tests/platform_runtime", "dev", "Makefile"]
+        delivery_compile.atomic_text(item, delivery_compile.frontmatter(props, body))
+        with mock.patch.object(architecture_compile, "solution_components", return_value=components):
+            self.assertEqual(delivery_compile.approve_execution(args), 0)
+        approved, _ = delivery_compile.split_note(root / "delivery.md")
+        self.assertEqual(approved["status"], "execution_approved")
+        self.assertEqual(approved["scope_hash"], scope_hash)
+        self.assertEqual({path: path.read_bytes() for path in (self.docs / "backlog").rglob("*") if path.is_file()}, backlog_before)
+        self.assertIn("tests/platform_runtime", (root / "execution-plan.md").read_text(encoding="utf-8"))
+
+    def test_crosscutting_claims_preserve_unselected_component_and_normalization_guards(self):
+        root, item, props, body, sources, components = self.execution_topology_fixture()
+        with mock.patch.object(architecture_compile, "solution_components", return_value=components):
+            for selected, paths in (
+                    (["api-tools"], ["workspace/apps/api-tools", "tests/platform_runtime", "Makefile", "dev", "workspace/environment"]),
+                    (["database"], ["tests/integration", "workspace/environment"]),
+                    (["api", "api-tools"], ["workspace/apps"])):
+                with self.subTest(selected=selected, paths=paths):
+                    props["architecture_components"] = selected
+                    props["path_claims"] = paths
+                    delivery_compile.atomic_text(item, delivery_compile.frontmatter(props, body))
+                    self.assertEqual(delivery_compile.execution_plan_findings(root, sources, self.docs), [])
+            for selected, path in ((["api-tools"], "workspace/apps/api/main.py"),
+                                   (["api-tools"], "workspace/apps"),
+                                   (["database"], "workspace/apps/api-tools")):
+                with self.subTest(selected=selected, forbidden=path):
+                    props["architecture_components"] = selected
+                    props["path_claims"] = [path]
+                    delivery_compile.atomic_text(item, delivery_compile.frontmatter(props, body))
+                    findings = delivery_compile.execution_plan_findings(root, sources, self.docs)
+                    self.assertTrue(any("unselected built component" in finding for finding in findings), findings)
+            props["architecture_components"] = ["api-tools"]
+            for path in (".", "..", "/tmp/source", "../source", "dev/../source", "dev//source", "dev/./source", "dev\\source", "C:/source"):
+                with self.subTest(unsafe=path):
+                    props["path_claims"] = [path]
+                    delivery_compile.atomic_text(item, delivery_compile.frontmatter(props, body))
+                    findings = delivery_compile.execution_plan_findings(root, sources, self.docs)
+                    self.assertTrue(any("not normalized" in finding for finding in findings), findings)
+            for path in ("", "dev/\x00source", "dev/\nsource"):
+                self.assertFalse(delivery_compile._is_normalized_claim(path))
+
+    def test_item_path_claims_reject_exact_and_ancestor_overlap(self):
+        root, item, props, body, sources, components = self.execution_topology_fixture()
+        second = root / "items/auth-02/item.md"
+        sources["AUTH-02"] = {**sources["AUTH-01"], "story_id": "AUTH-02"}
+        with mock.patch.object(architecture_compile, "solution_components", return_value=components):
+            for first_path, second_path, collision in (
+                    ("dev", "dev", True), ("dev", "dev/run.py", True),
+                    ("dev/run.py", "dev", True), ("dev/runtime", "dev/runtime-tools", False)):
+                with self.subTest(first=first_path, second=second_path):
+                    props["path_claims"] = [first_path]
+                    delivery_compile.atomic_text(item, delivery_compile.frontmatter(props, body))
+                    delivery_compile.atomic_text(second, delivery_compile.frontmatter(
+                        {**props, "story_id": "AUTH-02", "path_claims": [second_path]}, body))
+                    findings = delivery_compile.execution_plan_findings(root, sources, self.docs)
+                    if collision:
+                        self.assertTrue(any("owned by both" in finding for finding in findings), findings)
+                    else:
+                        self.assertEqual(findings, [])
 
     def test_no_timebox_or_runtime_coordination_fields_are_generated(self):
         self.approve_dod()

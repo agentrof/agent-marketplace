@@ -573,7 +573,7 @@ def init_delivery(args) -> int:
                       "runtime_required": False,
                       "architecture_impact": "not_applicable", "architecture_components": [],
                       "architecture_record_kinds": [], "architecture_reason": "No architecture delta is currently required.",
-                      "role_sequence": [source["owner_role"], *source["supporting_roles"], "code_reviewer", "qa_engineer"],
+                      "role_sequence": execution_roles(source),
                       "tags": ["doc/delivery-item", "status/in-scope"]}
         atomic_text(item, frontmatter(item_props, body_for("item", item_props["title"], {
             "Delivery Scope": identifier, "Navigation": link(f"delivery/deliveries/{root.name}/delivery", identifier),
@@ -675,10 +675,26 @@ def _string_list(value: object, label: str, errors: list[str]) -> list[str]:
 
 
 def _is_normalized_claim(value: str) -> bool:
-    if not value or value.startswith("/") or "\\" in value:
+    if (not value or value.startswith("/") or "\\" in value
+            or re.match(r"^[A-Za-z]:", value)
+            or any(ord(character) < 32 for character in value)):
         return False
     path = PurePosixPath(value)
-    return value == path.as_posix() and all(part not in {"", ".", ".."} for part in path.parts)
+    return bool(path.parts) and value == path.as_posix() and all(
+        part not in {"", ".", ".."} for part in path.parts)
+
+
+def execution_roles(source: dict, architecture_required: bool = False) -> list[str]:
+    implementation = [source["owner_role"], *source["supporting_roles"]]
+    if architecture_required:
+        implementation = ["software_architect", *(
+            role for role in implementation if role != "software_architect")]
+    return [*implementation, "code_reviewer", "qa_engineer"]
+
+
+def _claims_overlap(first: str, second: str) -> bool:
+    left, right = PurePosixPath(first), PurePosixPath(second)
+    return left == right or left in right.parents or right in left.parents
 
 
 def execution_plan_findings(root: Path, sources: dict[str, dict], docs: Path) -> list[str]:
@@ -742,26 +758,23 @@ def execution_plan_findings(root: Path, sources: dict[str, dict], docs: Path) ->
                 unknown = sorted(set(architecture_components) - set(available))
                 if unknown:
                     errors.append(f"{story_id} architecture components are absent from current Solution topology: {', '.join(unknown)}")
-                built_paths = [str(available[component].get("code_path", ""))
-                               for component in architecture_components
-                               if available.get(component, {}).get("sourcing") == "build"]
-                if paths and built_paths and any(
-                        not any(path == code_path or path.startswith(code_path + "/")
-                                for code_path in built_paths)
-                        for path in paths):
-                    errors.append(f"{story_id} path_claims must stay below the selected built component code_path")
-                if paths and not built_paths:
-                    errors.append(f"{story_id} external-only architecture impact cannot claim project source paths")
+                # Item ownership includes shared tests and infrastructure; component
+                # interiors still require an explicit architecture component claim.
+                for component, detail in available.items():
+                    if detail.get("sourcing") != "build" or component in architecture_components:
+                        continue
+                    code_path = str(detail.get("code_path", ""))
+                    if code_path and any(_claims_overlap(path, code_path) for path in paths):
+                        errors.append(f"{story_id} path_claims overlap unselected built component {component}: {code_path}")
             except (ImportError, ValueError) as exc:
                 errors.append(f"{story_id} architecture impact cannot resolve the current Solution catalog: {exc}")
-            expected_roles = ["software_architect", source["owner_role"], *source["supporting_roles"], "code_reviewer", "qa_engineer"]
         else:
             if architecture_components or architecture_kinds:
                 errors.append(f"{story_id} non-applicable architecture impact cannot declare architecture claims")
-            expected_roles = [source["owner_role"], *source["supporting_roles"], "code_reviewer", "qa_engineer"]
+        expected_roles = execution_roles(source, architecture_impact == "required")
         if roles != expected_roles:
             errors.append(
-                f"{story_id} role_sequence must be owner/supporting roles followed by code_reviewer and qa_engineer"
+                f"{story_id} role_sequence must be {', '.join(expected_roles)}"
             )
         if len(roles) != len(set(roles)):
             errors.append(f"{story_id} role_sequence contains duplicate roles")
@@ -769,9 +782,10 @@ def execution_plan_findings(root: Path, sources: dict[str, dict], docs: Path) ->
             if not _is_normalized_claim(claim):
                 errors.append(f"{story_id} path_claim is not normalized: {claim}")
                 continue
-            previous = path_owners.setdefault(claim, story_id)
-            if previous != story_id:
-                errors.append(f"path_claim {claim} is owned by both {previous} and {story_id}")
+            for previous_claim, previous in path_owners.items():
+                if previous != story_id and _claims_overlap(claim, previous_claim):
+                    errors.append(f"path_claim {claim} overlaps {previous_claim} owned by both {previous} and {story_id}")
+            path_owners.setdefault(claim, story_id)
         for claim in contracts:
             previous = contract_owners.setdefault(claim, story_id)
             if previous != story_id:

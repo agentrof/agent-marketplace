@@ -15,8 +15,10 @@ sys.path.insert(0, str(SCRIPTS))
 sys.path.insert(0, str(ROOT / "tools" / "tests"))
 
 import delivery_compile  # noqa: E402
+import backlog_compile  # noqa: E402
 import operation_compile  # noqa: E402
 import stage_package  # noqa: E402
+import vault_check  # noqa: E402
 from backlog_fixture import make_approved_backlog  # noqa: E402
 
 
@@ -43,6 +45,28 @@ class DeliveryCompilerTests(unittest.TestCase):
         args = type("Args", (), {"docs": str(self.docs), "title": "Project", "file": None})
         self.assertEqual(delivery_compile.init_dod(args), 0)
         self.assertEqual(delivery_compile.approve_dod(args), 0)
+
+    def assert_delivery_vault_contract(self):
+        self.maxDiff = None
+        policy = vault_check.load_policy(vault_check.DEFAULT_POLICY)
+        vault = vault_check.build_vault(self.docs, policy)
+        findings = []
+        for check in (vault_check.check_frontmatter_props,
+                      vault_check.check_nav_footer,
+                      vault_check.check_wikilink_resolution,
+                      vault_check.check_relation_contract):
+            check(vault, findings)
+        self.assertEqual(
+            [finding for finding in findings if finding.path.startswith("delivery/")],
+            [],
+        )
+        vault_check.materialize_payload(self.docs, policy, vault_check.DEFAULT_PAYLOAD)
+        vault_check.reconcile_payload_fragment(self.docs, policy, "delivery")
+        types = json.loads((self.docs / ".obsidian/types.json").read_text())["types"]
+        for note in vault.notes.values():
+            if note.rel.startswith("delivery/"):
+                for key in note.fm:
+                    self.assertEqual(types.get(key), policy["property_types"][key], key)
 
     def approve_verification_contract(self):
         """Create the smallest current Solution and Operation handoff chain."""
@@ -96,6 +120,35 @@ class DeliveryCompilerTests(unittest.TestCase):
         self.assertEqual(props["revision"], 2)
         self.assertNotEqual(props.get("source_hash"), before)
 
+    def test_scope_producer_obeys_vault_schema_links_and_navigation(self):
+        self.approve_dod()
+        args = type("Args", (), {"docs": str(self.docs), "id": None, "slug": "auth",
+                                 "goal": "Authenticate", "outcome": None,
+                                 "target_branch": "main", "story": ["AUTH-01"]})
+        self.assertEqual(delivery_compile.init_delivery(args), 0)
+        self.assert_delivery_vault_contract()
+
+    def test_backlog_source_validation_cache_is_scoped_to_one_read(self):
+        self.approve_dod()
+        original = backlog_compile.collect
+        seen = []
+
+        def read(*args, **kwargs):
+            seen.append((stage_package._CANDIDATE_SESSION_STACK[-1],
+                         backlog_compile._EXPERIENCE_APPLICATION_CACHE_STACK[-1]))
+            return original(*args, **kwargs)
+
+        with mock.patch.object(backlog_compile, "collect", side_effect=read):
+            for _ in range(2):
+                _sources, _snapshot, errors = delivery_compile.approved_backlog_sources(self.docs, ["AUTH-01"])
+                self.assertEqual(errors, [])
+        self.assertEqual(len(seen), 2)
+        for candidate, experience in seen:
+            self.assertIsNotNone(candidate)
+            self.assertIsNotNone(experience)
+        self.assertIsNot(seen[0][0], seen[1][0])
+        self.assertIsNot(seen[0][1], seen[1][1])
+
     def test_scope_then_execution_creates_exact_item_evidence_files(self):
         self.approve_verification_contract()
         dod_args = type("Args", (), {"docs": str(self.docs), "title": "Project", "file": None})
@@ -140,6 +193,7 @@ class DeliveryCompilerTests(unittest.TestCase):
             verification_props["title"], "Verification evidence for AUTH-01"
         )
         self.assertEqual(delivery_compile.check_delivery(plan_args), 0)
+        self.assert_delivery_vault_contract()
 
     def test_no_timebox_or_runtime_coordination_fields_are_generated(self):
         self.approve_dod()

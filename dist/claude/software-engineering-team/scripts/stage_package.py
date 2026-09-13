@@ -187,62 +187,189 @@ def tree_hash(root: Path, omitted_fields: set[str]) -> str:
 
 
 def is_committed(package_root: Path) -> bool:
-    """Check that a package has no authored changes.
+    """Ignore generated relations and safe policy metadata, never authored drift."""
+    import experience_application_check
 
-    Inverse relation blocks are compiler-owned projections, deliberately
-    excluded from package hashes.  A relation render after a downstream
-    candidate edit must not make an otherwise unchanged upstream package fail
-    a strict-current handoff.
-    """
     root = next((p for p in (package_root, *package_root.parents)
                  if (p / ".git").exists()), package_root.parent)
     relative = package_root.relative_to(root)
-    changed = subprocess.run(
-        ["git", "diff", "--name-only", "-z", "HEAD", "--", str(relative)],
-        cwd=root, capture_output=True, check=False,
-    )
-    untracked = subprocess.run(
-        ["git", "ls-files", "--others", "--exclude-standard", "-z", "--",
-         str(relative)],
-        cwd=root, capture_output=True, check=False,
-    )
-    if changed.returncode != 0 or untracked.returncode != 0 or untracked.stdout:
-        return False
-    for raw in changed.stdout.split(b"\0"):
-        if not raw:
-            continue
-        path = root / raw.decode("utf-8", errors="surrogateescape")
-        if path.suffix != ".md" or path.is_symlink() or not path.is_file():
+
+    def safe_metadata(path: Path, *, missing: bool = False) -> bool:
+        if not experience_application_check.is_os_metadata_path(path):
             return False
-        head = subprocess.run(
-            ["git", "show", f"HEAD:{path.relative_to(root).as_posix()}"],
+        if any(parent.is_symlink() for parent in (path, *path.parents)
+               if parent == root or root in parent.parents):
+            return False
+        try:
+            metadata = path.lstat()
+        except FileNotFoundError:
+            if not missing:
+                return False
+            previous = subprocess.run(
+                ["git", "--no-replace-objects", "--literal-pathspecs", "ls-tree", "-z", "HEAD", "--", path.relative_to(root).as_posix()],
+                cwd=root, capture_output=True, check=False,
+            )
+            rows = [row for row in previous.stdout.split(b"\0") if row]
+            if previous.returncode != 0 or len(rows) != 1:
+                return False
+            fields = rows[0].split(b"\t", 1)[0].split(b" ", 2)
+            return fields[:2] in (
+                [b"100644", b"blob"], [b"100755", b"blob"],
+            )
+        return stat.S_ISREG(metadata.st_mode) and metadata.st_nlink == 1
+
+    try:
+        if package_root.is_symlink() or not package_root.is_dir():
+            return False
+        # Ignored metadata aliases are invisible to Git's change listing too.
+        for path in package_root.rglob("*"):
+            if experience_application_check.is_os_metadata_path(path):
+                metadata = path.lstat()
+                if stat.S_ISDIR(metadata.st_mode):
+                    continue
+                if not safe_metadata(path):
+                    return False
+        changed = subprocess.run(
+            ["git", "--no-replace-objects", "--literal-pathspecs", "diff", "--name-only", "-z", "HEAD", "--", str(relative)],
             cwd=root, capture_output=True, check=False,
         )
-        if head.returncode != 0:
+        untracked = subprocess.run(
+            ["git", "--no-replace-objects", "--literal-pathspecs", "ls-files", "--others", "--exclude-standard", "-z", "--", str(relative)],
+            cwd=root, capture_output=True, check=False,
+        )
+        if changed.returncode != 0 or untracked.returncode != 0:
             return False
-        current = path.read_text(encoding="utf-8")
-        previous = head.stdout.decode("utf-8", errors="surrogateescape")
-        if without_generated_relations(current) != without_generated_relations(previous):
+        for raw in untracked.stdout.split(b"\0"):
+            if raw and not safe_metadata(root / os.fsdecode(raw)):
+                return False
+        for raw in changed.stdout.split(b"\0"):
+            if not raw:
+                continue
+            path = root / os.fsdecode(raw)
+            if safe_metadata(path, missing=True):
+                continue
+            if path.suffix != ".md" or path.is_symlink() or not path.is_file():
+                return False
+            head = subprocess.run(
+                ["git", "--no-replace-objects", "show", f"HEAD:{path.relative_to(root).as_posix()}"],
+                cwd=root, capture_output=True, check=False,
+            )
+            if head.returncode != 0:
+                return False
+            current = path.read_text(encoding="utf-8")
+            previous = head.stdout.decode("utf-8", errors="surrogateescape")
+            if without_generated_relations(current) != without_generated_relations(previous):
+                return False
+        artifacts = package_root / "artifacts"
+        if artifacts.is_symlink():
             return False
-    return True
+        artifact_paths = {
+            path for path in artifacts.rglob("*")
+            if not stat.S_ISDIR(path.lstat().st_mode) and not safe_metadata(path)
+        } if artifacts.is_dir() else set()
+        committed_artifacts = subprocess.run(
+            ["git", "--no-replace-objects", "--literal-pathspecs", "ls-tree", "-r", "--name-only", "-z", "HEAD", "--", artifacts.relative_to(root).as_posix()],
+            cwd=root, capture_output=True, check=False,
+        )
+        if committed_artifacts.returncode != 0:
+            return False
+        for raw in committed_artifacts.stdout.split(b"\0"):
+            if raw:
+                path = root / os.fsdecode(raw)
+                if not safe_metadata(path, missing=True):
+                    artifact_paths.add(path)
+        if artifact_paths and not paths_are_committed(sorted(artifact_paths)):
+            return False
+        return True
+    except (OSError, ValueError):
+        return False
 
 
 def paths_are_committed(paths: list[Path]) -> bool:
+    """Require real HEAD files, identical staged state and exact working bytes.
+
+    Git status omits ignored untracked files and may trust index flags. Literal
+    NUL-delimited paths preserve arbitrary author-owned artifact file names.
+    Directory selectors cover their complete local and tracked file sets.
+    """
     if not paths:
         return False
+    paths = [Path(os.path.abspath(os.fspath(path))) for path in paths]
     root = next(
-        (parent for path in paths for parent in (path.parent, *path.parents)
+        (parent for path in paths for parent in (path, *path.parents)
          if (parent / ".git").exists()),
-        paths[0].parent,
+        None,
     )
-    result = subprocess.run(
-        ["git", "status", "--porcelain=v1", "--", *map(str, paths)],
-        cwd=root,
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-    return result.returncode == 0 and not result.stdout.strip()
+    if root is None:
+        return False
+    try:
+        relative = [path.relative_to(root).as_posix() for path in paths]
+        selected: dict[bytes, Path] = {}
+        for path in paths:
+            if any(parent.is_symlink() for parent in (path, *path.parents)
+                   if parent == root or root in parent.parents):
+                return False
+            entries = [path, *path.rglob("*")] if path.is_dir() else [path]
+            for entry in entries:
+                metadata = entry.lstat()
+                if stat.S_ISDIR(metadata.st_mode):
+                    continue
+                if not stat.S_ISREG(metadata.st_mode) or metadata.st_nlink != 1:
+                    return False
+                selected[os.fsencode(entry.relative_to(root).as_posix())] = entry
+        if not selected:
+            return False
+        head = subprocess.run(
+            ["git", "--no-replace-objects", "--literal-pathspecs", "ls-tree", "-r", "-z", "HEAD", "--", *relative],
+            cwd=root, capture_output=True, check=False,
+        )
+        index = subprocess.run(
+            ["git", "--no-replace-objects", "--literal-pathspecs", "ls-files", "--stage", "-z", "--", *relative],
+            cwd=root, capture_output=True, check=False,
+        )
+        if head.returncode or index.returncode:
+            return False
+        committed: dict[bytes, tuple[bytes, bytes]] = {}
+        staged: dict[bytes, tuple[bytes, bytes]] = {}
+        for row in head.stdout.split(b"\0"):
+            if not row:
+                continue
+            fields, name = row.split(b"\t", 1)
+            mode, kind, digest = fields.split(b" ")
+            if kind != b"blob" or mode not in {b"100644", b"100755"}:
+                return False
+            committed[name] = (mode, digest)
+        for row in index.stdout.split(b"\0"):
+            if not row:
+                continue
+            fields, name = row.split(b"\t", 1)
+            mode, digest, stage = fields.split(b" ")
+            if stage != b"0" or name in staged:
+                return False
+            staged[name] = (mode, digest)
+        if set(selected) != set(committed) or committed != staged:
+            return False
+        objects = subprocess.run(
+            ["git", "--no-replace-objects", "cat-file", "--batch"], cwd=root, capture_output=True,
+            input=b"".join(digest + b"\n" for _mode, digest in committed.values()),
+            check=False,
+        )
+        if objects.returncode:
+            return False
+        offset = 0
+        for name, (_mode, digest) in committed.items():
+            end = objects.stdout.index(b"\n", offset)
+            actual_digest, kind, size_text = objects.stdout[offset:end].split(b" ")
+            size = int(size_text)
+            start = end + 1
+            offset = start + size + 1
+            if actual_digest != digest or kind != b"blob" or size < 0 \
+                    or objects.stdout[start + size:offset] != b"\n" \
+                    or objects.stdout[start:start + size] != selected[name].read_bytes():
+                return False
+        return offset == len(objects.stdout)
+    except (OSError, ValueError):
+        return False
 
 
 def receipt(stage: str, ref: str, result_type: str, package_hash: str,

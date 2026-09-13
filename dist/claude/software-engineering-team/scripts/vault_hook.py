@@ -2881,6 +2881,10 @@ def vault_inventory(root: Path) -> dict[str, dict[str, int | str]]:
             if not entry.is_file(follow_symlinks=False):
                 continue
             identity = path.stat()
+            if (experience_application_check is not None
+                    and experience_application_check.is_os_metadata_path(rel)
+                    and identity.st_nlink == 1):
+                continue
             result[rel] = {
                 "kind": "file",
                 "content_sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
@@ -2993,6 +2997,20 @@ def recovery_path_for_post(payload: dict) -> Path:
     return exact
 
 
+def experience_guard_key(project: Path) -> str:
+    """Return a private-state key bound to one resolved project root."""
+    identity = str(project.resolve())
+    return hashlib.sha256(identity.encode("utf-8")).hexdigest()
+
+
+def experience_writer_lock_path(project: Path) -> Path:
+    return recovery_root() / f"experience-writer-{experience_guard_key(project)}.json"
+
+
+def authorized_experience_state_path(project: Path) -> Path:
+    return recovery_root() / f"experience-authority-{experience_guard_key(project)}.json"
+
+
 def cleanup_stale_recovery(root: Path) -> None:
     cutoff = time.time() - RECOVERY_TTL_SECONDS
     try:
@@ -3046,6 +3064,23 @@ def atomic_create_text(path: Path, text: str) -> None:
         sync_directory(path.parent)
     finally:
         Path(temporary).unlink(missing_ok=True)
+
+
+def exclusive_create_text(path: Path, text: str) -> None:
+    """Create one small private lock file without platform link semantics."""
+    descriptor = os.open(
+        path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600,
+    )
+    try:
+        with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
+            handle.write(text)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.chmod(path, 0o600)
+        sync_directory(path.parent)
+    except Exception:
+        path.unlink(missing_ok=True)
+        raise
 
 
 def valid_config_snapshot(snapshot: object, expected_path: Path) -> bool:
@@ -3124,6 +3159,8 @@ def load_recovery(payload: dict, path: Path) -> tuple[dict | None, str]:
         return None, "recovery application writer authorization is invalid"
     if not isinstance(state.get("application_writer_candidate"), bool):
         return None, "recovery application writer candidate is invalid"
+    if not isinstance(state.get("authorized_experience_state_sha"), str):
+        return None, "recovery Experience authority identity is invalid"
     recovery_artifacts = state.get("recovery_artifacts")
     if recovery_artifacts is not None and not valid_recovery_artifact_snapshot(
         recovery_artifacts,
@@ -3145,6 +3182,106 @@ def load_recovery(payload: dict, path: Path) -> tuple[dict | None, str]:
         state["application_writer_candidate"] = False
         return state, "recovery shell command binding changed"
     return state, ""
+
+
+def load_authorized_experience_state(
+    project: Path,
+) -> tuple[dict | None, str, str]:
+    """Load the latest postimage accepted for one Experience writer."""
+    path = authorized_experience_state_path(project)
+    if not path.is_file():
+        return None, "", ""
+    envelope, _raw, error = load_json_file(path)
+    if envelope is None:
+        return None, "", error
+    state = envelope.get("state")
+    if not isinstance(state, dict):
+        return None, "", "Experience authority state is missing"
+    digest = hashlib.sha256(canonical_json(state).encode("utf-8")).hexdigest()
+    if envelope.get("state_sha256") != digest:
+        return None, "", "Experience authority state checksum does not match"
+    try:
+        expected_project = str(project.resolve())
+    except (OSError, RuntimeError):
+        return None, "", "Experience authority project cannot be resolved"
+    if state.get("project") != expected_project:
+        return None, "", "Experience authority project is invalid"
+    snapshot = state.get("experience_tree")
+    if not valid_experience_tree_snapshot(snapshot):
+        return None, "", "Experience authority snapshot is invalid"
+    return state, digest, ""
+
+
+def publish_authorized_experience_state(project: Path, vault: Path) -> str:
+    """Atomically publish a validated lifecycle writer's exact postimage."""
+    snapshot = experience_tree_snapshot(vault)
+    problem = experience_tree_snapshot_safety_problem(snapshot)
+    if problem:
+        raise OSError("Experience authority snapshot is unsafe: " + problem)
+    state = {
+        "project": str(project.resolve()),
+        "experience_tree": snapshot,
+    }
+    digest = hashlib.sha256(canonical_json(state).encode("utf-8")).hexdigest()
+    capsule = canonical_json({
+        "state": state,
+        "state_sha256": digest,
+    })
+    prepare_recovery_root()
+    atomic_replace_text(authorized_experience_state_path(project), capsule)
+    return digest
+
+
+def acquire_experience_writer_lock(project: Path, payload: dict) -> str:
+    """Keep concurrent lifecycle writers from claiming each other's output."""
+    state = {
+        "project": str(project.resolve()),
+        "owner": guard_locator(payload),
+        "binding": guard_binding(payload),
+    }
+    try:
+        exclusive_create_text(
+            experience_writer_lock_path(project), canonical_json(state),
+        )
+    except FileExistsError:
+        return (
+            "an Experience lifecycle writer is already in progress for this "
+            "project; wait for its shell tool to finish before starting "
+            "another writer"
+        )
+    except OSError as exc:
+        return "Experience lifecycle writer lock could not be created: " + str(exc)
+    return ""
+
+
+def release_experience_writer_lock(project: Path, payload: dict) -> None:
+    """Release only the lifecycle lock owned by this exact shell event."""
+    path = experience_writer_lock_path(project)
+    state, _raw, _error = load_json_file(path)
+    if not isinstance(state, dict):
+        return
+    if state.get("project") != str(project.resolve()) \
+            or state.get("owner") != guard_locator(payload) \
+            or state.get("binding") != guard_binding(payload):
+        return
+    try:
+        path.unlink(missing_ok=True)
+        sync_directory(path.parent)
+    except OSError:
+        return
+
+
+def another_experience_writer_is_active(project: Path, payload: dict) -> bool:
+    """Report a live lifecycle lock owned by another shell event."""
+    path = experience_writer_lock_path(project)
+    if path.exists():
+        state, _raw, _error = load_json_file(path)
+    else:
+        state = None
+    if not isinstance(state, dict):
+        return path.exists()
+    return state.get("project") == str(project.resolve()) \
+        and state.get("owner") != guard_locator(payload)
 
 
 def cleanup_guard_state(primary: Path, recovery: Path) -> None:
@@ -3223,6 +3360,14 @@ def shell_snapshot(payload: dict) -> int:
             payload, root, allow_bare_runtime=True,
         )
     )
+    _authority, authority_sha, authority_error = (
+        load_authorized_experience_state(project)
+    )
+    if authority_error:
+        return deny(
+            "Experience lifecycle authority state is unreadable: "
+            + authority_error
+        )
     value = {
         "vault": str(root) if root else "",
         "inventory": vault_inventory(root) if root else {},
@@ -3234,6 +3379,7 @@ def shell_snapshot(payload: dict) -> int:
         "recovery_artifacts": recovery_artifacts,
         "application_writer_allowed": application_writer_allowed,
         "application_writer_candidate": application_writer_candidate,
+        "authorized_experience_state_sha": authority_sha,
     }
     primary_text = canonical_json(value)
     state = {
@@ -3254,6 +3400,7 @@ def shell_snapshot(payload: dict) -> int:
         "application_writer_candidate": value[
             "application_writer_candidate"
         ],
+        "authorized_experience_state_sha": authority_sha,
         "primary_sha256": hashlib.sha256(
             primary_text.encode("utf-8")
         ).hexdigest(),
@@ -3267,18 +3414,28 @@ def shell_snapshot(payload: dict) -> int:
     recovery = recovery_path(payload)
     try:
         prepare_recovery_root()
+        if root and application_writer_candidate:
+            lock_error = acquire_experience_writer_lock(project, payload)
+            if lock_error:
+                return deny(lock_error)
         atomic_create_text(recovery, capsule)
     except FileExistsError:
+        if root and application_writer_candidate:
+            release_experience_writer_lock(project, payload)
         return deny(
             "a Bash guard already owns this session/event identity;"
             " refusing to overwrite its recovery state"
         )
     except OSError as exc:
+        if root and application_writer_candidate:
+            release_experience_writer_lock(project, payload)
         return deny(f"Bash config recovery capsule could not be created: {exc}")
     try:
         atomic_replace_text(path, primary_text)
     except OSError as exc:
         recovery.unlink(missing_ok=True)
+        if root and application_writer_candidate:
+            release_experience_writer_lock(project, payload)
         return deny(f"Bash vault inventory could not be snapshotted: {exc}")
     return 0
 
@@ -3305,6 +3462,9 @@ def shell_verify(payload: dict) -> int:
         )
         application_writer_candidate = bool(
             recovery_state.get("application_writer_candidate")
+        )
+        authority_sha_before = str(
+            recovery_state.get("authorized_experience_state_sha") or ""
         )
         root_value = str(recovery_state.get("vault") or "")
         primary_hash = hashlib.sha256(primary_raw or b"").hexdigest()
@@ -3349,6 +3509,7 @@ def shell_verify(payload: dict) -> int:
             recovery_artifacts_before = None
         application_writer_allowed = False
         application_writer_candidate = False
+        authority_sha_before = ""
         root_value = str(before.get("vault", "")) \
             if isinstance(before, dict) else ""
         expected_vault = project / "workspace" / "docs"
@@ -3551,6 +3712,58 @@ def shell_verify(payload: dict) -> int:
                 or "/_ledger/" in f"/{key}/"
             )
         ]
+        if machine_changes:
+            authority, authority_sha, authority_error = (
+                load_authorized_experience_state(project)
+            )
+            if authority_error:
+                return deny(protected_message(
+                    "Experience lifecycle authority state is unreadable: "
+                    + authority_error
+                ))
+            if authority_sha != authority_sha_before:
+                if authority is None:
+                    return deny(protected_message(
+                        "Experience lifecycle authority disappeared while "
+                        "this shell command was running"
+                    ))
+                try:
+                    current_experience_tree = experience_tree_snapshot(root)
+                except OSError as exc:
+                    current_experience_tree = None
+                    authority_error = str(exc)
+                if current_experience_tree == authority["experience_tree"]:
+                    if integrity_error or config_violation:
+                        return deny(protected_message(
+                            "protected shell effects were restored or "
+                            "verified"
+                        ))
+                    return 0
+                restore_error = restore_experience_tree(
+                    authority["experience_tree"], root,
+                )
+                if restore_error:
+                    retain_guard_state = True
+                    return deny(protected_message(
+                        "Bash changed compiler-owned Experience state after "
+                        "a concurrent authorized lifecycle transition; the "
+                        "current authorized postimage could not be restored: "
+                        + restore_error
+                    ))
+                detail = (
+                    "; current snapshot failed: " + authority_error
+                    if authority_error else ""
+                )
+                return deny(protected_message(
+                    "Bash changed compiler-owned Experience state after a "
+                    "concurrent authorized lifecycle transition; the current "
+                    "authorized postimage was restored" + detail
+                ))
+            if another_experience_writer_is_active(project, payload):
+                return deny(protected_message(
+                    "another Experience lifecycle writer is still in progress; "
+                    "its protected state was left unchanged"
+                ))
         candidate_is_valid = bool(recovery_candidate_is_valid)
         if (
             machine_changes
@@ -3589,6 +3802,9 @@ def shell_verify(payload: dict) -> int:
                 "original Experience tree was "
                 f"restored ({detail})"
             ))
+        writer_postimage_is_valid = bool(machine_changes) and (
+            application_writer_allowed or candidate_is_valid
+        )
         if integrity_error:
             return deny(protected_message(
                 "protected shell effects were restored or verified"
@@ -3613,6 +3829,25 @@ def shell_verify(payload: dict) -> int:
                 return deny(protected_message(
                     "Bash changed vault inventory and left its scoped vault"
                     " check red; repair or restore the changed paths"))
+        if writer_postimage_is_valid:
+            try:
+                publish_authorized_experience_state(project, root)
+            except OSError as exc:
+                restore_error = restore_recovery_protected_state(
+                    experience_before, recovery_artifacts_before, root,
+                )
+                if restore_error:
+                    retain_guard_state = True
+                    return deny(protected_message(
+                        "the validated Experience lifecycle writer could not "
+                        "publish its postimage; restore failed: "
+                        + restore_error
+                    ))
+                return deny(protected_message(
+                    "the validated Experience lifecycle writer could not "
+                    "publish its postimage; the original Experience tree was "
+                    "restored: " + str(exc)
+                ))
         if config_violation:
             return deny(config_violation)
         return 0
@@ -3622,6 +3857,7 @@ def shell_verify(payload: dict) -> int:
     finally:
         if not retain_guard_state:
             cleanup_guard_state(path, recovery)
+            release_experience_writer_lock(project, payload)
 
 
 def main() -> int:

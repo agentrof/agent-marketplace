@@ -39,6 +39,35 @@ class VaultHookPrototypeTests(unittest.TestCase):
     def setUp(self):
         self.hook = load_hook()
 
+    def test_safe_os_metadata_never_changes_the_guard_inventory(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            docs = Path(temporary)
+            generated = docs / "experience-design/_generated"
+            generated.mkdir(parents=True)
+            baseline = self.hook.vault_inventory(docs)
+            metadata = generated / ".DS_Store"
+            metadata.write_bytes(b"Finder state")
+            self.assertEqual(self.hook.vault_inventory(docs), baseline)
+            metadata.write_bytes(b"changed Finder state")
+            self.assertEqual(self.hook.vault_inventory(docs), baseline)
+            metadata.unlink()
+            self.assertEqual(self.hook.vault_inventory(docs), baseline)
+
+    def test_metadata_names_do_not_exempt_hardlinks_or_directory_contents(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            docs = Path(temporary)
+            generated = docs / "experience-design/_generated"
+            generated.mkdir(parents=True)
+            source = generated / "receipt.json"
+            source.write_bytes(b"receipt")
+            metadata = generated / ".DS_Store"
+            os.link(source, metadata)
+            self.assertIn("experience-design/_generated/.DS_Store", self.hook.vault_inventory(docs))
+            metadata.unlink()
+            metadata.mkdir()
+            (metadata / "meaningful.json").write_bytes(b"meaningful")
+            self.assertIn("experience-design/_generated/.DS_Store/meaningful.json", self.hook.vault_inventory(docs))
+
     def test_hook_has_no_application_surface_or_content_guard(self):
         source = HOOK.read_text(encoding="utf-8")
         self.assertNotIn("application.html", source)
@@ -2484,6 +2513,108 @@ class VaultHookShellContractTests(unittest.TestCase):
             self.assertEqual(after.returncode, 2)
             self.assertIn("original Experience tree was restored", after.stderr)
             self.assertFalse(generated.exists())
+
+    def test_stale_reader_does_not_restore_a_concurrent_writer_postimage(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            docs, _config = self.project(root)
+            (docs / "experience-design").mkdir()
+            reader = self.hook.normalize(self.payload(
+                root, "python3 read_only_validation.py",
+            ))
+            writer = self.hook.normalize(self.attested_writer_payload(
+                root, self.application_command(docs),
+                field="cmd",
+            ))
+            writer["tool_use_id"] = "concurrent-writer"
+
+            self.assertEqual(self.hook.shell_snapshot(reader), 0)
+            self.assertEqual(self.hook.shell_snapshot(writer), 0)
+            generated = (
+                docs / "experience-design" / "demo" / "_generated"
+                / "state.json"
+            )
+            generated.parent.mkdir(parents=True)
+            generated.write_text("authorized\n", encoding="utf-8")
+
+            with mock.patch.object(self.hook.vault_check, "main", return_value=0):
+                self.assertEqual(self.hook.shell_verify(writer), 0)
+                self.assertEqual(self.hook.shell_verify(reader), 0)
+            self.assertEqual(generated.read_text(encoding="utf-8"), "authorized\n")
+
+    def test_concurrent_lifecycle_writers_are_serialized(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            docs, _config = self.project(root)
+            (docs / "experience-design").mkdir()
+            first = self.hook.normalize(self.attested_writer_payload(
+                root, self.application_command(docs), field="cmd",
+            ))
+            first["tool_use_id"] = "first-writer"
+            second = self.hook.normalize(self.attested_writer_payload(
+                root, self.application_command(docs), field="cmd",
+            ))
+            second["tool_use_id"] = "second-writer"
+
+            self.assertEqual(self.hook.shell_snapshot(first), 0)
+            self.assertEqual(self.hook.shell_snapshot(second), 2)
+            self.assertEqual(self.hook.shell_verify(first), 0)
+            self.assertEqual(self.hook.shell_snapshot(second), 0)
+            self.assertEqual(self.hook.shell_verify(second), 0)
+
+    def test_reader_completion_during_a_writer_never_restores_writer_state(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            docs, _config = self.project(root)
+            (docs / "experience-design").mkdir()
+            reader = self.hook.normalize(self.payload(
+                root, "python3 read_only_validation.py",
+            ))
+            writer = self.hook.normalize(self.attested_writer_payload(
+                root, self.application_command(docs), field="cmd",
+            ))
+            writer["tool_use_id"] = "active-writer"
+
+            self.assertEqual(self.hook.shell_snapshot(reader), 0)
+            self.assertEqual(self.hook.shell_snapshot(writer), 0)
+            generated = (
+                docs / "experience-design" / "demo" / "_generated"
+                / "state.json"
+            )
+            generated.parent.mkdir(parents=True)
+            generated.write_text("authorized\n", encoding="utf-8")
+            with mock.patch.object(self.hook.vault_check, "main", return_value=0):
+                self.assertEqual(self.hook.shell_verify(reader), 2)
+                self.assertTrue(generated.is_file())
+                self.assertEqual(self.hook.shell_verify(writer), 0)
+            self.assertEqual(generated.read_text(encoding="utf-8"), "authorized\n")
+
+    def test_stale_reader_restores_the_new_authorized_postimage_on_drift(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            docs, _config = self.project(root)
+            (docs / "experience-design").mkdir()
+            reader = self.hook.normalize(self.payload(
+                root, "python3 read_only_validation.py",
+            ))
+            writer = self.hook.normalize(self.attested_writer_payload(
+                root, self.application_command(docs), field="cmd",
+            ))
+            writer["tool_use_id"] = "postimage-writer"
+
+            self.assertEqual(self.hook.shell_snapshot(reader), 0)
+            self.assertEqual(self.hook.shell_snapshot(writer), 0)
+            generated = docs / "experience-design" / "demo" / "_generated"
+            authorized = generated / "authorized.json"
+            unauthorized = generated / "unauthorized.json"
+            generated.mkdir(parents=True)
+            authorized.write_text("authorized\n", encoding="utf-8")
+            with mock.patch.object(self.hook.vault_check, "main", return_value=0):
+                self.assertEqual(self.hook.shell_verify(writer), 0)
+                unauthorized.write_text("unauthorized\n", encoding="utf-8")
+                self.assertEqual(self.hook.shell_verify(reader), 2)
+            self.assertEqual(authorized.read_text(encoding="utf-8"), "authorized\n")
+            self.assertFalse(unauthorized.exists())
 
     def test_post_diagnostic_drift_cannot_bypass_existing_recovery(self):
         with tempfile.TemporaryDirectory() as temporary:

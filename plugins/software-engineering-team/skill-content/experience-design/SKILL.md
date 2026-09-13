@@ -67,3 +67,13 @@ user-journey, screen, flow, state, transition or prototype work.
 10. Atomically approve the complete action set. The result is `application@rN`
    plus the exact current process receipts. Requirement mode binds that set;
    manual mode hands it to backlog planning.
+
+If an approved snapshot differs after clone or loss, follow the flow's approved
+artifact recovery: `propose --recover-artifacts --application-action update
+--reason <explanation>` produces a separate schema-v4 proof. Approve its exact
+previous/current inventories and complete delta, then use the ordinary
+`begin-application-revision`, `enter-application-review`, fresh reviewer
+attestation and `approve-set` path. Historical receipts and all process revisions
+remain unchanged. No automatic hash rewrite or approval is permitted; meaningful
+current artifact sources must match tracked `HEAD` bytes. Existing open scopes
+use their separate recovery flow above.

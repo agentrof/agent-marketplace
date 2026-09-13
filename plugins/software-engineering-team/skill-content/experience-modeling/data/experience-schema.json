@@ -20,6 +20,7 @@
   "application": {
     "artifact_root": "experience-design/artifacts/",
     "artifact_policy": "opaque-author-owned-tree",
+    "os_metadata_basenames": [".DS_Store", "Thumbs.db", "ehthumbs.db", "ehthumbs_vista.db", "desktop.ini"],
     "generated_registry_path": "experience-design/_generated/application-registry.json",
     "revision_ledger_path": "experience-design/_ledger/application-revisions.json",
     "receipt_pattern": "^application@r[1-9][0-9]*$",

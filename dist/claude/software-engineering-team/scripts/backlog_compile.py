@@ -12,6 +12,7 @@ import contextlib
 import hashlib
 import json
 import re
+import subprocess
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -190,7 +191,10 @@ def parse_scalar(value: str):
 
 
 def parse_front_matter(path: Path) -> tuple[dict, str]:
-    text = path.read_text(encoding="utf-8")
+    return parse_front_matter_text(path.read_text(encoding="utf-8"))
+
+
+def parse_front_matter_text(text: str) -> tuple[dict, str]:
     lines = text.splitlines()
     if not lines or lines[0].strip() != "---":
         return {}, text
@@ -1260,6 +1264,8 @@ def round_number(path: Path, props: dict, suffix: str, errors: list[str]) -> int
     return expected
 
 
+@stage_package.candidate_session()
+@experience_validation_session()
 def collect(docs: Path, *, historical_inputs: bool = False) -> tuple[dict, list[str]]:
     contract = backlog_contract()
     root = docs / "backlog"
@@ -1780,6 +1786,93 @@ def approval_readiness_findings(record: dict) -> list[str]:
     return sorted(set(errors))
 
 
+def approval_stamp_findings(path: Path, docs: Path) -> list[str]:
+    props, _body = parse_front_matter(path)
+    rel = path.relative_to(docs).as_posix()
+    errors = []
+    timestamp = props.get("approved_at_utc")
+    if not isinstance(timestamp, str) or not timestamp:
+        errors.append(f"{rel} approved_at_utc is missing")
+    else:
+        try:
+            parsed = datetime.fromisoformat(timestamp.replace("Z", "+00:00"))
+            offset = parsed.utcoffset()
+        except ValueError:
+            offset = None
+        if offset is None or offset.total_seconds() != 0:
+            errors.append(f"{rel} approved_at_utc is not a UTC timestamp")
+    if props.get("source_hash") != digest(path):
+        errors.append(f"{rel} approved source_hash is stale")
+    return errors
+
+
+def preserved_approval_sources(
+    record: dict, docs: Path, *, allow_new_approvals: bool = False,
+) -> tuple[dict[Path, bytes], list[str]]:
+    """Keep intact approvals; an existing review can only change in a new round."""
+    reviews = {docs / review["path"] for review in record["backlog_reviews"]}
+    reviews.update(docs / review["path"] for epic in record["epics"] for review in epic["reviews"])
+    project = next((parent for parent in (docs, *docs.parents) if (parent / ".git").exists()), None)
+    preserved, errors = {}, []
+    if project is not None:
+        prefix = (docs / "backlog").relative_to(project).as_posix()
+        listing = subprocess.run(
+            ["git", "--no-replace-objects", "ls-tree", "-r", "--name-only", "-z", "HEAD", "--", prefix],
+            cwd=project, capture_output=True, check=False,
+        )
+        for raw in listing.stdout.split(b"\0"):
+            if not raw:
+                continue
+            relative = raw.decode("utf-8", errors="surrogateescape")
+            path = project / relative
+            if path in reviews or not re.fullmatch(
+                r"(?:reviews/round-[0-9]+-backlog-review|epics/[^/]+/reviews/round-[0-9]+-epic-review)\.md",
+                path.relative_to(docs / "backlog").as_posix(),
+            ):
+                continue
+            original = subprocess.run(
+                ["git", "--no-replace-objects", "show", f"HEAD:{relative}"],
+                cwd=project, capture_output=True, check=False,
+            )
+            try:
+                head_props, _body = parse_front_matter_text(original.stdout.decode("utf-8"))
+            except UnicodeError:
+                errors.append(f"{relative} committed review approval is unreadable")
+                continue
+            if head_props.get("source_hash") or head_props.get("approved_at_utc"):
+                errors.append(f"{relative} prior review approval was removed or renamed")
+    for path in package_paths(record, docs):
+        props, _body = parse_front_matter(path)
+        stamped = bool(props.get("source_hash") or props.get("approved_at_utc"))
+        head = None
+        if project is not None:
+            result = subprocess.run(
+                ["git", "--no-replace-objects", "show", f"HEAD:{path.relative_to(project).as_posix()}"],
+                cwd=project, capture_output=True, check=False,
+            )
+            if result.returncode == 0:
+                head = result.stdout
+        try:
+            head_props = parse_front_matter_text(head.decode("utf-8"))[0] if head is not None else {}
+        except UnicodeError:
+            errors.append(f"{path.relative_to(docs).as_posix()} committed approval source is unreadable")
+            continue
+        head_stamped = bool(head_props.get("source_hash") or head_props.get("approved_at_utc"))
+        if path in reviews and (head_stamped or (stamped and not allow_new_approvals)):
+            if not head_stamped or head != path.read_bytes():
+                errors.append(f"{path.relative_to(docs).as_posix()} prior review approval must remain byte-exact in HEAD; create a new review round")
+            errors.extend(approval_stamp_findings(path, docs))
+        unchanged = (
+            props.get("source_hash") == head_props.get("source_hash")
+            and props.get("approved_at_utc") == head_props.get("approved_at_utc")
+        )
+        if stamped and unchanged and not approval_stamp_findings(path, docs) and (
+            props.get("status") in {"approved", "planned"} or path in reviews
+        ):
+            preserved[path] = path.read_bytes()
+    return preserved, sorted(set(errors))
+
+
 def approval_findings(record: dict, docs: Path) -> list[str]:
     errors: list[str] = []
     if record["backlog"]["props"].get("status") != "approved":
@@ -1799,27 +1892,8 @@ def approval_findings(record: dict, docs: Path) -> list[str]:
             if story["test_props"].get("status") != "approved":
                 errors.append(f"{story['id']} test plan is not approved")
     paths = package_paths(record, docs)
-    timestamps: set[str] = set()
     for path in paths:
-        props, _ = parse_front_matter(path)
-        rel = path.relative_to(docs).as_posix()
-        timestamp = props.get("approved_at_utc")
-        if not isinstance(timestamp, str) or not timestamp:
-            errors.append(f"{rel} approved_at_utc is missing")
-        else:
-            try:
-                parsed = datetime.fromisoformat(timestamp.replace("Z", "+00:00"))
-                offset = parsed.utcoffset()
-            except ValueError:
-                offset = None
-            if offset is None or offset.total_seconds() != 0:
-                errors.append(f"{rel} approved_at_utc is not a UTC timestamp")
-            timestamps.add(timestamp)
-        expected = digest(path)
-        if props.get("source_hash") != expected:
-            errors.append(f"{rel} approved source_hash is stale")
-    if len(timestamps) > 1:
-        errors.append("approved package timestamps are not identical")
+        errors.extend(approval_stamp_findings(path, docs))
     expected_package = package_digest(docs, paths)
     if record["backlog"]["props"].get("package_hash") != expected_package:
         errors.append("backlog approved package_hash is stale")
@@ -1873,7 +1947,17 @@ def normalize_backlog_map_aliases(path: Path, backlog_title: str) -> None:
         path.write_text(updated, encoding="utf-8")
 
 
-def render_backlog_navigation(record: dict, docs: Path) -> None:
+def render_backlog_navigation(record: dict, docs: Path, *, preserved: set[Path] | None = None) -> None:
+    if preserved is None:
+        preserved = {
+            path for path in package_paths(record, docs)
+            if not approval_stamp_findings(path, docs)
+        }
+
+    def append_current_nav(path: Path, links: list[str]) -> None:
+        if path not in preserved:
+            append_nav(path, links)
+
     ensure_home_map(docs)
     backlog_title = str(record["backlog"]["props"].get(
         "title", DEFAULT_BACKLOG_TITLE
@@ -1901,31 +1985,31 @@ def render_backlog_navigation(record: dict, docs: Path) -> None:
     map_path.write_text(prefix + "\n\n" + "\n".join(map_lines) + "\n",
                         encoding="utf-8")
 
-    append_nav(docs / record["backlog"]["path"],
+    append_current_nav(docs / record["backlog"]["path"],
                ["[[maps/backlog|Backlog map]]"])
     for review in record["backlog_reviews"]:
-        append_nav(docs / review["path"], [
+        append_current_nav(docs / review["path"], [
             "[[maps/backlog|Backlog map]]",
             wikilink(record["backlog"]["path"], backlog_title),
         ])
     for epic in record["epics"]:
         epic_link = wikilink(epic["path"], epic["props"].get("title", epic["id"]))
-        append_nav(docs / epic["path"], [
+        append_current_nav(docs / epic["path"], [
             "[[maps/backlog|Backlog map]]",
             wikilink(record["backlog"]["path"], backlog_title),
         ])
         for review in epic["reviews"]:
-            append_nav(docs / review["path"],
+            append_current_nav(docs / review["path"],
                        ["[[maps/backlog|Backlog map]]", epic_link])
         for story in epic["stories"]:
             story_link = wikilink(story["path"],
                                   story["props"].get("title", story["id"]))
-            append_nav(docs / story["path"], [
+            append_current_nav(docs / story["path"], [
                 "[[maps/backlog|Backlog map]]", epic_link,
                 wikilink(story["test_plan"],
                          story["test_props"].get("title", "Test plan")),
             ])
-            append_nav(docs / story["test_plan"],
+            append_current_nav(docs / story["test_plan"],
                        ["[[maps/backlog|Backlog map]]", epic_link, story_link])
 
 
@@ -2247,11 +2331,30 @@ def approve(args) -> int:
     with stage_package.candidate_session(), experience_validation_session():
         record, errors = collect(docs)
     errors.extend(approval_readiness_findings(record))
+    already_approved = record.get("backlog", {}).get("props", {}).get("status") == "approved"
+    preserved = {}
+    if not errors:
+        if already_approved:
+            errors.extend(approval_findings(record, docs))
+            _preserved, preserve_errors = preserved_approval_sources(
+                record, docs, allow_new_approvals=True,
+            )
+            errors.extend(preserve_errors)
+        else:
+            preserved, preserve_errors = preserved_approval_sources(record, docs)
+            errors.extend(preserve_errors)
     errors = sorted(set(errors))
     if errors:
         print(json.dumps({"ok": False, "errors": errors}, indent=2,
                          ensure_ascii=False, sort_keys=True))
         return 1
+    if already_approved:
+        print(json.dumps({
+            "ok": True, "approved_at_utc": record["backlog"]["props"]["approved_at_utc"],
+            "package_hash": record["backlog"]["props"]["package_hash"],
+            "files": len(package_paths(record, docs)),
+        }, indent=2, ensure_ascii=False, sort_keys=True))
+        return 0
     snapshot = snapshot_tree(docs)
     now = datetime.now(timezone.utc).replace(microsecond=0).isoformat()
     try:
@@ -2263,6 +2366,8 @@ def approve(args) -> int:
         transition_paths += [docs / story["test_plan"]
                              for story in record["stories"]]
         for path in sorted(set(transition_paths)):
+            if path in preserved:
+                continue
             props, body = parse_front_matter(path)
             status_tag(props, "approved")
             props["approved_at_utc"] = now
@@ -2274,7 +2379,7 @@ def approve(args) -> int:
             refreshed, close_errors = collect(docs)
         if close_errors:
             raise ApprovalFailure("; ".join(close_errors))
-        render_backlog_navigation(refreshed, docs)
+        render_backlog_navigation(refreshed, docs, preserved=set(preserved))
 
         with stage_package.candidate_session(), experience_validation_session():
             refreshed, close_errors = collect(docs)
@@ -2282,12 +2387,16 @@ def approve(args) -> int:
             raise ApprovalFailure("; ".join(close_errors))
         paths = package_paths(refreshed, docs)
         for path in paths:
+            if path in preserved:
+                continue
             props, body = parse_front_matter(path)
             props["approved_at_utc"] = now
             props.pop("source_hash", None)
             props.pop("package_hash", None)
             path.write_text(front_matter(props, body), encoding="utf-8")
         for path in paths:
+            if path in preserved:
+                continue
             props, body = parse_front_matter(path)
             props["source_hash"] = digest(path)
             path.write_text(front_matter(props, body), encoding="utf-8")
@@ -2307,6 +2416,8 @@ def approve(args) -> int:
         close_errors.extend(approval_findings(final_record, docs))
         if close_errors:
             raise ApprovalFailure("; ".join(sorted(set(close_errors))))
+        if any(path.read_bytes() != original for path, original in preserved.items()):
+            raise ApprovalFailure("an unchanged approved source was modified during approval")
     except Exception as exc:
         restore_tree(docs, snapshot)
         print(json.dumps({"ok": False,
@@ -2374,6 +2485,11 @@ def begin_revision(args) -> int:
                 print(json.dumps({"ok": False, "errors": binding_errors},
                                  indent=2, ensure_ascii=False), file=sys.stderr)
                 return 1
+    if not stage_package.paths_are_committed(package_paths(record, docs)):
+        print(json.dumps({"ok": False, "errors": [
+            "approved backlog sources must be byte-exact in committed HEAD before beginning a revision"
+        ]}, indent=2), file=sys.stderr)
+        return 1
     old_revision = int(root_props.get("revision", 0) or 0)
     revision = old_revision + 1
     status_tag(root_props, "draft")
@@ -2393,16 +2509,37 @@ def begin_revision(args) -> int:
     latest_review = latest(record["backlog_reviews"])
     next_round = int(latest_review["props"].get("round", 0) or 0) + 1
     review_props = dict(latest_review["props"])
+    backlog_title = str(root_props.get("title", DEFAULT_BACKLOG_TITLE))
+    review_title = f"Backlog review round {next_round} for {backlog_title}"
+    review_props["title"] = review_title
     review_props["round"] = next_round
     review_props["status"] = "draft"
     review_props["aliases"] = [f"BACKLOG-REVIEW-{next_round:03d}"]
-    for key in ("approved_at_utc", "source_hash"):
+    for key in ("approved_at_utc", "source_hash", "verdict"):
         review_props.pop(key, None)
     review_props["tags"] = [
         tag for tag in values(review_props, "tags") if not tag.startswith("status/")
     ] + ["status/draft"]
+    review_body_text, headings_replaced = re.subn(
+        r"^# [^\n]*$", lambda _match: f"# {review_title}",
+        latest_review["body"], count=1, flags=re.MULTILINE,
+    )
+    if not headings_replaced:
+        review_body_text = f"# {review_title}\n\n" + review_body_text.lstrip("\n")
+    pending_verdict = (
+        "## Verdict\n\n"
+        f"Evidence [Verdict]: [[backlog/backlog|{backlog_title}]] is now draft "
+        f"revision {revision}; review round {next_round} has not evaluated its current inputs.\n"
+        "Conclusion [Verdict]: Approval remains pending a fresh review of this "
+        "revision's scope, receipt bindings and coverage.\n\n"
+    )
+    review_body_text = re.sub(
+        r"^##[ \t]+Verdict[ \t]*\n.*?(?=^##[ \t]+|\Z)",
+        lambda _match: pending_verdict, review_body_text,
+        flags=re.MULTILINE | re.DOTALL,
+    )
     review_path = docs / "backlog" / "reviews" / f"round-{next_round}-backlog-review.md"
-    review_path.write_text(front_matter(review_props, latest_review["body"]), encoding="utf-8")
+    review_path.write_text(front_matter(review_props, review_body_text), encoding="utf-8")
     refreshed, render_errors = collect(docs)
     if render_errors:
         print(json.dumps({"ok": False, "errors": sorted(set(render_errors))}, indent=2,

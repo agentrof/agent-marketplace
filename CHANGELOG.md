@@ -44,3 +44,10 @@
 - Recover an interrupted Experience update approval without accepting ambiguous lifecycle state.
 - Preserve approved Requirement stage evidence during navigation rendering and normalize terminal status tags.
 - Parse escaped Requirement Stage Impact wikilink aliases as their canonical package references.
+
+## 0.3.0
+
+- Exclude operating-system metadata from new Experience snapshots, add proposal-bound artifact recovery, retain unchanged backlog approvals and review history, verify committed artifact bytes, align Delivery producers with the vault schema and navigation contract, and preserve validated Experience lifecycle postimages across overlapping shell checks.
+- Harden Delivery publication, governance lifecycle, target projection reconciliation, and merge safety.
+- Publish Delivery relation projections from the exact candidate tree without copying unpublished local map entries.
+- Validate execution role promotion and cross-cutting Item path ownership without weakening architecture boundaries.

@@ -76,6 +76,11 @@ approved. This entry prepares delivery, but it does not start delivery.
    whole package through fresh read-only backlog reviewers. Only the exact
    metadata-recovery exception in `flows/backlog-planning.md` may reuse existing
    epic reviews after a complete unchanged-source proof and a fresh root review.
+   Historical review, story and test-plan bytes remain exact; epic authored
+   source and approval stamps/hashes remain exact. Only renderer-owned epic
+   inverse-relation blocks may change for the new root review, with the full
+   vault gate proving the exact projection and unchanged authored relation,
+   dependency, coverage and scenario sets.
    Give each reviewer
    an exact named input set and expected relation sets; wait for all epic
    reviewers before the Product Owner writes any epic review or fix. The

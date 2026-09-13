@@ -154,10 +154,14 @@ semantic hash must remain identical.
 
 Before rebinding, record the committed predecessor HEAD and the complete path
 and byte inventory of every epic, story, test plan and historical review.
-After rebinding, prove that inventory unchanged, including the exact relation,
-dependency, role, coverage and scenario sets. Only the backlog root's receipt
-bindings/lifecycle and a fresh root review may change. Run the full compiler
-and vault gates. A fresh root reviewer independently verifies these conditions
+After rebinding, historical reviews, stories and test plans remain byte-exact.
+Each epic retains its authored source, `approved_at_utc` and `source_hash`;
+only its renderer-owned inverse-relation block may change to reflect the new
+root review's existing epic targets. The full vault gate must prove that block
+is the exact generated projection. Authored relation, dependency, role,
+coverage and scenario sets remain identical. Only the backlog root's receipt
+bindings/lifecycle and a fresh root review may otherwise change. Run the full
+compiler and vault gates. A fresh root reviewer independently verifies these conditions
 and the exact recovery delta before ordinary user approval, atomic approval
 and commit. Reused epic reviews retain their original bytes, stamps and hashes;
 do not create new epic approval claims. Any missing proof or meaningful delta

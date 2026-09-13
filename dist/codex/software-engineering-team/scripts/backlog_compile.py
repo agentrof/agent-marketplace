@@ -2509,16 +2509,37 @@ def begin_revision(args) -> int:
     latest_review = latest(record["backlog_reviews"])
     next_round = int(latest_review["props"].get("round", 0) or 0) + 1
     review_props = dict(latest_review["props"])
+    backlog_title = str(root_props.get("title", DEFAULT_BACKLOG_TITLE))
+    review_title = f"Backlog review round {next_round} for {backlog_title}"
+    review_props["title"] = review_title
     review_props["round"] = next_round
     review_props["status"] = "draft"
     review_props["aliases"] = [f"BACKLOG-REVIEW-{next_round:03d}"]
-    for key in ("approved_at_utc", "source_hash"):
+    for key in ("approved_at_utc", "source_hash", "verdict"):
         review_props.pop(key, None)
     review_props["tags"] = [
         tag for tag in values(review_props, "tags") if not tag.startswith("status/")
     ] + ["status/draft"]
+    review_body_text, headings_replaced = re.subn(
+        r"^# [^\n]*$", lambda _match: f"# {review_title}",
+        latest_review["body"], count=1, flags=re.MULTILINE,
+    )
+    if not headings_replaced:
+        review_body_text = f"# {review_title}\n\n" + review_body_text.lstrip("\n")
+    pending_verdict = (
+        "## Verdict\n\n"
+        f"Evidence [Verdict]: [[backlog/backlog|{backlog_title}]] is now draft "
+        f"revision {revision}; review round {next_round} has not evaluated its current inputs.\n"
+        "Conclusion [Verdict]: Approval remains pending a fresh review of this "
+        "revision's scope, receipt bindings and coverage.\n\n"
+    )
+    review_body_text = re.sub(
+        r"^##[ \t]+Verdict[ \t]*\n.*?(?=^##[ \t]+|\Z)",
+        lambda _match: pending_verdict, review_body_text,
+        flags=re.MULTILINE | re.DOTALL,
+    )
     review_path = docs / "backlog" / "reviews" / f"round-{next_round}-backlog-review.md"
-    review_path.write_text(front_matter(review_props, latest_review["body"]), encoding="utf-8")
+    review_path.write_text(front_matter(review_props, review_body_text), encoding="utf-8")
     refreshed, render_errors = collect(docs)
     if render_errors:
         print(json.dumps({"ok": False, "errors": sorted(set(render_errors))}, indent=2,

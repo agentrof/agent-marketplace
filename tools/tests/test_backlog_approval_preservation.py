@@ -82,6 +82,124 @@ class BacklogApprovalPreservationTests(unittest.TestCase):
         self.assertEqual(compiler.approval_findings(record, self.docs), [])
         return record
 
+    @contextlib.contextmanager
+    def fixture_input_selection(self):
+        # Keep the test's legacy upstream fixtures while exercising real backlog
+        # collection, revision writes, draft structure and approval readiness.
+        with mock.patch.object(compiler, "resolve_manual_input_bindings", return_value=([], [])), mock.patch.object(
+            compiler, "planning_package_findings", return_value=("", [], []),
+        ):
+            yield
+
+    def render_relations(self):
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output), contextlib.redirect_stderr(output):
+            code = compiler.vault_check.cmd_render_relations(
+                SimpleNamespace(vault=self.docs), compiler.vault_check.load_policy(compiler.POLICY_PATH),
+            )
+        self.assertEqual(code, 0, output.getvalue())
+
+    def test_begin_revision_creates_a_unique_pending_review_and_retains_structured_context(self):
+        acceptance = self.docs / "business-analysis/delivery/domains/identity/acceptance/delivery-acceptance.md"
+        acceptance.write_text(acceptance.read_text() + "\n| AC-DEL-002 | Administrative delegation can be requested. |\n")
+        registry_path = self.docs / "business-analysis/delivery/_generated/registry.json"
+        registry = json.loads(registry_path.read_text())
+        registry["ids"]["AC-DEL-002"] = {**registry["ids"]["AC-DEL-001"]}
+        registry_path.write_text(json.dumps(registry))
+        props, body = compiler.parse_front_matter(self.old_review)
+        deferred_row = (
+            "| [[business-analysis/delivery/domains/identity/acceptance/delivery-acceptance\\|delivery:AC-DEL-002]] "
+            "| product_owner | Administrative delegation belongs to a later approved scope. "
+            "| Revisit when the owner approves the administration requirement. |"
+        )
+        body = body.replace("|---|---|---|---|", "|---|---|---|---|\n" + deferred_row)
+        requirement_context = "## Requirement Coverage\n\n| Requirement | Receipt |\n|---|---|\n| REQ-001 | application@r1 |\n"
+        body = body.replace(compiler.NAV_MARKER, requirement_context + "\n" + compiler.NAV_MARKER)
+        self.old_review.write_text(compiler.front_matter(props, body))
+        props["source_hash"] = compiler.digest(self.old_review)
+        self.old_review.write_text(compiler.front_matter(props, body))
+        self.refresh_package_hash()
+        self.assert_full_gate()
+        self.commit()
+        original = self.source_bytes()
+        output = io.StringIO()
+        with self.fixture_input_selection(), contextlib.redirect_stdout(output):
+            code = compiler.begin_revision(SimpleNamespace(
+                docs=str(self.docs), delivery_snapshot="", planning_mode="manual",
+                requirement_ref="", input_ref=["ba", "solution", "design", "application"],
+            ))
+            record, errors = compiler.collect(self.docs)
+        self.assertEqual(code, 0, output.getvalue())
+        self.assertEqual(errors, [])
+        new_review = self.docs / "backlog/reviews/round-2-backlog-review.md"
+        review_props, review_body = compiler.parse_front_matter(new_review)
+        self.assertEqual(review_props["title"], "Backlog review round 2 for Product Backlog")
+        self.assertIn("# " + review_props["title"] + "\n", review_body)
+        self.assertEqual(review_props["aliases"], ["BACKLOG-REVIEW-002"])
+        self.assertEqual(review_props["status"], "draft")
+        self.assertNotIn("verdict", review_props)
+        for key in ("approved_at_utc", "source_hash"):
+            self.assertNotIn(key, review_props)
+        self.assertIn("Approval remains pending", compiler.section(review_body, "Verdict"))
+        self.assertNotEqual(compiler.section(review_body, "Verdict"), compiler.section(body, "Verdict"))
+        self.assertEqual(compiler.section(review_body, "Deferred Criteria"), compiler.section(body, "Deferred Criteria"))
+        self.assertIn(deferred_row, review_body)
+        self.assertEqual(compiler.section(review_body, "Requirement Coverage"), compiler.section(body, "Requirement Coverage"))
+        self.assertIn("latest cross-epic backlog review verdict is not approved", compiler.approval_readiness_findings(record))
+        for path, content in original.items():
+            if path != self.root:
+                self.assertEqual(path.read_bytes(), content, path)
+        vault = compiler.vault_check.build_vault(self.docs, compiler.vault_check.load_policy(compiler.POLICY_PATH))
+        findings = []
+        compiler.vault_check.check_title_shape(vault, findings)
+        compiler.vault_check.check_frontmatter_props(vault, findings)
+        affected = {new_review.relative_to(self.docs).as_posix()}
+        self.assertEqual([finding for finding in findings if finding.path in affected], [])
+
+    def test_generated_epic_relation_update_keeps_approval_and_other_source_bytes(self):
+        self.render_relations()
+        self.assert_full_gate()
+        self.commit()
+        original = self.source_bytes()
+        epic = self.docs / "backlog/epics/delivery-fixture/epic.md"
+        before_props, before_body = compiler.parse_front_matter(epic)
+        self.revise()
+        self.render_relations()
+        rendered = epic.read_bytes()
+        self.assertNotEqual(rendered, original[epic])
+        after_props, after_body = compiler.parse_front_matter(epic)
+        self.assertEqual(after_props, before_props)
+        self.assertEqual(compiler.without_generated_relations(after_body), compiler.without_generated_relations(before_body))
+        result, output = self.approve()
+        self.assertEqual(result, 0, output)
+        self.assertEqual(epic.read_bytes(), rendered)
+        for path, content in original.items():
+            if path not in {self.root, epic}:
+                self.assertEqual(path.read_bytes(), content, path)
+        self.assert_full_gate()
+        vault = compiler.vault_check.build_vault(self.docs, compiler.vault_check.load_policy(compiler.POLICY_PATH))
+        findings = []
+        compiler.vault_check.check_relation_projections(vault, findings)
+        self.assertEqual(findings, [])
+
+    def test_authored_epic_change_is_not_preserved_as_a_generated_relation_update(self):
+        self.render_relations()
+        self.commit()
+        self.revise()
+        self.render_relations()
+        epic = self.docs / "backlog/epics/delivery-fixture/epic.md"
+        old_props, body = compiler.parse_front_matter(epic)
+        body = body.replace("# Delivery Fixture", "# Delivery Fixture\n\nThe revised scope includes administrative account delegation.")
+        epic.write_text(compiler.front_matter(old_props, body))
+        self.assertNotEqual(old_props["source_hash"], compiler.digest(epic))
+        result, output = self.approve()
+        self.assertEqual(result, 0, output)
+        props, _body = compiler.parse_front_matter(epic)
+        self.assertNotEqual(props["approved_at_utc"], old_props["approved_at_utc"])
+        self.assertNotEqual(props["source_hash"], old_props["source_hash"])
+        self.assertEqual(props["source_hash"], compiler.digest(epic))
+        self.assert_full_gate()
+
     def test_first_approval_is_still_complete(self):
         record = self.assert_full_gate()
         self.assertEqual(record["backlog"]["props"]["status"], "approved")

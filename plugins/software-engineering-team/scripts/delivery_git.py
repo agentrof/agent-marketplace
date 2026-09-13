@@ -607,7 +607,7 @@ def run_git(root: Path, *args: str) -> str:
 
 
 def commit_tree(root: Path, base: str, paths: list[str], subject: str,
-                trailers: dict[str, str]) -> str:
+                trailers: dict[str, str], *, delivery_projections: bool = False) -> str:
     """Create an unreferenced candidate tree from *base* plus exact paths."""
     trailers = _normalise_control_trailers(trailers)
     with tempfile.TemporaryDirectory(prefix="agentrof-index-") as temporary:
@@ -627,6 +627,18 @@ def commit_tree(root: Path, base: str, paths: list[str], subject: str,
                               text=True, capture_output=True, check=False)
         if tree.returncode:
             raise RuntimeError(tree.stderr.strip() or "cannot write candidate tree")
+        if delivery_projections:
+            for path, (mode, content) in delivery_projection_changes(root, tree.stdout.strip()).items():
+                if content is None:
+                    args = ["git", "update-index", "--force-remove", "--", path]
+                else:
+                    blob = subprocess.run(["git", "hash-object", "-w", "--stdin"], cwd=root,
+                                          input=content, capture_output=True, check=True)
+                    args = ["git", "update-index", "--add", "--cacheinfo",
+                            mode, blob.stdout.decode().strip(), path]
+                subprocess.run(args, cwd=root, env=env, capture_output=True, check=True)
+            tree = subprocess.run(["git", "write-tree"], cwd=root, env=env,
+                                  text=True, capture_output=True, check=True)
         message = subject + "\n\n" + "\n".join(
             f"Agentrof-{key}: {value}" for key, value in trailers.items()
         ) + "\n"
@@ -636,6 +648,75 @@ def commit_tree(root: Path, base: str, paths: list[str], subject: str,
         if commit.returncode:
             raise RuntimeError(commit.stderr.strip() or "cannot create candidate commit")
         return commit.stdout.strip()
+
+
+def delivery_projection_changes(root: Path, tree: str) -> dict[str, tuple[str, bytes | None]]:
+    """Derive only owned projections from raw candidate blobs, never local notes."""
+    import vault_check
+    from delivery_compile import render_map
+
+    listing = subprocess.run(["git", "ls-tree", "-rz", tree, "--", "workspace/docs/"],
+                             cwd=root, capture_output=True, check=True).stdout
+    entries = []
+    for row in listing.split(b"\0"):
+        if not row:
+            continue
+        metadata, path = row.split(b"\t", 1)
+        mode, kind, oid = metadata.decode().split()
+        if kind != "blob" or mode not in {"100644", "100755"}:
+            raise RuntimeError("Delivery publication requires regular vault files")
+        entries.append((path.decode("utf-8"), mode, oid))
+    objects = subprocess.run(["git", "cat-file", "--batch"], cwd=root,
+                             input="".join(oid + "\n" for _, _, oid in entries).encode(),
+                             capture_output=True, check=True).stdout
+    originals: dict[str, tuple[str, bytes]] = {}
+    offset = 0
+    with tempfile.TemporaryDirectory(prefix="agentrof-delivery-projections-") as temporary:
+        candidate = Path(temporary)
+        for path, mode, oid in entries:
+            end = objects.index(b"\n", offset)
+            actual_oid, kind, size = objects[offset:end].decode().split()
+            if actual_oid != oid or kind != "blob":
+                raise RuntimeError("cannot read exact Delivery candidate blob")
+            offset = end + 1
+            content = objects[offset:offset + int(size)]
+            offset += int(size) + 1
+            originals[path] = (mode, content)
+            target = candidate / path
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_bytes(content)
+        docs = candidate / "workspace" / "docs"
+        render_map(docs)
+        policy = vault_check.load_policy(vault_check.DEFAULT_POLICY)
+        vault = vault_check.build_vault(docs, vault_check.effective_policy(policy, docs))
+        findings = []
+        vault_check.check_relation_contract(vault, findings)
+        if findings:
+            raise RuntimeError("Delivery candidate relations are invalid: " + "; ".join(
+                f"{finding.path}: {finding.message}" for finding in findings))
+        blocks, catalogs = vault_check.relation_projection(vault)
+        rendered = {"maps/delivery.md": (docs / "maps/delivery.md").read_text(encoding="utf-8")}
+        for note in vault_check.authored(vault):
+            current = note.path.read_text(encoding="utf-8")
+            block = blocks.get(note.rel, "")
+            if vault_check.relation_block(current) != block:
+                rendered[note.rel] = vault_check.replace_relation_block(current, block)
+        catalog_root = str(policy.get("relation_contract", {}).get(
+            "catalog_root", "maps/_relations")).rstrip("/")
+        removed = {rel for rel in vault.index
+                   if rel.startswith(catalog_root + "/") and rel.endswith(".md")} - set(catalogs)
+        rendered.update(catalogs)
+        rendered.update(vault_check.relation_reports(vault))
+        changes = {}
+        for rel, content in rendered.items():
+            path = "workspace/docs/" + rel
+            previous_mode, previous = originals.get(path, ("100644", None))
+            encoded = content.encode("utf-8")
+            if previous != encoded:
+                changes[path] = (previous_mode, encoded)
+        for rel in removed:
+            changes["workspace/docs/" + rel] = ("100644", None)
+        return changes
 
 
 def commit_replacements(root: Path, base: str, replacements: dict[str, str],
@@ -835,17 +916,23 @@ def canonical_github_pr(value: str) -> tuple[str, str]:
 
 
 def package_paths(root: Path, directory: Path, docs: Path,
-                  include_items: bool = True) -> list[str]:
+                  include_items: bool = True, include_map: bool = True) -> list[str]:
+    from experience_application_check import is_os_metadata_path
+
     paths = []
     for path in directory.rglob("*"):
+        if path.is_symlink():
+            raise RuntimeError("Delivery publication forbids symlink package paths")
         if not path.is_file():
+            continue
+        if is_os_metadata_path(path) and path.stat().st_nlink == 1:
             continue
         relative_to_delivery = path.relative_to(directory).parts
         if not include_items and relative_to_delivery and relative_to_delivery[0] == "items":
             continue
         paths.append(str(path.relative_to(root)))
     map_path = docs / "maps" / "delivery.md"
-    if map_path.exists():
+    if include_map and map_path.exists():
         paths.append(str(map_path.relative_to(root)))
     return sorted(set(paths))
 
@@ -1607,15 +1694,13 @@ def reserve_delivery(project_root: Path, delivery_id: str, remote: str = "origin
     refs = canonical_refs(delivery_id)
     if any(remote_has_ref(root, remote, ref) for ref in refs.values()):
         raise RuntimeError("reservation requires absent Fence and Integration refs")
-    package = [str(path.relative_to(root)) for path in directory.rglob("*") if path.is_file()]
-    map_path = docs / "maps" / "delivery.md"
-    if map_path.exists():
-        package.append(str(map_path.relative_to(root)))
+    package = package_paths(root, directory, docs, include_map=False)
     integration_oid = commit_tree(
         root, target_oid, sorted(set(package)),
         f"Reserve Delivery {delivery_id}",
         {"Record": "delivery-reservation-v1", "Protocol": "1", "Delivery": delivery_id,
          "Slug": directory.name.removeprefix(delivery_id.lower() + "-"), "Target": target_oid},
+        delivery_projections=True,
     )
     fence_oid = commit_tree(
         root, target_oid, [], f"Open Agentrof Fence for {delivery_id}",
@@ -1655,12 +1740,13 @@ def publish_execution_plan(project_root: Path, delivery_id: str,
     fence_message = commit_message(root, fence_oid)
     if trailer(fence_message, "Record") != "project-fence-v2" or trailer(fence_message, "Mode") != "open":
         raise RuntimeError("publish-execution-plan requires an open Fence")
-    package = [str(path.relative_to(root)) for path in directory.rglob("*") if path.is_file()]
+    package = package_paths(root, directory, docs, include_map=False)
     integration_candidate = commit_tree(
         root, integration_oid, sorted(package), f"Publish execution plan for {delivery_id}",
         {"Record": "execution-plan-published-v1", "Protocol": "1", "Delivery": delivery_id,
          "Scope-Hash": str(props.get("scope_hash", "none")),
          "Plan-Hash": str(props.get("plan_hash", "none")), "Target": trailer(fence_message, "Target") or "none"},
+        delivery_projections=True,
     )
     epoch = trailer(fence_message, "Epoch") or epoch_token()
     fence_candidate = commit_tree(
@@ -1839,12 +1925,13 @@ def revise_unclaimed_scope(project_root: Path, delivery_id: str,
              "Previous-Target": trailer(fence_message, "Target"), "Target": target,
              "Target-Impact-Hash": "none", "Refresh-Kind": "scope_revision"},
         )
-    package = package_paths(root, directory, docs)
+    package = package_paths(root, directory, docs, include_map=False)
     candidate = commit_tree(
         root, base, package, f"Revise scope for {delivery_id}",
         {"Record": "delivery-scope-revised-v1", "Protocol": "1", "Delivery": delivery_id,
          "Previous-Scope-Hash": previous_scope, "Scope-Hash": str(local_props.get("scope_hash", "none")),
          "Target": target},
+        delivery_projections=True,
     )
     fence_candidate = commit_tree(
         root, fence_oid, [], "Fence project in open mode",

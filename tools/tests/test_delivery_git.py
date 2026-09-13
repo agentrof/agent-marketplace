@@ -17,6 +17,7 @@ import delivery_git  # noqa: E402
 import delivery_compile  # noqa: E402
 import delivery_governance  # noqa: E402
 import operation_compile  # noqa: E402
+import vault_check  # noqa: E402
 from backlog_fixture import make_approved_backlog  # noqa: E402
 
 
@@ -43,7 +44,7 @@ class DeliveryGitTests(unittest.TestCase):
             return
         args = type("Args", (), {
             "docs": str(docs), "kind": "verification",
-            "constrained_by": ["solution-design/decisions/fixture-api"],
+            "constrained_by": ["[[solution-design/decisions/fixture-api|Fixture API]]"],
         })
         self.assertEqual(operation_compile.init(args), 0)
         props, body = operation_compile.parse(path)
@@ -573,6 +574,98 @@ class DeliveryGitTests(unittest.TestCase):
             self.assertIn("refs/heads/agentrof/deliveries/dlv-001", refs)
             with self.assertRaises(RuntimeError):
                 delivery_git.reserve_delivery(project, "DLV-001")
+
+    def test_publications_render_exact_candidate_without_local_sibling_or_dirty_note(self):
+        temporary, project = self.make_project()
+        self.addCleanup(temporary.cleanup)
+        docs = project / "workspace/docs"
+        make_approved_backlog(docs)
+        dod = type("Args", (), {"docs": str(docs), "title": "Project", "file": None})
+        self.assertEqual(delivery_compile.init_dod(dod), 0)
+        self.assertEqual(delivery_compile.approve_dod(dod), 0)
+        self.approve_verification_contract(docs)
+        dirty = docs / "research/notes/local-note.md"
+        dirty.parent.mkdir(parents=True)
+        dirty.write_text("# Local note\n\nCommitted content.\n", encoding="utf-8")
+        stale_catalog = docs / "maps/_relations/obsolete/relations-001.md"
+        stale_catalog.parent.mkdir(parents=True)
+        stale_catalog.write_text(vault_check.RELATION_CATALOG_MARKER + "\nOld catalog.\n", encoding="utf-8")
+        delivery_git.run_git(project, "add", "workspace")
+        delivery_git.run_git(project, "commit", "-qm", "Approve source inputs")
+        delivery_git.run_git(project, "push", "-q")
+        target = delivery_git.run_git(project, "rev-parse", "HEAD")
+        story = next(docs.glob("backlog/epics/*/stories/*/story.md"))
+        original_story = story.read_text(encoding="utf-8")
+        init = type("Args", (), {
+            "docs": str(docs), "id": None, "slug": None, "goal": "SAML authentication",
+            "outcome": None, "target_branch": "main", "story": ["AUTH-01"],
+        })
+        self.assertEqual(delivery_compile.init_delivery(init), 0)
+        scope = type("Args", (), {"docs": str(docs), "delivery": "DLV-001"})
+        self.assertEqual(delivery_compile.approve_scope(scope), 0)
+        directory = delivery_compile.find_delivery(docs, "DLV-001")
+        approved_props, _ = delivery_compile.split_note(directory / "delivery.md")
+        (directory / ".DS_Store").write_bytes(b"local operating system metadata")
+        sibling = docs / "delivery/deliveries/dlv-002-unpublished/delivery.md"
+        sibling.parent.mkdir(parents=True)
+        sibling.write_text(delivery_compile.frontmatter({
+            "type": "delivery", "id": "DLV-002", "title": "Unpublished delivery",
+            "status": "scope_proposed", "derives_from": [delivery_compile.link(
+                story.relative_to(docs).as_posix(), "AUTH-01")],
+        }, "# Unpublished delivery\n"), encoding="utf-8")
+        dirty.write_text("# Local note\n\nUnpublished edit.\n", encoding="utf-8")
+        delivery_git.run_git(project, "add", dirty.relative_to(project).as_posix())
+        delivery_compile.render_map(docs)
+        policy = vault_check.load_policy(vault_check.DEFAULT_POLICY)
+        self.assertEqual(vault_check.cmd_render_relations(
+            type("Args", (), {"vault": docs}), policy), 0)
+
+        def verify_publication(result):
+            oid = result["integration"]
+            self.assertEqual(delivery_git.remote_oid(
+                project, "origin", delivery_git.canonical_refs("DLV-001")["integration"]), oid)
+            with tempfile.TemporaryDirectory() as clone_root:
+                clone = Path(clone_root) / "checkout"
+                delivery_git.run_git(project, "clone", "-q", str(project / "remote.git"), str(clone))
+                delivery_git.run_git(clone, "checkout", "-q", "--detach", oid)
+                published = clone / "workspace/docs"
+                findings = []
+                vault_check.check_relation_projections(vault_check.build_vault(published, policy), findings)
+                self.assertEqual(findings, [])
+                self.assertFalse((published / sibling.relative_to(docs)).exists())
+                self.assertFalse((published / stale_catalog.relative_to(docs)).exists())
+                self.assertFalse((published / directory.relative_to(docs) / ".DS_Store").exists())
+                self.assertNotIn("DLV-002", (published / "maps/delivery.md").read_text(encoding="utf-8"))
+                self.assertNotIn("Unpublished delivery", (published / "maps/_generated/cross-subtree-matrix.md").read_text(encoding="utf-8"))
+                self.assertEqual((published / dirty.relative_to(docs)).read_text(encoding="utf-8"),
+                                 "# Local note\n\nCommitted content.\n")
+                published_story = (published / story.relative_to(docs)).read_text(encoding="utf-8")
+                self.assertIn(directory.name, vault_check.relation_block(published_story))
+                self.assertEqual(delivery_compile.without_generated_relations(published_story),
+                                 delivery_compile.without_generated_relations(original_story))
+                props, _ = delivery_compile.split_note(published / directory.relative_to(docs) / "delivery.md")
+                self.assertEqual(props["scope_hash"], approved_props["scope_hash"])
+                for local_note in directory.rglob("*.md"):
+                    published_note = published / local_note.relative_to(docs)
+                    self.assertEqual(
+                        delivery_compile.without_generated_relations(published_note.read_text(encoding="utf-8")),
+                        delivery_compile.without_generated_relations(local_note.read_text(encoding="utf-8")),
+                    )
+                self.assertEqual(delivery_git.delivery_projection_changes(clone, oid), {})
+
+        for verb in (delivery_git.reserve_delivery, delivery_git.revise_unclaimed_scope,
+                     delivery_git.publish_execution_plan):
+            with self.subTest(verb=verb.__name__):
+                if verb is delivery_git.publish_execution_plan:
+                    self.author_execution_topology(docs)
+                    self.assertEqual(delivery_compile.approve_execution(scope), 0)
+                local_before = {path: path.read_bytes() for path in docs.rglob("*") if path.is_file()}
+                index_before = (project / ".git/index").read_bytes()
+                result = verb(project, "DLV-001")
+                verify_publication(result)
+                self.assertEqual({path: path.read_bytes() for path in docs.rglob("*") if path.is_file()}, local_before)
+                self.assertEqual((project / ".git/index").read_bytes(), index_before)
+                self.assertEqual(delivery_git.run_git(project, "rev-parse", "HEAD"), target)
 
     def test_execution_publication_claim_and_start_use_global_slot(self):
         temporary, project = self.make_project()

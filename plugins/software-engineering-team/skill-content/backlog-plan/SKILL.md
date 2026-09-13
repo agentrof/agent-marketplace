@@ -73,7 +73,10 @@ approved. This entry prepares delivery, but it does not start delivery.
    initialization reconciles the backlog property/graph fragment and renders
    the map and backlog navigation. Outgoing wikilinks provide graph and
    backlink relations without rewriting approved upstream notes. Challenge the
-   whole package through fresh read-only backlog reviewers. Give each reviewer
+   whole package through fresh read-only backlog reviewers. Only the exact
+   metadata-recovery exception in `flows/backlog-planning.md` may reuse existing
+   epic reviews after a complete unchanged-source proof and a fresh root review.
+   Give each reviewer
    an exact named input set and expected relation sets; wait for all epic
    reviewers before the Product Owner writes any epic review or fix. The
    Product Owner is the only backlog writer. After epic packages are green,

@@ -1310,6 +1310,8 @@ def exact_scope_plan(plan: object) -> bool:
     schema_version = plan.get("schema_version")
     if schema_version == 3:
         expected_keys.add("recovery_from_proposal_hash")
+    if schema_version == 4:
+        expected_keys.add("artifact_recovery")
     if origin_mode == "requirement":
         expected_keys.update({
             "requirement", "requirement_semantic_hash",
@@ -1318,7 +1320,7 @@ def exact_scope_plan(plan: object) -> bool:
     if (
         set(plan) != expected_keys
         or type(schema_version) is not int
-        or schema_version not in {2, 3}
+        or schema_version not in {2, 3, 4}
         or origin_mode not in {"manual", "requirement"}
         or type(plan.get("input_bindings")) is not list
         or any(type(value) is not str for value in plan["input_bindings"])
@@ -1328,6 +1330,13 @@ def exact_scope_plan(plan: object) -> bool:
         or re.fullmatch(
             r"sha256:[0-9a-f]{64}", str(plan.get("proposal_hash", "")),
         ) is None
+    ):
+        return False
+    if schema_version == 4 and (
+        plan.get("application_action") != "update"
+        or any(row.get("action") != "reuse" for row in plan["actions"]
+               if isinstance(row, dict))
+        or not exact_artifact_recovery(plan.get("artifact_recovery"))
     ):
         return False
     if schema_version == 3 and (
@@ -2521,16 +2530,33 @@ def source_digest(
         digest.update(b"\0")
         digest.update(render_fm(stable, without_generated_relations(body)).encode())
         digest.update(b"\0")
+    legacy_digest = digest.copy()
     artifacts = package / "artifacts"
+    artifact_paths = []
     if artifacts.is_dir() and not artifacts.is_symlink():
-        for path in sorted(artifacts.rglob("*")):
-            if not path.is_file() or path.is_symlink():
+        import experience_application_check
+        artifact_paths = [path for path in sorted(artifacts.rglob("*"))
+                          if path.is_file() and not path.is_symlink()]
+        for path in artifact_paths:
+            if experience_application_check.is_os_metadata_path(path):
                 continue
-            digest.update(path.relative_to(package).as_posix().encode())
-            digest.update(b"\0")
-            digest.update(path.read_bytes())
-            digest.update(b"\0")
-    return "sha256:" + digest.hexdigest()
+            value = (path.relative_to(package).as_posix().encode() + b"\0"
+                     + path.read_bytes() + b"\0")
+            digest.update(value)
+    filtered = "sha256:" + digest.hexdigest()
+    approved_data = root_data if root_data is not None else fields(package)
+    if approved_data.get("status") in {"approved", "retired"}:
+        recorded = approved_data.get("source_hash")
+        # Existing receipts may bind metadata bytes. Preserve only an exact
+        # cryptographic match; missing legacy evidence never becomes trusted.
+        if filtered != recorded:
+            for path in artifact_paths:
+                legacy_digest.update(path.relative_to(package).as_posix().encode() + b"\0")
+                legacy_digest.update(path.read_bytes() + b"\0")
+            legacy = "sha256:" + legacy_digest.hexdigest()
+            if legacy == recorded:
+                return legacy
+    return filtered
 
 
 def read_process_ledger(package: Path) -> tuple[list[dict], list[str]]:
@@ -2876,6 +2902,7 @@ def require_lifecycle_dependents_open(
     return result
 
 
+@stage_package.candidate_session()
 def compile_package(package: Path, gate: bool = False, *,
                     allow_stale_inputs: bool = False,
                     defer_lifecycle_record_revision: bool = False,
@@ -3258,6 +3285,178 @@ def validate_reviewer_attestation(
         raise ValueError("review attestation is stale for the current application")
 
 
+def exact_artifact_recovery(value: object) -> bool:
+    import experience_application_check as application
+    keys = {
+        "reason", "ledger_sha256", "registry_sha256", "previous_artifact_files",
+        "observed_artifact_files", "observed_artifact_tree_hash",
+        "current_process_receipts", "delta",
+    }
+    if (
+        type(value) is not dict or set(value) != keys
+        or type(value.get("reason")) is not str
+        or not value["reason"].strip() or len(value["reason"]) > 4096
+        or any(not application._hash(value.get(key)) for key in (
+            "ledger_sha256", "registry_sha256", "observed_artifact_tree_hash",
+        ))
+    ):
+        return False
+    findings: list[str] = []
+    for key in ("previous_artifact_files", "observed_artifact_files"):
+        application._inventory_valid(value.get(key), key, findings)
+    application._packages_valid(
+        value.get("current_process_receipts"), "current_process_receipts", findings,
+    )
+    if findings:
+        return False
+    before, after = value["previous_artifact_files"], value["observed_artifact_files"]
+    return (
+        value["observed_artifact_tree_hash"] == application.artifact_tree_hash(after)
+        and canonical(value["delta"]) == canonical(artifact_recovery_delta(before, after))
+        and before != after
+    )
+
+
+def artifact_recovery_delta(before: list[dict], after: list[dict]) -> dict:
+    import experience_application_check as application
+    old = {application.artifact_row_path(row): row for row in before}
+    new = {application.artifact_row_path(row): row for row in after}
+    excluded = {name for name in old if application.is_os_metadata_path(name)}
+    return {
+        "added": [new[name] for name in sorted(new.keys() - old.keys())],
+        "changed": [
+            {"before": old[name], "after": new[name]}
+            for name in sorted(old.keys() & new.keys()) if old[name] != new[name]
+        ],
+        "removed": [old[name] for name in sorted(old.keys() - new.keys() - excluded)],
+        "policy_excluded": [old[name] for name in sorted(excluded)],
+    }
+
+
+def artifact_recovery_head_bytes(root: Path, path: Path) -> bytes:
+    project = transaction_project(root)
+    relative = path.relative_to(project).as_posix()
+    result = subprocess.run(
+        ["git", "--no-replace-objects", "show", f"HEAD:{relative}"],
+        cwd=project, capture_output=True, check=False,
+    )
+    if result.returncode:
+        raise ValueError(f"artifact recovery requires a tracked HEAD source: {relative}")
+    return result.stdout
+
+
+def artifact_recovery_evidence(root: Path, reason: str, *, allow_open: bool = False) -> tuple[dict, dict]:
+    """Prove immutable receipt history while making every artifact delta visible."""
+    import experience_application_check as application
+    if not isinstance(reason, str) or not reason.strip() or len(reason) > 4096:
+        raise ValueError("artifact recovery requires a nonempty --reason of at most 4096 characters")
+    if not allow_open and open_application_state_path(root).exists():
+        raise ValueError("artifact recovery requires no open application revision")
+    validate_mutation_surface(root)
+    ledger_path, registry_path = root / application.LEDGER_RELATIVE, root / application.REGISTRY_RELATIVE
+    history, findings = application.verified_application_ledger(root)
+    if findings or not history:
+        raise ValueError("artifact recovery requires valid immutable application history: " + "; ".join(findings))
+    predecessor = history[-1]
+    if predecessor.get("schema_version") != 3:
+        raise ValueError("artifact recovery requires a predecessor with an exact artifact inventory")
+    if not stage_package.paths_are_committed([ledger_path]):
+        raise ValueError("artifact recovery requires the immutable application ledger committed in HEAD")
+    head_registry = artifact_recovery_head_bytes(root, registry_path)
+    try:
+        original_registry = strict_json_loads(head_registry.decode("utf-8"))
+    except (UnicodeError, ValueError) as exc:
+        raise ValueError("artifact recovery HEAD registry is unreadable") from exc
+    if original_registry != predecessor:
+        raise ValueError("artifact recovery HEAD registry and final immutable ledger receipt disagree")
+    if not allow_open and (
+        not stage_package.paths_are_committed([registry_path])
+        or registry_path.read_bytes() != head_registry
+    ):
+        raise ValueError("artifact recovery requires the predecessor registry committed in HEAD")
+    process_receipts = []
+    for package in packages(root):
+        data = fields(package)
+        if data.get("status") not in {"approved", "retired"} or (package / GENERATED / OPEN_REVISION).exists():
+            raise ValueError("artifact recovery requires no open process revision")
+        compiled, problems = compile_package(package, True)
+        process_history = [path for path in (package / LEDGER).rglob("*") if path.is_file()]
+        if process_history and not stage_package.paths_are_committed(process_history):
+            raise ValueError(f"artifact recovery requires immutable process history committed in HEAD: {package.name}")
+        if problems or not stage_package.is_committed(package):
+            raise ValueError(f"artifact recovery process {package.name} is not approved, current and committed: " + "; ".join(problems))
+        if data.get("status") == "approved":
+            process_receipts.append({
+                "result_ref": f"{package.name}@r{compiled['package_revision']}",
+                "package_hash": compiled["package_hash"],
+            })
+    process_receipts.sort(key=lambda row: row["result_ref"])
+    if process_receipts != predecessor["packages"]:
+        raise ValueError("artifact recovery must preserve the exact approved process receipt set")
+    observed, findings = application.artifact_inventory(root)
+    if findings:
+        raise ValueError("artifact recovery cannot inventory the current prototype: " + "; ".join(findings))
+    current_paths = [root / "artifacts" / application.artifact_row_path(row) for row in observed]
+    if current_paths and not stage_package.paths_are_committed(current_paths):
+        raise ValueError("artifact recovery requires every current artifact source tracked and byte-exact in HEAD")
+    project = transaction_project(root)
+    prefix = (root / "artifacts").relative_to(project).as_posix() + "/"
+    result = subprocess.run(
+        ["git", "--no-replace-objects", "ls-tree", "-r", "--name-only", "-z", "HEAD", "--", prefix],
+        cwd=project, capture_output=True, check=False,
+    )
+    if result.returncode:
+        raise ValueError("artifact recovery cannot inspect committed prototype paths")
+    observed_names = {application.artifact_row_path(row) for row in observed}
+    for raw in result.stdout.split(b"\0"):
+        if raw:
+            name = os.fsdecode(raw)[len(prefix):]
+            if not application.is_os_metadata_path(name) and name not in observed_names:
+                raise ValueError("artifact recovery requires meaningful artifact deletions committed in HEAD")
+    previous = predecessor["artifact_files"]
+    if previous == observed:
+        raise ValueError("artifact recovery requires an explicit artifact inventory delta")
+    proof = {
+        "reason": reason,
+        "ledger_sha256": sha(ledger_path.read_bytes()),
+        "registry_sha256": sha(head_registry),
+        "previous_artifact_files": previous,
+        "observed_artifact_files": observed,
+        "observed_artifact_tree_hash": application.artifact_tree_hash(observed),
+        "current_process_receipts": process_receipts,
+        "delta": artifact_recovery_delta(previous, observed),
+    }
+    return recovery_application_preimage(root), proof
+
+
+@stage_package.candidate_session()
+def validate_artifact_recovery(root: Path, plan: dict, *, allow_open: bool = False) -> None:
+    if plan.get("schema_version") != 4 or not exact_scope_plan(plan):
+        raise ValueError("artifact recovery requires its exact schema-v4 proposal")
+    if plan.get("proposal_hash") != proposal_digest(plan):
+        raise ValueError("artifact recovery proposal hash is invalid")
+    if allow_open:
+        state = read_open_application_state(root)
+        validate_open_application_state(
+            root, plan=plan, proposal_hash=plan["proposal_hash"], expected_phase=state["phase"],
+        )
+    expected, actual = artifact_recovery_evidence(
+        root, plan["artifact_recovery"]["reason"], allow_open=allow_open,
+    )
+    if expected != plan["expected_application"] or actual != plan["artifact_recovery"]:
+        raise ValueError("artifact recovery proof changed after the approved proposal")
+    findings = verify_scope_inputs(root, plan, require_committed=True)
+    if findings:
+        raise ValueError("; ".join(findings))
+    active = {package.name: package for package in packages(root) if fields(package).get("status") == "approved"}
+    if len(plan["actions"]) != len(active) or {row["experience"] for row in plan["actions"]} != set(active):
+        raise ValueError("artifact recovery must reuse the complete current process set")
+    for action in plan["actions"]:
+        package = active[action["experience"]]
+        action_for_plan(root, plan, action="reuse", experience=package.name, process=str(fields(package).get("primary_process_ref", "")))
+        validate_package_input_bindings(fields(package), plan, action)
+
+
 def require_committed_application(root: Path) -> None:
     import experience_application_check
     registry, problems = experience_application_check.approved_snapshot(root)
@@ -3310,6 +3509,9 @@ def verify_application_preimage(
     except ValueError:
         state = {}
     phase = str(state.get("phase", ""))
+    if plan.get("schema_version") == 4:
+        validate_artifact_recovery(root, plan, allow_open=allow_open and phase in {"draft", "in_review"})
+        return
     if allow_open and phase in {"draft", "in_review"}:
         if state.get("proposal_hash") != proposal_hash:
             raise ValueError("application is open for another scope proposal")
@@ -3355,6 +3557,8 @@ def open_application(root: Path, plan: dict, proposal_hash: str) -> None:
             root, plan=plan, proposal_hash=proposal_hash,
             expected_phase="draft",
         )
+        if plan.get("schema_version") == 4:
+            validate_artifact_recovery(root, plan, allow_open=True)
         return
     verify_application_preimage(root, plan, proposal_hash, allow_open=False)
     expected = plan["expected_application"]
@@ -3365,7 +3569,8 @@ def open_application(root: Path, plan: dict, proposal_hash: str) -> None:
     else:
         if not expected.get("exists"):
             raise ValueError("application_action update requires an approved application")
-        require_committed_application(root)
+        if plan.get("schema_version") != 4:
+            require_committed_application(root)
     write_open_application_state(
         root, plan, proposal_hash, phase="draft",
     )
@@ -3518,11 +3723,19 @@ def recovery_proposal(
     return plan
 
 
+@stage_package.candidate_session()
 def propose(args) -> int:
     root = root_for(args.root)
     receipts, problems, context = selected_inputs(root, args)
     if problems:
         return fail("; ".join(problems), 2)
+    recover_artifacts = getattr(args, "recover_artifacts", False)
+    if recover_artifacts and (
+        args.recover_proposal_hash or args.recover_scope_plan
+        or args.process_ref or args.experience or args.to or args.action
+        or args.application_action != "update"
+    ):
+        return fail("artifact recovery requires only an application update and current input selectors", 2)
     if args.recover_proposal_hash or args.recover_scope_plan:
         if not args.recover_proposal_hash or not args.recover_scope_plan:
             return fail(
@@ -3669,11 +3882,15 @@ def propose(args) -> int:
     if application_action in {"update", "reuse"} and not application_exists:
         return fail(f"application_action {application_action} requires an approved application", 2)
     try:
-        application_preimage = expected_application(root)
+        if recover_artifacts:
+            application_preimage, artifact_recovery = artifact_recovery_evidence(root, args.reason)
+        else:
+            application_preimage = expected_application(root)
     except ValueError as exc:
         return fail(str(exc), 2)
     plan = {
-        "schema_version": 2,
+        "schema_version": 4 if recover_artifacts else 2,
+        **({"artifact_recovery": artifact_recovery} if recover_artifacts else {}),
         "origin_mode": args.origin_mode,
         "input_bindings": binding_rows(receipts),
         "actions": actions,
@@ -3682,6 +3899,11 @@ def propose(args) -> int:
         **context,
     }
     plan["proposal_hash"] = proposal_digest(plan)
+    if recover_artifacts:
+        try:
+            validate_artifact_recovery(root, plan)
+        except ValueError as exc:
+            return fail(str(exc), 2)
     print(json.dumps(plan, indent=2, ensure_ascii=False, sort_keys=True)); return 0
 
 
@@ -5258,7 +5480,7 @@ def reconcile_vault_navigation(root: Path) -> None:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__); sub = parser.add_subparsers(dest="command", required=True)
-    p = sub.add_parser("propose"); p.add_argument("--root", required=True); p.add_argument("--process-ref", action="append", default=[]); p.add_argument("--experience", default=""); p.add_argument("--to", default=""); p.add_argument("--action", choices=("create", "update", "reuse", "rename", "retire"), default=""); p.add_argument("--application-action", choices=("create", "update", "reuse"), default=""); p.add_argument("--reason", default=""); p.add_argument("--origin-mode", choices=("manual", "requirement"), required=True); p.add_argument("--requirement", default=""); p.add_argument("--ba-ref", action="append", default=[]); p.add_argument("--solution-ref", action="append", default=[]); p.add_argument("--design-ref", action="append", default=[]); p.add_argument("--recover-scope-plan", default=""); p.add_argument("--recover-proposal-hash", default=""); p.set_defaults(func=propose)
+    p = sub.add_parser("propose"); p.add_argument("--root", required=True); p.add_argument("--process-ref", action="append", default=[]); p.add_argument("--experience", default=""); p.add_argument("--to", default=""); p.add_argument("--action", choices=("create", "update", "reuse", "rename", "retire"), default=""); p.add_argument("--application-action", choices=("create", "update", "reuse"), default=""); p.add_argument("--reason", default=""); p.add_argument("--origin-mode", choices=("manual", "requirement"), required=True); p.add_argument("--requirement", default=""); p.add_argument("--ba-ref", action="append", default=[]); p.add_argument("--solution-ref", action="append", default=[]); p.add_argument("--design-ref", action="append", default=[]); p.add_argument("--recover-scope-plan", default=""); p.add_argument("--recover-proposal-hash", default=""); p.add_argument("--recover-artifacts", action="store_true"); p.set_defaults(func=propose)
     p = sub.add_parser("init"); p.add_argument("--root", required=True); p.add_argument("--experience", required=True); p.add_argument("--origin-mode", choices=("manual", "requirement"), required=True); p.add_argument("--primary-process-ref", required=True); p.add_argument("--related-process-ref", action="append", default=[]); p.add_argument("--requirement", default=""); p.add_argument("--scope-plan", required=True); p.add_argument("--proposal-hash", required=True); p.add_argument("--title", default=""); p.add_argument("--ba-ref", action="append", default=[]); p.add_argument("--solution-ref", action="append", default=[]); p.add_argument("--design-ref", action="append", default=[]); p.set_defaults(func=init)
     for name, handler in (("begin-revision", begin_revision), ("enter-review", enter_review), ("render", render), ("check", check), ("status", status), ("rename", rename), ("retire", retire)):
         p = sub.add_parser(name); p.add_argument("--experience-root", required=True)
@@ -5290,7 +5512,13 @@ def main(argv: list[str] | None = None) -> int:
     try:
         transaction_root = command_experience_root(args)
         with project_transaction_lock(transaction_root):
-            recover_transaction(transaction_root)
+            recovery_entry = getattr(args, "recover_artifacts", False)
+            if args.command == "begin-application-revision":
+                recovery_entry = load_scope_plan(args.scope_plan, args.proposal_hash).get("schema_version") == 4
+            if recovery_entry and read_transaction_journal(transaction_root) is not None:
+                raise ValueError("artifact recovery refuses an interrupted or conflicting transaction")
+            if not recovery_entry:
+                recover_transaction(transaction_root)
             if args.command in MUTATING_COMMANDS:
                 validate_mutation_surface(transaction_root)
             transaction_id = (

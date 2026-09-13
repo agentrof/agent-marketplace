@@ -142,6 +142,28 @@ belong to delivery.
 
 ## 4. Challenge and render
 
+### Recovery that removes only operating-system metadata
+
+An approved backlog may reuse its existing epic review evidence when the only
+upstream change is an approved application successor from the explicit
+schema-v4 artifact recovery path. The recovery proof must show no added,
+changed or meaningfully removed artifact: the successor inventory equals the
+predecessor inventory minus the exact schema-policy metadata rows. Process
+receipt refs and hashes, BA, Solution, Design System and any Requirement
+semantic hash must remain identical.
+
+Before rebinding, record the committed predecessor HEAD and the complete path
+and byte inventory of every epic, story, test plan and historical review.
+After rebinding, prove that inventory unchanged, including the exact relation,
+dependency, role, coverage and scenario sets. Only the backlog root's receipt
+bindings/lifecycle and a fresh root review may change. Run the full compiler
+and vault gates. A fresh root reviewer independently verifies these conditions
+and the exact recovery delta before ordinary user approval, atomic approval
+and commit. Reused epic reviews retain their original bytes, stamps and hashes;
+do not create new epic approval claims. Any missing proof or meaningful delta
+returns to the normal review flow below. This exception does not apply to
+other application-only revisions or general artifact loss.
+
 The Product Owner finishes the candidate package, then the active orchestrator
 runs the packaged compiler before spawning any reviewer:
 
@@ -203,7 +225,9 @@ backlog_compile.py check --docs <workspace>/docs --approved --render --json
 ```
 
 Approval stamps the package, root backlog, epics, reviews and test plans while
-stories remain `planned`. Commit `workspace/docs/backlog/` and the updated
+stories remain `planned`. Existing valid unchanged source approvals retain
+their timestamps, hashes and bytes; previously approved reviews are immutable
+and changes require a new review round. Commit `workspace/docs/backlog/` and the updated
 `workspace/config.json` in the same project change. Report the package hash
 and exact generated views. A newer approved Experience application receipt,
 including one caused by an application-only revision, makes the backlog input

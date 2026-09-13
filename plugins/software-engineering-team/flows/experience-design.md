@@ -32,6 +32,35 @@ that application receipt or author-owned artifacts.
    and Design receipts. Requirement mode keeps one BA receipt. Obtain approval
    for the entire action set.
 
+## Approved artifact recovery
+
+When an approved artifact inventory differs after a clone or file loss, do not
+rewrite its registry, ledger or hashes. Run the read-only `propose
+--recover-artifacts --application-action update --reason <explanation>` with the
+normal root, origin mode and current upstream input selectors. This distinct
+schema-v4 proposal preserves every process receipt and displays the complete
+previous and observed inventories, added/changed/removed rows and historical
+rows excluded by the operating-system metadata policy. Obtain approval for that
+exact delta and proposal hash, including any meaningful content loss.
+
+The predecessor registry and complete ledger must match committed `HEAD` and
+agree on the current receipt. Every retained or added meaningful artifact must
+be tracked with exactly its `HEAD` bytes; commit meaningful deletions before
+proposal. Missing historical operating-system metadata needs no replacement.
+Recovery rejects corrupt history, stale upstream or process receipts, an open
+application/process lifecycle, a conflicting transaction and an empty delta.
+
+Run the existing `begin-application-revision` with the approved proposal file
+and hash. The compiler rechecks the complete proof under its transaction lock
+before opening the next draft. Recovery does not restore files or approve a
+receipt. Do not edit the prototype during this recovery: begin, review and
+approval recheck the exact observed inventory. Changed evidence requires a new
+proposal. Run `enter-application-review`, obtain a fresh reviewer attestation
+that reviews the visible recovery delta, then use ordinary `approve-set`.
+Approval appends the successor application receipt, preserves the entire
+historical ledger and process revisions, and requires downstream Requirement
+and backlog bindings to advance through their normal revision flows.
+
 ## Stale open-scope recovery
 
 If a scope consists only of `draft` or `in_review` non-retire package
@@ -107,7 +136,10 @@ those bytes.
 5. Do not encode lifecycle state, receipt hashes or delivery constraints into
    the prototype. Its files are evidence for review, not delivery source code.
 6. The mechanical snapshot boundary accepts regular non-symlink files inside
-   the tree and hashes their exact bytes and relative paths. It does not parse,
+   the tree and hashes their exact bytes and relative paths. Regular files whose
+   basenames are declared in the schema operating-system metadata policy are
+   excluded from new snapshots after safety checks; historical receipts remain
+   byte-exact and require explicit recovery when stale. It does not parse,
    execute, lint, sandbox, normalize or constrain their contents.
 7. Enter application review only when the prototype is ready for human review.
    The compiler captures the current artifact-tree and package-set receipt.

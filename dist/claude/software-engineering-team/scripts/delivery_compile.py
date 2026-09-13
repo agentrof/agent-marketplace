@@ -21,6 +21,7 @@ from pathlib import Path, PurePosixPath
 from ba_compile import parse_frontmatter, without_generated_relations
 import backlog_compile
 import operation_compile
+import stage_package
 
 
 DELIVERY_ID_RE = re.compile(r"^DLV-[0-9]{3,}$")
@@ -133,7 +134,8 @@ def utc_now() -> str:
 
 
 def sections(body: str) -> set[str]:
-    return {match.group(1).strip() for match in re.finditer(r"(?m)^## (.+?)\s*$", body)}
+    return {match.group(1).replace("<!-- sec: nav -->", "").strip()
+            for match in re.finditer(r"(?m)^## (.+?)\s*$", body)}
 
 
 def content_hash(props: dict, body: str, *, exclude: set[str] | None = None) -> str:
@@ -152,7 +154,14 @@ def body_for(kind: str, heading: str, values: dict[str, str] | None = None) -> s
     values = values or {}
     lines = [f"# {heading}", ""]
     for section in SECTIONS[kind]:
-        lines.extend([f"## {section}", "", values.get(section, "Record compiler-owned evidence here."), ""])
+        content = values.get(section, "Record compiler-owned evidence here.")
+        marker = ""
+        if section == "Navigation":
+            marker = " <!-- sec: nav -->"
+            owning_map = link("maps/delivery", "Delivery map")
+            if not content.startswith(owning_map):
+                content = owning_map + "\n" + content
+        lines.extend([f"## {section}{marker}", "", content, ""])
     return "\n".join(lines)
 
 
@@ -217,9 +226,10 @@ def approved_backlog_sources(
     if len(story_ids) != len(set(story_ids)):
         return {}, {}, ["Delivery cannot select the same Story more than once"]
     try:
-        record, findings = backlog_compile.collect(
-            docs, historical_inputs=historical_inputs,
-        )
+        with stage_package.candidate_session(), backlog_compile.experience_validation_session():
+            record, findings = backlog_compile.collect(
+                docs, historical_inputs=historical_inputs,
+            )
     except (OSError, RuntimeError, ValueError) as exc:
         return {}, {}, [f"approved backlog cannot be read: {exc}"]
     errors.extend(findings)
@@ -389,14 +399,14 @@ def delivery_source_findings(docs: Path, root: Path, delivery_props: dict) -> tu
         for key in SOURCE_ITEM_FIELDS:
             if item_props.get(key) != source[key]:
                 errors.append(f"{item_path} {key} is stale against approved Story {story_id}")
-        expected_source = [story_id]
+        expected_source = [link(source["story_path"].removesuffix(".md"), story_id)]
         if item_props.get("derives_from") != expected_source:
             errors.append(f"{item_path} derives_from must contain only {story_id}")
     return sources, sorted(set(errors))
 
 
 def link(path: str, label: str) -> str:
-    return f"[[{path}|{label}]]"
+    return f"[[{path.removesuffix('.md')}|{label}]]"
 
 
 def render_map(docs: Path) -> None:
@@ -457,7 +467,7 @@ def init_dod(args) -> int:
         "## Commands", "", "Record project verification commands.", "",
         "## Evidence Rules", "", "Record the evidence required for each gate.", "",
         "## Quality Gates", "", "Record the acceptance and review gates.", "",
-        "## Navigation", "", link("maps/delivery", "Delivery map"), "",
+        "## Navigation <!-- sec: nav -->", "", link("maps/delivery", "Delivery map"), "",
     ])
     atomic_text(path, frontmatter(props, dod_body))
     print(json.dumps({"ok": True, "path": str(path)}))
@@ -530,7 +540,7 @@ def init_delivery(args) -> int:
         print(json.dumps({"ok": False, "errors": errors}, indent=2, ensure_ascii=False))
         return 2
     root.mkdir(parents=True)
-    item_links = [link(f"delivery/deliveries/{root.name}/items/{id_slug(story)}/item", story) for story in stories]
+    item_links = [link(f"delivery/deliveries/{root.name}/items/{id_slug(story)}/item", f"Implementation work for {story}") for story in stories]
     dod_link = link(dod_snapshot["definition_of_done_path"].removesuffix(".md"), "Definition of Done")
     goal = str(args.goal).strip()
     props = {"type": "delivery", "id": identifier, "title": f"Delivery scope for {goal}",
@@ -552,7 +562,9 @@ def init_delivery(args) -> int:
         item = root / "items" / id_slug(story) / "item.md"
         source = sources[story]
         item_props = {"type": "delivery-item", "title": f"Implementation work for {story}",
-                      "status": "in_scope", "derives_from": [story], "related_to": [identifier],
+                      "status": "in_scope",
+                      "derives_from": [link(source["story_path"].removesuffix(".md"), story)],
+                      "related_to": [link(f"delivery/deliveries/{root.name}/delivery", identifier)],
                       **{key: source[key] for key in SOURCE_ITEM_FIELDS},
                       "depends_on": source["depends_on"],
                       "execution_after": [], "dependency_bindings": [],
@@ -860,9 +872,9 @@ def approve_execution(args) -> int:
                 )
                 ev_props = {"type": kind, "id": f"{props['id']}-{story}-{'CR' if kind == 'code-review' else 'QA'}",
                             "title": evidence_title,
-                            "status": status, "derives_from": [link(str(item_path.relative_to(docs)), story)],
+                            "status": status, "derives_from": [link(str(item_path.relative_to(docs)), item_props["title"])],
                             "item_plan_hash": item_props["item_plan_hash"], "tags": [f"doc/{kind}", f"status/{status}"]}
-                atomic_text(evidence, frontmatter(ev_props, body_for("item", ev_props["title"], {"Navigation": link(str(item_path.relative_to(docs)), story)})))
+                atomic_text(evidence, frontmatter(ev_props, body_for("item", ev_props["title"], {"Navigation": link(str(item_path.relative_to(docs)), item_props["title"])})))
     plan_path = root / "execution-plan.md"
     plan_subject = str(props.get("goal", props["id"])).strip()
     plan_props = {"type": "execution-plan", "id": f"{props['id']}-EXEC", "title": f"Execution approach for {plan_subject}",

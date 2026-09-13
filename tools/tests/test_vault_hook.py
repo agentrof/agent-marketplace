@@ -39,6 +39,35 @@ class VaultHookPrototypeTests(unittest.TestCase):
     def setUp(self):
         self.hook = load_hook()
 
+    def test_safe_os_metadata_never_changes_the_guard_inventory(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            docs = Path(temporary)
+            generated = docs / "experience-design/_generated"
+            generated.mkdir(parents=True)
+            baseline = self.hook.vault_inventory(docs)
+            metadata = generated / ".DS_Store"
+            metadata.write_bytes(b"Finder state")
+            self.assertEqual(self.hook.vault_inventory(docs), baseline)
+            metadata.write_bytes(b"changed Finder state")
+            self.assertEqual(self.hook.vault_inventory(docs), baseline)
+            metadata.unlink()
+            self.assertEqual(self.hook.vault_inventory(docs), baseline)
+
+    def test_metadata_names_do_not_exempt_hardlinks_or_directory_contents(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            docs = Path(temporary)
+            generated = docs / "experience-design/_generated"
+            generated.mkdir(parents=True)
+            source = generated / "receipt.json"
+            source.write_bytes(b"receipt")
+            metadata = generated / ".DS_Store"
+            os.link(source, metadata)
+            self.assertIn("experience-design/_generated/.DS_Store", self.hook.vault_inventory(docs))
+            metadata.unlink()
+            metadata.mkdir()
+            (metadata / "meaningful.json").write_bytes(b"meaningful")
+            self.assertIn("experience-design/_generated/.DS_Store/meaningful.json", self.hook.vault_inventory(docs))
+
     def test_hook_has_no_application_surface_or_content_guard(self):
         source = HOOK.read_text(encoding="utf-8")
         self.assertNotIn("application.html", source)

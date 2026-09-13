@@ -2881,6 +2881,10 @@ def vault_inventory(root: Path) -> dict[str, dict[str, int | str]]:
             if not entry.is_file(follow_symlinks=False):
                 continue
             identity = path.stat()
+            if (experience_application_check is not None
+                    and experience_application_check.is_os_metadata_path(rel)
+                    and identity.st_nlink == 1):
+                continue
             result[rel] = {
                 "kind": "file",
                 "content_sha256": hashlib.sha256(path.read_bytes()).hexdigest(),

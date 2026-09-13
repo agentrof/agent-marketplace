@@ -1,0 +1,6 @@
+{
+  "summary": "Exclude operating-system metadata from new Experience snapshots, add proposal-bound artifact recovery, retain unchanged backlog approvals and review history, verify committed artifact bytes, and align Delivery producers with the vault schema and navigation contract.",
+  "components": {
+    "software-engineering-team": "minor"
+  }
+}

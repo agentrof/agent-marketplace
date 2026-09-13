@@ -16,6 +16,7 @@ import os
 import stat
 import tempfile
 import unicodedata
+from functools import lru_cache
 from pathlib import Path
 
 
@@ -29,6 +30,7 @@ GENESIS_APPLICATION_HASH = "sha256:" + "0" * 64
 HASH_PREFIX = "sha256:"
 HASH_LENGTH = 64
 POSIX_BYTES_PATH_ENCODING = "posix-bytes-base64"
+DEFAULT_SCHEMA = Path(__file__).resolve().parents[1] / "skill-content/experience-modeling/data/experience-schema.json"
 LEGACY_REGISTRY_FIELDS = {
     "schema_version", "application_revision", "source_hash", "package_set_hash",
     "coverage_hash", "design_system", "runtime_sha256", "packages", "coverage",
@@ -169,7 +171,8 @@ def root_for(value: str | Path) -> Path:
 
 
 def _safe_relative(path: Path) -> bool:
-    return bool(path.parts) and all(part not in {"", ".", ".."} for part in path.parts)
+    return (not path.is_absolute() and bool(path.parts)
+            and all(part not in {"", ".", ".."} and "\0" not in part for part in path.parts))
 
 
 def artifact_path_row(relative: Path, digest: str, size: int) -> dict:
@@ -208,6 +211,25 @@ def artifact_row_path(row: dict) -> str:
     if not _json_contains_non_scalar(decoded):
         raise ValueError("scalar artifact paths must use the legacy path row")
     return decoded
+
+
+@lru_cache(maxsize=1)
+def _os_metadata_basenames() -> frozenset[str]:
+    schema = strict_json_loads(DEFAULT_SCHEMA.read_text(encoding="utf-8"))
+    names = schema.get("application", {}).get("os_metadata_basenames")
+    if (
+        not isinstance(names, list) or not names
+        or any(not isinstance(name, str) or not name or name in {".", ".."}
+               or "/" in name or "\\" in name or "\0" in name for name in names)
+        or len(set(names)) != len(names)
+    ):
+        raise ValueError("application.os_metadata_basenames must declare unique exact file basenames")
+    return frozenset(names)
+
+
+def is_os_metadata_path(relative: str | Path) -> bool:
+    """Classify only exact declared basenames, independent of file existence."""
+    return Path(relative).name in _os_metadata_basenames()
 
 
 def artifact_inventory(root_value: str | Path) -> tuple[list[dict], list[str]]:
@@ -252,6 +274,8 @@ def artifact_inventory(root_value: str | Path) -> tuple[list[dict], list[str]]:
             continue
         if metadata.st_nlink != 1:
             findings.append(f"{display}: hard-linked files are not permitted in a snapshot")
+            continue
+        if is_os_metadata_path(relative):
             continue
         try:
             raw = path.read_bytes()
@@ -665,6 +689,10 @@ def write_registry_and_ledger(root_value: str | Path, registry: dict) -> None:
 
 def self_check() -> list[str]:
     """Keep a lightweight host-install integrity command without a UI schema."""
+    try:
+        _os_metadata_basenames()
+    except (OSError, TypeError, AttributeError, ValueError) as exc:
+        return [str(exc)]
     return []
 
 

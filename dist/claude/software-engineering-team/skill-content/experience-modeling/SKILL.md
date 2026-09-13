@@ -6,28 +6,22 @@ exposure: internal
 
 # Experience Modeling
 
-Treat Experience Design as a living graph owned by primary Business Analysis
-processes, not as a delivery implementation or numbered baseline.
+Experience Design is a living graph owned by primary Business Analysis processes.
 
 ## When to Use
 
-Load for Experience authoring, review and exact Experience references in
-backlog planning.
+Load for Experience authoring, review and exact references in backlog planning.
 
 ## Core rules
 
-- Follow `obsidian-vault` for every docs-tree path, metadata, link and artifact
-  policy decision.
+- Follow `obsidian-vault` for docs-tree paths, metadata, links and artifacts.
 - Use `experiences/<process-slug>/experience.md`. The slug is the semantic
   primary BA process, never `application`, `exp-*`, a Requirement, release or
   technical component.
-- One active Experience owns one primary process. Cite records as
-  `checkout:SCR-001@r2` and packages as `checkout@r3`.
-- Revise in place with `begin-revision`. Changed children increment and
-  supersede; unchanged IDs and revisions persist; retired records stay in
-  ledgers. Package approval belongs only to the root package.
-- Requirement and manual modes share proposal, authoring, challenge and
-  approval. Requirement mode alone adds traceability and binds final receipts.
+- One active Experience owns one primary process; cite `checkout:SCR-001@r2` or `checkout@r3`.
+- Revise in place with `begin-revision`: changed children increment and supersede;
+  unchanged IDs/revisions persist and retired records stay in ledgers. Only the root approves a package.
+- Both modes share proposal, authoring, challenge and approval; Requirement mode also binds traceability and final receipts.
 - A manual proposal may bind multiple current Business Analysis packages, but
   every selected process resolves through exactly one owner. Its Experience
   package binds that owner plus the one shared Solution and Design System
@@ -51,17 +45,23 @@ dependencies, pages, links, media, behavior and presentation. The compiler
 does not parse HTML, CSS, JavaScript, assets, framework output or any prototype
 convention. It never supplies a UI skeleton or rewrites prototype files.
 
-Use sensible conventions when they help the team, for example `index.html`,
-separate pages, `css/`, `js/` and media folders, but treat them as advice rather
-than acceptance requirements. Delivery later implements the approved product
-under its own engineering standards.
+Prototype conventions are advisory. Delivery implements the product under its own engineering standards.
 
 The only mechanical prototype constraints are lifecycle boundaries: files must
 remain inside the artifact tree, be regular non-symlink files when snapshotted,
 and match the approved byte inventory. Active Experience packages need at
 least one artifact before review. The receipt records the sorted file paths,
-bytes hashes, artifact-tree hash and package-set hash. It does not claim UI
-quality, accessibility, security or implementation suitability.
+bytes hashes, artifact-tree hash and package-set hash. Regular operating-system
+metadata files named by the schema policy are safety-checked but excluded from
+new snapshots. Existing receipts remain immutable and are never silently
+reinterpreted. Snapshot integrity does not establish UI quality or security.
+
+## Approved artifact recovery
+
+- [Recovery contract](references/artifact-recovery.md). Read when proposing or opening artifact recovery.
+
+`propose --recover-artifacts --application-action update --reason <explanation>`
+binds inventories and history, then requires ordinary review and approval.
 
 ## Lifecycle and review
 

@@ -629,27 +629,33 @@ def commit_tree(root: Path, base: str, paths: list[str], subject: str,
         if tree.returncode:
             raise RuntimeError(tree.stderr.strip() or "cannot write candidate tree")
         if delivery_projections:
-            for path, (mode, content) in delivery_projection_changes(
-                    root, tree.stdout.strip(), operation_bindings).items():
-                if content is None:
-                    args = ["git", "update-index", "--force-remove", "--", path]
-                else:
-                    blob = subprocess.run(["git", "hash-object", "-w", "--stdin"], cwd=root,
-                                          input=content, capture_output=True, check=True)
-                    args = ["git", "update-index", "--add", "--cacheinfo",
-                            mode, blob.stdout.decode().strip(), path]
-                subprocess.run(args, cwd=root, env=env, capture_output=True, check=True)
-            tree = subprocess.run(["git", "write-tree"], cwd=root, env=env,
-                                  text=True, capture_output=True, check=True)
+            projected = write_delivery_projection_tree(root, env, tree.stdout.strip(), operation_bindings)
+        else:
+            projected = tree.stdout.strip()
         message = subject + "\n\n" + "\n".join(
             f"Agentrof-{key}: {value}" for key, value in trailers.items()
         ) + "\n"
-        commit = subprocess.run(["git", "commit-tree", tree.stdout.strip(), "-p", base],
+        commit = subprocess.run(["git", "commit-tree", projected, "-p", base],
                                 cwd=root, env=env, input=message, text=True,
                                 capture_output=True, check=False)
         if commit.returncode:
             raise RuntimeError(commit.stderr.strip() or "cannot create candidate commit")
         return commit.stdout.strip()
+
+
+def write_delivery_projection_tree(root: Path, env: dict, tree: str,
+                                   operation_bindings: dict[str, dict] | None = None) -> str:
+    for path, (mode, content) in delivery_projection_changes(root, tree, operation_bindings).items():
+        if content is None:
+            args = ["git", "update-index", "--force-remove", "--", path]
+        else:
+            blob = subprocess.run(["git", "hash-object", "-w", "--stdin"], cwd=root,
+                                  input=content, capture_output=True, check=True)
+            args = ["git", "update-index", "--add", "--cacheinfo",
+                    mode, blob.stdout.decode().strip(), path]
+        subprocess.run(args, cwd=root, env=env, capture_output=True, check=True)
+    return subprocess.run(["git", "write-tree"], cwd=root, env=env,
+                          text=True, capture_output=True, check=True).stdout.strip()
 
 
 def delivery_projection_changes(root: Path, tree: str,
@@ -1924,13 +1930,11 @@ def refresh_target(project_root: Path, delivery_id: str,
                    remote: str = "origin") -> dict:
     """Merge a fresh target tip into one open Delivery under the Fence lease.
 
-    Disjoint target movement is fully supported. A path/contract overlap with
-    an already claimed Item is rejected before any ref mutation. A relevant
-    pre-claim overlap invalidates the published Plan and returns the package to
-    scope-approved state; a fresh Execution Plan approval is then required.
+    Claimed-path and pinned-input changes fail before ref mutation. Compiler-owned
+    projections are regenerated from the merged candidate without revising approvals.
     """
     root = main_worktree(project_root.resolve())
-    from delivery_compile import docs_root, find_delivery, split_note, frontmatter, content_hash
+    from delivery_compile import docs_root, find_delivery, split_note
     docs = docs_root(root)
     directory = find_delivery(docs, delivery_id)
     if directory is None:
@@ -1970,47 +1974,14 @@ def refresh_target(project_root: Path, delivery_id: str,
     overlaps = sorted(path for path in changed if any(_claims_overlap(path, claim) for claim in claimed))
     if overlaps:
         raise RuntimeError("claimed_source_violation: target changed claimed paths " + ", ".join(overlaps))
-    relevant = [
-        path for path in changed
-        if path in {
-            "workspace/docs/maps/delivery.md",
-            "workspace/docs/delivery/definition-of-done.md",
-        }
-    ]
-    merge = merge_candidate(
+    final_candidate = merge_candidate(
         root, integration_oid, target, f"Refresh target for {delivery_id}",
         {"Record": "target-refresh-v1", "Protocol": "1", "Delivery": delivery_id,
          "Previous-Target": previous_target, "Target": target,
          "Target-Impact-Hash": "none", "Refresh-Kind": "disjoint"},
+        delivery_projections=True, operation_bindings=operation_bindings,
+        preserve_delivery=directory,
     )
-    if operation_bindings:
-        delivery_projection_changes(root, merge, operation_bindings)
-    final_candidate = merge
-    invalidated = bool(relevant)
-    if invalidated:
-        delivery_path = directory / "delivery.md"
-        plan_path = directory / "execution-plan.md"
-        replacements = {}
-        remote_delivery_props, remote_delivery_body = split_remote_note(root, merge, str(delivery_path.relative_to(root)), split_note)
-        remote_delivery_props["status"] = "scope_approved"
-        remote_delivery_props.pop("plan_hash", None)
-        remote_delivery_props["source_hash"] = content_hash(remote_delivery_props, remote_delivery_body)
-        replacements[str(delivery_path.relative_to(root))] = frontmatter(remote_delivery_props, remote_delivery_body)
-        if plan_path.exists():
-            try:
-                plan_props, plan_body = split_remote_note(root, merge, str(plan_path.relative_to(root)), split_note)
-                plan_props["status"] = "draft"
-                plan_props["source_hash"] = content_hash(plan_props, plan_body)
-                replacements[str(plan_path.relative_to(root))] = frontmatter(plan_props, plan_body)
-            except RuntimeError:
-                pass
-        final_candidate = commit_replacements(
-            root, merge, replacements, f"Invalidate execution plan for {delivery_id}",
-            {"Record": "target-refresh-v1", "Protocol": "1", "Delivery": delivery_id,
-             "Previous-Target": previous_target, "Target": target,
-             "Target-Impact-Hash": "none", "Refresh-Kind": "plan_invalidated",
-             "Plan-Invalidated": "true"},
-        )
     fence_candidate = commit_tree(
         root, fence_oid, [], "Refresh project target",
         {"Record": "project-fence-v2", "Protocol": "2", "Mode": "open",
@@ -2023,7 +1994,7 @@ def refresh_target(project_root: Path, delivery_id: str,
     partial = observed_target != target
     return {"ok": True, "delivery": delivery_id, "changed": True, "target": target,
             "previous_target": previous_target, "paths": changed,
-            "plan_invalidated": invalidated, "integration": final_candidate,
+            "plan_invalidated": False, "integration": final_candidate,
             "fence": fence_candidate, "current_target": observed_target,
             "partial": partial, "writer_ready": not partial,
             "refs": short_refs(delivery_id)}
@@ -3395,8 +3366,105 @@ def unique_merge_base(root: Path, first_parent: str, second_parent: str) -> str:
     return bases[0]
 
 
+def require_delivery_controls_unchanged(root: Path, directory: Path, reference: str, candidate: str) -> None:
+    """Preserve the selected package's control paths, authored content and receipts."""
+    from ba_compile import without_generated_relations
+
+    def snapshot(tree):
+        prefix = directory.relative_to(root).as_posix() + "/"
+        listing = subprocess.run(["git", "ls-tree", "-rz", tree, "--", prefix],
+                                 cwd=root, capture_output=True, check=True).stdout
+        controls = {}
+        for row in listing.split(b"\0"):
+            if not row:
+                continue
+            metadata, raw_path = row.split(b"\t", 1)
+            path = raw_path.decode("utf-8")
+            if not path.endswith(".md"):
+                continue
+            mode, kind, oid = metadata.decode().split()
+            if kind != "blob" or mode not in {"100644", "100755"}:
+                raise RuntimeError("selected Delivery control must remain a regular file: " + path)
+            content = subprocess.run(["git", "cat-file", "blob", oid], cwd=root,
+                                     capture_output=True, check=True).stdout.decode("utf-8")
+            controls[path] = (mode, without_generated_relations(content))
+        return controls
+
+    before, after = snapshot(reference), snapshot(candidate)
+    changed = sorted(path for path in before.keys() | after.keys() if before.get(path) != after.get(path))
+    if changed:
+        raise RuntimeError("target changed selected Delivery control content or path set: " + ", ".join(changed))
+
+
+def reconcile_delivery_projection_conflicts(root: Path, env: dict) -> None:
+    """Resolve only owned projections, preserving ordinary authored merge conflicts."""
+    import vault_check
+    from ba_compile import without_generated_relations
+
+    policy = vault_check.load_policy(vault_check.DEFAULT_POLICY)
+    prefix = "workspace/docs/"
+    reports = vault_check.relation_reports(vault_check.Vault(
+        root=Path(env["GIT_INDEX_FILE"]).parent, policy=policy))
+    owned_files = {prefix + "maps/delivery.md", *(prefix + path for path in reports)}
+    catalog_root = prefix + str(policy.get("relation_contract", {}).get(
+        "catalog_root", "maps/_relations")).rstrip("/") + "/"
+    listing = subprocess.run(["git", "ls-files", "--unmerged", "-z"], cwd=root, env=env,
+                             capture_output=True, check=True).stdout
+    conflicts = {}
+    for row in listing.split(b"\0"):
+        if row:
+            metadata, raw_path = row.split(b"\t", 1)
+            mode, oid, stage = metadata.decode().split()
+            conflicts.setdefault(raw_path.decode("utf-8"), {})[int(stage)] = (mode, oid)
+    for path, stages in conflicts.items():
+        if any(mode not in {"100644", "100755"} for mode, _oid in stages.values()):
+            continue
+        if path in owned_files or (path.startswith(catalog_root) and path.endswith(".md")):
+            subprocess.run(["git", "update-index", "--force-remove", "--", path],
+                           cwd=root, env=env, capture_output=True, check=True)
+            continue
+        if (not path.startswith(prefix) or not path.endswith(".md")
+                or path.startswith(prefix + ".obsidian/")
+                or vault_check.is_artifact_location(policy, path.removeprefix(prefix))):
+            continue
+        semantic = {}
+        has_projection = False
+        for stage, (mode, oid) in stages.items():
+            if mode not in {"100644", "100755"}:
+                break
+            raw = subprocess.run(["git", "cat-file", "blob", oid], cwd=root,
+                                 capture_output=True, check=True).stdout
+            try:
+                text = raw.decode("utf-8")
+            except UnicodeDecodeError:
+                break
+            if text.startswith(policy.get("generated_marker_prefix", "<!-- generated by")):
+                break
+            start, end = vault_check.RELATION_START, vault_check.RELATION_END
+            if start in text or end in text:
+                lines = text.splitlines()
+                if lines.count(start) != 1 or lines.count(end) != 1 or lines.index(start) > lines.index(end):
+                    break
+                has_projection = True
+            semantic[stage] = (mode, without_generated_relations(text))
+        if len(semantic) != len(stages) or not has_projection:
+            continue
+        base, ours, theirs = (semantic.get(stage) for stage in (1, 2, 3))
+        chosen = 2 if ours == theirs or theirs == base else 3 if ours == base else None
+        if chosen is None:
+            continue
+        subprocess.run(["git", "update-index", "--force-remove", "--", path],
+                       cwd=root, env=env, capture_output=True, check=True)
+        if chosen in stages:
+            mode, oid = stages[chosen]
+            subprocess.run(["git", "update-index", "--add", "--cacheinfo", mode, oid, path],
+                           cwd=root, env=env, capture_output=True, check=True)
+
+
 def merge_candidate(root: Path, first_parent: str, second_parent: str,
-                    subject: str, trailers: dict[str, str]) -> str:
+                    subject: str, trailers: dict[str, str], *, delivery_projections: bool = False,
+                    operation_bindings: dict[str, dict] | None = None,
+                    preserve_delivery: Path | None = None) -> str:
     merge_base = unique_merge_base(root, first_parent, second_parent)
     with tempfile.TemporaryDirectory(prefix="agentrof-merge-index-") as temporary:
         index = Path(temporary) / "index"
@@ -3405,12 +3473,18 @@ def merge_candidate(root: Path, first_parent: str, second_parent: str,
                                text=True, capture_output=True, check=False)
         if merge.returncode:
             raise RuntimeError(merge.stderr.strip() or "Item and Integration trees conflict")
+        if delivery_projections:
+            reconcile_delivery_projection_conflicts(root, env)
         tree = subprocess.run(["git", "write-tree"], cwd=root, env=env, text=True,
                               capture_output=True, check=False)
         if tree.returncode:
             raise RuntimeError(tree.stderr.strip() or "cannot write integration tree")
+        if preserve_delivery is not None:
+            require_delivery_controls_unchanged(root, preserve_delivery, first_parent, tree.stdout.strip())
+        projected = (write_delivery_projection_tree(root, env, tree.stdout.strip(), operation_bindings)
+                     if delivery_projections else tree.stdout.strip())
         message = subject + "\n\n" + "\n".join(f"Agentrof-{key}: {value}" for key, value in trailers.items()) + "\n"
-        commit = subprocess.run(["git", "commit-tree", tree.stdout.strip(), "-p", first_parent, "-p", second_parent],
+        commit = subprocess.run(["git", "commit-tree", projected, "-p", first_parent, "-p", second_parent],
                                 cwd=root, env=env, input=message, text=True, capture_output=True, check=False)
         if commit.returncode:
             raise RuntimeError(commit.stderr.strip() or "cannot create integration commit")

@@ -741,7 +741,8 @@ class DeliveryGitTests(unittest.TestCase):
         delivery_git.begin_applying_governance(project, desired)
         _branch, baseline = delivery_git.resolve_target(project, "origin")
         candidate = delivery_git.commit_tree(project, baseline,
-            [governance.relative_to(project).as_posix(), *extra_paths], "Publish Governance", {})
+            [governance.relative_to(project).as_posix(), *extra_paths], "Publish Governance", {},
+            delivery_projections=True)
         carrier = "refs/heads/governance-input"
         delivery_git.atomic_push(project, "origin", [(carrier, "", candidate)])
         delivery_git.authorize_target_update(project, "governance", desired, "origin",
@@ -788,9 +789,171 @@ class DeliveryGitTests(unittest.TestCase):
                              "workspace/docs/operation/verification-contract.md"):
                 self.assertEqual(delivery_git.run_git(project, "show", before + ":" + relative),
                                  delivery_git.run_git(project, "show", refreshed["integration"] + ":" + relative))
+            with tempfile.TemporaryDirectory() as temporary:
+                clone = Path(temporary) / "checkout"
+                delivery_git.run_git(project, "clone", "-q", str(project / "remote.git"), str(clone))
+                delivery_git.run_git(clone, "checkout", "-q", "--detach", refreshed["integration"])
+                candidate_docs = clone / "workspace/docs"
+                candidate_package = candidate_docs / package.relative_to(docs)
+                self.assertEqual(delivery_compile.delivery_findings(candidate_docs, ident)[1], [])
+                for path in candidate_package.rglob("*.md"):
+                    relative = path.relative_to(clone).as_posix()
+                    previous = delivery_git.run_git(project, "show", before + ":" + relative) + "\n"
+                    self.assertEqual(delivery_compile.without_generated_relations(path.read_text(encoding="utf-8")),
+                                     delivery_compile.without_generated_relations(previous))
+                map_text = (candidate_docs / "maps/delivery.md").read_text(encoding="utf-8")
+                self.assertIn("[[delivery/governance/governance|Governance]]", map_text)
+                self.assertIn(ident, map_text)
+                self.assertEqual(delivery_git.delivery_projection_changes(clone, refreshed["integration"]), {})
+                vault = vault_check.build_vault(candidate_docs, vault_check.load_policy(vault_check.DEFAULT_POLICY))
+                findings = []
+                for check in (vault_check.check_frontmatter_props, vault_check.check_nav_footer,
+                              vault_check.check_wikilink_resolution, vault_check.check_orphans,
+                              vault_check.check_map_coverage, vault_check.check_relation_contract,
+                              vault_check.check_relation_projections):
+                    check(vault, findings)
+                self.assertEqual([finding for finding in findings if finding.path.startswith("delivery/")
+                                  or finding.path == "maps/delivery.md" or finding.check == "generated_views"], [])
+                self.assertEqual(delivery_git.run_git(clone, "status", "--porcelain"), "")
             again = delivery_git.refresh_target(project, ident)
             self.assertFalse(again["changed"])
         self.assertEqual(delivery_git.remote_oid(project, "origin", "refs/heads/main"), target)
+
+    def test_target_refresh_rejects_conflicting_authored_delivery_content(self):
+        project, docs, directory, _item, _reserved = self.prepare_execution_with_draft_reserved_contracts(False)
+        published = delivery_git.publish_execution_plan(project, "DLV-001")
+        delivery = directory / "delivery.md"
+        props, body = delivery_compile.split_note(delivery)
+        body += "\nUnapproved target scope change.\n"
+        props["source_hash"] = delivery_compile.content_hash(props, body)
+        delivery.write_text(delivery_compile.frontmatter(props, body), encoding="utf-8")
+        _target, fence = self.governance_target_handoff(project, docs,
+            delivery_git.package_paths(project, directory, docs, include_map=False))
+        with self.assertRaisesRegex(RuntimeError, "unmerged"):
+            delivery_git.refresh_target(project, "DLV-001")
+        refs = delivery_git.canonical_refs("DLV-001")
+        self.assertEqual(delivery_git.remote_oid(project, "origin", refs["integration"]), published["integration"])
+        self.assertEqual(delivery_git.remote_oid(project, "origin", refs["fence"]), fence)
+
+    def test_refresh_preserves_approved_control_content_and_path_set(self):
+        for control in ("delivery.md", "execution-plan.md", "items/auth-01/item.md", "injected_item", "deleted_item"):
+            with self.subTest(control=control):
+                project, _docs, directory, item, _reserved = self.prepare_execution_with_draft_reserved_contracts(False)
+                published = delivery_git.publish_execution_plan(project, "DLV-001")
+                base = published["integration"]
+                # Both branches descend from the same already-approved package.
+                previous = delivery_git.remote_oid(project, "origin", "refs/heads/main")
+                delivery_git.atomic_push(project, "origin", [("refs/heads/main", previous, base)])
+                delivery_git.refresh_target(project, "DLV-001")
+                refs = delivery_git.canonical_refs("DLV-001")
+                integration = delivery_git.remote_oid(project, "origin", refs["integration"])
+                path = directory / control if control.endswith(".md") else item
+                relative = path.relative_to(project).as_posix()
+                original = delivery_git.run_git(project, "show", base + ":" + relative) + "\n"
+                ours = vault_check.replace_relation_block(original,
+                    vault_check.RELATION_START + "\n\nIntegration view\n\n" + vault_check.RELATION_END)
+                integration = delivery_git.commit_replacements(project, integration, {relative: ours}, "Integration projection", {})
+                delivery_git.atomic_push(project, "origin", [(refs["integration"],
+                    delivery_git.remote_oid(project, "origin", refs["integration"]), integration)])
+                if control == "injected_item":
+                    path = directory / "items/auth-02/item.md"
+                    path.parent.mkdir()
+                    path.write_text("# Injected Item\n", encoding="utf-8")
+                elif control == "deleted_item":
+                    path.unlink()
+                else:
+                    theirs = vault_check.replace_relation_block(original,
+                        vault_check.RELATION_START + "\n\nTarget view\n\n" + vault_check.RELATION_END)
+                    path.write_text(theirs + "\nTarget-only authored control change.\n", encoding="utf-8")
+                target = delivery_git.commit_tree(project, base, [path.relative_to(project).as_posix()], "Target control drift", {})
+                delivery_git.atomic_push(project, "origin", [("refs/heads/main", base, target)])
+                before = delivery_git.run_git(project, "ls-remote", "origin")
+                with self.assertRaisesRegex(RuntimeError, "selected Delivery control content or path set"):
+                    delivery_git.refresh_target(project, "DLV-001")
+                self.assertEqual(delivery_git.run_git(project, "ls-remote", "origin"), before)
+                self.assertEqual(delivery_git.remote_slot_oids(project, "origin"), {})
+                self.assertIsNone(delivery_git.read_writer_receipt(project, "DLV-001", "AUTH-01"))
+
+    def test_projection_merge_rejects_structural_conflicts_at_owned_generated_paths(self):
+        temporary, project = self.make_project()
+        self.addCleanup(temporary.cleanup)
+        head = delivery_git.run_git(project, "rev-parse", "HEAD")
+        for relative in ("workspace/docs/maps/delivery.md", "workspace/docs/maps/_relations/test/relations-001.md"):
+            with self.subTest(path=relative):
+                path = project / relative
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text("Base generated view\n", encoding="utf-8")
+                base = delivery_git.commit_tree(project, head, [relative], "Base projection", {})
+                path.write_text("Integration generated view\n", encoding="utf-8")
+                ours = delivery_git.commit_tree(project, base, [relative], "Integration projection", {})
+                path.unlink()
+                path.symlink_to("unrelated-target")
+                theirs = delivery_git.commit_tree(project, base, [relative], "Target symlink", {})
+                with self.assertRaisesRegex(RuntimeError, "unmerged"):
+                    delivery_git.merge_candidate(project, ours, theirs, "Reject structural conflict", {}, delivery_projections=True)
+                self.assertTrue(path.is_symlink())
+        self.assertEqual(delivery_git.run_git(project, "rev-parse", "HEAD"), head)
+        self.assertEqual(delivery_git.remote_oid(project, "origin", "refs/heads/main"), head)
+
+    def test_projection_merge_resolves_only_owned_inverse_blocks(self):
+        temporary, project = self.make_project()
+        self.addCleanup(temporary.cleanup)
+        head = delivery_git.run_git(project, "rev-parse", "HEAD")
+        index = (project / ".git/index").read_bytes()
+        note = project / "workspace/docs/research/notes/merge.md"
+        note.parent.mkdir(parents=True)
+        authored = "# Authored note\n\nStable content.\n"
+
+        def content(projection, body=authored):
+            return body + "\n" + vault_check.RELATION_START + "\n\n" + projection + "\n\n" + vault_check.RELATION_END + "\n"
+
+        relative = note.relative_to(project).as_posix()
+        note.write_text(content("Base view"), encoding="utf-8")
+        base = delivery_git.commit_tree(project, head, [relative], "Base note", {})
+        note.write_text(content("Integration view"), encoding="utf-8")
+        ours = delivery_git.commit_tree(project, base, [relative], "Integration view", {})
+        note.write_text(content("Target view"), encoding="utf-8")
+        theirs = delivery_git.commit_tree(project, base, [relative], "Target view", {})
+        with self.assertRaisesRegex(RuntimeError, "unmerged"):
+            delivery_git.merge_candidate(project, ours, theirs, "Ordinary merge", {})
+        merged = delivery_git.merge_candidate(project, ours, theirs, "Projection merge", {}, delivery_projections=True)
+        self.assertEqual(delivery_git.run_git(project, "show", merged + ":" + relative) + "\n", authored)
+        self.assertEqual(delivery_git.delivery_projection_changes(project, merged), {})
+        note.write_text(content("Integration view", "# Authored note\n\nIntegration edit.\n"), encoding="utf-8")
+        authored_ours = delivery_git.commit_tree(project, base, [relative], "Integration authored edit", {})
+        note.write_text(content("Target view", "# Authored note\n\nTarget edit.\n"), encoding="utf-8")
+        authored_theirs = delivery_git.commit_tree(project, base, [relative], "Target authored edit", {})
+        with self.assertRaisesRegex(RuntimeError, "unmerged"):
+            delivery_git.merge_candidate(project, authored_ours, authored_theirs, "Reject authored conflict", {}, delivery_projections=True)
+        for malformed in (content("Target view").replace(vault_check.RELATION_END, ""),
+                          content("Target view") + vault_check.RELATION_START + "\n"):
+            note.write_text(malformed, encoding="utf-8")
+            bad = delivery_git.commit_tree(project, base, [relative], "Malformed projection markers", {})
+            with self.assertRaisesRegex(RuntimeError, "unmerged"):
+                delivery_git.merge_candidate(project, ours, bad, "Reject malformed markers", {}, delivery_projections=True)
+        foreign = lambda text: text.replace("relations:generated", "structural:generated")
+        note.write_text(foreign(content("Base contents")), encoding="utf-8")
+        foreign_base = delivery_git.commit_tree(project, head, [relative], "Base structural contents", {})
+        note.write_text(foreign(content("Integration contents")), encoding="utf-8")
+        foreign_ours = delivery_git.commit_tree(project, foreign_base, [relative], "Integration structural contents", {})
+        note.write_text(foreign(content("Target contents")), encoding="utf-8")
+        foreign_theirs = delivery_git.commit_tree(project, foreign_base, [relative], "Target structural contents", {})
+        with self.assertRaisesRegex(RuntimeError, "unmerged"):
+            delivery_git.merge_candidate(project, foreign_ours, foreign_theirs, "Reject unowned markers", {}, delivery_projections=True)
+        artifact = project / "workspace/docs/experience-design/artifacts/prototype.md"
+        artifact.parent.mkdir(parents=True)
+        relative_artifact = artifact.relative_to(project).as_posix()
+        artifact.write_text(content("Base prototype content"), encoding="utf-8")
+        artifact_base = delivery_git.commit_tree(project, head, [relative_artifact], "Base prototype", {})
+        artifact.write_text(content("Integration prototype content"), encoding="utf-8")
+        artifact_ours = delivery_git.commit_tree(project, artifact_base, [relative_artifact], "Integration prototype", {})
+        artifact.write_text(content("Target prototype content"), encoding="utf-8")
+        artifact_theirs = delivery_git.commit_tree(project, artifact_base, [relative_artifact], "Target prototype", {})
+        with self.assertRaisesRegex(RuntimeError, "unmerged"):
+            delivery_git.merge_candidate(project, artifact_ours, artifact_theirs, "Reject prototype conflict", {}, delivery_projections=True)
+        self.assertEqual(delivery_git.run_git(project, "rev-parse", "HEAD"), head)
+        self.assertEqual((project / ".git/index").read_bytes(), index)
+        self.assertEqual(delivery_git.remote_oid(project, "origin", "refs/heads/main"), head)
 
     def test_stale_paused_item_cannot_activate_after_integration_refresh(self):
         project, docs, _directory, _item, _reserved = self.prepare_execution_with_draft_reserved_contracts(False)
@@ -859,17 +1022,24 @@ class DeliveryGitTests(unittest.TestCase):
         self.assertEqual(delivery_git.run_git(project, "show", refreshed["integration"] + ":" + relative) + "\n", published_story)
 
     def test_target_refresh_rejects_changed_pinned_source_and_operation_receipts(self):
-        for kind in ("story", "operation"):
+        for kind in ("story", "operation", "dod", "missing_dod"):
             with self.subTest(kind=kind):
                 project, docs, _directory, item, _reserved = self.prepare_execution_with_draft_reserved_contracts(False)
                 published = delivery_git.publish_execution_plan(project, "DLV-001")
                 props, _body = delivery_compile.split_note(item)
-                path = docs / props["story_path"] if kind == "story" else operation_compile.contract_path(docs, "verification")
-                path.write_text(path.read_text(encoding="utf-8") + "\nChanged approved input.\n", encoding="utf-8")
+                path = (docs / props["story_path"] if kind == "story" else
+                        docs / "delivery/definition-of-done.md" if kind in {"dod", "missing_dod"} else
+                        operation_compile.contract_path(docs, "verification"))
+                if kind == "missing_dod":
+                    path.unlink()
+                else:
+                    path.write_text(path.read_text(encoding="utf-8") + "\nChanged approved input.\n", encoding="utf-8")
                 _target, fence = self.governance_target_handoff(project, docs, [path.relative_to(project).as_posix()])
                 item.unlink()  # The remote pin must remain enforced without local Item files.
-                with self.assertRaisesRegex(RuntimeError, "changed a pinned source or Operation receipt"):
+                with self.assertRaises(RuntimeError) as failure:
                     delivery_git.refresh_target(project, "DLV-001")
+                if kind != "missing_dod":
+                    self.assertIn("changed a pinned source or Operation receipt", str(failure.exception))
                 refs = delivery_git.canonical_refs("DLV-001")
                 self.assertEqual(delivery_git.remote_oid(project, "origin", refs["integration"]), published["integration"])
                 self.assertEqual(delivery_git.remote_oid(project, "origin", refs["fence"]), fence)

@@ -15,6 +15,7 @@ sys.path.insert(0, str(SCRIPTS))
 sys.path.insert(0, str(ROOT / "tools" / "tests"))
 
 import delivery_compile  # noqa: E402
+import delivery_governance  # noqa: E402
 import architecture_compile  # noqa: E402
 import backlog_compile  # noqa: E402
 import operation_compile  # noqa: E402
@@ -107,6 +108,44 @@ class DeliveryCompilerTests(unittest.TestCase):
         props["test_command"] = "make test"
         operation_compile.atomic_text(path, operation_compile.render(props, body))
         self.assertEqual(operation_compile.approve(args), 0)
+
+    def test_map_links_only_existing_global_documents_without_orphaning_them(self):
+        policy = vault_check.load_policy(vault_check.DEFAULT_POLICY)
+        map_path = self.docs / "maps/delivery.md"
+        home = self.docs / policy["home_file"]
+        home.write_text("# Home\n\n[[maps/delivery|Delivery]]\n", encoding="utf-8")
+        globals = ((delivery_governance.path_for(self.docs), "Governance"),
+                   (self.docs / "delivery/definition-of-done.md", "Definition of Done"))
+
+        def check_map(expected):
+            before = {path: path.read_bytes() for path, _title in globals if path.is_file()}
+            delivery_compile.render_map(self.docs)
+            text = map_path.read_text(encoding="utf-8")
+            for path, title in globals:
+                link = delivery_compile.link(path.relative_to(self.docs).as_posix(), title)
+                self.assertEqual(link in text, path in expected)
+            vault = vault_check.build_vault(self.docs, policy)
+            findings = []
+            vault_check.check_wikilink_resolution(vault, findings)
+            vault_check.check_orphans(vault, findings)
+            vault_check.check_moc_coverage(vault, findings)
+            selected = {"maps/delivery.md", *(path.relative_to(self.docs).as_posix() for path in expected)}
+            self.assertEqual([finding for finding in findings if finding.path in selected], [])
+            for path in expected:
+                self.assertIn("maps/delivery.md", vault.inbound[path.relative_to(self.docs).as_posix()])
+            self.assertEqual({path: path.read_bytes() for path in before}, before)
+            delivery_compile.render_map(self.docs)
+            self.assertEqual(map_path.read_text(encoding="utf-8"), text)
+
+        check_map(set())
+        self.assertEqual(delivery_governance.init(type("Args", (), {"docs": str(self.docs), "max_parallel": 1})), 0)
+        check_map({globals[0][0]})
+        self.approve_dod()
+        check_map({path for path, _title in globals})
+        globals[0][0].unlink()
+        check_map({globals[1][0]})
+        globals[1][0].unlink()
+        check_map(set())
 
     def test_dod_bootstrap_approval_and_revision_keep_one_path(self):
         args = type("Args", (), {"docs": str(self.docs), "title": "Project", "file": None})

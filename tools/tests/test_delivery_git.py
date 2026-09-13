@@ -571,6 +571,35 @@ class DeliveryGitTests(unittest.TestCase):
             with self.assertRaises(RuntimeError):
                 delivery_git.reserve_delivery(project, "DLV-001")
 
+    def test_candidate_map_excludes_unpublished_local_governance(self):
+        temporary, project = self.make_project()
+        self.addCleanup(temporary.cleanup)
+        docs = project / "workspace/docs"
+        governance = delivery_governance.path_for(docs)
+        relative_governance = governance.relative_to(project).as_posix()
+        original = governance.read_bytes()
+        head = delivery_git.run_git(project, "rev-parse", "HEAD")
+        index = (project / ".git/index").read_bytes()
+        governance.unlink()
+        base = delivery_git.commit_tree(project, head, [relative_governance], "Candidate before Governance", {})
+        governance.write_bytes(original)
+        args = type("Args", (), {"docs": str(docs), "title": "Project", "file": None})
+        self.assertEqual(delivery_compile.init_dod(args), 0)
+        dod = docs / "delivery/definition-of-done.md"
+        delivery_compile.render_map(docs)
+        self.assertIn("delivery/governance/governance|Governance", (docs / "maps/delivery.md").read_text(encoding="utf-8"))
+        candidate = delivery_git.commit_tree(project, base, [dod.relative_to(project).as_posix()],
+            "Publish candidate Definition of Done", {}, delivery_projections=True)
+        candidate_map = delivery_git.run_git(project, "show", candidate + ":workspace/docs/maps/delivery.md")
+        self.assertIn("[[delivery/definition-of-done|Definition of Done]]", candidate_map)
+        self.assertNotIn("delivery/governance/governance", candidate_map)
+        self.assertEqual(delivery_git.run_git(project, "ls-tree", candidate, "--", relative_governance), "")
+        self.assertEqual(delivery_git.delivery_projection_changes(project, candidate), {})
+        self.assertEqual(governance.read_bytes(), original)
+        self.assertEqual(delivery_git.run_git(project, "rev-parse", "HEAD"), head)
+        self.assertEqual((project / ".git/index").read_bytes(), index)
+        self.assertEqual(delivery_git.remote_oid(project, "origin", "refs/heads/main"), head)
+
     def test_publications_render_exact_candidate_without_local_sibling_or_dirty_note(self):
         temporary, project = self.make_project()
         self.addCleanup(temporary.cleanup)

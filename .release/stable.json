@@ -1,17 +1,15 @@
 {
   "schema_version": 1,
-  "version": "0.2.1",
-  "stable_base": "00b6db806fdde81d80289b3a8b090185f9d0a050",
-  "main_source": "0d4c41e3ce49101d12d507f9783a6748f93feebc",
+  "version": "0.3.0",
+  "stable_base": "e75dacb40306b211a2d3605bf77ec735b72ee8cc",
+  "main_source": "a78e39ef5a40cb9c59c943f28959754593c1b1f7",
   "impacts": {
-    "software-engineering-team": "patch"
+    "software-engineering-team": "minor"
   },
   "summaries": [
-    "Reuse immutable receipt validation during backlog approval so large approved input sets complete without repeated compiler scans.",
-    "Keep backlog compiler status tags aligned with vault validation.",
-    "Stabilize temporary Git repository cleanup in delivery tests.",
-    "Recover an interrupted Experience update approval without accepting ambiguous lifecycle state.",
-    "Preserve approved Requirement stage evidence during navigation rendering and normalize terminal status tags.",
-    "Parse escaped Requirement Stage Impact wikilink aliases as their canonical package references."
+    "Exclude operating-system metadata from new Experience snapshots, add proposal-bound artifact recovery, retain unchanged backlog approvals and review history, verify committed artifact bytes, align Delivery producers with the vault schema and navigation contract, and preserve validated Experience lifecycle postimages across overlapping shell checks.",
+    "Harden Delivery publication, governance lifecycle, target projection reconciliation, and merge safety.",
+    "Publish Delivery relation projections from the exact candidate tree without copying unpublished local map entries.",
+    "Validate execution role promotion and cross-cutting Item path ownership without weakening architecture boundaries."
   ]
 }

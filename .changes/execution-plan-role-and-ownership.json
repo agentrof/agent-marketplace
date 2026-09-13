@@ -1,6 +1,0 @@
-{
-  "summary": "Validate execution role promotion and cross-cutting Item path ownership without weakening architecture boundaries.",
-  "components": {
-    "software-engineering-team": "patch"
-  }
-}

@@ -1,5 +1,5 @@
 {
-  "summary": "Harden Delivery publication, governance lifecycle, target convergence, and merge safety.",
+  "summary": "Harden Delivery publication, governance lifecycle, target projection reconciliation, and merge safety.",
   "components": {
     "software-engineering-team": "patch"
   }

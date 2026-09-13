@@ -99,6 +99,102 @@ class OperationGovernanceTests(unittest.TestCase):
             revised = self.invoke(GOVERNANCE, "begin-revision", "--docs", str(docs))
             self.assertEqual(revised.returncode, 0, revised.stdout + revised.stderr)
 
+    def test_operation_lifecycle_quotes_wikilinks_without_changing_body_or_receipt(self):
+        sys.path.insert(0, str(SCRIPTS))
+        import operation_compile
+        import vault_check
+
+        for kind, command_field in (("verification", "test_command"), ("environment", "env_command")):
+            with self.subTest(kind=kind), tempfile.TemporaryDirectory() as temporary:
+                docs = Path(temporary) / "workspace/docs"
+                ref = self.approved_solution(docs)
+                wikilink = f"[[{ref}|SD-001]]"
+                args = ("--docs", str(docs), "--kind", kind)
+                initialized = self.invoke(OPERATION, "init", *args, "--constrained-by", wikilink)
+                self.assertEqual(initialized.returncode, 0, initialized.stdout + initialized.stderr)
+                path = operation_compile.contract_path(docs, kind)
+                policy = vault_check.load_policy(vault_check.DEFAULT_POLICY)
+
+                def assert_quoted_relation():
+                    text = path.read_text(encoding="utf-8")
+                    self.assertIn(f'  - "{wikilink}"\n', text)
+                    props, body = operation_compile.parse(path)
+                    self.assertEqual(props["constrained_by"], [wikilink])
+                    vault = vault_check.build_vault(docs, policy)
+                    findings = []
+                    vault_check.check_frontmatter_props(vault, findings)
+                    self.assertEqual([finding for finding in findings
+                                      if finding.path.startswith("operation/")
+                                      and "wikilink" in finding.message], [])
+                    return props, body
+
+                _props, initial_body = assert_quoted_relation()
+                path.write_text(path.read_text(encoding="utf-8").replace(
+                    f"{command_field}: \n", f"{command_field}: make {kind}\n"), encoding="utf-8")
+                for revision in (1, 2):
+                    approved = self.invoke(OPERATION, "approve", *args)
+                    self.assertEqual(approved.returncode, 0, approved.stdout + approved.stderr)
+                    props, body = assert_quoted_relation()
+                    self.assertEqual(body, initial_body)
+                    self.assertEqual(props["revision"], revision)
+                    receipt, findings = operation_compile.check_contract(docs, kind)
+                    self.assertEqual(findings, [])
+                    self.assertTrue(receipt["current"])
+                    self.assertEqual(props["source_hash"], operation_compile.source_hash(props, body))
+                    raw = path.read_text(encoding="utf-8")
+                    legacy = raw.replace(f'  - "{wikilink}"', f"  - {wikilink}")
+                    path.write_text(legacy, encoding="utf-8")
+                    legacy_props, legacy_body = operation_compile.parse(path)
+                    self.assertEqual(legacy_props, props)
+                    self.assertEqual(legacy_body, body)
+                    path.write_text(operation_compile.render(legacy_props, legacy_body), encoding="utf-8")
+                    self.assertEqual(path.read_text(encoding="utf-8"), raw)
+                    self.assertEqual(operation_compile.check_contract(docs, kind), (receipt, []))
+                    revised = self.invoke(OPERATION, "begin-revision", *args)
+                    self.assertEqual(revised.returncode, 0, revised.stdout + revised.stderr)
+                    draft, revised_body = assert_quoted_relation()
+                    self.assertEqual(revised_body, initial_body)
+                    self.assertEqual(draft["status"], "draft")
+                    self.assertEqual(draft["revision"], revision + 1)
+                    self.assertNotIn("approved_at_utc", draft)
+
+    def test_governance_lifecycle_omits_unset_hashes_and_preserves_approved_receipt(self):
+        sys.path.insert(0, str(SCRIPTS))
+        import delivery_governance
+        import vault_check
+
+        with tempfile.TemporaryDirectory() as temporary:
+            docs = Path(temporary) / "workspace/docs"
+            initialized = self.invoke(GOVERNANCE, "init", "--docs", str(docs), "--max-parallel", "2")
+            self.assertEqual(initialized.returncode, 0, initialized.stdout + initialized.stderr)
+            path = delivery_governance.path_for(docs)
+            _props, original_body = delivery_governance.read(path)
+            for verb, expected_status in ((None, "draft"), ("approve", "approved"), ("begin-revision", "draft")):
+                if verb:
+                    result = self.invoke(GOVERNANCE, verb, "--docs", str(docs))
+                    self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+                props, body = delivery_governance.read(path)
+                self.assertEqual(props["status"], expected_status)
+                self.assertEqual(body, original_body)
+                policy = vault_check.load_policy(vault_check.DEFAULT_POLICY)
+                findings = []
+                vault_check.check_frontmatter_props(vault_check.build_vault(docs, policy), findings)
+                self.assertEqual([finding for finding in findings
+                                  if finding.path == "delivery/governance/governance.md"], [])
+                receipt, errors = delivery_governance.status(docs)
+                self.assertEqual(errors, [])
+                self.assertEqual(receipt["current"], expected_status == "approved")
+                if expected_status == "approved":
+                    digest = delivery_governance.governance_hash(props, body)
+                    self.assertEqual(props["governance_hash"], digest)
+                    self.assertEqual(props["source_hash"], digest)
+                    self.assertIn("approved_at_utc", props)
+                else:
+                    self.assertNotIn("governance_hash", props)
+                    self.assertNotIn("source_hash", props)
+                    self.assertNotIn("approved_at_utc", props)
+            self.assertEqual(props["revision"], 2)
+
 
 if __name__ == "__main__":
     unittest.main()

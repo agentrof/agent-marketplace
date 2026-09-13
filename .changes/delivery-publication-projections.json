@@ -1,0 +1,6 @@
+{
+  "summary": "Publish Delivery relation projections from the exact candidate tree without copying unpublished local map entries.",
+  "components": {
+    "software-engineering-team": "patch"
+  }
+}

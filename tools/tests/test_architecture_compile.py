@@ -49,6 +49,38 @@ class ArchitectureCompilerTests(unittest.TestCase):
             result = self.run_cli("init-root", "--docs", docs, "--item-ref", "AUTH-01", expected=2)
             self.assertIn("claimed or active", result.stderr)
 
+    def test_sealing_preserves_quoted_wikilinks_and_item_source_hash(self):
+        sys.path.insert(0, str(COMPILER.parent))
+        import architecture_compile
+        import delivery_compile
+        import vault_check
+        with tempfile.TemporaryDirectory() as raw:
+            docs = Path(raw) / "workspace/docs"
+            self.prepare(docs)
+            self.run_cli("init-root", "--docs", docs, "--item-ref", "AUTH-01")
+            root = docs / "system-architecture/architecture.md"
+            props = architecture_compile.record_props(root)
+            wikilink = "[[solution-design/landscape|Approved Solution]]"
+            props["constrained_by"] = [wikilink]
+            props["summary"] = wikilink
+            body = "# Architecture\n\nAuthored contract and exact punctuation: a | b.\n"
+            root.write_text(architecture_compile.frontmatter(props, body), encoding="utf-8")
+            self.run_cli("stamp-item", "--docs", docs, "--item-ref", "AUTH-01")
+            text = root.read_text(encoding="utf-8")
+            self.assertIn(f'  - "{wikilink}"\n', text)
+            self.assertIn(f'summary: "{wikilink}"\n', text)
+            self.assertEqual(architecture_compile.record_props(root)["constrained_by"], [wikilink])
+            self.assertEqual(delivery_compile.split_note(root)[1], body.rstrip())
+            item = docs / "delivery/deliveries/dlv-001-test/items/auth-01/item.md"
+            item_props, item_body = delivery_compile.split_note(item)
+            self.assertEqual(item_props["source_hash"], delivery_compile.content_hash(item_props, item_body))
+            self.run_cli("check", "--docs", docs)
+            policy = vault_check.load_policy(vault_check.DEFAULT_POLICY)
+            findings = []
+            vault_check.check_frontmatter_props(vault_check.build_vault(docs, policy), findings)
+            self.assertEqual([finding for finding in findings if finding.path == "system-architecture/architecture.md"
+                              and "wikilink" in finding.message], [])
+
     def test_sealed_record_detects_direct_drift_and_supports_standards(self):
         with tempfile.TemporaryDirectory() as raw:
             docs = Path(raw) / "workspace/docs"

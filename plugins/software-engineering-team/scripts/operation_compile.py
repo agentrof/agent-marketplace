@@ -94,13 +94,30 @@ def render(props: dict, body: str) -> str:
     return "\n".join(lines)
 
 
-def source_hash(props: dict, body: str) -> str:
+def _source_hash(props: dict, body: str) -> str:
     excluded = {"source_hash", "approved_at_utc"}
     view = {key: value for key, value in props.items() if key not in excluded}
     return "sha256:" + hashlib.sha256(
-        json.dumps({"frontmatter": view, "body": without_generated_relations(body)}, ensure_ascii=False,
+        json.dumps({"frontmatter": view, "body": body}, ensure_ascii=False,
                    sort_keys=True, separators=(",", ":")).encode("utf-8")
     ).hexdigest()
+
+
+def source_hash(props: dict, body: str) -> str:
+    return _source_hash(props, without_generated_relations(body).rstrip())
+
+
+def receipt_hash(props: dict, body: str) -> str:
+    """Retain only a recomputed approved receipt from the two historical endings."""
+    authored = without_generated_relations(body).rstrip()
+    canonical = _source_hash(props, authored)
+    # Before canonicalization, removing an inverse block added one terminal
+    # newline, while approvals without a block hashed the stripped body.
+    if props.get("status") == "approved":
+        legacy = _source_hash(props, authored + "\n")
+        if props.get("source_hash") == legacy:
+            return legacy
+    return canonical
 
 
 def valid_workdir(value: object) -> bool:
@@ -187,7 +204,7 @@ def check_contract(docs: Path, kind: str) -> tuple[dict, list[str]]:
         for name in ("tolerated_warnings", "service_catalog"):
             if not isinstance(props.get(name), list):
                 errors.append(f"{name} must be a list")
-    digest = source_hash(props, body)
+    digest = receipt_hash(props, body)
     if props.get("status") == "approved":
         if props.get("source_hash") != digest:
             errors.append("approved contract source_hash is stale")

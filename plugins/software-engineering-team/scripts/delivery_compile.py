@@ -1010,6 +1010,19 @@ def item_worktree_head(worktree: Path) -> tuple[str, list[str]]:
     return head.stdout.strip(), [line for line in dirty.stdout.splitlines() if line]
 
 
+def item_evidence_file_findings(worktree: Path, head: str, paths: tuple[Path, Path]) -> list[str]:
+    """Evidence authoring may update existing reports, never replace their file boundary."""
+    for path in paths:
+        tracked = subprocess.run(["git", "--no-replace-objects", "-C", str(worktree), "ls-tree", head, "--",
+                                  path.relative_to(worktree).as_posix()],
+                                 text=True, capture_output=True, check=False)
+        if (path.is_symlink() or not path.is_file() or path.stat().st_nlink != 1
+                or tracked.returncode or not tracked.stdout.startswith("100644 blob ")
+                or path.stat().st_mode & 0o111):
+            return ["Item evidence must remain initialized regular non-executable files"]
+    return []
+
+
 def approve_item_evidence(args) -> int:
     worktree_value = getattr(args, "worktree", None)
     if not isinstance(worktree_value, str) or not worktree_value.strip():
@@ -1023,8 +1036,6 @@ def approve_item_evidence(args) -> int:
         print(json.dumps({"ok": False, "errors": [str(exc)]}, indent=2)); return 2
     if str(getattr(args, "docs", ".")) not in {"", "."} and requested_docs != docs:
         print(json.dumps({"ok": False, "errors": ["--docs must resolve inside the active Item worktree"]}, indent=2)); return 2
-    if dirty:
-        print(json.dumps({"ok": False, "errors": ["commit or remove all Item worktree changes before approving evidence"]}, indent=2)); return 2
     root = find_delivery(docs, args.delivery)
     item = root / "items" / id_slug(args.story) / "item.md" if root else None
     if item is None or not item.exists():
@@ -1033,6 +1044,17 @@ def approve_item_evidence(args) -> int:
     verification = item.parent / "verification.md"
     if not review.exists() or not verification.exists():
         print(json.dumps({"ok": False, "errors": ["Item evidence files are not initialized"]}, indent=2)); return 1
+    from delivery_git import require_visible_item_index, worktree_pending_paths
+    try:
+        require_visible_item_index(worktree)
+    except RuntimeError as exc:
+        print(json.dumps({"ok": False, "errors": [str(exc)]}, indent=2)); return 2
+    allowed = {path.relative_to(worktree).as_posix() for path in (review, verification)}
+    if dirty and not worktree_pending_paths(worktree, worktree).issubset(allowed):
+        print(json.dumps({"ok": False, "errors": ["commit or remove non-evidence Item worktree changes before approving evidence"]}, indent=2)); return 2
+    findings = item_evidence_file_findings(worktree, head, (review, verification))
+    if findings:
+        print(json.dumps({"ok": False, "errors": findings}, indent=2)); return 2
     item_props, _ = split_note(item)
     review_props, review_body = split_note(review)
     verification_props, verification_body = split_note(verification)

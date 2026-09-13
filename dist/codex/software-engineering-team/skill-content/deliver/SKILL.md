@@ -27,7 +27,8 @@ Read the approved `delivery.md`, `execution-plan.md`, Item records, code
 reviews and verification records. The execution flow owns resumable Item
 work, serialized integration, one aggregate Delivery Review and one final PR.
 Item evidence is authored only in the active Item worktree: approval derives
-the reviewed and verified OID from its real clean `HEAD`, then the coordinator
+the reviewed and verified OID from its real committed `HEAD`, with only the
+initialized Code Review and Verification report drafts allowed pending. The coordinator
 publishes that committed product/test change with its review and verification
 records. Do not copy evidence from the primary worktree or supply an arbitrary
 commit identifier. Integration validates the remote Item tip and its exact

@@ -69,15 +69,16 @@ def docs_root(value: str | Path) -> Path:
 
 
 def frontmatter(props: dict, body: str) -> str:
+    from delivery_compile import scalar
     rows = ["---"]
     for key, value in props.items():
         if isinstance(value, list):
             rows.append(f"{key}:")
-            rows.extend(f"  - {item}" for item in value)
+            rows.extend(f"  - {scalar(item)}" for item in value)
         elif isinstance(value, bool):
             rows.append(f"{key}: {'true' if value else 'false'}")
         else:
-            rows.append(f"{key}: {value}")
+            rows.append(f"{key}: {scalar(value)}")
     return "\n".join([*rows, "---", "", body.rstrip(), ""])
 
 
@@ -628,7 +629,19 @@ def stamp_item(docs: Path, item_ref: str) -> int:
         return 1
     delta = item_delta(root, item_ref)
     digest = item_delta_hash(delta)
-    rewrite(item_path, {"architecture_delta_hash": digest})
+    # The Item belongs to Delivery: stamp only its receipt scalars, retaining
+    # approved topology and authored bytes rather than reserializing the note.
+    from delivery_compile import content_hash, split_note
+    props, body = split_note(item_path)
+    props["architecture_delta_hash"] = digest
+    updates = {"architecture_delta_hash": digest, "source_hash": content_hash(props, body)}
+    text = item_path.read_text(encoding="utf-8")
+    header, body_text = text.split("\n---\n", 1)
+    for key, value in updates.items():
+        header, count = re.subn(rf"(?m)^{key}:[^\n]*$", f"{key}: {value}", header)
+        if not count:
+            header += f"\n{key}: {value}"
+    atomic(item_path, header + "\n---\n" + body_text)
     target = root / "_ledger" / "item-deltas" / f"{item_ref.replace(':', '-').replace('/', '-')}.json"
     atomic(target, json.dumps({**delta, "architecture_delta_hash": digest,
                                "stamped_at_utc": datetime.now(timezone.utc).replace(microsecond=0).isoformat()}, indent=2, sort_keys=True) + "\n")

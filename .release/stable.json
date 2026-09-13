@@ -1,13 +1,17 @@
 {
   "schema_version": 1,
-  "version": "0.2.0",
-  "stable_base": "d86765f7a8c92036befbd0a85c7e2cf4db766826",
-  "main_source": "33922924a8f6f960e6519322fdefb236f018c01d",
+  "version": "0.2.1",
+  "stable_base": "00b6db806fdde81d80289b3a8b090185f9d0a050",
+  "main_source": "0d4c41e3ce49101d12d507f9783a6748f93feebc",
   "impacts": {
-    "software-engineering-team": "minor"
+    "software-engineering-team": "patch"
   },
   "summaries": [
-    "Add a safe abort path for incomplete unpublished Experience update scopes.",
-    "Add a safe return-to-draft path for unpublished Experience review scopes."
+    "Reuse immutable receipt validation during backlog approval so large approved input sets complete without repeated compiler scans.",
+    "Keep backlog compiler status tags aligned with vault validation.",
+    "Stabilize temporary Git repository cleanup in delivery tests.",
+    "Recover an interrupted Experience update approval without accepting ambiguous lifecycle state.",
+    "Preserve approved Requirement stage evidence during navigation rendering and normalize terminal status tags.",
+    "Parse escaped Requirement Stage Impact wikilink aliases as their canonical package references."
   ]
 }

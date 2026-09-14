@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import sys
 import json
+import hashlib
 import subprocess
 import tempfile
 import unittest
@@ -17,6 +18,7 @@ import delivery_git  # noqa: E402
 import delivery_compile  # noqa: E402
 import delivery_governance  # noqa: E402
 import operation_compile  # noqa: E402
+import architecture_compile  # noqa: E402
 import vault_check  # noqa: E402
 from backlog_fixture import make_approved_backlog  # noqa: E402
 
@@ -692,11 +694,24 @@ class DeliveryGitTests(unittest.TestCase):
                 self.assertEqual((project / ".git/index").read_bytes(), index_before)
                 self.assertEqual(delivery_git.run_git(project, "rev-parse", "HEAD"), target)
 
-    def prepare_execution_with_draft_reserved_contracts(self, runtime=True, path_claim="src/auth.py"):
+    def prepare_execution_with_draft_reserved_contracts(self, runtime=True, path_claim="src/auth.py", architecture=False, legacy_operation_receipts=False):
         temporary, project = self.make_project()
         self.addCleanup(temporary.cleanup)
         docs = project / "workspace/docs"
         make_approved_backlog(docs)
+        if architecture:
+            catalog = docs / "solution-design/_generated/component-catalog.json"
+            catalog.parent.mkdir(parents=True, exist_ok=True)
+            catalog.write_text(json.dumps({"components": [
+                {"component_id": "api", "sourcing": "build", "code_path": "src/auth.py"},
+                {"component_id": "other", "sourcing": "build", "code_path": "src/other.py"},
+            ]}), encoding="utf-8")
+            import landscape_check
+            landscape = docs / "solution-design/landscape.md"
+            props, body = delivery_compile.split_note(landscape)
+            landscape.write_text(delivery_compile.frontmatter(props, body), encoding="utf-8")
+            props["package_hash"] = landscape_check.package_hash(landscape.parent)
+            landscape.write_text(delivery_compile.frontmatter(props, body), encoding="utf-8")
         dod = type("Args", (), {"docs": str(docs), "title": "Project", "file": None})
         self.assertEqual(delivery_compile.init_dod(dod), 0)
         self.assertEqual(delivery_compile.approve_dod(dod), 0)
@@ -719,15 +734,245 @@ class DeliveryGitTests(unittest.TestCase):
             props[command] = "make test" if kind == "verification" else "make env"
             operation_compile.atomic_text(path, operation_compile.render(props, body))
             self.assertEqual(operation_compile.approve(type("Args", (), {"docs": str(docs), "kind": kind})), 0)
+            if legacy_operation_receipts:
+                props, authored = operation_compile.parse(path)
+                view = {key: value for key, value in props.items()
+                        if key not in {"source_hash", "approved_at_utc"}}
+                props["source_hash"] = "sha256:" + hashlib.sha256(json.dumps(
+                    {"frontmatter": view, "body": authored + "\n"}, ensure_ascii=False,
+                    sort_keys=True, separators=(",", ":")).encode("utf-8")).hexdigest()
+                block = vault_check.RELATION_START + "\n\nHistorical generated inverse\n\n" + vault_check.RELATION_END
+                path.write_text(vault_check.replace_relation_block(operation_compile.render(props, authored), block), encoding="utf-8")
         self.author_execution_topology(docs)
         directory = delivery_compile.find_delivery(docs, "DLV-001")
         item = directory / "items/auth-01/item.md"
         props, body = delivery_compile.split_note(item)
         props["runtime_required"] = runtime
         props["path_claims"] = [path_claim]
+        if architecture:
+            props.update({"architecture_impact": "required", "architecture_components": ["api"],
+                          "architecture_record_kinds": ["system-architecture", "architecture-component", "interface-contract"],
+                          "architecture_reason": "Define the authentication interface."})
+            sources, _snapshot, errors = delivery_compile.approved_backlog_sources(docs, ["AUTH-01"])
+            self.assertEqual(errors, [])
+            props["role_sequence"] = delivery_compile.execution_roles(sources["AUTH-01"], True)
         delivery_compile.atomic_text(item, delivery_compile.frontmatter(props, body))
         self.assertEqual(delivery_compile.approve_execution(args), 0)
         return project, docs, directory, item, reserved
+
+    def prepare_stamped_architecture_item(self):
+        project, docs, directory, _item, _reserved = self.prepare_execution_with_draft_reserved_contracts(
+            runtime=False, architecture=True)
+        delivery_git.publish_execution_plan(project, "DLV-001")
+        delivery_git.claim_items(project, "DLV-001")
+        active = delivery_git.start_item(project, "DLV-001", "AUTH-01")
+        worktree = Path(active["worktree"])
+        item = worktree / directory.relative_to(project) / "items/auth-01/item.md"
+        original = item.read_bytes()
+        before, before_body = delivery_compile.split_note(item)
+        active_docs = worktree / "workspace/docs"
+        self.assertEqual(architecture_compile.init_root(active_docs, "AUTH-01"), 0)
+        self.assertEqual(architecture_compile.init_component(active_docs, "api", "AUTH-01"), 0)
+        self.assertEqual(architecture_compile.stub(active_docs, "interface", "api", "IFC-001", "auth", "AUTH-01"), 0)
+        self.assertEqual(architecture_compile.stamp_item(active_docs, "AUTH-01"), 0)
+        props, body = delivery_compile.split_note(item)
+        self.assertEqual(props["item_plan_hash"], before["item_plan_hash"])
+        self.assertEqual(props["source_hash"], delivery_compile.content_hash(props, body))
+        self.assertEqual(body, before_body)
+        self.assertEqual(item.read_bytes().split(b"\n---\n", 1)[1], original.split(b"\n---\n", 1)[1])
+        self.assertEqual({key: value for key, value in props.items() if key not in {"source_hash", "architecture_delta_hash"}},
+                         {key: value for key, value in before.items() if key not in {"source_hash", "architecture_delta_hash"}})
+        (worktree / "src").mkdir()
+        (worktree / "src/auth.py").write_text("def authenticate():\n    return 'approved'\n", encoding="utf-8")
+        delivery_git.run_git(worktree, "add", "workspace/docs", "src")
+        delivery_git.run_git(worktree, "commit", "-qm", "Implement authentication with sealed Architecture")
+        return project, worktree, item, active
+
+    def test_architecture_stamp_authored_evidence_push_and_integration(self):
+        project, worktree, item, active = self.prepare_stamped_architecture_item()
+        product = delivery_git.run_git(worktree, "rev-parse", "HEAD")
+        authored = {}
+        for name, report in (("code-review.md", "Reviewed authentication interface and rejected unauthorized input."),
+                             ("verification.md", "Executed authentication success and missing-credential tests; both passed.")):
+            path = item.parent / name
+            props, body = delivery_compile.split_note(path)
+            body += "\n\n" + report + "\n"
+            path.write_text(delivery_compile.frontmatter(props, body), encoding="utf-8")
+            authored[name] = body.rstrip()
+        self.assertEqual(self.approve_item_evidence(str(worktree)), 0)
+        pushed = delivery_git.push_item(project, "DLV-001", "AUTH-01")
+        self.assertEqual(pushed["product_tip"], product)
+        self.assertEqual(delivery_git.run_git(project, "rev-parse", pushed["item"] + "^"), product)
+        integrated = delivery_git.integrate_item(project, "DLV-001", "AUTH-01")
+        for name, body in authored.items():
+            relative = (item.parent / name).relative_to(worktree).as_posix()
+            props, actual = delivery_git.split_remote_note(project, integrated["integration"], relative, delivery_compile.split_note)
+            self.assertEqual(actual, body)
+            self.assertEqual(props["source_hash"], delivery_compile.content_hash(props, actual))
+            self.assertEqual(props["reviewed_commit" if name == "code-review.md" else "verified_commit"], product)
+        props, body = delivery_git.split_remote_note(project, integrated["integration"], item.relative_to(worktree).as_posix(), delivery_compile.split_note)
+        self.assertEqual(props["status"], "integrated")
+        self.assertTrue(props["architecture_delta_hash"].startswith("sha256:"))
+        self.assertEqual(props["source_hash"], delivery_compile.content_hash(props, body))
+        self.assertEqual(delivery_git.remote_slot_oids(project, "origin"), {})
+        self.assertFalse(worktree.exists())
+
+    def test_architecture_push_rejects_control_and_receipt_tampering(self):
+        project, worktree, item, active = self.prepare_stamped_architecture_item()
+        clean = delivery_git.run_git(worktree, "rev-parse", "HEAD")
+        baseline = delivery_git.run_git(project, "ls-remote", "origin")
+        package = item.parents[2]
+        def mutate_note(path, key=None, value=None):
+            props, body = delivery_compile.split_note(path)
+            if key:
+                props[key] = value
+            else:
+                body += "\nUnapproved change.\n"
+            props["source_hash"] = delivery_compile.content_hash(props, body)
+            path.write_text(delivery_compile.frontmatter(props, body), encoding="utf-8")
+        mutations = {
+            "body": lambda: mutate_note(item),
+            "status": lambda: mutate_note(item, "status", "paused"),
+            "owner": lambda: mutate_note(item, "owner_role", "frontend_developer"),
+            "path_claim": lambda: mutate_note(item, "path_claims", ["src/other.py"]),
+            "item_plan": lambda: mutate_note(item, "item_plan_hash", "sha256:" + "0" * 64),
+            "story_pin": lambda: mutate_note(item, "story_source_hash", "sha256:" + "0" * 64),
+            "operation_pin": lambda: mutate_note(item, "verification_contract_hash", "sha256:" + "0" * 64),
+            "scope": lambda: mutate_note(package / "delivery.md"),
+            "plan": lambda: mutate_note(package / "execution-plan.md"),
+            "committed_evidence": lambda: mutate_note(item.parent / "code-review.md"),
+            "new_item": lambda: (package / "items/extra").mkdir(),
+            "deleted_evidence": lambda: (item.parent / "verification.md").unlink(),
+            "non_markdown": lambda: (package / "extra\ncontrol.json").write_text("{}"),
+            "mode": lambda: item.chmod(0o755),
+            "symlink": lambda: (item.unlink(), item.symlink_to("code-review.md")),
+            "missing_hash": lambda: mutate_note(item, "architecture_delta_hash", "none"),
+            "wrong_hash": lambda: mutate_note(item, "architecture_delta_hash", "sha256:" + "0" * 64),
+            "source_hash": lambda: item.write_text(item.read_text().replace("source_hash: sha256:", "source_hash: broken:")),
+        }
+        for label, mutation in mutations.items():
+            with self.subTest(label=label):
+                delivery_git.run_git(worktree, "reset", "--hard", clean)
+                delivery_git.run_git(worktree, "clean", "-fd")
+                mutation()
+                if label == "new_item":
+                    (package / "items/extra/item.md").write_bytes(item.read_bytes())
+                delivery_git.run_git(worktree, "add", "workspace/docs")
+                delivery_git.run_git(worktree, "commit", "-qm", "Tamper with control")
+                # Independent report writers can produce receipts, but publication
+                # must still reject changes to the authoritative Item controls.
+                if label not in {"status", "deleted_evidence", "symlink"}:
+                    self.assertEqual(self.approve_item_evidence(str(worktree)), 0)
+                with self.assertRaises(RuntimeError):
+                    delivery_git.push_item(project, "DLV-001", "AUTH-01")
+                self.assertEqual(delivery_git.run_git(project, "ls-remote", "origin"), baseline)
+
+    def test_evidence_authoring_rejects_product_index_drift_and_unsafe_reports(self):
+        import os
+        project, worktree, item, active = self.prepare_stamped_architecture_item()
+        clean = delivery_git.run_git(worktree, "rev-parse", "HEAD")
+        review = item.parent / "code-review.md"
+        for label in ("product", "staged_product", "sibling", "leading_space", "symlink", "hardlink", "mode"):
+            with self.subTest(label=label):
+                delivery_git.run_git(worktree, "reset", "--hard", clean)
+                delivery_git.run_git(worktree, "clean", "-fd")
+                review.write_text(review.read_text() + "\nReviewed the authenticated entrypoint.\n")
+                if label in {"product", "staged_product"}:
+                    product = worktree / "src/auth.py"
+                    content = product.read_bytes()
+                    product.write_text("unreviewed change\n")
+                    if label == "staged_product":
+                        delivery_git.run_git(worktree, "add", "src/auth.py")
+                        product.write_bytes(content)
+                elif label == "sibling":
+                    (item.parents[2] / "execution-plan.md").write_text("unapproved plan\n")
+                elif label == "leading_space":
+                    lookalike = worktree / (" " + review.relative_to(worktree).as_posix())
+                    lookalike.parent.mkdir(parents=True)
+                    lookalike.write_text("untracked report lookalike\n")
+                elif label == "symlink":
+                    review.unlink(); review.symlink_to(worktree / "src/auth.py")
+                elif label == "hardlink":
+                    os.link(review, project / "report-hardlink.md")
+                else:
+                    review.chmod(0o755)
+                before = review.read_bytes()
+                self.assertNotEqual(self.approve_item_evidence(str(worktree)), 0)
+                self.assertEqual(review.read_bytes(), before)
+        delivery_git.run_git(worktree, "reset", "--hard", clean)
+        delivery_git.run_git(worktree, "clean", "-fd")
+        self.assertEqual(self.approve_item_evidence(str(worktree)), 0)
+        review.write_text(review.read_text() + "\nChanged after approval.\n")
+        with self.assertRaisesRegex(RuntimeError, "source_hash is stale"):
+            delivery_git.push_item(project, "DLV-001", "AUTH-01")
+        for flag, target in ((flag, target) for flag in ("assume-unchanged", "skip-worktree")
+                             for target in ("item", "product")):
+            with self.subTest(index_flag=flag, target=target):
+                delivery_git.run_git(worktree, "reset", "--hard", clean)
+                path = item if target == "item" else worktree / "src/auth.py"
+                relative = path.relative_to(worktree).as_posix()
+                delivery_git.run_git(worktree, "update-index", "--" + flag, relative)
+                if target == "item":
+                    props, body = delivery_compile.split_note(item)
+                    props["architecture_impact"] = "not_applicable"
+                    props["owner_role"] = "frontend_developer"
+                    item.write_text(delivery_compile.frontmatter(props, body))
+                else:
+                    path.write_text("def authenticate():\n    return 'untested'\n")
+                review.write_text(review.read_text() + "\nReviewed the authentication interface.\n")
+                before_reports = {name: (item.parent / name).read_bytes()
+                                  for name in ("code-review.md", "verification.md")}
+                before_index = delivery_git.run_git(worktree, "ls-files", "-v", "-z")
+                self.assertNotEqual(self.approve_item_evidence(str(worktree)), 0)
+                baseline = delivery_git.run_git(project, "ls-remote", "origin")
+                with self.assertRaisesRegex(RuntimeError, "index flags hide tracked paths"):
+                    delivery_git.push_item(project, "DLV-001", "AUTH-01")
+                self.assertEqual(delivery_git.run_git(project, "ls-remote", "origin"), baseline)
+                self.assertEqual(delivery_git.run_git(worktree, "ls-files", "-v", "-z"), before_index)
+                self.assertEqual({name: (item.parent / name).read_bytes() for name in before_reports}, before_reports)
+                delivery_git.run_git(worktree, "update-index", "--no-" + flag, relative)
+
+    def test_architecture_push_rejects_unsealed_stale_and_outside_claim_delta(self):
+        project, worktree, item, active = self.prepare_stamped_architecture_item()
+        clean = delivery_git.run_git(worktree, "rev-parse", "HEAD")
+        baseline = delivery_git.run_git(project, "ls-remote", "origin")
+        architecture = worktree / "workspace/docs/system-architecture"
+        delta_path = architecture / "_ledger/item-deltas/AUTH-01.json"
+        record = architecture / "components/api/interfaces/auth/interface.md"
+        for label in ("missing_delta", "stale_record", "missing_seal", "unsealed_forgery", "unclaimed_component", "unclaimed_kind", "symlink_record"):
+            with self.subTest(label=label):
+                delivery_git.run_git(worktree, "reset", "--hard", clean)
+                delivery_git.run_git(worktree, "clean", "-fd")
+                if label == "missing_delta":
+                    delta_path.unlink()
+                elif label == "missing_seal":
+                    (architecture / "_ledger/records/IFC-001/r1.json").unlink()
+                elif label == "symlink_record":
+                    record.unlink(); record.symlink_to("../../../component.md")
+                elif label == "stale_record":
+                    record.write_text(record.read_text() + "\nChanged after seal.\n")
+                else:
+                    if label == "unclaimed_component":
+                        self.assertEqual(architecture_compile.init_component(worktree / "workspace/docs", "other", "AUTH-01"), 0)
+                        architecture_compile.seal_record(architecture, architecture / "components/other/component.md", "AUTH-01")
+                    elif label == "unclaimed_kind":
+                        self.assertEqual(architecture_compile.stub(worktree / "workspace/docs", "runtime", "api", "RUN-001", "runtime", "AUTH-01"), 0)
+                        architecture_compile.seal_record(architecture, architecture / "components/api/runtime/runtime/runtime.md", "AUTH-01")
+                    else:
+                        record.write_text(record.read_text().replace("revision_state: sealed", "revision_state: draft"))
+                    delta = architecture_compile.item_delta(architecture, "AUTH-01")
+                    digest = architecture_compile.item_delta_hash(delta)
+                    delta_path.write_text(json.dumps({**delta, "architecture_delta_hash": digest}))
+                    props, body = delivery_compile.split_note(item)
+                    props["architecture_delta_hash"] = digest
+                    props["source_hash"] = delivery_compile.content_hash(props, body)
+                    item.write_text(delivery_compile.frontmatter(props, body))
+                delivery_git.run_git(worktree, "add", "workspace/docs")
+                delivery_git.run_git(worktree, "commit", "-qm", "Tamper with Architecture receipt")
+                self.assertEqual(self.approve_item_evidence(str(worktree)), 0)
+                with self.assertRaisesRegex(RuntimeError, "[Aa]rchitecture"):
+                    delivery_git.push_item(project, "DLV-001", "AUTH-01")
+                self.assertEqual(delivery_git.run_git(project, "ls-remote", "origin"), baseline)
 
     def governance_target_handoff(self, project, docs, extra_paths=()):
         args = type("Args", (), {"docs": str(docs)})
@@ -1043,6 +1288,47 @@ class DeliveryGitTests(unittest.TestCase):
                 refs = delivery_git.canonical_refs("DLV-001")
                 self.assertEqual(delivery_git.remote_oid(project, "origin", refs["integration"]), published["integration"])
                 self.assertEqual(delivery_git.remote_oid(project, "origin", refs["fence"]), fence)
+
+    def test_target_refresh_preserves_legacy_operation_pins_after_relation_rendering(self):
+        project, docs, directory, item, _reserved = self.prepare_execution_with_draft_reserved_contracts(
+            runtime=True, legacy_operation_receipts=True)
+        approved = {kind: operation_compile.parse(operation_compile.contract_path(docs, kind))[0]
+                    for kind in ("verification", "environment")}
+        pinned_item, _body = delivery_compile.split_note(item)
+        published = delivery_git.publish_execution_plan(project, "DLV-001")
+        paths = [operation_compile.contract_path(docs, kind).relative_to(project).as_posix()
+                 for kind in approved]
+        # Owning candidate rendering removes the old generated block and regenerates
+        # projections; the target consumer must still verify each original pin.
+        target, _fence = self.governance_target_handoff(project, docs, paths)
+        refreshed = delivery_git.refresh_target(project, "DLV-001")
+        self.assertFalse(refreshed["plan_invalidated"])
+        self.assertTrue(delivery_git.is_ancestor(project, target, refreshed["integration"]))
+        with tempfile.TemporaryDirectory() as temporary:
+            clone = Path(temporary) / "checkout"
+            delivery_git.run_git(project, "clone", "-q", str(project / "remote.git"), str(clone))
+            delivery_git.run_git(clone, "checkout", "-q", "--detach", refreshed["integration"])
+            candidate_docs = clone / "workspace/docs"
+            self.assertEqual(delivery_compile.item_operation_findings(candidate_docs, pinned_item), [])
+            for kind, expected in approved.items():
+                receipt, errors = operation_compile.check_contract(candidate_docs, kind)
+                self.assertEqual(errors, [])
+                self.assertTrue(receipt["current"])
+                self.assertEqual(receipt["source_hash"], expected["source_hash"])
+                actual, _body = operation_compile.parse(operation_compile.contract_path(candidate_docs, kind))
+                self.assertEqual((actual["revision"], actual["approved_at_utc"]),
+                                 (expected["revision"], expected["approved_at_utc"]))
+                self.assertEqual(pinned_item[kind + "_contract_hash"], expected["source_hash"])
+        for kind in approved:
+            path = operation_compile.contract_path(docs, kind)
+            path.write_text(path.read_text() + "\nChanged authored operation behavior.\n", encoding="utf-8")
+        carrier = "refs/heads/governance-input"
+        delivery_git.atomic_push(project, "origin", [(carrier, delivery_git.remote_oid(project, "origin", carrier), "")])
+        self.governance_target_handoff(project, docs, paths)
+        refs_before = delivery_git.run_git(project, "ls-remote", "origin")
+        with self.assertRaisesRegex(RuntimeError, "changed a pinned source or Operation receipt"):
+            delivery_git.refresh_target(project, "DLV-001")
+        self.assertEqual(delivery_git.run_git(project, "ls-remote", "origin"), refs_before)
 
     def test_stale_integrated_item_cannot_reopen_after_target_refresh(self):
         project, docs, _directory, _item, _reserved = self.prepare_execution_with_draft_reserved_contracts(False)

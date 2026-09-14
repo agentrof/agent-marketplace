@@ -562,11 +562,31 @@ def is_ancestor(root: Path, ancestor: str, descendant: str) -> bool:
     raise RuntimeError(result.stderr.strip() or "cannot compare Git ancestry")
 
 
+def require_visible_item_index(worktree: Path) -> None:
+    """Refuse index flags that can hide different tested bytes from Git status."""
+    result = subprocess.run(["git", "-C", str(worktree), "ls-files", "-v", "-z"],
+                            text=True, capture_output=True, check=False)
+    if result.returncode:
+        raise RuntimeError(result.stderr.strip() or "cannot inspect Item index flags")
+    hidden = [entry[2:] for entry in result.stdout.split("\0")
+              if entry and (entry[0] == "S" or entry[0].islower())]
+    if hidden:
+        raise RuntimeError("Item index flags hide tracked paths from verification: "
+                           + json.dumps(sorted(hidden), ensure_ascii=False))
+
+
 def worktree_pending_paths(root: Path, path: Path) -> set[str]:
     """Return every tracked or untracked path not yet committed in one Item worktree."""
-    tracked = run_git(root, "-C", str(path), "diff", "--name-only", "HEAD")
-    untracked = run_git(root, "-C", str(path), "ls-files", "--others", "--exclude-standard")
-    return {value for value in (tracked.splitlines() + untracked.splitlines()) if value}
+    pending = set()
+    for args in (("diff", "--name-only", "-z", "HEAD"),
+                 ("diff", "--cached", "--name-only", "-z", "HEAD"),
+                 ("ls-files", "-z", "--others", "--exclude-standard")):
+        result = subprocess.run(["git", "-C", str(path), *args], cwd=root,
+                                capture_output=True, text=True, check=False)
+        if result.returncode:
+            raise RuntimeError(result.stderr.strip() or "cannot inspect pending Item paths")
+        pending.update(value for value in result.stdout.split("\0") if value)
+    return pending
 
 
 def advance_worktree_to_candidate(root: Path, path: Path, candidate_oid: str) -> None:
@@ -1898,7 +1918,7 @@ def target_input_bindings(root: Path, directory: Path, integration: str,
 
     def operation_record(path):
         props, body = operation_compile.parse(path)
-        return props, operation_compile.source_hash(props, body)
+        return props, operation_compile.receipt_hash(props, body)
 
     delivery, _body = split_remote_note(root, integration, str((directory / "delivery.md").relative_to(root)), split_note)
     inputs = {str(delivery["definition_of_done_path"]): (delivery["definition_of_done_source_hash"], dod_record, "approved")}
@@ -2782,7 +2802,7 @@ def require_item_operation_bindings(root: Path, item_props: dict) -> None:
 
 
 def require_item_architecture_binding(worktree: Path, item_props: dict,
-                                      story_id: str) -> None:
+                                      story_id: str, *, tree: str | None = None) -> None:
     """Require a compiler-stamped Architecture delta only when planned."""
     impact = str(item_props.get("architecture_impact", "not_applicable"))
     if impact == "not_applicable":
@@ -2794,13 +2814,79 @@ def require_item_architecture_binding(worktree: Path, item_props: dict,
         raise RuntimeError("architecture-impact Item lacks architecture_delta_hash")
     try:
         import architecture_compile
-        docs = worktree / "workspace" / "docs"
-        delta = architecture_compile.current_item_delta(
-            docs / "system-architecture", story_id)
-        if expected != delta.get("architecture_delta_hash"):
-            raise RuntimeError("architecture_delta_hash is stale")
+        # Read committed blobs: a local edit must never authorize the reviewed tip.
+        tree = tree or run_git(worktree, "--no-replace-objects", "rev-parse", "HEAD")
+        prefix = "workspace/docs/system-architecture/"
+        listing = run_git(worktree, "--no-replace-objects", "ls-tree", "-rz", tree, "--", prefix)
+        with tempfile.TemporaryDirectory(prefix="agentrof-item-architecture-") as temporary:
+            architecture = Path(temporary)
+            for entry in filter(None, listing.split("\0")):
+                metadata, path = entry.split("\t", 1)
+                mode, kind, oid = metadata.split()
+                if kind != "blob" or mode not in {"100644", "100755"}:
+                    raise RuntimeError("Item Architecture files must be regular")
+                target = architecture / path.removeprefix(prefix)
+                target.parent.mkdir(parents=True, exist_ok=True)
+                target.write_bytes(subprocess.run(
+                    ["git", "--no-replace-objects", "cat-file", "blob", oid], cwd=worktree,
+                    capture_output=True, check=True).stdout)
+            delta = architecture_compile.current_item_delta(architecture, story_id)
+            if expected != delta.get("architecture_delta_hash"):
+                raise RuntimeError("architecture_delta_hash is stale")
+            _registry, findings = architecture_compile.registry(architecture)
+            if findings:
+                raise RuntimeError("Item Architecture sealed records are invalid: " + "; ".join(findings))
+            components = set(item_props.get("architecture_components", []))
+            kinds = set(item_props.get("architecture_record_kinds", []))
+            if not delta.get("records") or not components or not kinds:
+                raise RuntimeError("Item Architecture requires a nonempty claimed delta")
+            for row in delta["records"]:
+                props = architecture_compile.record_props(architecture / row["path"])
+                affected = {scope.split("#module/", 1)[0] for scope in props.get("affected_scopes", [])}
+                if (props.get("revision_state") != "sealed"
+                        or row["type"] not in kinds
+                        or (row["component_ref"] and row["component_ref"] not in components)
+                        or not set(row["connects"]).issubset(components)
+                        or not affected.issubset(components)):
+                    raise RuntimeError("Item Architecture delta is unsealed or exceeds approved claims")
     except (ImportError, OSError, ValueError) as exc:
         raise RuntimeError("Item Architecture binding is invalid: " + str(exc)) from exc
+
+
+def require_item_publication_controls(root: Path, before: str, after: str,
+                                      relative_delivery: Path, relative_item: str) -> None:
+    """Permit only the current Item's Architecture stamp inside Delivery controls."""
+    from delivery_compile import content_hash, parse_frontmatter
+    prefix = relative_delivery.as_posix().rstrip("/") + "/"
+    changed = run_git(root, "--no-replace-objects", "diff", "--name-only", "-z", before, after, "--", prefix).split("\0")
+    if any(path and path != relative_item for path in changed):
+        raise RuntimeError("product/test commits may not edit Delivery control files")
+    if relative_item not in changed:
+        return
+    versions = []
+    for tree in (before, after):
+        entry = run_git(root, "--no-replace-objects", "ls-tree", tree, "--", relative_item)
+        if not entry:
+            raise RuntimeError("product/test commits may not add or remove the active Item")
+        metadata, _path = entry.split("\t", 1)
+        mode, kind, oid = metadata.split()
+        if kind != "blob" or mode not in {"100644", "100755"}:
+            raise RuntimeError("Item publication requires a regular control file")
+        text = subprocess.run(["git", "--no-replace-objects", "cat-file", "blob", oid], cwd=root,
+                              capture_output=True, check=True).stdout.decode("utf-8")
+        props, body_line, error = parse_frontmatter(text)
+        if error:
+            raise RuntimeError("Item publication frontmatter is invalid: " + error)
+        body = "\n".join(text.splitlines()[body_line - 1:]).lstrip("\n")
+        if props.get("architecture_impact") != "required":
+            raise RuntimeError("only a required Architecture Item may publish its stamp")
+        if tree == after and props.get("source_hash") != content_hash(props, body):
+            raise RuntimeError("Item Architecture stamp source_hash is stale")
+        header, body_text = text.split("\n---\n", 1)
+        header = re.sub(r"(?m)^(?:architecture_delta_hash|source_hash):[^\n]*\n?", "", header)
+        versions.append((mode, header.rstrip("\n"), body_text))
+    if versions[0] != versions[1]:
+        raise RuntimeError("product/test commits changed authored Item controls beyond its Architecture stamp")
 
 
 def require_current_activation_target(root: Path, remote: str, delivery_id: str,
@@ -3223,6 +3309,7 @@ def push_item(project_root: Path, delivery_id: str, story_id: str,
     receipt = active_writer_receipt(root, delivery_id, story_id, item_oid, slot_ref)
     relative_delivery = directory.relative_to(root)
     worktree = worktree_paths(root, delivery_id, story_id)["item"]
+    require_visible_item_index(worktree)
     product_tip = worktree_head(root, worktree)
     if product_tip == item_oid or not is_ancestor(root, item_oid, product_tip):
         raise RuntimeError("push-item requires a committed product/test change after the active remote Item tip")
@@ -3230,9 +3317,9 @@ def push_item(project_root: Path, delivery_id: str, story_id: str,
     relative_review = str(relative_delivery / "items" / story_key(story_id) / "code-review.md")
     relative_verification = str(relative_delivery / "items" / story_key(story_id) / "verification.md")
     committed_changes = set(run_git(root, "diff", "--name-only", item_oid, product_tip).splitlines())
-    delivery_prefix = str(relative_delivery).rstrip("/") + "/"
-    if not committed_changes or any(path.startswith(delivery_prefix) for path in committed_changes):
-        raise RuntimeError("product/test commits may not edit Delivery control files")
+    if not committed_changes:
+        raise RuntimeError("push-item requires a committed product/test change")
+    require_item_publication_controls(root, item_oid, product_tip, relative_delivery, relative_item)
     pending = worktree_pending_paths(root, worktree)
     allowed_pending = {relative_review, relative_verification}
     if not pending.issubset(allowed_pending):
@@ -3241,7 +3328,17 @@ def push_item(project_root: Path, delivery_id: str, story_id: str,
     item_path = worktree / relative_item
     if not item_path.exists():
         raise RuntimeError(f"missing Item worktree projection: {item_path}")
-    item_props, item_body = split_note(item_path)
+    committed_item = subprocess.run(
+        ["git", "--no-replace-objects", "show", f"{product_tip}:{relative_item}"],
+        cwd=root, capture_output=True, check=True).stdout
+    if item_path.is_symlink() or item_path.read_bytes() != committed_item:
+        raise RuntimeError("Item worktree control differs from the committed product tip")
+    from ba_compile import parse_frontmatter
+    item_text = committed_item.decode("utf-8")
+    item_props, body_line, error = parse_frontmatter(item_text)
+    if error:
+        raise RuntimeError("Item product control is invalid: " + error)
+    item_body = "\n".join(item_text.splitlines()[body_line - 1:]).lstrip("\n")
     remote_item_props, _ = split_remote_note(root, item_oid, relative_item, split_note)
     if remote_item_props.get("status") != "active" or item_props.get("status") != "active":
         raise RuntimeError("push-item requires an active remote Item projection")
@@ -3249,6 +3346,10 @@ def push_item(project_root: Path, delivery_id: str, story_id: str,
     verification = item_path.parent / "verification.md"
     if not review.exists() or not verification.exists():
         raise RuntimeError("push-item requires Item review and verification files")
+    from delivery_compile import item_evidence_file_findings
+    evidence_findings = item_evidence_file_findings(worktree, product_tip, (review, verification))
+    if evidence_findings:
+        raise RuntimeError("; ".join(evidence_findings))
     review_props, review_body = split_note(review)
     verification_props, verification_body = split_note(verification)
     if review_props.get("status") != "approved" or verification_props.get("status") != "passed":
@@ -3257,7 +3358,7 @@ def push_item(project_root: Path, delivery_id: str, story_id: str,
         raise RuntimeError("Item evidence must bind the exact committed product/test tip")
     if review_props.get("item_plan_hash") != item_props.get("item_plan_hash") or verification_props.get("item_plan_hash") != item_props.get("item_plan_hash"):
         raise RuntimeError("Item evidence does not bind the active Item plan hash")
-    require_item_architecture_binding(worktree, item_props, story_id)
+    require_item_architecture_binding(worktree, item_props, story_id, tree=product_tip)
     if review_props.get("source_hash") != content_hash(review_props, review_body):
         raise RuntimeError("code review source_hash is stale")
     if verification_props.get("source_hash") != content_hash(verification_props, verification_body):
@@ -3322,7 +3423,7 @@ def integrate_item(project_root: Path, delivery_id: str, story_id: str,
         raise RuntimeError("integrate-item evidence does not bind the published product/test tip")
     if review_props.get("item_plan_hash") != item_props.get("item_plan_hash") or verification_props.get("item_plan_hash") != item_props.get("item_plan_hash"):
         raise RuntimeError("integrate-item evidence does not bind the Item plan hash")
-    require_item_architecture_binding(worktree, item_props, story_id)
+    require_item_architecture_binding(worktree, item_props, story_id, tree=item_oid)
     if review_props.get("source_hash") != content_hash(review_props, review_body):
         raise RuntimeError("integrate-item code review source_hash is stale")
     if verification_props.get("source_hash") != content_hash(verification_props, verification_body):

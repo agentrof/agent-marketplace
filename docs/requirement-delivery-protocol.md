@@ -259,13 +259,17 @@ takeover elects a new epoch on the existing Item and Slot refs; it never
 allocates a second Slot.
 
 Product and test changes stay on the Item branch. Before approving evidence,
-the active Item worktree must be clean and its real `HEAD` becomes both the
+the active Item worktree may contain only edits to its initialized Code Review
+and Verification reports; its real `HEAD` becomes both the
 reviewed and verified commit; callers cannot supply an arbitrary commit ID.
 The subsequent Item push accepts only a committed change after the active
-remote Item, refuses Delivery control-file changes in that product commit and
+remote Item, refuses Delivery control-file changes except the current required
+Architecture Item's exact compiler stamp (delta hash and refreshed source hash), and
 allows uncommitted changes solely to the generated Code Review and Verification
 records. It creates an `item-evidence-v1` child whose direct parent is that
 exact product/test commit, then advances both Item and Slot together.
+The stamp preserves all other Item bytes and requires a current, sealed,
+nonempty Architecture delta within the approved component and record-kind claims.
 
 Integration reads the Item, Code Review and Verification records from the
 remote Item tip, not from the primary worktree. It accepts an Item only when

@@ -18,13 +18,20 @@ Takeover is an explicit host-loss decision; it reuses the existing Item and
 Slot refs, elects a new writer epoch under exact leases and never allocates a
 second Slot.
 
-After implementation, the Item worktree must be clean. Evidence approval
+After implementation, only the current Item's initialized Code Review and
+Verification reports may have uncommitted authoring changes. Evidence approval
 derives both reviewed and verified commits from that worktree's real `HEAD`;
 it never accepts caller-supplied commit text. The only permitted uncommitted
 files after approval are that Item's `code-review.md` and `verification.md`.
+Approval and publication reject tracked entries with `assume-unchanged` or
+`skip-worktree` flags, without modifying the index.
 `push-item` attaches those records to the committed product/test tip as one
 `item-evidence-v1` child and advances Item plus Slot together. It rejects a
-product commit that edits Delivery control files. `integrate-item` reads the
+product commit that edits Delivery control files, except the current required
+Architecture Item's compiler-stamped delta hash and refreshed source hash.
+That exception preserves every other Item byte and control path, and requires
+the exact committed, sealed delta to remain within approved architecture claims.
+`integrate-item` reads the
 evidence from the remote Item ref and requires that its exact direct parent is
 the reviewed and verified product/test tip.
 

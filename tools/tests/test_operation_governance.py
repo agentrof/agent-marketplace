@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import hashlib
 import subprocess
 import sys
 import tempfile
@@ -194,6 +195,89 @@ class OperationGovernanceTests(unittest.TestCase):
                     self.assertNotIn("source_hash", props)
                     self.assertNotIn("approved_at_utc", props)
             self.assertEqual(props["revision"], 2)
+
+    def test_operation_receipts_survive_only_generated_relation_changes(self):
+        sys.path.insert(0, str(SCRIPTS))
+        import delivery_compile
+        import operation_compile
+        import vault_check
+
+        def historical_digest(props, exact_body):
+            view = {key: value for key, value in props.items()
+                    if key not in {"source_hash", "approved_at_utc"}}
+            return "sha256:" + hashlib.sha256(json.dumps(
+                {"frontmatter": view, "body": exact_body}, ensure_ascii=False,
+                sort_keys=True, separators=(",", ":")).encode("utf-8")).hexdigest()
+
+        def block(label):
+            return vault_check.RELATION_START + "\n\n" + label + "\n\n" + vault_check.RELATION_END
+
+        for kind in ("verification", "environment"):
+            for originally_projected in (False, True):
+                with self.subTest(kind=kind, originally_projected=originally_projected), tempfile.TemporaryDirectory() as temporary:
+                    docs = Path(temporary) / "workspace/docs"
+                    ref = self.approved_solution(docs)
+                    args = ("--docs", str(docs), "--kind", kind)
+                    self.assertEqual(self.invoke(OPERATION, "init", *args, "--constrained-by", ref).returncode, 0)
+                    path = operation_compile.contract_path(docs, kind)
+                    props, authored = operation_compile.parse(path)
+                    command = "test_command" if kind == "verification" else "env_command"
+                    workdir = "test_workdir" if kind == "verification" else "env_workdir"
+                    props[command] = "make " + kind
+                    text = operation_compile.render(props, authored)
+                    if originally_projected:
+                        text = vault_check.replace_relation_block(text, block("Initial generated inverse"))
+                    path.write_text(text, encoding="utf-8")
+                    approved = self.invoke(OPERATION, "approve", *args)
+                    self.assertEqual(approved.returncode, 0, approved.stdout + approved.stderr)
+                    props, body = operation_compile.parse(path)
+                    canonical = historical_digest(props, authored)
+                    self.assertEqual(props["source_hash"], canonical, "new approvals always use canonical ending")
+                    # Reproduce the old issuer independently, including its block-dependent newline.
+                    pin = historical_digest(props, authored + ("\n" if originally_projected else ""))
+                    props["source_hash"] = pin
+                    path.write_text(operation_compile.render(props, body), encoding="utf-8")
+                    approved_at, revision = props["approved_at_utc"], props["revision"]
+                    for projection in ("", block("New generated inverse"), block("Rerendered generated inverse"), ""):
+                        path.write_text(vault_check.replace_relation_block(path.read_text(), projection), encoding="utf-8")
+                        before = path.read_bytes()
+                        receipt, errors = operation_compile.check_contract(docs, kind)
+                        self.assertEqual(errors, [])
+                        self.assertTrue(receipt["current"])
+                        self.assertEqual(receipt["source_hash"], pin)
+                        current, current_body = operation_compile.parse(path)
+                        self.assertEqual((current["source_hash"], current["approved_at_utc"], current["revision"]),
+                                         (pin, approved_at, revision))
+                        self.assertEqual(operation_compile.source_hash(current, current_body), canonical)
+                        snapshot, errors = delivery_compile.operation_contract_snapshot(docs, kind)
+                        self.assertEqual(errors, [])
+                        self.assertEqual(snapshot[kind + "_contract_hash"], pin)
+                        self.assertEqual(path.read_bytes(), before, "consumption must not rewrite approval")
+                    baseline = path.read_text()
+                    for mutation in ("digest", "prose", "command", "workdir", "revision", "relation", "missing_start", "missing_end", "altered_marker"):
+                        with self.subTest(mutation=mutation):
+                            current, current_body = operation_compile.parse(path)
+                            if mutation == "digest": current["source_hash"] = "sha256:" + "0" * 64
+                            elif mutation == "prose": current_body += "\nAuthored command semantics changed."
+                            elif mutation == "command": current[command] += " changed"
+                            elif mutation == "workdir": current[workdir] = "other"
+                            elif mutation == "revision": current["revision"] += 1
+                            elif mutation == "relation": current["constrained_by"] = [f"[[{ref}|Different authored relation]]"]
+                            text = operation_compile.render(current, current_body)
+                            if mutation in {"missing_start", "missing_end", "altered_marker"}:
+                                text = vault_check.replace_relation_block(text, block("Generated inverse"))
+                                marker = vault_check.RELATION_END if mutation == "missing_end" else vault_check.RELATION_START
+                                text = text.replace(marker, "<!-- changed generated marker -->" if mutation == "altered_marker" else "")
+                            path.write_text(text, encoding="utf-8")
+                            receipt, errors = operation_compile.check_contract(docs, kind)
+                            self.assertIn("approved contract source_hash is stale", errors)
+                            self.assertFalse(receipt["current"])
+                            path.write_text(baseline, encoding="utf-8")
+                    draft, draft_body = operation_compile.parse(path)
+                    draft["status"] = "draft"
+                    draft["source_hash"] = historical_digest(draft, draft_body + "\n")
+                    self.assertEqual(operation_compile.receipt_hash(draft, draft_body), historical_digest(draft, draft_body))
+                    self.assertNotEqual(operation_compile.receipt_hash(draft, draft_body), draft["source_hash"])
 
 
 if __name__ == "__main__":

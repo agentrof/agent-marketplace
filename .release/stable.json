@@ -1,15 +1,12 @@
 {
   "schema_version": 1,
-  "version": "0.3.0",
-  "stable_base": "e75dacb40306b211a2d3605bf77ec735b72ee8cc",
-  "main_source": "a78e39ef5a40cb9c59c943f28959754593c1b1f7",
+  "version": "0.3.1",
+  "stable_base": "a9b0e11eeafa9c65cb247fb5aae759664ac0252b",
+  "main_source": "1ac2401fa8650ca7b58236251fbe756e3e1df7c1",
   "impacts": {
-    "software-engineering-team": "minor"
+    "software-engineering-team": "patch"
   },
   "summaries": [
-    "Exclude operating-system metadata from new Experience snapshots, add proposal-bound artifact recovery, retain unchanged backlog approvals and review history, verify committed artifact bytes, align Delivery producers with the vault schema and navigation contract, and preserve validated Experience lifecycle postimages across overlapping shell checks.",
-    "Harden Delivery publication, governance lifecycle, target projection reconciliation, and merge safety.",
-    "Publish Delivery relation projections from the exact candidate tree without copying unpublished local map entries.",
-    "Validate execution role promotion and cross-cutting Item path ownership without weakening architecture boundaries."
+    "Repair Architecture-to-Delivery handoff receipts, evidence authoring integrity, and generated Operation relation compatibility."
   ]
 }

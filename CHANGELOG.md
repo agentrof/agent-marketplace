@@ -51,3 +51,7 @@
 - Harden Delivery publication, governance lifecycle, target projection reconciliation, and merge safety.
 - Publish Delivery relation projections from the exact candidate tree without copying unpublished local map entries.
 - Validate execution role promotion and cross-cutting Item path ownership without weakening architecture boundaries.
+
+## 0.3.1
+
+- Repair Architecture-to-Delivery handoff receipts, evidence authoring integrity, and generated Operation relation compatibility.

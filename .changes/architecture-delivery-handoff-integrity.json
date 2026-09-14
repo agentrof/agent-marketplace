@@ -1,0 +1,6 @@
+{
+  "summary": "Repair Architecture-to-Delivery handoff receipts, evidence authoring integrity, and generated Operation relation compatibility.",
+  "components": {
+    "software-engineering-team": "patch"
+  }
+}

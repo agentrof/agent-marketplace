@@ -32,6 +32,8 @@ STATUSES = {
     "review", "pr_handoff", "awaiting_merge", "merged", "cancelled",
 }
 ITEM_STATUSES = {"in_scope", "claimed", "active", "blocked", "paused", "integrated", "cancelled"}
+# A terminal Item keeps the Operation bindings its evidence was produced against.
+TERMINAL_ITEM_STATUSES = {"integrated", "cancelled"}
 SECTIONS = {
     "delivery": (
         "Goal", "Observable Outcome", "Scope Rationale", "Exclusions",
@@ -592,7 +594,8 @@ def init_delivery(args) -> int:
     return 0
 
 
-def delivery_findings(docs: Path, identifier: str) -> tuple[Path | None, list[str]]:
+def delivery_findings(docs: Path, identifier: str, *,
+                      check_item_operation_bindings: bool = True) -> tuple[Path | None, list[str]]:
     root = find_delivery(docs, identifier) if identifier else None
     if root is None:
         return None, ["Delivery not found"]
@@ -628,11 +631,14 @@ def delivery_findings(docs: Path, identifier: str) -> tuple[Path | None, list[st
     if props.get("status") not in {"merged", "cancelled"}:
         _, source_errors = delivery_source_findings(docs, root, props)
         errors.extend(source_errors)
-    if props.get("status") in {"execution_approved", "active", "review", "pr_handoff", "awaiting_merge"}:
+    if check_item_operation_bindings and props.get("status") in {"execution_approved", "active", "review", "pr_handoff", "awaiting_merge"}:
         for item_path in item_paths:
             try:
                 item_props, _item_body = split_note(item_path)
             except (OSError, ValueError):
+                continue
+            # Its binding names the revision its evidence was produced against.
+            if item_props.get("status") in TERMINAL_ITEM_STATUSES:
                 continue
             errors.extend(f"{item_path}: {error}" for error in item_operation_findings(docs, item_props))
     return root, sorted(set(errors))
@@ -830,7 +836,10 @@ def execution_plan_findings(root: Path, sources: dict[str, dict], docs: Path) ->
 
 def approve_execution(args) -> int:
     docs = docs_root(args.docs)
-    root, findings = delivery_findings(docs, args.delivery)
+    # This verb writes the Item Operation bindings, so it cannot require them to
+    # already match. The contracts themselves are still proved approved and current
+    # by execution_plan_findings before anything is written.
+    root, findings = delivery_findings(docs, args.delivery, check_item_operation_bindings=False)
     if root is None:
         print(json.dumps({"ok": False, "errors": findings}, indent=2)); return 1
     path = root / "delivery.md"
@@ -865,12 +874,13 @@ def approve_execution(args) -> int:
         item_props["waits_for_bindings"] = sorted(
             set(sources[story]["depends_on"]) - set(item_props["execution_after"])
         )
-        item_props.update(verification_binding)
-        if item_props.get("runtime_required"):
-            item_props.update(environment_binding)
-        else:
-            item_props.pop("environment_contract_ref", None)
-            item_props.pop("environment_contract_hash", None)
+        if item_props.get("status") not in TERMINAL_ITEM_STATUSES:
+            item_props.update(verification_binding)
+            if item_props.get("runtime_required"):
+                item_props.update(environment_binding)
+            else:
+                item_props.pop("environment_contract_ref", None)
+                item_props.pop("environment_contract_hash", None)
         item_props["item_plan_hash"] = content_hash(item_props, item_body, exclude=MUTABLE | {"item_plan_hash"})
         atomic_text(item_path, frontmatter(item_props, item_body))
         item_hashes.append(f"{story}:{item_props['item_plan_hash']}")

@@ -1,5 +1,5 @@
 {
-  "build_id": "snapshot.afd4b35eb4b322e8c22df6d1f6a4f61536b29adb7d7781f79545a56c557c4f8a",
+  "build_id": "snapshot.e673297d9179b8d5119968d6eb53f201c08d90afde13cf59b0b28f4f459dedba",
   "component": "software-engineering-team",
   "delivery_protocol": {
     "read_max": 1,
@@ -75,7 +75,7 @@
     "scripts/team_guard.py": "b001c78b460ed623523738699882061f37ef73e616c7100af84d1f299d5b45c6",
     "scripts/vault_check.py": "e7b3bdc80d24aa9d80875f94c0310e87789969128be55f5d57f73beed6e8e958",
     "scripts/vault_gate.py": "2624df7cae40066e1f7ce022dd6f1986841a65c7a28aada0ebfa565aca0832b2",
-    "scripts/vault_hook.py": "ab4b5a1d8f7ff1fa0b8353dcc4a8894d4dbf2f24b05a6eb130608f00f4ad26ee",
+    "scripts/vault_hook.py": "847b9ad4afefab1440bc1a1fcebf0cd222ce52a2879dbf63186c30aeea196545",
     "skill-content/backlog-plan/SKILL.md": "b620ff5173fc4f26ae5b058d5d5223233829f20526ff8fda4588b4d8c62a2123",
     "skill-content/business-analysis/SKILL.md": "a2e836689bfafa46817564bc1744215d190e54adb54ebcef989513676969d76d",
     "skill-content/business-analysis/data/space-schema.json": "8bec0bb3025459143f52a8255d542ee52fcf99217e8c61fb770b407f1caa0936",
@@ -281,6 +281,6 @@
   "schema_version": 3,
   "source_channel": "snapshot",
   "source_commit": "",
-  "source_ref": "snapshot.afd4b35eb4b322e8c22df6d1f6a4f61536b29adb7d7781f79545a56c557c4f8a",
+  "source_ref": "snapshot.e673297d9179b8d5119968d6eb53f201c08d90afde13cf59b0b28f4f459dedba",
   "version": "0.3.1"
 }

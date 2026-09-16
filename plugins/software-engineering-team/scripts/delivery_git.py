@@ -746,7 +746,8 @@ def delivery_projection_changes(root: Path, tree: str,
         for rel in removed:
             changes["workspace/docs/" + rel] = ("100644", None)
         if operation_bindings is not None:
-            from delivery_compile import item_operation_findings, split_note
+            from delivery_compile import (TERMINAL_ITEM_STATUSES,
+                                          item_operation_findings, split_note)
             for path, (_mode, content) in changes.items():
                 target = candidate / path
                 if content is None:
@@ -758,6 +759,10 @@ def delivery_projection_changes(root: Path, tree: str,
                 actual, _body = split_note(docs / relative)
                 if any(actual.get(key) != value for key, value in expected.items()):
                     raise RuntimeError(f"Delivery candidate changed approved Operation bindings: {relative}")
+                # The binding is still pinned above; a terminal Item's names an earlier
+                # approved revision and is not compared against the current one.
+                if actual.get("status") in TERMINAL_ITEM_STATUSES:
+                    continue
                 errors = item_operation_findings(docs, actual)
                 if errors:
                     raise RuntimeError("Delivery candidate Operation bindings are invalid: " + "; ".join(errors))
@@ -1769,15 +1774,20 @@ def reserve_delivery(project_root: Path, delivery_id: str, remote: str = "origin
 def execution_operation_inputs(root: Path, directory: Path, docs: Path) -> tuple[list[str], dict[str, dict]]:
     """Select only canonical contracts bound by the approved execution Items."""
     import operation_compile
-    from delivery_compile import OPERATION_BINDING_FIELDS, item_operation_findings, split_note
+    from delivery_compile import (OPERATION_BINDING_FIELDS, TERMINAL_ITEM_STATUSES,
+                                  item_operation_findings, split_note)
 
     bindings = {}
     kinds = {"verification"}
     for item in sorted(directory.glob("items/*/item.md")):
         props, _body = split_note(item)
-        errors = item_operation_findings(docs, props)
-        if errors:
-            raise RuntimeError("Item Operation bindings are invalid: " + "; ".join(errors))
+        # A terminal Item names the revision its evidence was produced against, so it
+        # still contributes its binding and contract kind but is not compared against
+        # a later approved revision.
+        if props.get("status") not in TERMINAL_ITEM_STATUSES:
+            errors = item_operation_findings(docs, props)
+            if errors:
+                raise RuntimeError("Item Operation bindings are invalid: " + "; ".join(errors))
         bindings[item.relative_to(docs).as_posix()] = {
             key: props.get(key) for key in (*OPERATION_BINDING_FIELDS, "runtime_required")}
         if props.get("runtime_required"):

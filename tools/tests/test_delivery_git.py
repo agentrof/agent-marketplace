@@ -1499,6 +1499,31 @@ class DeliveryGitTests(unittest.TestCase):
                 self.assertEqual(delivery_git.remote_oid(project, "origin", "refs/heads/main"), target)
                 self.assertEqual(unrelated.read_text(encoding="utf-8"), "# Unpublished local notes\n")
 
+    def test_execution_publication_keeps_a_terminal_item_on_its_verified_revision(self):
+        """A closed Item's binding names history, not a stale current receipt."""
+        project, _docs, _directory, item, _reserved = self.prepare_execution_with_draft_reserved_contracts()
+        props, body = delivery_compile.split_note(item)
+        superseded = dict(props)
+        superseded["verification_contract_hash"] = "sha256:" + "0" * 64
+
+        def write(status):
+            value = dict(superseded, status=status)
+            value["tags"] = [tag for tag in props.get("tags", [])
+                             if not str(tag).startswith("status/")] + [f"status/{status}"]
+            delivery_compile.atomic_text(item, delivery_compile.frontmatter(value, body))
+
+        write("integrated")
+        with mock.patch.object(delivery_git, "atomic_push") as push:
+            delivery_git.publish_execution_plan(project, "DLV-001")
+            push.assert_called()
+
+        # The same binding on an open Item is genuine staleness and still fails.
+        write("active")
+        with mock.patch.object(delivery_git, "atomic_push") as push:
+            with self.assertRaisesRegex(RuntimeError, "binding is stale or missing"):
+                delivery_git.publish_execution_plan(project, "DLV-001")
+            push.assert_not_called()
+
     def test_execution_publication_rejects_invalid_operation_bindings_before_ref_changes(self):
         project, docs, _directory, item, reserved = self.prepare_execution_with_draft_reserved_contracts()
         original = item.read_bytes()

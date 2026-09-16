@@ -100,6 +100,53 @@ class OperationGovernanceTests(unittest.TestCase):
             revised = self.invoke(GOVERNANCE, "begin-revision", "--docs", str(docs))
             self.assertEqual(revised.returncode, 0, revised.stdout + revised.stderr)
 
+    def test_begin_revision_leaves_no_empty_hash_for_the_vault_to_reject(self):
+        """An unset hash is absent, not present and empty."""
+        sys.path.insert(0, str(SCRIPTS))
+        import operation_compile
+        import vault_check
+
+        for kind, command_field in (("verification", "test_command"),
+                                    ("environment", "env_command")):
+            with self.subTest(kind=kind), tempfile.TemporaryDirectory() as temporary:
+                docs = Path(temporary) / "workspace/docs"
+                ref = self.approved_solution(docs)
+                args = ("--docs", str(docs), "--kind", kind)
+                initialized = self.invoke(
+                    OPERATION, "init", *args,
+                    "--constrained-by", f"[[{ref}|SD-001]]",
+                )
+                self.assertEqual(
+                    initialized.returncode, 0,
+                    initialized.stdout + initialized.stderr,
+                )
+                path = operation_compile.contract_path(docs, kind)
+                path.write_text(path.read_text(encoding="utf-8").replace(
+                    f"{command_field}: \n", f"{command_field}: make {kind}\n",
+                ), encoding="utf-8")
+                approved = self.invoke(OPERATION, "approve", *args)
+                self.assertEqual(
+                    approved.returncode, 0, approved.stdout + approved.stderr,
+                )
+                revised = self.invoke(OPERATION, "begin-revision", *args)
+                self.assertEqual(
+                    revised.returncode, 0, revised.stdout + revised.stderr,
+                )
+                self.assertNotIn(
+                    "source_hash: \n", path.read_text(encoding="utf-8"),
+                )
+                draft, _body = operation_compile.parse(path)
+                self.assertNotIn("source_hash", draft)
+                policy = vault_check.load_policy(vault_check.DEFAULT_POLICY)
+                vault = vault_check.build_vault(docs, policy)
+                findings = []
+                vault_check.check_frontmatter_props(vault, findings)
+                self.assertEqual(
+                    [finding for finding in findings
+                     if finding.path.startswith("operation/")
+                     and "source_hash" in finding.message], [],
+                )
+
     def test_operation_lifecycle_quotes_wikilinks_without_changing_body_or_receipt(self):
         sys.path.insert(0, str(SCRIPTS))
         import operation_compile

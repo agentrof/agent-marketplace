@@ -2728,6 +2728,48 @@ class VaultHookShellContractTests(unittest.TestCase):
             )
             self.assertFalse(generated.exists())
 
+    def test_post_after_a_directory_change_finds_its_own_snapshot(self):
+        """A persistent cd moves the host cwd between the two hook events."""
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            docs, config = self.project(root)
+            nested = root / "tools"
+            nested.mkdir()
+            payload = {
+                **self.payload(root, "cd tools && ls"),
+                "tool_use_id": "directory-change-event",
+            }
+            before = self.run_hook("pre", payload)
+            self.assertEqual(before.returncode, 0, before.stdout + before.stderr)
+            after = self.run_hook("post", {**payload, "cwd": str(nested)})
+            self.assertNotIn("vault snapshot is missing", after.stderr)
+            self.assertEqual(after.returncode, 0, after.stdout + after.stderr)
+            self.assertEqual(
+                json.loads(config.read_text(encoding="utf-8"))["output_language"],
+                "English",
+            )
+
+    def test_directory_change_does_not_admit_a_different_command(self):
+        """The relaxed identity must still reject a substituted command."""
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            docs, config = self.project(root)
+            nested = root / "tools"
+            nested.mkdir()
+            payload = {
+                **self.payload(root, "cd tools && ls"),
+                "tool_use_id": "directory-change-substitution",
+            }
+            before = self.run_hook("pre", payload)
+            self.assertEqual(before.returncode, 0, before.stdout + before.stderr)
+            after = self.run_hook("post", {
+                **payload,
+                "cwd": str(nested),
+                "tool_input": {"command": "cd tools && rm -rf ."},
+            })
+            self.assertEqual(after.returncode, 2)
+            self.assertIn("binding changed", after.stderr)
+
     def test_workspace_symlink_swap_restores_local_protected_state(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)

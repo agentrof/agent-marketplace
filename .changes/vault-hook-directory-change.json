@@ -1,0 +1,6 @@
+{
+  "summary": "Verify Bash guard state when the command changes the working directory, instead of failing closed on a snapshot name no event wrote.",
+  "components": {
+    "software-engineering-team": "patch"
+  }
+}

@@ -2910,14 +2910,18 @@ def guard_event_id(payload: dict) -> str:
     return ""
 
 
+def locator_digest(session_id: str, event: str, cwd: str) -> str:
+    value = {"session_id": session_id, "event": event, "cwd": cwd}
+    return hashlib.sha256(canonical_json(value).encode("utf-8")).hexdigest()
+
+
 def guard_locator(payload: dict) -> str:
     """Separate equal host event IDs that occur in different directories."""
-    value = {
-        "session_id": str(payload.get("session_id") or "unknown"),
-        "event": guard_event_id(payload),
-        "cwd": guard_cwd(payload),
-    }
-    return hashlib.sha256(canonical_json(value).encode("utf-8")).hexdigest()
+    return locator_digest(
+        str(payload.get("session_id") or "unknown"),
+        guard_event_id(payload),
+        guard_cwd(payload),
+    )
 
 
 def guard_command_digest(payload: dict) -> str:
@@ -2937,22 +2941,71 @@ def guard_cwd(payload: dict) -> str:
         return str(payload.get("cwd") or ".")
 
 
-def guard_binding(payload: dict) -> str:
+def binding_digest(locator: str, command_sha256: str, cwd: str) -> str:
     value = {
-        "locator": guard_locator(payload),
-        "command_sha256": guard_command_digest(payload),
-        "cwd": guard_cwd(payload),
+        "locator": locator,
+        "command_sha256": command_sha256,
+        "cwd": cwd,
     }
     return hashlib.sha256(canonical_json(value).encode("utf-8")).hexdigest()
 
 
+def guard_binding(payload: dict) -> str:
+    return binding_digest(
+        guard_locator(payload),
+        guard_command_digest(payload),
+        guard_cwd(payload),
+    )
+
+
+def recovery_binding_matches(state: dict, payload: dict) -> bool:
+    """Accept one command whose two events report different directories.
+
+    The locator and the binding both hash the working directory, so a command
+    that changes it makes the post event recompute an identity no pre event
+    wrote. Rebuild the binding from the identity the capsule recorded, keeping
+    the post event's command digest: a genuinely different command still fails.
+    """
+    recorded = state.get("binding")
+    if recorded == guard_binding(payload):
+        return True
+    session = str(state.get("session_id") or "unknown")
+    cwd = str(state.get("cwd") or "")
+    locator = locator_digest(session, str(state.get("event_id") or ""), cwd)
+    return recorded == binding_digest(
+        locator, guard_command_digest(payload), cwd,
+    )
+
+
+def inventory_name(session: str, locator: str) -> str:
+    safe = re.sub(r"[^A-Za-z0-9_.-]", "_", session)[:80]
+    return f"{safe}-{locator[:16]}.json"
+
+
 def inventory_path(payload: dict, project: Path | None = None) -> Path:
     session = str(payload.get("session_id") or "unknown")
-    safe = re.sub(r"[^A-Za-z0-9_.-]", "_", session)[:80]
     project = project or shell_project(payload)
-    name = f"{safe}-{guard_locator(payload)[:16]}.json"
     return (project / ".agentrof" / "agent-marketplace" / ".runtime"
-            / "vault-inventory" / name)
+            / "vault-inventory" / inventory_name(session, guard_locator(payload)))
+
+
+def recovered_inventory_path(state: dict, project: Path) -> Path:
+    """Name the snapshot the pre-command event wrote.
+
+    A host may report a different working directory for the two events of one
+    command, because the command itself changed it and the shell is persistent.
+    The locator hashes that directory, so recomputing it from the post-command
+    payload names a snapshot no event ever wrote. The capsule already records
+    the pre-command identity; use it.
+    """
+    session = str(state.get("session_id") or "unknown")
+    locator = locator_digest(
+        session,
+        str(state.get("event_id") or ""),
+        str(state.get("cwd") or ""),
+    )
+    return (project / ".agentrof" / "agent-marketplace" / ".runtime"
+            / "vault-inventory" / inventory_name(session, locator))
 
 
 def recovery_root() -> Path:
@@ -3175,7 +3228,7 @@ def load_recovery(payload: dict, path: Path) -> tuple[dict | None, str]:
         and recovery_artifacts is None
     ):
         return None, "recovery artifact snapshot is missing"
-    if state.get("binding") != guard_binding(payload):
+    if not recovery_binding_matches(state, payload):
         state = dict(state)
         state["config_writer_allowed"] = False
         state["application_writer_allowed"] = False
@@ -3448,7 +3501,11 @@ def shell_verify(payload: dict) -> int:
         if recovery_state is not None
         else shell_project(payload).resolve()
     )
-    path = inventory_path(payload, project)
+    path = (
+        recovered_inventory_path(recovery_state, project)
+        if recovery_state is not None
+        else inventory_path(payload, project)
+    )
     expected_config = project / "workspace" / "config.json"
     before, primary_raw, primary_error = load_json_file(path)
     integrity_error = recovery_error if recovery_state is not None else ""

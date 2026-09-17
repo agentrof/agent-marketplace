@@ -1,0 +1,6 @@
+{
+  "summary": "Read an exact revision ref in a decision record's supersedes as a revision lineage instead of a broken document supersede chain.",
+  "components": {
+    "software-engineering-team": "patch"
+  }
+}

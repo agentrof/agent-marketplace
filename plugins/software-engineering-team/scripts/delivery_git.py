@@ -1956,6 +1956,48 @@ def target_input_bindings(root: Path, directory: Path, integration: str,
     return bindings
 
 
+def refreshed_claim_updates(root: Path, remote: str, delivery_id: str, directory: Path,
+                            integration_oid: str, integration_candidate: str,
+                            target: str) -> list[tuple[str, str, str]]:
+    """Re-issue every untouched Item claim against the refreshed Integration.
+
+    A claim names the Integration an Item will be built on. Refreshing the target
+    moves that Integration, so a claim left behind can never contain the current
+    target and its Item can never be activated. A claim that already carries work
+    is not re-issued: its writer owns convergence. A closed Item is history.
+    """
+    from delivery_compile import content_hash, frontmatter, split_note
+
+    updates = []
+    for item_path in integration_item_paths(root, directory, integration_oid):
+        story = item_path.parent.name.upper()
+        item_ref = canonical_refs(delivery_id, story)["item"]
+        if not remote_has_ref(root, remote, item_ref):
+            continue
+        item_oid = remote_oid(root, remote, item_ref)
+        if trailer(commit_message(root, item_oid), "Record") != "item-claim-v1":
+            continue
+        if is_ancestor(root, target, item_oid):
+            continue
+        relative = str(item_path.relative_to(root))
+        item_props, item_body = split_remote_note(
+            root, integration_candidate, relative, split_note)
+        item_props["integration_base_commit"] = integration_candidate
+        item_props["source_hash"] = content_hash(item_props, item_body)
+        delivery_props, _delivery_body = split_remote_note(
+            root, integration_candidate,
+            str((directory / "delivery.md").relative_to(root)), split_note)
+        updates.append((item_ref, item_oid, commit_replacements(
+            root, integration_candidate,
+            {relative: frontmatter(item_props, item_body)},
+            f"Refresh claim {story} for {delivery_id}",
+            {"Record": "item-claim-v1", "Protocol": "1", "Delivery": delivery_id,
+             "Story": story,
+             "Scope-Hash": str(delivery_props.get("scope_hash", "none")),
+             "Plan-Hash": str(delivery_props.get("plan_hash", "none"))})))
+    return updates
+
+
 def refresh_target(project_root: Path, delivery_id: str,
                    remote: str = "origin") -> dict:
     """Merge a fresh target tip into one open Delivery under the Fence lease.
@@ -1981,7 +2023,14 @@ def refresh_target(project_root: Path, delivery_id: str,
     _target_branch, target = fetch_target(root, remote)
     integrated = is_ancestor(root, target, integration_oid)
     if target == previous_target and integrated:
-        return {"ok": True, "delivery": delivery_id, "changed": False,
+        # The Fence and the Integration are already converged, but a claim issued
+        # before an earlier refresh can still be behind. Re-issue those alone.
+        claim_updates = refreshed_claim_updates(
+            root, remote, delivery_id, directory, integration_oid, integration_oid, target)
+        if claim_updates:
+            atomic_push(root, remote, claim_updates)
+        return {"ok": True, "delivery": delivery_id, "changed": bool(claim_updates),
+                "claims_refreshed": [ref for ref, _old, _new in claim_updates],
                 "target": target, "refs": short_refs(delivery_id)}
     if not integrated:
         previous_target = unique_merge_base(root, integration_oid, target)
@@ -2018,8 +2067,11 @@ def refresh_target(project_root: Path, delivery_id: str,
          "Epoch": trailer(fence_message, "Epoch") or epoch_token(), "Target": target,
          "Governance-Hash": trailer(fence_message, "Governance-Hash") or "none"},
     )
-    atomic_push(root, remote, [(refs["fence"], fence_oid, fence_candidate),
-                               (refs["integration"], integration_oid, final_candidate)])
+    updates = [(refs["fence"], fence_oid, fence_candidate),
+               (refs["integration"], integration_oid, final_candidate)]
+    updates.extend(refreshed_claim_updates(
+        root, remote, delivery_id, directory, integration_oid, final_candidate, target))
+    atomic_push(root, remote, updates)
     _target_branch, observed_target = resolve_target(root, remote)
     partial = observed_target != target
     return {"ok": True, "delivery": delivery_id, "changed": True, "target": target,

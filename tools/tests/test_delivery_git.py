@@ -1200,6 +1200,53 @@ class DeliveryGitTests(unittest.TestCase):
         self.assertEqual((project / ".git/index").read_bytes(), index)
         self.assertEqual(delivery_git.remote_oid(project, "origin", "refs/heads/main"), head)
 
+    def test_target_refresh_reissues_an_untouched_claim_against_the_new_integration(self):
+        """A claim carrying no work must not strand its Item behind the target."""
+        project, docs, _directory, _item, _reserved = self.prepare_execution_with_draft_reserved_contracts(False)
+        delivery_git.publish_execution_plan(project, "DLV-001")
+        delivery_git.claim_items(project, "DLV-001")
+        refs = delivery_git.canonical_refs("DLV-001", "AUTH-01")
+        before = delivery_git.remote_oid(project, "origin", refs["item"])
+        self.governance_target_handoff(project, docs)
+        delivery_git.refresh_target(project, "DLV-001")
+        after = delivery_git.remote_oid(project, "origin", refs["item"])
+        self.assertNotEqual(after, before)
+        self.assertEqual(
+            delivery_git.trailer(delivery_git.commit_message(project, after), "Record"),
+            "item-claim-v1",
+        )
+        integration = delivery_git.remote_oid(
+            project, "origin", delivery_git.canonical_refs("DLV-001")["integration"])
+        self.assertTrue(delivery_git.is_ancestor(project, integration, after))
+        started = delivery_git.start_item(project, "DLV-001", "AUTH-01")
+        self.assertTrue(Path(started["worktree"]).is_dir())
+
+    def test_target_refresh_recovers_a_claim_stranded_by_an_earlier_refresh(self):
+        """Convergence must not depend on the target having moved this time."""
+        project, docs, _directory, _item, _reserved = self.prepare_execution_with_draft_reserved_contracts(False)
+        delivery_git.publish_execution_plan(project, "DLV-001")
+        delivery_git.claim_items(project, "DLV-001")
+        refs = delivery_git.canonical_refs("DLV-001", "AUTH-01")
+        stranded = delivery_git.remote_oid(project, "origin", refs["item"])
+        self.governance_target_handoff(project, docs)
+        delivery_git.refresh_target(project, "DLV-001")
+        refreshed = delivery_git.remote_oid(project, "origin", refs["item"])
+
+        # Put the claim back where a pre-repair refresh would have left it.
+        delivery_git.atomic_push(project, "origin", [(refs["item"], refreshed, stranded)])
+        self.assertEqual(delivery_git.remote_oid(project, "origin", refs["item"]), stranded)
+        again = delivery_git.refresh_target(project, "DLV-001")
+        self.assertTrue(again["changed"])
+        self.assertEqual(again["claims_refreshed"], [refs["item"]])
+        recovered = delivery_git.remote_oid(project, "origin", refs["item"])
+        self.assertNotEqual(recovered, stranded)
+        started = delivery_git.start_item(project, "DLV-001", "AUTH-01")
+        self.assertTrue(Path(started["worktree"]).is_dir())
+
+        # A Delivery with nothing left behind reports no change.
+        settled = delivery_git.refresh_target(project, "DLV-001")
+        self.assertFalse(settled["changed"])
+
     def test_stale_paused_item_cannot_activate_after_integration_refresh(self):
         project, docs, _directory, _item, _reserved = self.prepare_execution_with_draft_reserved_contracts(False)
         delivery_git.publish_execution_plan(project, "DLV-001")

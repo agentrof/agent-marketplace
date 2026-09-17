@@ -189,6 +189,69 @@ class DeliveryCompilerTests(unittest.TestCase):
         self.assertIsNot(seen[0][0], seen[1][0])
         self.assertIsNot(seen[0][1], seen[1][1])
 
+    def approved_execution_with_revised_contract(self):
+        """Approve one Item, then approve a second revision of its contract."""
+        self.approve_verification_contract()
+        dod_args = type("Args", (), {"docs": str(self.docs), "title": "Project", "file": None})
+        delivery_compile.init_dod(dod_args)
+        delivery_compile.approve_dod(dod_args)
+        init_args = type("Args", (), {"docs": str(self.docs), "id": None, "slug": None,
+                                      "goal": "SAML authentication", "outcome": "Users sign in",
+                                      "target_branch": "main", "story": ["AUTH-01"]})
+        self.assertEqual(delivery_compile.init_delivery(init_args), 0)
+        plan_args = type("Args", (), {"docs": str(self.docs), "delivery": "DLV-001"})
+        self.assertEqual(delivery_compile.approve_scope(plan_args), 0)
+        root = self.docs / "delivery" / "deliveries" / "dlv-001-saml-authentication"
+        item = root / "items" / "auth-01" / "item.md"
+        props, body = delivery_compile.split_note(item)
+        props["path_claims"] = ["src/auth.py"]
+        props["contract_claims"] = ["auth:session"]
+        delivery_compile.atomic_text(item, delivery_compile.frontmatter(props, body))
+        self.assertEqual(delivery_compile.approve_execution(plan_args), 0)
+        bound, _ = delivery_compile.split_note(item)
+        first = bound["verification_contract_hash"]
+
+        contract_args = type("Args", (), {"docs": str(self.docs), "kind": "verification",
+                                          "constrained_by": None, "json": False})
+        self.assertEqual(operation_compile.revise(contract_args), 0)
+        contract = self.docs / "operation" / "verification-contract.md"
+        contract_props, contract_body = operation_compile.parse(contract)
+        contract_props["test_command"] = "make test --tiered"
+        operation_compile.atomic_text(
+            contract, operation_compile.render(contract_props, contract_body))
+        self.assertEqual(operation_compile.approve(contract_args), 0)
+        second = operation_compile.parse(contract)[0]["source_hash"]
+        self.assertNotEqual(second, first)
+        return root, item, plan_args, first, second
+
+    def test_terminal_item_keeps_the_contract_revision_it_was_verified_against(self):
+        root, item, plan_args, first, second = self.approved_execution_with_revised_contract()
+        props, body = delivery_compile.split_note(item)
+        props["status"] = "integrated"
+        delivery_compile.atomic_text(item, delivery_compile.frontmatter(props, body))
+
+        # The only verb that rewrites the binding must not be gated on it.
+        self.assertEqual(delivery_compile.approve_execution(plan_args), 0)
+        rebound, _ = delivery_compile.split_note(item)
+        self.assertEqual(rebound["status"], "integrated")
+        self.assertEqual(rebound["verification_contract_hash"], first)
+        _root, findings = delivery_compile.delivery_findings(self.docs, "DLV-001")
+        self.assertEqual(findings, [])
+
+    def test_open_item_rebinds_to_the_new_revision_and_still_reports_staleness(self):
+        root, item, plan_args, first, second = self.approved_execution_with_revised_contract()
+        self.assertEqual(delivery_compile.approve_execution(plan_args), 0)
+        rebound, body = delivery_compile.split_note(item)
+        self.assertEqual(rebound["status"], "in_scope")
+        self.assertEqual(rebound["verification_contract_hash"], second)
+        _root, findings = delivery_compile.delivery_findings(self.docs, "DLV-001")
+        self.assertEqual(findings, [])
+
+        rebound["verification_contract_hash"] = "sha256:" + "0" * 64
+        delivery_compile.atomic_text(item, delivery_compile.frontmatter(rebound, body))
+        _root, stale = delivery_compile.delivery_findings(self.docs, "DLV-001")
+        self.assertTrue(any("Verification Contract binding" in finding for finding in stale), stale)
+
     def test_scope_then_execution_creates_exact_item_evidence_files(self):
         self.approve_verification_contract()
         dod_args = type("Args", (), {"docs": str(self.docs), "title": "Project", "file": None})

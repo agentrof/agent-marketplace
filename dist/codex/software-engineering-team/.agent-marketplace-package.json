@@ -1,5 +1,5 @@
 {
-  "build_id": "snapshot.e673297d9179b8d5119968d6eb53f201c08d90afde13cf59b0b28f4f459dedba",
+  "build_id": "snapshot.c06b951d82e69bced0e79aef89d5cb7151e8acf9e7b0800340054a32cac6a58b",
   "component": "software-engineering-team",
   "delivery_protocol": {
     "read_max": 1,
@@ -64,7 +64,7 @@
     "scripts/generate_codex_project.py": "11a82ab6f04507c46486c8bd018bff2310cde5fb93013f414cbaa60709bc43e8",
     "scripts/landscape_check.py": "64fe7922c5fd3b26c1fd0648f046af1ccc521339eefdab39714bc4908865c4a3",
     "scripts/marketplace_paths.py": "612e835bb2c91fab9509282dd4ecbce55c9b62a35ff59b3f22e7e6c05e2fbd79",
-    "scripts/operation_compile.py": "fdb8b1f5486f1371307d15f514d073aa07ba1ee2125b0f9012a23f418ad03988",
+    "scripts/operation_compile.py": "2d8b9b7cd4de6b1e1f1b08b254c2a36bfdf14ef7ecd345596a547038b5cb933c",
     "scripts/project_config.py": "a0bebad9b625003a175371dcadf82425288065d469229d9677695f035d6a9790",
     "scripts/project_instructions.py": "06d1f95f45364bfba9755b017b87a618da9c1076c66ee9835d0957ee6b0464f0",
     "scripts/requirement_compile.py": "f11df297d86f2cbffe16d9d2927de4dd709fd037b979a1d155ac4b1024107814",
@@ -281,6 +281,6 @@
   "schema_version": 3,
   "source_channel": "snapshot",
   "source_commit": "",
-  "source_ref": "snapshot.e673297d9179b8d5119968d6eb53f201c08d90afde13cf59b0b28f4f459dedba",
+  "source_ref": "snapshot.c06b951d82e69bced0e79aef89d5cb7151e8acf9e7b0800340054a32cac6a58b",
   "version": "0.3.1"
 }

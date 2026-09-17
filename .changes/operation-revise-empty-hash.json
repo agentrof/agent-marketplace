@@ -1,0 +1,6 @@
+{
+  "summary": "Remove the unset source hash when an Operation contract revision begins, instead of emitting it empty for the vault to reject.",
+  "components": {
+    "software-engineering-team": "patch"
+  }
+}

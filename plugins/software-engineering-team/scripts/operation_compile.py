@@ -263,7 +263,7 @@ def revise(args) -> int:
     props["status"] = "draft"
     props["revision"] = int(props.get("revision", 0)) + 1
     props.pop("approved_at_utc", None)
-    props["source_hash"] = ""
+    props.pop("source_hash", None)
     props["tags"] = [f"doc/{TYPE_FOR[args.kind]}", "status/draft"]
     path.write_text(render(props, body), encoding="utf-8")
     print(json.dumps({"kind": args.kind, "path": str(path), "status": "draft", "revision": props["revision"]}, sort_keys=True))

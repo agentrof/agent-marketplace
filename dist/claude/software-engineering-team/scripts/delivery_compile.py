@@ -793,9 +793,16 @@ def execution_plan_findings(root: Path, sources: dict[str, dict], docs: Path) ->
             )
         if len(roles) != len(set(roles)):
             errors.append(f"{story_id} role_sequence contains duplicate roles")
+        # A claim reserves a path against concurrent writers. A terminal Item has
+        # no writer left, so its claim is a record of what it wrote rather than a
+        # reservation, and holding it would keep any later Item out of that path
+        # for the life of the Delivery. Its own claims are still validated.
+        reserving = props.get("status") not in TERMINAL_ITEM_STATUSES
         for claim in paths:
             if not _is_normalized_claim(claim):
                 errors.append(f"{story_id} path_claim is not normalized: {claim}")
+                continue
+            if not reserving:
                 continue
             for previous_claim, previous in path_owners.items():
                 if previous != story_id and _claims_overlap(claim, previous_claim):

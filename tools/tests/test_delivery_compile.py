@@ -224,6 +224,38 @@ class DeliveryCompilerTests(unittest.TestCase):
         self.assertNotEqual(second, first)
         return root, item, plan_args, first, second
 
+    def test_a_terminal_item_releases_its_path_claim_to_a_later_item(self):
+        """A closed Item records what it wrote; it does not reserve it forever."""
+        root, item, plan_args, _first, _second = self.approved_execution_with_revised_contract()
+        props, body = delivery_compile.split_note(item)
+        approved, _snapshot, errors = delivery_compile.approved_backlog_sources(
+            self.docs, [props["story_id"]])
+        self.assertEqual(errors, [])
+        sources = dict(approved)
+
+        successor = root / "items" / "auth-02" / "item.md"
+        successor.parent.mkdir(parents=True, exist_ok=True)
+        later = dict(props, story_id="AUTH-02", status="in_scope")
+        later["path_claims"] = ["src/auth.py"]
+        later["execution_after"] = [props["story_id"]]
+        later["depends_on"] = [props["story_id"]]
+        delivery_compile.atomic_text(successor,
+                                     delivery_compile.frontmatter(later, body))
+        sources["AUTH-02"] = dict(approved[props["story_id"]],
+                                  depends_on=[props["story_id"]])
+
+        def overlaps():
+            findings = delivery_compile.execution_plan_findings(root, sources, self.docs)
+            return [f for f in findings if "overlaps" in f]
+
+        # While the first Item is open, the same path may not be claimed twice.
+        assert overlaps(), "an open Item must still reserve its claimed paths"
+
+        # Once it is closed there is no writer left to protect, so the path is free.
+        closed = dict(props, status="integrated")
+        delivery_compile.atomic_text(item, delivery_compile.frontmatter(closed, body))
+        self.assertEqual(overlaps(), [])
+
     def test_terminal_item_keeps_the_contract_revision_it_was_verified_against(self):
         root, item, plan_args, first, second = self.approved_execution_with_revised_contract()
         props, body = delivery_compile.split_note(item)

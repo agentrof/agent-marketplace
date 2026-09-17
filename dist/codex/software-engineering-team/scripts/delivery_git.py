@@ -2023,7 +2023,14 @@ def refresh_target(project_root: Path, delivery_id: str,
     _target_branch, target = fetch_target(root, remote)
     integrated = is_ancestor(root, target, integration_oid)
     if target == previous_target and integrated:
-        return {"ok": True, "delivery": delivery_id, "changed": False,
+        # The Fence and the Integration are already converged, but a claim issued
+        # before an earlier refresh can still be behind. Re-issue those alone.
+        claim_updates = refreshed_claim_updates(
+            root, remote, delivery_id, directory, integration_oid, integration_oid, target)
+        if claim_updates:
+            atomic_push(root, remote, claim_updates)
+        return {"ok": True, "delivery": delivery_id, "changed": bool(claim_updates),
+                "claims_refreshed": [ref for ref, _old, _new in claim_updates],
                 "target": target, "refs": short_refs(delivery_id)}
     if not integrated:
         previous_target = unique_merge_base(root, integration_oid, target)

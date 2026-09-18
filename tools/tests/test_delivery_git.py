@@ -1247,6 +1247,41 @@ class DeliveryGitTests(unittest.TestCase):
         settled = delivery_git.refresh_target(project, "DLV-001")
         self.assertFalse(settled["changed"])
 
+    def test_activation_carries_the_currently_published_plan_into_the_item(self):
+        project, docs, _directory, item, _reserved = self.prepare_execution_with_draft_reserved_contracts(False)
+        delivery_git.publish_execution_plan(project, "DLV-001")
+        delivery_git.claim_items(project, "DLV-001")
+        started = delivery_git.start_item(project, "DLV-001", "AUTH-01")
+        relative_item = str(item.relative_to(project))
+        contract = docs / "operation/verification-contract.md"
+        relative_contract = str(contract.relative_to(project))
+        first, _body = delivery_compile.split_note(Path(started["worktree"]) / relative_item)
+        self.assertEqual(first["path_claims"], ["src/auth.py"])
+        self.assertEqual(operation_compile.parse(Path(started["worktree"]) / relative_contract)[0]["revision"], 1)
+        delivery_git.pause_item(project, "DLV-001", "AUTH-01")
+
+        kind = type("Args", (), {"docs": str(docs), "kind": "verification"})
+        self.assertEqual(operation_compile.revise(kind), 0)
+        props, body = operation_compile.parse(contract)
+        operation_compile.atomic_text(contract, operation_compile.render(props, body + "\n\nA later approved revision.\n"))
+        self.assertEqual(operation_compile.approve(kind), 0)
+        revised = operation_compile.parse(contract)[0]
+        props, body = delivery_compile.split_note(item)
+        props["path_claims"] = ["src/auth.py", "src/session.py"]
+        delivery_compile.atomic_text(item, delivery_compile.frontmatter(props, body))
+        args = type("Args", (), {"docs": str(docs), "delivery": "DLV-001"})
+        self.assertEqual(delivery_compile.approve_execution(args), 0)
+        delivery_git.publish_execution_plan(project, "DLV-001")
+
+        worktree = Path(delivery_git.resume_item(project, "DLV-001", "AUTH-01")["worktree"])
+        current, _body = delivery_compile.split_note(worktree / relative_item)
+        self.assertEqual(current["path_claims"], ["src/auth.py", "src/session.py"])
+        self.assertEqual(current["verification_contract_hash"], revised["source_hash"])
+        self.assertEqual(current["status"], "active")
+        published = operation_compile.parse(worktree / relative_contract)[0]
+        self.assertEqual(published["revision"], 2)
+        self.assertEqual(published["source_hash"], revised["source_hash"])
+
     def test_stale_paused_item_cannot_activate_after_integration_refresh(self):
         project, docs, _directory, _item, _reserved = self.prepare_execution_with_draft_reserved_contracts(False)
         delivery_git.publish_execution_plan(project, "DLV-001")

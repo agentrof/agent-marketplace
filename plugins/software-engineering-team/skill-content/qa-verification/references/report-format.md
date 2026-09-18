@@ -43,7 +43,7 @@ Per interaction:
 | Surface | Action | Expected | Actual | Result |
 |---|---|---|---|---|
 
-KNOWN third-party warnings, each with library name and reason.
+Boot-time third-party error lines, each with its bounded cause and disposition; warning-line counts per service.
 
 Service-log audit: window covered, PASS/FAIL, offending lines (or none);
 environment teardown confirmed.

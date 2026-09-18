@@ -1,5 +1,5 @@
 {
-  "build_id": "snapshot.8972d858d2941f04f120cb46af3a646159d215322b2932b8d69644cb8aed6597",
+  "build_id": "snapshot.592ebbcda7b13a31539d10b8e264c08cf6ee20f6b2462d109a8892c8eaaf6f23",
   "component": "software-engineering-team",
   "delivery_protocol": {
     "read_max": 1,
@@ -22,7 +22,7 @@
     "agents/code-reviewer.md": "27f678a61284fbf5716d1fef77abef95298f3c0da86b2170aad9ee10d7d2363f",
     "agents/delivery-coordinator.md": "a91883b2d1ec627278363d600c3037f934581c60838c94da9f1e47f35e1dfd8a",
     "agents/design-system-reviewer.md": "4fd0739c64d1472460a4f934017a3c059ad3f7c7f9ec29c3c63affd2f68f8157",
-    "agents/devops-engineer.md": "217ff0396df4401c4b01be410500e0e982f7e237b616f9bc3f3ad0b947a648d7",
+    "agents/devops-engineer.md": "dcf655a1df6cd4633565fdc1b98b69f63b05fce292fa39e71311dd96ee6d531c",
     "agents/domain-expert.md": "b46f72e96a345f76b1f8692e07a643bbd6eea3723fc1e0e518dffdbb6c107783",
     "agents/experience-reviewer.md": "88a988ca65618ae790de68797a305c1e478fd9a54a68d78ce746145653bc3a7c",
     "agents/frontend-developer.md": "f868f2eec763d42192defc23ea8765c19fad624c8a73fafa2bc652ad60aa6b8b",
@@ -103,8 +103,8 @@
     "skill-content/docker-compose/SKILL.md": "7e5a961779d2a89822e15686b30c0b7b5427683f2268f4e59d09859c9e7c739d",
     "skill-content/docker-compose/references/compose-patterns.md": "551c7bc29d1901bc6a6e1f881303d12bd107a3d0dadfd564aca27b2cee436c55",
     "skill-content/docker-compose/references/image-build.md": "0d6247c2604a71054ceb04093a0395784a477003054fac52f5e895ee71e0eaca",
-    "skill-content/docker-compose/references/qa-checklist.md": "fcc219397fd0078ffcd7ee7e46292938e10e487cba0ab3bf8dc89be585d19e6b",
-    "skill-content/docker-compose/references/review-checklist.md": "ecb277b0f85af3a4944681cf92b30906eceaa37cbc8cc0b20bda75a46f4cd5b8",
+    "skill-content/docker-compose/references/qa-checklist.md": "0aca7d560e8a9beceb395a4f7562abf3c855e987641ade5355d87161b2357fcb",
+    "skill-content/docker-compose/references/review-checklist.md": "23bf5c586aee15e4df59129091cd7d3d906f5b90cc34d185547b5eb12d8c0738",
     "skill-content/docker-compose/references/seed-scenarios.md": "695931bd10a84eae5652455e9ba798856b1d340d56de3de0409c2fc86556b106",
     "skill-content/execution-plan/SKILL.md": "792efa6ce680c66b1b56dc82aa485806341c6c406f4cb8732699ea9feb103185",
     "skill-content/experience-design/SKILL.md": "53750e073da950641d9a4d036d9d8d3f718dd269ac1bdbf41c14cbba11327c94",
@@ -143,8 +143,8 @@
     "skill-content/qa-verification/references/coverage-audit.md": "0ad8ab806ea51eb133a68c201e7998b03ac4c2346568224f2ec219ea25d97a40",
     "skill-content/qa-verification/references/exploratory.md": "43aad71b88ddcf23d2b53c4a268f057c4471fa7395c88b7cb4de728f686f0ca3",
     "skill-content/qa-verification/references/mutation.md": "211a80da8ec96f9ce09cba83424a66f8ac6142f4fd68abe7ce5c7cc3b7bdd561",
-    "skill-content/qa-verification/references/report-format.md": "d10c20cb39a6e74d088043738bf5dac9a9f8836acb5bd4c4621f17e0eb1db9c6",
-    "skill-content/qa-verification/references/runtime-protocol.md": "df710d3ebd1c56c0cf733bf344b46c5ca2dc54cd0f7fc29bf56a82d1c202fd0c",
+    "skill-content/qa-verification/references/report-format.md": "f1a874d86fd5616ee968c9a4172ec9eed9466d408aac6081645925b954a9071a",
+    "skill-content/qa-verification/references/runtime-protocol.md": "7ddf13911059f2676d23cb1ae8a0e33e69f0f3cd7e2f2a9c3a7f4149761194d3",
     "skill-content/qa-verification/references/test-design.md": "c8ef52eb9cbb30c14fcb905b49b92a9e88489ba9a842b75834da615d7fb330cd",
     "skill-content/qa-verification/scripts/scenario_report.py": "5cd855bdbcd470b1cb975a393e261274382b6f8163e208182b6e06858e078a25",
     "skill-content/react-typescript/SKILL.md": "ff247db8ea0452aa6c654fe970db48786ea52005528c1e9ee5ca4903b5cdd747",
@@ -281,6 +281,6 @@
   "schema_version": 3,
   "source_channel": "snapshot",
   "source_commit": "",
-  "source_ref": "snapshot.8972d858d2941f04f120cb46af3a646159d215322b2932b8d69644cb8aed6597",
+  "source_ref": "snapshot.592ebbcda7b13a31539d10b8e264c08cf6ee20f6b2462d109a8892c8eaaf6f23",
   "version": "0.3.1"
 }

@@ -1538,6 +1538,9 @@ def check_tags_mirror(vault: Vault, findings: list[Finding]) -> None:
                 " never hand-pick tags"))
 
 
+REVISION_LINEAGE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.:-]*@r[1-9][0-9]*")
+
+
 def tree_is_glob(tree: dict) -> bool:
     return "*" in tree["path"]
 
@@ -1626,6 +1629,12 @@ def check_decision_records(vault: Vault, findings: list[Finding]) -> None:
             for key_name in ("supersedes", "superseded_by"):
                 target = dict(note.fm_targets).get(key_name, "")
                 raw = note.fm.get(key_name, "")
+                # A revision lineage is not a document supersede chain. A record
+                # compiler writes the exact ref of the revision this one replaces,
+                # which names no second note, so it carries no wikilink and no
+                # symmetric back-reference to validate.
+                if REVISION_LINEAGE.fullmatch(str(raw).strip()):
+                    continue
                 if raw and not target:
                     findings.append(Finding(
                         "error", note.rel, 1, "decision_records",

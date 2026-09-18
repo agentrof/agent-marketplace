@@ -252,6 +252,27 @@ class ProjectVaultContractTests(unittest.TestCase):
             self.assertEqual(second.returncode, 0, second.stdout + second.stderr)
             self.assertEqual(note.read_bytes(), normalized)
 
+    def test_decision_revision_lineage_is_not_read_as_a_supersede_chain(self):
+        for lineage, ok in (("ARC:ROOT:ADR-003@r1", True),
+                            ("ARC:orders-api:HUB-orders-api@r12", True),
+                            ("solution-design/decisions/other-decision", False),
+                            ("ARC:ROOT:ADR-003@r0", False)):
+            with self.subTest(supersedes=lineage), tempfile.TemporaryDirectory() as temporary:
+                workspace = self.setup_project(Path(temporary))
+                decisions = workspace / "docs/solution-design/decisions"
+                decisions.mkdir(parents=True)
+                note = self.decision_note("Dispatch decision", "SD-001")
+                (decisions / "dispatch-decision.md").write_text(
+                    note.replace("---\n\n#", f"supersedes: {lineage}\n---\n\n#"),
+                    encoding="utf-8",
+                )
+                result = self.check_vault(workspace)
+                if ok:
+                    self.assertNotIn("quoted wikilink", result.stdout)
+                else:
+                    self.assertEqual(result.returncode, 1)
+                    self.assertIn("quoted wikilink", result.stdout)
+
     def test_title_shape_rejects_generic_and_duplicate_graph_labels(self):
         with tempfile.TemporaryDirectory() as temporary:
             workspace = self.setup_project(Path(temporary))

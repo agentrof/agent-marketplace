@@ -2982,10 +2982,42 @@ def require_current_activation_target(root: Path, remote: str, delivery_id: str,
         )
 
 
+ITEM_WRITER_FIELDS = ("status", "tags", "architecture_delta_hash", "integration_base_commit")
+
+
+def published_plan_paths(root: Path, directory: Path, docs: Path) -> list[str]:
+    """Exactly what the published execution plan owns: its package and its contracts.
+
+    Item evidence files are deliberately excluded. The plan owns each Item's control
+    file; the writer owns the review and verification records beside it.
+    """
+    paths = package_paths(root, directory, docs, include_items=False, include_map=False)
+    paths += [str(item.relative_to(root)) for item in directory.glob("items/*/item.md")]
+    operation_paths, _bindings = execution_operation_inputs(root, directory, docs)
+    return sorted(set(paths + operation_paths))
+
+
+def published_plan_blobs(root: Path, source: str, paths: list[str]) -> dict[str, str]:
+    """Read the exact published bytes of each plan path, skipping what it does not carry."""
+    values = {}
+    for relative in paths:
+        entry = run_git(root, "--no-replace-objects", "ls-tree", source, "--", relative)
+        if not entry:
+            continue
+        metadata, _path = entry.split("\t", 1)
+        mode, kind, oid = metadata.split()
+        if kind != "blob" or mode != "100644":
+            raise RuntimeError("published plan path is not a regular file: " + relative)
+        values[relative] = subprocess.run(
+            ["git", "--no-replace-objects", "cat-file", "blob", oid], cwd=root,
+            capture_output=True, check=True).stdout.decode("utf-8")
+    return values
+
+
 def start_item(project_root: Path, delivery_id: str, story_id: str,
                remote: str = "origin", allowed_statuses: set[str] | None = None) -> dict:
     root = main_worktree(project_root.resolve())
-    from delivery_compile import split_note, frontmatter, content_hash
+    from delivery_compile import docs_root, split_note, frontmatter, content_hash
     directory = find_delivery_dir_from_remote(root, remote, delivery_id)
     if directory is None:
         raise RuntimeError("local Delivery package is required for Item activation")
@@ -3011,17 +3043,31 @@ def start_item(project_root: Path, delivery_id: str, story_id: str,
     if not item_path.exists():
         raise RuntimeError(f"missing local Item projection: {item_path}")
     relative_item = str(item_path.relative_to(root))
-    item_props, item_body = split_remote_note(root, item_oid, relative_item, split_note)
+    live_props, item_body = split_remote_note(root, item_oid, relative_item, split_note)
     allowed = {"in_scope", "paused", "blocked"} if allowed_statuses is None else allowed_statuses
-    if item_props.get("status") not in allowed:
+    if live_props.get("status") not in allowed:
         raise RuntimeError("Item is not startable from its current status")
+    # Activation carries the currently published plan and its Operation contracts into
+    # the Item. Activating on the Item's own stale tree would hand its writer a plan, and
+    # a contract, that a later approval already replaced, with no supported way to reach
+    # the current ones: the Item ref is only ever built from the plan at claim time.
+    # The plan owns the Item's claims and bindings; the Item ref owns its lifecycle and
+    # whatever its writer has already stamped.
+    plan_props, _plan_body = split_remote_note(root, integration_oid, relative_item, split_note)
+    item_props = dict(plan_props)
+    for key in ITEM_WRITER_FIELDS:
+        if key in live_props:
+            item_props[key] = live_props[key]
     require_item_operation_bindings(root, item_props)
     writer = epoch_token()
     item_props["status"] = "active"
     item_props["tags"] = [tag for tag in item_props.get("tags", []) if not str(tag).startswith("status/")] + ["status/active"]
     item_props["source_hash"] = content_hash(item_props, item_body)
+    refreshed = published_plan_blobs(root, integration_oid,
+                                     published_plan_paths(root, directory, docs_root(root)))
+    refreshed[relative_item] = frontmatter(item_props, item_body)
     item_candidate = commit_replacements(
-        root, item_oid, {str(item_path.relative_to(root)): frontmatter(item_props, item_body)},
+        root, item_oid, refreshed,
         f"Activate {story_id} for {delivery_id}",
         {"Record": "item-activation-v1", "Protocol": "1", "Delivery": delivery_id,
          "Story": story_id, "Claim": item_oid, "Item-Plan-Hash": str(item_props.get("item_plan_hash", "none")),

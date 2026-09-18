@@ -85,14 +85,17 @@ Any interaction that crashes, silently does nothing, or produces the wrong outco
 
 ## Step 7: Service-Log Audit (after the surface walk)
 
-Pull the aggregated service logs with the `logs` verb and audit the whole window, bring-up through last interaction.
+Pull the aggregated service logs with the `logs` verb and audit the whole window, bring-up through last interaction. The audit gates on structure; log text is evidence.
 
 FAIL conditions:
 
-- Any error-level line or stack trace from any service.
+- Any container restart inside the window.
+- Any scheduler warning event recorded after the workload it concerns became ready.
+- Any error-level line or stack trace from a first-party service, at any time.
+- Any error-level line or stack trace from a third-party service after that service's own readiness.
 - Any credential, token or secret appearing in log output (this one is CRITICAL).
 
-MINOR/KNOWN exception: a warning recorded in the environment contract document's tolerated-warning record (library name and reason). An unrecorded warning is FAIL, including "harmless" ones.
+A third-party service's error-level lines before its own readiness are not a FAIL by themselves: list each distinct line in the verification record with its bounded cause and disposition; an undispositioned line is a finding. Warning-level lines are counted per service and retained; a warning is a finding only when it names a misconfiguration the story owns. No line is matched against a listed sentence: the environment contract document's tolerated-warning record stays empty unless a Solution decision requires a named exception, recorded with library name and reason.
 
 ## Step 8: Record Results and Tear Down
 

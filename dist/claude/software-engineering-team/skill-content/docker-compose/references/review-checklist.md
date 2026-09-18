@@ -41,7 +41,7 @@ Checkbox assertions for reviewing environment-owned diffs (the workspace/environ
 - [ ] Every scenario in the registry; runner refuses unknown names
 - [ ] Scenarios deterministic (fixed ids, fixed timestamps, seeded randomness only) and re-run converges
 - [ ] Domain content lives in application loaders, not under the environment prefix
-- [ ] Contract document updated: verb usage, scenario catalog, tolerated-warning record
+- [ ] Contract document updated: verb usage, scenario catalog, log-audit rule
 
 ## Traceability
 

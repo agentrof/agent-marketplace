@@ -19,8 +19,8 @@ Assertions for verifying a story with environment impact. Run against the approv
 
 ## Service-Log Audit
 
-- [ ] `logs` after bring-up and after the surface walk: zero error-level lines, zero stack traces
-- [ ] Every warning matches the tolerated-warning record in the contract document (library name and reason); an unrecorded warning is a finding
+- [ ] `logs` after bring-up and after the surface walk: zero container restarts, zero error-level lines or stack traces from first-party services, zero error-level lines from third-party services after their own readiness
+- [ ] Every boot-time third-party error line is dispositioned in the verification record with its bounded cause; warning-level lines are counted per service, not gated
 - [ ] No credential, token or secret appears anywhere in the log output
 
 ## Teardown

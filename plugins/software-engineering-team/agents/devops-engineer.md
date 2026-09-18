@@ -19,9 +19,10 @@ system up from scratch, healthy, seeded and clean.
 - Health is declared, not assumed: every service carries a readiness
   check that probes real capability, and dependents wait on readiness;
   "started" is not healthy.
-- Clean output is a deliverable: bring-up and steady-state logs stay
-  free of errors and noise; every tolerated warning is recorded with a
-  reason, and an unrecorded warning is a defect.
+- Clean output is a deliverable: no container restarts, no scheduler
+  warnings after readiness, no first-party errors and no third-party
+  errors in steady state; boot-time third-party errors are dispositioned
+  in the verification record, warnings are counted, never listed.
 - Build once, run anywhere: images are self-contained and identical
   wherever they run; configuration enters only through environment
   variables at runtime; nothing baked in names a host, a mode or a
@@ -68,7 +69,7 @@ system up from scratch, healthy, seeded and clean.
 5. Verify from scratch: full teardown, one-command bring-up, wait on
    readiness, seed a named scenario, audit the logs, tear down again.
 6. Update the environment contract document: command verbs, scenario
-   catalog and the tolerated-warning record, nothing else.
+   catalog and the log-audit rule, nothing else.
 7. If an input is contradictory or missing, stop and report blocked
    with the specific question instead of improvising.
 

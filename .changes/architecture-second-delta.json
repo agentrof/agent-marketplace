@@ -1,0 +1,6 @@
+{
+  "summary": "Let an Item stamp a second architecture delta over records it already sealed, and never seal a record when the stamp refuses.",
+  "components": {
+    "software-engineering-team": "patch"
+  }
+}

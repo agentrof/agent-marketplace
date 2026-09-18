@@ -40,6 +40,26 @@ class ArchitectureCompilerTests(unittest.TestCase):
             stamped = self.run_cli("stamp-item", "--docs", docs, "--item-ref", "AUTH-01")
             self.assertTrue(json.loads(stamped.stdout)["architecture_delta_hash"].startswith("sha256:"))
 
+    def test_item_can_stamp_a_second_delta_over_records_it_already_sealed(self):
+        with tempfile.TemporaryDirectory() as raw:
+            docs = Path(raw) / "workspace/docs"
+            self.prepare(docs)
+            self.run_cli("init-root", "--docs", docs, "--item-ref", "AUTH-01")
+            self.run_cli("init-component", "--docs", docs, "--component-ref", "orders-api", "--item-ref", "AUTH-01")
+            self.run_cli("render", "--docs", docs)
+            first = json.loads(self.run_cli("stamp-item", "--docs", docs, "--item-ref", "AUTH-01").stdout)
+            component = docs / "system-architecture/components/orders-api/component.md"
+            self.assertIn("revision_state: sealed", component.read_text(encoding="utf-8"))
+            self.run_cli("begin-revision", "--docs", docs,
+                         "--ref", "ARC:orders-api:HUB-orders-api@r1", "--item-ref", "AUTH-01")
+            self.run_cli("render", "--docs", docs)
+            second = json.loads(self.run_cli("stamp-item", "--docs", docs, "--item-ref", "AUTH-01").stdout)
+            self.assertNotEqual(second["architecture_delta_hash"], first["architecture_delta_hash"])
+            self.assertIn("revision: 2", component.read_text(encoding="utf-8"))
+            self.assertIn("revision_state: sealed", component.read_text(encoding="utf-8"))
+            root_record = docs / "system-architecture/architecture.md"
+            self.assertIn("revision: 1", root_record.read_text(encoding="utf-8"))
+
     def test_architecture_rejects_non_active_item(self):
         with tempfile.TemporaryDirectory() as raw:
             docs = Path(raw) / "workspace/docs"

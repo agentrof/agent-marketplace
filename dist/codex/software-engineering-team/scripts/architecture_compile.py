@@ -616,13 +616,18 @@ def stamp_item(docs: Path, item_ref: str) -> int:
         if row["connects"] and not set(row["connects"]).issubset(claimed_components):
             print("architecture_compile: connection delta exceeds claimed components")
             return 1
+    # A record this Item already sealed stays part of its delta. Requiring every one
+    # of them to be draft would let an Item stamp exactly one delta for its life, so a
+    # reopened Item, or one whose contracts were revised mid-flight, could never record
+    # a correction to architecture it wrote itself. Nothing is sealed until every
+    # record to seal is known, so a refusal leaves no record half sealed.
+    pending = []
     for path in records(root):
         props = record_props(path)
-        if item_ref in props.get("introduced_by", []):
-            if props.get("revision_state") != "draft":
-                print("architecture_compile: Item includes an already sealed record")
-                return 1
-            seal_record(root, path, item_ref)
+        if item_ref in props.get("introduced_by", []) and props.get("revision_state") == "draft":
+            pending.append(path)
+    for path in pending:
+        seal_record(root, path, item_ref)
     _rendered, findings = render(root)
     if findings:
         print("architecture_compile: " + "; ".join(findings))

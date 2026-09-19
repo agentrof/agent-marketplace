@@ -706,6 +706,18 @@ class DeliveryGitTests(unittest.TestCase):
                 {"component_id": "api", "sourcing": "build", "code_path": "src/auth.py"},
                 {"component_id": "other", "sourcing": "build", "code_path": "src/other.py"},
             ]}), encoding="utf-8")
+            # The architecture stub derives from these components by canonical alias;
+            # the relation contract can only resolve an alias that a solution-component
+            # note owns, and integration now regenerates the projections that check it.
+            for component_id in ("api", "other"):
+                note = docs / "solution-design/components" / component_id / "component.md"
+                note.parent.mkdir(parents=True, exist_ok=True)
+                note.write_text(delivery_compile.frontmatter(
+                    {"type": "solution-component", "title": component_id.title() + " component",
+                     "component_id": component_id, "component_class": "application", "sourcing": "build",
+                     "derives_from": ["[[solution-design/landscape|Solution Landscape]]"],
+                     "tags": ["doc/solution-component"]},
+                    f"# {component_id.title()} component\n\nFixture component.\n"), encoding="utf-8")
             import landscape_check
             landscape = docs / "solution-design/landscape.md"
             props, body = delivery_compile.split_note(landscape)
@@ -760,9 +772,11 @@ class DeliveryGitTests(unittest.TestCase):
         self.assertEqual(delivery_compile.approve_execution(args), 0)
         return project, docs, directory, item, reserved
 
-    def prepare_stamped_architecture_item(self):
+    def prepare_stamped_architecture_item(self, before_publish=None):
         project, docs, directory, _item, _reserved = self.prepare_execution_with_draft_reserved_contracts(
             runtime=False, architecture=True)
+        if before_publish is not None:
+            before_publish(project)
         delivery_git.publish_execution_plan(project, "DLV-001")
         delivery_git.claim_items(project, "DLV-001")
         active = delivery_git.start_item(project, "DLV-001", "AUTH-01")
@@ -816,6 +830,58 @@ class DeliveryGitTests(unittest.TestCase):
         self.assertEqual(props["source_hash"], delivery_compile.content_hash(props, body))
         self.assertEqual(delivery_git.remote_slot_oids(project, "origin"), {})
         self.assertFalse(worktree.exists())
+
+    def test_integration_merges_item_deletions_and_republished_evidence_drafts(self):
+        integration_ref = "refs/heads/agentrof/deliveries/dlv-001"
+
+        def carry_legacy_file(project):
+            (project / "notes").mkdir()
+            (project / "notes/legacy.txt").write_text("carried from the target\n", encoding="utf-8")
+            base = delivery_git.remote_oid(project, "origin", integration_ref)
+            candidate = delivery_git.commit_tree(project, base, ["notes/legacy.txt"], "Carry a legacy file", {})
+            delivery_git.atomic_push(project, "origin", [(integration_ref, base, candidate)])
+
+        project, worktree, item, active = self.prepare_stamped_architecture_item(before_publish=carry_legacy_file)
+        # The Item removes a file the base carried: a trivial resolution any merge
+        # makes, which a plain three-way read left unmerged.
+        self.assertTrue((worktree / "notes/legacy.txt").is_file())
+        delivery_git.run_git(worktree, "rm", "-q", "notes/legacy.txt")
+        delivery_git.run_git(worktree, "commit", "-qm", "Retire the legacy file")
+        product = delivery_git.run_git(worktree, "rev-parse", "HEAD")
+        # Meanwhile the Integration re-projected the Item's evidence drafts, as a plan
+        # publication does; the sealed Item's own records must win that conflict.
+        relative_reports = [(item.parent / name).relative_to(worktree).as_posix()
+                            for name in ("code-review.md", "verification.md")]
+        for relative in relative_reports:
+            path = project / relative
+            props, body = delivery_compile.split_note(path)
+            path.write_text(delivery_compile.frontmatter(props, body + "\nRe-projected draft.\n"), encoding="utf-8")
+        base = delivery_git.remote_oid(project, "origin", integration_ref)
+        republished = delivery_git.commit_tree(project, base, relative_reports, "Republish evidence drafts", {},
+                                               delivery_projections=True)
+        delivery_git.atomic_push(project, "origin", [(integration_ref, base, republished)])
+        authored = {}
+        for name, report in (("code-review.md", "Reviewed the retirement of the legacy file."),
+                             ("verification.md", "Executed the suite without the legacy file; it passed.")):
+            path = item.parent / name
+            props, body = delivery_compile.split_note(path)
+            body += "\n\n" + report + "\n"
+            path.write_text(delivery_compile.frontmatter(props, body), encoding="utf-8")
+            authored[name] = body.rstrip()
+        self.assertEqual(self.approve_item_evidence(str(worktree)), 0)
+        delivery_git.push_item(project, "DLV-001", "AUTH-01")
+        integrated = delivery_git.integrate_item(project, "DLV-001", "AUTH-01")
+        tree = delivery_git.run_git(project, "ls-tree", "-r", "--name-only", integrated["integration"]).splitlines()
+        self.assertNotIn("notes/legacy.txt", tree)
+        self.assertIn("src/auth.py", tree)
+        for name, body in authored.items():
+            relative = (item.parent / name).relative_to(worktree).as_posix()
+            props, actual = delivery_git.split_remote_note(project, integrated["integration"], relative, delivery_compile.split_note)
+            self.assertEqual(actual, body)
+            self.assertEqual(props["reviewed_commit" if name == "code-review.md" else "verified_commit"], product)
+        props, body = delivery_git.split_remote_note(project, integrated["integration"], item.relative_to(worktree).as_posix(), delivery_compile.split_note)
+        self.assertEqual(props["status"], "integrated")
+        self.assertEqual(delivery_git.remote_slot_oids(project, "origin"), {})
 
     def test_architecture_push_rejects_control_and_receipt_tampering(self):
         project, worktree, item, active = self.prepare_stamped_architecture_item()

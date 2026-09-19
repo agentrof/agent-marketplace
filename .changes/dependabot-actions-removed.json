@@ -1,0 +1,4 @@
+{
+  "summary": "Stop asking Dependabot for GitHub Actions bumps that the SHA allowlist and the changeset gate refuse by construction; action pins are reviewed by hand.",
+  "components": {}
+}

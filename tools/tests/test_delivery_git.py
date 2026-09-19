@@ -10,6 +10,7 @@ import tempfile
 import unittest
 from unittest import mock
 from pathlib import Path
+import pathlib
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "plugins" / "software-engineering-team" / "scripts"))
@@ -21,6 +22,23 @@ import operation_compile  # noqa: E402
 import architecture_compile  # noqa: E402
 import vault_check  # noqa: E402
 from backlog_fixture import make_approved_backlog  # noqa: E402
+
+
+def remove_temporary(temporary: tempfile.TemporaryDirectory, attempts: int = 10) -> None:
+    """Remove a fixture tree, retrying while git finishes writes that outlive the call that started them."""
+    import shutil
+    import time
+    for attempt in range(attempts):
+        try:
+            temporary.cleanup()
+            return
+        except OSError:
+            if attempt == attempts - 1:
+                shutil.rmtree(temporary.name, ignore_errors=True)
+                if pathlib.Path(temporary.name).exists():
+                    raise
+                return
+            time.sleep(0.2)
 
 
 class DeliveryGitTests(unittest.TestCase):
@@ -102,7 +120,7 @@ class DeliveryGitTests(unittest.TestCase):
 
     def test_project_fixture_disables_automatic_git_maintenance(self):
         temporary, project = self.make_project()
-        self.addCleanup(temporary.cleanup)
+        self.addCleanup(remove_temporary, temporary)
         remote = project / "remote.git"
         local_auto_gc = subprocess.run(
             ["git", "-C", str(project), "config", "--get", "gc.auto"],
@@ -333,8 +351,7 @@ class DeliveryGitTests(unittest.TestCase):
             self.assertEqual(values["Mode"], "open")
             self.assertEqual(values["Target-Update-Intent"], "none")
         finally:
-            temporary.cleanup()
-
+            remove_temporary(temporary)
     def test_quiescent_v1_fence_upgrades_to_governed_v2(self):
         temporary, project = self.make_project()
         try:
@@ -361,8 +378,7 @@ class DeliveryGitTests(unittest.TestCase):
             self.assertEqual(delivery_git.trailer(message, "Record"), "project-fence-v2")
             self.assertEqual(delivery_git.trailer(message, "Governance-Hash"), delivery_git.governed_governance_hash(project))
         finally:
-            temporary.cleanup()
-
+            remove_temporary(temporary)
     def test_target_reauthorization_is_fail_closed_without_zero_effect_proof(self):
         with self.assertRaises(RuntimeError):
             delivery_git.reauthorize_target_update(Path("/tmp"))
@@ -394,8 +410,7 @@ class DeliveryGitTests(unittest.TestCase):
             self.assertEqual(applied["receipt"]["state"], "verified")
             self.assertEqual(delivery_git.finish_source_handoff(project)["mode"], "open")
         finally:
-            temporary.cleanup()
-
+            remove_temporary(temporary)
     def test_direct_target_response_loss_recovers_when_target_equals_candidate(self):
         temporary, project = self.make_project()
         try:
@@ -431,8 +446,7 @@ class DeliveryGitTests(unittest.TestCase):
             self.assertEqual(recovered["receipt"]["state"], "verified")
             self.assertEqual(delivery_git.finish_source_handoff(project)["mode"], "open")
         finally:
-            temporary.cleanup()
-
+            remove_temporary(temporary)
     def test_open_and_merge_pr_use_the_exact_reviewed_integration_head(self):
         temporary, project, _docs, product_tip, intent = self.prepare_pr_intent()
         try:
@@ -450,8 +464,7 @@ class DeliveryGitTests(unittest.TestCase):
             parents = delivery_git.run_git(project, "show", "-s", "--format=%P", merged["merge_commit"]).split()
             self.assertEqual(parents[1], merged["reviewed_integration"])
         finally:
-            temporary.cleanup()
-
+            remove_temporary(temporary)
     def test_scope_cancellation_projection_is_sorted_and_closed(self):
         stories = {
             "AUTH-02": {"disposition": "not_started", "tip": "none"},
@@ -575,7 +588,7 @@ class DeliveryGitTests(unittest.TestCase):
 
     def test_candidate_map_excludes_unpublished_local_governance(self):
         temporary, project = self.make_project()
-        self.addCleanup(temporary.cleanup)
+        self.addCleanup(remove_temporary, temporary)
         docs = project / "workspace/docs"
         governance = delivery_governance.path_for(docs)
         relative_governance = governance.relative_to(project).as_posix()
@@ -604,7 +617,7 @@ class DeliveryGitTests(unittest.TestCase):
 
     def test_publications_render_exact_candidate_without_local_sibling_or_dirty_note(self):
         temporary, project = self.make_project()
-        self.addCleanup(temporary.cleanup)
+        self.addCleanup(remove_temporary, temporary)
         docs = project / "workspace/docs"
         make_approved_backlog(docs)
         dod = type("Args", (), {"docs": str(docs), "title": "Project", "file": None})
@@ -696,7 +709,7 @@ class DeliveryGitTests(unittest.TestCase):
 
     def prepare_execution_with_draft_reserved_contracts(self, runtime=True, path_claim="src/auth.py", architecture=False, legacy_operation_receipts=False):
         temporary, project = self.make_project()
-        self.addCleanup(temporary.cleanup)
+        self.addCleanup(remove_temporary, temporary)
         docs = project / "workspace/docs"
         make_approved_backlog(docs)
         if architecture:
@@ -1187,7 +1200,7 @@ class DeliveryGitTests(unittest.TestCase):
 
     def test_projection_merge_rejects_structural_conflicts_at_owned_generated_paths(self):
         temporary, project = self.make_project()
-        self.addCleanup(temporary.cleanup)
+        self.addCleanup(remove_temporary, temporary)
         head = delivery_git.run_git(project, "rev-parse", "HEAD")
         for relative in ("workspace/docs/maps/delivery.md", "workspace/docs/maps/_relations/test/relations-001.md"):
             with self.subTest(path=relative):
@@ -1208,7 +1221,7 @@ class DeliveryGitTests(unittest.TestCase):
 
     def test_projection_merge_resolves_only_owned_inverse_blocks(self):
         temporary, project = self.make_project()
-        self.addCleanup(temporary.cleanup)
+        self.addCleanup(remove_temporary, temporary)
         head = delivery_git.run_git(project, "rev-parse", "HEAD")
         index = (project / ".git/index").read_bytes()
         note = project / "workspace/docs/research/notes/merge.md"
@@ -1541,7 +1554,7 @@ class DeliveryGitTests(unittest.TestCase):
 
     def test_merge_candidate_preserves_disjoint_additions_and_rejects_conflicts(self):
         temporary, project = self.make_project()
-        self.addCleanup(temporary.cleanup)
+        self.addCleanup(remove_temporary, temporary)
         base = delivery_git.run_git(project, "rev-parse", "HEAD")
         (project / "left.txt").write_text("Integration-only content\n", encoding="utf-8")
         left = delivery_git.commit_tree(project, base, ["left.txt"], "Left addition", {})
@@ -1749,7 +1762,7 @@ class DeliveryGitTests(unittest.TestCase):
 
     def test_execution_publication_claim_and_start_use_global_slot(self):
         temporary, project = self.make_project()
-        self.addCleanup(temporary.cleanup)
+        self.addCleanup(remove_temporary, temporary)
         docs = project / "workspace" / "docs"
         (docs / "maps").mkdir(parents=True, exist_ok=True)
         make_approved_backlog(docs)

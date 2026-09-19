@@ -3549,11 +3549,16 @@ def integrate_item(project_root: Path, delivery_id: str, story_id: str,
                                 "Story": story_id, "Item-Plan-Hash": str(item_props.get("item_plan_hash", "none")),
                                 "Reviewed-Tip": item_oid, "Product-Tip": product_tip,
                                 "Integration-Parent": integration_oid})
+    # The sealed Item's own control and evidence records were validated above and
+    # win over whatever the Integration re-projected for them; the compiler-owned
+    # projections are regenerated from the merged tree, as every other publication does.
     integration_candidate = merge_candidate(root, integration_oid, seal,
                                             f"Integrate Item {story_id} for {delivery_id}",
                                             {"Record": "item-integration-v1", "Protocol": "1", "Delivery": delivery_id,
                                              "Story": story_id, "Item-Plan-Hash": str(item_props.get("item_plan_hash", "none")),
-                                             "Reviewed-Tip": seal, "Integration-Parent": integration_oid})
+                                             "Reviewed-Tip": seal, "Integration-Parent": integration_oid},
+                                            delivery_projections=True,
+                                            prefer_second=(relative_item, relative_review, relative_verification))
     atomic_push(root, remote, [(refs["integration"], integration_oid, integration_candidate),
                                (refs["item"], item_oid, integration_candidate),
                                (slot_ref, slot_oid, "")])
@@ -3670,20 +3675,57 @@ def reconcile_delivery_projection_conflicts(root: Path, env: dict) -> None:
                            cwd=root, env=env, capture_output=True, check=True)
 
 
+def unmerged_paths(root: Path, env: dict) -> list[str]:
+    listing = subprocess.run(["git", "ls-files", "--unmerged", "-z"], cwd=root, env=env,
+                             capture_output=True, check=True).stdout
+    return sorted({row.split(b"\t", 1)[1].decode("utf-8") for row in listing.split(b"\0") if row})
+
+
+def resolve_to_second_parent(root: Path, env: dict, second_parent: str, paths: tuple[str, ...]) -> None:
+    """Resolve only the named paths to the second parent's exact entry.
+
+    Every other conflict stays exactly as the three-way read left it, so an
+    authored conflict is still refused by name rather than merged by guess.
+    """
+    pending = set(unmerged_paths(root, env)) & set(paths)
+    for path in sorted(pending):
+        entry = subprocess.run(["git", "ls-tree", second_parent, "--", path], cwd=root,
+                               text=True, capture_output=True, check=True).stdout.strip()
+        subprocess.run(["git", "update-index", "--force-remove", "--", path],
+                       cwd=root, env=env, capture_output=True, check=True)
+        if not entry:
+            continue
+        metadata, _path = entry.split("\t", 1)
+        mode, kind, oid = metadata.split()
+        if kind != "blob" or mode not in {"100644", "100755"}:
+            raise RuntimeError("merge can only carry a regular file forward: " + path)
+        subprocess.run(["git", "update-index", "--add", "--cacheinfo", f"{mode},{oid},{path}"],
+                       cwd=root, env=env, capture_output=True, check=True)
+
+
 def merge_candidate(root: Path, first_parent: str, second_parent: str,
                     subject: str, trailers: dict[str, str], *, delivery_projections: bool = False,
                     operation_bindings: dict[str, dict] | None = None,
-                    preserve_delivery: Path | None = None) -> str:
+                    preserve_delivery: Path | None = None,
+                    prefer_second: tuple[str, ...] = ()) -> str:
     merge_base = unique_merge_base(root, first_parent, second_parent)
     with tempfile.TemporaryDirectory(prefix="agentrof-merge-index-") as temporary:
         index = Path(temporary) / "index"
         env = os.environ.copy(); env["GIT_INDEX_FILE"] = str(index)
-        merge = subprocess.run(["git", "read-tree", "-m", merge_base, first_parent, second_parent], cwd=root, env=env,
-                               text=True, capture_output=True, check=False)
+        # --aggressive resolves what any merge resolves without looking at content:
+        # a path one side deleted and the other left untouched, or both sides changed
+        # identically. Everything else stays unmerged for the callers below.
+        merge = subprocess.run(["git", "read-tree", "-m", "--aggressive", merge_base, first_parent, second_parent],
+                               cwd=root, env=env, text=True, capture_output=True, check=False)
         if merge.returncode:
             raise RuntimeError(merge.stderr.strip() or "Item and Integration trees conflict")
+        if prefer_second:
+            resolve_to_second_parent(root, env, second_parent, prefer_second)
         if delivery_projections:
             reconcile_delivery_projection_conflicts(root, env)
+        conflicts = unmerged_paths(root, env)
+        if conflicts:
+            raise RuntimeError("merge left authored paths unmerged: " + ", ".join(conflicts))
         tree = subprocess.run(["git", "write-tree"], cwd=root, env=env, text=True,
                               capture_output=True, check=False)
         if tree.returncode:

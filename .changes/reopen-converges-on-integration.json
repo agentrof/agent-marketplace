@@ -1,0 +1,6 @@
+{
+  "summary": "Reopen a sealed Item on the Integration that absorbed it, so a target refreshed after integration no longer makes the Item unreopenable.",
+  "components": {
+    "software-engineering-team": "patch"
+  }
+}

@@ -1,0 +1,6 @@
+{
+  "summary": "Generated package manifests digest only the build inputs the file inventory cannot reveal (host adapters and package contracts); plugin content is pinned per file, so pull requests touching unrelated packaged files no longer conflict on one manifest line.",
+  "components": {
+    "software-engineering-team": "patch"
+  }
+}

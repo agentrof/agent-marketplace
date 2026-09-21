@@ -1491,8 +1491,8 @@ class DeliveryGitTests(unittest.TestCase):
             delivery_git.refresh_target(project, "DLV-001")
         self.assertEqual(delivery_git.run_git(project, "ls-remote", "origin"), refs_before)
 
-    def test_stale_integrated_item_cannot_reopen_after_target_refresh(self):
-        project, docs, _directory, _item, _reserved = self.prepare_execution_with_draft_reserved_contracts(False)
+    def test_stale_integrated_item_reopens_on_the_refreshed_integration(self):
+        project, docs, _directory, item, _reserved = self.prepare_execution_with_draft_reserved_contracts(False)
         delivery_git.publish_execution_plan(project, "DLV-001")
         delivery_git.claim_items(project, "DLV-001")
         active = delivery_git.start_item(project, "DLV-001", "AUTH-01")
@@ -1500,16 +1500,46 @@ class DeliveryGitTests(unittest.TestCase):
         self.assertEqual(self.approve_item_evidence(active["worktree"]), 0)
         delivery_git.push_item(project, "DLV-001", "AUTH-01")
         integrated = delivery_git.integrate_item(project, "DLV-001", "AUTH-01")
-        self.governance_target_handoff(project, docs)
+        target, _fence = self.governance_target_handoff(project, docs)
+        refs = delivery_git.canonical_refs("DLV-001", "AUTH-01")
         with self.assertRaisesRegex(RuntimeError, "Integration does not contain"):
             delivery_git.reopen_item(project, "DLV-001", "AUTH-01")
-        delivery_git.refresh_target(project, "DLV-001")
-        with self.assertRaisesRegex(RuntimeError, "Item does not contain"):
-            delivery_git.reopen_item(project, "DLV-001", "AUTH-01")
-        refs = delivery_git.canonical_refs("DLV-001", "AUTH-01")
         self.assertEqual(delivery_git.remote_oid(project, "origin", refs["item"]), integrated["item"])
         self.assertEqual(delivery_git.remote_slot_oids(project, "origin"), {})
         self.assertIsNone(delivery_git.read_writer_receipt(project, "DLV-001", "AUTH-01"))
+        delivery_git.refresh_target(project, "DLV-001")
+        integration_oid = delivery_git.remote_oid(project, "origin", refs["integration"])
+        self.assertFalse(delivery_git.is_ancestor(project, target, integrated["item"]))
+        reopened = delivery_git.reopen_item(project, "DLV-001", "AUTH-01")
+        self.assertEqual(reopened["status"], "active")
+        self.assertTrue(delivery_git.is_ancestor(project, target, reopened["item"]))
+        self.assertEqual(
+            delivery_git.run_git(project, "rev-list", "--parents", "-n", "1", reopened["item"]).split()[1:],
+            [integrated["item"], integration_oid],
+        )
+        message = delivery_git.commit_message(project, reopened["item"])
+        self.assertEqual(delivery_git.trailer(message, "Record"), "item-reopen-v1")
+        self.assertEqual(delivery_git.trailer(message, "Previous-Tip"), integrated["item"])
+        self.assertEqual(delivery_git.trailer(message, "Integration-Base"), integration_oid)
+        self.assertEqual(
+            delivery_git.run_git(project, "diff", "--name-only", integration_oid, reopened["item"]).splitlines(),
+            [Path(item).relative_to(Path(project)).as_posix()],
+        )
+        self.assertEqual(delivery_git.remote_oid(project, "origin", refs["item"]), reopened["item"])
+        self.assertEqual(set(delivery_git.remote_slot_oids(project, "origin").values()), {reopened["item"]})
+        self.assertTrue(Path(reopened["worktree"]).is_dir())
+        second_product = self.commit_item_product_change(reopened["worktree"], "def authenticate():\n    return 'v2'\n")
+        self.assertEqual(self.approve_item_evidence(reopened["worktree"]), 0)
+        pushed = delivery_git.push_item(project, "DLV-001", "AUTH-01")
+        self.assertEqual(pushed["product_tip"], second_product)
+        integrated_again = delivery_git.integrate_item(project, "DLV-001", "AUTH-01")
+        self.assertEqual(
+            subprocess.run(
+                ["git", "show", f"{integrated_again['integration']}:src/auth.py"],
+                cwd=project, check=True, capture_output=True, text=True,
+            ).stdout,
+            "def authenticate():\n    return 'v2'\n",
+        )
 
     def test_activation_target_race_quiesces_before_writer_receipt_or_worktree(self):
         for action in ("start", "resume", "reopen", "takeover"):

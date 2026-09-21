@@ -770,9 +770,16 @@ def delivery_projection_changes(root: Path, tree: str,
 
 
 def commit_replacements(root: Path, base: str, replacements: dict[str, str],
-                        subject: str, trailers: dict[str, str]) -> str:
-    """Create a candidate from *base* with exact in-memory file replacements."""
+                        subject: str, trailers: dict[str, str], *,
+                        parents: tuple[str, ...] | None = None) -> str:
+    """Create a candidate from *base* with exact in-memory file replacements.
+
+    The candidate's tree is *base* plus the replacements; its parents default to
+    *base* alone. Passing *parents* records a different lineage for the same tree,
+    which is how a sealed Item reopens on the Integration that absorbed it.
+    """
     trailers = _normalise_control_trailers(trailers)
+    parent_args = [arg for parent in (parents or (base,)) for arg in ("-p", parent)]
     with tempfile.TemporaryDirectory(prefix="agentrof-index-") as temporary:
         index = Path(temporary) / "index"
         env = os.environ.copy()
@@ -798,7 +805,7 @@ def commit_replacements(root: Path, base: str, replacements: dict[str, str],
         message = subject + "\n\n" + "\n".join(
             f"Agentrof-{key}: {value}" for key, value in trailers.items()
         ) + "\n"
-        commit = subprocess.run(["git", "commit-tree", tree.stdout.strip(), "-p", base],
+        commit = subprocess.run(["git", "commit-tree", tree.stdout.strip(), *parent_args],
                                 cwd=root, env=env, input=message, text=True,
                                 capture_output=True, check=False)
         if commit.returncode:
@@ -3175,9 +3182,14 @@ def reopen_item(project_root: Path, delivery_id: str, story_id: str,
                 remote: str = "origin") -> dict:
     """Reopen one integrated Item through the explicit failure path.
 
-    A sealed Item is never passed back through ``start-item``. Its remote tip
-    becomes a child with invalidated evidence, Integration receives a separate
-    authorization record and the new Item tip alone acquires the Slot.
+    A sealed Item is never passed back through ``start-item``. It reopens on the
+    Integration that absorbed it: the new tip carries the Integration's tree, so
+    it contains every target the Integration contains, and keeps the sealed tip
+    as its first parent so the Item's history stays one line. Integration
+    receives a separate authorization record and the new Item tip alone
+    acquires the Slot. Evidence sealed on the previous tip no longer names the
+    product tip, so the Item must be reviewed and verified again before it can
+    push.
     """
     root = main_worktree(project_root.resolve())
     from delivery_compile import docs_root, split_note, frontmatter, content_hash
@@ -3191,11 +3203,15 @@ def reopen_item(project_root: Path, delivery_id: str, story_id: str,
     fence_message = commit_message(root, fence_oid)
     if trailer(fence_message, "Mode") != "open":
         raise RuntimeError("reopen-item requires an open Fence")
-    target_before = require_target_ancestry(root, remote, fence_message, integration_oid, item_oid)
+    if not is_ancestor(root, item_oid, integration_oid):
+        raise RuntimeError("reopen-item requires an Item its Integration has absorbed")
+    target_before = require_target_ancestry(root, remote, fence_message, integration_oid)
     if any(oid == item_oid for oid in remote_slot_oids(root, remote).values()):
         raise RuntimeError("reopen-item requires a sealed, slotless Item")
     relative_item = str((directory / "items" / story_key(story_id) / "item.md").relative_to(root))
-    props, body = split_remote_note(root, item_oid, relative_item, split_note)
+    # The Integration carries the sealed control file byte for byte; a refresh
+    # after integration may only have regenerated projections around it.
+    props, body = split_remote_note(root, integration_oid, relative_item, split_note)
     if props.get("status") != "integrated":
         raise RuntimeError("reopen-item requires an integrated Item")
     require_item_operation_bindings(root, props)
@@ -3205,11 +3221,12 @@ def reopen_item(project_root: Path, delivery_id: str, story_id: str,
     props["source_hash"] = content_hash(props, body)
     writer = epoch_token()
     item_candidate = commit_replacements(
-        root, item_oid, {relative_item: frontmatter(props, body)},
+        root, integration_oid, {relative_item: frontmatter(props, body)},
         f"Reopen {story_id} for {delivery_id}",
         {"Record": "item-reopen-v1", "Protocol": "1", "Delivery": delivery_id,
          "Story": story_id, "Previous-Tip": item_oid, "Integration-Base": integration_oid,
          "Writer-Epoch": writer},
+        parents=(item_oid, integration_oid),
     )
     integration_candidate = commit_tree(
         root, integration_oid, [], f"Authorize reopen of {story_id} for {delivery_id}",

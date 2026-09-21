@@ -47,6 +47,7 @@ projections are regenerated from the combined candidate and preserve existing
 approvals. Claimed-path overlaps and changed pinned semantic sources are
 rejected without ref mutation, pending explicit source or plan revision.
 Authored merge conflicts remain unresolved. No stale target grants a Slot or
-worktree.
+worktree. `reopen-item` reactivates a sealed Item on the Integration that
+absorbed it, so a target refreshed after integration never strands the Item.
 Failed checks, target drift, review changes and process loss become explicit
 resumable states. Release Management is intentionally not part of this flow.

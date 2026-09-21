@@ -298,6 +298,37 @@ def split_wikilink(value: str) -> tuple[str, str, str] | None:
     return target.strip(), anchor.strip(), alias.strip()
 
 
+def implements_findings(props: dict, story_rel: str, requirement_ref: str) -> list[str]:
+    """Require one typed link from a new Requirement-mode story to its Requirement.
+
+    `implements` is a typed relation like every other story link: a quoted
+    vault-absolute wikilink to the Requirement note. The vault law refuses a bare
+    identifier there, and the incorporation predicate reads the link target, so a
+    bare identifier could never close the Requirement it names.
+    """
+    links = values(props, "implements")
+    errors: list[str] = []
+    if len(links) != 1:
+        errors.append(f"{story_rel} must implement exactly one Requirement, {requirement_ref}")
+        return errors
+    parts = split_wikilink(links[0])
+    if parts is None:
+        errors.append(f"{story_rel} implements must be a quoted vault-absolute wikilink to {requirement_ref}")
+        return errors
+    target, _anchor, alias = parts
+    if alias != requirement_ref or not target.startswith("requirements/req-"):
+        errors.append(f"{story_rel} must implement exact current Requirement {requirement_ref}")
+    return errors
+
+
+def requirement_link(docs: Path, requirement_ref: str) -> str | None:
+    """Return the quoted-ready wikilink of the Requirement note carrying *requirement_ref*."""
+    for path in requirement_compile.requirement_paths(docs):
+        if requirement_compile.requirement_id(path) == requirement_ref:
+            return f"[[requirements/{path.stem}|{requirement_ref}]]"
+    return None
+
+
 def valid_target(target: str) -> bool:
     if (not target or target.startswith("/") or target.endswith(".md")
             or "\\" in target):
@@ -1453,8 +1484,7 @@ def collect(docs: Path, *, historical_inputs: bool = False) -> tuple[dict, list[
                     errors.append(f"{story_rel} manual planning must not declare implements")
                 if planning_mode == "requirement":
                     root_requirement = str(record["backlog"]["props"].get("requirement_ref", ""))
-                    if implements != [root_requirement]:
-                        errors.append(f"{story_rel} must implement exact current Requirement {root_requirement}")
+                    errors.extend(implements_findings(story_props, story_rel, root_requirement))
             elif planning_mode and (introduced <= 0 or not origin_mode):
                 # Historical records stay readable, but every new contract
                 # record identifies its intake without rewriting history.
@@ -2648,7 +2678,12 @@ def stub_story(args) -> int:
         print("backlog_compile: initialize or revise backlog with a planning_mode first", file=sys.stderr)
         return 2
     if planning_mode == "requirement":
-        implements = [str(backlog_props.get("requirement_ref", ""))]
+        requirement_ref = str(backlog_props.get("requirement_ref", ""))
+        link = requirement_link(docs, requirement_ref)
+        if link is None:
+            print(f"backlog_compile: Requirement {requirement_ref} was not found under requirements/", file=sys.stderr)
+            return 2
+        implements = [link]
     elif implements:
         print("backlog_compile: manual stories cannot implement a Requirement", file=sys.stderr)
         return 2

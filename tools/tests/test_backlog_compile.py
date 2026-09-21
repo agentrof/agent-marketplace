@@ -39,6 +39,51 @@ class BacklogCompilerTests(unittest.TestCase):
             result = self.run_cli("init", "--docs", Path(raw) / "docs", "--planning-mode", "requirement")
             self.assertNotEqual(result.returncode, 0)
 
+    def test_implements_findings_require_one_typed_link_to_the_current_requirement(self):
+        link = "[[requirements/req-002-tiered-verification-gates|REQ-002]]"
+        self.assertEqual(backlog_compile.implements_findings({"implements": [link]}, "s", "REQ-002"), [])
+        self.assertIn("quoted vault-absolute wikilink",
+                      backlog_compile.implements_findings({"implements": ["REQ-002"]}, "s", "REQ-002")[0])
+        self.assertIn("exact current Requirement REQ-002",
+                      backlog_compile.implements_findings(
+                          {"implements": ["[[requirements/req-003-other|REQ-003]]"]}, "s", "REQ-002")[0])
+        self.assertIn("exact current Requirement REQ-002",
+                      backlog_compile.implements_findings(
+                          {"implements": ["[[backlog/backlog|REQ-002]]"]}, "s", "REQ-002")[0])
+        self.assertIn("exactly one Requirement",
+                      backlog_compile.implements_findings({"implements": [link, link]}, "s", "REQ-002")[0])
+        self.assertIn("exactly one Requirement",
+                      backlog_compile.implements_findings({}, "s", "REQ-002")[0])
+
+    def test_stub_story_writes_the_requirement_wikilink_in_requirement_mode(self):
+        with tempfile.TemporaryDirectory() as raw:
+            docs = Path(raw) / "workspace" / "docs"
+            (docs / "backlog" / "epics" / "platform").mkdir(parents=True)
+            (docs / "requirements").mkdir()
+            (docs / "backlog" / "backlog.md").write_text(backlog_compile.front_matter({
+                "type": "backlog", "title": "Product Backlog", "status": "draft",
+                "planning_mode": "requirement", "requirement_ref": "REQ-002", "revision": 7,
+            }, "# Product Backlog\n"), encoding="utf-8")
+            args = SimpleNamespace(
+                docs=docs, epic="platform", slug="gate", id="ST-104", title="Gate",
+                scope="Scope.", work_kind="technical", criterion_ref=[], experience_ref=[],
+                evidence_ref=[], uses_design=[], constrained_by=[], implements=[],
+            )
+            with redirect_stdout(StringIO()), redirect_stderr(StringIO()):
+                self.assertEqual(backlog_compile.stub_story(args), 2)
+            self.assertFalse((docs / "backlog" / "epics" / "platform" / "stories" / "gate" / "story.md").exists())
+            (docs / "requirements" / "req-002-tiered-verification-gates.md").write_text(
+                backlog_compile.front_matter({
+                    "type": "requirement", "id": "REQ-002", "title": "Tiered verification gates",
+                    "status": "approved", "aliases": ["REQ-002"],
+                }, "# Tiered verification gates\n"), encoding="utf-8")
+            with redirect_stdout(StringIO()), redirect_stderr(StringIO()):
+                self.assertEqual(backlog_compile.stub_story(args), 0)
+            props, _body = backlog_compile.parse_front_matter(
+                docs / "backlog" / "epics" / "platform" / "stories" / "gate" / "story.md")
+            self.assertEqual(props["implements"], ["[[requirements/req-002-tiered-verification-gates|REQ-002]]"])
+            self.assertEqual(backlog_compile.implements_findings(props, "story.md", "REQ-002"), [])
+
     def test_changes_requested_status_tag_uses_kebab_case(self):
         props = {
             "status": "changes_requested",

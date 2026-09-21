@@ -462,6 +462,60 @@ class BacklogUpstreamApprovalTests(unittest.TestCase):
         errors = self.manual_binding_findings("sha256:" + "0" * 64)
         self.assertIn("backlog/backlog.md input binding: solution-design/landscape package hash is stale or does not match expected hash", errors)
 
+    def revise_solution(self):
+        """Open, change and re-approve the committed solution package; return (old, new) hashes."""
+        old = backlog_compile.parse_front_matter(self.landscape)[0]["package_hash"]
+        for command in ("begin-revision",):
+            with redirect_stdout(StringIO()), redirect_stderr(StringIO()):
+                self.assertEqual(landscape_check.main([command, "--tree", str(self.tree)]), 0)
+        decision = self.tree / "decisions" / "service-decision.md"
+        decision.write_text(decision.read_text(encoding="utf-8") + "\nRevised rationale.\n", encoding="utf-8")
+        for command in ("confirm-topology", "approve"):
+            with redirect_stdout(StringIO()), redirect_stderr(StringIO()):
+                self.assertEqual(landscape_check.main([command, "--tree", str(self.tree)]), 0)
+        project = self.docs.parents[1]
+        for args in (["add", "--", "workspace/docs/solution-design"],
+                     ["-c", "user.name=Test", "-c", "user.email=test@example.com",
+                      "-c", "commit.gpgsign=false", "commit", "--quiet", "-m", "Approve solution revision"]):
+            result = subprocess.run(["git", "-c", "core.autocrlf=false", *args],
+                                    cwd=project, text=True, capture_output=True, check=False)
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        new = backlog_compile.parse_front_matter(self.landscape)[0]["package_hash"]
+        self.assertNotEqual(old, new)
+        return old, new
+
+    def test_historical_binding_resolves_to_the_earlier_approved_receipt(self):
+        self.approved_solution()
+        old, new = self.revise_solution()
+        receipt, errors = stage_package.verify(
+            self.docs, "solution-design", "solution-design/landscape", old,
+            require_committed=True, allow_historical=True)
+        self.assertEqual(errors, [])
+        self.assertEqual((receipt["package_hash"], receipt["status"], receipt["current"],
+                          receipt["committed"], receipt["verification_profile"]),
+                         (old, "approved", False, True, "historical"))
+        current, errors = stage_package.verify(
+            self.docs, "solution-design", "solution-design/landscape", new,
+            require_committed=True, allow_historical=True)
+        self.assertEqual(errors, [])
+        self.assertTrue(current["current"])
+
+    def test_historical_binding_still_rejects_a_hash_that_was_never_approved(self):
+        self.approved_solution()
+        self.revise_solution()
+        for digest in ("sha256:" + "0" * 64, "sha256:" + "f" * 64):
+            _receipt, errors = stage_package.verify(
+                self.docs, "solution-design", "solution-design/landscape", digest,
+                require_committed=True, allow_historical=True)
+            self.assertIn("solution-design/landscape package hash is stale or does not match expected hash", errors)
+
+    def test_strict_binding_rejects_the_earlier_receipt_after_a_revision(self):
+        self.approved_solution()
+        old, _new = self.revise_solution()
+        self.assertIn(
+            "backlog/backlog.md input binding: solution-design/landscape package hash is stale or does not match expected hash",
+            self.manual_binding_findings(old))
+
     def test_legacy_note_approval_behavior_is_unchanged(self):
         self.write_note("solution-design/landscape.md", {
             "type": "landscape", "status": "approved", "package_status": "approved",

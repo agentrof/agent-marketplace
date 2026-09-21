@@ -372,6 +372,9 @@ def paths_are_committed(paths: list[Path]) -> bool:
         return False
 
 
+OID_HASH = re.compile(r"sha256:[0-9a-f]{64}")
+
+
 def receipt(stage: str, ref: str, result_type: str, package_hash: str,
             approved: bool, current: bool, path: Path, package_root: Path,
             verification_profile: str = "invalid") -> dict:
@@ -685,6 +688,45 @@ def historical_process_refs(
     return refs if len(refs) == len(set(refs)) else None
 
 
+def historical_package_candidate(current: dict, expected_hash: str) -> dict | None:
+    """Resolve one package receipt as it was approved at an earlier commit.
+
+    The current candidate names the receipt note; Git history answers whether
+    ``expected_hash`` was ever that note's approved package hash. The result is
+    an approved, non-current, committed receipt for the same reference.
+    """
+    note = Path(current["path"])
+    if not note.is_file() or not OID_HASH.fullmatch(expected_hash or ""):
+        return None
+    root = next((p for p in (note.parent, *note.parent.parents)
+                 if (p / ".git").exists()), None)
+    if root is None:
+        return None
+    relative = note.relative_to(root).as_posix()
+    listing = subprocess.run(
+        ["git", "log", "--format=%H", "-S", expected_hash, "--", relative],
+        cwd=root, text=True, capture_output=True, check=False,
+    )
+    if listing.returncode:
+        return None
+    for commit in listing.stdout.split():
+        shown = subprocess.run(["git", "show", f"{commit}:{relative}"], cwd=root,
+                               text=True, capture_output=True, check=False)
+        if shown.returncode:
+            continue
+        props, _line, error = parse_frontmatter(shown.stdout)
+        if error or props.get("package_hash") != expected_hash:
+            continue
+        if "approved" not in {props.get("package_status"), props.get("status")}:
+            continue
+        candidate = dict(current)
+        candidate.update({"package_hash": expected_hash, "status": "approved",
+                          "current": False, "committed": True,
+                          "verification_profile": "historical", "legacy": False})
+        return candidate
+    return None
+
+
 def historical_experience_candidate(docs: Path, ref: str) -> dict | None:
     """Resolve one immutable Experience receipt after it stops being current."""
     try:
@@ -913,6 +955,13 @@ def verify(docs: Path, stage: str, ref: str, expected_hash: str = "",
     if not matches:
         return None, [f"{stage} receipt must use its canonical result_ref, got {ref}"]
     item = matches[0]
+    if allow_historical and expected_hash and item["package_hash"] != expected_hash:
+        # A binding taken from an earlier approved package stays readable after
+        # that package was revised: the revision that will rebind it must be able
+        # to open, and the committed history is the only place that approval lives.
+        historical = historical_package_candidate(item, expected_hash)
+        if historical is not None:
+            item = historical
     errors = []
     if item["status"] != "approved" or (not item["current"] and not allow_historical):
         errors.append(f"{ref} is not an approved/current {stage} package")

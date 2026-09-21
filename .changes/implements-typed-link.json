@@ -1,0 +1,6 @@
+{
+  "summary": "A new Requirement-mode story implements its Requirement through one quoted vault-absolute wikilink, written by stub-story and required by the compiler, so the vault law, the compiler and the incorporation predicate agree.",
+  "components": {
+    "software-engineering-team": "patch"
+  }
+}

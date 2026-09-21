@@ -249,10 +249,9 @@ class ReleaseWorkflowContracts(unittest.TestCase):
         self.assertIn("tools.tests.test_experience_compile", text)
         self.assertIn("tools.tests.test_vault_hook", text)
 
-    def test_dependabot_tracks_github_actions(self):
-        text = (REPO / ".github/dependabot.yml").read_text(encoding="utf-8")
-        self.assertIn("package-ecosystem: github-actions", text)
-        self.assertIn("interval: weekly", text)
+    def test_dependabot_is_not_asked_for_action_bumps_the_gates_refuse(self):
+        # PINNED_ACTIONS and the changeset gate refuse every bump Dependabot can raise.
+        self.assertFalse((REPO / ".github/dependabot.yml").exists())
 
     def test_security_policy_uses_private_vulnerability_reporting(self):
         text = (REPO / "SECURITY.md").read_text(encoding="utf-8")

@@ -333,7 +333,7 @@ class SetupProjectTests(unittest.TestCase):
             )
             self.assertEqual(setup.returncode, 0, setup.stdout + setup.stderr)
             forbidden = (
-                project / ".agentrof/agent-marketplace/.runtime/cache.sqlite"
+                project / ".agentrof/agent-marketplace/.runtime/project.sqlite"
             )
             forbidden.write_text("not a database\n", encoding="utf-8")
 
@@ -344,7 +344,7 @@ class SetupProjectTests(unittest.TestCase):
             payload = json.loads(inspected.stdout)
             self.assertFalse(payload["ok"])
             self.assertTrue(any(
-                "cache.sqlite" in blocker for blocker in payload["blockers"]
+                "project.sqlite" in blocker for blocker in payload["blockers"]
             ))
 
     def test_setup_accepts_process_local_experience_prototype_files(self):
@@ -734,7 +734,7 @@ class SetupProjectTests(unittest.TestCase):
             self.assertEqual(setup.returncode, 0, setup.stdout + setup.stderr)
             database = (
                 project / ".agentrof" / "agent-marketplace" / ".runtime"
-                / "cache.sqlite"
+                / "project.sqlite"
             )
             database.write_bytes(b"not a database")
             checked = self.run_script(
@@ -744,6 +744,37 @@ class SetupProjectTests(unittest.TestCase):
             findings = json.loads(checked.stdout)["findings"]
             self.assertTrue(any("forbidden in runtime" in item
                                 for item in findings))
+
+    def test_setup_check_admits_disposable_tool_databases_in_runtime(self):
+        """Scratch is where the required cadence writes its tool output."""
+        with tempfile.TemporaryDirectory() as temporary:
+            project = Path(temporary)
+            subprocess.run(["git", "init", "-q", str(project)], check=True)
+            setup = self.run_script(SETUP, "--project-root", str(project))
+            self.assertEqual(setup.returncode, 0, setup.stdout + setup.stderr)
+            runtime = project / ".agentrof" / "agent-marketplace" / ".runtime"
+            for relative in ("tools/grype-db/6/vulnerability.db",
+                             "verification/mutation/connection-api/mutants.sqlite",
+                             "verification/mutation/connection-api/baseline.sqlite3"):
+                disposable = runtime / relative
+                disposable.parent.mkdir(parents=True, exist_ok=True)
+                disposable.write_bytes(b"disposable tool output")
+            checked = self.run_script(
+                CHECK, "check", "--project-root", str(project), "--json"
+            )
+            self.assertEqual(checked.returncode, 0, checked.stdout + checked.stderr)
+            self.assertEqual(json.loads(checked.stdout)["findings"], [])
+
+            for reserved in ("project.db", "backlog.sqlite", "backlog.json"):
+                condemned = runtime / reserved
+                condemned.write_bytes(b"canonical state in the wrong place")
+                rejected = self.run_script(
+                    CHECK, "check", "--project-root", str(project), "--json"
+                )
+                self.assertEqual(rejected.returncode, 1, reserved)
+                self.assertTrue(any("forbidden in runtime" in item
+                                    for item in json.loads(rejected.stdout)["findings"]), reserved)
+                condemned.unlink()
 
     def test_setup_check_rejects_state_next_to_the_runtime_directory(self):
         with tempfile.TemporaryDirectory() as temporary:

@@ -47,6 +47,10 @@ placeholder is allowed to reach a consuming repository.
    the short apply window because portable filesystems provide no conditional
    replace against a non-cooperating writer. Repeating apply with the same
    package and project must produce no operation.
+   Disposable tool databases, such as scanner caches and mutation results, are
+   permitted in that ignored scratch. Their file format does not make them
+   workflow truth. Canonical project and backlog state remains in tracked
+   workspace files; setup rejects their reserved runtime storage names.
    Use the active host runtime's exact absolute Python executable and the
    installed package script's absolute path. A bare Python command name,
    `/usr/bin/env` indirection or direct shebang invocation cannot receive

@@ -18,8 +18,14 @@ END = "# agent-marketplace:software-engineering-team:gitignore:end"
 TEAM = "software-engineering-team"
 WORKSPACE = "workspace"
 RUNTIME_PARTS = ("agent-marketplace", ".runtime")
-FORBIDDEN_RUNTIME_NAMES = {"project.json", "backlog.json"}
-FORBIDDEN_RUNTIME_SUFFIXES = {".db", ".sqlite", ".sqlite3"}
+# Canonical project and backlog state belongs in tracked workspace files, in any
+# format. Disposable tool output in ignored scratch, such as a scanner cache or a
+# mutation session, is not project truth and its storage format does not make it so.
+FORBIDDEN_RUNTIME_NAMES = {
+    f"{name}{suffix}"
+    for name in ("project", "backlog")
+    for suffix in (".json", ".db", ".sqlite", ".sqlite3")
+}
 
 
 def read(path: Path):
@@ -83,10 +89,9 @@ def runtime_findings(root: Path) -> list[str]:
         for path in sorted(runtime.rglob("*")):
             if not path.is_file():
                 continue
-            if path.name in FORBIDDEN_RUNTIME_NAMES \
-                    or path.suffix.casefold() in FORBIDDEN_RUNTIME_SUFFIXES:
+            if path.name.casefold() in FORBIDDEN_RUNTIME_NAMES:
                 findings.append(
-                    "database or canonical state is forbidden in runtime: "
+                    "canonical state is forbidden in runtime: "
                     + path.relative_to(root).as_posix()
                 )
     return findings

@@ -1,5 +1,5 @@
 {
-  "build_id": "snapshot.a1939e8cf96b7f8ccf37076cea8f2050a86e668c01023dd553915b69da82828d",
+  "build_id": "snapshot.c66b282da427bc344528ac5f4880814e95bb9acd5c95a2648a32001ca8b7b286",
   "component": "software-engineering-team",
   "delivery_protocol": {
     "read_max": 1,
@@ -69,7 +69,7 @@
     "scripts/project_instructions.py": "06d1f95f45364bfba9755b017b87a618da9c1076c66ee9835d0957ee6b0464f0",
     "scripts/requirement_compile.py": "f11df297d86f2cbffe16d9d2927de4dd709fd037b979a1d155ac4b1024107814",
     "scripts/requirement_route.py": "d71f32972262ce90e1266620ebb3512288a109e5e451904182a313c84f74977d",
-    "scripts/setup_check.py": "c6bc36741e6e9d357a4f9ed6b2e1094340233cd12a79542bea3799b7a19a5444",
+    "scripts/setup_check.py": "009b3c0351f20aa8199c5776eda41b8bbd9b89629c98ae3cc6303ab648235601",
     "scripts/setup_project.py": "a2f077040ff1da1f0f71231e273aa8118f1c642b6265444bc12f04b2174174d6",
     "scripts/stage_package.py": "d2c6fb7a0a1ac3d20e081354d13ae5a6f1a4ef943018ec8fc7e44260f0ca27d4",
     "scripts/team_guard.py": "b001c78b460ed623523738699882061f37ef73e616c7100af84d1f299d5b45c6",
@@ -164,7 +164,7 @@
     "skill-content/requirements-analysis/references/nfr-elicitation.md": "154730b8b546e3e0e538e6eb3dab21b1304d5a2657148352cda02e19e0c2ecb8",
     "skill-content/requirements-analysis/references/research-methods.md": "fa08b909a2863a7162a9199f21c234c3c58da40afb3cb31e5ad05a109fdc172f",
     "skill-content/requirements-analysis/references/space-standard.md": "cc8eab275082721a22c16d4d0d545e62faefdab626e7cdfefffc899f8abb28c8",
-    "skill-content/setup/SKILL.md": "e866f7b57c647f04615dec583882aff1c48c7d69f3ed8c8a3e1ec828a6c97d23",
+    "skill-content/setup/SKILL.md": "4c660eb1f0e0cd4568d12cdfb0ea7a647d9b89d1831d9746e13156ec939746ec",
     "skill-content/setup/references/ci-bootstrap.md": "dc83f62ab0a971cc025c1a2996e7eb5dd07087df81be79ea56382aed762f64d6",
     "skill-content/sketch/SKILL.md": "998f77390ae24f85ff6cff4b22fedf4d0cbaf7ae581a2a089261b1a52abed606",
     "skill-content/software-architecture/SKILL.md": "5944f0a6c14b43a82ae5c9e212b8b2db9ca5607522533c3e6cddfbc947158564",
@@ -281,6 +281,6 @@
   "schema_version": 3,
   "source_channel": "snapshot",
   "source_commit": "",
-  "source_ref": "snapshot.a1939e8cf96b7f8ccf37076cea8f2050a86e668c01023dd553915b69da82828d",
+  "source_ref": "snapshot.c66b282da427bc344528ac5f4880814e95bb9acd5c95a2648a32001ca8b7b286",
   "version": "0.3.2"
 }

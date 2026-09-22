@@ -1,0 +1,6 @@
+{
+  "summary": "The setup check admits disposable tool databases in the project-local runtime scratch, such as a vulnerability scanner cache or a mutation session, and still refuses canonical project and backlog state there in any format.",
+  "components": {
+    "software-engineering-team": "patch"
+  }
+}

@@ -55,3 +55,24 @@
 ## 0.3.1
 
 - Repair Architecture-to-Delivery handoff receipts, evidence authoring integrity, and generated Operation relation compatibility.
+
+## 0.3.2
+
+- Activate an Item on the currently published execution plan and its Operation contracts, not on the plan its Item ref was claimed from.
+- Let an Item stamp a second architecture delta over records it already sealed, and never seal a record when the stamp refuses.
+- Open a backlog revision after an upstream package was revised: a binding to an earlier approved package hash resolves through Git history as a historical receipt instead of failing as stale.
+- Re-issue an untouched Item claim against the refreshed Integration, so a claimed Item is not stranded behind the target and unable to activate.
+- Update the pinned github/codeql-action init and analyze steps to v4.38.0.
+- Read an exact revision ref in a decision record's supersedes as a revision lineage instead of a broken document supersede chain.
+- Stop asking Dependabot for GitHub Actions bumps that the SHA allowlist and the changeset gate refuse by construction; action pins are reviewed by hand.
+- Retry fixture tree removal in the Delivery coordinator tests while git finishes writes that outlive the call that started them.
+- A new Requirement-mode story implements its Requirement through one quoted vault-absolute wikilink, written by stub-story and required by the compiler, so the vault law, the compiler and the incorporation predicate agree.
+- Integrate an Item that deleted files the base carried or whose evidence drafts the Integration re-projected: trivial deletions resolve, the sealed Item's own records win, projections regenerate, and any remaining authored conflict is refused by name.
+- Gate the service-log audit on container restarts, post-readiness scheduler warnings, first-party errors and third-party steady-state errors instead of matching listed sentences.
+- Generated package manifests digest only the build inputs the file inventory cannot reveal (host adapters and package contracts); plugin content is pinned per file, so pull requests touching unrelated packaged files no longer conflict on one manifest line.
+- Let approved Operation contract revisions rebind open Delivery Items, and keep a terminal Item bound to the revision its evidence was produced against.
+- Remove the unset source hash when an Operation contract revision begins, instead of emitting it empty for the vault to reject.
+- Execution re-approval refreshes stale Story, Test Plan, backlog and Definition of Done pins and rebinds a sealed Item to the current Operation contracts only when the approval names it for reopen, so a hash drift no longer blocks reopen-item permanently.
+- Reopen a sealed Item on the Integration that absorbed it, so a target refreshed after integration no longer makes the Item unreopenable.
+- Release a terminal Item's path claims so a later Item in the same Delivery can claim those paths.
+- Verify Bash guard state when the command changes the working directory, instead of failing closed on a snapshot name no event wrote.

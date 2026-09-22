@@ -1,4 +1,0 @@
-{
-  "summary": "Retry fixture tree removal in the Delivery coordinator tests while git finishes writes that outlive the call that started them.",
-  "components": {}
-}

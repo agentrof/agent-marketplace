@@ -1,6 +1,0 @@
-{
-  "summary": "Activate an Item on the currently published execution plan and its Operation contracts, not on the plan its Item ref was claimed from.",
-  "components": {
-    "software-engineering-team": "patch"
-  }
-}

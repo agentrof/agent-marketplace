@@ -1,6 +1,0 @@
-{
-  "summary": "Open a backlog revision after an upstream package was revised: a binding to an earlier approved package hash resolves through Git history as a historical receipt instead of failing as stale.",
-  "components": {
-    "software-engineering-team": "patch"
-  }
-}

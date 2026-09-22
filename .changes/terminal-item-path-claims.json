@@ -1,6 +1,0 @@
-{
-  "summary": "Release a terminal Item's path claims so a later Item in the same Delivery can claim those paths.",
-  "components": {
-    "software-engineering-team": "patch"
-  }
-}

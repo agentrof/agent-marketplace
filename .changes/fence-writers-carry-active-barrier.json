@@ -1,0 +1,6 @@
+{
+  "summary": "Every Fence writer restates the barrier it inherited, so a plan-revision barrier survives the publication that is part of the revision and finish-plan-revision can release it, and a cancellation barrier is no longer cleared by a later Item verb.",
+  "components": {
+    "software-engineering-team": "patch"
+  }
+}

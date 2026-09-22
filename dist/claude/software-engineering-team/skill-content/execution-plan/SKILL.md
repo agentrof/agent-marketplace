@@ -26,6 +26,8 @@ authored truth.
 Before approval, reject cycles, duplicate stories, unordered path/contract
 overlaps, unknown role IDs and stale story/test/DoD hashes. `delivery_compile.py
 approve-execution` creates the draft review/verification records and stamps
-the plan hash offline. It does not create branches, worktrees, slots or
+the plan hash offline. Pass `--reopen <STORY>` for each integrated Item the
+revision prepares to reopen; only those sealed Items are rebound to the current
+Operation contracts. It does not create branches, worktrees, slots or
 remote refs. Publication is a later explicit `delivery_git.py
 publish-execution-plan` operation.

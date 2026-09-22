@@ -180,6 +180,61 @@ class DeliveryProtocolTests(unittest.TestCase):
         for flow in sorted((PLUGIN / "flows").glob("*.md")):
             self.assertIn(f"flows/{flow.name}", skill_text, flow.name)
 
+    @staticmethod
+    def split_dict(node: ast.Dict) -> tuple[dict, list]:
+        literal, spreads = {}, []
+        for key, value in zip(node.keys, node.values):
+            if key is None:
+                spreads.append(value)
+            elif isinstance(key, ast.Constant) and isinstance(key.value, str):
+                literal[key.value] = value
+        return literal, spreads
+
+    @classmethod
+    def states_barrier(cls, function: ast.FunctionDef, node: ast.Dict) -> bool:
+        literal, spreads = cls.split_dict(node)
+        if "Barrier-Kind" in literal:
+            return True
+        for spread in spreads:
+            if isinstance(spread, ast.Call) and getattr(spread.func, "id", "") == "carried_fence_barrier":
+                return True
+            if not isinstance(spread, ast.Name):
+                continue
+            for inner in ast.walk(function):
+                filled = None
+                if isinstance(inner, ast.Assign) and any(
+                        isinstance(target, ast.Name) and target.id == spread.id
+                        for target in inner.targets):
+                    filled = inner.value
+                elif (isinstance(inner, ast.Call) and isinstance(inner.func, ast.Attribute)
+                      and inner.func.attr == "update" and inner.args
+                      and isinstance(inner.func.value, ast.Name)
+                      and inner.func.value.id == spread.id):
+                    filled = inner.args[0]
+                if isinstance(filled, ast.Dict) and "Barrier-Kind" in cls.split_dict(filled)[0]:
+                    return True
+        return False
+
+    def test_every_fence_writer_states_the_barrier_it_inherits(self):
+        """A Fence child that omits the two trailers silently clears the barrier."""
+        tree = ast.parse((PLUGIN / "scripts/delivery_git.py").read_text(encoding="utf-8"))
+        silent = []
+        writers = 0
+        for function in ast.walk(tree):
+            if not isinstance(function, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                continue
+            for node in ast.walk(function):
+                if not isinstance(node, ast.Dict):
+                    continue
+                record = self.split_dict(node)[0].get("Record")
+                if not (isinstance(record, ast.Constant) and record.value == "project-fence-v2"):
+                    continue
+                writers += 1
+                if not self.states_barrier(function, node):
+                    silent.append(f"{function.name}:{node.lineno}")
+        self.assertEqual(silent, [])
+        self.assertGreaterEqual(writers, 15)
+
     def test_coordinator_exposes_closed_internal_verb_set(self):
         source = (PLUGIN / "scripts/delivery_git.py").read_text(encoding="utf-8")
         declared = set(re.findall(r'sub\.add_parser\("([^"]+)"\)', source))

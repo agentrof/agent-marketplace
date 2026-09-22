@@ -1541,6 +1541,29 @@ class DeliveryGitTests(unittest.TestCase):
             "def authenticate():\n    return 'v2'\n",
         )
 
+    def test_fence_writers_carry_an_active_plan_revision_barrier(self):
+        project, _docs, _directory, _item, _reserved = self.prepare_execution_with_draft_reserved_contracts(False)
+        fence_ref = delivery_git.canonical_refs("DLV-001")["fence"]
+
+        begun = delivery_git.begin_plan_revision(project, "DLV-001")
+        self.assertEqual(begun["barrier_kind"], "plan-revision")
+
+        for writer in (
+            lambda: delivery_git.publish_execution_plan(project, "DLV-001"),
+            lambda: delivery_git.claim_items(project, "DLV-001"),
+        ):
+            writer()
+            carried = delivery_git.commit_message(
+                project, delivery_git.remote_oid(project, "origin", fence_ref))
+            self.assertEqual(delivery_git.trailer(carried, "Barrier-Kind"), "plan-revision")
+            self.assertEqual(delivery_git.trailer(carried, "Barrier-Epoch"), begun["barrier_epoch"])
+
+        delivery_git.finish_plan_revision(project, "DLV-001")
+        released = delivery_git.commit_message(
+            project, delivery_git.remote_oid(project, "origin", fence_ref))
+        self.assertEqual(delivery_git.trailer(released, "Barrier-Kind"), "none")
+        self.assertEqual(delivery_git.trailer(released, "Barrier-Epoch"), "none")
+
     def test_sealed_item_reopens_after_reapproval_names_it_for_rebinding(self):
         project, docs, directory, item, _reserved = self.prepare_execution_with_draft_reserved_contracts(False)
         delivery_git.publish_execution_plan(project, "DLV-001")

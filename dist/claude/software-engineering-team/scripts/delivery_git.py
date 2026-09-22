@@ -1054,7 +1054,8 @@ def publish_delivery_review(project_root: Path, delivery_id: str,
         {"Record": "project-fence-v2", "Protocol": "2", "Mode": "open",
          "Epoch": trailer(fence_message, "Epoch") or epoch_token(),
          "Target": trailer(fence_message, "Target") or "none",
-         "Governance-Hash": trailer(fence_message, "Governance-Hash") or "none"},
+         "Governance-Hash": trailer(fence_message, "Governance-Hash") or "none",
+         **carried_fence_barrier(fence_message)},
     )
     atomic_push(root, remote, [(refs["fence"], fence_oid, fence_candidate),
                                (refs["integration"], integration_oid, candidate)])
@@ -1086,7 +1087,8 @@ def prepare_pr_creation(project_root: Path, delivery_id: str,
         root, fence_oid, [], "Fence project in open mode",
         {"Record": "project-fence-v2", "Protocol": "2", "Mode": "open",
          "Epoch": trailer(fence_message, "Epoch") or epoch_token(),
-         "Target": target, "Governance-Hash": trailer(fence_message, "Governance-Hash") or "none"},
+         "Target": target, "Governance-Hash": trailer(fence_message, "Governance-Hash") or "none",
+         **carried_fence_barrier(fence_message)},
     )
     atomic_push(root, remote, [(refs["fence"], fence_oid, fence_candidate),
                                (refs["integration"], integration_oid, intent)])
@@ -1130,7 +1132,8 @@ def record_pr_remote(project_root: Path, delivery_id: str, url: str,
         {"Record": "project-fence-v2", "Protocol": "2", "Mode": "open",
          "Epoch": trailer(fence_message, "Epoch") or epoch_token(),
          "Target": trailer(fence_message, "Target") or "none",
-         "Governance-Hash": trailer(fence_message, "Governance-Hash") or "none"},
+         "Governance-Hash": trailer(fence_message, "Governance-Hash") or "none",
+         **carried_fence_barrier(fence_message)},
     )
     atomic_push(root, remote, [(refs["fence"], fence_oid, fence_candidate),
                                (refs["integration"], integration_oid, candidate)])
@@ -1195,7 +1198,8 @@ def open_pr(project_root: Path, delivery_id: str, remote: str = "origin") -> dic
             {"Record": "project-fence-v2", "Protocol": "2", "Mode": "open",
              "Epoch": trailer(fence_message, "Epoch") or epoch_token(),
              "Target": trailer(fence_message, "Target") or "none",
-             "Governance-Hash": trailer(fence_message, "Governance-Hash") or "none"},
+             "Governance-Hash": trailer(fence_message, "Governance-Hash") or "none",
+             **carried_fence_barrier(fence_message)},
         )
         atomic_push(root, remote, [(refs["fence"], fence_oid, fence_candidate),
                                    (refs["integration"], integration_oid, adoption_intent)])
@@ -1375,7 +1379,8 @@ def invalidate_delivery_review(project_root: Path, delivery_id: str,
         {"Record": "project-fence-v2", "Protocol": "2", "Mode": "open",
          "Epoch": trailer(fence_message, "Epoch") or epoch_token(),
          "Target": trailer(fence_message, "Target") or "none",
-         "Governance-Hash": trailer(fence_message, "Governance-Hash") or "none"},
+         "Governance-Hash": trailer(fence_message, "Governance-Hash") or "none",
+         **carried_fence_barrier(fence_message)},
     )
     atomic_push(root, remote, [(refs["fence"], fence_oid, fence_candidate),
                                (refs["integration"], integration_oid, candidate)])
@@ -1714,7 +1719,8 @@ def cancel_delivery(project_root: Path, delivery_id: str, reason: str,
         root, fence_oid, [], "Fence project in open mode",
         {"Record": "project-fence-v2", "Protocol": "2", "Mode": "open",
          "Epoch": trailer(fence_message, "Epoch") or epoch_token(), "Target": target,
-         "Governance-Hash": trailer(fence_message, "Governance-Hash") or "none"},
+         "Governance-Hash": trailer(fence_message, "Governance-Hash") or "none",
+         **carried_fence_barrier(fence_message)},
     )
     updates = [(refs["fence"], fence_oid, fence_candidate),
                (refs["integration"], integration_oid, review)]
@@ -1763,7 +1769,8 @@ def reserve_delivery(project_root: Path, delivery_id: str, remote: str = "origin
         root, target_oid, [], f"Open Agentrof Fence for {delivery_id}",
         {"Record": "project-fence-v2", "Protocol": "2", "Mode": "open",
          "Epoch": epoch_token(), "Target": target_oid,
-         "Governance-Hash": governed_governance_hash(root)},
+         "Governance-Hash": governed_governance_hash(root),
+         "Barrier-Kind": "none", "Barrier-Epoch": "none"},
     )
     push_args = ["push", "--atomic", remote,
                  f"--force-with-lease={refs['fence']}:",
@@ -1841,7 +1848,8 @@ def publish_execution_plan(project_root: Path, delivery_id: str,
     fence_candidate = commit_tree(
         root, fence_oid, [], f"Publish execution plan for {delivery_id}",
         {"Record": "project-fence-v2", "Protocol": "2", "Mode": "open", "Epoch": epoch,
-         "Target": trailer(fence_message, "Target") or "none", "Governance-Hash": trailer(fence_message, "Governance-Hash") or "none"},
+         "Target": trailer(fence_message, "Target") or "none", "Governance-Hash": trailer(fence_message, "Governance-Hash") or "none",
+         **carried_fence_barrier(fence_message)},
     )
     atomic_push(root, remote, [(refs["fence"], fence_oid, fence_candidate),
                                (refs["integration"], integration_oid, integration_candidate)])
@@ -2072,7 +2080,8 @@ def refresh_target(project_root: Path, delivery_id: str,
         root, fence_oid, [], "Refresh project target",
         {"Record": "project-fence-v2", "Protocol": "2", "Mode": "open",
          "Epoch": trailer(fence_message, "Epoch") or epoch_token(), "Target": target,
-         "Governance-Hash": trailer(fence_message, "Governance-Hash") or "none"},
+         "Governance-Hash": trailer(fence_message, "Governance-Hash") or "none",
+         **carried_fence_barrier(fence_message)},
     )
     updates = [(refs["fence"], fence_oid, fence_candidate),
                (refs["integration"], integration_oid, final_candidate)]
@@ -2137,7 +2146,8 @@ def revise_unclaimed_scope(project_root: Path, delivery_id: str,
         root, fence_oid, [], "Fence project in open mode",
         {"Record": "project-fence-v2", "Protocol": "2", "Mode": "open",
          "Epoch": trailer(fence_message, "Epoch") or epoch_token(), "Target": target,
-         "Governance-Hash": trailer(fence_message, "Governance-Hash") or "none"},
+         "Governance-Hash": trailer(fence_message, "Governance-Hash") or "none",
+         **carried_fence_barrier(fence_message)},
     )
     atomic_push(root, remote, [(refs["fence"], fence_oid, fence_candidate),
                                (refs["integration"], integration_oid, candidate)])
@@ -2145,6 +2155,19 @@ def revise_unclaimed_scope(project_root: Path, delivery_id: str,
             "fence": fence_candidate, "previous_scope_hash": previous_scope,
             "scope_hash": local_props.get("scope_hash", "none"), "target": target,
             "refs": short_refs(delivery_id)}
+
+
+def carried_fence_barrier(fence_message: str) -> dict[str, str]:
+    """Carry an active barrier across a Fence writer that does not own it.
+
+    Only the barrier verbs install and release a barrier. Every other Fence
+    child must restate the two trailers it inherited, because a Fence commit
+    that omits them reads back as ``none`` and silently clears the barrier.
+    """
+    return {
+        "Barrier-Kind": trailer(fence_message, "Barrier-Kind") or "none",
+        "Barrier-Epoch": trailer(fence_message, "Barrier-Epoch") or "none",
+    }
 
 
 def _fence_context(root: Path, remote: str) -> tuple[str, str, dict[str, str]]:
@@ -2805,7 +2828,8 @@ def claim_items(project_root: Path, delivery_id: str, remote: str = "origin") ->
         {"Record": "project-fence-v2", "Protocol": "2", "Mode": "open",
          "Epoch": trailer(fence_message, "Epoch") or epoch_token(),
          "Target": trailer(fence_message, "Target") or "none",
-         "Governance-Hash": trailer(fence_message, "Governance-Hash") or "none"})),
+         "Governance-Hash": trailer(fence_message, "Governance-Hash") or "none",
+         **carried_fence_barrier(fence_message)})),
                (refs["integration"], integration_oid, marker)]
     stories = []
     for item_path in sorted(directory.glob("items/*/item.md")):
@@ -3092,7 +3116,8 @@ def start_item(project_root: Path, delivery_id: str, story_id: str,
         {"Record": "project-fence-v2", "Protocol": "2", "Mode": "open",
          "Epoch": trailer(fence_message, "Epoch") or epoch_token(),
          "Target": trailer(fence_message, "Target") or "none",
-         "Governance-Hash": trailer(fence_message, "Governance-Hash") or "none"},
+         "Governance-Hash": trailer(fence_message, "Governance-Hash") or "none",
+         **carried_fence_barrier(fence_message)},
     )
     receipt = create_writer_receipt(
         root, delivery_id, story_id, slot, writer, refs["item"], slot_ref,
@@ -3246,7 +3271,8 @@ def reopen_item(project_root: Path, delivery_id: str, story_id: str,
         {"Record": "project-fence-v2", "Protocol": "2", "Mode": "open",
          "Epoch": trailer(fence_message, "Epoch") or epoch_token(),
          "Target": trailer(fence_message, "Target") or "none",
-         "Governance-Hash": trailer(fence_message, "Governance-Hash") or "none"},
+         "Governance-Hash": trailer(fence_message, "Governance-Hash") or "none",
+         **carried_fence_barrier(fence_message)},
     )
     receipt = create_writer_receipt(
         root, delivery_id, story_id, slot, writer, refs["item"], slot_ref,
@@ -3303,7 +3329,8 @@ def pause_item(project_root: Path, delivery_id: str, story_id: str,
         {"Record": "project-fence-v2", "Protocol": "2", "Mode": "open",
          "Epoch": trailer(fence_message, "Epoch") or epoch_token(),
          "Target": trailer(fence_message, "Target") or "none",
-         "Governance-Hash": trailer(fence_message, "Governance-Hash") or "none"},
+         "Governance-Hash": trailer(fence_message, "Governance-Hash") or "none",
+         **carried_fence_barrier(fence_message)},
     )
     atomic_push(root, remote, [(refs["fence"], fence_oid, fence_candidate),
                                (refs["item"], item_oid, item_candidate),
@@ -3389,7 +3416,8 @@ def takeover_item(project_root: Path, delivery_id: str, story_id: str,
         {"Record": "project-fence-v2", "Protocol": "2", "Mode": "open",
          "Epoch": trailer(fence_message, "Epoch") or epoch_token(),
          "Target": trailer(fence_message, "Target") or "none",
-         "Governance-Hash": trailer(fence_message, "Governance-Hash") or "none"},
+         "Governance-Hash": trailer(fence_message, "Governance-Hash") or "none",
+         **carried_fence_barrier(fence_message)},
     )
     create_writer_receipt(
         root, delivery_id, story_id, slot, writer, refs["item"], slot_ref,

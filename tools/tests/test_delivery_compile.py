@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import contextlib
+import io
 import json
 import sys
 import tempfile
@@ -267,6 +269,90 @@ class DeliveryCompilerTests(unittest.TestCase):
         rebound, _ = delivery_compile.split_note(item)
         self.assertEqual(rebound["status"], "integrated")
         self.assertEqual(rebound["verification_contract_hash"], first)
+        _root, findings = delivery_compile.delivery_findings(self.docs, "DLV-001")
+        self.assertEqual(findings, [])
+
+    def test_reapproval_rebinds_a_sealed_item_only_when_named_for_reopen(self):
+        root, item, _plan_args, first, second = self.approved_execution_with_revised_contract()
+        props, body = delivery_compile.split_note(item)
+        props["status"] = "integrated"
+        delivery_compile.atomic_text(item, delivery_compile.frontmatter(props, body))
+        before, _ = delivery_compile.split_note(item)
+
+        outside = type("Args", (), {"docs": str(self.docs), "delivery": "DLV-001", "reopen": ["AUTH-02"]})
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output):
+            self.assertEqual(delivery_compile.approve_execution(outside), 1)
+        self.assertIn("reopen names a Story outside this Delivery: AUTH-02", output.getvalue())
+        unchanged, _ = delivery_compile.split_note(item)
+        self.assertEqual(unchanged["verification_contract_hash"], first)
+
+        named = type("Args", (), {"docs": str(self.docs), "delivery": "DLV-001", "reopen": ["AUTH-01"]})
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output):
+            self.assertEqual(delivery_compile.approve_execution(named), 0)
+        result = json.loads(output.getvalue())
+        self.assertEqual(result["rebound"], ["AUTH-01"])
+        self.assertEqual(result["refreshed_sources"], [])
+        rebound, _ = delivery_compile.split_note(item)
+        self.assertEqual(rebound["status"], "integrated")
+        self.assertEqual(rebound["verification_contract_hash"], second)
+        self.assertNotEqual(rebound["item_plan_hash"], before["item_plan_hash"])
+        plan_props, _ = delivery_compile.split_note(root / "execution-plan.md")
+        self.assertIn(f"AUTH-01:{rebound['item_plan_hash']}", plan_props["item_plan_hashes"])
+        _root, findings = delivery_compile.delivery_findings(self.docs, "DLV-001")
+        self.assertEqual(findings, [])
+
+    def test_reopen_flag_requires_an_integrated_item(self):
+        _root, item, _plan_args, first, _second = self.approved_execution_with_revised_contract()
+        named = type("Args", (), {"docs": str(self.docs), "delivery": "DLV-001", "reopen": ["AUTH-01"]})
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output):
+            self.assertEqual(delivery_compile.approve_execution(named), 1)
+        self.assertIn("reopen requires an integrated Item: AUTH-01", output.getvalue())
+        unchanged, _ = delivery_compile.split_note(item)
+        self.assertEqual(unchanged["verification_contract_hash"], first)
+
+    def test_reapproval_refreshes_stale_story_and_backlog_pins(self):
+        root, item, plan_args, first, _second = self.approved_execution_with_revised_contract()
+        props, body = delivery_compile.split_note(item)
+        props["status"] = "integrated"
+        delivery_compile.atomic_text(item, delivery_compile.frontmatter(props, body))
+
+        # A later approved backlog revision changes the Story the sealed Item was planned from.
+        story = self.docs / props["story_path"]
+        story_props, story_body = backlog_compile.parse_front_matter(story)
+        revised_body = story_body.replace(
+            "Preserve the approved API boundary and avoid delivery-state metadata.",
+            "Preserve the approved API boundary, cover the session scenario and avoid delivery-state metadata.")
+        self.assertNotEqual(revised_body, story_body)
+        story.write_text(backlog_compile.front_matter(story_props, revised_body), encoding="utf-8")
+        story_props["source_hash"] = backlog_compile.digest(story)
+        story.write_text(backlog_compile.front_matter(story_props, revised_body), encoding="utf-8")
+        record, errors = backlog_compile.collect(self.docs)
+        self.assertEqual(errors, [])
+        backlog = self.docs / "backlog" / "backlog.md"
+        backlog_props, backlog_body = backlog_compile.parse_front_matter(backlog)
+        backlog_props["package_hash"] = backlog_compile.package_digest(
+            self.docs, backlog_compile.package_paths(record, self.docs))
+        backlog.write_text(backlog_compile.front_matter(backlog_props, backlog_body), encoding="utf-8")
+        _root, stale = delivery_compile.delivery_findings(self.docs, "DLV-001")
+        self.assertTrue(any("story_source_hash is stale" in finding for finding in stale), stale)
+        self.assertIn("Delivery backlog_package_hash is stale against the approved backlog", stale)
+
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output):
+            self.assertEqual(delivery_compile.approve_execution(plan_args), 0)
+        result = json.loads(output.getvalue())
+        self.assertEqual(result["refreshed_sources"], ["AUTH-01"])
+        self.assertEqual(result["refreshed_delivery_pins"], ["backlog_package_hash"])
+        self.assertEqual(result["rebound"], [])
+        refreshed, _ = delivery_compile.split_note(item)
+        self.assertEqual(refreshed["status"], "integrated")
+        self.assertEqual(refreshed["story_source_hash"], story_props["source_hash"])
+        self.assertEqual(refreshed["verification_contract_hash"], first)
+        delivery_props, _ = delivery_compile.split_note(root / "delivery.md")
+        self.assertEqual(delivery_props["backlog_package_hash"], backlog_props["package_hash"])
         _root, findings = delivery_compile.delivery_findings(self.docs, "DLV-001")
         self.assertEqual(findings, [])
 

@@ -16,7 +16,12 @@ Every executable Item binds the current approved Verification Contract during
 approval. Set `runtime_required: true` only when the Item genuinely needs a
 live service environment; that Item then also binds the approved Environment
 Contract. A later hash drift blocks start, resume, reopen and takeover until a
-new execution plan is approved.
+new execution plan is approved. Re-approval refreshes every Item's Story and
+Test Plan pins and the Delivery's backlog and Definition of Done pins from the
+current approved sources. A sealed Item keeps the Operation bindings its
+evidence was produced against unless the approval names it with `--reopen`;
+that Item is rebound to the current contracts, stays integrated, and can then
+be reopened.
 
 Every Item also declares `architecture_impact: required|not_applicable`, its
 exact Solution component refs, requested architecture record kinds and a

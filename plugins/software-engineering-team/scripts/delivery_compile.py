@@ -352,12 +352,12 @@ def item_operation_findings(docs: Path, props: dict) -> list[str]:
     return sorted(set(errors))
 
 
-def delivery_source_findings(docs: Path, root: Path, delivery_props: dict) -> tuple[dict[str, dict], list[str]]:
-    """Prove that a nonterminal Delivery still consumes its approved inputs."""
+def delivery_source_snapshots(docs: Path, root: Path) -> tuple[list[tuple[Path, dict]], dict[str, dict], dict, dict, list[str]]:
+    """Resolve the approved Story, backlog and Definition of Done inputs one Delivery consumes."""
     item_paths = sorted(root.glob("items/*/item.md"))
     errors: list[str] = []
     if not item_paths:
-        return {}, ["Delivery must contain at least one Item"]
+        return [], {}, {}, {}, ["Delivery must contain at least one Item"]
     item_records: list[tuple[Path, dict]] = []
     for item_path in item_paths:
         try:
@@ -374,7 +374,7 @@ def delivery_source_findings(docs: Path, root: Path, delivery_props: dict) -> tu
     if len(story_ids) != len(set(story_ids)):
         errors.append("Delivery Item story_id values must be unique")
     if errors:
-        return {}, sorted(set(errors))
+        return [], {}, {}, {}, sorted(set(errors))
 
     sources, backlog_snapshot, source_errors = approved_backlog_sources(
         docs,
@@ -385,7 +385,26 @@ def delivery_source_findings(docs: Path, root: Path, delivery_props: dict) -> tu
     dod, dod_errors = approved_dod_source(docs)
     errors.extend(dod_errors)
     if errors:
-        return {}, sorted(set(errors))
+        return [], {}, {}, {}, sorted(set(errors))
+    return item_records, sources, backlog_snapshot, dod, []
+
+
+def item_source_pins(source: dict, story_id: str) -> dict:
+    """Return the compiler-owned pins one Item carries for its approved Story."""
+    pins = {key: source[key] for key in SOURCE_ITEM_FIELDS}
+    pins["depends_on"] = source["depends_on"]
+    pins["derives_from"] = [link(source["story_path"].removesuffix(".md"), story_id)]
+    return pins
+
+
+def delivery_source_findings(docs: Path, root: Path, delivery_props: dict, *,
+                             compare_pins: bool = True) -> tuple[dict[str, dict], list[str]]:
+    """Prove that a nonterminal Delivery still consumes its approved inputs."""
+    item_records, sources, backlog_snapshot, dod, errors = delivery_source_snapshots(docs, root)
+    if errors:
+        return {}, errors
+    if not compare_pins:
+        return sources, []
 
     if delivery_props.get("backlog_path") != backlog_snapshot["backlog_path"]:
         errors.append("Delivery backlog_path does not identify the canonical backlog")
@@ -405,7 +424,6 @@ def delivery_source_findings(docs: Path, root: Path, delivery_props: dict) -> tu
         if item_props.get("derives_from") != expected_source:
             errors.append(f"{item_path} derives_from must contain only {story_id}")
     return sources, sorted(set(errors))
-
 
 def link(path: str, label: str) -> str:
     return f"[[{path.removesuffix('.md')}|{label}]]"
@@ -595,7 +613,8 @@ def init_delivery(args) -> int:
 
 
 def delivery_findings(docs: Path, identifier: str, *,
-                      check_item_operation_bindings: bool = True) -> tuple[Path | None, list[str]]:
+                      check_item_operation_bindings: bool = True,
+                      compare_source_pins: bool = True) -> tuple[Path | None, list[str]]:
     root = find_delivery(docs, identifier) if identifier else None
     if root is None:
         return None, ["Delivery not found"]
@@ -629,7 +648,7 @@ def delivery_findings(docs: Path, identifier: str, *,
     # mutable Delivery phase must instead prove that its selected Story/Test
     # Plan and Definition of Done are still the exact approved source bytes.
     if props.get("status") not in {"merged", "cancelled"}:
-        _, source_errors = delivery_source_findings(docs, root, props)
+        _, source_errors = delivery_source_findings(docs, root, props, compare_pins=compare_source_pins)
         errors.extend(source_errors)
     if check_item_operation_bindings and props.get("status") in {"execution_approved", "active", "review", "pr_handoff", "awaiting_merge"}:
         for item_path in item_paths:
@@ -841,12 +860,26 @@ def execution_plan_findings(root: Path, sources: dict[str, dict], docs: Path) ->
     return sorted(set(errors))
 
 
+def reopen_findings(reopen: list[str], item_records: list[tuple[Path, dict]]) -> list[str]:
+    """Allow a sealed Item to be rebound only when this approval names it for reopen."""
+    statuses = {str(props["story_id"]): props.get("status") for _, props in item_records}
+    errors: list[str] = []
+    for story in reopen:
+        if story not in statuses:
+            errors.append(f"reopen names a Story outside this Delivery: {story}")
+        elif statuses[story] != "integrated":
+            errors.append(f"reopen requires an integrated Item: {story}")
+    return errors
+
+
 def approve_execution(args) -> int:
     docs = docs_root(args.docs)
-    # This verb writes the Item Operation bindings, so it cannot require them to
-    # already match. The contracts themselves are still proved approved and current
-    # by execution_plan_findings before anything is written.
-    root, findings = delivery_findings(docs, args.delivery, check_item_operation_bindings=False)
+    # This verb writes the Item Operation bindings and refreshes the approved source
+    # pins, so it cannot require either to already match. The contracts themselves are
+    # still proved approved and current by execution_plan_findings before anything is
+    # written, and the sources are re-resolved from the approved backlog below.
+    root, findings = delivery_findings(docs, args.delivery, check_item_operation_bindings=False,
+                                       compare_source_pins=False)
     if root is None:
         print(json.dumps({"ok": False, "errors": findings}, indent=2)); return 1
     path = root / "delivery.md"
@@ -858,10 +891,15 @@ def approve_execution(args) -> int:
     items = sorted(root.glob("items/*/item.md"))
     if not items:
         print(json.dumps({"ok": False, "errors": ["Execution Plan requires at least one Item"]}, indent=2)); return 1
-    sources, source_errors = delivery_source_findings(docs, root, props)
-    plan_errors = source_errors + execution_plan_findings(root, sources, docs)
+    item_records, sources, backlog_snapshot, dod, source_errors = delivery_source_snapshots(docs, root)
+    reopen = sorted(set(str(story) for story in (getattr(args, "reopen", None) or [])))
+    plan_errors = source_errors + reopen_findings(reopen, item_records)
+    if not plan_errors:
+        plan_errors = execution_plan_findings(root, sources, docs)
     if plan_errors:
         print(json.dumps({"ok": False, "errors": sorted(set(plan_errors))}, indent=2)); return 1
+    refreshed_sources: list[str] = []
+    rebound: list[str] = []
     item_ids = []
     item_graph: list[str] = []
     role_sequences: list[str] = []
@@ -875,13 +913,21 @@ def approve_execution(args) -> int:
         item_props, item_body = split_note(item_path)
         story = str(item_props["story_id"])
         item_ids.append(story)
+        pins = item_source_pins(sources[story], story)
+        if any(item_props.get(key) != value for key, value in pins.items()):
+            refreshed_sources.append(story)
+        item_props.update(pins)
         item_props["dependency_bindings"] = sorted(
             set(sources[story]["depends_on"]) & set(item_props["execution_after"])
         )
         item_props["waits_for_bindings"] = sorted(
             set(sources[story]["depends_on"]) - set(item_props["execution_after"])
         )
-        if item_props.get("status") not in TERMINAL_ITEM_STATUSES:
+        # A sealed Item keeps the binding its evidence was produced against unless this
+        # approval names it for reopen, which rebinds it to the current contracts.
+        if item_props.get("status") not in TERMINAL_ITEM_STATUSES or story in reopen:
+            if story in reopen:
+                rebound.append(story)
             item_props.update(verification_binding)
             if item_props.get("runtime_required"):
                 item_props.update(environment_binding)
@@ -940,12 +986,17 @@ def approve_execution(args) -> int:
     plan_props["approved_at_utc"] = utc_now()
     plan_props["source_hash"] = content_hash(plan_props, plan_body)
     atomic_text(plan_path, frontmatter(plan_props, plan_body))
+    delivery_pins = {**backlog_snapshot, **{key: dod[key] for key in DOD_SOURCE_FIELDS}}
+    refreshed_delivery_pins = sorted(key for key, value in delivery_pins.items() if props.get(key) != value)
+    props.update(delivery_pins)
     props["status"] = "execution_approved"
     props["plan_hash"] = plan_props["plan_hash"]
     props["source_hash"] = content_hash(props, body)
     props["tags"] = [tag for tag in props.get("tags", []) if not str(tag).startswith("status/")] + ["status/execution-approved"]
     atomic_text(path, frontmatter(props, body))
-    print(json.dumps({"ok": True, "id": props["id"], "plan_hash": props["plan_hash"], "items": item_ids}, indent=2)); return 0
+    print(json.dumps({"ok": True, "id": props["id"], "plan_hash": props["plan_hash"], "items": item_ids,
+                      "refreshed_sources": refreshed_sources, "refreshed_delivery_pins": refreshed_delivery_pins,
+                      "rebound": rebound}, indent=2)); return 0
 
 
 def status(args) -> int:
@@ -1154,6 +1205,9 @@ def main(argv=None) -> int:
     init = sub.add_parser("init"); init.add_argument("--id"); init.add_argument("--slug"); init.add_argument("--goal", required=True); init.add_argument("--outcome"); init.add_argument("--target-branch", default="main"); init.add_argument("--story", action="append"); init.set_defaults(func=init_delivery)
     for name, func in (("check", check_delivery), ("approve-scope", approve_scope), ("approve-execution", approve_execution), ("status", status)):
         cmd = sub.add_parser(name); cmd.add_argument("--delivery", required=True); cmd.set_defaults(func=func)
+    sub.choices["approve-execution"].add_argument(
+        "--reopen", action="append", default=[], metavar="STORY",
+        help="rebind this integrated Item to the current Operation contracts so that it can be reopened")
     sub.add_parser("render").set_defaults(func=render)
     transition = sub.add_parser("prepare-item-transition")
     transition.add_argument("--delivery", required=True); transition.add_argument("--story", required=True)

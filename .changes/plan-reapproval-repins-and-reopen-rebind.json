@@ -1,0 +1,6 @@
+{
+  "summary": "Execution re-approval refreshes stale Story, Test Plan, backlog and Definition of Done pins and rebinds a sealed Item to the current Operation contracts only when the approval names it for reopen, so a hash drift no longer blocks reopen-item permanently.",
+  "components": {
+    "software-engineering-team": "patch"
+  }
+}

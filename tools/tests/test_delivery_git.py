@@ -1541,6 +1541,60 @@ class DeliveryGitTests(unittest.TestCase):
             "def authenticate():\n    return 'v2'\n",
         )
 
+    def test_sealed_item_reopens_after_reapproval_names_it_for_rebinding(self):
+        project, docs, directory, item, _reserved = self.prepare_execution_with_draft_reserved_contracts(False)
+        delivery_git.publish_execution_plan(project, "DLV-001")
+        delivery_git.claim_items(project, "DLV-001")
+        active = delivery_git.start_item(project, "DLV-001", "AUTH-01")
+        self.commit_item_product_change(active["worktree"], "def authenticate():\n    return True\n")
+        self.assertEqual(self.approve_item_evidence(active["worktree"]), 0)
+        delivery_git.push_item(project, "DLV-001", "AUTH-01")
+        integrated = delivery_git.integrate_item(project, "DLV-001", "AUTH-01")
+        # The plan revision compiles the tracked package as the Integration sealed it.
+        for name in ("item.md", "code-review.md", "verification.md"):
+            relative = (directory / "items/auth-01" / name).relative_to(project).as_posix()
+            props, body = delivery_git.split_remote_note(project, integrated["integration"], relative, delivery_compile.split_note)
+            delivery_compile.atomic_text(project / relative, delivery_compile.frontmatter(props, body))
+        sealed, _body = delivery_compile.split_note(item)
+        self.assertEqual(sealed["status"], "integrated")
+        first = sealed["verification_contract_hash"]
+
+        kind = type("Args", (), {"docs": str(docs), "kind": "verification"})
+        self.assertEqual(operation_compile.revise(kind), 0)
+        contract = docs / "operation/verification-contract.md"
+        props, body = operation_compile.parse(contract)
+        operation_compile.atomic_text(contract, operation_compile.render(props, body + "\n\nA later approved revision.\n"))
+        self.assertEqual(operation_compile.approve(kind), 0)
+        second = operation_compile.parse(contract)[0]["source_hash"]
+        self.assertNotEqual(second, first)
+        with self.assertRaisesRegex(RuntimeError, "Operation Contract bindings are invalid"):
+            delivery_git.reopen_item(project, "DLV-001", "AUTH-01")
+
+        # Re-approval alone keeps the sealed binding, so the drift still blocks reopen.
+        args = type("Args", (), {"docs": str(docs), "delivery": "DLV-001"})
+        self.assertEqual(delivery_compile.approve_execution(args), 0)
+        self.assertEqual(delivery_compile.split_note(item)[0]["verification_contract_hash"], first)
+        delivery_git.publish_execution_plan(project, "DLV-001")
+        with self.assertRaisesRegex(RuntimeError, "Operation Contract bindings are invalid"):
+            delivery_git.reopen_item(project, "DLV-001", "AUTH-01")
+
+        named = type("Args", (), {"docs": str(docs), "delivery": "DLV-001", "reopen": ["AUTH-01"]})
+        self.assertEqual(delivery_compile.approve_execution(named), 0)
+        rebound, _body = delivery_compile.split_note(item)
+        self.assertEqual(rebound["status"], "integrated")
+        self.assertEqual(rebound["verification_contract_hash"], second)
+        published = delivery_git.publish_execution_plan(project, "DLV-001")
+        relative_item = item.relative_to(project).as_posix()
+        remote, _body = delivery_git.split_remote_note(project, published["integration"], relative_item, delivery_compile.split_note)
+        self.assertEqual(remote["status"], "integrated")
+        self.assertEqual(remote["verification_contract_hash"], second)
+
+        reopened = delivery_git.reopen_item(project, "DLV-001", "AUTH-01")
+        self.assertEqual(reopened["status"], "active")
+        current, _body = delivery_compile.split_note(Path(reopened["worktree"]) / relative_item)
+        self.assertEqual(current["verification_contract_hash"], second)
+        self.assertEqual(current["item_plan_hash"], rebound["item_plan_hash"])
+
     def test_activation_target_race_quiesces_before_writer_receipt_or_worktree(self):
         for action in ("start", "resume", "reopen", "takeover"):
             with self.subTest(action=action):

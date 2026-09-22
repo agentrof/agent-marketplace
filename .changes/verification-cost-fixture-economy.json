@@ -1,0 +1,6 @@
+{
+  "summary": "The containerized environment skill states that a scenario proves a rule rather than a size: shared image caches and registry stores are one-time host assets a suite never destroys or re-fetches, cold-path behavior gets a kilobyte-scale isolated fixture, and the review and QA checklists assert it.",
+  "components": {
+    "software-engineering-team": "patch"
+  }
+}

@@ -1,5 +1,5 @@
 {
-  "build_id": "snapshot.c66b282da427bc344528ac5f4880814e95bb9acd5c95a2648a32001ca8b7b286",
+  "build_id": "snapshot.362efa3d74eda7d3ac11a3e29e76ebba16a7dbb91444d4c146b514e8a7d0b4f4",
   "component": "software-engineering-team",
   "delivery_protocol": {
     "read_max": 1,
@@ -100,11 +100,11 @@
     "skill-content/demo/SKILL.md": "e9dbe06f3d0920bb63610694e59bfe8cd80e86c03e0d073153a7596eebc5df28",
     "skill-content/design-system/SKILL.md": "a28c38f193910fc375d811272bda2c04b82c86049a459f4da8e29f54f8859081",
     "skill-content/design-system/data/standalone-template.html": "13536cf36955facf8576d166d640ae13414f768720c1bed21263617426931b63",
-    "skill-content/docker-compose/SKILL.md": "7e5a961779d2a89822e15686b30c0b7b5427683f2268f4e59d09859c9e7c739d",
+    "skill-content/docker-compose/SKILL.md": "758e65bc4bf542ed5be998718708e381b8bc3af79162faefbbc5afb2b9a5424b",
     "skill-content/docker-compose/references/compose-patterns.md": "551c7bc29d1901bc6a6e1f881303d12bd107a3d0dadfd564aca27b2cee436c55",
     "skill-content/docker-compose/references/image-build.md": "0d6247c2604a71054ceb04093a0395784a477003054fac52f5e895ee71e0eaca",
-    "skill-content/docker-compose/references/qa-checklist.md": "0aca7d560e8a9beceb395a4f7562abf3c855e987641ade5355d87161b2357fcb",
-    "skill-content/docker-compose/references/review-checklist.md": "23bf5c586aee15e4df59129091cd7d3d906f5b90cc34d185547b5eb12d8c0738",
+    "skill-content/docker-compose/references/qa-checklist.md": "acb390d812b303bbdafff02a5826b7da64743333e16c4ff0a2cfa411cfc1656f",
+    "skill-content/docker-compose/references/review-checklist.md": "f511894d3d82cdfde197df18f1c791a1e520e680cd4818a3582c5a43318c738f",
     "skill-content/docker-compose/references/seed-scenarios.md": "695931bd10a84eae5652455e9ba798856b1d340d56de3de0409c2fc86556b106",
     "skill-content/execution-plan/SKILL.md": "91dd014071b9d34b6db0906eb064db659820659205474ddb6ba065e6f1a9690a",
     "skill-content/experience-design/SKILL.md": "53750e073da950641d9a4d036d9d8d3f718dd269ac1bdbf41c14cbba11327c94",
@@ -281,6 +281,6 @@
   "schema_version": 3,
   "source_channel": "snapshot",
   "source_commit": "",
-  "source_ref": "snapshot.c66b282da427bc344528ac5f4880814e95bb9acd5c95a2648a32001ca8b7b286",
+  "source_ref": "snapshot.362efa3d74eda7d3ac11a3e29e76ebba16a7dbb91444d4c146b514e8a7d0b4f4",
   "version": "0.3.2"
 }

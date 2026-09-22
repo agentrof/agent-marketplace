@@ -43,6 +43,12 @@ Checkbox assertions for reviewing environment-owned diffs (the workspace/environ
 - [ ] Domain content lives in application loaders, not under the environment prefix
 - [ ] Contract document updated: verb usage, scenario catalog, log-audit rule
 
+## Verification Cost
+
+- [ ] No scenario destroys, empties or re-fetches a shared expensive artifact (image cache, registry store, model or dataset snapshot)
+- [ ] Cold-path and destructive behavior is proven on a test-scoped fixture seeded with a locally built artifact of a few kilobytes, torn down when the scenario ends
+- [ ] Any deliberate publisher fetch is one named small pin, fetched once, with the bytes moved recorded
+
 ## Traceability
 
 - [ ] A change to the service or store set traces to an approved architecture delta

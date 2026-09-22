@@ -1,6 +1,0 @@
-{
-  "summary": "Gate the service-log audit on container restarts, post-readiness scheduler warnings, first-party errors and third-party steady-state errors instead of matching listed sentences.",
-  "components": {
-    "software-engineering-team": "patch"
-  }
-}

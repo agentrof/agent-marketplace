@@ -1,6 +1,0 @@
-{
-  "summary": "Integrate an Item that deleted files the base carried or whose evidence drafts the Integration re-projected: trivial deletions resolve, the sealed Item's own records win, projections regenerate, and any remaining authored conflict is refused by name.",
-  "components": {
-    "software-engineering-team": "patch"
-  }
-}

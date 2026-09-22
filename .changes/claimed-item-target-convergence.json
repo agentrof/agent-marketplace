@@ -1,6 +1,0 @@
-{
-  "summary": "Re-issue an untouched Item claim against the refreshed Integration, so a claimed Item is not stranded behind the target and unable to activate.",
-  "components": {
-    "software-engineering-team": "patch"
-  }
-}

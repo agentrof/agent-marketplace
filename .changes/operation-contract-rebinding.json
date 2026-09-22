@@ -1,6 +1,0 @@
-{
-  "summary": "Let approved Operation contract revisions rebind open Delivery Items, and keep a terminal Item bound to the revision its evidence was produced against.",
-  "components": {
-    "software-engineering-team": "patch"
-  }
-}

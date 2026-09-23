@@ -28,6 +28,7 @@ Environment Contract under `workspace/docs/operation/`.
 4. **Exact image tags, non-root, multi-stage:** never a floating tag; final stages run as a non-root user on minimal bases; dependency manifests are copied before source so the build cache survives source edits.
 5. **Teardown means everything:** the `down` verb removes containers, networks and data volumes. From-scratch verification starts with it.
 6. **Isolation by naming:** namespacing comes from the entry point (below), never from caller discipline.
+7. **Proof is not scale:** a scenario proves a rule, not a size. Never move gigabytes to establish behavior a kilobyte fixture establishes.
 
 ## The Environment Command
 
@@ -58,6 +59,27 @@ violates this, bring the environment up once for the whole mutation run, never
 per mutant. Environment cycles happen only at: authoring self-verification,
 developer smoke checks, the QA live protocol, the CI smoke job, and merge
 checkpoints.
+
+## Fixture Economy
+
+Expensive shared artifacts are one-time host assets: the local image cache, a
+registry store, downloaded models, dataset snapshots. The suite never destroys,
+empties or re-fetches them, and a run on an already-warm host moves zero bytes
+from publishers.
+
+Cold-path behavior gets its own fixture instead: an empty cache, a first pull,
+the from-publisher branch of a report, retention and garbage collection. Give
+that scenario a test-scoped volume and, where it needs one, its own service
+instance on its own port, seed it with a synthetic artifact of a few kilobytes
+built locally, and tear both down when the scenario ends. An image with one
+empty layer proves manifest, digest, tag and blob behavior exactly as a large
+publisher image does.
+
+Where a scenario genuinely must observe a real publisher fetch, it uses exactly
+one small declared pin, once, and the record names which pin and the bytes it
+moved. A destructive verb is proven against the isolated fixture; the shared
+artifact appears only in assertions that preserve it, such as a reset naming it
+as preserved.
 
 ## Seed Scenarios
 

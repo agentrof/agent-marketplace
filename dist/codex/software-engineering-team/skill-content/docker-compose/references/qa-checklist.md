@@ -23,6 +23,11 @@ Assertions for verifying a story with environment impact. Run against the approv
 - [ ] Every boot-time third-party error line is dispositioned in the verification record with its bounded cause; warning-level lines are counted per service, not gated
 - [ ] No credential, token or secret appears anywhere in the log output
 
+## Verification Cost
+
+- [ ] A full suite run on an already-warm host moves zero bytes from publishers, or exactly the one small pin the record names
+- [ ] The shared cache or store the environment depends on survives the whole suite, and the run leaves no test-scoped fixture behind
+
 ## Teardown
 
 - [ ] `down` leaves no containers, networks or volumes carrying the project name

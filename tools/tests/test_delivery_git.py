@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import ast
 import sys
 import json
 import hashlib
@@ -22,6 +23,21 @@ import operation_compile  # noqa: E402
 import architecture_compile  # noqa: E402
 import vault_check  # noqa: E402
 from backlog_fixture import make_approved_backlog  # noqa: E402
+
+
+
+def init_repository(path: Path, bare: bool = False, initial_branch: str = "main") -> None:
+    """Create a fixture repository with automatic maintenance already disabled.
+
+    An auto-gc that a commit or a push starts outlives the command that started
+    it and keeps writing into the tree the test is about to remove, so the
+    removal fails on a directory that refills while it is being emptied.
+    """
+    command = ["git", "init", "-q"]
+    command += ["--bare", str(path)] if bare else ["-b", initial_branch, str(path)]
+    subprocess.run(command, check=True)
+    git_dir = path if bare else path / ".git"
+    subprocess.run(["git", "--git-dir", str(git_dir), "config", "gc.auto", "0"], check=True)
 
 
 def remove_temporary(temporary: tempfile.TemporaryDirectory, attempts: int = 10) -> None:
@@ -96,8 +112,7 @@ class DeliveryGitTests(unittest.TestCase):
     def make_project(self):
         temporary = tempfile.TemporaryDirectory()
         project = Path(temporary.name)
-        subprocess.run(["git", "init", "-q", "-b", "main", str(project)], check=True)
-        subprocess.run(["git", "-C", str(project), "config", "gc.auto", "0"], check=True)
+        init_repository(project)
         subprocess.run(["git", "-C", str(project), "config", "user.email", "test@example.com"], check=True)
         subprocess.run(["git", "-C", str(project), "config", "user.name", "Test"], check=True)
         (project / "workspace" / "docs").mkdir(parents=True)
@@ -111,8 +126,7 @@ class DeliveryGitTests(unittest.TestCase):
         subprocess.run(["git", "-C", str(project), "add", "."], check=True)
         subprocess.run(["git", "-C", str(project), "commit", "-qm", "init"], check=True)
         remote = project / "remote.git"
-        subprocess.run(["git", "init", "-q", "--bare", str(remote)], check=True)
-        subprocess.run(["git", "--git-dir", str(remote), "config", "gc.auto", "0"], check=True)
+        init_repository(remote, bare=True)
         subprocess.run(["git", "-C", str(project), "remote", "add", "origin", str(remote)], check=True)
         subprocess.run(["git", "-C", str(project), "push", "-q", "-u", "origin", "main"], check=True)
         subprocess.run(["git", "--git-dir", str(remote), "symbolic-ref", "HEAD", "refs/heads/main"], check=True)
@@ -132,6 +146,24 @@ class DeliveryGitTests(unittest.TestCase):
         ).stdout.strip()
         self.assertEqual(local_auto_gc, "0")
         self.assertEqual(remote_auto_gc, "0")
+
+    def test_every_fixture_repository_is_created_through_the_guarded_helper(self):
+        """A repository initialised around the helper brings automatic maintenance back."""
+        module = ast.parse(Path(__file__).read_text(encoding="utf-8"))
+        direct = []
+        for node in ast.walk(module):
+            if not isinstance(node, ast.Call) or not isinstance(node.func, ast.Attribute):
+                continue
+            if node.func.attr != "run" or not node.args:
+                continue
+            command = node.args[0]
+            if not isinstance(command, ast.List) or len(command.elts) < 2:
+                continue
+            head = [element.value for element in command.elts[:2]
+                    if isinstance(element, ast.Constant)]
+            if head == ["git", "init"]:
+                direct.append(node.lineno)
+        self.assertEqual(direct, [], "initialise fixture repositories with init_repository: lines " + str(direct))
 
     def prepare_pr_intent(self):
         """Build one real remote Delivery through its durable PR intent."""
@@ -493,7 +525,7 @@ class DeliveryGitTests(unittest.TestCase):
     def test_active_delivery_cancellation_releases_slot_and_publishes_terminal_item(self):
         with tempfile.TemporaryDirectory() as temporary:
             project = Path(temporary)
-            subprocess.run(["git", "init", "-q", "-b", "main", str(project)], check=True)
+            init_repository(project)
             subprocess.run(["git", "-C", str(project), "config", "user.email", "test@example.com"], check=True)
             subprocess.run(["git", "-C", str(project), "config", "user.name", "Test"], check=True)
             docs = project / "workspace" / "docs"; (docs / "maps").mkdir(parents=True)
@@ -502,7 +534,7 @@ class DeliveryGitTests(unittest.TestCase):
             make_approved_backlog(docs)
             subprocess.run(["git", "-C", str(project), "add", "."], check=True)
             subprocess.run(["git", "-C", str(project), "commit", "-qm", "init"], check=True)
-            remote = project / "remote.git"; subprocess.run(["git", "init", "-q", "--bare", str(remote)], check=True)
+            remote = project / "remote.git"; init_repository(remote, bare=True)
             subprocess.run(["git", "-C", str(project), "remote", "add", "origin", str(remote)], check=True)
             subprocess.run(["git", "-C", str(project), "push", "-q", "-u", "origin", "main"], check=True)
             dod = type("Args", (), {"docs": str(docs), "title": "Project", "file": None})
@@ -535,7 +567,7 @@ class DeliveryGitTests(unittest.TestCase):
     def test_ref_free_reservation_pushes_fence_and_integration_atomically(self):
         with tempfile.TemporaryDirectory() as temporary:
             project = Path(temporary)
-            subprocess.run(["git", "init", "-q", "-b", "main", str(project)], check=True)
+            init_repository(project)
             subprocess.run(["git", "-C", str(project), "config", "user.email", "test@example.com"], check=True)
             subprocess.run(["git", "-C", str(project), "config", "user.name", "Test"], check=True)
             docs = project / "workspace" / "docs"
@@ -546,7 +578,7 @@ class DeliveryGitTests(unittest.TestCase):
             subprocess.run(["git", "-C", str(project), "add", "."], check=True)
             subprocess.run(["git", "-C", str(project), "commit", "-qm", "init"], check=True)
             remote = project / "remote.git"
-            subprocess.run(["git", "init", "-q", "--bare", str(remote)], check=True)
+            init_repository(remote, bare=True)
             subprocess.run(["git", "-C", str(project), "remote", "add", "origin", str(remote)], check=True)
             subprocess.run(["git", "-C", str(project), "push", "-q", "-u", "origin", "main"], check=True)
             args = type("Args", (), {"docs": str(docs), "title": "Project", "file": None})

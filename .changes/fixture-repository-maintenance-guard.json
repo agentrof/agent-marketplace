@@ -1,0 +1,4 @@
+{
+  "summary": "Delivery-Git fixture repositories are created with automatic git maintenance disabled, so an auto-gc that outlives the command that started it can no longer refill a temporary tree while a test removes it.",
+  "components": {}
+}

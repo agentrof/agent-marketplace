@@ -276,7 +276,11 @@ def registry(root: Path) -> tuple[dict, list[str]]:
             snapshot = root / "_ledger" / "records" / record_id / f"r{revision}.json"
             try:
                 saved = json.loads(snapshot.read_text(encoding="utf-8"))
-                if saved.get("source_hash") != source_hash(path) or saved.get("content") != path.read_text(encoding="utf-8"):
+                # The inverse-relation block is a renderer-owned projection that every
+                # revision of a linking record relabels, so it is not sealed content.
+                content = saved.get("content")
+                if (saved.get("source_hash") != source_hash(path) or not isinstance(content, str)
+                        or without_generated_relations(content) != without_generated_relations(path.read_text(encoding="utf-8"))):
                     findings.append(f"{path.relative_to(root)} sealed revision differs from its ledger snapshot")
             except (OSError, json.JSONDecodeError):
                 findings.append(f"{path.relative_to(root)} sealed revision lacks an immutable ledger snapshot")

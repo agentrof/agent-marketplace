@@ -31,6 +31,12 @@ product commit that edits Delivery control files, except the current required
 Architecture Item's compiler-stamped delta hash and refreshed source hash.
 That exception preserves every other Item byte and control path, and requires
 the exact committed, sealed delta to remain within approved architecture claims.
+An Item whose writer converged it on a refreshed Integration may also carry
+that Integration commit's Delivery controls byte for byte and record the commit
+as its `integration_base_commit`. The commit must lie on the Integration's own
+line after the Item's previous base and be contained in the product tip, and
+the Item record keeps the commit's plan-owned fields with only its own status,
+stamp and base.
 `integrate-item` reads the
 evidence from the remote Item ref and requires that its exact direct parent is
 the reviewed and verified product/test tip.

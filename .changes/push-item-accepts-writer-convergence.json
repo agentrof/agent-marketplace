@@ -1,0 +1,6 @@
+{
+  "summary": "An active Item whose writer took a refreshed Integration can publish its evidence again: push-item accepts that Integration's Delivery controls and the Item's advanced integration base, and still refuses every other control change.",
+  "components": {
+    "software-engineering-team": "patch"
+  }
+}

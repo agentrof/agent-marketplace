@@ -1,0 +1,6 @@
+{
+  "summary": "A sealed System Architecture record no longer needs a new revision when only its generated inverse-relation block changes, as it does whenever a record linking to it is revised, and any change to its authored content is still refused.",
+  "components": {
+    "software-engineering-team": "patch"
+  }
+}

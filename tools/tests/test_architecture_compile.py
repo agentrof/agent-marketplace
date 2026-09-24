@@ -57,6 +57,10 @@ class ArchitectureCompilerTests(unittest.TestCase):
         delivery.mkdir(parents=True)
         (delivery / "item.md").write_text("---\ntype: delivery-item\nstory_id: AUTH-01\nstatus: active\n---\n# Item\n", encoding="utf-8")
 
+    def blank_lines_under_frontmatter(self, path):
+        body = path.read_text(encoding="utf-8").split("\n---\n", 1)[1]
+        return len(body) - len(body.lstrip("\n"))
+
     def test_architecture_is_materialized_and_stamped_only_for_active_item(self):
         with tempfile.TemporaryDirectory() as raw:
             docs = Path(raw) / "workspace/docs"
@@ -87,6 +91,53 @@ class ArchitectureCompilerTests(unittest.TestCase):
             self.assertIn("revision_state: sealed", component.read_text(encoding="utf-8"))
             root_record = docs / "system-architecture/architecture.md"
             self.assertIn("revision: 1", root_record.read_text(encoding="utf-8"))
+
+    def test_revision_cycles_keep_one_blank_line_under_the_frontmatter(self):
+        with tempfile.TemporaryDirectory() as raw:
+            docs = Path(raw) / "workspace/docs"
+            self.prepare(docs)
+            self.run_cli("init-root", "--docs", docs, "--item-ref", "AUTH-01")
+            root = docs / "system-architecture/architecture.md"
+            self.run_cli("stamp-item", "--docs", docs, "--item-ref", "AUTH-01")
+            self.assertEqual(self.blank_lines_under_frontmatter(root), 1)
+            for revision in range(1, 4):
+                self.run_cli("begin-revision", "--docs", docs,
+                             "--ref", f"ARC:ROOT:HUB-ROOT@r{revision}", "--item-ref", "AUTH-01")
+                self.assertEqual(self.blank_lines_under_frontmatter(root), 1)
+                self.run_cli("stamp-item", "--docs", docs, "--item-ref", "AUTH-01")
+                self.assertEqual(self.blank_lines_under_frontmatter(root), 1)
+            self.run_cli("retire", "--docs", docs, "--ref", "ARC:ROOT:HUB-ROOT@r4", "--item-ref", "AUTH-01")
+            self.assertEqual(self.blank_lines_under_frontmatter(root), 1)
+            self.run_cli("stamp-item", "--docs", docs, "--item-ref", "AUTH-01")
+            self.assertEqual(self.blank_lines_under_frontmatter(root), 1)
+            self.run_cli("check", "--docs", docs)
+
+    def test_next_revision_collapses_blank_lines_a_sealed_record_accumulated(self):
+        sys.path.insert(0, str(COMPILER.parent))
+        import architecture_compile
+        with tempfile.TemporaryDirectory() as raw:
+            docs = Path(raw) / "workspace/docs"
+            self.prepare(docs)
+            self.run_cli("init-root", "--docs", docs, "--item-ref", "AUTH-01")
+            self.run_cli("stamp-item", "--docs", docs, "--item-ref", "AUTH-01")
+            root = docs / "system-architecture/architecture.md"
+            snapshot = docs / "system-architecture/_ledger/records/HUB-ROOT/r1.json"
+            # A record and snapshot sealed while every rewrite added a blank line.
+            header, body = root.read_text(encoding="utf-8").split("\n---\n", 1)
+            root.write_text(header + "\n---\n" + "\n" * 5 + body.lstrip("\n"), encoding="utf-8")
+            saved = json.loads(snapshot.read_text(encoding="utf-8"))
+            saved.update(content=root.read_text(encoding="utf-8"),
+                         source_hash=architecture_compile.source_hash(root))
+            snapshot.write_text(json.dumps(saved, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+            self.run_cli("check", "--docs", docs)
+            sealed = snapshot.read_bytes()
+            self.run_cli("begin-revision", "--docs", docs,
+                         "--ref", "ARC:ROOT:HUB-ROOT@r1", "--item-ref", "AUTH-01")
+            self.assertEqual(self.blank_lines_under_frontmatter(root), 1)
+            self.run_cli("stamp-item", "--docs", docs, "--item-ref", "AUTH-01")
+            self.assertEqual(self.blank_lines_under_frontmatter(root), 1)
+            self.assertEqual(snapshot.read_bytes(), sealed)
+            self.run_cli("check", "--docs", docs)
 
     def test_architecture_rejects_non_active_item(self):
         with tempfile.TemporaryDirectory() as raw:

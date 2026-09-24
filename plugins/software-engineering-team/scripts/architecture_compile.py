@@ -90,7 +90,9 @@ def rewrite(path: Path, updates: dict, remove: set[str] = set()) -> None:
     for key in remove:
         props.pop(key, None)
     props.update(updates)
-    body = "\n".join(text.splitlines()[body_start - 1:])
+    # The body starts on the separator line frontmatter() emits again, so strip
+    # every leading blank line to keep exactly one separator across rewrites.
+    body = "\n".join(text.splitlines()[body_start - 1:]).lstrip("\n")
     atomic(path, frontmatter(props, body))
 
 

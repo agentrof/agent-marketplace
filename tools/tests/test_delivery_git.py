@@ -1085,6 +1085,113 @@ class DeliveryGitTests(unittest.TestCase):
                     delivery_git.push_item(project, "DLV-001", "AUTH-01")
                 self.assertEqual(delivery_git.run_git(project, "ls-remote", "origin"), baseline)
 
+    def republish_integration_plan(self, project, worktree, item):
+        """Republish the active Item's plan on the Integration, as a plan revision does."""
+        integration_ref = "refs/heads/agentrof/deliveries/dlv-001"
+        package = item.parents[2]
+        relative = {name: path.relative_to(worktree).as_posix() for name, path in (
+            ("plan", package / "execution-plan.md"), ("scope", package / "delivery.md"), ("item", item))}
+        base = delivery_git.remote_oid(project, "origin", integration_ref)
+        for name, path in relative.items():
+            props, body = delivery_git.split_remote_note(project, base, path, delivery_compile.split_note)
+            body += "\n\nRepublished for the revised plan.\n"
+            props["source_hash"] = delivery_compile.content_hash(props, body)
+            (project / path).write_text(delivery_compile.frontmatter(props, body), encoding="utf-8")
+        republished = delivery_git.commit_tree(project, base, list(relative.values()), "Publish execution plan", {},
+                                               delivery_projections=True)
+        delivery_git.atomic_push(project, "origin", [(integration_ref, base, republished)])
+        return republished, relative
+
+    def converge_on_integration(self, worktree, item, integration, relative, *, merge=True, base=None):
+        """Take the Integration into the Item as its writer does: its controls, its plan, a new base."""
+        mine, _ = delivery_compile.split_note(item)
+        if merge:
+            subprocess.run(["git", "-C", str(worktree), "merge", "-q", "--no-ff", "--no-commit", integration],
+                           capture_output=True, check=False)
+        for name in ("plan", "scope"):
+            (worktree / relative[name]).write_bytes(subprocess.run(
+                ["git", "-C", str(worktree), "show", f"{integration}:{relative[name]}"],
+                check=True, capture_output=True).stdout)
+        published, body = delivery_git.split_remote_note(worktree, integration, relative["item"], delivery_compile.split_note)
+        converged = dict(published)
+        for key in ("status", "tags", "architecture_delta_hash"):
+            converged[key] = mine[key]
+        converged["integration_base_commit"] = base or integration
+        converged["source_hash"] = delivery_compile.content_hash(converged, body)
+        item.write_text(delivery_compile.frontmatter(converged, body), encoding="utf-8")
+        delivery_git.run_git(worktree, "add", "-A", "workspace/docs")
+        delivery_git.run_git(worktree, "commit", "-qm", "Take the republished Integration")
+        return delivery_git.run_git(worktree, "rev-parse", "HEAD")
+
+    def test_push_accepts_an_item_converged_on_its_republished_integration(self):
+        """A target refresh leaves an Item that carries work to its writer. The
+        writer takes the Integration, its republished plan and the Item's new base;
+        publication accepts exactly that and integration seals it."""
+        project, worktree, item, active = self.prepare_stamped_architecture_item()
+        integration, relative = self.republish_integration_plan(project, worktree, item)
+        product = self.converge_on_integration(worktree, item, integration, relative)
+        self.assertEqual(self.approve_item_evidence(str(worktree)), 0)
+        pushed = delivery_git.push_item(project, "DLV-001", "AUTH-01")
+        self.assertEqual(pushed["product_tip"], product)
+        integrated = delivery_git.integrate_item(project, "DLV-001", "AUTH-01")
+        for name in ("plan", "scope"):
+            _props, body = delivery_git.split_remote_note(project, integrated["integration"], relative[name],
+                                                          delivery_compile.split_note)
+            self.assertIn("Republished for the revised plan.", body)
+        props, body = delivery_git.split_remote_note(project, integrated["integration"], relative["item"],
+                                                     delivery_compile.split_note)
+        self.assertEqual(props["status"], "integrated")
+        self.assertIn("Republished for the revised plan.", body)
+        self.assertEqual(props["source_hash"], delivery_compile.content_hash(props, body))
+
+    def test_push_refuses_what_a_converged_item_does_not_carry(self):
+        project, worktree, item, active = self.prepare_stamped_architecture_item()
+        clean = delivery_git.run_git(worktree, "rev-parse", "HEAD")
+        integration, relative = self.republish_integration_plan(project, worktree, item)
+        baseline = delivery_git.run_git(project, "ls-remote", "origin")
+
+        def edit_note(path, key=None, value=None):
+            props, body = delivery_compile.split_note(path)
+            if key:
+                props[key] = value
+            else:
+                body += "\nUnapproved change.\n"
+            props["source_hash"] = delivery_compile.content_hash(props, body)
+            path.write_text(delivery_compile.frontmatter(props, body), encoding="utf-8")
+            delivery_git.run_git(worktree, "commit", "-qam", "Change a control after converging")
+
+        beyond = "beyond its Architecture stamp and its converged Integration"
+        base_rule = "integration base only forward"
+        variants = {
+            "plan_beyond_integration": (lambda: edit_note(worktree / relative["plan"]), "may not edit Delivery control"),
+            "item_field_beyond_integration": (lambda: edit_note(item, "owner_role", "frontend_developer"), beyond),
+            "item_body_beyond_integration": (lambda: edit_note(item), beyond),
+            "lifecycle": (lambda: edit_note(item, "status", "paused"), beyond),
+            "base_not_taken": (None, base_rule),
+            "base_off_integration": (None, base_rule),
+            "base_kept": (None, "may not edit Delivery control"),
+        }
+        for label, (tamper, refusal) in variants.items():
+            with self.subTest(label=label):
+                delivery_git.run_git(worktree, "reset", "--hard", clean)
+                delivery_git.run_git(worktree, "clean", "-fd")
+                if label == "base_not_taken":
+                    self.converge_on_integration(worktree, item, integration, relative, merge=False)
+                elif label == "base_off_integration":
+                    self.converge_on_integration(worktree, item, integration, relative, base=clean)
+                elif label == "base_kept":
+                    previous, _ = delivery_compile.split_note(item)
+                    self.converge_on_integration(worktree, item, integration, relative,
+                                                 base=previous["integration_base_commit"])
+                else:
+                    self.converge_on_integration(worktree, item, integration, relative)
+                    tamper()
+                if label != "lifecycle":
+                    self.assertEqual(self.approve_item_evidence(str(worktree)), 0)
+                with self.assertRaisesRegex(RuntimeError, refusal):
+                    delivery_git.push_item(project, "DLV-001", "AUTH-01")
+                self.assertEqual(delivery_git.run_git(project, "ls-remote", "origin"), baseline)
+
     def governance_target_handoff(self, project, docs, extra_paths=()):
         args = type("Args", (), {"docs": str(docs)})
         self.assertEqual(delivery_governance.begin_revision(args), 0)

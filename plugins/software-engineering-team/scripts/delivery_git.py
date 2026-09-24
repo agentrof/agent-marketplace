@@ -2946,40 +2946,118 @@ def require_item_architecture_binding(worktree: Path, item_props: dict,
         raise RuntimeError("Item Architecture binding is invalid: " + str(exc)) from exc
 
 
+def item_control_note(root: Path, tree: str, relative_item: str) -> tuple[str, str, dict, str]:
+    """The Item control file in one tree: its mode, text, frontmatter and body."""
+    from delivery_compile import parse_frontmatter
+    entry = run_git(root, "--no-replace-objects", "ls-tree", tree, "--", relative_item)
+    if not entry:
+        raise RuntimeError("product/test commits may not add or remove the active Item")
+    metadata, _path = entry.split("\t", 1)
+    mode, kind, oid = metadata.split()
+    if kind != "blob" or mode not in {"100644", "100755"}:
+        raise RuntimeError("Item publication requires a regular control file")
+    text = subprocess.run(["git", "--no-replace-objects", "cat-file", "blob", oid], cwd=root,
+                          capture_output=True, check=True).stdout.decode("utf-8")
+    props, body_line, error = parse_frontmatter(text)
+    if error:
+        raise RuntimeError("Item publication frontmatter is invalid: " + error)
+    body = "\n".join(text.splitlines()[body_line - 1:]).lstrip("\n")
+    return mode, text, props, body
+
+
+def converged_integration(root: Path, before_props: dict, after_props: dict, after: str,
+                          integration: str | None) -> str | None:
+    """The newer Integration commit an Item has taken, or None while its base stands.
+
+    A target refresh re-issues an untouched claim on the new Integration and
+    leaves an Item that already carries work to its writer. That writer takes a
+    commit of the Integration's own line into the Item and records it as the
+    Item's integration base, which only ever moves forward along that line.
+    """
+    previous = before_props.get("integration_base_commit")
+    taken = after_props.get("integration_base_commit")
+    if taken == previous:
+        return None
+    try:
+        converged = bool(
+            all(isinstance(value, str) and OID_RE.fullmatch(value) for value in (previous, taken, integration))
+            and taken in run_git(root, "--no-replace-objects", "rev-list", "--first-parent",
+                                 f"{previous}..{integration}").split()
+            and is_ancestor(root, previous, taken) and is_ancestor(root, taken, after))
+    except (RuntimeError, subprocess.CalledProcessError):
+        converged = False
+    if not converged:
+        raise RuntimeError("an Item may move its integration base only forward to an Integration commit it has taken")
+    return taken
+
+
+def plan_owned_item_fields(props: dict) -> dict:
+    """What the published plan owns in an Item record: all but the writer's lifecycle, base and stamp."""
+    owned = {key: value for key, value in props.items() if key not in {*ITEM_WRITER_FIELDS, "source_hash"}}
+    owned["tags"] = [tag for tag in props.get("tags") or [] if not str(tag).startswith("status/")]
+    return owned
+
+
+def item_lifecycle(props: dict) -> tuple:
+    return props.get("status"), [tag for tag in props.get("tags") or [] if str(tag).startswith("status/")]
+
+
 def require_item_publication_controls(root: Path, before: str, after: str,
-                                      relative_delivery: Path, relative_item: str) -> None:
-    """Permit only the current Item's Architecture stamp inside Delivery controls."""
-    from delivery_compile import content_hash, parse_frontmatter
+                                      relative_delivery: Path, relative_item: str,
+                                      integration: str | None = None) -> None:
+    """Permit only the current Item's Architecture stamp inside Delivery controls,
+    and what an Item carries once its writer converges it on a newer Integration.
+
+    Converging brings the Delivery controls of the Integration commit the Item
+    took, byte for byte. The Item record then holds that commit's plan-owned
+    fields while it keeps its own lifecycle, its stamp and its new base.
+    """
+    from delivery_compile import content_hash
     prefix = relative_delivery.as_posix().rstrip("/") + "/"
-    changed = run_git(root, "--no-replace-objects", "diff", "--name-only", "-z", before, after, "--", prefix).split("\0")
-    if any(path and path != relative_item for path in changed):
-        raise RuntimeError("product/test commits may not edit Delivery control files")
+    changed = [path for path in run_git(root, "--no-replace-objects", "diff", "--name-only", "-z",
+                                        before, after, "--", prefix).split("\0") if path]
+    notes = {}
+    converged = None
+    if relative_item in changed:
+        notes = {tree: item_control_note(root, tree, relative_item) for tree in (before, after)}
+        converged = converged_integration(root, notes[before][2], notes[after][2], after, integration)
+    for path in changed:
+        if path == relative_item:
+            continue
+        carried = converged is not None and (
+            run_git(root, "--no-replace-objects", "ls-tree", after, "--", path)
+            == run_git(root, "--no-replace-objects", "ls-tree", converged, "--", path))
+        if not carried:
+            raise RuntimeError("product/test commits may not edit Delivery control files")
     if relative_item not in changed:
         return
-    versions = []
-    for tree in (before, after):
-        entry = run_git(root, "--no-replace-objects", "ls-tree", tree, "--", relative_item)
-        if not entry:
-            raise RuntimeError("product/test commits may not add or remove the active Item")
-        metadata, _path = entry.split("\t", 1)
-        mode, kind, oid = metadata.split()
-        if kind != "blob" or mode not in {"100644", "100755"}:
-            raise RuntimeError("Item publication requires a regular control file")
-        text = subprocess.run(["git", "--no-replace-objects", "cat-file", "blob", oid], cwd=root,
-                              capture_output=True, check=True).stdout.decode("utf-8")
-        props, body_line, error = parse_frontmatter(text)
-        if error:
-            raise RuntimeError("Item publication frontmatter is invalid: " + error)
-        body = "\n".join(text.splitlines()[body_line - 1:]).lstrip("\n")
-        if props.get("architecture_impact") != "required":
-            raise RuntimeError("only a required Architecture Item may publish its stamp")
-        if tree == after and props.get("source_hash") != content_hash(props, body):
-            raise RuntimeError("Item Architecture stamp source_hash is stale")
-        header, body_text = text.split("\n---\n", 1)
-        header = re.sub(r"(?m)^(?:architecture_delta_hash|source_hash):[^\n]*\n?", "", header)
-        versions.append((mode, header.rstrip("\n"), body_text))
-    if versions[0] != versions[1]:
-        raise RuntimeError("product/test commits changed authored Item controls beyond its Architecture stamp")
+    if converged is None:
+        versions = []
+        for tree in (before, after):
+            mode, text, props, body = notes[tree]
+            if props.get("architecture_impact") != "required":
+                raise RuntimeError("only a required Architecture Item may publish its stamp")
+            if tree == after and props.get("source_hash") != content_hash(props, body):
+                raise RuntimeError("Item Architecture stamp source_hash is stale")
+            header, body_text = text.split("\n---\n", 1)
+            header = re.sub(r"(?m)^(?:architecture_delta_hash|source_hash):[^\n]*\n?", "", header)
+            versions.append((mode, header.rstrip("\n"), body_text))
+        if versions[0] != versions[1]:
+            raise RuntimeError("product/test commits changed authored Item controls beyond its Architecture stamp")
+        return
+    previous_mode, _previous_text, previous, _previous_body = notes[before]
+    mode, _text, props, body = notes[after]
+    _published_mode, _published_text, published, published_body = item_control_note(root, converged, relative_item)
+    if props.get("source_hash") != content_hash(props, body):
+        raise RuntimeError("Item Architecture stamp source_hash is stale")
+    if (props.get("architecture_delta_hash") != previous.get("architecture_delta_hash")
+            and props.get("architecture_impact") != "required"):
+        raise RuntimeError("only a required Architecture Item may publish its stamp")
+    if (mode != previous_mode or body != published_body
+            or plan_owned_item_fields(props) != plan_owned_item_fields(published)
+            or item_lifecycle(props) != item_lifecycle(previous)):
+        raise RuntimeError("product/test commits changed authored Item controls beyond its Architecture stamp "
+                           "and its converged Integration")
 
 
 def require_current_activation_target(root: Path, remote: str, delivery_id: str,
@@ -3472,7 +3550,12 @@ def push_item(project_root: Path, delivery_id: str, story_id: str,
     committed_changes = set(run_git(root, "diff", "--name-only", item_oid, product_tip).splitlines())
     if not committed_changes:
         raise RuntimeError("push-item requires a committed product/test change")
-    require_item_publication_controls(root, item_oid, product_tip, relative_delivery, relative_item)
+    # A converged Item is checked against the Integration's own line, which
+    # another host may have advanced since this one last saw it.
+    integration_oid = remote_oid(root, remote, refs["integration"])
+    run_git(root, "fetch", "--no-tags", remote, refs["integration"])
+    require_item_publication_controls(root, item_oid, product_tip, relative_delivery, relative_item,
+                                      integration_oid)
     pending = worktree_pending_paths(root, worktree)
     allowed_pending = {relative_review, relative_verification}
     if not pending.issubset(allowed_pending):

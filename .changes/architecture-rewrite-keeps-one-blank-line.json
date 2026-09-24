@@ -1,0 +1,6 @@
+{
+  "summary": "Beginning, retiring or sealing a System Architecture revision no longer adds a blank line under the record's frontmatter, and the next revision of a record that already accumulated blank lines keeps exactly one; sealed revisions and their ledger snapshots keep their bytes.",
+  "components": {
+    "software-engineering-team": "patch"
+  }
+}

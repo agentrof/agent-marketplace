@@ -8,6 +8,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 COMPILER = ROOT / "plugins/software-engineering-team/scripts/architecture_compile.py"
+VAULT_CHECK = COMPILER.parent / "vault_check.py"
 
 
 class ArchitectureCompilerTests(unittest.TestCase):
@@ -16,6 +17,33 @@ class ArchitectureCompilerTests(unittest.TestCase):
                                 capture_output=True, text=True, check=False)
         self.assertEqual(result.returncode, expected, result.stdout + result.stderr)
         return result
+
+    def render_relations(self, docs):
+        result = subprocess.run([sys.executable, str(VAULT_CHECK), "render-relations", "--vault", str(docs)],
+                                cwd=ROOT, capture_output=True, text=True, check=False)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+    def seal_constrained_decision(self, docs):
+        """Seal a root decision that a component runtime view is constrained by."""
+        sys.path.insert(0, str(COMPILER.parent))
+        import architecture_compile
+        self.prepare(docs)
+        self.run_cli("init-root", "--docs", docs, "--item-ref", "AUTH-01")
+        self.run_cli("stub", "--docs", docs, "--item-ref", "AUTH-01", "--kind", "decision",
+                     "--record-id", "ADR-001", "--slug", "auth-boundary",
+                     "--affected-scope", "orders-api", "--affected-scope", "other-api")
+        self.run_cli("stub", "--docs", docs, "--item-ref", "AUTH-01", "--kind", "runtime",
+                     "--component", "orders-api", "--record-id", "RUN-001", "--slug", "request-path")
+        architecture = docs / "system-architecture"
+        decision = architecture / "decisions/auth-boundary-decision.md"
+        decision.write_text(decision.read_text(encoding="utf-8").replace(
+            "## Navigation\n", "## Navigation <!-- sec: nav -->\n", 1), encoding="utf-8")
+        runtime = architecture / "components/orders-api/runtime/request-path/runtime.md"
+        architecture_compile.rewrite(runtime, {"constrained_by": [
+            "[[system-architecture/decisions/auth-boundary-decision|ADR-001]]"]})
+        self.render_relations(docs)
+        self.run_cli("stamp-item", "--docs", docs, "--item-ref", "AUTH-01")
+        return decision, runtime
 
     def prepare(self, docs):
         solution = docs / "solution-design"
@@ -127,6 +155,77 @@ class ArchitectureCompilerTests(unittest.TestCase):
             root.write_text(root.read_text(encoding="utf-8") + "\nTampered hub\n", encoding="utf-8")
             result = self.run_cli("check", "--docs", docs, expected=1)
             self.assertIn("sealed revision differs", result.stdout)
+
+    def test_sealed_record_accepts_its_rerendered_inverse_relation_block(self):
+        sys.path.insert(0, str(COMPILER.parent))
+        import architecture_compile
+        with tempfile.TemporaryDirectory() as raw:
+            docs = Path(raw) / "workspace/docs"
+            decision, runtime = self.seal_constrained_decision(docs)
+            root = docs / "system-architecture/architecture.md"
+            ledger = docs / "system-architecture/_ledger/records"
+            self.assertIn("|ARC:orders-api:RUN-001@r1]]", decision.read_text(encoding="utf-8"))
+            self.assertNotIn("relations:generated", root.read_text(encoding="utf-8"))
+            # Revising the linking record relabels the decision's block and adds one to the root hub.
+            self.run_cli("begin-revision", "--docs", docs, "--ref", "ARC:orders-api:RUN-001@r1", "--item-ref", "AUTH-01")
+            architecture_compile.rewrite(runtime, {"related_to": ["[[system-architecture/architecture|System Architecture]]"]})
+            self.render_relations(docs)
+            self.assertIn("|ARC:orders-api:RUN-001@r2]]", decision.read_text(encoding="utf-8"))
+            self.assertIn("relations:generated", root.read_text(encoding="utf-8"))
+            for record, record_id in ((decision, "ADR-001"), (root, "HUB-ROOT")):
+                snapshot = json.loads((ledger / record_id / "r1.json").read_text(encoding="utf-8"))
+                self.assertNotEqual(snapshot["content"], record.read_text(encoding="utf-8"))
+            self.run_cli("stamp-item", "--docs", docs, "--item-ref", "AUTH-01")
+            self.run_cli("check", "--docs", docs)
+            # Dropping the relations removes both blocks again.
+            self.run_cli("begin-revision", "--docs", docs, "--ref", "ARC:orders-api:RUN-001@r2", "--item-ref", "AUTH-01")
+            architecture_compile.rewrite(runtime, {}, {"constrained_by", "related_to"})
+            self.render_relations(docs)
+            self.assertNotIn("relations:generated", decision.read_text(encoding="utf-8") + root.read_text(encoding="utf-8"))
+            self.run_cli("stamp-item", "--docs", docs, "--item-ref", "AUTH-01")
+            self.run_cli("check", "--docs", docs)
+            self.assertEqual(architecture_compile.record_props(runtime)["revision"], 3)
+            for record, record_id in ((decision, "ADR-001"), (root, "HUB-ROOT")):
+                self.assertEqual(architecture_compile.record_props(record)["revision"], 1)
+                self.assertEqual(sorted(path.name for path in (ledger / record_id).iterdir()), ["r1.json"])
+
+    def test_sealed_record_still_refuses_authored_drift_beside_its_relation_block(self):
+        sys.path.insert(0, str(COMPILER.parent))
+        import architecture_compile
+        import vault_check
+        with tempfile.TemporaryDirectory() as raw:
+            docs = Path(raw) / "workspace/docs"
+            decision, _runtime = self.seal_constrained_decision(docs)
+            self.run_cli("begin-revision", "--docs", docs, "--ref", "ARC:orders-api:RUN-001@r1", "--item-ref", "AUTH-01")
+            self.render_relations(docs)
+            self.run_cli("stamp-item", "--docs", docs, "--item-ref", "AUTH-01")
+            current = decision.read_text(encoding="utf-8")
+            self.assertIn("|ARC:orders-api:RUN-001@r2]]", current)
+            for drifted in (current.replace("## Scope\n", "## Scope\n\nAn unrevised authored claim.\n", 1),
+                            current.replace("title: auth-boundary\n", "title: renamed-boundary\n", 1)):
+                self.assertNotEqual(drifted, current)
+                decision.write_text(drifted, encoding="utf-8")
+                result = self.run_cli("check", "--docs", docs, expected=1)
+                self.assertIn("decisions/auth-boundary-decision.md sealed revision differs", result.stdout)
+            # A snapshot hash rewritten to match the drift still disagrees with the snapshot's content.
+            snapshot = docs / "system-architecture/_ledger/records/ADR-001/r1.json"
+            sealed = snapshot.read_text(encoding="utf-8")
+            snapshot.write_text(json.dumps({**json.loads(sealed), "source_hash": architecture_compile.source_hash(decision)}),
+                                encoding="utf-8")
+            result = self.run_cli("check", "--docs", docs, expected=1)
+            self.assertIn("decisions/auth-boundary-decision.md sealed revision differs", result.stdout)
+            snapshot.write_text(sealed, encoding="utf-8")
+            # Text placed inside the block is not the exact projection the vault gate requires.
+            decision.write_text(current.replace(
+                "<!-- sec: relations:generated:end -->",
+                "An unrevised authored claim.\n\n<!-- sec: relations:generated:end -->", 1), encoding="utf-8")
+            findings = []
+            vault_check.check_relation_projections(
+                vault_check.build_vault(docs, vault_check.load_policy(vault_check.DEFAULT_POLICY)), findings)
+            self.assertIn("system-architecture/decisions/auth-boundary-decision.md",
+                          [finding.path for finding in findings if "projection is stale" in finding.message])
+            decision.write_text(current, encoding="utf-8")
+            self.run_cli("check", "--docs", docs)
 
     def test_external_component_cannot_gain_a_fake_internal_module(self):
         with tempfile.TemporaryDirectory() as raw:

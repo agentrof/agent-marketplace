@@ -270,6 +270,13 @@ records. It creates an `item-evidence-v1` child whose direct parent is that
 exact product/test commit, then advances both Item and Slot together.
 The stamp preserves all other Item bytes and requires a current, sealed,
 nonempty Architecture delta within the approved component and record-kind claims.
+A target refresh leaves an Item that already carries work to its writer, who
+converges it by taking the refreshed Integration. The push then also accepts
+that Integration commit's Delivery controls, byte for byte, and the commit as
+the Item's `integration_base_commit`, when the commit lies on the Integration's
+own line after the Item's previous base and the product tip contains it. The
+Item record must then hold that commit's plan-owned fields and change only its
+own status, stamp and base.
 
 Integration reads the Item, Code Review and Verification records from the
 remote Item tip, not from the primary worktree. It accepts an Item only when

@@ -7,6 +7,7 @@ import io
 import sys
 import json
 import hashlib
+import shutil
 import subprocess
 import tempfile
 import unittest
@@ -16,6 +17,7 @@ from pathlib import Path, PureWindowsPath
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "plugins" / "software-engineering-team" / "scripts"))
 sys.path.insert(0, str(ROOT / "tools" / "tests"))
+import backlog_compile  # noqa: E402
 import delivery_git  # noqa: E402
 import delivery_compile  # noqa: E402
 import delivery_governance  # noqa: E402
@@ -577,6 +579,138 @@ class DeliveryGitTests(unittest.TestCase):
                 self.assertIn(text, state["body"])
         finally:
             remove_temporary(temporary)
+
+    @staticmethod
+    def reported_status(docs: Path) -> str:
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output):
+            delivery_compile.status(type("Args", (), {"docs": str(docs), "delivery": "DLV-001"}))
+        return json.loads(output.getvalue())["status"]
+
+    def merge_and_integration_checkouts(self, project: Path) -> tuple[Path, Path]:
+        """Clone the remote, merge the PR head into its main with --no-ff and keep the Integration beside it."""
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(remove_temporary, temporary)
+        merged = Path(temporary.name) / "main"
+        integration = Path(temporary.name) / "integration"
+        head = "origin/" + delivery_git.short_refs("DLV-001")["integration"]
+        subprocess.run(["git", "clone", "-q", "-c", "gc.auto=0", str(project / "remote.git"), str(merged)], check=True)
+        subprocess.run(["git", "-C", str(merged), "worktree", "add", "-q", "--detach", str(integration), head], check=True)
+        subprocess.run(["git", "-C", str(merged), "-c", "user.email=test@example.com", "-c", "user.name=Test",
+                        "merge", "-q", "--no-ff", "-m", "Merge pull request #17", head], check=True)
+        return merged, integration
+
+    def revise_selected_story(self, docs: Path) -> None:
+        """Approve a later backlog revision that changes the selected Story's bytes."""
+        story = docs / "backlog/epics/delivery-fixture/stories/auth-01/story.md"
+        props, body = backlog_compile.parse_front_matter(story)
+        revised = body.replace(
+            "Preserve the approved API boundary and avoid delivery-state metadata.",
+            "Preserve the approved API boundary, cover the session scenario and avoid delivery-state metadata.")
+        self.assertNotEqual(revised, body)
+        story.write_text(backlog_compile.front_matter(props, revised), encoding="utf-8")
+        props["source_hash"] = backlog_compile.digest(story)
+        story.write_text(backlog_compile.front_matter(props, revised), encoding="utf-8")
+        record, errors = backlog_compile.collect(docs)
+        self.assertEqual(errors, [])
+        backlog = docs / "backlog" / "backlog.md"
+        backlog_props, backlog_body = backlog_compile.parse_front_matter(backlog)
+        backlog_props["package_hash"] = backlog_compile.package_digest(
+            docs, backlog_compile.package_paths(record, docs))
+        backlog.write_text(backlog_compile.front_matter(backlog_props, backlog_body), encoding="utf-8")
+
+    def test_recorded_pr_moves_the_delivery_to_awaiting_merge_in_the_pr_head(self):
+        temporary, project, docs, _product_tip, intent = self.prepare_pr_intent()
+        self.addCleanup(remove_temporary, temporary)
+        package = delivery_compile.find_delivery(docs, "DLV-001")
+        relative = package.relative_to(project).as_posix()
+        provider = self.fake_provider_type({})
+        with mock.patch("delivery_provider.GitHubProvider", provider):
+            opened = delivery_git.open_pr(project, "DLV-001")
+        head = opened["integration"]
+        local = delivery_compile.split_note(package / "delivery.md")
+        published = delivery_git.split_remote_note(project, head, relative + "/delivery.md", delivery_compile.split_note)
+        for props, body in (local, published):
+            self.assertEqual(props["status"], "awaiting_merge")
+            self.assertEqual(set(props["tags"]), {"doc/delivery", "status/awaiting-merge"})
+            self.assertEqual(props["source_hash"], delivery_compile.content_hash(props, body))
+        review, review_body = delivery_git.split_remote_note(
+            project, head, relative + "/delivery-review.md", delivery_compile.split_note)
+        self.assertEqual(review["pull_request_url"], opened["pull_request_url"])
+        self.assertEqual(review["approval_hash"], delivery_compile.content_hash(
+            review, review_body, exclude=delivery_compile.MUTABLE | {"approval_hash"}))
+        # The PR head changes only the Review, the Delivery status and the map that mirrors it.
+        self.assertEqual(set(delivery_git.run_git(project, "diff", "--name-only", intent["intent"], head).splitlines()),
+                         {relative + "/delivery-review.md", relative + "/delivery.md", "workspace/docs/maps/delivery.md"})
+        self.assertIn("|DLV-001]] — `awaiting_merge`",
+                      delivery_git.run_git(project, "show", head + ":workspace/docs/maps/delivery.md"))
+        self.assertEqual(delivery_git.delivery_projection_changes(project, head), {})
+        self.assertEqual(self.reported_status(docs), "awaiting_merge")
+        recorded = (package / "delivery.md").read_bytes()
+        with mock.patch("delivery_provider.GitHubProvider", provider):
+            again = delivery_git.open_pr(project, "DLV-001")
+        self.assertTrue(again["reused"])
+        self.assertFalse(again["provider_call"])
+        self.assertEqual(delivery_git.remote_oid(project, "origin", delivery_git.canonical_refs("DLV-001")["integration"]), head)
+        self.assertEqual((package / "delivery.md").read_bytes(), recorded)
+
+    def test_merging_the_pr_head_reports_merged_and_keeps_the_generated_map(self):
+        temporary, project, _docs, _product_tip, _intent = self.prepare_pr_intent()
+        self.addCleanup(remove_temporary, temporary)
+        with mock.patch("delivery_provider.GitHubProvider", self.fake_provider_type({})):
+            head = delivery_git.open_pr(project, "DLV-001")["integration"]
+        merged, integration = self.merge_and_integration_checkouts(project)
+        self.assertEqual(delivery_git.run_git(merged, "rev-parse", "HEAD^2"), head)
+        self.assertEqual(self.reported_status(merged / "workspace/docs"), "merged")
+        self.assertEqual(self.reported_status(integration / "workspace/docs"), "awaiting_merge")
+        exported = merged.parent / "exported"
+        shutil.copytree(merged / "workspace", exported / "workspace")
+        with mock.patch.dict("os.environ", {"GIT_CEILING_DIRECTORIES": str(merged.parent)}):
+            self.assertEqual(self.reported_status(exported / "workspace/docs"), "awaiting_merge")
+        # The map renders tracked bytes only, so the target branch keeps the
+        # Integration's map and a fresh render there changes nothing.
+        map_path = merged / "workspace/docs/maps/delivery.md"
+        self.assertIn("|DLV-001]] — `awaiting_merge`", map_path.read_text(encoding="utf-8"))
+        self.assertEqual(delivery_git.delivery_projection_changes(merged, "HEAD"), {})
+        delivery_compile.render_map(merged / "workspace/docs")
+        self.assertEqual(delivery_git.run_git(merged, "status", "--porcelain"), "")
+
+    def test_merged_delivery_keeps_its_pinned_baseline_after_a_story_revision(self):
+        temporary, project, _docs, _product_tip, _intent = self.prepare_pr_intent()
+        self.addCleanup(remove_temporary, temporary)
+        with mock.patch("delivery_provider.GitHubProvider", self.fake_provider_type({})):
+            delivery_git.open_pr(project, "DLV-001")
+        merged, integration = (checkout / "workspace/docs" for checkout in self.merge_and_integration_checkouts(project))
+        for docs in (merged, integration):
+            self.assertEqual(delivery_compile.delivery_findings(docs, "DLV-001")[1], [])
+            self.revise_selected_story(docs)
+        self.assertEqual(delivery_compile.delivery_findings(merged, "DLV-001")[1], [])
+        _root, stale = delivery_compile.delivery_findings(integration, "DLV-001")
+        self.assertTrue(any("story_source_hash is stale" in finding for finding in stale), stale)
+        self.assertIn("Delivery backlog_package_hash is stale against the approved backlog", stale)
+
+    def test_merge_reached_through_a_second_parent_proves_the_delivery_merged(self):
+        """A branch that later merges the target, as refresh-target does for the next
+        Delivery's Integration, reaches the PR merge only through a second parent."""
+        temporary, project, _docs, _product_tip, _intent = self.prepare_pr_intent()
+        self.addCleanup(remove_temporary, temporary)
+        with mock.patch("delivery_provider.GitHubProvider", self.fake_provider_type({})):
+            delivery_git.open_pr(project, "DLV-001")
+        merged, _integration = self.merge_and_integration_checkouts(project)
+        refreshed = merged.parent / "refreshed"
+        identity = ["-c", "user.email=test@example.com", "-c", "user.name=Test"]
+        subprocess.run(["git", "-C", str(merged), "worktree", "add", "-q", "-b", "next", str(refreshed), "HEAD^1"], check=True)
+        (refreshed / "next.txt").write_text("next Delivery work\n", encoding="utf-8")
+        subprocess.run(["git", "-C", str(refreshed), "add", "next.txt"], check=True)
+        subprocess.run(["git", "-C", str(refreshed), *identity, "commit", "-qm", "Next Delivery work"], check=True)
+        subprocess.run(["git", "-C", str(refreshed), *identity, "merge", "-q", "--no-ff", "-m", "Refresh target", "main"], check=True)
+        proof = delivery_git.run_git(merged, "rev-parse", "HEAD")
+        self.assertNotIn(proof, delivery_git.run_git(refreshed, "rev-list", "--first-parent", "HEAD").split())
+        self.assertIn(proof, delivery_git.run_git(refreshed, "rev-list", "HEAD").split())
+        docs = refreshed / "workspace/docs"
+        self.assertEqual(self.reported_status(docs), "merged")
+        self.revise_selected_story(docs)
+        self.assertEqual(delivery_compile.delivery_findings(docs, "DLV-001")[1], [])
 
     def test_scope_cancellation_projection_is_sorted_and_closed(self):
         stories = {

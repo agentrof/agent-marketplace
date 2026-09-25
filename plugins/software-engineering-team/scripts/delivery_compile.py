@@ -21,6 +21,8 @@ from pathlib import Path, PurePosixPath
 from ba_compile import parse_frontmatter, without_generated_relations
 import backlog_compile
 import operation_compile
+import requirement_compile
+import requirement_route
 import stage_package
 
 
@@ -809,6 +811,118 @@ def check_delivery(args) -> int:
     return 0 if not errors else 1
 
 
+def implemented_requirement_findings(docs: Path, stories: dict[str, dict]) -> list[str]:
+    """Require every Requirement a selected Story implements to route to backlog."""
+    paths = {f"requirements/{path.stem}": path for path in requirement_compile.requirement_paths(docs)}
+    routes: dict[str, dict] = {}
+    errors: list[str] = []
+    for story_id, props in sorted(stories.items()):
+        for value in backlog_compile.values(props, "implements"):
+            parts = backlog_compile.split_wikilink(value)
+            path = paths.get(parts[0]) if parts else None
+            identifier = requirement_compile.requirement_id(path) if path else ""
+            if not requirement_route.REQ_ID_RE.fullmatch(identifier):
+                errors.append(f"{story_id} implements a link that resolves to no Requirement: {value}")
+                continue
+            if identifier not in routes:
+                routes[identifier] = requirement_route.route(docs, identifier)
+            routing = routes[identifier]
+            status = routing.get("status")
+            if status == "approved" and routing.get("action") == "backlog":
+                continue
+            reason = routing.get("reason") or ("" if status == "approved" else f"Requirement status is {status}")
+            errors.append(
+                f"{story_id} implements {identifier}, which does not route to backlog: "
+                f"stage {routing.get('stage', 'requirement')}, action {routing.get('action', 'requirement')}"
+                + (f", reason: {reason}" if reason else "")
+                + f"; rebind it through the Requirement entry, /requirement {identifier}, before handoff"
+            )
+    return errors
+
+
+def application_binding_findings(docs: Path, citing: list[str]) -> list[str]:
+    """Require a backlog whose selected Stories cite Experience records to bind the current application.
+
+    Compiler-owned input_bindings bind it in manual mode, and in requirement
+    mode whenever the backlog carries them. A requirement-mode backlog without
+    them binds it through its root Requirement's Experience Stage Results. A
+    backlog without a planning mode predates application receipts.
+    """
+    props, _ = backlog_compile.parse_front_matter(docs / "backlog" / "backlog.md")
+    mode = str(props.get("planning_mode", "")).strip().casefold()
+    if mode not in {"manual", "requirement"}:
+        return []
+    bound: list[tuple[str, str]] = []
+    for binding in backlog_compile.values(props, "input_bindings"):
+        stage, _separator, remainder = binding.partition("|")
+        reference, _separator, digest = remainder.partition("|")
+        if stage == "experience-design":
+            bound.append((reference, digest))
+    rows: list[tuple[str, str]] = []
+    problems: list[str] = []
+    if mode == "manual" or bound:
+        label = f"the {mode}-mode input_bindings"
+        rows = bound
+    else:
+        requirement = str(props.get("requirement_ref", "")).strip()
+        label = f"root Requirement {requirement}'s Experience Stage Results"
+        path = next((path for path in requirement_compile.requirement_paths(docs)
+                     if requirement_compile.requirement_id(path) == requirement), None)
+        try:
+            body = requirement_compile.split_note(path)[1] if path else ""
+        except (OSError, ValueError):
+            body = ""
+        dispositions = {stage: disposition for stage, disposition, _refs, _why
+                        in requirement_compile.impact_rows(body)}
+        if dispositions.get("experience-design") == "not_applicable":
+            problems.append(f"root Requirement {requirement} marks experience-design not_applicable")
+        else:
+            rows = requirement_compile.stage_results(body).get("experience-design", [])
+    if not problems and not rows:
+        problems.append(f"{label} hold no application receipt")
+    if rows and not requirement_compile.valid_experience_receipt_refs([ref for ref, _digest in rows], docs):
+        problems.append(f"{label} are not the current application with its exact process receipts")
+    for reference, digest in rows:
+        _receipt, invalid = stage_package.verify(
+            docs, "experience-design", reference, digest,
+            require_committed=True, require_strict_current=True)
+        problems.extend(invalid)
+    if not problems:
+        return []
+    current = next((str(item["result_ref"]) for item in stage_package.candidates(docs, "experience-design")
+                    if item.get("result_type") == "experience-application"), "")
+    return [
+        f"{', '.join(citing)} {'cites' if len(citing) == 1 else 'cite'} experience_refs, but the backlog "
+        f"does not bind the globally current {current or 'application receipt, and none resolves now'}: "
+        + "; ".join(problems)
+        + "; bind it before handoff through a manual-mode backlog revision whose input_bindings pin it, "
+        "or through a Requirement whose Experience stage binds it"
+    ]
+
+
+def handoff_binding_findings(docs: Path, root: Path) -> list[str]:
+    """Refuse a scope handoff whose selected Stories rest on non-current upstream bindings.
+
+    A reserved Delivery keeps verifying its pinned inputs historically, so these
+    rules apply at scope approval only: every Requirement a selected Story
+    implements must route to backlog, and a selection that cites Experience
+    records needs the backlog to bind the globally current application receipt.
+    """
+    stories: dict[str, dict] = {}
+    for item_path in sorted(root.glob("items/*/item.md")):
+        item_props, _ = split_note(item_path)
+        story_props, _ = backlog_compile.parse_front_matter(docs / str(item_props["story_path"]))
+        stories[str(item_props["story_id"])] = story_props
+    citing = sorted(story_id for story_id, props in stories.items()
+                    if backlog_compile.values(props, "experience_refs"))
+    errors = implemented_requirement_findings(docs, stories)
+    if citing:
+        errors.extend(application_binding_findings(docs, citing))
+    return errors
+
+
+# One read-only candidate snapshot serves the historical read and the handoff check.
+@stage_package.candidate_session()
 def approve_scope(args) -> int:
     docs = docs_root(args.docs)
     root, errors = delivery_findings(docs, args.delivery)
@@ -821,6 +935,10 @@ def approve_scope(args) -> int:
     dod = delivery_root(docs) / "definition-of-done.md"
     if not dod.exists() or split_note(dod)[0].get("status") != "approved":
         errors.append("Definition of Done must be approved before scope approval")
+    # Scope approval is the handoff: the selected Stories' upstream bindings must
+    # be current now, while every later phase keeps the historical read above.
+    if not errors:
+        errors.extend(handoff_binding_findings(docs, root))
     if errors:
         print(json.dumps({"ok": False, "errors": errors}, indent=2)); return 1
     props["status"] = "scope_approved"

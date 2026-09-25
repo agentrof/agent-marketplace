@@ -26,7 +26,9 @@ name, per-file write targets). Bash pre/post snapshots guard both vault
 inventory and the machine-managed projection of workspace/config.json.
 The inventory stays in the project runtime. A private, short-lived recovery
 capsule outside the command's project tree lets post restore the config even
-when that command removes its project-local snapshot. Stdlib only.
+when that command removes its project-local snapshot. When the command removes
+the whole project root, nothing protected remains there, so post releases the
+guard state and allows the command. Stdlib only.
 """
 
 from __future__ import annotations
@@ -3340,6 +3342,30 @@ def another_experience_writer_is_active(project: Path, payload: dict) -> bool:
         and state.get("owner") != guard_locator(payload)
 
 
+def project_root_removed(project: Path) -> bool:
+    """Report a recorded project root that no longer exists at all.
+
+    Only plain absence counts: the root and any missing ancestor must be
+    reported as not found, never as unreadable, looping or not a directory,
+    and the nearest surviving ancestor must be one local directory rather
+    than an alias. Any other shape stays on the verifying path, which fails
+    closed.
+    """
+    for candidate in (project, *project.parents):
+        try:
+            metadata = os.lstat(candidate)
+        except FileNotFoundError:
+            continue
+        except OSError:
+            return False
+        return (
+            candidate != project
+            and stat.S_ISDIR(metadata.st_mode)
+            and not path_is_alias(candidate)
+        )
+    return False
+
+
 def cleanup_guard_state(primary: Path, recovery: Path) -> None:
     for path in (primary, recovery):
         try:
@@ -3586,6 +3612,22 @@ def shell_verify(payload: dict) -> int:
                 root_value = str(expected_vault)
     retain_guard_state = False
     try:
+        if (
+            recovery_state is not None
+            and not recovery_error
+            and project_root_removed(project)
+        ):
+            # The command removed the project it ran in, such as a Delivery
+            # coordinator removing its own Item worktree. Nothing protected
+            # remains at the capsule's project root and restore never
+            # recreates a missing project; the finally block releases the
+            # guard state.
+            print(
+                f"vault law: this Bash command removed its project {project};"
+                " no protected state remains there to verify",
+                file=sys.stderr,
+            )
+            return 0
         config_topology_changed = bool(
             config_topology_problem(expected_config)
         )

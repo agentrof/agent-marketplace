@@ -1104,9 +1104,13 @@ def prepare_pr_creation(project_root: Path, delivery_id: str,
 
 def record_pr_remote(project_root: Path, delivery_id: str, url: str,
                      remote: str = "origin") -> dict:
-    """Record a provider-verified PR URL as the exact intent child."""
+    """Record a provider-verified PR URL as the exact intent child.
+
+    The same commit, which is the PR head, moves a reviewed Delivery to
+    awaiting_merge and re-renders the projections that mirror its status.
+    """
     root = main_worktree(project_root.resolve())
-    from delivery_compile import docs_root, find_delivery, split_note, frontmatter, content_hash
+    from delivery_compile import docs_root, find_delivery, split_note, frontmatter, content_hash, pr_recorded_props
     canonical_url, number = canonical_github_pr(url)
     docs = docs_root(root)
     directory = find_delivery(docs, delivery_id)
@@ -1125,12 +1129,19 @@ def record_pr_remote(project_root: Path, delivery_id: str, url: str,
     review_props["pull_request_url"] = canonical_url
     review_props["source_hash"] = content_hash(review_props, review_body, exclude={"status", "approved_at_utc", "source_hash", "approval_hash"})
     relative_review = str(review_path.relative_to(root))
+    replacements = {relative_review: frontmatter(review_props, review_body)}
+    relative_delivery = str((directory / "delivery.md").relative_to(root))
+    delivery_props, delivery_body = split_remote_note(root, integration_oid, relative_delivery, split_note)
+    recorded = pr_recorded_props(delivery_props, delivery_body)
+    if recorded is not None:
+        replacements[relative_delivery] = frontmatter(recorded, delivery_body)
     candidate = commit_replacements(
-        root, integration_oid, {relative_review: frontmatter(review_props, review_body)},
+        root, integration_oid, replacements,
         f"Record PR for {delivery_id}",
         {"Record": "pr-url-recorded-v1", "Protocol": "1", "Delivery": delivery_id,
          "Intent": integration_oid, "Provider": "github", "Pull-Request": number,
          "URL-Hash": "sha256:" + hashlib.sha256(canonical_url.encode("utf-8")).hexdigest()},
+        delivery_projections=recorded is not None,
     )
     fence_message = commit_message(root, fence_oid)
     fence_candidate = commit_tree(

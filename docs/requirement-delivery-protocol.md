@@ -298,12 +298,30 @@ The coordinator publishes that Review, elects one durable PR intent and uses
 the provider adapter to create or adopt exactly one PR for the Delivery. The PR
 head is the Integration branch and its base is the resolved target branch.
 Provider calls are elected by crash-durable receipts and are never repeated
-blindly after an ambiguous result.
+blindly after an ambiguous result. The commit that records the PR URL becomes
+the PR head. It also moves a reviewed Delivery from `review` to
+`awaiting_merge` and re-renders the Delivery map; a cancelled Delivery keeps
+`cancelled`.
 
 Closure requires provider-confirmed merge evidence for the exact reviewed
 head, successful required checks and target ancestry. The merge method is a
 merge commit; squash and rebase results fail closed. Release Management is not
 part of Delivery closure.
+
+The tracked status stays `awaiting_merge` after the merge, because the target
+branch receives the PR head's bytes. The Delivery compiler derives `merged`
+offline from Git: the current branch reaches, on any path, a two-parent merge
+whose second parent is the Delivery's recorded PR head, identified by its
+record, Delivery and intent trailers. A later Delivery's Integration branch
+therefore still sees the target's merge after a target refresh brought it in
+through a second parent. The one caveat is that a manual merge of the
+Integration branch into any other branch also counts as proof; the controlled
+Integration refs make that unlikely. Without that proof, for example on the
+Integration branch itself, after a fast-forward or squash, or outside a Git
+checkout, the Delivery stays `awaiting_merge` and is still checked against its
+current approved sources. A merged Delivery keeps its pinned historical
+sources, as a cancelled one does. The Delivery map shows the tracked status,
+so the Integration branch and the target branch render the same map.
 
 ## Target changes, recovery and cancellation
 

@@ -52,7 +52,10 @@ commit with an exact head lease and prove that the resulting merge commit is
 in the target ancestry before reporting `merged`. Every provider-reported
 required check must be complete and successful immediately before the merge
 call and in merged evidence. Squash, rebase and a different PR are never
-accepted as closure evidence.
+accepted as closure evidence. Recording the PR moves the Delivery to
+`awaiting_merge`; `status` reports `merged` only when the current branch
+reaches a two-parent merge of that recorded PR head, on any path. A manual
+merge of the Integration branch into another branch would also count.
 Release management is deliberately out of scope. No command may infer a
 status from a branch name alone; the compiler and verified remote evidence are
 the source of semantic truth.

@@ -5,6 +5,8 @@ from __future__ import annotations
 import contextlib
 import io
 import json
+import shutil
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -26,6 +28,9 @@ import vault_check  # noqa: E402
 from backlog_fixture import make_approved_backlog  # noqa: E402
 
 
+WORKFLOW_JOBS = "jobs:\n  test:\n    runs-on: ubuntu-latest\n    steps:\n      - run: make test\n"
+
+
 class DeliveryCompilerTests(unittest.TestCase):
     def setUp(self):
         self.temporary = tempfile.TemporaryDirectory()
@@ -41,6 +46,9 @@ class DeliveryCompilerTests(unittest.TestCase):
             }), encoding="utf-8"
         )
         make_approved_backlog(self.docs)
+        workflows = self.root / ".github" / "workflows"
+        workflows.mkdir(parents=True)
+        (workflows / "tests.yml").write_text("on:\n  pull_request:\n" + WORKFLOW_JOBS, encoding="utf-8")
 
     def tearDown(self):
         self.temporary.cleanup()
@@ -459,6 +467,110 @@ class DeliveryCompilerTests(unittest.TestCase):
         )
         self.assertEqual(delivery_compile.check_delivery(plan_args), 0)
         self.assert_delivery_vault_contract()
+
+    def scope_ready_for_execution(self):
+        """Return approval arguments for one scope-approved Delivery with a claimed Item."""
+        self.approve_verification_contract()
+        self.approve_dod()
+        init_args = type("Args", (), {"docs": str(self.docs), "id": None, "slug": "auth",
+                                      "goal": "Authenticate", "outcome": None,
+                                      "target_branch": "main", "story": ["AUTH-01"]})
+        self.assertEqual(delivery_compile.init_delivery(init_args), 0)
+        plan_args = type("Args", (), {"docs": str(self.docs), "delivery": "DLV-001"})
+        self.assertEqual(delivery_compile.approve_scope(plan_args), 0)
+        item = delivery_compile.find_delivery(self.docs, "DLV-001") / "items" / "auth-01" / "item.md"
+        props, body = delivery_compile.split_note(item)
+        props["path_claims"] = ["src/auth.py"]
+        props["contract_claims"] = ["auth:session"]
+        delivery_compile.atomic_text(item, delivery_compile.frontmatter(props, body))
+        return plan_args
+
+    def approve_execution_result(self, args):
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output):
+            code = delivery_compile.approve_execution(args)
+        return code, json.loads(output.getvalue())
+
+    def delivery_bytes(self):
+        root = delivery_compile.find_delivery(self.docs, "DLV-001")
+        return {path: path.read_bytes() for path in root.rglob("*") if path.is_file()}
+
+    def test_execution_approval_refuses_without_workflows_until_render_ci_adds_one(self):
+        plan_args = self.scope_ready_for_execution()
+        shutil.rmtree(self.root / ".github")
+        before = self.delivery_bytes()
+        code, result = self.approve_execution_result(plan_args)
+        self.assertEqual(code, 1)
+        [error] = result["errors"]
+        self.assertIn("triggered by pull_request or pull_request_target", error)
+        self.assertIn("operation_compile.py render-ci", error)
+        self.assertIn("skill-content/setup/references/ci-bootstrap.md", error)
+        self.assertEqual(self.delivery_bytes(), before)
+
+        render = type("Args", (), {"docs": str(self.docs), "template": None, "include_environment": False,
+                                   "output": str(self.root / ".github" / "workflows" / "tests.yml")})
+        with contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(operation_compile.render_ci(render), 0)
+        self.assertEqual(self.approve_execution_result(plan_args)[0], 0)
+
+    def test_execution_approval_refuses_workflows_that_pull_requests_do_not_trigger(self):
+        plan_args = self.scope_ready_for_execution()
+        workflow = self.root / ".github" / "workflows" / "tests.yml"
+        for trigger in ("on: push\n", "on: [push, workflow_dispatch]\n",
+                        "on:\n  push:\n    branches: [main]\n",
+                        "on:\n  push:\n  # pull_request:\n",
+                        "on:\n  workflow_dispatch:\n    inputs:\n      pull_request:\n        type: string\n"):
+            with self.subTest(trigger=trigger):
+                workflow.write_text(trigger + WORKFLOW_JOBS, encoding="utf-8")
+                code, result = self.approve_execution_result(plan_args)
+                self.assertEqual(code, 1)
+                self.assertTrue(any("render-ci" in error for error in result["errors"]), result)
+
+    def test_execution_approval_accepts_each_pull_request_trigger_form(self):
+        plan_args = self.scope_ready_for_execution()
+        (self.root / ".github" / "workflows" / "tests.yml").unlink()
+        workflow = self.root / ".github" / "workflows" / "tests.yaml"
+        forms = {
+            "scalar": "on: {event}\n",
+            "inline list": "on: [push, {event}]\n",
+            "quoted inline list": "on: [ \"push\", '{event}' ]\n",
+            "mapping": "on:\n  push:\n    branches: [main]\n  {event}:\n    branches: [main]\n",
+            "quoted keys": "\"on\":\n  '{event}':\n",
+            "trailing comment": "on: {event}  # every change\n",
+            "mapping comments": "on:  # triggers\n  push:  # pushes\n  {event}:  # reviews\n",
+            "block list": "on:\n  - push\n  - {event}\n",
+            "compact block list": "on:\n- push\n- {event}\n",
+        }
+        # The same form naming pull_request_review must be refused, which proves the form is parsed.
+        for name, form in forms.items():
+            for event, expected in (("pull_request", 0), ("pull_request_target", 0),
+                                    ("pull_request_review", 1)):
+                with self.subTest(form=name, event=event):
+                    workflow.write_text(form.format(event=event) + WORKFLOW_JOBS, encoding="utf-8")
+                    self.assertEqual(self.approve_execution_result(plan_args)[0], expected)
+
+    def test_execution_approval_reads_workflows_at_the_git_checkout_root(self):
+        # GitHub reads workflows only at the checkout root, above a project in a subdirectory.
+        product = self.root / "product"
+        product.mkdir()
+        (self.root / "workspace").rename(product / "workspace")
+        self.docs = product / "workspace" / "docs"
+        subprocess.run(["git", "init", "-q", str(self.root)], check=True)
+        plan_args = self.scope_ready_for_execution()
+        (self.root / ".github").rename(product / ".github")
+        self.assertEqual(self.approve_execution_result(plan_args)[0], 1)
+        (product / ".github").rename(self.root / ".github")
+        self.assertEqual(self.approve_execution_result(plan_args)[0], 0)
+
+    def test_execution_reapproval_rechecks_the_pull_request_workflow(self):
+        plan_args = self.scope_ready_for_execution()
+        self.assertEqual(self.approve_execution_result(plan_args)[0], 0)
+        shutil.rmtree(self.root / ".github")
+        before = self.delivery_bytes()
+        code, result = self.approve_execution_result(plan_args)
+        self.assertEqual(code, 1)
+        self.assertTrue(any("render-ci" in error for error in result["errors"]), result)
+        self.assertEqual(self.delivery_bytes(), before)
 
     def execution_topology_fixture(self):
         self.approve_verification_contract()

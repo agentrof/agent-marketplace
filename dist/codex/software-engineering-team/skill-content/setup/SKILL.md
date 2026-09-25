@@ -88,8 +88,9 @@ placeholder is allowed to reach a consuming repository.
 8. Run the portable vault gate and relevant Requirement compilers. Delivery
    execution owns its own test and provider gates; setup never emits a
    template with unresolved command placeholders.
-   Read [ci-bootstrap](references/ci-bootstrap.md) when an approved Delivery
-   is ready to materialize project CI.
+   Read [ci-bootstrap](references/ci-bootstrap.md) before a Delivery's
+   execution approval, which refuses a repository without a pull request
+   workflow.
 9. Review and commit the exact tracked refresh diff before a workflow handoff.
    Report `requirement` as the next entry. `/requirement` evaluates the
    request-specific impact matrix and routes only the required stages and

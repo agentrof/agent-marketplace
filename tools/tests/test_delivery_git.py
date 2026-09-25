@@ -721,6 +721,36 @@ class DeliveryGitTests(unittest.TestCase):
         self.assertEqual((project / ".git/index").read_bytes(), index)
         self.assertEqual(delivery_git.remote_oid(project, "origin", "refs/heads/main"), head)
 
+    def test_integration_publication_projects_the_direct_map_render(self):
+        """The Integration carries the map its own tree renders, ending with one newline."""
+        temporary, project = self.make_project()
+        self.addCleanup(remove_temporary, temporary)
+        docs = project / "workspace/docs"
+        make_approved_backlog(docs)
+        dod = type("Args", (), {"docs": str(docs), "title": "Project", "file": None})
+        self.assertEqual(delivery_compile.init_dod(dod), 0)
+        self.assertEqual(delivery_compile.approve_dod(dod), 0)
+        init = type("Args", (), {"docs": str(docs), "id": None, "slug": None,
+                                 "goal": "SAML authentication", "outcome": None,
+                                 "target_branch": "main", "story": ["AUTH-01"]})
+        self.assertEqual(delivery_compile.init_delivery(init), 0)
+        self.assertEqual(delivery_compile.approve_scope(
+            type("Args", (), {"docs": str(docs), "delivery": "DLV-001"})), 0)
+        delivery_git.run_git(project, "add", "workspace")
+        delivery_git.run_git(project, "commit", "-qm", "Approve scope")
+        delivery_git.run_git(project, "push", "-q")
+        integration = delivery_git.reserve_delivery(project, "DLV-001")["integration"]
+        with tempfile.TemporaryDirectory() as clone_root:
+            clone = Path(clone_root) / "checkout"
+            delivery_git.run_git(project, "clone", "-q", str(project / "remote.git"), str(clone))
+            delivery_git.run_git(clone, "checkout", "-q", "--detach", integration)
+            map_path = clone / "workspace/docs/maps/delivery.md"
+            published = map_path.read_bytes()
+            delivery_compile.render_map(clone / "workspace/docs")
+            self.assertEqual(map_path.read_bytes(), published)
+        self.assertIn(b"|DLV-001]]", published)
+        self.assertTrue(published.endswith(b"\n") and not published.endswith(b"\n\n"), published[-60:])
+
     def test_publications_render_exact_candidate_without_local_sibling_or_dirty_note(self):
         temporary, project = self.make_project()
         self.addCleanup(remove_temporary, temporary)

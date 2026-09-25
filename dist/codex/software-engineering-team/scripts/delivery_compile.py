@@ -463,7 +463,8 @@ def render_map(docs: Path) -> None:
         identifier = str(props.get("id", directory.name)).strip()
         status = str(props.get("status", "unknown"))
         rows.append(f"- {link(str(path.relative_to(docs)), identifier)} — `{status}`")
-    atomic_text(map_path, "\n".join(rows))
+    # vault_check render-relations normalizes authored notes to this ending too.
+    atomic_text(map_path, "\n".join(rows).rstrip() + "\n")
 
 
 def check_dod(path: Path) -> list[str]:

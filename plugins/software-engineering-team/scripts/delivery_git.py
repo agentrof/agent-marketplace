@@ -1048,6 +1048,7 @@ def publish_delivery_review(project_root: Path, delivery_id: str,
         {"Record": "delivery-review-published-v1", "Protocol": "1", "Delivery": delivery_id,
          "Reviewed-Integration": integration_oid, "Approval-Hash": str(review_props.get("approval_hash", "none")),
          "Target": trailer(fence_message, "Target") or "none", "Cancellation-Intent-Hash": "none"},
+        delivery_projections=True,
     )
     fence_candidate = commit_tree(
         root, fence_oid, [], "Fence project in open mode",

@@ -1,0 +1,6 @@
+{
+  "summary": "Publishing a Delivery Review now regenerates the Delivery map and relation projections from the published tree, as every other Integration publication does, instead of carrying a local map that may lag the Integration.",
+  "components": {
+    "software-engineering-team": "patch"
+  }
+}

@@ -14,6 +14,9 @@ Two moments, one law (the obsidian-vault skill):
   run vault_check's --changed fast path and surface its findings to the
   writing session immediately, so link and metadata duties are repaired
   in-session instead of at a distant gate. Gates stay the hard barrier.
+  A host that reports a failed tool call through a separate event (Claude
+  Code's PostToolUseFailure) runs the same post: a command that changes the
+  vault and then exits non-zero is still verified and restored.
 - register (SessionStart): perform no global registration. The hook runs from
   its installed team package and all mutable inventory remains under the
   current project's ignored `.agentrof/` runtime.
@@ -3358,6 +3361,9 @@ def shell_snapshot(payload: dict) -> int:
     root = shell_vault(payload)
     project = shell_project(payload).resolve()
     path = inventory_path(payload, project)
+    # A snapshot whose post never ran (host timeout, interrupted command)
+    # outlives its recovery capsule; expire it on the same clock.
+    cleanup_stale_recovery(path.parent)
     config_path = project / "workspace" / "config.json"
     topology_problem = config_topology_problem(config_path)
     if topology_problem:

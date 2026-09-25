@@ -10,6 +10,7 @@ import stat
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 from contextlib import redirect_stderr
 from pathlib import Path
@@ -2488,6 +2489,66 @@ class VaultHookShellContractTests(unittest.TestCase):
                 json.loads(config.read_text(encoding="utf-8"))["output_language"],
                 "English",
             )
+
+    def test_claude_runs_the_post_guard_for_failed_tool_calls(self):
+        # Claude Code reports a failed tool call, including a Bash command
+        # that exits non-zero, through PostToolUseFailure, never PostToolUse.
+        for hooks in (
+            ROOT / "platforms/claude/software-engineering-team/overlay/hooks/hooks.json",
+            ROOT / "dist/claude/software-engineering-team/hooks/hooks.json",
+        ):
+            events = json.loads(hooks.read_text(encoding="utf-8"))["hooks"]
+            self.assertEqual(events.get("PostToolUseFailure"), events["PostToolUse"], hooks)
+
+    def test_failed_command_payload_restores_protected_state(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            _docs, config = self.project(root)
+            payload = {
+                **self.payload(root, "python3 unrelated.py"),
+                "tool_use_id": "failed-command-event",
+            }
+            before = self.run_hook("pre", payload)
+            self.assertEqual(before.returncode, 0, before.stdout + before.stderr)
+            value = json.loads(config.read_text(encoding="utf-8"))
+            value["output_language"] = "Turkish"
+            config.write_text(json.dumps(value, indent=2) + "\n", encoding="utf-8")
+            failed = {
+                **payload,
+                "hook_event_name": "PostToolUseFailure",
+                "error": "Command failed with exit code 1",
+            }
+            after = self.run_hook("post", failed)
+            self.assertEqual(after.returncode, 2)
+            self.assertEqual(
+                json.loads(config.read_text(encoding="utf-8"))["output_language"],
+                "English",
+            )
+            inventory = root / ".agentrof/agent-marketplace/.runtime/vault-inventory"
+            self.assertEqual(list(inventory.glob("*.json")), [])
+
+    def test_snapshot_expires_project_inventory_left_by_a_missed_post(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            self.project(root)
+            inventory = root / ".agentrof/agent-marketplace/.runtime/vault-inventory"
+            inventory.mkdir(parents=True)
+            expired = inventory / "expired-session-0000000000000000.json"
+            recent = inventory / "recent-session-0000000000000000.json"
+            for leftover in (expired, recent):
+                leftover.write_text("{}", encoding="utf-8")
+            old = time.time() - self.hook.RECOVERY_TTL_SECONDS - 60
+            os.utime(expired, (old, old))
+            payload = {
+                **self.payload(root, "python3 unrelated.py"),
+                "tool_use_id": "expiry-event",
+            }
+            before = self.run_hook("pre", payload)
+            self.assertEqual(before.returncode, 0, before.stdout + before.stderr)
+            self.assertFalse(expired.exists())
+            self.assertTrue(recent.exists())
+            after = self.run_hook("post", payload)
+            self.assertEqual(after.returncode, 0, after.stdout + after.stderr)
 
     def test_post_command_drift_restores_compiler_owned_experience_state(self):
         with tempfile.TemporaryDirectory() as temporary:

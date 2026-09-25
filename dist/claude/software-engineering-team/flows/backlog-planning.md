@@ -47,7 +47,10 @@ backlog_compile.py init --docs <workspace>/docs --planning-mode manual \\
 
 The compiler validates the three strict-current upstream package families plus
 the globally current Experience application and its selected process receipt
-set, then renders `backlog/_generated/input-package-coverage.md`. Requirement
+set, then renders `backlog/_generated/input-package-coverage.md`. The view lists
+each bound package with its stage and receipt hash, whether the package
+resolver still finds that receipt strict-current, and how many stories cite the
+package. Requirement
 mode instead records `requirement_ref: REQ-###`; stories carry
 `implements: REQ-###`, and the complete Requirement Stage Results receipt set
 is required before approval.

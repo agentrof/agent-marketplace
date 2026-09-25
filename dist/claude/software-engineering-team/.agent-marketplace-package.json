@@ -1,5 +1,5 @@
 {
-  "build_id": "snapshot.36d2bc13b3d2b95a63fab014a33bcc69cf53528e8b70fe86a29cffd08dc9f414",
+  "build_id": "snapshot.67ec3b0aa5548c598c03c26d830d0273c5dec82b16b8cfa1d2af919825766b88",
   "component": "software-engineering-team",
   "delivery_protocol": {
     "read_max": 1,
@@ -73,7 +73,7 @@
     "scripts/setup_project.py": "a2f077040ff1da1f0f71231e273aa8118f1c642b6265444bc12f04b2174174d6",
     "scripts/stage_package.py": "d2c6fb7a0a1ac3d20e081354d13ae5a6f1a4ef943018ec8fc7e44260f0ca27d4",
     "scripts/team_guard.py": "b001c78b460ed623523738699882061f37ef73e616c7100af84d1f299d5b45c6",
-    "scripts/vault_check.py": "5b17b5f012353116680cf43231aec68514ca64288076d1438fa300d491a3e664",
+    "scripts/vault_check.py": "2258ae3566c56aa9e088e0d9dccfb74cf32d38ada742cdefa5a3a6ed43fe9da8",
     "scripts/vault_gate.py": "2624df7cae40066e1f7ce022dd6f1986841a65c7a28aada0ebfa565aca0832b2",
     "scripts/vault_hook.py": "741c07a85a7dd18cab27ef13724acb2c9057a1e41444bed4a8ddc41fb8aa3624",
     "skill-content/backlog-plan/SKILL.md": "d063e6cd9a9ab6a5bdfd77fdc6bf77a7b2fef070bc3742cd312a27106c90435a",
@@ -126,7 +126,7 @@
     "skill-content/obsidian-vault/data/vault-policy.json": "d78b7fa7df3ee111f95bbdf23ecaa54b3234f49f96626aebd261f60a331370f0",
     "skill-content/obsidian-vault/references/graph.md": "e730f2e176541e1db640f3aadec9a35e51cfa8af95a62331e0e2894a65862a1e",
     "skill-content/obsidian-vault/references/linking.md": "7cdd63dcd67ed3326765abe065744e1b39c189e5399f1dfe8baa62f786ca52e9",
-    "skill-content/obsidian-vault/references/metadata.md": "73b716736859585ff25e68a6576d93f8127e49133c4a7cd7241ed43a2858a07e",
+    "skill-content/obsidian-vault/references/metadata.md": "821fea2aeb69ea8b74f044fc4b9c396c423e1165823919a8333587ab2b196d26",
     "skill-content/obsidian-vault/references/vault-structure.md": "ed6fb5780b0a0214a27cf448de91542edaf44622137ed097c9304d0190e98415",
     "skill-content/organize-docs/SKILL.md": "ac4887ee4ba62a001ae00207ccb13712a57cb59779182306aa24a3bfee5464fe",
     "skill-content/product-planning/SKILL.md": "8f3752ebbe373a7f9ff011bf4085b144dc27edafdf436f3ca871a8d7a59d4cf8",
@@ -283,6 +283,6 @@
   "schema_version": 3,
   "source_channel": "snapshot",
   "source_commit": "",
-  "source_ref": "snapshot.36d2bc13b3d2b95a63fab014a33bcc69cf53528e8b70fe86a29cffd08dc9f414",
+  "source_ref": "snapshot.67ec3b0aa5548c598c03c26d830d0273c5dec82b16b8cfa1d2af919825766b88",
   "version": "0.3.2"
 }

@@ -40,7 +40,12 @@ aliases:
   space or domain overview carries its code (`- SHP`), so search, the
   quick switcher and unlinked mentions find them; ids never appear in
   filenames, titles or H1s. An id-shaped LINK alias must target the
-  id's owning note (`alias_ownership`).
+  id's owning note (`alias_ownership`). An alias is id-shaped when it
+  reads PREFIX-, an optional node code, then three or more digits
+  (`SD-007`, `EP-004`, `DEC-INV-001`). The owner is the decision note
+  for a decision id, the note the space registry names for a BA row id,
+  and otherwise the one authored note whose `aliases` declare the id;
+  an id declared by two notes has no owner and is not checked.
 
 ## Title law
 

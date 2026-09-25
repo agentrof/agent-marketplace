@@ -1,0 +1,6 @@
+{
+  "summary": "The manual backlog's input coverage view now judges each bound package by its receipt, showing its stage, hash and whether it is still strict-current, and counts every story that cites the package instead of reading note status and matching only stories added in the current revision.",
+  "components": {
+    "software-engineering-team": "patch"
+  }
+}

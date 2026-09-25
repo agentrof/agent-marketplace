@@ -1,0 +1,6 @@
+{
+  "summary": "Cancelling a Delivery now regenerates the Delivery map and relation projections from the published cancellation Review, as every other Integration publication does, so the published map shows the Delivery as cancelled.",
+  "components": {
+    "software-engineering-team": "patch"
+  }
+}

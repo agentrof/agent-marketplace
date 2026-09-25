@@ -771,12 +771,15 @@ def delivery_projection_changes(root: Path, tree: str,
 
 def commit_replacements(root: Path, base: str, replacements: dict[str, str],
                         subject: str, trailers: dict[str, str], *,
-                        parents: tuple[str, ...] | None = None) -> str:
+                        parents: tuple[str, ...] | None = None,
+                        delivery_projections: bool = False) -> str:
     """Create a candidate from *base* with exact in-memory file replacements.
 
     The candidate's tree is *base* plus the replacements; its parents default to
     *base* alone. Passing *parents* records a different lineage for the same tree,
     which is how a sealed Item reopens on the Integration that absorbed it.
+    *delivery_projections* derives the Delivery map and relation projections from
+    that tree, as ``commit_tree`` does for every other Integration publication.
     """
     trailers = _normalise_control_trailers(trailers)
     parent_args = [arg for parent in (parents or (base,)) for arg in ("-p", parent)]
@@ -802,10 +805,12 @@ def commit_replacements(root: Path, base: str, replacements: dict[str, str],
                               text=True, capture_output=True, check=False)
         if tree.returncode:
             raise RuntimeError(tree.stderr.strip() or "cannot write candidate tree")
+        projected = (write_delivery_projection_tree(root, env, tree.stdout.strip())
+                     if delivery_projections else tree.stdout.strip())
         message = subject + "\n\n" + "\n".join(
             f"Agentrof-{key}: {value}" for key, value in trailers.items()
         ) + "\n"
-        commit = subprocess.run(["git", "commit-tree", tree.stdout.strip(), *parent_args],
+        commit = subprocess.run(["git", "commit-tree", projected, *parent_args],
                                 cwd=root, env=env, input=message, text=True,
                                 capture_output=True, check=False)
         if commit.returncode:
@@ -1716,6 +1721,7 @@ def cancel_delivery(project_root: Path, delivery_id: str, reason: str,
          "Reviewed-Integration": finalization, "Approval-Hash": review_props["approval_hash"],
          "Target": target, "Cancellation-Intent-Hash": intent_hash,
          "Cancellation-Projection-Hash": projection_hash},
+        delivery_projections=True,
     )
     fence_candidate = commit_tree(
         root, fence_oid, [], "Fence project in open mode",

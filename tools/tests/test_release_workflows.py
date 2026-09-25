@@ -13,7 +13,6 @@ PINNED_ACTIONS = {
     "actions/checkout": ("fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09", "v5"),
     "actions/setup-python": ("5fda3b95a4ea91299a34e894583c3862153e4b97", "v7.0.0"),
     "actions/setup-node": ("820762786026740c76f36085b0efc47a31fe5020", "v7.0.0"),
-    "actions/upload-artifact": ("043fb46d1a93c77aae656e7c1c64a875d1fc6a0a", "v7.0.1"),
     "github/codeql-action/init": ("b96794f015dfd88f77b49b1c93e0fa7110f94c63", "v4"),
     "github/codeql-action/analyze": ("b96794f015dfd88f77b49b1c93e0fa7110f94c63", "v4"),
 }
@@ -21,6 +20,7 @@ ACTION_USE_RE = re.compile(
     r"uses:\s+([A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+(?:/[A-Za-z0-9_.-]+)?)"
     r"@([^\s#]+)(?:\s+#\s*([^\s]+))?"
 )
+STATUS_CHECK_RE = re.compile(r"\b(?:always|cancelled|failure)\(\)")
 
 
 def workflow_action_findings(name: str, text: str) -> list[str]:
@@ -46,6 +46,57 @@ def workflow_action_findings(name: str, text: str) -> list[str]:
             findings.append(f"{name}: setup-node must select Node.js 24")
         if "package-manager-cache: false" not in inputs:
             findings.append(f"{name}: setup-node must disable package caching")
+    return findings
+
+
+def workflow_jobs(text: str) -> dict[str, dict]:
+    jobs: dict[str, dict] = {}
+    job: dict = {"if": "", "needs": []}
+    key = ""
+    for line in text.split("\njobs:\n", 1)[1].splitlines():
+        if re.fullmatch(r"  [\w-]+:", line):
+            job = jobs.setdefault(line.strip()[:-1], {"if": "", "needs": []})
+            key = ""
+        elif not line.startswith("    "):
+            continue
+        elif not line.startswith("     "):
+            key, _, value = line.strip().partition(":")
+            value = value.strip()
+            if key == "if" and not value.startswith((">", "|")):
+                job["if"] = value
+            elif key == "needs":
+                job["needs"] = [
+                    need.strip() for need in value.strip("[]").split(",")
+                    if need.strip()
+                ]
+        elif key == "if":
+            job["if"] = f"{job['if']} {line.strip()}".strip()
+        elif key == "needs" and line.strip().startswith("- "):
+            job["needs"].append(line.strip()[2:].strip())
+    return jobs
+
+
+def workflow_skip_inheritance_findings(name: str, text: str) -> list[str]:
+    # Without always(), cancelled() or failure() a job `if` gets GitHub's
+    # implicit success(), which is false after a skipped or failed ancestor
+    # anywhere in its chain. A need that calls one of them can succeed after
+    # such an ancestor, and its dependent is then skipped anyway.
+    jobs = workflow_jobs(text)
+    findings: list[str] = []
+    for job, spec in jobs.items():
+        for need in spec["needs"]:
+            if not STATUS_CHECK_RE.search(jobs.get(need, {}).get("if", "")):
+                continue
+            if not STATUS_CHECK_RE.search(spec["if"]):
+                findings.append(
+                    f"{name}: {job} inherits every skip {need} tolerates; gate "
+                    f"it with !cancelled() && needs.{need}.result == 'success'"
+                )
+            elif f"needs.{need}.result == 'success'" not in spec["if"]:
+                findings.append(
+                    f"{name}: {job} runs past {need} without requiring "
+                    f"needs.{need}.result == 'success'"
+                )
     return findings
 
 
@@ -209,24 +260,76 @@ class ReleaseWorkflowContracts(unittest.TestCase):
         self.assertIn("persist-credentials: false", public)
         self.assertIn("make public-release-check", public)
 
-    def test_main_validation_uploads_build_id_and_native_artifacts(self):
+    def test_validation_is_read_only_and_pins_setup_python(self):
         text = self.text("validate.yml")
         self.assertIn("permissions:\n  contents: read", text)
-        self.assertIn("tools/release.py build-info", text)
         self.assertEqual(
             text.count(
                 "actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0"
             ),
-            6,
+            5,
         )
         self.assertGreaterEqual(text.count('python-version: "3.9"'), 2)
-        self.assertIn("actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1", text)
-        self.assertIn("dist/claude", text)
-        self.assertIn("dist/codex", text)
+
+    def test_no_job_inherits_a_skip_its_need_tolerates(self):
+        validate = workflow_jobs(self.text("validate.yml"))
+        self.assertEqual(validate["check"]["if"], "always()")
+        self.assertEqual(validate["check"]["needs"], [
+            "changeset", "release-pr-policy", "deterministic-check",
+            "compatibility", "vault-hook-platforms",
+        ])
+        self.assertIn("github.event_name == 'pull_request' &&",
+                      validate["changeset"]["if"])
+        prepare = workflow_jobs(self.text("prepare-stable-release.yml"))
+        self.assertEqual(prepare["prepare"]["needs"], ["exact-sha-host-gates"])
+        publish = workflow_jobs(self.text("publish-stable-release.yml"))
+        self.assertEqual(publish["finalize-publication"]["needs"],
+                         ["stage-publication", "public-stable-smoke"])
+        self.assertRegex(publish["finalize-publication"]["if"], STATUS_CHECK_RE)
+        workflow_root = REPO / ".github" / "workflows"
+        for workflow in sorted({
+            *workflow_root.glob("*.yml"),
+            *workflow_root.glob("*.yaml"),
+        }):
+            text = workflow.read_text(encoding="utf-8")
+            with self.subTest(workflow=workflow.name):
+                self.assertTrue(workflow_jobs(text))
+                self.assertEqual(
+                    [], workflow_skip_inheritance_findings(workflow.name, text)
+                )
+
+    def test_skip_inheritance_rejects_each_stale_shape(self):
+        template = (
+            "on: push\n"
+            "jobs:\n"
+            "  changeset:\n"
+            "    if: github.event_name == 'pull_request'\n"
+            "  check:\n"
+            "    if: always()\n"
+            "    needs:\n"
+            "      - changeset\n"
+            "  build-metadata:\n"
+            "    if: {condition}\n"
+            "    needs: [check]\n"
+        )
+        cases = {
+            "implicit-success": "github.event_name == 'push'",
+            "explicit-success": "success() && github.event_name == 'push'",
+            "ignores-verdict": "${{ !cancelled() && github.event_name == 'push' }}",
+        }
+        for name, condition in cases.items():
+            with self.subTest(name=name):
+                self.assertTrue(workflow_skip_inheritance_findings(
+                    name, template.format(condition=condition),
+                ))
+        gated = template.format(condition=(
+            "${{ !cancelled() && github.event_name == 'push' && "
+            "needs.check.result == 'success' }}"
+        ))
+        self.assertEqual([], workflow_skip_inheritance_findings("gated", gated))
 
     def test_vault_hook_matrix_gates_platforms_and_apple_launcher(self):
         text = self.text("validate.yml")
-        self.assertIn("needs: [check]", text)
         self.assertIn("VAULT_RESULT: ${{ needs.vault-hook-platforms.result }}", text)
         self.assertIn('test "$VAULT_RESULT" = success', text)
         for runner in ("ubuntu-latest", "macos-latest", "windows-latest"):
@@ -363,7 +466,6 @@ class ReleaseWorkflowContracts(unittest.TestCase):
             "release-pr-policy": "10",
             "deterministic-check": "20",
             "check": "5",
-            "build-metadata": "10",
             "compatibility": "20",
             "vault-hook-platforms": "10",
         }

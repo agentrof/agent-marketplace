@@ -1,8 +1,7 @@
 #!/usr/bin/env python3
 """Stable release and cross-host version tooling for Agent Marketplace.
 
-SemVer belongs only to stable releases. Normal main commits use a build identity
-derived from first-parent history and the commit SHA.
+SemVer belongs only to stable releases.
 """
 
 from __future__ import annotations
@@ -697,18 +696,6 @@ def finalize_local_release(
     return result
 
 
-def build_identity(root: Path, sha: str = "HEAD") -> dict:
-    full_sha = git(root, "rev-parse", sha)
-    count = git(root, "rev-list", "--count", "--first-parent", full_sha)
-    return {
-        "schema_version": 1,
-        "build_id": f"main.{count}.g{full_sha[:7]}",
-        "commit": full_sha,
-        "first_parent_count": int(count),
-        "stable_versions": load_versions(root),
-    }
-
-
 def changed_paths(root: Path, base: str) -> list[tuple[str, str]]:
     output = git(root, "diff", "--name-status", f"{base}...HEAD")
     result: list[tuple[str, str]] = []
@@ -1177,9 +1164,6 @@ def main() -> int:
     sub.add_parser("plan")
     sync_parser = sub.add_parser("sync")
     sync_parser.add_argument("--write", action="store_true", required=True)
-    build_parser = sub.add_parser("build-info")
-    build_parser.add_argument("--sha", default="HEAD")
-    build_parser.add_argument("--output", type=Path)
     pr_parser = sub.add_parser("check-pr")
     pr_parser.add_argument("--base", required=True)
     prepare_parser = sub.add_parser("prepare")
@@ -1216,13 +1200,6 @@ def main() -> int:
         print(json.dumps(release_plan(load_versions(root), load_changesets(root)), indent=2))
     elif args.command == "sync":
         sync_version_surfaces(root, load_versions(root))
-    elif args.command == "build-info":
-        result = build_identity(root, args.sha)
-        payload = json.dumps(result, indent=2) + "\n"
-        if args.output:
-            args.output.write_bytes(payload.encode("utf-8"))
-        else:
-            print(payload, end="")
     elif args.command == "check-pr":
         check_pr_changeset(root, args.base)
         print("release: pull request changeset valid")

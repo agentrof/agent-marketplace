@@ -1194,6 +1194,7 @@ def approve_review(args) -> int:
     review_props["source_hash"] = content_hash(review_props, review_body)
     atomic_text(review_path, frontmatter(review_props, review_body))
     delivery_props["status"] = "review"
+    delivery_props["tags"] = [tag for tag in delivery_props.get("tags", []) if not str(tag).startswith("status/")] + ["status/review"]
     delivery_props["source_hash"] = content_hash(delivery_props, split_note(delivery_path_value)[1])
     atomic_text(delivery_path_value, frontmatter(delivery_props, split_note(delivery_path_value)[1]))
     print(json.dumps({"ok": True, "review": str(review_path), "approval_hash": review_props["approval_hash"]}, indent=2)); return 0

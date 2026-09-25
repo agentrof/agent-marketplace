@@ -1,0 +1,6 @@
+{
+  "summary": "Approving a Delivery Review now moves the Delivery's status tag to review, and invalidating a Review moves its status tag to changes-requested, so the vault check stays green after both transitions.",
+  "components": {
+    "software-engineering-team": "patch"
+  }
+}

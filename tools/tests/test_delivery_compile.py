@@ -641,6 +641,43 @@ class DeliveryCompilerTests(unittest.TestCase):
         })
         self.assertEqual(delivery_compile.approve_review(review), 2)
 
+    def test_review_approval_keeps_the_authored_sections(self):
+        self.approve_dod()
+        init = type("Args", (), {"docs": str(self.docs), "id": None, "slug": "auth",
+                                   "goal": "Authenticate", "outcome": None, "target_branch": "main",
+                                   "story": ["AUTH-01"]})
+        self.assertEqual(delivery_compile.init_delivery(init), 0)
+        root = delivery_compile.find_delivery(self.docs, "DLV-001")
+        review_path = root / "delivery-review.md"
+        review = type("Args", (), {"docs": str(self.docs), "delivery": "DLV-001",
+                                     "reviewed_commit": "a" * 40, "reviewed_integration_commit": "b" * 40})
+        navigation = delivery_compile.link(str((root / "delivery.md").relative_to(self.docs)), "DLV-001")
+        # Without an authored draft the approval writes the template it always wrote.
+        self.assertEqual(delivery_compile.approve_review(review), 0)
+        props, template = delivery_compile.split_note(review_path)
+        self.assertEqual(template.rstrip(), delivery_compile.body_for("delivery-review", props["title"], {
+            "Goal Outcome": "Authenticate", "Verdict": "Approved for PR handoff.", "Navigation": navigation}).rstrip())
+        authored = {"Scope Disposition": "AUTH-01 delivered as planned.",
+                    "Deviations": "The owner added session expiry on 2026-01-01.",
+                    "Lessons and Follow-up": "Rotate the fixture keys.",
+                    "Verdict": "Approved for PR handoff with one follow-up."}
+        draft = delivery_compile.body_for("delivery-review", "Draft review", {
+            **authored, "Findings": delivery_compile.SECTION_PLACEHOLDER, "Navigation": "[[elsewhere|Elsewhere]]"})
+        review_path.write_text(delivery_compile.frontmatter({"type": "delivery-review", "status": "draft"}, draft),
+                               encoding="utf-8")
+        self.assertEqual(delivery_compile.approve_review(review), 0)
+        props, body = delivery_compile.split_note(review_path)
+        sections = delivery_compile.section_bodies(body)
+        for title, text in authored.items():
+            self.assertEqual(sections[title], text)
+        self.assertEqual(sections["Goal Outcome"], "Authenticate")
+        self.assertEqual(sections["Findings"], delivery_compile.SECTION_PLACEHOLDER)
+        self.assertIn(navigation, sections["Navigation"])
+        self.assertNotIn("Elsewhere", sections["Navigation"])
+        self.assertEqual(props["status"], "approved")
+        self.assertEqual(props["approval_hash"], delivery_compile.content_hash(
+            props, body, exclude=delivery_compile.MUTABLE | {"approval_hash"}))
+
     def test_scope_rejects_unknown_story_and_execution_rejects_unclaimed_topology(self):
         self.approve_dod()
         unknown = type("Args", (), {"docs": str(self.docs), "id": None, "slug": "unknown",

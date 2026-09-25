@@ -476,26 +476,11 @@ def planning_package_findings(
             errors.append(f"{path} manual planning must not declare a Requirement")
         bindings = values(props, "input_bindings")
         if bindings:
-            refs = []
-            expected: dict[str, list[str]] = {}
-            for binding in bindings:
-                stage, separator, remainder = binding.partition("|")
-                reference, separator2, digest = remainder.partition("|")
-                if (not separator or not separator2 or not reference
-                        or not digest.startswith("sha256:")):
-                    errors.append(f"{path} input_binding must be stage|exact-ref|sha256")
-                    continue
-                if stage not in {"business-analysis", "solution-design", "design-system", "experience-design"}:
-                    errors.append(f"{path} input_binding has unsupported stage {stage}")
-                    continue
-                expected.setdefault(stage, []).append(reference)
-                refs.append(reference)
-                _receipt, verify_errors = stage_package.verify(
-                    docs, stage, reference, digest, require_committed=True,
-                    require_strict_current=not allow_historical,
-                    allow_historical=allow_historical)
-                errors.extend(f"{path} input binding: {error}"
-                              for error in verify_errors)
+            rows, binding_errors = verify_input_bindings(
+                docs, bindings, path, allow_historical=allow_historical)
+            errors.extend(binding_errors)
+            refs = [reference for _stage, reference, _digest in rows]
+            expected = grouped_input_references(rows)
         else:
             # Mode-bearing historical packages remain readable. New manual
             # packages must carry compiler-owned hash bindings.
@@ -516,20 +501,10 @@ def planning_package_findings(
             else:
                 expected = {}
                 errors.append(f"{path} manual planning needs compiler-owned input_bindings")
-        for stage, references in expected.items():
-            if stage != "experience-design" and len(references) != 1:
-                errors.append(f"{path} manual planning needs exactly one {stage} input package")
-                continue
-            if stage == "experience-design" and not requirement_compile.valid_experience_receipt_refs(
-                    references, docs, allow_historical=allow_historical):
-                errors.append(
-                    f"{path} manual planning needs one Experience application plus its exact process packages, "
-                    "or only the application when it is verified empty"
-                )
-        missing = sorted({"business-analysis", "solution-design", "design-system", "experience-design"} - set(expected))
-        if missing:
-            errors.append(f"{path} manual planning is missing input packages: {', '.join(missing)}")
+        errors.extend(input_family_findings(
+            expected, docs, path, "manual", allow_historical=allow_historical))
     elif mode == "requirement":
+        requirement_receipts: dict[str, list[tuple[str, str]]] = {}
         requirement = str(props.get("requirement_ref", "")).strip()
         if not requirement:
             errors.append(f"{path} requirement planning needs requirement_ref")
@@ -556,6 +531,8 @@ def planning_package_findings(
                             if disposition == "not_applicable":
                                 continue
                             receipts = results.get(stage, [])
+                            requirement_receipts[stage] = sorted(
+                                (str(result_ref), str(result_hash)) for result_ref, result_hash in receipts)
                             if stage != "experience-design" and len(receipts) != 1:
                                 errors.append(f"{path} Requirement {stage} needs exactly one receipt")
                             if stage == "experience-design" and not requirement_compile.valid_experience_receipt_refs(
@@ -573,7 +550,79 @@ def planning_package_findings(
                                 errors.extend(f"{path} Requirement {stage} receipt: {error}" for error in verify_errors)
                     except (OSError, ValueError) as exc:
                         errors.append(f"{path} cannot read Requirement Stage Results: {exc}")
+        # The backlog pins every input family itself. A Requirement binds only
+        # the stages it changes or reuses; the rest would otherwise go unpinned.
+        bindings = values(props, "input_bindings")
+        if bindings:
+            rows, binding_errors = verify_input_bindings(
+                docs, bindings, path, allow_historical=allow_historical)
+            errors.extend(binding_errors)
+            refs = [reference for _stage, reference, _digest in rows]
+            errors.extend(input_family_findings(
+                grouped_input_references(rows), docs, path, "requirement",
+                allow_historical=allow_historical))
+            for stage, receipts in requirement_receipts.items():
+                bound = sorted((reference, digest) for bound_stage, reference, digest in rows
+                               if bound_stage == stage)
+                if bound != receipts:
+                    errors.append(f"{path} {stage} input binding must equal {requirement} Stage Results")
+        elif not (props.get("status") == "approved" or props.get("legacy_contract")):
+            errors.append(f"{path} requirement planning needs compiler-owned input_bindings")
     return mode, refs, errors
+
+
+INPUT_STAGES = ("business-analysis", "solution-design", "design-system", "experience-design")
+
+
+def verify_input_bindings(docs: Path, bindings: list[str], path: str, *,
+                          allow_historical: bool = False) -> tuple[list[tuple[str, str, str]], list[str]]:
+    """Parse compiler-owned stage|ref|sha256 bindings and verify each receipt."""
+    rows: list[tuple[str, str, str]] = []
+    errors: list[str] = []
+    for binding in bindings:
+        stage, separator, remainder = binding.partition("|")
+        reference, separator2, digest = remainder.partition("|")
+        if (not separator or not separator2 or not reference
+                or not digest.startswith("sha256:")):
+            errors.append(f"{path} input_binding must be stage|exact-ref|sha256")
+            continue
+        if stage not in INPUT_STAGES:
+            errors.append(f"{path} input_binding has unsupported stage {stage}")
+            continue
+        rows.append((stage, reference, digest))
+        _receipt, verify_errors = stage_package.verify(
+            docs, stage, reference, digest, require_committed=True,
+            require_strict_current=not allow_historical,
+            allow_historical=allow_historical)
+        errors.extend(f"{path} input binding: {error}" for error in verify_errors)
+    return rows, errors
+
+
+def grouped_input_references(rows: list[tuple[str, str, str]]) -> dict[str, list[str]]:
+    grouped: dict[str, list[str]] = {}
+    for stage, reference, _digest in rows:
+        grouped.setdefault(stage, []).append(reference)
+    return grouped
+
+
+def input_family_findings(expected: dict[str, list[str]], docs: Path, path: str,
+                          mode: str, *, allow_historical: bool = False) -> list[str]:
+    """Require one BA, Solution and Design package plus one complete Experience set."""
+    errors = []
+    for stage, references in expected.items():
+        if stage != "experience-design" and len(references) != 1:
+            errors.append(f"{path} {mode} planning needs exactly one {stage} input package")
+            continue
+        if stage == "experience-design" and not requirement_compile.valid_experience_receipt_refs(
+                references, docs, allow_historical=allow_historical):
+            errors.append(
+                f"{path} {mode} planning needs one Experience application plus its exact process packages, "
+                "or only the application when it is verified empty"
+            )
+    missing = sorted(set(INPUT_STAGES) - set(expected))
+    if missing:
+        errors.append(f"{path} {mode} planning is missing input packages: {', '.join(missing)}")
+    return errors
 
 
 def manual_stage_for_ref(reference: str) -> str:
@@ -623,6 +672,67 @@ def resolve_manual_input_bindings(docs: Path, raw_refs: list[str],
     if len(rows) != len(set(rows)):
         errors.append(f"{label} input package selection contains duplicates")
     return [f"{stage}|{ref}|{digest}" for stage, ref, digest in sorted(rows)], sorted(set(errors))
+
+
+def requirement_input_bindings(docs: Path, requirement_ref: str, carried: list[str],
+                               declared: list[str], label: str) -> tuple[list[str], list[str]]:
+    """Pin all four input families for a Requirement-mode backlog.
+
+    Stages the Requirement changes or reuses bind its Stage Results receipts.
+    A stage it marks not_applicable keeps the backlog's previous binding or
+    takes an explicitly declared --input-ref, so a Requirement that does not
+    touch a package never leaves the backlog unpinned against it.
+    """
+    if not re.fullmatch(r"REQ-[0-9]{3,}", requirement_ref):
+        return [], [f"{label} requirement_ref must be REQ-###"]
+    paths = sorted((docs / "requirements").glob(f"req-{int(requirement_ref[4:]):03d}-*.md"))
+    if len(paths) != 1:
+        return [], [f"{label} requirement_ref is not uniquely resolvable: {requirement_ref}"]
+    try:
+        _props, body = requirement_compile.split_note(paths[0])
+        results = requirement_compile.stage_results(body)
+        dispositions = {stage: disposition for stage, disposition, _refs, _why
+                        in requirement_compile.impact_rows(body)}
+    except (OSError, ValueError) as exc:
+        return [], [f"{label} cannot read Requirement Stage Results: {exc}"]
+    errors: list[str] = []
+    declared_rows: list[tuple[str, str, str]] = []
+    for raw in declared:
+        target = raw.strip()
+        if target.startswith("[[") and target.endswith("]]"):
+            target = target[2:-2].split("|", 1)[0].split("#", 1)[0]
+        stage = manual_stage_for_ref(target)
+        if not stage:
+            errors.append(f"{label} input package targets an unsupported subtree: {target}")
+            continue
+        if dispositions.get(stage) != "not_applicable":
+            errors.append(f"{label} --input-ref may pin only a stage {requirement_ref} marks "
+                          f"not_applicable; {stage} binds its Stage Results")
+            continue
+        receipt, verify_errors = stage_package.verify(docs, stage, target,
+                                                       require_committed=True,
+                                                       require_strict_current=True)
+        errors.extend(f"{label} input package: {error}" for error in verify_errors)
+        if receipt is not None and not verify_errors:
+            declared_rows.append((stage, str(receipt["result_ref"]), str(receipt["package_hash"])))
+    carried_rows = []
+    for binding in carried:
+        stage, _separator, remainder = binding.partition("|")
+        reference, _separator, digest = remainder.partition("|")
+        carried_rows.append((stage, reference, digest))
+    rows: list[tuple[str, str, str]] = []
+    for stage in INPUT_STAGES:
+        if dispositions.get(stage, "not_applicable") != "not_applicable":
+            rows.extend((stage, str(reference), str(digest))
+                        for reference, digest in results.get(stage, []))
+            continue
+        chosen = ([row for row in declared_rows if row[0] == stage]
+                  or [row for row in carried_rows if row[0] == stage])
+        if not chosen:
+            errors.append(f"{label} requirement planning needs an input binding for {stage}, "
+                          f"which {requirement_ref} marks not_applicable; pass --input-ref")
+        rows.extend(chosen)
+    return [f"{stage}|{ref}|{digest}" for stage, ref, digest in sorted(set(rows))], sorted(set(errors))
 
 
 def validate_experience_ref(docs: Path, value: str, label: str,
@@ -2165,7 +2275,8 @@ def render(record: dict, docs: Path) -> None:
                         f"{len(story['scenario_ids'])} | {required} |")
     (out / "test-coverage.md").write_text(
         "\n".join(coverage) + "\n", encoding="utf-8")
-    if record["backlog"].get("planning_mode") == "manual":
+    if (record["backlog"].get("planning_mode") == "manual"
+            or values(record["backlog"]["props"], "input_bindings")):
         rows = [GENERATED_MAP_MARKER, "# Input Package Coverage", "",
                 "| package reference | stage | receipt | status | story links |",
                 "|---|---|---|---|---|"]
@@ -2224,8 +2335,9 @@ def init(args) -> int:
             file=sys.stderr,
         )
         return 2
-    if planning_mode == "requirement" and (not requirement_ref or input_ref):
-        print("backlog_compile: requirement init needs --requirement-ref and no --input-ref", file=sys.stderr)
+    if planning_mode == "requirement" and not requirement_ref:
+        print("backlog_compile: requirement init needs --requirement-ref; --input-ref pins "
+              "only the stages the Requirement marks not_applicable", file=sys.stderr)
         return 2
     input_bindings: list[str] = []
     # Resolve every selected receipt against one immutable graph snapshot.
@@ -2239,6 +2351,13 @@ def init(args) -> int:
         if planning_mode == "manual":
             input_bindings, binding_errors = resolve_manual_input_bindings(
                 docs, input_ref, "backlog/backlog.md")
+            if binding_errors:
+                print(json.dumps({"ok": False, "errors": binding_errors},
+                                 indent=2, ensure_ascii=False), file=sys.stderr)
+                return 1
+        elif planning_mode == "requirement":
+            input_bindings, binding_errors = requirement_input_bindings(
+                docs, requirement_ref, [], input_ref, "backlog/backlog.md")
             if binding_errors:
                 print(json.dumps({"ok": False, "errors": binding_errors},
                                  indent=2, ensure_ascii=False), file=sys.stderr)
@@ -2543,8 +2662,11 @@ def begin_revision(args) -> int:
             ],
         }, indent=2), file=sys.stderr)
         return 2
-    if args.planning_mode == "requirement" and (not args.requirement_ref or args.input_ref):
-        print(json.dumps({"ok": False, "errors": ["requirement revision needs --requirement-ref and no --input-ref values"]}, indent=2), file=sys.stderr)
+    if args.planning_mode == "requirement" and not args.requirement_ref:
+        print(json.dumps({"ok": False, "errors": [
+            "requirement revision needs --requirement-ref; --input-ref pins only the "
+            "stages the Requirement marks not_applicable"
+        ]}, indent=2), file=sys.stderr)
         return 2
     input_bindings: list[str] = []
     if args.planning_mode == "manual":
@@ -2560,6 +2682,20 @@ def begin_revision(args) -> int:
             "approved backlog sources must be byte-exact in committed HEAD before beginning a revision"
         ]}, indent=2), file=sys.stderr)
         return 1
+    if args.planning_mode == "requirement":
+        # Untouched stages carry this backlog's previous bindings forward.
+        input_bindings, binding_errors = requirement_input_bindings(
+            docs, args.requirement_ref, values(root_props, "input_bindings"),
+            list(args.input_ref), "backlog/backlog.md")
+        if not binding_errors:
+            _mode, _refs, binding_errors = planning_package_findings(docs, {
+                "planning_mode": "requirement", "requirement_ref": args.requirement_ref,
+                "input_bindings": input_bindings,
+            }, "backlog/backlog.md")
+        if binding_errors:
+            print(json.dumps({"ok": False, "errors": sorted(set(binding_errors))},
+                             indent=2, ensure_ascii=False), file=sys.stderr)
+            return 1
     old_revision = int(root_props.get("revision", 0) or 0)
     revision = old_revision + 1
     status_tag(root_props, "draft")
@@ -2570,8 +2706,7 @@ def begin_revision(args) -> int:
     root_props.pop("input_bindings", None)
     if args.planning_mode == "requirement":
         root_props["requirement_ref"] = args.requirement_ref
-    else:
-        root_props["input_bindings"] = input_bindings
+    root_props["input_bindings"] = input_bindings
     for key in ("approved_at_utc", "source_hash", "package_hash"):
         root_props.pop(key, None)
     backlog_path.write_text(front_matter(root_props, root_body), encoding="utf-8")

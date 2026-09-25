@@ -1,0 +1,4 @@
+{
+  "summary": "Main-branch validation drops the build-metadata job, which never ran after the aggregate check gate was introduced, and its unused build-info command; stable releases install from the verified stable ref and never read that job's artifact.",
+  "components": {}
+}

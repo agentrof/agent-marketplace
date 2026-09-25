@@ -628,8 +628,15 @@ class DeliveryGitTests(unittest.TestCase):
             self.assertEqual(delivery_git.trailer(item_message, "Disposition"), "unintegrated_discarded")
             self.assertEqual(delivery_git.trailer(item_message, "Previous-Tip"), started["item"])
             integration_ref = delivery_git.canonical_refs("DLV-001")["integration"]
-            integration_message = delivery_git.commit_message(project, delivery_git.remote_oid(project, "origin", integration_ref))
+            integration = delivery_git.remote_oid(project, "origin", integration_ref)
+            integration_message = delivery_git.commit_message(project, integration)
             self.assertEqual(delivery_git.trailer(integration_message, "Record"), "delivery-review-published-v1")
+            # The cancellation Review is published like any other: the map and the
+            # relation projections come from the published tree.
+            published_map = delivery_git.run_git(project, "show", f"{integration}:workspace/docs/maps/delivery.md")
+            self.assertIn("|DLV-001]] — `cancelled`", published_map)
+            tree = delivery_git.run_git(project, "rev-parse", integration + "^{tree}")
+            self.assertEqual(delivery_git.delivery_projection_changes(project, tree), {})
 
     def test_ref_free_reservation_pushes_fence_and_integration_atomically(self):
         with tempfile.TemporaryDirectory() as temporary:

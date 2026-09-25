@@ -2043,6 +2043,61 @@ def render_backlog_navigation(record: dict, docs: Path, *, preserved: set[Path] 
                        ["[[maps/backlog|Backlog map]]", epic_link, story_link])
 
 
+def input_package_rows(record: dict) -> list[tuple[str, str, str]]:
+    """Return (stage, reference, receipt hash) for every declared input package."""
+    bindings = values(record["backlog"]["props"], "input_bindings")
+    if bindings:
+        rows = []
+        for binding in bindings:
+            stage, _, remainder = binding.partition("|")
+            reference, _, digest = remainder.partition("|")
+            rows.append((stage, reference, digest))
+        return rows
+    rows = []
+    for value in sorted(set(record["backlog"].get("input_package_refs", []))):
+        parsed = split_wikilink(value)
+        reference = parsed[0] if parsed else value
+        rows.append((manual_stage_for_ref(reference), reference, ""))
+    return rows
+
+
+def input_package_status(docs: Path, stage: str, reference: str, digest: str) -> str:
+    """Judge a receipt by the package resolver, never by a note's own status."""
+    if not stage:
+        return "unknown stage"
+    _receipt, errors = stage_package.verify(
+        docs, stage, reference, digest, require_committed=True,
+        require_strict_current=True)
+    return "current" if not errors else "not current: " + errors[0]
+
+
+def story_cites_input_package(story: dict, stage: str, reference: str) -> bool:
+    """Whether a story's planning links resolve into this input package."""
+    def link_values(key: str, *, alias: bool = False) -> list[str]:
+        found = []
+        for value in values(story["props"], key):
+            parsed = split_wikilink(value)
+            if parsed is None:
+                found.append(value)
+            else:
+                found.append(parsed[2] if alias and parsed[2] else parsed[0])
+        return found
+    if stage == "experience-design":
+        cited = link_values("experience_refs", alias=True)
+        package = reference.split("@", 1)[0]
+        if package == "application":
+            return bool(cited)
+        return any(ref.split(":", 1)[0] == package for ref in cited)
+    if stage == "business-analysis":
+        space = reference.rsplit("/", 1)[0] + "/"
+        return any(target.startswith(space) for target in link_values("criterion_refs"))
+    if stage == "solution-design":
+        return any(target.startswith("solution-design/") for target in link_values("constrained_by"))
+    if stage == "design-system":
+        return any(target.startswith("design-system/") for target in link_values("uses_design"))
+    return False
+
+
 def render(record: dict, docs: Path) -> None:
     out = docs / "backlog" / "_generated"
     out.mkdir(parents=True, exist_ok=True)
@@ -2112,29 +2167,14 @@ def render(record: dict, docs: Path) -> None:
         "\n".join(coverage) + "\n", encoding="utf-8")
     if record["backlog"].get("planning_mode") == "manual":
         rows = [GENERATED_MAP_MARKER, "# Input Package Coverage", "",
-                "| package reference | status | current-revision story links |", "|---|---|---|"]
-        refs = list(record["backlog"].get("input_package_refs", []))
-        if not refs:
-            for story in record["stories"]:
-                refs.extend(story["experience_refs"])
-                refs.extend(values(story["props"], "uses_design"))
-                refs.extend(values(story["props"], "constrained_by"))
-        revision = int(record["backlog"]["props"].get("revision", 1) or 1)
-        current = [story for story in record["stories"]
-                   if int(story["props"].get("introduced_in_revision", 0) or 0) == revision]
-        for value in sorted(set(refs)):
-            parsed = split_wikilink(value)
-            target = parsed[0] if parsed else value
-            status = "unknown"
-            try:
-                status = str(note_status_and_type(docs / f"{target}.md")[0]) or "unknown"
-            except (OSError, ValueError):
-                pass
-            linked = sum(value in values(story["props"], "experience_refs")
-                         or value in values(story["props"], "uses_design")
-                         or value in values(story["props"], "constrained_by")
-                         for story in current)
-            rows.append(f"| {value} | {status} | {linked} |")
+                "| package reference | stage | receipt | status | story links |",
+                "|---|---|---|---|---|"]
+        for stage, reference, digest in input_package_rows(record):
+            linked = sum(story_cites_input_package(story, stage, reference)
+                         for story in record["stories"])
+            status = input_package_status(docs, stage, reference, digest).replace("|", "\\|")
+            rows.append(f"| {reference} | {stage or 'unknown'} | {digest or 'none'} | "
+                        f"{status} | {linked} |")
         (out / "input-package-coverage.md").write_text(
             "\n".join(rows) + "\n", encoding="utf-8")
 

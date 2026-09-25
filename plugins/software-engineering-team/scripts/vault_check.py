@@ -859,7 +859,9 @@ def check_map_coverage(vault: Vault, findings: list[Finding]) -> None:
 def check_alias_ownership(vault: Vault, findings: list[Finding]) -> None:
     """An id-shaped link alias must decorate a link to the id's owning
     note: decision-tree ids resolve by frontmatter alias, BA row ids through the
-    target space's generated registry. Absent or unknown = silent skip."""
+    target space's generated registry, any other id-shaped alias through the
+    one authored note that declares it. Absent, unknown or ambiguous = silent
+    skip."""
     policy = vault.policy
     owners: dict[str, str] = {}
     for tree in policy.get("decision_trees", {}).values():
@@ -867,6 +869,13 @@ def check_alias_ownership(vault: Vault, findings: list[Finding]) -> None:
             rec_id = decision_id(tree, note)
             if rec_id is not None:
                 owners.setdefault(rec_id, note.rel)
+    note_owners: dict[str, str | None] = {}
+    for note in authored(vault):
+        if in_machine_dir(policy, note.rel):
+            continue
+        for aid in set(id_shaped_aliases(note)):
+            # A second declaring note makes the id ambiguous: no owner.
+            note_owners[aid] = None if aid in note_owners else note.rel
     registries: dict[str, dict | None] = {}
 
     def space_registry(rel: str) -> tuple[str, dict] | None:
@@ -886,12 +895,28 @@ def check_alias_ownership(vault: Vault, findings: list[Finding]) -> None:
             return (root, data) if isinstance(data, dict) else None
         return None
 
+    def registry_owner(aid: str, rel: str) -> str | None:
+        if not NAMESPACED_ID_RE.fullmatch(aid):
+            return None
+        resolved = space_registry(rel)
+        if resolved is None:
+            return None  # no registry in reach: silent skip
+        root, registry = resolved
+        info = registry.get("ids", {}).get(aid)
+        if not isinstance(info, dict) or "doc" not in info:
+            return None  # unknown id: silent skip
+        return f"{root}/{info['doc']}"
+
     for note in authored(vault):
         for (lineno, embed, target, _anchor, alias, _inner) in note.wikilinks:
             if embed or not target or not alias:
                 continue
             aid = alias.strip()
             owner = owners.get(aid)
+            owner_rel = (registry_owner(aid, f"{target}.md")
+                         if owner is None else None)
+            if owner is None and owner_rel is None:
+                owner = note_owners.get(aid)
             if owner is not None:
                 if f"{target}.md" != owner:
                     findings.append(Finding(
@@ -901,17 +926,7 @@ def check_alias_ownership(vault: Vault, findings: list[Finding]) -> None:
                         "an id-shaped alias always rides a link to its"
                         " owner; use plain prose for anything else"))
                 continue
-            if not NAMESPACED_ID_RE.fullmatch(aid):
-                continue
-            resolved = space_registry(f"{target}.md")
-            if resolved is None:
-                continue  # no registry in reach: silent skip
-            root, registry = resolved
-            info = registry.get("ids", {}).get(aid)
-            if not isinstance(info, dict) or "doc" not in info:
-                continue  # unknown id: silent skip
-            owner_rel = f"{root}/{info['doc']}"
-            if f"{target}.md" != owner_rel:
+            if owner_rel is not None and f"{target}.md" != owner_rel:
                 findings.append(Finding(
                     "error", note.rel, lineno, "alias_ownership",
                     f"alias '{aid}' decorates a link to '{target}' but the"

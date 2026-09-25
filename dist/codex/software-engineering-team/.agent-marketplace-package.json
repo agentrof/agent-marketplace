@@ -1,5 +1,5 @@
 {
-  "build_id": "snapshot.308e054eb7cd36ba3c41322fe68ec5085472f1a6800246e5cd5380f2b4d663ea",
+  "build_id": "snapshot.9e2dc77f25380219e0c25318615f963bbafa11d5877e0d9f0b67473b5b7b1e09",
   "component": "software-engineering-team",
   "delivery_protocol": {
     "read_max": 1,
@@ -33,7 +33,7 @@
     "agents/solution-reviewer.md": "c2fe6d06c702cd0c7c891b385dbbe334e42fdbec4347da688c82e1ab79500886",
     "agents/ux-designer.md": "1d990eb8f773a941b6b7df31c0aa75b6cdd992fedd872f185500d77d4e04e6bc",
     "constitution.md": "32177174a6855417d1bfca8ffdb91011b525443c696d824e7ccad4cd4e457cde",
-    "flows/backlog-planning.md": "d8c64763798f65cdd2f84a78d27facaf6463236b646051fcc51d54312140be94",
+    "flows/backlog-planning.md": "0a9f822e57ec3350fc4ddd1e7d1c5294698b8a40723096ac524e6d9beaa8aa7d",
     "flows/business-analysis.md": "67b69348c59746263ded358459f51ab9653914ba1a4d597c3fb31d7b2557e2c3",
     "flows/delivery-execution.md": "0569956b3f0babd95dd35a50abe6b86c39629a66f9656b3cfb2fdbb70245e133",
     "flows/delivery-governance.md": "35bb00cea1ad2a11cde0f522c3fcca117db74dc4dff3a314cd4bba45b8c37f2d",
@@ -51,7 +51,7 @@
     "scripts/architecture_compile.py": "cab92f90a483765f5f5b8e2c3c1964051070feccc8f0e351c63830705b329152",
     "scripts/artifact_check.py": "d95f51158f98e56fab55a083f240a2de612ae5cf5f2b73aeaee848721793e860",
     "scripts/ba_compile.py": "53c0abab2358b4980908b5cdcedac6153ce53a5fc5fe60573360dc6a727e1d20",
-    "scripts/backlog_compile.py": "12e8ca50604ba42b464b58e7a34cc4e2e41944cb208e08025045ed6ebc056951",
+    "scripts/backlog_compile.py": "32c9e26435f7e0782de36ef0156cb73cf91bc52c4d08a077ba06177965374f72",
     "scripts/delivery_compile.py": "724c880a901e2628353ab3b19cdf5598b3b2d3b8d1fad18a9f13100a25ae4ecf",
     "scripts/delivery_git.py": "0196290c2bd1fdbfe1e49869cbd15333484019ad634a8258142855398de46ada",
     "scripts/delivery_governance.py": "e2a7a356d158517d3117fea9eb8b593889b6986f6259992542be4f090df3d0a5",
@@ -76,7 +76,7 @@
     "scripts/vault_check.py": "5b17b5f012353116680cf43231aec68514ca64288076d1438fa300d491a3e664",
     "scripts/vault_gate.py": "2624df7cae40066e1f7ce022dd6f1986841a65c7a28aada0ebfa565aca0832b2",
     "scripts/vault_hook.py": "f6f24e17c742d450377d0291ee71e13eca8de461fd170e71e47fbbb07d6256a4",
-    "skill-content/backlog-plan/SKILL.md": "b620ff5173fc4f26ae5b058d5d5223233829f20526ff8fda4588b4d8c62a2123",
+    "skill-content/backlog-plan/SKILL.md": "d063e6cd9a9ab6a5bdfd77fdc6bf77a7b2fef070bc3742cd312a27106c90435a",
     "skill-content/business-analysis/SKILL.md": "a2e836689bfafa46817564bc1744215d190e54adb54ebcef989513676969d76d",
     "skill-content/business-analysis/data/space-schema.json": "8bec0bb3025459143f52a8255d542ee52fcf99217e8c61fb770b407f1caa0936",
     "skill-content/challenge-review/SKILL.md": "08eecc5ff550106c6a5e65d1d8092214bd35a05335336643c9ac38a092372221",
@@ -131,7 +131,7 @@
     "skill-content/organize-docs/SKILL.md": "ac4887ee4ba62a001ae00207ccb13712a57cb59779182306aa24a3bfee5464fe",
     "skill-content/product-planning/SKILL.md": "8f3752ebbe373a7f9ff011bf4085b144dc27edafdf436f3ca871a8d7a59d4cf8",
     "skill-content/product-planning/references/flow-metrics.md": "891e42fcf0eb759a0307491ceca79e247bab0e1a81c4bcbade51c36ad621a2e0",
-    "skill-content/product-planning/references/living-experience-contract.md": "5663173211488fce8ee1a8403f59c93cc76001b6b1bb9cf0520902f1fb8ccc44",
+    "skill-content/product-planning/references/living-experience-contract.md": "7f7985b91205870b18fee297b106f2eb05016a0c0e9e81ac801104d706326d3f",
     "skill-content/product-planning/references/prioritization.md": "d3931963973a535ab15e4cda4b550271788b0717182742c91d6b0c93411b219e",
     "skill-content/product-planning/references/slicing-patterns.md": "133710c7ea873588dab8559850ad3ac372dc8d2cd66d98bfe305ed82ad59226e",
     "skill-content/product-planning/references/structured-records.md": "4a4ffc0e3c31e94418408fddad435c42dfbd84dd10cc387d670170b2359032f3",
@@ -281,6 +281,6 @@
   "schema_version": 3,
   "source_channel": "snapshot",
   "source_commit": "",
-  "source_ref": "snapshot.308e054eb7cd36ba3c41322fe68ec5085472f1a6800246e5cd5380f2b4d663ea",
+  "source_ref": "snapshot.9e2dc77f25380219e0c25318615f963bbafa11d5877e0d9f0b67473b5b7b1e09",
   "version": "0.3.2"
 }

@@ -55,6 +55,16 @@ mode instead records `requirement_ref: REQ-###`; stories carry
 `implements: REQ-###`, and the complete Requirement Stage Results receipt set
 is required before approval.
 
+Both modes pin the same four input families in compiler-owned
+`input_bindings`, and the compiler rejects any binding that is no longer
+strict-current. In Requirement mode, a stage the Requirement changes or reuses
+binds exactly its Stage Results receipt. A stage the Requirement marks
+`not_applicable` binds the exact approved package named with `--input-ref`
+(allowed only for such stages) or, at `begin-revision`, the previous
+revision's binding, carried forward. A carried binding whose package has since
+advanced fails preflight until it is rebound with `--input-ref`, so a package
+the Requirement does not touch can never drift unnoticed.
+
 The root contains `backlog.md` and `reviews/`. Each epic is a folder with an
 `epic.md`, `reviews/`, and `stories/`. Each story folder contains exactly
 `story.md` and `test-plan.md`. Membership is derived from the path.

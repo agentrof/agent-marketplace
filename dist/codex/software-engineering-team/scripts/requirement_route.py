@@ -135,13 +135,16 @@ def route(docs: Path, argument: str | None = None) -> dict:
             }.get(status, ["inspect"])
         routing = route_stage(path) if status == "approved" else {
             "next_entry": "requirement", "stage": "requirement", "action": "requirement"}
-        return {
+        result = {
             "ok": True, "mode": "exact", "requirement_id": identifier,
             "path": path.as_posix(), "status": status,
             "next_entry": routing["next_entry"], "stage": routing["stage"],
             "action": routing["action"], "upstream_receipts": routing.get("upstream_receipts", {}),
             "actions": actions,
         }
+        if routing.get("reason"):
+            result["reason"] = routing["reason"]
+        return result
     if argument:
         return {
             "ok": True, "mode": "new", "next_entry": "requirement",

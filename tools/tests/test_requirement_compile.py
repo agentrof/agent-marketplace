@@ -123,6 +123,22 @@ class RequirementCompilerTests(unittest.TestCase):
         terminal = requirement_route.route(self.docs, "REQ-001")
         self.assertEqual(terminal["actions"], ["inspect"])
 
+    def test_exact_route_reports_why_it_routes_back(self):
+        path = self.complete_draft()
+        requirement_compile.approve_requirement(path)
+        # The fixture is not a Git repository, so the approved record is uncommitted.
+        uncommitted = requirement_route.route(self.docs, "REQ-001")
+        self.assertEqual(uncommitted["action"], "requirement")
+        self.assertEqual(uncommitted["reason"], "Requirement is not committed")
+        repair = {
+            "next_entry": "solution-design", "stage": "solution-design", "action": "repair",
+            "upstream_receipts": {}, "reason": "solution-design/landscape package hash is stale",
+        }
+        with mock.patch.object(requirement_route, "route_stage", return_value=repair):
+            routed = requirement_route.route(self.docs, "REQ-001")
+        self.assertEqual(routed["action"], "repair")
+        self.assertEqual(routed["reason"], repair["reason"])
+
     def test_discard_removes_only_an_uncommitted_draft(self):
         path = self.complete_draft()
         requirement_compile.discard_requirement(path)

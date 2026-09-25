@@ -138,7 +138,8 @@ An application-only revision leaves process receipts unchanged but still
 advances the application receipt. Any approved package-set or application delta
 makes the preceding application receipt non-current. Requirement Stage Results
 and an existing backlog must rebind the new receipt through their normal
-revision before a new handoff. An already-created nonterminal Delivery remains
+revision before a new handoff; Delivery scope approval enforces that rebind for
+the Stories it selects. An already-created nonterminal Delivery remains
 bound to its exact approved backlog package and selected Story/Test Plan hashes;
 an unrelated later application revision cannot invalidate those immutable
 inputs. Mechanical coverage proves that selected exact refs have declared
@@ -172,6 +173,20 @@ application receipt.
 binds the goal, exact Story set, dependency facts, Definition of Done and
 target branch. The Git coordinator then reserves the Delivery by atomically
 creating its Integration ref with the project Fence lease.
+
+Scope approval is the handoff check for upstream bindings. Every Requirement
+that a selected Story `implements` must be approved and route to `backlog`;
+otherwise approval names the Story, the Requirement and the router's stage and
+reason, and the Requirement is rebound through `/requirement REQ-###` first.
+When a selected Story cites `experience_refs`, the backlog must bind the
+globally current `application@rN`: through its compiler-owned
+`input_bindings` in manual mode, and in requirement mode whenever the backlog
+carries them; otherwise a requirement-mode backlog binds it through its root
+Requirement's Experience Stage Results. A root Requirement that marks
+Experience `not_applicable` binds none, so approval names the current receipt
+and the two remedies: a manual-mode backlog revision whose `input_bindings` pin
+it, or a Requirement whose Experience stage binds it. A backlog without a
+planning mode predates application receipts and is not held to that rule.
 
 A Delivery is one reviewable outcome. It has no duration, estimate, cadence,
 capacity or release field. Before reservation, declining or stopping leaves no

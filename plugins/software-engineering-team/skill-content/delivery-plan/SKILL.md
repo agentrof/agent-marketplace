@@ -27,7 +27,10 @@ Read `flows/delivery-planning.md` completely before creating the proposal.
    temporary semantic proposal. Show goal, observable outcome, exclusions,
    dependencies and conflicts.
 3. After the user approves scope, run `approve-scope`; only the later Git
-   coordinator may publish the package and reserve the Delivery.
+   coordinator may publish the package and reserve the Delivery. It refuses a
+   selected Story whose implemented Requirement or Experience application
+   binding is no longer current; show the finding and route to the remedy it
+   names before approving again.
 4. If the Definition of Done is absent, route through `/configure DOD` and
    return to the original goal after the protected documentation handoff.
 

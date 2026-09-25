@@ -1,0 +1,6 @@
+{
+  "summary": "Delivery scope approval now refuses a selected Story whose implemented Requirement no longer routes to backlog, and a selection citing Experience records when the backlog does not bind the globally current application receipt, naming the Story, Requirement or current application@rN and the remedy.",
+  "components": {
+    "software-engineering-team": "patch"
+  }
+}

@@ -1,0 +1,6 @@
+{
+  "summary": "On Claude Code the vault guard now also runs after a failed tool call, so a command that changes protected vault or config state and then exits non-zero is verified and restored like any other, and project-local guard snapshots whose post never ran expire with their recovery capsules.",
+  "components": {
+    "software-engineering-team": "patch"
+  }
+}

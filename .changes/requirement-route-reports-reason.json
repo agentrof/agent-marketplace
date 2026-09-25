@@ -1,0 +1,6 @@
+{
+  "summary": "Routing a Requirement by its REQ id now returns the reason it routes back, such as a stale stage receipt that needs repair or an uncommitted record, as routing without an id already did.",
+  "components": {
+    "software-engineering-team": "patch"
+  }
+}

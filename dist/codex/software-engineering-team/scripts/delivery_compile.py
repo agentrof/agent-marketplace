@@ -152,11 +152,22 @@ def content_hash(props: dict, body: str, *, exclude: set[str] | None = None) -> 
     return "sha256:" + hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
+SECTION_PLACEHOLDER = "Record compiler-owned evidence here."
+
+
+def section_bodies(body: str) -> dict[str, str]:
+    """Each section's text keyed by its title, without the navigation marker."""
+    headings = list(re.finditer(r"(?m)^## (.+?)\s*$", body))
+    return {heading.group(1).replace("<!-- sec: nav -->", "").strip():
+            body[heading.end():following.start() if following else len(body)].strip()
+            for heading, following in zip(headings, [*headings[1:], None])}
+
+
 def body_for(kind: str, heading: str, values: dict[str, str] | None = None) -> str:
     values = values or {}
     lines = [f"# {heading}", ""]
     for section in SECTIONS[kind]:
-        content = values.get(section, "Record compiler-owned evidence here.")
+        content = values.get(section, SECTION_PLACEHOLDER)
         marker = ""
         if section == "Navigation":
             marker = " <!-- sec: nav -->"
@@ -1167,7 +1178,18 @@ def approve_review(args) -> int:
                     "reviewed_commit": reviewed_commit,
                     "reviewed_integration_commit": reviewed_integration,
                     "approved_at_utc": utc_now(), "tags": ["doc/delivery-review", "status/approved"]}
-    review_body = body_for("delivery-review", review_props["title"], {"Goal Outcome": delivery_props.get("goal", ""), "Verdict": "Approved for PR handoff.", "Navigation": link(str(delivery_path_value.relative_to(docs)), args.delivery)})
+    # The review is authored before it is approved: what its author wrote in each
+    # section is kept, and the compiler fills only the sections left empty and the
+    # navigation it owns. The approval then binds the authored review.
+    authored = {}
+    if review_path.exists():
+        authored = {title: text for title, text
+                    in section_bodies(without_generated_relations(split_note(review_path)[1])).items()
+                    if title in SECTIONS["delivery-review"] and title != "Navigation"
+                    and text and text != SECTION_PLACEHOLDER}
+    review_body = body_for("delivery-review", review_props["title"], {
+        "Goal Outcome": delivery_props.get("goal", ""), "Verdict": "Approved for PR handoff.", **authored,
+        "Navigation": link(str(delivery_path_value.relative_to(docs)), args.delivery)})
     review_props["approval_hash"] = content_hash(review_props, review_body, exclude=MUTABLE | {"approval_hash"})
     review_props["source_hash"] = content_hash(review_props, review_body)
     atomic_text(review_path, frontmatter(review_props, review_body))

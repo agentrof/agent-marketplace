@@ -1,0 +1,6 @@
+{
+  "summary": "Approving a Delivery Review now keeps what its author wrote in each section, so the published Review and the Delivery PR carry the outcome, deviations, evidence and follow-up decisions instead of placeholder text.",
+  "components": {
+    "software-engineering-team": "patch"
+  }
+}

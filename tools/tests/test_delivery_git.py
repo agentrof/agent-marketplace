@@ -499,6 +499,26 @@ class DeliveryGitTests(unittest.TestCase):
             self.assertEqual(parents[1], merged["reviewed_integration"])
         finally:
             remove_temporary(temporary)
+    def test_review_publication_regenerates_the_delivery_projections(self):
+        """The published Review is a new note: the Integration's map and relation
+        projections are derived from the published tree, never taken from a local
+        map that lags the Integration."""
+        marker = "<!-- delivery_compile.py: generated deliveries -->"
+
+        def lagging_map(docs):
+            path = docs / "maps" / "delivery.md"
+            path.write_text(path.read_text().split(marker)[0] + marker + "\n", encoding="utf-8")
+
+        temporary, project, docs, _product_tip, _intent = self.prepare_pr_intent(author_review=lagging_map)
+        try:
+            integration = delivery_git.remote_oid(project, "origin", delivery_git.canonical_refs("DLV-001")["integration"])
+            published = delivery_git.run_git(project, "show", f"{integration}:workspace/docs/maps/delivery.md")
+            self.assertIn("|DLV-001]] — `review`", published)
+            tree = delivery_git.run_git(project, "rev-parse", integration + "^{tree}")
+            self.assertEqual(delivery_git.delivery_projection_changes(project, tree), {})
+        finally:
+            remove_temporary(temporary)
+
     def test_invalidated_review_mirrors_its_status_in_its_tags(self):
         temporary, project, docs, _product_tip, _intent = self.prepare_pr_intent()
         try:

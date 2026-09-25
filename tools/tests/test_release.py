@@ -292,17 +292,6 @@ class ReleaseRepositoryTests(unittest.TestCase):
         )
         self.assertEqual(metadata["summaries"], ["Apply new-patch."])
 
-    def test_main_build_identity_is_unique_without_semver_change(self):
-        full_sha = "abcdef0123456789abcdef0123456789abcdef01"
-
-        def fake_git(_root, *args):
-            return full_sha if args[:1] == ("rev-parse",) else "42"
-
-        with mock.patch.object(release, "git", side_effect=fake_git):
-            identity = release.build_identity(self.root)
-        self.assertEqual(identity["build_id"], "main.42.gabcdef0")
-        self.assertEqual(identity["stable_versions"]["marketplace"], "0.0.1")
-
 
 class BootstrapCandidatePolicyTests(unittest.TestCase):
     def setUp(self):

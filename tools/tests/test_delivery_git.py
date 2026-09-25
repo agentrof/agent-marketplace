@@ -499,6 +499,22 @@ class DeliveryGitTests(unittest.TestCase):
             self.assertEqual(parents[1], merged["reviewed_integration"])
         finally:
             remove_temporary(temporary)
+    def test_invalidated_review_mirrors_its_status_in_its_tags(self):
+        temporary, project, docs, _product_tip, _intent = self.prepare_pr_intent()
+        try:
+            with mock.patch("delivery_provider.GitHubProvider", self.fake_provider_type({})):
+                delivery_git.open_pr(project, "DLV-001")
+            delivery_git.invalidate_delivery_review(project, "DLV-001", "REVIEW_FINDING", "sha256:" + "0" * 64)
+            review_path = delivery_compile.find_delivery(docs, "DLV-001") / "delivery-review.md"
+            invalidated = delivery_git.remote_oid(project, "origin", delivery_git.canonical_refs("DLV-001")["integration"])
+            props, body = delivery_git.split_remote_note(
+                project, invalidated, review_path.relative_to(project).as_posix(), delivery_compile.split_note)
+            self.assertEqual(props["status"], "changes_requested")
+            self.assertEqual(set(props["tags"]), {"doc/delivery-review", "status/changes-requested"})
+            self.assertEqual(props["source_hash"], delivery_compile.content_hash(props, body))
+        finally:
+            remove_temporary(temporary)
+
     def test_published_review_and_pr_carry_the_authored_delivery_review(self):
         authored = {"Scope Disposition": "AUTH-01 delivered as planned.",
                     "Deviations": "The owner added session expiry on 2026-01-01.",

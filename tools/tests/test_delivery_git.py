@@ -165,7 +165,7 @@ class DeliveryGitTests(unittest.TestCase):
                 direct.append(node.lineno)
         self.assertEqual(direct, [], "initialise fixture repositories with init_repository: lines " + str(direct))
 
-    def prepare_pr_intent(self):
+    def prepare_pr_intent(self, author_review=None):
         """Build one real remote Delivery through its durable PR intent."""
         temporary, project = self.make_project()
         docs = project / "workspace" / "docs"
@@ -202,6 +202,8 @@ class DeliveryGitTests(unittest.TestCase):
         self.assertEqual(self.approve_item_evidence(active["worktree"]), 0)
         delivery_git.push_item(project, "DLV-001", "AUTH-01")
         integrated = delivery_git.integrate_item(project, "DLV-001", "AUTH-01")
+        if author_review is not None:
+            author_review(docs)
         review = type("Args", (), {
             "docs": str(docs), "delivery": "DLV-001",
             "reviewed_commit": integrated["integration"],
@@ -497,6 +499,35 @@ class DeliveryGitTests(unittest.TestCase):
             self.assertEqual(parents[1], merged["reviewed_integration"])
         finally:
             remove_temporary(temporary)
+    def test_published_review_and_pr_carry_the_authored_delivery_review(self):
+        authored = {"Scope Disposition": "AUTH-01 delivered as planned.",
+                    "Deviations": "The owner added session expiry on 2026-01-01.",
+                    "Lessons and Follow-up": "Rotate the fixture keys."}
+
+        def author(docs):
+            path = delivery_compile.find_delivery(docs, "DLV-001") / "delivery-review.md"
+            path.write_text(delivery_compile.frontmatter(
+                {"type": "delivery-review", "status": "draft"},
+                delivery_compile.body_for("delivery-review", "Draft review", authored)), encoding="utf-8")
+
+        temporary, project, docs, _product_tip, _intent = self.prepare_pr_intent(author_review=author)
+        try:
+            review_path = delivery_compile.find_delivery(docs, "DLV-001") / "delivery-review.md"
+            published = delivery_git.remote_oid(project, "origin", delivery_git.canonical_refs("DLV-001")["integration"])
+            props, body = delivery_git.split_remote_note(
+                project, published, review_path.relative_to(project).as_posix(), delivery_compile.split_note)
+            for title, text in authored.items():
+                self.assertEqual(delivery_compile.section_bodies(body)[title], text)
+            self.assertEqual(props["approval_hash"], delivery_compile.content_hash(
+                props, body, exclude=delivery_compile.MUTABLE | {"approval_hash"}))
+            state: dict = {}
+            with mock.patch("delivery_provider.GitHubProvider", self.fake_provider_type(state)):
+                delivery_git.open_pr(project, "DLV-001")
+            for text in authored.values():
+                self.assertIn(text, state["body"])
+        finally:
+            remove_temporary(temporary)
+
     def test_scope_cancellation_projection_is_sorted_and_closed(self):
         stories = {
             "AUTH-02": {"disposition": "not_started", "tip": "none"},

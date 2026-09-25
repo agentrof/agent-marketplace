@@ -1363,6 +1363,7 @@ def invalidate_delivery_review(project_root: Path, delivery_id: str,
     if review_props.get("status") != "approved":
         raise RuntimeError("current Delivery Review is not approved")
     review_props["status"] = "changes_requested"
+    review_props["tags"] = [tag for tag in review_props.get("tags", []) if not str(tag).startswith("status/")] + ["status/changes-requested"]
     review_props["finding_code"] = finding_code
     review_props["finding_hash"] = finding_hash
     review_props.pop("approval_hash", None)

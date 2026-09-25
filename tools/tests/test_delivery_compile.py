@@ -641,6 +641,20 @@ class DeliveryCompilerTests(unittest.TestCase):
         })
         self.assertEqual(delivery_compile.approve_review(review), 2)
 
+    def test_review_approval_stamps_the_delivery_status_mirror(self):
+        self.approve_dod()
+        init = type("Args", (), {"docs": str(self.docs), "id": None, "slug": "auth",
+                                   "goal": "Authenticate", "outcome": None, "target_branch": "main",
+                                   "story": ["AUTH-01"]})
+        self.assertEqual(delivery_compile.init_delivery(init), 0)
+        review = type("Args", (), {"docs": str(self.docs), "delivery": "DLV-001",
+                                     "reviewed_commit": "a" * 40, "reviewed_integration_commit": "b" * 40})
+        self.assertEqual(delivery_compile.approve_review(review), 0)
+        props, body = delivery_compile.split_note(delivery_compile.find_delivery(self.docs, "DLV-001") / "delivery.md")
+        self.assertEqual(props["status"], "review")
+        self.assertEqual(set(props["tags"]), {"doc/delivery", "status/review"})
+        self.assertEqual(props["source_hash"], delivery_compile.content_hash(props, body))
+
     def test_review_approval_keeps_the_authored_sections(self):
         self.approve_dod()
         init = type("Args", (), {"docs": str(self.docs), "id": None, "slug": "auth",

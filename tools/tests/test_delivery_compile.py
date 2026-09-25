@@ -5,6 +5,8 @@ from __future__ import annotations
 import contextlib
 import io
 import json
+import shutil
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -20,10 +22,14 @@ import delivery_compile  # noqa: E402
 import delivery_governance  # noqa: E402
 import architecture_compile  # noqa: E402
 import backlog_compile  # noqa: E402
+import design_system_compile  # noqa: E402
+import experience_application_check  # noqa: E402
 import operation_compile  # noqa: E402
+import requirement_compile  # noqa: E402
+import requirement_route  # noqa: E402
 import stage_package  # noqa: E402
 import vault_check  # noqa: E402
-from backlog_fixture import make_approved_backlog  # noqa: E402
+from backlog_fixture import CRITERION, make_approved_backlog  # noqa: E402
 
 
 class DeliveryCompilerTests(unittest.TestCase):
@@ -705,6 +711,285 @@ class DeliveryCompilerTests(unittest.TestCase):
         scope = type("Args", (), {"docs": str(self.docs), "delivery": "DLV-001"})
         self.assertEqual(delivery_compile.approve_scope(scope), 0)
         self.assertEqual(delivery_compile.approve_execution(scope), 1)
+
+
+class ScopeHandoffBindingTests(unittest.TestCase):
+    """Scope approval is the handoff that refuses non-current upstream bindings."""
+
+    STORY = "backlog/epics/delivery-fixture/stories/auth-01/story.md"
+    TEST_PLAN = "backlog/epics/delivery-fixture/stories/auth-01/test-plan.md"
+    EVIDENCE = "[[solution-design/decisions/fixture-api|Fixture API]]"
+    TECHNICAL = {"work_kind": "technical", "experience_refs": [], "related_to": [EVIDENCE]}
+    CHECKOUT_REF = "checkout:SCR-001@r1"
+    REMEDY = ("bind it before handoff through a manual-mode backlog revision whose input_bindings "
+              "pin it, or through a Requirement whose Experience stage binds it")
+
+    def setUp(self):
+        self.temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temporary.cleanup)
+        self.root = Path(self.temporary.name)
+        self.docs = self.root / "workspace" / "docs"
+        (self.docs / "maps").mkdir(parents=True)
+        make_approved_backlog(self.docs)
+        # A space note makes the fixture's analysis folder a Business Analysis receipt.
+        (self.docs / "business-analysis/delivery/space.md").write_text(
+            "---\ntype: space\ntitle: Delivery\nstatus: approved\n---\n\n# Delivery\n", encoding="utf-8")
+        dod = type("Args", (), {"docs": str(self.docs), "title": "Project", "file": None})
+        with contextlib.redirect_stdout(io.StringIO()):
+            delivery_compile.init_dod(dod)
+            delivery_compile.approve_dod(dod)
+        subprocess.run(["git", "init", "-q", "-b", "main", str(self.root)], check=True)
+        subprocess.run(["git", "-C", str(self.root), "config", "gc.auto", "0"], check=True)
+        self.commit("approved backlog")
+
+    def commit(self, message: str) -> None:
+        for args in (["add", "-A"], ["commit", "-q", "-m", message]):
+            subprocess.run(["git", "-C", str(self.root), "-c", "user.name=Test", "-c", "user.email=test@example.com",
+                            "-c", "commit.gpgsign=false", *args], check=True, capture_output=True)
+
+    def edit(self, relative: str, **changes) -> None:
+        path = self.docs / relative
+        props, body = backlog_compile.parse_front_matter(path)
+        props.update(changes)
+        path.write_text(backlog_compile.front_matter(props, body), encoding="utf-8")
+
+    def reseal_backlog(self) -> None:
+        """Stamp the approved backlog again after a test edits its authored notes."""
+        record, _findings = backlog_compile.collect(self.docs, historical_inputs=True)
+        paths = backlog_compile.package_paths(record, self.docs)
+        for path in paths:
+            props, body = backlog_compile.parse_front_matter(path)
+            props["source_hash"] = backlog_compile.digest(path)
+            path.write_text(backlog_compile.front_matter(props, body), encoding="utf-8")
+        self.edit("backlog/backlog.md", package_hash=backlog_compile.package_digest(self.docs, paths))
+
+    def requirement(self, identifier: str, slug: str, applicable: tuple[str, ...] = ()) -> Path:
+        """Approve one Requirement whose stages outside *applicable* are not_applicable."""
+        path = requirement_compile.create_requirement(
+            self.docs, slug, f"Account change {identifier}", "feature", "normal", identifier, [])
+        props, body = requirement_compile.split_note(path)
+        for old, new in (
+                ("TODO: state the requested change and who needs it.", "Customers need one bounded account change."),
+                ("TODO: state the observable outcome and acceptance boundary.", "The account result is observable."),
+                ("TODO: define included and excluded behavior.", "Registration only; provisioning is excluded."),
+                ("TODO: record evidence, constraints and urgency rationale.", "The approved account boundary applies.")):
+            body = body.replace(old, new)
+        for stage in requirement_compile.STAGES:
+            body = body.replace(
+                f"| {stage} | required |  | TODO: explain why this stage must change. |",
+                f"| {stage} | {'required' if stage in applicable else 'not_applicable'} |  | "
+                f"The {stage} impact was reviewed for this change. |")
+        path.write_text(requirement_compile.render_note(props, body), encoding="utf-8")
+        requirement_compile.approve_requirement(path)
+        return path
+
+    def requirement_mode(self, root: Path, **story) -> None:
+        """Rebind the approved backlog in requirement mode to *root* and edit AUTH-01."""
+        self.edit("backlog/backlog.md", legacy_contract=None, planning_mode="requirement",
+                  requirement_ref=requirement_compile.requirement_id(root), revision=2)
+        self.edit(self.STORY, **story)
+        if story.get("work_kind") == "technical":
+            plan = self.docs / self.TEST_PLAN
+            plan.write_text(plan.read_text(encoding="utf-8").replace(
+                f"  - {CRITERION}\n", f"  - {CRITERION}\n  - {self.EVIDENCE}\n"), encoding="utf-8")
+        self.reseal_backlog()
+        self.commit("requirement-mode backlog")
+
+    def publish_application(self) -> tuple[str, str]:
+        """Approve the next revision of an empty Experience application.
+
+        The fixture's placeholder checkout folder is not a living Experience
+        package, and the application compiles every package, so it goes first.
+        """
+        root = self.docs / "experience-design"
+        shutil.rmtree(root / "experiences", ignore_errors=True)
+        ledger, findings = experience_application_check.verified_application_ledger(root)
+        self.assertEqual(findings, [])
+        state = root / "_generated/open-application-revision.json"
+        state.parent.mkdir(parents=True, exist_ok=True)
+        state.write_text(json.dumps({"opened_revision": len(ledger) + 1}), encoding="utf-8")
+        registry, findings = experience_application_check.compile_application(root)
+        self.assertEqual(findings, [])
+        state.unlink()
+        experience_application_check.write_registry_and_ledger(root, registry)
+        return f"application@r{registry['application_revision']}", registry["application_hash"]
+
+    def legacy_receipts(self) -> list[tuple[str, str, str]]:
+        """Approve the fixture's Design System and return the three pre-Experience receipts."""
+        self.edit("design-system/MASTER.md",
+                  baseline_hash=design_system_compile.baseline_hash(self.docs / "design-system"))
+        self.commit("approved design system")
+        receipts = []
+        for stage, ref in (("business-analysis", "business-analysis/delivery/space"),
+                           ("solution-design", "solution-design/landscape"),
+                           ("design-system", "design-system/MASTER")):
+            receipt, errors = stage_package.verify(self.docs, stage, ref, require_committed=True)
+            self.assertEqual(errors, [])
+            receipts.append((stage, ref, receipt["package_hash"]))
+        return receipts
+
+    def experience_refs_resolve(self):
+        """Accept Story Experience refs, which the fixture keeps no living package for.
+
+        Resolving a Story ref inside its process package is Backlog Planning's own
+        check; scope approval only reads which application the backlog binds.
+        """
+        return mock.patch.object(backlog_compile, "validate_experience_ref")
+
+    def propose(self, *, legacy_manual_inputs: bool = False) -> None:
+        """Create the local DLV-001 proposal for AUTH-01.
+
+        A new proposal refuses legacy-readonly manual inputs, which is all this
+        fixture's analysis, solution and design packages are, so a manual-mode
+        proposal is created through the historical read that scope approval uses.
+        """
+        args = type("Args", (), {"docs": str(self.docs), "id": None, "slug": "auth", "goal": "Authenticate",
+                                 "outcome": None, "target_branch": "main", "story": ["AUTH-01"]})
+        read = backlog_compile.planning_package_findings
+        historical = mock.patch.object(
+            backlog_compile, "planning_package_findings",
+            side_effect=lambda docs, props, path, allow_historical=False: read(docs, props, path, allow_historical=True))
+        with (historical if legacy_manual_inputs else contextlib.nullcontext()), \
+                contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(delivery_compile.init_delivery(args), 0)
+
+    def approve_scope(self) -> tuple[int, list[str]]:
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output):
+            code = delivery_compile.approve_scope(type("Args", (), {"docs": str(self.docs), "delivery": "DLV-001"}))
+        return code, json.loads(output.getvalue()).get("errors", [])
+
+    def stale_requirement_selection(self) -> Path:
+        """Select AUTH-01, which implements REQ-001, then revise the analysis REQ-001 bound."""
+        implemented = self.requirement("REQ-001", "account-access", ("business-analysis",))
+        requirement_compile.bind_stage(implemented, "business-analysis", "business-analysis/delivery/space")
+        root = self.requirement("REQ-002", "pin-acquisition")
+        self.requirement_mode(root, origin_mode="manual",
+                              implements=[f"[[requirements/{implemented.stem}|REQ-001]]"], **self.TECHNICAL)
+        self.assertEqual(requirement_route.route(self.docs, "REQ-001")["action"], "backlog")
+        self.propose()
+        space = self.docs / "business-analysis/delivery/space.md"
+        space.write_text(space.read_text(encoding="utf-8") + "\nThe space gains a revised boundary.\n",
+                         encoding="utf-8")
+        self.commit("revise the analysis package")
+        return implemented
+
+    def test_scope_refuses_a_story_whose_requirement_has_a_stale_stage_result(self):
+        self.stale_requirement_selection()
+        self.assertEqual(self.approve_scope(), (1, [
+            "AUTH-01 implements REQ-001, which does not route to backlog: stage business-analysis, "
+            "action repair, reason: business-analysis/delivery/space package hash is stale or does not "
+            "match expected hash; rebind it through the Requirement entry, /requirement REQ-001, before handoff",
+        ]))
+        props, _body = delivery_compile.split_note(delivery_compile.find_delivery(self.docs, "DLV-001") / "delivery.md")
+        self.assertEqual(props["status"], "scope_proposed")
+
+    def test_scope_accepts_the_story_once_its_requirement_is_rebound(self):
+        implemented = self.stale_requirement_selection()
+        self.assertEqual(self.approve_scope()[0], 1)
+        requirement_compile.bind_stage(implemented, "business-analysis", "business-analysis/delivery/space")
+        self.commit("rebind REQ-001")
+        self.assertEqual(self.approve_scope(), (0, []))
+
+    def test_scope_refuses_experience_refs_when_the_root_requirement_marks_experience_not_applicable(self):
+        application, _hash = self.publish_application()
+        root = self.requirement("REQ-002", "pin-acquisition")
+        with self.experience_refs_resolve():
+            self.requirement_mode(root, origin_mode="manual", experience_refs=[self.CHECKOUT_REF])
+            self.propose()
+            self.assertEqual(self.approve_scope(), (1, [
+                f"AUTH-01 cites experience_refs, but the backlog does not bind the globally current "
+                f"{application}: root Requirement REQ-002 marks experience-design not_applicable; {self.REMEDY}",
+            ]))
+
+    def test_scope_refuses_a_root_requirement_that_binds_an_earlier_application(self):
+        receipts = self.legacy_receipts()
+        earlier, _hash = self.publish_application()
+        root = self.requirement("REQ-002", "account-screens", requirement_compile.STAGES)
+        self.commit("upstream packages")
+        for stage, ref, _digest in receipts:
+            requirement_compile.bind_stage(root, stage, ref)
+        requirement_compile.bind_stage(root, "experience-design", earlier)
+        with self.experience_refs_resolve():
+            self.requirement_mode(root, origin_mode="manual", experience_refs=[self.CHECKOUT_REF])
+            self.propose()
+            current, _hash = self.publish_application()
+            self.commit("application-only revision")
+            self.assertEqual(self.approve_scope(), (1, [
+                f"AUTH-01 cites experience_refs, but the backlog does not bind the globally current {current}: "
+                f"root Requirement REQ-002's Experience Stage Results are not the current application with its "
+                f"exact process receipts; experience-design receipt must use its canonical result_ref, got "
+                f"{earlier}; {self.REMEDY}",
+            ]))
+
+    def manual_mode(self) -> str:
+        """Rebind the approved backlog in manual mode to the current receipts; return the application."""
+        receipts = self.legacy_receipts()
+        application, application_hash = self.publish_application()
+        bindings = [f"{stage}|{ref}|{digest}" for stage, ref, digest in receipts]
+        bindings.append(f"experience-design|{application}|{application_hash}")
+        self.edit("backlog/backlog.md", legacy_contract=None, planning_mode="manual", revision=2,
+                  input_bindings=sorted(bindings))
+        self.edit(self.STORY, origin_mode="manual", experience_refs=[self.CHECKOUT_REF])
+        self.reseal_backlog()
+        self.commit("manual-mode backlog")
+        return application
+
+    def test_scope_accepts_experience_refs_when_manual_bindings_pin_the_current_application(self):
+        with self.experience_refs_resolve():
+            self.manual_mode()
+            self.propose(legacy_manual_inputs=True)
+            self.assertEqual(self.approve_scope(), (0, []))
+
+    def test_scope_refuses_manual_bindings_that_pin_an_earlier_application(self):
+        with self.experience_refs_resolve():
+            earlier = self.manual_mode()
+            self.propose(legacy_manual_inputs=True)
+            current, _hash = self.publish_application()
+            self.commit("application-only revision")
+            self.assertEqual(self.approve_scope(), (1, [
+                f"AUTH-01 cites experience_refs, but the backlog does not bind the globally current {current}: "
+                f"the manual-mode input_bindings are not the current application with its exact process "
+                f"receipts; experience-design receipt must use its canonical result_ref, got {earlier}; "
+                f"{self.REMEDY}",
+            ]))
+
+    def requirement_mode_with_bindings(self) -> tuple[str, str]:
+        """Pin the current receipts in a requirement-mode backlog whose root marks Experience not_applicable."""
+        receipts = self.legacy_receipts()
+        application, application_hash = self.publish_application()
+        bindings = [f"{stage}|{ref}|{digest}" for stage, ref, digest in receipts]
+        bindings.append(f"experience-design|{application}|{application_hash}")
+        self.edit("backlog/backlog.md", input_bindings=sorted(bindings))
+        root = self.requirement("REQ-002", "pin-acquisition")
+        self.requirement_mode(root, origin_mode="manual", experience_refs=[self.CHECKOUT_REF])
+        return application, application_hash
+
+    def test_scope_accepts_requirement_mode_bindings_that_pin_the_current_application(self):
+        with self.experience_refs_resolve():
+            self.requirement_mode_with_bindings()
+            self.propose()
+            self.assertEqual(self.approve_scope(), (0, []))
+
+    def test_scope_refuses_requirement_mode_bindings_that_pin_an_earlier_application(self):
+        with self.experience_refs_resolve():
+            earlier, _hash = self.requirement_mode_with_bindings()
+            self.propose()
+            current, _hash = self.publish_application()
+            self.commit("application-only revision")
+            self.assertEqual(self.approve_scope(), (1, [
+                f"AUTH-01 cites experience_refs, but the backlog does not bind the globally current {current}: "
+                f"the requirement-mode input_bindings are not the current application with its exact process "
+                f"receipts; experience-design receipt must use its canonical result_ref, got {earlier}; "
+                f"{self.REMEDY}",
+            ]))
+
+    def test_scope_accepts_a_selection_without_experience_refs_on_current_requirements(self):
+        root = self.requirement("REQ-002", "pin-acquisition")
+        self.requirement_mode(root, origin_mode="requirement", introduced_in_revision=2,
+                              implements=[f"[[requirements/{root.stem}|REQ-002]]"], **self.TECHNICAL)
+        self.propose()
+        self.assertEqual(self.approve_scope(), (0, []))
 
 
 if __name__ == "__main__":

@@ -1,0 +1,6 @@
+{
+  "summary": "The generated Delivery map now always ends with one newline, the ending the vault relation render gives every note, so a later unrelated change no longer carries a newline-only rewrite of the map a Delivery publication produced.",
+  "components": {
+    "software-engineering-team": "patch"
+  }
+}

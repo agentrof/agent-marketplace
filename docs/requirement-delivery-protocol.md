@@ -199,6 +199,12 @@ Item marked `runtime_required: true` additionally pins the approved
 Environment Contract. Contract hash drift blocks Item start, resume, reopen and
 takeover; Operation remains outside Requirement and product-stage routing.
 
+Execution approval, and every re-approval, also refuses while the repository
+has no workflow in `.github/workflows/` triggered by `pull_request` or
+`pull_request_target`. Closure requires successful provider checks, so such a
+Delivery would otherwise run to completion and stop at merge.
+`operation_compile.py render-ci` materializes the packaged workflow.
+
 ## Git topology
 
 The canonical remote refs are:

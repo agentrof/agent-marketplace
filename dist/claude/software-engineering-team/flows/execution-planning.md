@@ -23,6 +23,13 @@ evidence was produced against unless the approval names it with `--reopen`;
 that Item is rebound to the current contracts, stays integrated, and can then
 be reopened.
 
+Approval also refuses while the repository has no workflow in
+`.github/workflows/` triggered by `pull_request` or `pull_request_target`,
+because the final merge needs a green provider check on the Delivery PR. Every
+approval, including a re-approval, repeats this check. When no such workflow
+exists, offer the one that `operation_compile.py render-ci` materializes, as
+the setup CI bootstrap reference describes.
+
 Every Item also declares `architecture_impact: required|not_applicable`, its
 exact Solution component refs, requested architecture record kinds and a
 reason. A required impact places `software_architect` first in the Item role

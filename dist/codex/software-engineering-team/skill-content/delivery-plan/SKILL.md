@@ -38,6 +38,8 @@ Operation contracts are not a scope-planning prerequisite. During the later
 execution-plan step, every Item receives an exact approved Verification
 Contract receipt. Mark an Item `runtime_required: true` only when it needs a
 live environment; the compiler then requires and pins Environment Contract too.
+That step also refuses a repository with no workflow in `.github/workflows/`
+triggered by pull requests.
 
 Execution planning also declares the Item's architecture impact. When it is
 `required`, name current Solution components and requested architecture record

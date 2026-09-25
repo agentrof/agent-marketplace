@@ -43,6 +43,13 @@ def init_repository(path: Path, bare: bool = False, initial_branch: str = "main"
     subprocess.run(["git", "--git-dir", str(git_dir), "config", "gc.auto", "0"], check=True)
 
 
+def write_pull_request_workflow(project: Path) -> None:
+    """Give a fixture repository the pull request workflow that execution approval requires."""
+    workflow = project / ".github" / "workflows" / "tests.yml"
+    workflow.parent.mkdir(parents=True)
+    workflow.write_text("on:\n  pull_request:\n", encoding="utf-8")
+
+
 def remove_temporary(temporary: tempfile.TemporaryDirectory, attempts: int = 10) -> None:
     """Remove a fixture tree, retrying while git finishes writes that outlive the call that started them."""
     import shutil
@@ -126,6 +133,7 @@ class DeliveryGitTests(unittest.TestCase):
         )
         self.approve_governance(project / "workspace" / "docs")
         (project / "README.md").write_text("fixture\n", encoding="utf-8")
+        write_pull_request_workflow(project)
         subprocess.run(["git", "-C", str(project), "add", "."], check=True)
         subprocess.run(["git", "-C", str(project), "commit", "-qm", "init"], check=True)
         remote = project / "remote.git"
@@ -636,6 +644,7 @@ class DeliveryGitTests(unittest.TestCase):
             (project / "workspace" / "config.json").write_text(json.dumps({"schema_version": 2, "team_id": "software-engineering-team", "output_language": "English", "terminology_language": "English"}), encoding="utf-8")
             self.approve_governance(docs)
             make_approved_backlog(docs)
+            write_pull_request_workflow(project)
             subprocess.run(["git", "-C", str(project), "add", "."], check=True)
             subprocess.run(["git", "-C", str(project), "commit", "-qm", "init"], check=True)
             remote = project / "remote.git"; init_repository(remote, bare=True)

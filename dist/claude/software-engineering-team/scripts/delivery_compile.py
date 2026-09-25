@@ -884,6 +884,77 @@ def reopen_findings(reopen: list[str], item_records: list[tuple[Path, dict]]) ->
     return errors
 
 
+# merge-pr merges a Delivery PR only on green provider checks, so execution
+# approval requires a GitHub workflow that pull requests trigger: a `.yml` or
+# `.yaml` file directly in `.github/workflows/`, the only place GitHub reads.
+# The check reads lines instead of parsing YAML to stay dependency-free. It
+# accepts a top-level `on` key, bare or quoted, whose value is one event or a
+# one-line flow sequence, or whose direct children are event keys or block
+# sequence items, and it ignores trailing comments. It does not resolve flow
+# mappings, flow sequences that span lines, anchors, aliases or tags, and it does
+# not evaluate branch, path or activity-type filters, so any direct pull_request
+# or pull_request_target trigger counts. It reads the checkout, so it cannot
+# prove that the workflow reaches the target branch or that the provider runs it.
+PULL_REQUEST_EVENTS = {"pull_request", "pull_request_target"}
+YAML_COMMENT_RE = re.compile(r"(?:^|\s)#.*$")
+TRIGGER_KEY_RE = re.compile(r"""^(?:on|"on"|'on')\s*:(?:\s+(?P<value>.*))?$""")
+
+
+def _event_names(value: str) -> set[str]:
+    """Event names in one scalar or one-line flow sequence."""
+    value = value.strip()
+    names = value[1:-1].split(",") if value.startswith("[") and value.endswith("]") else [value]
+    return {name.strip().strip("\"'") for name in names}
+
+
+def triggers_on_pull_request(text: str) -> bool:
+    """Whether one workflow's top-level ``on`` key names a pull request event."""
+    lines = [YAML_COMMENT_RE.sub("", line).rstrip() for line in text.splitlines()]
+    for index, line in enumerate(lines):
+        match = TRIGGER_KEY_RE.match(line)
+        if match is None:
+            continue
+        if match.group("value"):
+            return bool(_event_names(match.group("value")) & PULL_REQUEST_EVENTS)
+        events: set[str] = set()
+        indent = None
+        for child in lines[index + 1:]:
+            entry = child.strip()
+            if not entry:
+                continue
+            depth = len(child) - len(child.lstrip())
+            if indent is None:
+                indent = depth
+            # A block sequence may start at the column of its own key.
+            if depth < indent or (depth == 0 and not entry.startswith("- ")):
+                break
+            if depth == indent:
+                events |= _event_names(entry[2:] if entry.startswith("- ") else entry.split(":", 1)[0])
+        return bool(events & PULL_REQUEST_EVENTS)
+    return False
+
+
+def pull_request_workflow_findings(docs: Path) -> list[str]:
+    """Require a pull request workflow in the Git checkout that holds the docs.
+
+    The checkout is found as the sibling compilers find it; outside one, the
+    project root that the docs layout names stands in.
+    """
+    project = docs.parent.parent if docs.parent.name == "workspace" else docs.parent
+    root = next((parent for parent in (docs, *docs.parents) if (parent / ".git").exists()), project)
+    workflows = root / ".github" / "workflows"
+    for path in (*workflows.glob("*.yml"), *workflows.glob("*.yaml")):
+        try:
+            if path.is_file() and triggers_on_pull_request(path.read_text(encoding="utf-8-sig")):
+                return []
+        except (OSError, UnicodeDecodeError):
+            continue
+    return [f"Execution approval requires a workflow in {workflows} triggered by pull_request "
+            "or pull_request_target, since merge-pr needs a green check on the Delivery PR; "
+            "materialize one with operation_compile.py render-ci as the CI bootstrap contract "
+            "(skill-content/setup/references/ci-bootstrap.md) describes"]
+
+
 def approve_execution(args) -> int:
     docs = docs_root(args.docs)
     # This verb writes the Item Operation bindings and refreshes the approved source
@@ -908,6 +979,7 @@ def approve_execution(args) -> int:
     plan_errors = source_errors + reopen_findings(reopen, item_records)
     if not plan_errors:
         plan_errors = execution_plan_findings(root, sources, docs)
+    plan_errors += pull_request_workflow_findings(docs)
     if plan_errors:
         print(json.dumps({"ok": False, "errors": sorted(set(plan_errors))}, indent=2)); return 1
     refreshed_sources: list[str] = []

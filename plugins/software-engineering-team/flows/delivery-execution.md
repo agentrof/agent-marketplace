@@ -42,7 +42,11 @@ evidence from the remote Item ref and requires that its exact direct parent is
 the reviewed and verified product/test tip.
 
 The flow ends in one Delivery Review, one final PR and provider-neutral merged
-evidence. The Git coordinator first publishes the approved Review, then
+evidence. The Review is authored as a draft `delivery-review.md` in the
+Delivery package before `approve-review`. Approval keeps every authored
+section, fills only the sections left empty and the navigation the compiler
+owns, and binds that content in its approval hash; the PR body is that Review.
+The Git coordinator first publishes the approved Review, then
 publishes one durable PR-creation intent and records the provider URL as its
 exact descendant. Provider create/merge calls are adapter-owned and must
 requery the intent and reviewed Integration head before any external mutation.

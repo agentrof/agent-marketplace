@@ -289,7 +289,10 @@ Slot atomically.
 After every Item is integrated, the aggregate gate runs the approved Verification Contract tests,
 portable vault gate and Delivery checks on the exact Integration head. The one
 Delivery Review records outcome, deviations, evidence, unfinished scope and
-follow-up decisions. Its approval binds the reviewed Integration commit.
+follow-up decisions. Its author writes them into a draft before approval, and
+approval keeps what was written, filling only empty sections and the
+compiler-owned navigation. Its approval binds the reviewed Integration commit
+and the authored content.
 
 The coordinator publishes that Review, elects one durable PR intent and uses
 the provider adapter to create or adopt exactly one PR for the Delivery. The PR

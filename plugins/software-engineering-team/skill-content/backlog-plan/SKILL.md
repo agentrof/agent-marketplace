@@ -39,9 +39,12 @@ approved. This entry prepares delivery, but it does not start delivery.
    `application@rN` and its exact zero-or-more Experience process receipt set.
    The zero-process form is accepted only for a verified empty application.
    This renders the compiler-owned `Input Package Coverage` report. Requirement
-   mode records the exact `requirement_ref`, consumes the same complete
-   Experience set from Stage Results and requires `implements: REQ-###` on
-   stories.
+   mode records the exact `requirement_ref`, pins the Stage Results receipts of
+   the stages the Requirement changes or reuses, and requires
+   `implements: REQ-###` on stories. For each stage the Requirement marks
+   `not_applicable`, pass that stage's exact approved package with
+   `--input-ref`, or let `begin-revision` carry the previous revision's binding
+   forward; both modes pin all four input families.
 4. Create one folder per epic. Each epic contains `epic.md`, `reviews/` and
    `stories/<story-slug>/story.md` plus `test-plan.md` for every story. Authored
    titles and H1s are direct, natural labels in the configured output language;

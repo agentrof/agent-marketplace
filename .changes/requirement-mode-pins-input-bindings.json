@@ -1,0 +1,6 @@
+{
+  "summary": "A Requirement-mode backlog now pins all four input families in compiler-owned input bindings, as a manual backlog does: stages its Requirement changes or reuses bind the Stage Results receipts, stages it marks not_applicable take --input-ref or carry the previous revision's binding, and the backlog check rejects any binding that is no longer strict-current, so a package the Requirement does not touch cannot drift unnoticed. Backlogs approved before bindings stay readable and gain them at their next revision.",
+  "components": {
+    "software-engineering-team": "minor"
+  }
+}

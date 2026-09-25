@@ -13,8 +13,10 @@ current process set.
   Experience registry. It does not require a route, state map or prototype
   implementation convention for the exact ref.
 - A Requirement-mode backlog receives the globally current application receipt
-  and exact current process receipts from Stage Results. A manual backlog pins
-  the same complete set in compiler-owned input bindings.
+  and exact current process receipts from Stage Results when its Requirement
+  changes or reuses Experience. Otherwise it keeps its previous Experience
+  binding or takes one from `--input-ref`. Either way, like a manual backlog,
+  it pins the complete set in compiler-owned input bindings.
 - Package rename aliases preserve historical references. New work uses the
   current process slug. `application` is reserved and never names or aliases a
   process package.

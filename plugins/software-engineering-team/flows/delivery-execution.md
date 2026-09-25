@@ -48,7 +48,13 @@ section, fills only the sections left empty and the navigation the compiler
 owns, and binds that content in its approval hash; the PR body is that Review.
 The Git coordinator first publishes the approved Review, then
 publishes one durable PR-creation intent and records the provider URL as its
-exact descendant. Provider create/merge calls are adapter-owned and must
+exact descendant. That record is the PR head and moves the reviewed Delivery
+to `awaiting_merge`. The compiler reports `merged` only when the current
+branch reaches, on any path, a two-parent merge of that exact head; a manual
+merge of the Integration branch into another branch would also count. A
+merged Delivery keeps its pinned sources, and the Delivery map keeps the
+tracked status.
+Provider create/merge calls are adapter-owned and must
 requery the intent and reviewed Integration head before any external mutation.
 Before Item work starts, `/deliver DLV-###` may run the internal
 `refresh-target` coordinator. A disjoint target advance becomes one

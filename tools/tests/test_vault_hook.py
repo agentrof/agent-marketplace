@@ -574,6 +574,18 @@ class VaultHookShellContractTests(unittest.TestCase):
         }, indent=2) + "\n", encoding="utf-8")
         return docs, config
 
+    @classmethod
+    def item_worktree_project(cls, root: Path) -> tuple[Path, Path]:
+        """Nest one Item worktree project inside its primary checkout."""
+        primary = root / "primary"
+        item = primary.joinpath(
+            ".agentrof", "agent-marketplace", ".runtime", "worktrees",
+            "dlv-001", "items", "st-001",
+        )
+        cls.project(primary)
+        cls.project(item)
+        return primary, item
+
     @staticmethod
     def payload(root: Path, command: str, field: str = "command") -> dict:
         return {
@@ -3236,6 +3248,193 @@ class VaultHookShellContractTests(unittest.TestCase):
                 "English",
             )
             self.assertEqual(generated.read_text(encoding="utf-8"), "before\n")
+
+    def test_post_allows_a_command_that_removed_its_own_project(self):
+        """A coordinator may remove the Item worktree it runs in."""
+        command = "python3 delivery_git.py integrate-item"
+        for post_cwd in ("removed", "primary"):
+            with self.subTest(post_cwd=post_cwd), \
+                    tempfile.TemporaryDirectory() as temporary:
+                primary, item = self.item_worktree_project(Path(temporary))
+                generated = (
+                    item / "workspace" / "docs" / "experience-design"
+                    / "demo" / "_generated" / "out.json"
+                )
+                generated.parent.mkdir(parents=True)
+                generated.write_text("before\n", encoding="utf-8")
+                primary_config = primary / "workspace" / "config.json"
+                primary_bytes = primary_config.read_bytes()
+                payload = {
+                    **self.payload(item, command),
+                    "tool_use_id": f"removed-project-{post_cwd}-event",
+                }
+                recovery = self.hook.recovery_path(payload)
+                before = self.run_hook("pre", payload)
+                self.assertEqual(
+                    before.returncode, 0, before.stdout + before.stderr,
+                )
+                self.assertTrue(recovery.is_file())
+                shutil.rmtree(item)
+                cwd = item if post_cwd == "removed" else primary
+                try:
+                    after = self.run_hook("post", {**payload, "cwd": str(cwd)})
+                    self.assertEqual(
+                        after.returncode, 0, after.stdout + after.stderr,
+                    )
+                    self.assertIn("no longer exists at its recorded path", after.stderr)
+                    self.assertFalse(recovery.exists())
+                    self.assertFalse(os.path.lexists(item))
+                    self.assertEqual(primary_config.read_bytes(), primary_bytes)
+                finally:
+                    recovery.unlink(missing_ok=True)
+
+    def test_removed_project_releases_its_experience_writer_lock(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            _primary, item = self.item_worktree_project(Path(temporary))
+            docs = item / "workspace" / "docs"
+            (docs / "experience-design").mkdir()
+            writer = self.hook.normalize(self.attested_writer_payload(
+                item, self.application_command(docs), field="cmd",
+            ))
+            writer["tool_use_id"] = "removed-project-writer"
+            lock = self.hook.experience_writer_lock_path(item)
+            recovery = self.hook.recovery_path(writer)
+            try:
+                self.assertEqual(self.hook.shell_snapshot(writer), 0)
+                self.assertTrue(lock.is_file())
+                shutil.rmtree(item)
+                errors = io.StringIO()
+                with redirect_stderr(errors):
+                    self.assertEqual(
+                        self.hook.shell_verify(writer), 0, errors.getvalue(),
+                    )
+                self.assertFalse(lock.exists())
+                self.assertFalse(recovery.exists())
+            finally:
+                lock.unlink(missing_ok=True)
+                recovery.unlink(missing_ok=True)
+
+    def test_present_project_without_its_snapshot_still_fails_closed(self):
+        for damage in ("missing", "tampered"):
+            with self.subTest(snapshot=damage), \
+                    tempfile.TemporaryDirectory() as temporary:
+                _primary, item = self.item_worktree_project(Path(temporary))
+                payload = {
+                    **self.payload(item, "python3 unrelated.py"),
+                    "tool_use_id": f"present-project-{damage}-event",
+                }
+                snapshot = self.hook.inventory_path(payload, item)
+                before = self.run_hook("pre", payload)
+                self.assertEqual(
+                    before.returncode, 0, before.stdout + before.stderr,
+                )
+                if damage == "missing":
+                    snapshot.unlink()
+                else:
+                    snapshot.write_text("{}", encoding="utf-8")
+                after = self.run_hook("post", payload)
+                self.assertEqual(after.returncode, 2)
+                self.assertIn("project-local vault snapshot", after.stderr)
+                self.assertNotIn("no longer exists at its recorded path", after.stderr)
+
+    def test_project_replaced_by_an_alias_is_not_treated_as_removed(self):
+        for dangling in (False, True):
+            with self.subTest(dangling=dangling), \
+                    tempfile.TemporaryDirectory() as temporary:
+                _primary, item = self.item_worktree_project(Path(temporary))
+                payload = {
+                    **self.payload(item, "python3 unrelated.py"),
+                    "tool_use_id": f"aliased-project-{dangling}-event",
+                }
+                recovery = self.hook.recovery_path(payload)
+                before = self.run_hook("pre", payload)
+                self.assertEqual(
+                    before.returncode, 0, before.stdout + before.stderr,
+                )
+                moved = item.with_name("st-001-moved")
+                item.rename(moved)
+                self.create_directory_alias(item, moved)
+                if dangling:
+                    shutil.rmtree(moved)
+                try:
+                    after = self.run_hook("post", payload)
+                    self.assertEqual(after.returncode, 2)
+                    self.assertIn("failed closed", after.stderr)
+                    self.assertNotIn("no longer exists at its recorded path", after.stderr)
+                finally:
+                    recovery.unlink(missing_ok=True)
+                    if self.hook.path_is_alias(item):
+                        self.hook.remove_path_alias(item)
+
+    def test_removed_project_without_a_trusted_capsule_still_fails_closed(self):
+        for damage in ("missing", "tampered", "rebound"):
+            with self.subTest(capsule=damage), \
+                    tempfile.TemporaryDirectory() as temporary:
+                root = Path(temporary) / "project"
+                self.project(root)
+                payload = {
+                    **self.payload(root, "python3 unrelated.py"),
+                    "tool_use_id": f"untrusted-capsule-{damage}-event",
+                }
+                recovery = self.hook.recovery_path(payload)
+                before = self.run_hook("pre", payload)
+                self.assertEqual(
+                    before.returncode, 0, before.stdout + before.stderr,
+                )
+                if damage == "missing":
+                    recovery.unlink()
+                elif damage == "tampered":
+                    envelope = json.loads(recovery.read_text(encoding="utf-8"))
+                    envelope["state_sha256"] = "0" * 64
+                    recovery.write_text(json.dumps(envelope), encoding="utf-8")
+                else:
+                    payload["tool_input"] = {"command": "python3 other.py"}
+                shutil.rmtree(root)
+                try:
+                    after = self.run_hook("post", payload)
+                    self.assertEqual(after.returncode, 2)
+                    self.assertIn("failed closed", after.stderr)
+                    self.assertNotIn("no longer exists at its recorded path", after.stderr)
+                    self.assertFalse(os.path.lexists(root))
+                finally:
+                    recovery.unlink(missing_ok=True)
+
+    def test_only_a_plain_absence_counts_as_a_removed_project(self):
+        removed = self.hook.project_root_removed
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            items = root / "items"
+            project = items / "st-001"
+            elsewhere = root / "elsewhere"
+            project.mkdir(parents=True)
+            elsewhere.mkdir()
+            self.assertFalse(removed(project), "present directory")
+            project.rmdir()
+            self.assertTrue(removed(project), "absent below a local directory")
+            self.create_directory_alias(project, elsewhere)
+            self.assertFalse(removed(project), "alias at the project root")
+            elsewhere.rmdir()
+            self.assertFalse(removed(project), "dangling alias at the root")
+            self.hook.remove_path_alias(project)
+            elsewhere.mkdir()
+            items.rmdir()
+            self.create_directory_alias(items, elsewhere)
+            self.assertFalse(removed(project), "absent below an alias")
+            self.hook.remove_path_alias(items)
+            items.write_text("not a directory\n", encoding="utf-8")
+            self.assertFalse(removed(project), "absent below a file")
+            items.unlink()
+            if os.name != "nt":
+                items.symlink_to("items")
+                self.assertFalse(removed(project), "absent below a loop")
+                items.unlink()
+            if os.name != "nt" and os.geteuid() != 0:
+                project.mkdir(parents=True)
+                os.chmod(items, 0)
+                try:
+                    self.assertFalse(removed(project), "unreadable, not absent")
+                finally:
+                    os.chmod(items, 0o700)
 
     def test_composed_host_hooks_enforce_writer_support_boundaries(self):
         for host in ("claude", "codex"):

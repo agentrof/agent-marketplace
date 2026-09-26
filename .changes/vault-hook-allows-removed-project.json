@@ -1,0 +1,6 @@
+{
+  "summary": "A Bash command that removes the project it ran in, such as a Delivery coordinator removing its own Item worktree, is now allowed and its guard state released, instead of failing closed on the snapshot that went away with the project; a project that is aliased, unreadable or only partly removed, or a recovery capsule that is missing or altered, still fails closed.",
+  "components": {
+    "software-engineering-team": "patch"
+  }
+}

@@ -214,7 +214,7 @@ class DeliveryProviderTests(unittest.TestCase):
         """A provider refusal reaches the result envelope under its own code, with its words intact."""
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
-            subprocess.run(["git", "init", "-q", str(root)], check=True)
+            init_repository(root)
             subprocess.run(["git", "-C", str(root), "remote", "add", "origin", "https://gitlab.com/a/b.git"], check=True)
             subprocess.run(["git", "-C", str(root), "remote", "add", "owner", "https://github.com/agentrof"], check=True)
             provider = self.github_provider()

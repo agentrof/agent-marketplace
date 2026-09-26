@@ -1726,6 +1726,10 @@ def cancel_delivery(project_root: Path, delivery_id: str, reason: str,
 
     relative_delivery = rel_posix(root, delivery_path_value)
     remote_props, remote_body = split_remote_note(root, integration_oid, relative_delivery, split_note)
+    # A cancellation publishes the cancelled status on the Integration alone,
+    # so the local delivery.md cannot tell that the Delivery is cancelled.
+    if remote_props.get("status") == "cancelled":
+        raise RuntimeError("DELIVERY_CANCELLATION_INVALID: the published Delivery is already cancelled")
     scope_hash = str(remote_props.get("scope_hash", "none"))
     all_slots = remote_slot_oids(root, remote)
     contexts: dict[str, dict] = {}

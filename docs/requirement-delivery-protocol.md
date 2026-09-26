@@ -296,7 +296,9 @@ An active writer may push only while its receipt epoch matches the remote Item
 and Slot lineage. Pause requires a clean worktree whose local head equals the
 verified remote Item. A missing receipt denies local writer readiness. Explicit
 takeover elects a new epoch on the existing Item and Slot refs; it never
-allocates a second Slot.
+allocates a second Slot. Reopen and takeover drop their pending receipt on the
+same proof as activation, and a takeover the remote rejects that way gives back
+the receipt and the worktree it replaced.
 
 Product and test changes stay on the Item branch. Before approving evidence,
 the active Item worktree may contain only edits to its initialized Code Review

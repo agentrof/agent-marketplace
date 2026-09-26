@@ -276,8 +276,12 @@ def promote_writer_receipt(main_worktree: Path, delivery_id: str, story_id: str,
 
 
 def discard_pending_writer_receipt(main_worktree: Path, delivery_id: str,
-                                   story_id: str, candidate_oid: str) -> None:
-    """Delete a pending receipt only after the remote CAS is conclusively rejected."""
+                                   story_id: str, candidate_oid: str,
+                                   replaced: dict | None = None) -> None:
+    """Delete a pending receipt only after the remote CAS is conclusively rejected.
+
+    A pending receipt that replaced a verified one gives that receipt back.
+    """
     receipt_path, lock_path = writer_receipt_paths(main_worktree, delivery_id, story_id)
     with receipt_lock(lock_path):
         if not receipt_path.exists():
@@ -285,6 +289,9 @@ def discard_pending_writer_receipt(main_worktree: Path, delivery_id: str,
         receipt = _validate_receipt(json.loads(receipt_path.read_text(encoding="utf-8")))
         if receipt["state"] != "pending" or receipt["candidate_oid"] != candidate_oid:
             raise RuntimeError("cannot discard a spent or different writer receipt")
+        if replaced is not None:
+            _write_writer_receipt_locked(receipt_path, replaced)
+            return
         receipt_path.unlink()
         _fsync_directory(receipt_path.parent)
 
@@ -3584,10 +3591,15 @@ def reopen_item(project_root: Path, delivery_id: str, story_id: str,
         root, delivery_id, story_id, slot, writer, refs["item"], slot_ref,
         item_candidate, allow_verified_replace=True, expected_previous_oid=item_oid,
     )
-    atomic_push(root, remote, [(refs["fence"], fence_oid, fence_candidate),
-                               (refs["integration"], integration_oid, integration_candidate),
-                               (refs["item"], item_oid, item_candidate),
-                               (slot_ref, "", item_candidate)])
+    try:
+        atomic_push(root, remote, [(refs["fence"], fence_oid, fence_candidate),
+                                   (refs["integration"], integration_oid, integration_candidate),
+                                   (refs["item"], item_oid, item_candidate),
+                                   (slot_ref, "", item_candidate)])
+    except RuntimeError:
+        if activation_took_no_effect(root, remote, refs["item"], item_oid):
+            discard_pending_writer_receipt(root, delivery_id, story_id, item_candidate)
+        raise
     require_current_activation_target(root, remote, delivery_id, story_id, target_before,
                                       slot, item_candidate, relative_item, props, body)
     receipt = promote_writer_receipt(root, delivery_id, story_id, item_candidate)
@@ -3693,7 +3705,8 @@ def takeover_item(project_root: Path, delivery_id: str, story_id: str,
         raise RuntimeError("takeover requires an active or blocked remote Item")
     require_item_operation_bindings(root, item_props)
     worktree = worktree_paths(root, delivery_id, story_id)["item"]
-    if worktree.exists():
+    removed_worktree = worktree.exists()
+    if removed_worktree:
         worktree_is_clean_and_at(root, worktree, item_oid)
         remove_item_worktree(root, delivery_id, story_id)
     writer = epoch_token()
@@ -3725,14 +3738,23 @@ def takeover_item(project_root: Path, delivery_id: str, story_id: str,
          "Governance-Hash": trailer(fence_message, "Governance-Hash") or "none",
          **carried_fence_barrier(fence_message)},
     )
+    replaced = read_writer_receipt(root, delivery_id, story_id)
     create_writer_receipt(
         root, delivery_id, story_id, slot, writer, refs["item"], slot_ref,
         item_candidate, allow_verified_replace=True, expected_previous_oid=item_oid,
     )
-    atomic_push(root, remote, [(refs["fence"], fence_oid, fence_candidate),
-                               (refs["integration"], integration_oid, integration_candidate),
-                               (refs["item"], item_oid, item_candidate),
-                               (slot_ref, item_oid, item_candidate)])
+    try:
+        atomic_push(root, remote, [(refs["fence"], fence_oid, fence_candidate),
+                                   (refs["integration"], integration_oid, integration_candidate),
+                                   (refs["item"], item_oid, item_candidate),
+                                   (slot_ref, item_oid, item_candidate)])
+    except RuntimeError:
+        # A takeover that changed no ref leaves this host the writer state it had.
+        if activation_took_no_effect(root, remote, refs["item"], item_oid):
+            discard_pending_writer_receipt(root, delivery_id, story_id, item_candidate, replaced)
+            if removed_worktree:
+                materialize_item_worktree(root, delivery_id, story_id, item_oid)
+        raise
     if remote_oid(root, remote, refs["item"]) != item_candidate or remote_oid(root, remote, slot_ref) != item_candidate:
         raise RuntimeError("takeover refs did not converge to the receipt candidate")
     require_current_activation_target(root, remote, delivery_id, story_id, target_before,

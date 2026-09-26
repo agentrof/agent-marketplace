@@ -188,7 +188,7 @@ def check_contract(docs: Path, kind: str, text: str | None = None) -> tuple[dict
             errors.append(f"{field} must be a normalized repository-relative path")
     if kind == "verification":
         if props.get("status") == "approved" and (not isinstance(refs, list) or not refs):
-            errors.append("approved contract must cite at least one accepted Solution decision")
+            errors.append("approved contract must cite at least one accepted Solution decision in constrained_by")
         if props.get("status") == "approved" and (not isinstance(props.get("test_command"), str) or not props["test_command"].strip()):
             errors.append("test_command is required")
         for prefix in ("mutation", "dependency_audit"):
@@ -213,7 +213,7 @@ def check_contract(docs: Path, kind: str, text: str | None = None) -> tuple[dict
             errors.append("pull_request_check_provider is declared only with pull_request_check_source external")
     else:
         if props.get("status") == "approved" and (not isinstance(refs, list) or not refs):
-            errors.append("approved contract must cite at least one accepted Solution decision")
+            errors.append("approved contract must cite at least one accepted Solution decision in constrained_by")
         if props.get("status") == "approved" and (not isinstance(props.get("env_command"), str) or not props["env_command"].strip()):
             errors.append("env_command is required")
         scenarios = props.get("scenarios")
@@ -234,11 +234,12 @@ def check_contract(docs: Path, kind: str, text: str | None = None) -> tuple[dict
 
 
 def initial_props(kind: str, refs: list[str]) -> dict:
-    # The hash and the commands start absent: an empty value parses as a
-    # list, which the vault rejects for these text properties.
+    # The hash, the commands and an unbound relation start absent: the vault
+    # rejects an empty relation, and an empty value parses as a list, which
+    # it rejects for these text properties.
     common = {
         "type": TYPE_FOR[kind], "title": TYPE_FOR[kind].replace("-", " ").title(),
-        "status": "draft", "revision": 1, "constrained_by": refs,
+        "status": "draft", "revision": 1, **({"constrained_by": refs} if refs else {}),
         "tags": [f"doc/{TYPE_FOR[kind]}", "status/draft"],
     }
     if kind == "verification":

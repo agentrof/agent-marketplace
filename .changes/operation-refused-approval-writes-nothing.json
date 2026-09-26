@@ -1,0 +1,6 @@
+{
+  "summary": "A refused Operation Contract approval now leaves the draft byte-identical, so its writer fixes the draft and approves it again. Before, the refusal had already rewritten the draft as approved, every consumer refused that contract, and only begin-revision, at the cost of a revision number, could recover it.",
+  "components": {
+    "software-engineering-team": "patch"
+  }
+}

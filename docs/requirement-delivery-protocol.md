@@ -307,7 +307,11 @@ that Integration commit's Delivery controls, byte for byte, and the commit as
 the Item's `integration_base_commit`, when the commit lies on the Integration's
 own line after the Item's previous base and the product tip contains it. The
 Item record must then hold that commit's plan-owned fields and change only its
-own status, stamp and base.
+own status, stamp and base. The push also refuses a committed product or test
+path outside the Item's path claims, where a claim covers its path and every
+path below it. Vault paths keep the control, Architecture and projection rules
+instead, and a path the product tip holds exactly as the Item's
+`integration_base_commit` does is not the Item's change.
 
 Integration reads the Item, Code Review and Verification records from the
 remote Item tip, not from the primary worktree. It accepts an Item only when

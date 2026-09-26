@@ -39,6 +39,10 @@ as its `integration_base_commit`. The commit must lie on the Integration's own
 line after the Item's previous base and be contained in the product tip, and
 the Item record keeps the commit's plan-owned fields with only its own status,
 stamp and base.
+`push-item` also rejects a product or test path outside the Item's path claims,
+which cover their paths and everything below them. Vault paths keep the
+control, Architecture and projection rules, and a path held exactly as the
+Item's `integration_base_commit` holds it is not the Item's change.
 `integrate-item` reads the
 evidence from the remote Item ref and requires that its exact direct parent is
 the reviewed and verified product/test tip.

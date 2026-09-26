@@ -1431,7 +1431,8 @@ class DeliveryGitTests(unittest.TestCase):
                 self.assertEqual((project / ".git/index").read_bytes(), index_before)
                 self.assertEqual(delivery_git.run_git(project, "rev-parse", "HEAD"), target)
 
-    def prepare_execution_with_draft_reserved_contracts(self, runtime=True, path_claim="src/auth.py", architecture=False, legacy_operation_receipts=False):
+    def prepare_execution_with_draft_reserved_contracts(self, runtime=True, path_claim="src/auth.py", architecture=False, legacy_operation_receipts=False,
+                                                        extra_path_claims=()):
         temporary, project = self.make_project()
         self.addCleanup(remove_temporary, temporary)
         docs = project / "workspace/docs"
@@ -1497,7 +1498,7 @@ class DeliveryGitTests(unittest.TestCase):
         item = directory / "items/auth-01/item.md"
         props, body = delivery_compile.split_note(item)
         props["runtime_required"] = runtime
-        props["path_claims"] = [path_claim]
+        props["path_claims"] = [path_claim, *extra_path_claims]
         if architecture:
             props.update({"architecture_impact": "required", "architecture_components": ["api"],
                           "architecture_record_kinds": ["system-architecture", "architecture-component", "interface-contract"],
@@ -1509,9 +1510,9 @@ class DeliveryGitTests(unittest.TestCase):
         self.assertEqual(delivery_compile.approve_execution(args), 0)
         return project, docs, directory, item, reserved
 
-    def prepare_stamped_architecture_item(self, before_publish=None):
+    def prepare_stamped_architecture_item(self, before_publish=None, extra_path_claims=()):
         project, docs, directory, _item, _reserved = self.prepare_execution_with_draft_reserved_contracts(
-            runtime=False, architecture=True)
+            runtime=False, architecture=True, extra_path_claims=extra_path_claims)
         if before_publish is not None:
             before_publish(project)
         delivery_git.publish_execution_plan(project, "DLV-001")
@@ -1578,9 +1579,10 @@ class DeliveryGitTests(unittest.TestCase):
             candidate = delivery_git.commit_tree(project, base, ["notes/legacy.txt"], "Carry a legacy file", {})
             delivery_git.atomic_push(project, "origin", [(integration_ref, base, candidate)])
 
-        project, worktree, item, active = self.prepare_stamped_architecture_item(before_publish=carry_legacy_file)
-        # The Item removes a file the base carried: a trivial resolution any merge
-        # makes, which a plain three-way read left unmerged.
+        project, worktree, item, active = self.prepare_stamped_architecture_item(
+            before_publish=carry_legacy_file, extra_path_claims=("notes/legacy.txt",))
+        # The Item removes a file the base carried, and claims it: a trivial resolution
+        # any merge makes, which a plain three-way read left unmerged.
         self.assertTrue((worktree / "notes/legacy.txt").is_file())
         delivery_git.run_git(worktree, "rm", "-q", "notes/legacy.txt")
         delivery_git.run_git(worktree, "commit", "-qm", "Retire the legacy file")
@@ -2960,6 +2962,53 @@ class DeliveryGitTests(unittest.TestCase):
         delivery_git.integrate_item(project, "DLV-001", "AUTH-01")
         started = delivery_git.start_item(project, "DLV-001", "AUTH-02")
         self.assertEqual((started["story"], started["slot"]), ("AUTH-02", "001"))
+
+    def test_push_item_refuses_product_paths_outside_the_item_path_claims(self):
+        """A claim covers its path and every path below it. The vault keeps its own rules,
+        and what the Item's integration base carries is not the Item's change."""
+        project, worktree, item, active = self.prepare_stamped_architecture_item()
+        clean = delivery_git.run_git(worktree, "rev-parse", "HEAD")
+        baseline = delivery_git.run_git(project, "ls-remote", "origin")
+
+        def write(relative):
+            path = worktree / relative
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text("unclaimed\n", encoding="utf-8")
+
+        for label, change, outside in (
+            ("added", lambda: write("src/session.py"), "src/session.py"),
+            ("beside the claim", lambda: write("src/auth.py.orig"), "src/auth.py.orig"),
+            ("deleted", lambda: (worktree / "README.md").unlink(), "README.md"),
+        ):
+            with self.subTest(label=label):
+                delivery_git.run_git(worktree, "reset", "--hard", clean)
+                delivery_git.run_git(worktree, "clean", "-fd")
+                change()
+                delivery_git.run_git(worktree, "add", "-A")
+                delivery_git.run_git(worktree, "commit", "-qm", "Change a path the Item does not claim")
+                self.assertEqual(self.approve_item_evidence(str(worktree)), 0)
+                code, message = self.refused_finding(lambda: delivery_git.push_item(project, "DLV-001", "AUTH-01"))
+                self.assertEqual((code, message), ("DELIVERY_PATH_CLAIM_EXCEEDED",
+                                                   "the Item's product change lies outside its path claims: " + outside))
+                self.assertEqual(delivery_git.run_git(project, "ls-remote", "origin"), baseline)
+
+        # A refreshed Integration brings product content the Item never claimed; its
+        # writer takes that Integration as the Item's new base and still publishes.
+        delivery_git.run_git(worktree, "reset", "--hard", clean)
+        delivery_git.run_git(worktree, "clean", "-fd")
+        integration_ref = delivery_git.canonical_refs("DLV-001")["integration"]
+        base = delivery_git.remote_oid(project, "origin", integration_ref)
+        (project / "notes").mkdir()
+        (project / "notes/target.txt").write_text("carried by the target\n", encoding="utf-8")
+        carried = delivery_git.commit_tree(project, base, ["notes/target.txt"], "Carry target content", {})
+        delivery_git.atomic_push(project, "origin", [(integration_ref, base, carried)])
+        package = item.parents[2]
+        relative = {name: path.relative_to(worktree).as_posix() for name, path in (
+            ("plan", package / "execution-plan.md"), ("scope", package / "delivery.md"), ("item", item))}
+        product = self.converge_on_integration(worktree, item, carried, relative)
+        self.assertEqual(delivery_git.run_git(worktree, "show", product + ":notes/target.txt"), "carried by the target")
+        self.assertEqual(self.approve_item_evidence(str(worktree)), 0)
+        self.assertEqual(delivery_git.push_item(project, "DLV-001", "AUTH-01")["product_tip"], product)
 
 
 if __name__ == "__main__":

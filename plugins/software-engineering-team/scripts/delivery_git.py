@@ -3120,6 +3120,39 @@ def require_item_publication_controls(root: Path, before: str, after: str,
                            "and its converged Integration")
 
 
+def require_item_path_claims(root: Path, before: str, after: str, relative_item: str) -> None:
+    """Refuse a committed product or test path outside the Item's path claims.
+
+    A claim covers its exact path and every path below it. Vault paths keep their
+    own rules instead: the Delivery controls, the claimed Architecture delta and
+    the compiler projections. A path the product tip holds exactly as the Item's
+    recorded integration base holds it is not the Item's change; its writer took
+    it with that Integration.
+    """
+    from delivery_compile import _is_normalized_claim
+    props = item_control_note(root, after, relative_item)[2]
+    claims = [claim for claim in props.get("path_claims") or []
+              if isinstance(claim, str) and _is_normalized_claim(claim)]
+
+    def product_paths(start: str) -> set[str]:
+        listing = subprocess.run(["git", "--no-replace-objects", "diff", "--no-renames", "--name-only", "-z",
+                                  start, after], cwd=root, capture_output=True, encoding="utf-8",
+                                 errors="replace", check=False)
+        if listing.returncode:
+            raise RuntimeError(listing.stderr.strip() or "cannot list the Item's committed paths")
+        return {path for path in listing.stdout.split("\0") if path and not path.startswith("workspace/docs/")}
+
+    changed = product_paths(before)
+    base = props.get("integration_base_commit")
+    if changed and isinstance(base, str) and OID_RE.fullmatch(base):
+        changed &= product_paths(base)
+    outside = sorted(path for path in changed
+                     if not any(path == claim or path.startswith(claim + "/") for claim in claims))
+    if outside:
+        raise RuntimeError("DELIVERY_PATH_CLAIM_EXCEEDED: the Item's product change lies outside its path claims: "
+                           + ", ".join(outside))
+
+
 def require_current_activation_target(root: Path, remote: str, delivery_id: str,
                                       story_id: str, target_before: str, slot: str,
                                       item_candidate: str, relative_item: str,
@@ -3642,6 +3675,7 @@ def push_item(project_root: Path, delivery_id: str, story_id: str,
     run_git(root, "fetch", "--no-tags", remote, refs["integration"])
     require_item_publication_controls(root, item_oid, product_tip, relative_delivery, relative_item,
                                       integration_oid)
+    require_item_path_claims(root, item_oid, product_tip, relative_item)
     pending = worktree_pending_paths(root, worktree)
     allowed_pending = {relative_review, relative_verification}
     if not pending.issubset(allowed_pending):

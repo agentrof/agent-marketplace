@@ -100,6 +100,13 @@ def git_path_arguments():
 
 
 class DeliveryGitTests(unittest.TestCase):
+    def symlink_or_skip(self, link: Path, target) -> None:
+        """Create a symlink, or skip the current test or subtest on a host that cannot."""
+        try:
+            link.symlink_to(target)
+        except OSError as exc:
+            self.skipTest(f"symlinks unavailable: {exc}")
+
     def approve_governance(self, docs: Path, max_parallel: int = 1) -> None:
         initialized = type("Args", (), {"docs": str(docs), "max_parallel": max_parallel})
         self.assertEqual(delivery_governance.init(initialized), 0)
@@ -3523,6 +3530,56 @@ class DeliveryGitTests(unittest.TestCase):
         delivery_git.claim_items(project, "DLV-001")
         delivery_git.cancel_delivery(project, "DLV-001", "Authentication moves to a later Delivery")
         self.refuse_waiting_start(project, project, undeliverable("AUTH-01 was cancelled with DLV-001"))
+
+    def test_worktree_file_holds_its_blob_as_git_stores_it(self):
+        """A worktree file holds a committed blob when Git would store it as that blob. A checkout
+        that converted line endings still holds it; the same bytes with the conversion off, a
+        changed, missing or linked file and a directory do not (#257)."""
+        committed = b"---\nstatus: active\n---\n\n# Item\n"
+        converted = committed.replace(b"\n", b"\r\n")
+        with temporary_directory() as temporary:
+            root = Path(temporary)
+            init_repository(root)
+            for key, value in (("user.email", "test@example.com"), ("user.name", "Test"),
+                               ("core.autocrlf", "true")):
+                delivery_git.run_git(root, "config", key, value)
+            note, twin = root / "notes" / "item.md", root / "notes" / "twin.md"
+            note.parent.mkdir()
+            note.write_bytes(committed)
+            delivery_git.run_git(root, "add", "notes/item.md")
+            delivery_git.run_git(root, "commit", "-qm", "Item")
+            oid = delivery_git.run_git(root, "rev-parse", "HEAD:notes/item.md")
+            note.unlink()
+            delivery_git.run_git(root, "checkout", "--", "notes/item.md")
+            self.assertEqual(note.read_bytes(), converted)
+            self.assertTrue(delivery_git.worktree_holds_blob(root, "notes/item.md", oid))
+            delivery_git.run_git(root, "config", "core.autocrlf", "false")
+            self.assertFalse(delivery_git.worktree_holds_blob(root, "notes/item.md", oid))
+            delivery_git.run_git(root, "config", "core.autocrlf", "true")
+            note.write_bytes(converted.replace(b"active", b"paused"))
+            self.assertFalse(delivery_git.worktree_holds_blob(root, "notes/item.md", oid))
+            note.unlink()
+            self.assertFalse(delivery_git.worktree_holds_blob(root, "notes/item.md", oid))
+            note.mkdir()
+            self.assertFalse(delivery_git.worktree_holds_blob(root, "notes/item.md", oid))
+            note.rmdir()
+            twin.write_bytes(committed)
+            self.symlink_or_skip(note, "twin.md")
+            self.assertFalse(delivery_git.worktree_holds_blob(root, "notes/item.md", oid))
+
+    def test_push_item_publishes_an_item_whose_checkout_converted_line_endings(self):
+        """Git for Windows converts line endings on checkout by default (core.autocrlf=true), so
+        the started Item's record ends its lines with CRLF while the commit holds LF. push-item
+        reads the record as Git stores it and publishes the Item (#257)."""
+        project, _docs, _directory, item, _reserved = self.prepare_execution_with_draft_reserved_contracts(False)
+        delivery_git.run_git(project, "config", "core.autocrlf", "true")
+        delivery_git.publish_execution_plan(project, "DLV-001")
+        delivery_git.claim_items(project, "DLV-001")
+        worktree = Path(delivery_git.start_item(project, "DLV-001", "AUTH-01")["worktree"])
+        self.assertIn(b"\r\n", (worktree / item.relative_to(project)).read_bytes())
+        product = self.commit_item_product_change(str(worktree), "def authenticate():\n    return True\n")
+        self.assertEqual(self.approve_item_evidence(str(worktree)), 0)
+        self.assertEqual(delivery_git.push_item(project, "DLV-001", "AUTH-01")["product_tip"], product)
 
     def test_push_item_refuses_product_paths_outside_the_item_path_claims(self):
         """A claim covers its path and every path below it. The vault keeps its own rules,

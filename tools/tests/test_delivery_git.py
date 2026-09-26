@@ -745,11 +745,12 @@ class DeliveryGitTests(unittest.TestCase):
             delivery_git.run_git(project, "clone", "-q", str(project / "remote.git"), str(clone))
             delivery_git.run_git(clone, "checkout", "-q", "--detach", integration)
             map_path = clone / "workspace/docs/maps/delivery.md"
-            published = map_path.read_bytes()
+            # Text mode folds native CRLF from checkout or render, so the ending check holds on every OS.
+            published = map_path.read_text(encoding="utf-8")
             delivery_compile.render_map(clone / "workspace/docs")
-            self.assertEqual(map_path.read_bytes(), published)
-        self.assertIn(b"|DLV-001]]", published)
-        self.assertTrue(published.endswith(b"\n") and not published.endswith(b"\n\n"), published[-60:])
+            self.assertEqual(map_path.read_text(encoding="utf-8"), published)
+        self.assertIn("|DLV-001]]", published)
+        self.assertTrue(published.endswith("\n") and not published.endswith("\n\n"), published[-60:])
 
     def test_publications_render_exact_candidate_without_local_sibling_or_dirty_note(self):
         temporary, project = self.make_project()

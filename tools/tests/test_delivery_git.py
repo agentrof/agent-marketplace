@@ -281,6 +281,10 @@ class DeliveryGitTests(unittest.TestCase):
                 state["draft"] = True
                 return {"url": url, "draft": True}
 
+            def update_body(self, url: str, body: str) -> dict:
+                state["body"] = body
+                return {"url": url}
+
             def make_ready(self, url: str) -> dict:
                 state["draft"] = False
                 return {"url": url, "draft": False}
@@ -1244,6 +1248,27 @@ class DeliveryGitTests(unittest.TestCase):
             self.assertTrue(delivery_git.open_pr(project, "DLV-001")["provider_call"])
         self.assertEqual(state["body"], delivery_git.split_remote_note(
             project, cancelled["review"], review, delivery_compile.split_note)[1])
+
+    def test_cancelling_after_the_pr_opened_gives_the_pr_the_cancellation_review_as_its_body(self):
+        """A Delivery cancelled after its PR was opened replaces that PR's approval body with the
+        published cancellation Review, whether open-pr adopts the PR or a new PR intent finds it."""
+        for prepared in (False, True):
+            with self.subTest(prepared=prepared):
+                temporary, project, docs, _product_tip, _intent = self.prepare_pr_intent()
+                self.addCleanup(remove_temporary, temporary)
+                review = delivery_compile.find_delivery(docs, "DLV-001").relative_to(project).as_posix() + "/delivery-review.md"
+                state: dict = {}
+                with mock.patch("delivery_provider.GitHubProvider", self.fake_provider_type(state)):
+                    delivery_git.open_pr(project, "DLV-001")
+                    approval = state["body"]
+                    cancelled = delivery_git.cancel_delivery(project, "DLV-001", "The owner withdrew the request")
+                    if prepared:
+                        delivery_git.prepare_pr_creation(project, "DLV-001")
+                    self.assertFalse(delivery_git.open_pr(project, "DLV-001")["provider_call"])
+                cancellation = delivery_git.split_remote_note(
+                    project, cancelled["review"], review, delivery_compile.split_note)[1]
+                self.assertNotEqual(approval, cancellation)
+                self.assertEqual(state["body"], cancellation)
 
     def test_scope_cancellation_projection_is_sorted_and_closed(self):
         stories = {

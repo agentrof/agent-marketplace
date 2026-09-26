@@ -58,7 +58,9 @@ accepted as closure evidence. Recording the PR moves the Delivery to
 reaches, on any path, a two-parent merge of that recorded PR head that carries
 no `Agentrof-Record` trailer, also for a PR recorded while the Delivery stayed
 in `review`. Coordinator commits, such as the reopen commit, never count; a
-manual merge of the Integration branch into another branch would.
+manual merge of the Integration branch into another branch would. A shallow
+clone or a failed Git query makes `status` and `check` fail with an explicit
+finding.
 Release management is deliberately out of scope. No command may infer a
 status from a branch name alone; the compiler and verified remote evidence are
 the source of semantic truth.

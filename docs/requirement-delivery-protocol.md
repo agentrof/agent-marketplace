@@ -331,10 +331,15 @@ Integration branch therefore still sees the target's merge after a target
 refresh brought it in through a second parent. The one caveat is that a manual
 merge of the Integration branch into any other branch also counts as proof;
 the controlled Integration refs make that unlikely. Without that proof, for
-example on the Integration branch itself, after a fast-forward or squash, or
-outside a Git checkout, the Delivery keeps its tracked status and is still
-checked against its current approved sources. A merged Delivery keeps its
-pinned historical sources, as a cancelled one does.
+example on the Integration branch itself or after a fast-forward or squash,
+the Delivery keeps its tracked status and is still checked against its current
+approved sources. A merged Delivery keeps its pinned historical sources, as a
+cancelled one does. Only a Delivery whose Review records its PR is derived;
+any other keeps its tracked status without a Git query. When Git cannot
+evaluate the proof, in a shallow clone, outside a Git checkout or after a
+failed Git query, `check` and `status` fail with that finding instead of
+reporting the tracked status as the answer, so a CI job that checks a
+Delivery needs the full history.
 
 ## Target changes, recovery and cancellation
 

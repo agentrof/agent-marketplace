@@ -1,18 +1,43 @@
 # CI Bootstrap
 
 This is the deferred Delivery activation contract. Project setup does not
-materialize CI. `delivery_compile.py approve-execution` refuses while the
-repository has no workflow in `.github/workflows/` triggered by `pull_request`
-or `pull_request_target`, because `merge-pr` merges the Delivery PR only on
-green provider checks. Every approval, including a re-approval, repeats the
-check. Any such workflow counts; the test job is optional, so a workflow that
-runs only the portable vault gate is valid. When none exists, offer the
-packaged `templates/ci-tests.yml` before execution approval.
+materialize CI. `delivery_compile.py approve-execution` refuses, on every
+approval and re-approval, until a committed workflow will run on the Delivery
+PR, because `merge-pr` merges that PR only on green provider checks. When none
+exists, offer the packaged `templates/ci-tests.yml` before execution approval;
+the project then commits it and pushes it to the target branch.
 
-The check reads workflow files without a YAML parser. It recognizes a
-top-level `on` key whose value is one event or a one-line list, or whose
-direct children are event keys or list items, and it evaluates no branch, path
-or activity-type filter.
+A workflow counts when it is a `.yml` or `.yaml` file directly in
+`.github/workflows/`, its top-level `on` names `pull_request` or
+`pull_request_target`, and that event lists no `types` or includes `opened`,
+`synchronize` or `reopened` among them. The test job is optional, so a
+workflow that runs only the portable vault gate counts. Counting does not
+guarantee a mergeable check: `merge-pr` still refuses a job skipped by its
+`if:` condition and a green commit status, which reports no conclusion
+([agentrof/agent-marketplace#229](https://github.com/agentrof/agent-marketplace/issues/229)).
+
+The check reads committed trees with local Git and never fetches. GitHub runs a
+`pull_request` workflow from the PR merge commit, so it counts in the target
+branch's remote-tracking ref or in the Delivery Integration's. GitHub runs a
+`pull_request_target` workflow from the default branch, so it counts only in
+the target's, which is the default branch whenever
+`refs/remotes/<remote>/HEAD` names it. Without a remote-tracking target, `HEAD`
+stands in; outside a Git checkout, the working tree does. A written but
+uncommitted workflow, or one not yet pushed and fetched, does not count.
+
+A project whose pull request checks come from an external CI provider or an
+organization-level required workflow still needs a minimal `pull_request`
+workflow here, and one that runs only the portable vault gate suffices. A
+declared exemption is tracked in
+[agentrof/agent-marketplace#230](https://github.com/agentrof/agent-marketplace/issues/230).
+
+The check parses lines, not YAML. It reads a top-level `on` whose value is one
+event or a one-line list, or whose direct children are event keys or list
+items, and an event's `types` as a scalar or one-line list on the key's line, a
+block list below it, or a one-line flow mapping. It resolves no other form. It
+evaluates no `branches` or `paths` filter and cannot see a workflow disabled on
+GitHub or Actions turned off, so any of these can still leave the Delivery PR
+without a check.
 
 The template always runs the tracked portable single-vault gate before the
 project-specific jobs. Do not replace it with an installed plugin path; every

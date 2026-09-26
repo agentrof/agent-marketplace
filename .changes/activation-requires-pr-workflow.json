@@ -1,5 +1,5 @@
 {
-  "summary": "Execution approval now refuses a repository with no workflow in .github/workflows/ triggered by pull_request or pull_request_target, on first approval and on every re-approval, so a Delivery can no longer run to completion and stop at merge-pr without a green check; the refusal names operation_compile.py render-ci and the CI bootstrap contract.",
+  "summary": "Execution approval now refuses, on every approval and re-approval, until a committed workflow will run on the Delivery PR, read with local Git from the target's and the Delivery Integration's remote-tracking refs with its activity types evaluated, so a Delivery can no longer stop at merge-pr without a green check.",
   "components": {
     "software-engineering-team": "patch"
   }

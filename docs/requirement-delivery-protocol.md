@@ -199,11 +199,11 @@ Item marked `runtime_required: true` additionally pins the approved
 Environment Contract. Contract hash drift blocks Item start, resume, reopen and
 takeover; Operation remains outside Requirement and product-stage routing.
 
-Execution approval, and every re-approval, also refuses while the repository
-has no workflow in `.github/workflows/` triggered by `pull_request` or
-`pull_request_target`. Closure requires successful provider checks, so such a
-Delivery would otherwise run to completion and stop at merge.
-`operation_compile.py render-ci` materializes the packaged workflow.
+Closure requires successful provider checks, so execution approval also
+carries the pull request workflow precondition that
+`plugins/software-engineering-team/flows/execution-planning.md` states and
+`plugins/software-engineering-team/skill-content/setup/references/ci-bootstrap.md`
+defines.
 
 ## Git topology
 

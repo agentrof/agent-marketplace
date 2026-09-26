@@ -885,74 +885,171 @@ def reopen_findings(reopen: list[str], item_records: list[tuple[Path, dict]]) ->
 
 
 # merge-pr merges a Delivery PR only on green provider checks, so execution
-# approval requires a GitHub workflow that pull requests trigger: a `.yml` or
+# approval requires a GitHub workflow that the Delivery PR runs: a `.yml` or
 # `.yaml` file directly in `.github/workflows/`, the only place GitHub reads.
 # The check reads lines instead of parsing YAML to stay dependency-free. It
 # accepts a top-level `on` key, bare or quoted, whose value is one event or a
 # one-line flow sequence, or whose direct children are event keys or block
-# sequence items, and it ignores trailing comments. It does not resolve flow
-# mappings, flow sequences that span lines, anchors, aliases or tags, and it does
-# not evaluate branch, path or activity-type filters, so any direct pull_request
-# or pull_request_target trigger counts. It reads the checkout, so it cannot
-# prove that the workflow reaches the target branch or that the provider runs it.
+# sequence items, and it ignores trailing comments. Under a pull_request or
+# pull_request_target key it reads `types` as a scalar, a one-line flow sequence
+# or a block sequence, also inside a one-line flow mapping. It does not resolve
+# other flow mappings, flow sequences that span lines, anchors, aliases or tags,
+# and it does not evaluate branch or path filters.
 PULL_REQUEST_EVENTS = {"pull_request", "pull_request_target"}
+# GitHub runs a pull request workflow for these activity types when it lists none.
+PULL_REQUEST_ACTIVITY_TYPES = {"opened", "synchronize", "reopened"}
 YAML_COMMENT_RE = re.compile(r"(?:^|\s)#.*$")
 TRIGGER_KEY_RE = re.compile(r"""^(?:on|"on"|'on')\s*:(?:\s+(?P<value>.*))?$""")
+FLOW_TYPES_RE = re.compile(r"""[{,]\s*["']?types["']?\s*:\s*(\[[^\]]*\]|[^,}]+)""")
 
 
-def _event_names(value: str) -> set[str]:
-    """Event names in one scalar or one-line flow sequence."""
+def _names(value: str) -> set[str]:
+    """Names in one scalar or one-line flow sequence."""
     value = value.strip()
     names = value[1:-1].split(",") if value.startswith("[") and value.endswith("]") else [value]
     return {name.strip().strip("\"'") for name in names}
 
 
-def triggers_on_pull_request(text: str) -> bool:
-    """Whether one workflow's top-level ``on`` key names a pull request event."""
+def _children(lines: list[str]) -> list[tuple[str, str, list[str]]]:
+    """Split one block into its direct children as (key, inline value, nested lines).
+
+    A sequence item has the key ``-``. An item at the column of an empty key
+    before it is that key's value, the compact form of a block sequence.
+    """
+    children: list[tuple[str, str, list[str]]] = []
+    column = None
+    for line in lines:
+        entry = line.strip()
+        if not entry:
+            continue
+        depth = len(line) - len(line.lstrip())
+        column = depth if column is None else column
+        item = entry == "-" or entry.startswith("- ")
+        if children and (depth > column or (item and children[-1][0] != "-" and not children[-1][1])):
+            children[-1][2].append(line)
+        elif depth == column:
+            key, _, value = ("-", "", entry[1:]) if item else entry.partition(":")
+            children.append((key.strip().strip("\"'"), value.strip(), []))
+        else:
+            break
+    return children
+
+
+def _event_runs(value: str, nested: list[str]) -> bool:
+    """Whether one pull request event key lists no activity types or one that counts."""
+    if value.startswith("{") and value.endswith("}"):
+        match = FLOW_TYPES_RE.search(value)
+        types = _names(match.group(1)) if match else None
+    elif value.lower() in {"", "~", "null"}:
+        types = None
+        for key, inline, lines in _children(nested):
+            if key == "types":
+                types = _names(inline) if inline else {
+                    name for item, text, _ in _children(lines) if item == "-" for name in _names(text)}
+    else:
+        return False
+    return types is None or bool(types & PULL_REQUEST_ACTIVITY_TYPES)
+
+
+def pull_request_triggers(text: str) -> set[str]:
+    """The pull request events in one workflow's top-level ``on`` whose activity types count."""
     lines = [YAML_COMMENT_RE.sub("", line).rstrip() for line in text.splitlines()]
     for index, line in enumerate(lines):
         match = TRIGGER_KEY_RE.match(line)
         if match is None:
             continue
         if match.group("value"):
-            return bool(_event_names(match.group("value")) & PULL_REQUEST_EVENTS)
-        events: set[str] = set()
-        indent = None
+            return _names(match.group("value")) & PULL_REQUEST_EVENTS
+        block = []
         for child in lines[index + 1:]:
             entry = child.strip()
-            if not entry:
-                continue
-            depth = len(child) - len(child.lstrip())
-            if indent is None:
-                indent = depth
             # A block sequence may start at the column of its own key.
-            if depth < indent or (depth == 0 and not entry.startswith("- ")):
+            if entry and child == child.lstrip() and not entry.startswith("- "):
                 break
-            if depth == indent:
-                events |= _event_names(entry[2:] if entry.startswith("- ") else entry.split(":", 1)[0])
-        return bool(events & PULL_REQUEST_EVENTS)
-    return False
+            block.append(child)
+        events = set()
+        for key, value, nested in _children(block):
+            if key == "-":
+                events |= _names(value) & PULL_REQUEST_EVENTS
+            elif key in PULL_REQUEST_EVENTS and _event_runs(value, nested):
+                events.add(key)
+        return events
+    return set()
 
 
-def pull_request_workflow_findings(docs: Path) -> list[str]:
-    """Require a pull request workflow in the Git checkout that holds the docs.
+def committed_workflows(checkout: Path, ref: str) -> list[str] | None:
+    """The workflow files directly in `.github/workflows/` at one ref, or None without the ref."""
+    git = ["git", "--no-replace-objects", "-C", str(checkout)]
+    listing = subprocess.run([*git, "ls-tree", "--full-tree", "-z", ref, "--", ".github/workflows/"],
+                             capture_output=True, check=False)
+    if listing.returncode:
+        return None
+    texts = []
+    for row in filter(None, listing.stdout.split(b"\0")):
+        metadata, _, name = row.partition(b"\t")
+        mode, _kind, oid = metadata.decode("ascii").split()
+        if mode not in {"100644", "100755"} or not name.endswith((b".yml", b".yaml")):
+            continue
+        blob = subprocess.run([*git, "cat-file", "blob", oid], capture_output=True, check=False)
+        try:
+            texts.append(blob.stdout.decode("utf-8-sig"))
+        except UnicodeDecodeError:
+            continue
+    return texts
 
-    The checkout is found as the sibling compilers find it; outside one, the
-    project root that the docs layout names stands in.
+
+def pull_request_workflow_findings(docs: Path, delivery: str, remote: str = "origin") -> list[str]:
+    """Require a workflow that the Delivery PR will run, read from committed trees.
+
+    GitHub runs a pull_request workflow from the PR merge commit, which joins the
+    Integration head and the target, and a pull_request_target workflow from the
+    default branch alone. So a pull_request trigger counts in the target's or the
+    Integration's remote-tracking ref, and a pull_request_target trigger only in
+    the target's. Integration alone would not do: reservation cuts it from the
+    target before this approval, so a workflow merged into the target afterwards
+    is in the merge commit before a target refresh brings it into Integration.
+    HEAD stands in for a target that has no remote-tracking ref. Only local refs
+    are read, as current as the last fetch or push; outside a Git checkout the
+    working tree of the project stands in.
     """
     project = docs.parent.parent if docs.parent.name == "workspace" else docs.parent
-    root = next((parent for parent in (docs, *docs.parents) if (parent / ".git").exists()), project)
-    workflows = root / ".github" / "workflows"
-    for path in (*workflows.glob("*.yml"), *workflows.glob("*.yaml")):
+    checkout = next((parent for parent in (docs, *docs.parents) if (parent / ".git").exists()), None)
+    if checkout is None:
+        workflows = project / ".github" / "workflows"
+        texts = []
+        for path in (*workflows.glob("*.yml"), *workflows.glob("*.yaml")):
+            try:
+                texts.append(path.read_text(encoding="utf-8-sig"))
+            except (OSError, UnicodeDecodeError):
+                continue
+        trees = [(str(workflows), texts, PULL_REQUEST_EVENTS)]
+        where, remedy = f"is in {workflows} outside a Git checkout", ""
+    else:
+        from delivery_git import resolve_target_branch, short_refs
         try:
-            if path.is_file() and triggers_on_pull_request(path.read_text(encoding="utf-8-sig")):
-                return []
-        except (OSError, UnicodeDecodeError):
-            continue
-    return [f"Execution approval requires a workflow in {workflows} triggered by pull_request "
-            "or pull_request_target, since merge-pr needs a green check on the Delivery PR; "
-            "materialize one with operation_compile.py render-ci as the CI bootstrap contract "
-            "(skill-content/setup/references/ci-bootstrap.md) describes"]
+            branch = resolve_target_branch(checkout, remote)
+        except RuntimeError:
+            branch = ""
+        target = f"refs/remotes/{remote}/{branch}"
+        texts = committed_workflows(checkout, target) if branch else None
+        remedy = f", commit it, push it to {branch} on {remote} and fetch"
+        if texts is None:
+            target, texts, remedy = "HEAD", committed_workflows(checkout, "HEAD") or [], ", then commit it"
+        trees = [(target, texts, PULL_REQUEST_EVENTS)]
+        integration = f"refs/remotes/{remote}/{short_refs(delivery)['integration']}"
+        integration_texts = committed_workflows(checkout, integration)
+        if integration_texts is not None:
+            trees.append((integration, integration_texts, {"pull_request"}))
+        where = "is committed in " + " or ".join(ref for ref, _texts, _events in trees)
+    if any(pull_request_triggers(text) & events for _ref, texts, events in trees for text in texts):
+        return []
+    names = sorted(PULL_REQUEST_ACTIVITY_TYPES)
+    types = " or ".join(filter(None, (", ".join(names[:-1]), names[-1])))
+    return [f"Execution approval requires a workflow in .github/workflows/ triggered by pull_request "
+            f"or pull_request_target, listing no activity types or including {types}, since merge-pr "
+            f"needs a green check on the Delivery PR; none {where}. Materialize one with "
+            "operation_compile.py render-ci as the CI bootstrap contract "
+            f"(skill-content/setup/references/ci-bootstrap.md) describes{remedy}"]
 
 
 def approve_execution(args) -> int:
@@ -979,7 +1076,7 @@ def approve_execution(args) -> int:
     plan_errors = source_errors + reopen_findings(reopen, item_records)
     if not plan_errors:
         plan_errors = execution_plan_findings(root, sources, docs)
-    plan_errors += pull_request_workflow_findings(docs)
+    plan_errors += pull_request_workflow_findings(docs, args.delivery, getattr(args, "remote", "origin"))
     if plan_errors:
         print(json.dumps({"ok": False, "errors": sorted(set(plan_errors))}, indent=2)); return 1
     refreshed_sources: list[str] = []
@@ -1304,6 +1401,9 @@ def main(argv=None) -> int:
     sub.choices["approve-execution"].add_argument(
         "--reopen", action="append", default=[], metavar="STORY",
         help="rebind this integrated Item to the current Operation contracts so that it can be reopened")
+    sub.choices["approve-execution"].add_argument(
+        "--remote", default="origin",
+        help="the Git remote whose local remote-tracking refs hold the target and Integration branches")
     sub.add_parser("render").set_defaults(func=render)
     transition = sub.add_parser("prepare-item-transition")
     transition.add_argument("--delivery", required=True); transition.add_argument("--story", required=True)

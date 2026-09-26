@@ -1307,6 +1307,22 @@ class DeliveryGitTests(unittest.TestCase):
         self.assertEqual((props["pull_request_url"], body), (url, cancellation))
         self.assertEqual(delivery_compile.delivery_findings(checkout / "workspace/docs", "DLV-001")[1], [])
 
+    def test_a_published_cancellation_refuses_a_second_cancellation(self):
+        """cancel-delivery judges a Delivery by its published status: the local delivery.md keeps
+        its scope status after a cancellation, and a Delivery without Item refs has no cancelled
+        Item to refuse on, so a second cancellation used to publish a second cancellation Review."""
+        temporary, project, docs = self.reserve_scope()
+        self.addCleanup(remove_temporary, temporary)
+        delivery_git.cancel_delivery(project, "DLV-001", "The owner withdrew the request")
+        package = delivery_compile.find_delivery(docs, "DLV-001")
+        self.assertEqual(delivery_compile.split_note(package / "delivery.md")[0]["status"], "scope_approved")
+        refs = delivery_git.canonical_refs("DLV-001")
+        before = [delivery_git.remote_oid(project, "origin", refs[name]) for name in ("fence", "integration")]
+        self.assertEqual(self.refused_finding(lambda: delivery_git.cancel_delivery(project, "DLV-001", "Withdrawn again")),
+                         ("DELIVERY_CANCELLATION_INVALID", "the published Delivery is already cancelled"))
+        self.assertEqual([delivery_git.remote_oid(project, "origin", refs[name]) for name in ("fence", "integration")],
+                         before)
+
     def test_record_pr_remote_checks_the_local_mirror_and_the_adoption_intent(self):
         """record-pr-remote refuses a URL that an existing local Review does not mirror, as it did
         before the PR record became the only source of the URL, and a PR other than the one an

@@ -1,0 +1,6 @@
+{
+  "summary": "cancel-delivery now refuses a Delivery whose published status on its Integration branch is already cancelled, under DELIVERY_CANCELLATION_INVALID. It judged only the local delivery.md, which a cancellation never updates, so a Delivery without Item refs could be cancelled a second time and publish a second cancellation Review.",
+  "components": {
+    "software-engineering-team": "patch"
+  }
+}

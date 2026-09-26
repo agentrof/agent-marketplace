@@ -422,7 +422,9 @@ intent freezes exact Story dispositions, quiesces active Items, reverts
 integrated Item merges in reverse order and publishes one cancellation Review
 through the same Integration branch and final PR. A scope-only or claims-free
 Delivery uses `not_started` dispositions and never fabricates Item refs,
-review evidence or integration bases.
+review evidence or integration bases. A Delivery whose published status is
+already `cancelled` refuses another cancellation with
+`DELIVERY_CANCELLATION_INVALID`.
 
 ## Setup and package upgrade
 

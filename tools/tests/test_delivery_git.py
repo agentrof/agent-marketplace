@@ -4,8 +4,10 @@ from __future__ import annotations
 
 import contextlib
 import io
+import os
 import sys
 import json
+import pathlib
 import hashlib
 import shutil
 import subprocess
@@ -25,6 +27,7 @@ import delivery_provider  # noqa: E402
 import delivery_result  # noqa: E402
 import operation_compile  # noqa: E402
 import architecture_compile  # noqa: E402
+import stage_package  # noqa: E402
 import vault_check  # noqa: E402
 from backlog_fixture import make_approved_backlog  # noqa: E402
 from git_fixture import init_repository, remove_temporary, temporary_directory  # noqa: E402
@@ -55,6 +58,42 @@ def windows_vault_paths():
     """
     docs_root = delivery_compile.docs_root
     return mock.patch.object(delivery_compile, "docs_root", lambda value: WindowsVaultPath(docs_root(value)))
+
+
+def windows_checkout_paths():
+    """Render a path relative to a Git checkout as native Windows renders it.
+
+    The files stay real, and a path relative to any other directory, such as
+    the vault, keeps this host's separator: its Windows handling is #228. The
+    patch is on the method every path inherits, because the coordinator builds
+    its checkout and package paths with Path calls of its own, which a path
+    subclass handed to it would not reach.
+    """
+    relative_to = pathlib.PurePath.relative_to
+
+    def windows_relative_to(self, *other, **options):
+        relative = relative_to(self, *other, **options)
+        base = os.fspath(other[0]) if other else ""
+        if os.path.isabs(base) and os.path.lexists(os.path.join(base, ".git")):
+            return pathlib.PureWindowsPath(*relative.parts)
+        return relative
+
+    return mock.patch.object(pathlib.PurePath, "relative_to", windows_relative_to)
+
+
+@contextlib.contextmanager
+def git_path_arguments():
+    """Record the arguments of every Git call, leaving out absolute local paths."""
+    arguments: list[str] = []
+    run = subprocess.run
+
+    def recording_run(command, *args, **kwargs):
+        if isinstance(command, list) and command[:1] == ["git"]:
+            arguments.extend(value for value in map(str, command[1:]) if not os.path.isabs(value))
+        return run(command, *args, **kwargs)
+
+    with mock.patch.object(subprocess, "run", recording_run):
+        yield arguments
 
 
 class DeliveryGitTests(unittest.TestCase):
@@ -2395,6 +2434,87 @@ class DeliveryGitTests(unittest.TestCase):
         refs = delivery_git.canonical_refs("DLV-001")
         self.assertEqual(delivery_git.remote_oid(project, "origin", refs["integration"]), published["integration"])
         self.assertEqual(delivery_git.remote_oid(project, "origin", refs["fence"]), advanced["fence"])
+
+    def assert_git_paths_are_posix(self, arguments: list[str], project: Path, commits: list[str]) -> None:
+        """No path reached Git, or a tree Git wrote, with a Windows separator."""
+        self.assertEqual([value for value in arguments if "\\" in value], [])
+        for commit in commits:
+            names = delivery_git.run_git(project, "ls-tree", "-r", "-z", "--name-only", commit).split("\0")
+            self.assertEqual([name for name in names if "\\" in name], [], commit)
+
+    def test_coordinator_hands_git_posix_paths_on_a_host_with_backslash_separators(self):
+        """Every path the coordinator hands Git, or compares with what Git
+        returns, uses forward slashes on every host (#236)."""
+        with windows_checkout_paths(), git_path_arguments() as arguments:
+            project, docs, _directory, item, _reserved = self.prepare_execution_with_draft_reserved_contracts(False)
+            # The simulation is live: a path relative to the checkout renders as on Windows.
+            self.assertEqual(str(docs.relative_to(project)), "workspace\\docs")
+            delivery_git.publish_execution_plan(project, "DLV-001")
+            delivery_git.claim_items(project, "DLV-001")
+            self.governance_target_handoff(project, docs)
+            self.assertTrue(delivery_git.refresh_target(project, "DLV-001")["changed"])
+            delivery_git.start_item(project, "DLV-001", "AUTH-01")
+            delivery_git.block_item(project, "DLV-001", "AUTH-01")
+            delivery_git.unblock_item(project, "DLV-001", "AUTH-01")
+            delivery_git.pause_item(project, "DLV-001", "AUTH-01")
+            delivery_git.resume_item(project, "DLV-001", "AUTH-01")
+            active = delivery_git.takeover_item(project, "DLV-001", "AUTH-01", confirm=True)
+            self.commit_item_product_change(active["worktree"], "def authenticate():\n    return 'v1'\n")
+            self.assertEqual(self.approve_item_evidence(active["worktree"]), 0)
+            delivery_git.push_item(project, "DLV-001", "AUTH-01")
+            delivery_git.integrate_item(project, "DLV-001", "AUTH-01")
+            reopened = delivery_git.reopen_item(project, "DLV-001", "AUTH-01")
+            self.commit_item_product_change(reopened["worktree"], "def authenticate():\n    return 'v2'\n")
+            self.assertEqual(self.approve_item_evidence(reopened["worktree"]), 0)
+            delivery_git.push_item(project, "DLV-001", "AUTH-01")
+            integrated = delivery_git.integrate_item(project, "DLV-001", "AUTH-01")
+            review = type("Args", (), {"docs": str(docs), "delivery": "DLV-001",
+                                       "reviewed_commit": integrated["integration"],
+                                       "reviewed_integration_commit": integrated["integration"]})
+            self.assertEqual(delivery_compile.approve_review(review), 0)
+            delivery_git.publish_delivery_review(project, "DLV-001")
+            delivery_git.prepare_pr_creation(project, "DLV-001")
+            pr_url = "https://github.com/agentrof/example/pull/17"
+            delivery_compile.record_pr(type("Args", (), {"docs": str(docs), "delivery": "DLV-001", "url": pr_url}))
+            delivery_git.record_pr_remote(project, "DLV-001", pr_url)
+            delivery_git.invalidate_delivery_review(project, "DLV-001", "REVIEW_FINDING", "sha256:" + "0" * 64)
+            cancelled = delivery_git.cancel_delivery(project, "DLV-001", "Request withdrawn")
+        self.assertTrue(cancelled["reverts"])
+        relative_item = item.relative_to(project).as_posix()
+        self.assertIn(relative_item, arguments)
+        self.assertTrue(any(value.endswith(":" + relative_item) for value in arguments))
+        item_tip = delivery_git.remote_oid(project, "origin", delivery_git.canonical_refs("DLV-001", "AUTH-01")["item"])
+        self.assert_git_paths_are_posix(arguments, project, [cancelled["review"], item_tip])
+
+    def test_package_commit_check_hands_git_posix_paths_on_a_host_with_backslash_separators(self):
+        """The commit check behind the stage receipts a Delivery reads names its
+        package to Git with forward slashes on every host (#236)."""
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(remove_temporary, temporary)
+        project = Path(temporary.name)
+        init_repository(project)
+        delivery_git.run_git(project, "config", "user.email", "test@example.com")
+        delivery_git.run_git(project, "config", "user.name", "Test")
+        package = project / "workspace" / "docs" / "solution-design"
+        note = package / "landscape.md"
+        metadata = package / "decisions" / ".DS_Store"
+        metadata.parent.mkdir(parents=True)
+        note.write_text("# Landscape\n", encoding="utf-8")
+        metadata.write_bytes(b"operating-system metadata")
+        delivery_git.run_git(project, "add", "--force", "workspace")
+        delivery_git.run_git(project, "commit", "-qm", "Commit the package")
+        with windows_checkout_paths(), git_path_arguments() as arguments:
+            self.assertEqual(str(package.relative_to(project)), "workspace\\docs\\solution-design")
+            # Committed metadata that is gone is looked up in HEAD by its path.
+            metadata.unlink()
+            self.assertTrue(stage_package.is_committed(package))
+            note.write_text("# Landscape\n\nAuthored drift.\n", encoding="utf-8")
+            self.assertFalse(stage_package.is_committed(package))
+            note.write_text("# Landscape\n", encoding="utf-8")
+            (package / "draft.md").write_text("# Draft\n", encoding="utf-8")
+            self.assertFalse(stage_package.is_committed(package))
+        self.assertIn(package.relative_to(project).as_posix(), arguments)
+        self.assert_git_paths_are_posix(arguments, project, ["HEAD"])
 
     def test_execution_publication_includes_only_exact_bound_operation_contracts(self):
         for runtime in (True, False):

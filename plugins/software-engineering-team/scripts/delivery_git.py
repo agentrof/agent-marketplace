@@ -25,6 +25,7 @@ from urllib.parse import urlsplit
 import delivery_governance
 
 import delivery_result
+from vault_check import rel_posix
 
 
 DELIVERY_ID_RE = re.compile(r"^DLV-[0-9]{3,}$")
@@ -1007,10 +1008,10 @@ def package_paths(root: Path, directory: Path, docs: Path,
         relative_to_delivery = path.relative_to(directory).parts
         if not include_items and relative_to_delivery and relative_to_delivery[0] == "items":
             continue
-        paths.append(str(path.relative_to(root)))
+        paths.append(rel_posix(root, path))
     map_path = docs / "maps" / "delivery.md"
     if include_map and map_path.exists():
-        paths.append(str(map_path.relative_to(root)))
+        paths.append(rel_posix(root, map_path))
     return sorted(set(paths))
 
 
@@ -1022,7 +1023,7 @@ def assert_integrated_items(root: Path, remote: str, directory: Path,
         story = item_path.parent.name.upper()
         item_ref = canonical_refs(delivery_id, story)["item"]
         item_oid = remote_oid(root, remote, item_ref)
-        relative = str(item_path.relative_to(root))
+        relative = rel_posix(root, item_path)
         item_props, _ = split_remote_note(root, item_oid, relative, split_note)
         if item_props.get("status") != "integrated":
             raise RuntimeError(f"DELIVERY_ITEM_NOT_READY: Delivery Item is not integrated: {story}")
@@ -1143,12 +1144,12 @@ def record_pr_remote(project_root: Path, delivery_id: str, url: str,
     intent_message = commit_message(root, integration_oid)
     if trailer(intent_message, "Record") not in {"pr-creation-intent-v1", "pr-adoption-intent-v1"}:
         raise RuntimeError("record-pr requires the exact unmatched PR intent")
-    relative_review = str(review_path.relative_to(root))
+    relative_review = rel_posix(root, review_path)
     review_props, review_body = split_remote_note(root, integration_oid, relative_review, split_note)
     review_props["pull_request_url"] = canonical_url
     review_props["source_hash"] = content_hash(review_props, review_body, exclude={"status", "approved_at_utc", "source_hash", "approval_hash"})
     replacements = {relative_review: frontmatter(review_props, review_body)}
-    relative_delivery = str((directory / "delivery.md").relative_to(root))
+    relative_delivery = rel_posix(root, directory / "delivery.md")
     delivery_props, delivery_body = split_remote_note(root, integration_oid, relative_delivery, split_note)
     recorded = pr_recorded_props(delivery_props, delivery_body)
     if recorded is not None:
@@ -1396,7 +1397,7 @@ def invalidate_delivery_review(project_root: Path, delivery_id: str,
     if trailer(integration_message, "Record") not in {"delivery-review-published-v1", "pr-url-recorded-v1"}:
         raise RuntimeError("review invalidation requires a published current Review")
     review_path = directory / "delivery-review.md"
-    relative_review = str(review_path.relative_to(root))
+    relative_review = rel_posix(root, review_path)
     review_props, review_body = split_remote_note(root, integration_oid, relative_review, split_note)
     if review_props.get("status") != "approved":
         raise RuntimeError("current Delivery Review is not approved")
@@ -1594,7 +1595,7 @@ def cancel_delivery(project_root: Path, delivery_id: str, reason: str,
             "cancellation-intent-v1", "delivery-barrier-v1", "cancellation-finalized-v1"}:
         raise RuntimeError("DELIVERY_BARRIER_ACTIVE: Delivery already has a barrier or non-open Fence")
 
-    relative_delivery = str(delivery_path_value.relative_to(root))
+    relative_delivery = rel_posix(root, delivery_path_value)
     remote_props, remote_body = split_remote_note(root, integration_oid, relative_delivery, split_note)
     scope_hash = str(remote_props.get("scope_hash", "none"))
     all_slots = remote_slot_oids(root, remote)
@@ -1603,7 +1604,7 @@ def cancel_delivery(project_root: Path, delivery_id: str, reason: str,
     for item_path in sorted(directory.glob("items/*/item.md")):
         story = item_path.parent.name.upper()
         item_ref = canonical_refs(delivery_id, story)["item"]
-        relative_item = str(item_path.relative_to(root))
+        relative_item = rel_posix(root, item_path)
         context = {"path": relative_item, "item_ref": item_ref, "item_oid": None,
                    "slot": None, "props": None, "body": None}
         if remote_has_ref(root, remote, item_ref):
@@ -1745,7 +1746,7 @@ def cancel_delivery(project_root: Path, delivery_id: str, reason: str,
     })
     review_props["approval_hash"] = content_hash(review_props, review_body, exclude={"status", "approved_at_utc", "source_hash", "approval_hash"})
     review_props["source_hash"] = content_hash(review_props, review_body)
-    relative_review = str((directory / "delivery-review.md").relative_to(root))
+    relative_review = rel_posix(root, directory / "delivery-review.md")
     review = commit_replacements(
         root, finalization, {relative_review: frontmatter(review_props, review_body)},
         f"Publish delivery review for {delivery_id}",
@@ -1851,7 +1852,7 @@ def execution_operation_inputs(root: Path, directory: Path, docs: Path) -> tuple
         path = operation_compile.contract_path(docs, kind)
         if not path.is_file() or path.is_symlink() or path.parent.is_symlink():
             raise RuntimeError(f"Execution publication requires a regular canonical {kind} contract")
-        paths.append(path.relative_to(root).as_posix())
+        paths.append(rel_posix(root, path))
     return paths, bindings
 
 
@@ -1948,7 +1949,7 @@ def require_target_ancestry(root: Path, remote: str, fence_message: str,
 
 def integration_item_paths(root: Path, directory: Path, integration: str) -> list[Path]:
     """Enumerate exact canonical Item files from the authoritative Git tree."""
-    prefix = (directory / "items").relative_to(root).as_posix() + "/"
+    prefix = rel_posix(root, directory / "items") + "/"
     listing = subprocess.run(["git", "ls-tree", "-rz", integration, "--", prefix],
                              cwd=root, capture_output=True, check=True).stdout
     paths = []
@@ -1985,11 +1986,11 @@ def target_input_bindings(root: Path, directory: Path, integration: str,
         props, body = operation_compile.parse(path)
         return props, operation_compile.receipt_hash(props, body)
 
-    delivery, _body = split_remote_note(root, integration, str((directory / "delivery.md").relative_to(root)), split_note)
+    delivery, _body = split_remote_note(root, integration, rel_posix(root, directory / "delivery.md"), split_note)
     inputs = {str(delivery["definition_of_done_path"]): (delivery["definition_of_done_source_hash"], dod_record, "approved")}
     bindings = {}
     for item in integration_item_paths(root, directory, integration):
-        props, _body = split_remote_note(root, integration, str(item.relative_to(root)), split_note)
+        props, _body = split_remote_note(root, integration, rel_posix(root, item), split_note)
         for kind in ("story", "test_plan"):
             inputs[str(props[kind + "_path"])] = (props[kind + "_source_hash"], backlog_record, "planned" if kind == "story" else "approved")
         if props.get("verification_contract_hash"):
@@ -2034,14 +2035,14 @@ def refreshed_claim_updates(root: Path, remote: str, delivery_id: str, directory
             continue
         if is_ancestor(root, target, item_oid):
             continue
-        relative = str(item_path.relative_to(root))
+        relative = rel_posix(root, item_path)
         item_props, item_body = split_remote_note(
             root, integration_candidate, relative, split_note)
         item_props["integration_base_commit"] = integration_candidate
         item_props["source_hash"] = content_hash(item_props, item_body)
         delivery_props, _delivery_body = split_remote_note(
             root, integration_candidate,
-            str((directory / "delivery.md").relative_to(root)), split_note)
+            rel_posix(root, directory / "delivery.md"), split_note)
         updates.append((item_ref, item_oid, commit_replacements(
             root, integration_candidate,
             {relative: frontmatter(item_props, item_body)},
@@ -2098,7 +2099,7 @@ def refresh_target(project_root: Path, delivery_id: str,
         if not remote_has_ref(root, remote, item_ref):
             continue
         item_oid = remote_oid(root, remote, item_ref)
-        item_props, _ = split_remote_note(root, item_oid, str(item_path.relative_to(root)), split_note)
+        item_props, _ = split_remote_note(root, item_oid, rel_posix(root, item_path), split_note)
         from delivery_compile import _is_normalized_claim
         for claim in item_props.get("path_claims", []) or []:
             if not isinstance(claim, str) or not _is_normalized_claim(claim):
@@ -2880,7 +2881,7 @@ def claim_items(project_root: Path, delivery_id: str, remote: str = "origin") ->
         item_props, item_body = split_note(item_path)
         item_props["integration_base_commit"] = marker
         item_props["source_hash"] = content_hash(item_props, item_body)
-        relative = str(item_path.relative_to(root))
+        relative = rel_posix(root, item_path)
         item_commit = commit_replacements(root, marker, {relative: frontmatter(item_props, item_body)},
                                           f"Claim {story} for {delivery_id}",
                                           {"Record": "item-claim-v1", "Protocol": "1", "Delivery": delivery_id,
@@ -3043,7 +3044,7 @@ def item_lifecycle(props: dict) -> tuple:
 
 
 def require_item_publication_controls(root: Path, before: str, after: str,
-                                      relative_delivery: Path, relative_item: str,
+                                      relative_delivery: str, relative_item: str,
                                       integration: str | None = None) -> None:
     """Permit only the current Item's Architecture stamp inside Delivery controls,
     and what an Item carries once its writer converges it on a newer Integration.
@@ -3053,7 +3054,7 @@ def require_item_publication_controls(root: Path, before: str, after: str,
     fields while it keeps its own lifecycle, its stamp and its new base.
     """
     from delivery_compile import content_hash
-    prefix = relative_delivery.as_posix().rstrip("/") + "/"
+    prefix = relative_delivery.rstrip("/") + "/"
     changed = [path for path in run_git(root, "--no-replace-objects", "diff", "--name-only", "-z",
                                         before, after, "--", prefix).split("\0") if path]
     notes = {}
@@ -3141,7 +3142,7 @@ def published_plan_paths(root: Path, directory: Path, docs: Path) -> list[str]:
     file; the writer owns the review and verification records beside it.
     """
     paths = package_paths(root, directory, docs, include_items=False, include_map=False)
-    paths += [str(item.relative_to(root)) for item in directory.glob("items/*/item.md")]
+    paths += [rel_posix(root, item) for item in directory.glob("items/*/item.md")]
     operation_paths, _bindings = execution_operation_inputs(root, directory, docs)
     return sorted(set(paths + operation_paths))
 
@@ -3191,7 +3192,7 @@ def start_item(project_root: Path, delivery_id: str, story_id: str,
     item_path = directory / "items" / story_key(story_id) / "item.md"
     if not item_path.exists():
         raise RuntimeError(f"missing local Item projection: {item_path}")
-    relative_item = str(item_path.relative_to(root))
+    relative_item = rel_posix(root, item_path)
     live_props, item_body = split_remote_note(root, item_oid, relative_item, split_note)
     allowed = {"in_scope", "paused", "blocked"} if allowed_statuses is None else allowed_statuses
     if live_props.get("status") not in allowed:
@@ -3285,7 +3286,7 @@ def _set_active_item_status(project_root: Path, delivery_id: str, story_id: str,
     slot = next((key for key, oid in slots.items() if oid == item_oid), None)
     if slot is None:
         raise RuntimeError("DELIVERY_ITEM_SLOT_DIVERGED: Item and Slot refs diverge; refuse active status transition")
-    relative_item = str((directory / "items" / story_key(story_id) / "item.md").relative_to(root))
+    relative_item = rel_posix(root, directory / "items" / story_key(story_id) / "item.md")
     props, body = split_remote_note(root, item_oid, relative_item, split_note)
     if props.get("status") not in {"active", "blocked"}:
         raise RuntimeError("Item is not active or blocked")
@@ -3351,7 +3352,7 @@ def reopen_item(project_root: Path, delivery_id: str, story_id: str,
     target_before = require_target_ancestry(root, remote, fence_message, integration_oid)
     if any(oid == item_oid for oid in remote_slot_oids(root, remote).values()):
         raise RuntimeError("reopen-item requires a sealed, slotless Item")
-    relative_item = str((directory / "items" / story_key(story_id) / "item.md").relative_to(root))
+    relative_item = rel_posix(root, directory / "items" / story_key(story_id) / "item.md")
     # The Integration carries the sealed control file byte for byte; a refresh
     # after integration may only have regenerated projections around it.
     props, body = split_remote_note(root, integration_oid, relative_item, split_note)
@@ -3428,7 +3429,7 @@ def pause_item(project_root: Path, delivery_id: str, story_id: str,
     slot_ref = f"refs/heads/agentrof/slots/{slot}"
     worktree = worktree_paths(root, delivery_id, story_id)["item"]
     worktree_is_clean_and_at(root, worktree, item_oid)
-    relative_item = str((directory / "items" / story_key(story_id) / "item.md").relative_to(root))
+    relative_item = rel_posix(root, directory / "items" / story_key(story_id) / "item.md")
     item_props, item_body = split_remote_note(root, item_oid, relative_item, split_note)
     if item_props.get("status") not in {"active", "blocked"}:
         raise RuntimeError("pause-item requires an active or blocked Item")
@@ -3471,7 +3472,7 @@ def resume_item(project_root: Path, delivery_id: str, story_id: str,
     if directory is None:
         raise RuntimeError("local Delivery package is required for Item resume")
     item_path = directory / "items" / story_key(story_id) / "item.md"
-    item_props, _ = split_remote_note(root, item_oid, str(item_path.relative_to(root)), split_note)
+    item_props, _ = split_remote_note(root, item_oid, rel_posix(root, item_path), split_note)
     if item_props.get("status") != "paused":
         raise RuntimeError("resume-item requires a paused remote Item")
     if any(oid == item_oid for oid in remote_slot_oids(root, remote).values()):
@@ -3499,7 +3500,7 @@ def takeover_item(project_root: Path, delivery_id: str, story_id: str,
     if slot is None:
         raise RuntimeError("DELIVERY_ITEM_SLOT_DIVERGED: takeover requires one exact existing Item Slot pair")
     slot_ref = f"refs/heads/agentrof/slots/{slot}"
-    relative_item = str((directory / "items" / story_key(story_id) / "item.md").relative_to(root))
+    relative_item = rel_posix(root, directory / "items" / story_key(story_id) / "item.md")
     item_props, item_body = split_remote_note(root, item_oid, relative_item, split_note)
     if item_props.get("status") not in {"active", "blocked"}:
         raise RuntimeError("takeover requires an active or blocked remote Item")
@@ -3578,15 +3579,15 @@ def push_item(project_root: Path, delivery_id: str, story_id: str,
         raise RuntimeError("DELIVERY_ITEM_SLOT_DIVERGED: Item and Slot refs diverge; refuse active writer push")
     slot_ref = f"refs/heads/agentrof/slots/{slot}"; slot_oid = slots[slot]
     receipt = active_writer_receipt(root, delivery_id, story_id, item_oid, slot_ref)
-    relative_delivery = directory.relative_to(root)
+    relative_delivery = rel_posix(root, directory)
     worktree = worktree_paths(root, delivery_id, story_id)["item"]
     require_visible_item_index(worktree)
     product_tip = worktree_head(root, worktree)
     if product_tip == item_oid or not is_ancestor(root, item_oid, product_tip):
         raise RuntimeError("DELIVERY_ITEM_NOT_READY: push-item requires a committed product/test change after the active remote Item tip")
-    relative_item = str(relative_delivery / "items" / story_key(story_id) / "item.md")
-    relative_review = str(relative_delivery / "items" / story_key(story_id) / "code-review.md")
-    relative_verification = str(relative_delivery / "items" / story_key(story_id) / "verification.md")
+    relative_item = rel_posix(root, directory / "items" / story_key(story_id) / "item.md")
+    relative_review = rel_posix(root, directory / "items" / story_key(story_id) / "code-review.md")
+    relative_verification = rel_posix(root, directory / "items" / story_key(story_id) / "verification.md")
     committed_changes = set(run_git(root, "diff", "--name-only", item_oid, product_tip).splitlines())
     if not committed_changes:
         raise RuntimeError("DELIVERY_ITEM_NOT_READY: push-item requires a committed product/test change")
@@ -3680,10 +3681,9 @@ def integrate_item(project_root: Path, delivery_id: str, story_id: str,
     active_writer_receipt(root, delivery_id, story_id, item_oid, slot_ref)
     worktree = worktree_paths(root, delivery_id, story_id)["item"]
     worktree_is_clean_and_at(root, worktree, item_oid)
-    relative_delivery = directory.relative_to(root)
-    relative_item = str(relative_delivery / "items" / story_key(story_id) / "item.md")
-    relative_review = str(relative_delivery / "items" / story_key(story_id) / "code-review.md")
-    relative_verification = str(relative_delivery / "items" / story_key(story_id) / "verification.md")
+    relative_item = rel_posix(root, directory / "items" / story_key(story_id) / "item.md")
+    relative_review = rel_posix(root, directory / "items" / story_key(story_id) / "code-review.md")
+    relative_verification = rel_posix(root, directory / "items" / story_key(story_id) / "verification.md")
     item_props, item_body = split_remote_note(root, item_oid, relative_item, split_note)
     if item_props.get("status") != "active":
         raise RuntimeError("integrate-item requires an active Item")
@@ -3753,7 +3753,7 @@ def require_delivery_controls_unchanged(root: Path, directory: Path, reference: 
     from ba_compile import without_generated_relations
 
     def snapshot(tree):
-        prefix = directory.relative_to(root).as_posix() + "/"
+        prefix = rel_posix(root, directory) + "/"
         listing = subprocess.run(["git", "ls-tree", "-rz", tree, "--", prefix],
                                  cwd=root, capture_output=True, check=True).stdout
         controls = {}

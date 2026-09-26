@@ -961,6 +961,23 @@ class DeliveryCompilerTests(unittest.TestCase):
                     else:
                         self.assertEqual(findings, [])
 
+    def test_execution_after_keeps_every_dependency_inside_the_delivery(self):
+        """start-item waits for the Items execution_after names, so approval keeps each
+        depends_on Story of the same Delivery there."""
+        root, item, props, body, sources, components = self.execution_topology_fixture()
+        delivery_compile.atomic_text(item, delivery_compile.frontmatter(props, body))
+        later = root / "items/auth-02/item.md"
+        sources["AUTH-02"] = {**sources["AUTH-01"], "story_id": "AUTH-02", "depends_on": ["AUTH-01"]}
+        omitted = "AUTH-02 execution_after omits approved dependencies: AUTH-01"
+        with mock.patch.object(architecture_compile, "solution_components", return_value=components):
+            for execution_after in ([], ["AUTH-01"]):
+                with self.subTest(execution_after=execution_after):
+                    delivery_compile.atomic_text(later, delivery_compile.frontmatter(
+                        {**props, "story_id": "AUTH-02", "path_claims": ["tests/auth"],
+                         "execution_after": execution_after}, body))
+                    findings = delivery_compile.execution_plan_findings(root, sources, self.docs)
+                    self.assertEqual(omitted in findings, not execution_after, findings)
+
     def test_no_timebox_or_runtime_coordination_fields_are_generated(self):
         self.approve_dod()
         args = type("Args", (), {"docs": str(self.docs), "id": None, "slug": "small-change",

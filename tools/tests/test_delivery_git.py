@@ -346,7 +346,7 @@ class DeliveryGitTests(unittest.TestCase):
         temporary = tempfile.TemporaryDirectory()
         self.addCleanup(remove_temporary, temporary)
         root, remote = Path(temporary.name) / "project", Path(temporary.name) / "remote.git"
-        init_repository(root)
+        init_repository(root, initial_branch="main")
         init_repository(remote, bare=True)
         delivery_git.run_git(root, "config", "user.email", "test@example.com")
         delivery_git.run_git(root, "config", "user.name", "Test")

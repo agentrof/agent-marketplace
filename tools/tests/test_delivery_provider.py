@@ -107,6 +107,95 @@ class DeliveryProviderTests(unittest.TestCase):
             with self.assertRaises(delivery_provider.ProviderError):
                 provider.require_green_checks({"statusCheckRollup": []})
 
+    def github_provider(self) -> delivery_provider.GitHubProvider:
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        root = Path(temporary.name)
+        subprocess.run(["git", "init", "-q", str(root)], check=True)
+        subprocess.run(["git", "-C", str(root), "remote", "add", "origin", "https://github.com/agentrof/example.git"], check=True)
+        return delivery_provider.GitHubProvider(root)
+
+    @staticmethod
+    def check_run(name: str, status: str = "COMPLETED", conclusion: str | None = "SUCCESS") -> dict:
+        """One CheckRun entry in the shape `gh pr view --json statusCheckRollup` prints."""
+        return {"__typename": "CheckRun", "name": name, "workflowName": "validate",
+                "status": status, "conclusion": conclusion}
+
+    @staticmethod
+    def commit_status(context: str, state: str | None) -> dict:
+        """One StatusContext entry: a commit status has a state and no conclusion."""
+        return {"__typename": "StatusContext", "context": context, "state": state,
+                "targetUrl": "https://ci.example/builds/1"}
+
+    def test_green_commit_status_passes_without_a_conclusion(self):
+        provider = self.github_provider()
+        provider.require_green_checks({"statusCheckRollup": [self.commit_status("ci/build", "SUCCESS")]})
+        provider.require_green_checks({"statusCheckRollup": [
+            self.check_run("tests"), self.commit_status("ci/build", "SUCCESS"),
+        ]})
+        # gh before 2.14 printed empty check-run fields on every entry.
+        legacy = {**self.commit_status("ci/build", "SUCCESS"), "name": "", "status": "", "conclusion": ""}
+        provider.require_green_checks({"statusCheckRollup": [legacy]})
+
+    def test_pending_or_failed_commit_status_blocks(self):
+        provider = self.github_provider()
+        for state in ("PENDING", "EXPECTED", "FAILURE", "ERROR", None):
+            with self.subTest(state=state):
+                with self.assertRaisesRegex(delivery_provider.ProviderError,
+                                            rf"not green: ci/build \({state or 'no state'}\)"):
+                    provider.require_green_checks({"statusCheckRollup": [
+                        self.check_run("tests"), self.commit_status("ci/build", state),
+                    ]})
+
+    def test_skipped_or_neutral_check_run_does_not_block_a_green_rollup(self):
+        provider = self.github_provider()
+        for conclusion in ("SKIPPED", "NEUTRAL"):
+            with self.subTest(conclusion=conclusion):
+                provider.require_green_checks({"statusCheckRollup": [
+                    self.check_run("check"), self.check_run("release-pr-policy", conclusion=conclusion),
+                ]})
+
+    def test_skipped_or_neutral_checks_alone_cannot_authorize_the_merge(self):
+        provider = self.github_provider()
+        skipped = self.check_run("release-pr-policy", conclusion="SKIPPED")
+        neutral = self.check_run("advisory", conclusion="NEUTRAL")
+        for rollup in ([skipped], [neutral], [skipped, neutral]):
+            with self.subTest(rollup=rollup):
+                with self.assertRaisesRegex(delivery_provider.ProviderError, "no successful check"):
+                    provider.require_green_checks({"statusCheckRollup": rollup})
+
+    def test_completed_check_run_without_conclusion_blocks(self):
+        provider = self.github_provider()
+        absent = self.check_run("tests")
+        del absent["conclusion"]
+        for check in (self.check_run("tests", conclusion=None), self.check_run("tests", conclusion=""), absent):
+            with self.subTest(check=check):
+                with self.assertRaisesRegex(delivery_provider.ProviderError,
+                                            r"not green: tests \(no conclusion\)"):
+                    provider.require_green_checks({"statusCheckRollup": [self.check_run("check"), check]})
+
+    def test_unfinished_or_unsuccessful_check_run_blocks_a_green_rollup(self):
+        provider = self.github_provider()
+        for status, conclusion in (
+            ("QUEUED", ""), ("IN_PROGRESS", ""), ("PENDING", ""), ("REQUESTED", ""), ("WAITING", ""),
+            ("COMPLETED", "FAILURE"), ("COMPLETED", "CANCELLED"), ("COMPLETED", "TIMED_OUT"),
+            ("COMPLETED", "ACTION_REQUIRED"), ("COMPLETED", "STALE"), ("COMPLETED", "STARTUP_FAILURE"),
+        ):
+            reported = conclusion if status == "COMPLETED" else status
+            with self.subTest(status=status, conclusion=conclusion):
+                with self.assertRaisesRegex(delivery_provider.ProviderError,
+                                            rf"not green: tests \({reported}\)"):
+                    provider.require_green_checks({"statusCheckRollup": [
+                        self.check_run("check"), self.check_run("tests", status, conclusion),
+                    ]})
+
+    def test_unknown_rollup_entry_type_blocks(self):
+        provider = self.github_provider()
+        unknown = {"__typename": "Deployment", "name": "preview", "status": "COMPLETED", "conclusion": "SUCCESS"}
+        with self.assertRaisesRegex(delivery_provider.ProviderError,
+                                    r"not green: preview \(unsupported type Deployment\)"):
+            provider.require_green_checks({"statusCheckRollup": [self.check_run("check"), unknown]})
+
 
 if __name__ == "__main__":
     unittest.main()

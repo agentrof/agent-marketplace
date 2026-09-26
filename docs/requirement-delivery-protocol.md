@@ -383,9 +383,11 @@ revision and Item reconciliation protocol. No stale target grants a Slot,
 worktree, Review approval or merge action.
 
 Every mutating coordinator operation supports exact refetch classification:
-accepted, rejected, response uncertain or repository incident. Recovery never
-reconstructs semantic state from a local receipt alone. Remote records and
-tracked package hashes remain authoritative.
+accepted, rejected, response uncertain or repository incident. A rejected
+atomic push is named from the refetched refs, never from Git's wording: a moved
+Fence lease, any other moved lease, or a remote that takes the same push only
+without atomic support. Recovery never reconstructs semantic state from a local
+receipt alone. Remote records and tracked package hashes remain authoritative.
 
 Cancellation is an explicit action inside `/deliver DLV-###`. Its approved
 intent freezes exact Story dispositions, quiesces active Items, reverts

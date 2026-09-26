@@ -3010,6 +3010,71 @@ class DeliveryGitTests(unittest.TestCase):
         self.assertEqual(self.approve_item_evidence(str(worktree)), 0)
         self.assertEqual(delivery_git.push_item(project, "DLV-001", "AUTH-01")["product_tip"], product)
 
+    def lease_remote(self) -> tuple[Path, Path, list[str]]:
+        """A checkout with three commits and a bare remote that holds its main branch."""
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(remove_temporary, temporary)
+        root, remote = Path(temporary.name) / "project", Path(temporary.name) / "remote.git"
+        init_repository(root, initial_branch="main")
+        init_repository(remote, bare=True)
+        delivery_git.run_git(root, "config", "user.email", "test@example.com")
+        delivery_git.run_git(root, "config", "user.name", "Test")
+        oids = []
+        for name in ("first", "second", "third"):
+            (root / f"{name}.txt").write_text(name + "\n", encoding="utf-8")
+            delivery_git.run_git(root, "add", f"{name}.txt")
+            delivery_git.run_git(root, "commit", "-qm", name)
+            oids.append(delivery_git.run_git(root, "rev-parse", "HEAD"))
+        delivery_git.run_git(root, "remote", "add", "origin", str(remote))
+        delivery_git.run_git(root, "push", "-q", "origin", "main")
+        return root, remote, oids
+
+    def test_refused_atomic_push_names_the_lease_it_lost(self):
+        """The refetched refs, never Git's translated words, name the lease that no longer holds."""
+        root, _remote, (first, second, third) = self.lease_remote()
+        refs = delivery_git.canonical_refs("DLV-001", "AUTH-01", 1)
+        released = delivery_git.canonical_refs("DLV-001", "AUTH-01", 2)["slot"]
+        delivery_git.atomic_push(root, "origin", [(refs["fence"], "", first), (refs["item"], "", first),
+                                                  (refs["slot"], "", first)])
+        before = delivery_git.run_git(root, "ls-remote", "origin")
+        for label, code, updates, moved in (
+            ("fence", "DELIVERY_FENCE_LEASE_LOST",
+             [(refs["fence"], second, third), (refs["item"], first, third)],
+             f"{refs['fence']} is {first}, leased as {second}"),
+            ("item", "DELIVERY_LEASE_LOST",
+             [(refs["fence"], first, third), (refs["item"], second, third), (refs["slot"], first, third)],
+             f"{refs['item']} is {first}, leased as {second}"),
+            ("slot taken", "DELIVERY_LEASE_LOST",
+             [(refs["fence"], first, third), (refs["slot"], "", third)],
+             f"{refs['slot']} is {first}, leased as absent"),
+            ("slot released", "DELIVERY_LEASE_LOST",
+             [(refs["fence"], first, third), (released, first, "")],
+             f"{released} is absent, leased as {first}"),
+        ):
+            with self.subTest(label=label):
+                found, message = self.refused_finding(lambda: delivery_git.atomic_push(root, "origin", updates))
+                self.assertEqual(found, code)
+                self.assertIn(moved, message)
+                self.assertEqual(delivery_git.run_git(root, "ls-remote", "origin"), before)
+
+    def test_remote_without_atomic_push_support_is_named_and_other_refusals_keep_their_words(self):
+        root, remote, (first, second, _third) = self.lease_remote()
+        fence = delivery_git.canonical_refs("DLV-001")["fence"]
+        delivery_git.atomic_push(root, "origin", [(fence, "", first)])
+        before = delivery_git.run_git(root, "ls-remote", "origin")
+        delivery_git.run_git(remote, "config", "receive.advertiseAtomic", "false")
+        code, _message = self.refused_finding(lambda: delivery_git.atomic_push(root, "origin", [(fence, first, second)]))
+        self.assertEqual(code, "DELIVERY_REMOTE_ATOMIC_UNSUPPORTED")
+        self.assertEqual(delivery_git.run_git(root, "ls-remote", "origin"), before)
+        # With every lease holding on a remote that pushes atomically, an unproven cause keeps Git's report.
+        delivery_git.run_git(remote, "config", "receive.advertiseAtomic", "true")
+        hook = remote / "hooks" / "pre-receive"
+        hook.write_text("#!/bin/sh\nexit 1\n", encoding="utf-8")
+        hook.chmod(0o755)
+        code, _message = self.refused_finding(lambda: delivery_git.atomic_push(root, "origin", [(fence, first, second)]))
+        self.assertEqual(code, "DELIVERY_INPUT_INVALID")
+        self.assertEqual(delivery_git.run_git(root, "ls-remote", "origin"), before)
+
 
 if __name__ == "__main__":
     unittest.main()

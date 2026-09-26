@@ -950,7 +950,58 @@ def atomic_push(root: Path, remote: str, updates: list[tuple[str, str, str]]) ->
     result = subprocess.run(["git", *args], cwd=root, text=True,
                             capture_output=True, check=False)
     if result.returncode:
-        raise RuntimeError(result.stderr.strip() or "atomic remote transaction rejected")
+        raise RuntimeError(refused_transaction(root, remote, updates)
+                           or result.stderr.strip() or "atomic remote transaction rejected")
+
+
+def remote_ref_oids(root: Path, remote: str, refs: list[str]) -> dict[str, str]:
+    """Each named ref's exact object ID on the remote, or "" where the remote has none."""
+    values = dict.fromkeys(refs, "")
+    for line in run_git(root, "ls-remote", remote, *refs).splitlines():
+        oid, _tab, name = line.partition("\t")
+        if name in values:
+            values[name] = oid
+    return values
+
+
+def refused_transaction(root: Path, remote: str, updates: list[tuple[str, str, str]]) -> str | None:
+    """Name why the remote refused an atomic transaction, or None when that is unproven.
+
+    Git words its refusals in the reader's language, so only exit statuses and
+    refetched object IDs decide. A ref that no longer holds its leased value lost
+    the transaction; the Fence is named apart because it serializes every
+    coordinator. While every lease holds, a remote that takes the same no-op push
+    without --atomic but not with it lacks atomic push support. A remote that
+    holds a new candidate commit, or every ref's candidate, took the transaction,
+    so Git's own report stands.
+    """
+    try:
+        observed = remote_ref_oids(root, remote, [ref for ref, _expected, _candidate in updates])
+    except RuntimeError:
+        return None
+    if (any(candidate and observed[ref] == candidate for ref, _expected, candidate in updates)
+            or all(observed[ref] == candidate for ref, _expected, candidate in updates)):
+        return None
+    moved = sorted((ref, expected) for ref, expected, _candidate in updates if observed[ref] != expected)
+    detail = "; ".join(f"{ref} is {observed[ref] or 'absent'}, leased as {expected or 'absent'}"
+                       for ref, expected in moved)
+    if any(ref == canonical_refs("DLV-000")["fence"] for ref, _expected in moved):
+        return "DELIVERY_FENCE_LEASE_LOST: the project Fence moved, so the atomic push changed no ref: " + detail
+    if moved:
+        return "DELIVERY_LEASE_LOST: a leased ref moved, so the atomic push changed no ref: " + detail
+    held = next(((ref, expected) for ref, expected, _candidate in updates if expected), None)
+    if held is not None and refuses_atomic_push(root, remote, *held):
+        return ("DELIVERY_REMOTE_ATOMIC_UNSUPPORTED: the remote takes a push only without --atomic, "
+                "which every Delivery transaction needs; no ref changed")
+    return None
+
+
+def refuses_atomic_push(root: Path, remote: str, ref: str, oid: str) -> bool:
+    """Whether the remote takes a no-op push of *ref* at its current *oid* only without --atomic."""
+    def dry_run(*flags: str) -> int:
+        return subprocess.run(["git", "push", "--dry-run", "--no-verify", *flags, remote, f"{oid}:{ref}"],
+                              cwd=root, capture_output=True, check=False).returncode
+    return dry_run("--atomic") != 0 and dry_run() == 0
 
 
 def _normalise_control_trailers(trailers: dict[str, str]) -> dict[str, str]:

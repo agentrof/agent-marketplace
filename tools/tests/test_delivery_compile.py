@@ -1265,12 +1265,14 @@ class ScopeHandoffBindingTests(unittest.TestCase):
         """
         return mock.patch.object(backlog_compile, "validate_experience_ref")
 
-    def propose(self, *, legacy_manual_inputs: bool = False) -> None:
+    def propose(self, *, historical_inputs: bool = False) -> None:
         """Create the local DLV-001 proposal for AUTH-01.
 
-        A new proposal refuses legacy-readonly manual inputs, which is all this
-        fixture's analysis, solution and design packages are, so a manual-mode
-        proposal is created through the historical read that scope approval uses.
+        A new proposal reads the backlog strictly, and a strict read refuses a
+        legacy-readonly input binding. This fixture's analysis, solution and
+        design packages are all legacy-readonly, so a backlog that carries
+        input_bindings, in either planning mode, is proposed through the
+        historical read that scope approval uses.
         """
         args = type("Args", (), {"docs": str(self.docs), "id": None, "slug": "auth", "goal": "Authenticate",
                                  "outcome": None, "target_branch": "main", "story": ["AUTH-01"]})
@@ -1278,7 +1280,7 @@ class ScopeHandoffBindingTests(unittest.TestCase):
         historical = mock.patch.object(
             backlog_compile, "planning_package_findings",
             side_effect=lambda docs, props, path, allow_historical=False: read(docs, props, path, allow_historical=True))
-        with (historical if legacy_manual_inputs else contextlib.nullcontext()), \
+        with (historical if historical_inputs else contextlib.nullcontext()), \
                 contextlib.redirect_stdout(io.StringIO()):
             self.assertEqual(delivery_compile.init_delivery(args), 0)
 
@@ -1367,13 +1369,13 @@ class ScopeHandoffBindingTests(unittest.TestCase):
     def test_scope_accepts_experience_refs_when_manual_bindings_pin_the_current_application(self):
         with self.experience_refs_resolve():
             self.manual_mode()
-            self.propose(legacy_manual_inputs=True)
+            self.propose(historical_inputs=True)
             self.assertEqual(self.approve_scope(), (0, []))
 
     def test_scope_refuses_manual_bindings_that_pin_an_earlier_application(self):
         with self.experience_refs_resolve():
             earlier = self.manual_mode()
-            self.propose(legacy_manual_inputs=True)
+            self.propose(historical_inputs=True)
             current, _hash = self.publish_application()
             self.commit("application-only revision")
             self.assertEqual(self.approve_scope(), (1, [
@@ -1397,13 +1399,13 @@ class ScopeHandoffBindingTests(unittest.TestCase):
     def test_scope_accepts_requirement_mode_bindings_that_pin_the_current_application(self):
         with self.experience_refs_resolve():
             self.requirement_mode_with_bindings()
-            self.propose()
+            self.propose(historical_inputs=True)
             self.assertEqual(self.approve_scope(), (0, []))
 
     def test_scope_refuses_requirement_mode_bindings_that_pin_an_earlier_application(self):
         with self.experience_refs_resolve():
             earlier, _hash = self.requirement_mode_with_bindings()
-            self.propose()
+            self.propose(historical_inputs=True)
             current, _hash = self.publish_application()
             self.commit("application-only revision")
             self.assertEqual(self.approve_scope(), (1, [

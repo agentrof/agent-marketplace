@@ -3327,6 +3327,16 @@ def unmet_waits_for(root: Path, remote: str, delivery_id: str, integration_oid: 
     return waiting, undeliverable
 
 
+def activation_took_no_effect(root: Path, remote: str, item_ref: str, leased_tip: str) -> bool:
+    """Whether a rejected activation provably changed no ref.
+
+    An activation pushes all its refs in one atomic transaction, so an Item ref
+    that is absent or still holds the tip the activation leased proves that none
+    changed, whatever the Slot holds now.
+    """
+    return remote_ref_oids(root, remote, [item_ref])[item_ref] in ("", leased_tip)
+
+
 def start_item(project_root: Path, delivery_id: str, story_id: str,
                remote: str = "origin", allowed_statuses: set[str] | None = None) -> dict:
     root = main_worktree(project_root.resolve())
@@ -3427,12 +3437,10 @@ def start_item(project_root: Path, delivery_id: str, story_id: str,
     try:
         atomic_push(root, remote, updates)
     except RuntimeError:
-        observed_item = remote_oid(root, remote, refs["item"]) if remote_has_ref(root, remote, refs["item"]) else None
-        observed_slot = remote_oid(root, remote, slot_ref) if remote_has_ref(root, remote, slot_ref) else None
-        # Absent or unchanged proves the activation took no effect; the Slot was leased absent.
-        if observed_item in (None, item_oid) and observed_slot is None:
+        if activation_took_no_effect(root, remote, refs["item"], item_oid):
             discard_pending_writer_receipt(root, delivery_id, story_id, item_candidate)
-        elif observed_item == item_candidate and observed_slot == item_candidate:
+        elif remote_ref_oids(root, remote, [refs["item"], slot_ref]) == {refs["item"]: item_candidate,
+                                                                        slot_ref: item_candidate}:
             require_current_activation_target(root, remote, delivery_id, story_id, target_before,
                                               slot, item_candidate, relative_item, item_props, item_body)
             promote_writer_receipt(root, delivery_id, story_id, item_candidate)

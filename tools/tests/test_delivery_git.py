@@ -2519,31 +2519,43 @@ class DeliveryGitTests(unittest.TestCase):
                 self.assertIsNone(delivery_git.read_writer_receipt(project, "DLV-001", "AUTH-01"))
                 self.assertFalse(delivery_git.worktree_paths(project, "DLV-001", "AUTH-01")["item"].exists())
 
-    def test_rejected_activation_drops_its_pending_receipt_so_a_retry_starts(self):
-        """A lost lease leaves the Item and Slot refs unchanged, which proves the activation took no effect."""
-        project, _docs, _directory, _item, _reserved = self.prepare_execution_with_draft_reserved_contracts(False)
-        delivery_git.publish_execution_plan(project, "DLV-001")
-        delivery_git.claim_items(project, "DLV-001")
-        item_ref = delivery_git.canonical_refs("DLV-001", "AUTH-01")["item"]
-        claimed = delivery_git.remote_oid(project, "origin", item_ref)
+    def refused_under_concurrent_coordinator(self, verb, taken_slot: str = "") -> tuple[str, str]:
+        """Refuse *verb* after another coordinator moves the Fence first and, when named, takes *taken_slot*."""
         original_push = delivery_git.atomic_push
         raced = []
 
-        def race_fence(root, remote, updates):
+        def race(root, remote, updates):
             if not raced:
                 ref, fence, values = delivery_git._fence_context(root, remote)
                 raced.append(delivery_git._fence_child(root, fence, values, "Concurrent coordinator update"))
-                original_push(root, remote, [(ref, fence, raced[0])])
+                taken = [(taken_slot, "", raced[0])] if taken_slot else []
+                original_push(root, remote, [(ref, fence, raced[0]), *taken])
             return original_push(root, remote, updates)
 
-        with mock.patch.object(delivery_git, "atomic_push", side_effect=race_fence):
-            code, _message = self.refused_finding(lambda: delivery_git.start_item(project, "DLV-001", "AUTH-01"))
-        self.assertEqual(code, "DELIVERY_FENCE_LEASE_LOST")
-        self.assertEqual(delivery_git.remote_oid(project, "origin", item_ref), claimed)
-        self.assertEqual(delivery_git.remote_slot_oids(project, "origin"), {})
-        self.assertIsNone(delivery_git.read_writer_receipt(project, "DLV-001", "AUTH-01"))
-        started = delivery_git.start_item(project, "DLV-001", "AUTH-01")
-        self.assertEqual((started["slot"], started["receipt"]["state"]), ("001", "verified"))
+        with mock.patch.object(delivery_git, "atomic_push", side_effect=race):
+            return self.refused_finding(verb)
+
+    def test_rejected_activation_drops_its_pending_receipt_so_a_retry_starts(self):
+        """The activation is atomic, so an unchanged Item ref proves it changed no ref, whatever the Slot holds."""
+        for label, taken in (("lost Fence lease", False), ("Slot taken by a concurrent start", True)):
+            with self.subTest(label=label):
+                project, _docs, _directory, _item, _reserved = self.prepare_execution_with_draft_reserved_contracts(False)
+                delivery_git.publish_execution_plan(project, "DLV-001")
+                delivery_git.claim_items(project, "DLV-001")
+                refs = delivery_git.canonical_refs("DLV-001", "AUTH-01", 1)
+                claimed = delivery_git.remote_oid(project, "origin", refs["item"])
+                code, _message = self.refused_under_concurrent_coordinator(
+                    lambda: delivery_git.start_item(project, "DLV-001", "AUTH-01"), refs["slot"] if taken else "")
+                self.assertEqual(code, "DELIVERY_FENCE_LEASE_LOST")
+                self.assertEqual(delivery_git.remote_oid(project, "origin", refs["item"]), claimed)
+                self.assertIsNone(delivery_git.read_writer_receipt(project, "DLV-001", "AUTH-01"))
+                if taken:
+                    # The concurrent Item releases the Slot, as its pause or integration would.
+                    occupant = delivery_git.remote_oid(project, "origin", refs["slot"])
+                    delivery_git.atomic_push(project, "origin", [(refs["slot"], occupant, "")])
+                self.assertEqual(delivery_git.remote_slot_oids(project, "origin"), {})
+                started = delivery_git.start_item(project, "DLV-001", "AUTH-01")
+                self.assertEqual((started["slot"], started["receipt"]["state"]), ("001", "verified"))
 
     def test_merge_candidate_preserves_disjoint_additions_and_rejects_conflicts(self):
         temporary, project = self.make_project()

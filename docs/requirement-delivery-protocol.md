@@ -288,7 +288,9 @@ Delivery has claimed, or one its Delivery cancelled, fails closed with
 way out. Before the atomic remote transaction, the coordinator writes an
 ignored pending receipt. It promotes the receipt only after Item and Slot refs
 both equal the accepted candidate, then creates the Item worktree from that
-exact OID.
+exact OID. A rejected transaction deletes the pending receipt once the
+refetched Item ref is absent or still holds the tip the activation leased: the
+transaction is atomic, so that proves no ref changed, whatever the Slot holds.
 
 An active writer may push only while its receipt epoch matches the remote Item
 and Slot lineage. Pause requires a clean worktree whose local head equals the

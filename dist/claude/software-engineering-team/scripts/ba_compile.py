@@ -212,6 +212,70 @@ class Space:
 # Parsing
 # ---------------------------------------------------------------------------
 
+# YAML indicators that cannot open a plain scalar.
+PLAIN_SCALAR_UNSAFE_START = frozenset("[]{},#&*!|>'\"%@`")
+# Characters JSON leaves unescaped that a note line cannot hold as written:
+# str.splitlines() ends a line at the last three, and a YAML plain scalar
+# cannot hold DEL.
+JSON_UNESCAPED_BREAKS = "\x7f\x85\u2028\u2029"
+
+
+def frontmatter_value(token: str) -> str:
+    """Decode one stripped frontmatter scalar token.
+
+    A token that parses as exactly one JSON string is a YAML double-quoted
+    scalar, the form frontmatter_scalar writes, and decodes to its value.
+    Every other token keeps the surrounding-quote strip this parser has
+    always applied, so a note without such a token reads as before.
+    """
+    if len(token) >= 2 and token[0] == token[-1] == '"':
+        try:
+            value = json.loads(token)
+            value.encode("utf-8")
+        except ValueError:
+            pass
+        else:
+            return value
+    return token.strip("\"'")
+
+
+def frontmatter_scalar(value: object) -> str:
+    """Render the value of one `key: value` line so frontmatter_value reads
+    it back as-is.
+
+    Text stays plain only when this parser and a YAML reader both keep it
+    unchanged. Other text becomes one JSON string, which is also a YAML
+    double-quoted scalar. An empty string stays the empty value every writer
+    has always rendered, which parse_frontmatter reads as an empty list.
+    """
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    text = str(value)
+    if not text or (
+            text == text.strip()
+            and text[0] not in PLAIN_SCALAR_UNSAFE_START
+            and not re.match(r"[-?:](?:\s|$)", text)
+            and text[-1] not in "\"':"
+            and not re.search(r":\s|\s#", text)
+            and text.lower() not in {"true", "false", "null", "~"}
+            and not any((char < " " and char != "\t") or char in JSON_UNESCAPED_BREAKS
+                        for char in text)):
+        return text
+    return quoted_scalar(text)
+
+
+def frontmatter_item(value: object) -> str:
+    """Render one `- item` line's value; an empty string stays an item."""
+    return frontmatter_scalar(value) or '""'
+
+
+def quoted_scalar(text: str) -> str:
+    """Render text as one JSON string that stays on its note line."""
+    encoded = json.dumps(text, ensure_ascii=False)
+    for char in JSON_UNESCAPED_BREAKS:
+        encoded = encoded.replace(char, f"\\u{ord(char):04x}")
+    return encoded
+
 
 def parse_frontmatter(text: str) -> tuple[dict, int, str | None]:
     """Minimal YAML subset: scalar `key: value` and lists of `- item` lines.
@@ -229,12 +293,12 @@ def parse_frontmatter(text: str) -> tuple[dict, int, str | None]:
         if not stripped or stripped.startswith("#"):
             continue
         if stripped.startswith("- ") and current_list:
-            fm[current_list].append(stripped[2:].strip().strip("\"'"))
+            fm[current_list].append(frontmatter_value(stripped[2:].strip()))
             continue
         if ":" in stripped:
             key, _, value = stripped.partition(":")
             key = key.strip()
-            value = value.strip().strip("\"'")
+            value = frontmatter_value(value.strip())
             if value == "":
                 fm[key] = []
                 current_list = key
@@ -1514,8 +1578,8 @@ def stub_lines(schema: dict, doc_type: str, title: str,
                seed_rows: dict[str, list[str]] | None = None,
                **extra) -> list[str]:
     spec = schema["doc_types"][doc_type]
-    fm = ["---", f"type: {doc_type}", f"title: {title}", "status: draft",
-          "owner_role: business_analyst"]
+    fm = ["---", f"type: {doc_type}", f"title: {frontmatter_scalar(title)}",
+          "status: draft", "owner_role: business_analyst"]
     for key in spec["extra_frontmatter"]["required"]:
         value = extra.get(key)
         if isinstance(value, list):
@@ -1525,15 +1589,14 @@ def stub_lines(schema: dict, doc_type: str, title: str,
                     target = str(v).strip()
                     if target.endswith(".md"):
                         target = target[:-3]
-                    fm.append(f'  - "[[{vault_prefix}{target}]]"')
-                else:
-                    fm.append(f"  - {v}")
+                    v = f"[[{vault_prefix}{target}]]"
+                fm.append(f"  - {frontmatter_item(v)}")
         else:
-            fm.append(f"{key}: {value}")
+            fm.append(f"{key}: {frontmatter_scalar(value)}")
     fm += ["tags:", f"  - doc/{doc_type.replace('_', '-')}", "  - status/draft"]
     if aliases:
         fm.append("aliases:")
-        fm.extend(f"  - {a}" for a in aliases)
+        fm.extend(f"  - {frontmatter_item(a)}" for a in aliases)
     fm.append("---")
     body = ["", f"# {title}", "", f"One-line summary of {title}.", ""]
     section_titles = {token: token.replace("_", " ").title()

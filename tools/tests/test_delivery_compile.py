@@ -23,10 +23,15 @@ import delivery_compile  # noqa: E402
 import delivery_governance  # noqa: E402
 import architecture_compile  # noqa: E402
 import backlog_compile  # noqa: E402
+import design_system_compile  # noqa: E402
+import experience_application_check  # noqa: E402
 import operation_compile  # noqa: E402
+import requirement_compile  # noqa: E402
+import requirement_route  # noqa: E402
 import stage_package  # noqa: E402
 import vault_check  # noqa: E402
-from backlog_fixture import make_approved_backlog  # noqa: E402
+from backlog_fixture import CRITERION, make_approved_backlog  # noqa: E402
+from git_fixture import init_repository, remove_temporary  # noqa: E402
 
 
 WORKFLOW_JOBS = "jobs:\n  test:\n    runs-on: ubuntu-latest\n    steps:\n      - run: make test\n"
@@ -53,11 +58,11 @@ class DeliveryCompilerTests(unittest.TestCase):
         workflows.mkdir(parents=True)
         (workflows / "tests.yml").write_text("on:\n  pull_request:\n" + WORKFLOW_JOBS, encoding="utf-8")
         # A checkout of its own keeps the workflow lookup inside this fixture.
-        self.git("init", "-q", "-b", "main")
+        init_repository(self.root, initial_branch="main")
         self.commit_workflows()
 
     def tearDown(self):
-        self.temporary.cleanup()
+        remove_temporary(self.temporary)
 
     def git(self, *args, cwd=None):
         subprocess.run(["git", "-C", str(cwd or self.root), *args], check=True, capture_output=True,
@@ -608,7 +613,7 @@ class DeliveryCompilerTests(unittest.TestCase):
         remote = self.root / "remote.git"
         # Name the branch: a bare repository otherwise takes the host default, and a clone
         # of one whose HEAD names a missing branch checks out nothing.
-        subprocess.run(["git", "init", "-q", "--bare", "-b", "main", str(remote)], check=True)
+        init_repository(remote, bare=True, initial_branch="main")
         self.git("remote", "add", "origin", str(remote))
         self.git("push", "-q", "-u", "origin", "main")
         return remote
@@ -725,6 +730,99 @@ class DeliveryCompilerTests(unittest.TestCase):
         self.assertEqual(code, 1)
         self.assertTrue(any("render-ci" in error for error in result["errors"]), result)
         self.assertEqual(self.delivery_bytes(), before)
+
+    def declare_pull_request_checks(self, source, provider=None):
+        """Revise and approve the Verification Contract with one pull request check source, or none."""
+        args = type("Args", (), {"docs": str(self.docs), "kind": "verification",
+                                 "constrained_by": None, "json": False})
+        path = operation_compile.contract_path(self.docs, "verification")
+        with contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(operation_compile.revise(args), 0)
+            props, body = operation_compile.parse(path)
+            props.pop("pull_request_check_source", None)
+            props.pop("pull_request_check_provider", None)
+            if source is not None:
+                props["pull_request_check_source"] = source
+            if provider is not None:
+                props["pull_request_check_provider"] = provider
+            operation_compile.atomic_text(path, operation_compile.render(props, body))
+            self.assertEqual(operation_compile.approve(args), 0)
+
+    def check_delivery_result(self, args):
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output):
+            code = delivery_compile.check_delivery(args)
+        return code, json.loads(output.getvalue())
+
+    def test_execution_approval_honours_an_external_pull_request_check_source(self):
+        plan_args = self.scope_ready_for_execution()
+        shutil.rmtree(self.root / ".github")
+        self.commit_workflows()
+        self.declare_pull_request_checks("external", "Buildkite pipeline acme/web")
+        code, result = self.approve_execution_result(plan_args)
+        self.assertEqual(code, 0, result)
+        checks = result["pull_request_checks"]
+        self.assertEqual((checks["source"], checks["provider"]), ("external", "Buildkite pipeline acme/web"))
+        # Approval checked no workflow, so it states what merge-pr still requires.
+        self.assertIn("merge-pr still merges the Delivery PR only on green checks", checks["merge_requirement"])
+        self.assertIn("Buildkite pipeline acme/web must report them", checks["merge_requirement"])
+        # The Item binds the exact contract that carries the declaration.
+        receipt, errors = operation_compile.check_contract(self.docs, "verification")
+        self.assertEqual(errors, [])
+        item = delivery_compile.find_delivery(self.docs, "DLV-001") / "items" / "auth-01" / "item.md"
+        self.assertEqual(delivery_compile.split_note(item)[0]["verification_contract_hash"], receipt["source_hash"])
+
+    def test_execution_approval_requires_a_workflow_for_the_repository_workflow_source(self):
+        plan_args = self.scope_ready_for_execution()
+        shutil.rmtree(self.root / ".github")
+        self.commit_workflows()
+        # Declared, and absent as from a contract approved before the field existed.
+        for source in ("repository_workflow", None):
+            with self.subTest(source=source):
+                self.declare_pull_request_checks(source)
+                contract, _body = operation_compile.parse(operation_compile.contract_path(self.docs, "verification"))
+                self.assertEqual(contract.get("pull_request_check_source"), source)
+                before = self.delivery_bytes()
+                code, result = self.approve_execution_result(plan_args)
+                self.assertEqual(code, 1)
+                [error] = result["errors"]
+                self.assertIn("none is committed in HEAD.", error)
+                self.assertIn("declare pull_request_check_source: external in an approved Verification "
+                              "Contract revision instead", error)
+                self.assertIn("operation_compile.py render-ci", error)
+                self.assertEqual(self.delivery_bytes(), before)
+
+    def test_a_changed_pull_request_check_source_takes_contract_and_execution_reapproval(self):
+        plan_args = self.scope_ready_for_execution()
+        self.assertEqual(self.approve_execution_result(plan_args)[0], 0)
+        shutil.rmtree(self.root / ".github")
+        self.commit_workflows()
+        path = operation_compile.contract_path(self.docs, "verification")
+        approved = path.read_text(encoding="utf-8")
+        # An approved contract edited in place is stale, and its edit is not honoured.
+        path.write_text(approved.replace(
+            "pull_request_check_source: repository_workflow\n",
+            "pull_request_check_source: external\npull_request_check_provider: Buildkite\n"), encoding="utf-8")
+        code, result = self.approve_execution_result(plan_args)
+        self.assertEqual(code, 1)
+        self.assertTrue(any("source_hash is stale" in error for error in result["errors"]), result)
+        self.assertTrue(any("render-ci" in error for error in result["errors"]), result)
+        path.write_text(approved, encoding="utf-8")
+        # A revision changes the contract hash, so the open Item stays blocked until execution is re-approved.
+        self.declare_pull_request_checks("external", "Buildkite")
+        code, result = self.check_delivery_result(plan_args)
+        self.assertEqual(code, 1)
+        self.assertTrue(any("Verification Contract binding is stale or missing" in error
+                            for error in result["errors"]), result)
+        code, result = self.approve_execution_result(plan_args)
+        self.assertEqual(code, 0, result)
+        self.assertEqual(result["pull_request_checks"]["source"], "external")
+        self.assertEqual(self.check_delivery_result(plan_args)[0], 0)
+        # Returning to the repository workflow source requires the workflow again.
+        self.declare_pull_request_checks("repository_workflow")
+        code, result = self.approve_execution_result(plan_args)
+        self.assertEqual(code, 1)
+        self.assertTrue(any("render-ci" in error for error in result["errors"]), result)
 
     def execution_topology_fixture(self):
         self.approve_verification_contract()
@@ -863,6 +961,23 @@ class DeliveryCompilerTests(unittest.TestCase):
                     else:
                         self.assertEqual(findings, [])
 
+    def test_execution_after_keeps_every_dependency_inside_the_delivery(self):
+        """start-item waits for the Items execution_after names, so approval keeps each
+        depends_on Story of the same Delivery there."""
+        root, item, props, body, sources, components = self.execution_topology_fixture()
+        delivery_compile.atomic_text(item, delivery_compile.frontmatter(props, body))
+        later = root / "items/auth-02/item.md"
+        sources["AUTH-02"] = {**sources["AUTH-01"], "story_id": "AUTH-02", "depends_on": ["AUTH-01"]}
+        omitted = "AUTH-02 execution_after omits approved dependencies: AUTH-01"
+        with mock.patch.object(architecture_compile, "solution_components", return_value=components):
+            for execution_after in ([], ["AUTH-01"]):
+                with self.subTest(execution_after=execution_after):
+                    delivery_compile.atomic_text(later, delivery_compile.frontmatter(
+                        {**props, "story_id": "AUTH-02", "path_claims": ["tests/auth"],
+                         "execution_after": execution_after}, body))
+                    findings = delivery_compile.execution_plan_findings(root, sources, self.docs)
+                    self.assertEqual(omitted in findings, not execution_after, findings)
+
     def test_no_timebox_or_runtime_coordination_fields_are_generated(self):
         self.approve_dod()
         args = type("Args", (), {"docs": str(self.docs), "id": None, "slug": "small-change",
@@ -975,7 +1090,7 @@ class DeliveryCompilerTests(unittest.TestCase):
         review_path = root / "delivery-review.md"
         review = type("Args", (), {"docs": str(self.docs), "delivery": "DLV-001",
                                      "reviewed_commit": "a" * 40, "reviewed_integration_commit": "b" * 40})
-        navigation = delivery_compile.link(str((root / "delivery.md").relative_to(self.docs)), "DLV-001")
+        navigation = delivery_compile.link((root / "delivery.md").relative_to(self.docs).as_posix(), "DLV-001")
         # Without an authored draft the approval writes the template it always wrote.
         self.assertEqual(delivery_compile.approve_review(review), 0)
         props, template = delivery_compile.split_note(review_path)
@@ -1002,6 +1117,33 @@ class DeliveryCompilerTests(unittest.TestCase):
         self.assertEqual(props["approval_hash"], delivery_compile.content_hash(
             props, body, exclude=delivery_compile.MUTABLE | {"approval_hash"}))
 
+    def test_vault_paths_stay_posix_on_a_host_with_backslash_separators(self):
+        """A vault path uses forward slashes on every host (#228)."""
+        from test_delivery_git import WindowsVaultPath, windows_vault_paths
+        self.approve_verification_contract()
+        self.approve_dod()
+        init = type("Args", (), {"docs": str(self.docs), "id": None, "slug": "auth",
+                                 "goal": "Authenticate", "outcome": None, "target_branch": "main",
+                                 "story": ["AUTH-01"]})
+        args = type("Args", (), {"docs": str(self.docs), "delivery": "DLV-001",
+                                 "reviewed_commit": "a" * 40, "reviewed_integration_commit": "b" * 40})
+        with windows_vault_paths():
+            self.assertEqual(delivery_compile.init_delivery(init), 0)
+            self.assertEqual(delivery_compile.approve_scope(args), 0)
+            root = delivery_compile.find_delivery(delivery_compile.docs_root(str(self.docs)), "DLV-001")
+            # Paths the compiler finds by globbing must carry the simulation too.
+            self.assertIsInstance(root, WindowsVaultPath)
+            item = root / "items/auth-01/item.md"
+            props, body = delivery_compile.split_note(item)
+            props["path_claims"] = ["src/auth.py"]
+            delivery_compile.atomic_text(item, delivery_compile.frontmatter(props, body))
+            self.assertEqual(delivery_compile.approve_execution(args), 0)
+            self.assertEqual(delivery_compile.approve_review(args), 0)
+        for note in [self.docs / "maps/delivery.md", *sorted((self.docs / "delivery").rglob("*.md"))]:
+            with self.subTest(note=note.relative_to(self.docs).as_posix()):
+                self.assertNotIn("\\", note.read_text(encoding="utf-8"))
+        self.assert_delivery_vault_contract()
+
     def test_scope_rejects_unknown_story_and_execution_rejects_unclaimed_topology(self):
         self.approve_dod()
         unknown = type("Args", (), {"docs": str(self.docs), "id": None, "slug": "unknown",
@@ -1015,6 +1157,390 @@ class DeliveryCompilerTests(unittest.TestCase):
         scope = type("Args", (), {"docs": str(self.docs), "delivery": "DLV-001"})
         self.assertEqual(delivery_compile.approve_scope(scope), 0)
         self.assertEqual(delivery_compile.approve_execution(scope), 1)
+
+
+class ScopeHandoffBindingTests(unittest.TestCase):
+    """The proposal and scope approval, the handoff, refuse non-current upstream bindings."""
+
+    STORY = "backlog/epics/delivery-fixture/stories/auth-01/story.md"
+    TEST_PLAN = "backlog/epics/delivery-fixture/stories/auth-01/test-plan.md"
+    EVIDENCE = "[[solution-design/decisions/fixture-api|Fixture API]]"
+    TECHNICAL = {"work_kind": "technical", "experience_refs": [], "related_to": [EVIDENCE]}
+    CHECKOUT_REF = "checkout:SCR-001@r1"
+    MANUAL_REMEDY = "begin a manual-mode backlog revision whose --input-ref values pin it, before handoff"
+    INPUT_REF_REMEDY = "begin a requirement-mode backlog revision that pins it with --input-ref, before handoff"
+    REBIND_REMEDY = ("rebind REQ-002's Experience stage through /requirement REQ-002, then begin a "
+                     "requirement-mode backlog revision that binds it, before handoff")
+    STALE_FINDING = ("AUTH-01 implements REQ-001, which does not route to backlog: stage business-analysis, "
+                     "action repair, reason: business-analysis/delivery/space package hash is stale or does "
+                     "not match expected hash; rebind it through the Requirement entry, /requirement REQ-001, "
+                     "before handoff")
+
+    def setUp(self):
+        self.temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(remove_temporary, self.temporary)
+        self.root = Path(self.temporary.name)
+        self.docs = self.root / "workspace" / "docs"
+        (self.docs / "maps").mkdir(parents=True)
+        make_approved_backlog(self.docs)
+        # A space note makes the fixture's analysis folder a Business Analysis receipt.
+        (self.docs / "business-analysis/delivery/space.md").write_text(
+            "---\ntype: space\ntitle: Delivery\nstatus: approved\n---\n\n# Delivery\n", encoding="utf-8")
+        dod = type("Args", (), {"docs": str(self.docs), "title": "Project", "file": None})
+        with contextlib.redirect_stdout(io.StringIO()):
+            delivery_compile.init_dod(dod)
+            delivery_compile.approve_dod(dod)
+        init_repository(self.root, initial_branch="main")
+        self.commit("approved backlog")
+
+    def commit(self, message: str) -> None:
+        for args in (["add", "-A"], ["commit", "-q", "-m", message]):
+            subprocess.run(["git", "-C", str(self.root), "-c", "user.name=Test", "-c", "user.email=test@example.com",
+                            "-c", "commit.gpgsign=false", *args], check=True, capture_output=True)
+
+    def edit(self, relative: str, **changes) -> None:
+        path = self.docs / relative
+        props, body = backlog_compile.parse_front_matter(path)
+        props.update(changes)
+        path.write_text(backlog_compile.front_matter(props, body), encoding="utf-8")
+
+    def reseal_backlog(self) -> None:
+        """Stamp the approved backlog again after a test edits its authored notes."""
+        record, _findings = backlog_compile.collect(self.docs, historical_inputs=True)
+        paths = backlog_compile.package_paths(record, self.docs)
+        for path in paths:
+            props, body = backlog_compile.parse_front_matter(path)
+            props["source_hash"] = backlog_compile.digest(path)
+            path.write_text(backlog_compile.front_matter(props, body), encoding="utf-8")
+        self.edit("backlog/backlog.md", package_hash=backlog_compile.package_digest(self.docs, paths))
+
+    def requirement(self, identifier: str, slug: str, applicable: tuple[str, ...] = ()) -> Path:
+        """Approve one Requirement whose stages outside *applicable* are not_applicable."""
+        path = self.draft_requirement(identifier, slug, applicable)
+        requirement_compile.approve_requirement(path)
+        return path
+
+    def draft_requirement(self, identifier: str, slug: str, applicable: tuple[str, ...] = ()) -> Path:
+        """Author one approvable draft Requirement whose stages outside *applicable* are not_applicable."""
+        path = requirement_compile.create_requirement(
+            self.docs, slug, f"Account change {identifier}", "feature", "normal", identifier, [])
+        props, body = requirement_compile.split_note(path)
+        for old, new in (
+                ("TODO: state the requested change and who needs it.", "Customers need one bounded account change."),
+                ("TODO: state the observable outcome and acceptance boundary.", "The account result is observable."),
+                ("TODO: define included and excluded behavior.", "Registration only; provisioning is excluded."),
+                ("TODO: record evidence, constraints and urgency rationale.", "The approved account boundary applies.")):
+            body = body.replace(old, new)
+        for stage in requirement_compile.STAGES:
+            body = body.replace(
+                f"| {stage} | required |  | TODO: explain why this stage must change. |",
+                f"| {stage} | {'required' if stage in applicable else 'not_applicable'} |  | "
+                f"The {stage} impact was reviewed for this change. |")
+        path.write_text(requirement_compile.render_note(props, body), encoding="utf-8")
+        return path
+
+    def requirement_mode(self, root: Path, **story) -> None:
+        """Rebind the approved backlog in requirement mode to *root* and edit AUTH-01."""
+        self.edit("backlog/backlog.md", legacy_contract=None, planning_mode="requirement",
+                  requirement_ref=requirement_compile.requirement_id(root), revision=2)
+        self.edit(self.STORY, **story)
+        if story.get("work_kind") == "technical":
+            plan = self.docs / self.TEST_PLAN
+            plan.write_text(plan.read_text(encoding="utf-8").replace(
+                f"  - {CRITERION}\n", f"  - {CRITERION}\n  - {self.EVIDENCE}\n"), encoding="utf-8")
+        self.reseal_backlog()
+        self.commit("requirement-mode backlog")
+
+    def publish_application(self) -> tuple[str, str]:
+        """Approve the next revision of an empty Experience application.
+
+        The fixture's placeholder checkout folder is not a living Experience
+        package, and the application compiles every package, so it goes first.
+        """
+        root = self.docs / "experience-design"
+        shutil.rmtree(root / "experiences", ignore_errors=True)
+        ledger, findings = experience_application_check.verified_application_ledger(root)
+        self.assertEqual(findings, [])
+        state = root / "_generated/open-application-revision.json"
+        state.parent.mkdir(parents=True, exist_ok=True)
+        state.write_text(json.dumps({"opened_revision": len(ledger) + 1}), encoding="utf-8")
+        registry, findings = experience_application_check.compile_application(root)
+        self.assertEqual(findings, [])
+        state.unlink()
+        experience_application_check.write_registry_and_ledger(root, registry)
+        return f"application@r{registry['application_revision']}", registry["application_hash"]
+
+    def legacy_receipts(self) -> list[tuple[str, str, str]]:
+        """Approve the fixture's Design System and return the three pre-Experience receipts."""
+        self.edit("design-system/MASTER.md",
+                  baseline_hash=design_system_compile.baseline_hash(self.docs / "design-system"))
+        self.commit("approved design system")
+        receipts = []
+        for stage, ref in (("business-analysis", "business-analysis/delivery/space"),
+                           ("solution-design", "solution-design/landscape"),
+                           ("design-system", "design-system/MASTER")):
+            receipt, errors = stage_package.verify(self.docs, stage, ref, require_committed=True)
+            self.assertEqual(errors, [])
+            receipts.append((stage, ref, receipt["package_hash"]))
+        return receipts
+
+    def experience_refs_resolve(self):
+        """Accept Story Experience refs, which the fixture keeps no living package for.
+
+        Resolving a Story ref inside its process package is Backlog Planning's own
+        check; scope approval only reads which application the backlog binds.
+        """
+        return mock.patch.object(backlog_compile, "validate_experience_ref")
+
+    def init(self, *, historical_inputs: bool = False) -> tuple[int, list[str]]:
+        """Propose DLV-001 for AUTH-01 and return init's exit code and errors.
+
+        A new proposal reads the backlog strictly, and a strict read refuses a
+        legacy-readonly input binding. This fixture's analysis, solution and
+        design packages are all legacy-readonly, so a backlog that carries
+        input_bindings, in either planning mode, is proposed through the
+        historical read that scope approval uses.
+        """
+        args = type("Args", (), {"docs": str(self.docs), "id": None, "slug": "auth", "goal": "Authenticate",
+                                 "outcome": None, "target_branch": "main", "story": ["AUTH-01"]})
+        read = backlog_compile.planning_package_findings
+        historical = mock.patch.object(
+            backlog_compile, "planning_package_findings",
+            side_effect=lambda docs, props, path, allow_historical=False: read(docs, props, path, allow_historical=True))
+        output = io.StringIO()
+        with (historical if historical_inputs else contextlib.nullcontext()), contextlib.redirect_stdout(output):
+            code = delivery_compile.init_delivery(args)
+        return code, json.loads(output.getvalue()).get("errors", [])
+
+    def propose(self, *, historical_inputs: bool = False) -> None:
+        """Create the local DLV-001 proposal for AUTH-01."""
+        self.assertEqual(self.init(historical_inputs=historical_inputs), (0, []))
+
+    def approve_scope(self) -> tuple[int, list[str]]:
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output):
+            code = delivery_compile.approve_scope(type("Args", (), {"docs": str(self.docs), "delivery": "DLV-001"}))
+        return code, json.loads(output.getvalue()).get("errors", [])
+
+    def implemented_selection(self, *, propose: bool = True) -> Path:
+        """Let AUTH-01 implement the current REQ-001 under root Requirement REQ-002, and propose it."""
+        implemented = self.requirement("REQ-001", "account-access", ("business-analysis",))
+        requirement_compile.bind_stage(implemented, "business-analysis", "business-analysis/delivery/space")
+        root = self.requirement("REQ-002", "pin-acquisition")
+        self.requirement_mode(root, origin_mode="manual",
+                              implements=[f"[[requirements/{implemented.stem}|REQ-001]]"], **self.TECHNICAL)
+        self.assertEqual(requirement_route.route(self.docs, "REQ-001")["action"], "backlog")
+        if propose:
+            self.propose()
+        return implemented
+
+    def revise_analysis(self) -> None:
+        """Revise the analysis package that REQ-001's Stage Result binds."""
+        space = self.docs / "business-analysis/delivery/space.md"
+        space.write_text(space.read_text(encoding="utf-8") + "\nThe space gains a revised boundary.\n",
+                         encoding="utf-8")
+        self.commit("revise the analysis package")
+
+    def stale_requirement_selection(self) -> Path:
+        """Select AUTH-01, which implements REQ-001, then revise the analysis REQ-001 bound."""
+        implemented = self.implemented_selection()
+        self.revise_analysis()
+        return implemented
+
+    def test_proposal_refuses_a_story_whose_requirement_does_not_route_to_backlog(self):
+        self.implemented_selection(propose=False)
+        self.revise_analysis()
+        self.assertEqual(self.init(), (2, [self.STALE_FINDING]))
+        self.assertIsNone(delivery_compile.find_delivery(self.docs, "DLV-001"))
+
+    def test_scope_refuses_a_story_whose_requirement_has_a_stale_stage_result(self):
+        self.stale_requirement_selection()
+        self.assertEqual(self.approve_scope(), (1, [self.STALE_FINDING]))
+        props, _body = delivery_compile.split_note(delivery_compile.find_delivery(self.docs, "DLV-001") / "delivery.md")
+        self.assertEqual(props["status"], "scope_proposed")
+
+    def test_scope_accepts_the_story_once_its_requirement_is_rebound(self):
+        implemented = self.stale_requirement_selection()
+        self.assertEqual(self.approve_scope()[0], 1)
+        requirement_compile.bind_stage(implemented, "business-analysis", "business-analysis/delivery/space")
+        self.commit("rebind REQ-001")
+        self.assertEqual(self.approve_scope(), (0, []))
+
+    def test_scope_routes_a_story_whose_requirement_is_superseded_to_a_backlog_revision(self):
+        implemented = self.implemented_selection()
+        replacement = self.draft_requirement("REQ-003", "account-access-v2")
+        props, body = requirement_compile.split_note(replacement)
+        props["supersedes"] = [f"[[requirements/{implemented.stem}|REQ-001]]"]
+        replacement.write_text(requirement_compile.render_note(props, body), encoding="utf-8")
+        requirement_compile.supersede_requirement(implemented, replacement)
+        self.commit("supersede REQ-001 with REQ-003")
+        self.assertEqual(requirement_route.route(self.docs, "REQ-001")["actions"], ["inspect"])
+        self.assertEqual(self.approve_scope(), (1, [
+            "AUTH-01 implements REQ-001, which is superseded by REQ-003 and cannot be rebound; begin a "
+            "backlog revision that re-traces AUTH-01 to REQ-003 or drops it, before handoff",
+        ]))
+
+    def terminal_selection(self, status: str, reason: str) -> None:
+        """Propose AUTH-01, then end the Requirement it implements with *status*."""
+        implemented = self.implemented_selection()
+        requirement_compile.transition_terminal(implemented, status, reason, [])
+        self.commit(f"end REQ-001 as {status}")
+        self.assertEqual(requirement_route.route(self.docs, "REQ-001")["actions"], ["inspect"])
+
+    def test_scope_routes_a_story_whose_requirement_is_withdrawn_to_a_backlog_revision(self):
+        self.terminal_selection("withdrawn", "The account change is no longer requested.")
+        self.assertEqual(self.approve_scope(), (1, [
+            "AUTH-01 implements REQ-001, which is withdrawn and cannot be rebound; begin a backlog revision "
+            "that re-traces AUTH-01 to a current Requirement or drops it, before handoff",
+        ]))
+
+    def test_scope_routes_a_story_whose_requirement_is_resolved_without_change_to_a_backlog_revision(self):
+        self.terminal_selection("resolved_no_change", "The approved account boundary already holds.")
+        self.assertEqual(self.approve_scope(), (1, [
+            "AUTH-01 implements REQ-001, which is resolved_no_change and cannot be rebound; begin a backlog "
+            "revision that re-traces AUTH-01 to a current Requirement or drops it, before handoff",
+        ]))
+
+    def test_scope_names_the_drift_of_a_requirement_edited_after_approval(self):
+        implemented = self.implemented_selection()
+        props, body = requirement_compile.split_note(implemented)
+        implemented.write_text(requirement_compile.render_note(props, body.replace(
+            "Customers need one bounded account change.", "Customers need two bounded account changes.")),
+            encoding="utf-8")
+        self.commit("edit REQ-001 after approval")
+        self.assertEqual(self.approve_scope(), (1, [
+            "AUTH-01 implements REQ-001, which does not route to backlog: stage requirement, action "
+            "requirement, reason: approved source_hash is stale; restore its approved text, since the "
+            "Requirement entry cannot revise an invalid Requirement, then continue through /requirement "
+            "REQ-001, before handoff",
+        ]))
+
+    def test_proposal_and_scope_refuse_experience_refs_when_the_root_marks_experience_not_applicable(self):
+        application, _hash = self.publish_application()
+        root = self.requirement("REQ-002", "pin-acquisition")
+        finding = (f"AUTH-01 cites experience_refs, but the backlog does not bind the globally current "
+                   f"{application}: root Requirement REQ-002 marks experience-design not_applicable; "
+                   f"{self.INPUT_REF_REMEDY}")
+        with self.experience_refs_resolve():
+            self.requirement_mode(root, origin_mode="manual", experience_refs=[self.CHECKOUT_REF])
+            self.assertEqual(self.init(), (2, [finding]))
+            self.assertIsNone(delivery_compile.find_delivery(self.docs, "DLV-001"))
+            # A proposal rendered before init ran this check still meets it at the handoff.
+            with mock.patch.object(delivery_compile, "handoff_binding_findings", return_value=[]):
+                self.propose()
+            self.assertEqual(self.approve_scope(), (1, [finding]))
+
+    def test_scope_refuses_a_root_requirement_that_binds_an_earlier_application(self):
+        receipts = self.legacy_receipts()
+        earlier, _hash = self.publish_application()
+        root = self.requirement("REQ-002", "account-screens", requirement_compile.STAGES)
+        self.commit("upstream packages")
+        for stage, ref, _digest in receipts:
+            requirement_compile.bind_stage(root, stage, ref)
+        requirement_compile.bind_stage(root, "experience-design", earlier)
+        with self.experience_refs_resolve():
+            self.requirement_mode(root, origin_mode="manual", experience_refs=[self.CHECKOUT_REF])
+            self.propose()
+            current, _hash = self.publish_application()
+            self.commit("application-only revision")
+            self.assertEqual(self.approve_scope(), (1, [
+                f"AUTH-01 cites experience_refs, but the backlog does not bind the globally current {current}: "
+                f"root Requirement REQ-002's Experience Stage Results are not the current application with its "
+                f"exact process receipts; experience-design receipt must use its canonical result_ref, got "
+                f"{earlier}; {self.REBIND_REMEDY}",
+            ]))
+
+    def manual_mode(self) -> str:
+        """Rebind the approved backlog in manual mode to the current receipts; return the application."""
+        receipts = self.legacy_receipts()
+        application, application_hash = self.publish_application()
+        bindings = [f"{stage}|{ref}|{digest}" for stage, ref, digest in receipts]
+        bindings.append(f"experience-design|{application}|{application_hash}")
+        self.edit("backlog/backlog.md", legacy_contract=None, planning_mode="manual", revision=2,
+                  input_bindings=sorted(bindings))
+        self.edit(self.STORY, origin_mode="manual", experience_refs=[self.CHECKOUT_REF])
+        self.reseal_backlog()
+        self.commit("manual-mode backlog")
+        return application
+
+    def test_scope_accepts_experience_refs_when_manual_bindings_pin_the_current_application(self):
+        with self.experience_refs_resolve():
+            self.manual_mode()
+            self.propose(historical_inputs=True)
+            self.assertEqual(self.approve_scope(), (0, []))
+
+    def test_scope_refuses_manual_bindings_that_pin_an_earlier_application(self):
+        with self.experience_refs_resolve():
+            earlier = self.manual_mode()
+            self.propose(historical_inputs=True)
+            current, _hash = self.publish_application()
+            self.commit("application-only revision")
+            self.assertEqual(self.approve_scope(), (1, [
+                f"AUTH-01 cites experience_refs, but the backlog does not bind the globally current {current}: "
+                f"the manual-mode input_bindings are not the current application with its exact process "
+                f"receipts; backlog/backlog.md input binding: experience-design receipt must use its "
+                f"canonical result_ref, got {earlier}; {self.MANUAL_REMEDY}",
+            ]))
+
+    def requirement_mode_with_bindings(self) -> tuple[str, str]:
+        """Pin the current receipts in a requirement-mode backlog whose root marks Experience not_applicable."""
+        receipts = self.legacy_receipts()
+        application, application_hash = self.publish_application()
+        bindings = [f"{stage}|{ref}|{digest}" for stage, ref, digest in receipts]
+        bindings.append(f"experience-design|{application}|{application_hash}")
+        self.edit("backlog/backlog.md", input_bindings=sorted(bindings))
+        root = self.requirement("REQ-002", "pin-acquisition")
+        self.requirement_mode(root, origin_mode="manual", experience_refs=[self.CHECKOUT_REF])
+        return application, application_hash
+
+    def test_scope_accepts_requirement_mode_bindings_that_pin_the_current_application(self):
+        with self.experience_refs_resolve():
+            self.requirement_mode_with_bindings()
+            self.propose(historical_inputs=True)
+            self.assertEqual(self.approve_scope(), (0, []))
+
+    def test_scope_refuses_requirement_mode_bindings_that_pin_an_earlier_application(self):
+        with self.experience_refs_resolve():
+            earlier, _hash = self.requirement_mode_with_bindings()
+            self.propose(historical_inputs=True)
+            current, _hash = self.publish_application()
+            self.commit("application-only revision")
+            self.assertEqual(self.approve_scope(), (1, [
+                f"AUTH-01 cites experience_refs, but the backlog does not bind the globally current {current}: "
+                f"the requirement-mode input_bindings are not the current application with its exact process "
+                f"receipts; backlog/backlog.md input binding: experience-design receipt must use its "
+                f"canonical result_ref, got {earlier}; {self.INPUT_REF_REMEDY}",
+            ]))
+
+    def test_scope_names_the_requirement_rebind_when_bindings_follow_an_earlier_root_result(self):
+        receipts = self.legacy_receipts()
+        earlier, earlier_hash = self.publish_application()
+        root = self.requirement("REQ-002", "account-screens", requirement_compile.STAGES)
+        self.commit("upstream packages")
+        for stage, ref, _digest in receipts:
+            requirement_compile.bind_stage(root, stage, ref)
+        requirement_compile.bind_stage(root, "experience-design", earlier)
+        bindings = [f"{stage}|{ref}|{digest}" for stage, ref, digest in receipts]
+        self.edit("backlog/backlog.md", input_bindings=sorted(
+            [*bindings, f"experience-design|{earlier}|{earlier_hash}"]))
+        with self.experience_refs_resolve():
+            self.requirement_mode(root, origin_mode="manual", experience_refs=[self.CHECKOUT_REF])
+            self.propose(historical_inputs=True)
+            current, _hash = self.publish_application()
+            self.commit("application-only revision")
+            self.assertEqual(self.approve_scope(), (1, [
+                f"AUTH-01 cites experience_refs, but the backlog does not bind the globally current {current}: "
+                f"the requirement-mode input_bindings are not the current application with its exact process "
+                f"receipts; backlog/backlog.md input binding: experience-design receipt must use its "
+                f"canonical result_ref, got {earlier}; {self.REBIND_REMEDY}",
+            ]))
+
+    def test_scope_accepts_a_selection_without_experience_refs_on_current_requirements(self):
+        root = self.requirement("REQ-002", "pin-acquisition")
+        self.requirement_mode(root, origin_mode="requirement", introduced_in_revision=2,
+                              implements=[f"[[requirements/{root.stem}|REQ-002]]"], **self.TECHNICAL)
+        self.propose()
+        self.assertEqual(self.approve_scope(), (0, []))
 
 
 if __name__ == "__main__":

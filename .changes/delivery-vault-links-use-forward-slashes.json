@@ -1,0 +1,6 @@
+{
+  "summary": "On native Windows the Delivery scripts now write the pinned Definition of Done path and the links in the Delivery map, execution plan, Item evidence, Delivery Review and cancellation Review with forward slashes, as on every other host, so the links resolve in the vault.",
+  "components": {
+    "software-engineering-team": "patch"
+  }
+}

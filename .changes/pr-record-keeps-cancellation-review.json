@@ -1,0 +1,6 @@
+{
+  "summary": "Recording the PR of a cancelled Delivery now keeps its published cancellation Review in the PR head and adds only the PR URL, instead of replacing it with the local Review that still holds the earlier approval, so the merged target shows the cancellation verdict.",
+  "components": {
+    "software-engineering-team": "patch"
+  }
+}

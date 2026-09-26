@@ -19,12 +19,13 @@ import experience_application_check as application
 import experience_compile as compiler
 import stage_package
 import vault_check
+from tools.tests.git_fixture import init_repository, remove_temporary
 
 
 class ArtifactSnapshotMetadataTests(unittest.TestCase):
     def setUp(self):
         temporary = tempfile.TemporaryDirectory()
-        self.addCleanup(temporary.cleanup)
+        self.addCleanup(remove_temporary, temporary)
         self.project = Path(temporary.name)
         self.root = self.project / "workspace/docs/experience-design"
         self.artifacts = self.root / "artifacts"
@@ -164,8 +165,9 @@ class ArtifactSnapshotMetadataTests(unittest.TestCase):
 
     def test_committed_new_receipt_ignores_metadata_without_ignoring_authored_files(self):
         receipt = self.approve()
+        init_repository(self.project)
         for args in [
-            ["init", "-q"], ["config", "user.name", "Jane Doe"],
+            ["config", "user.name", "Jane Doe"],
             ["config", "user.email", "jane@example.invalid"],
             ["add", "--all"], ["commit", "-qm", "Approve prototype"],
         ]:
@@ -188,9 +190,9 @@ class ArtifactSnapshotMetadataTests(unittest.TestCase):
 class CommittedArtifactPathsTests(unittest.TestCase):
     def setUp(self):
         temporary = tempfile.TemporaryDirectory()
-        self.addCleanup(temporary.cleanup)
+        self.addCleanup(remove_temporary, temporary)
         self.root = Path(temporary.name)
-        self.git("init", "-q")
+        init_repository(self.root)
         self.git("config", "user.name", "Jane Doe")
         self.git("config", "user.email", "jane@example.invalid")
         self.folder = self.root / "artifacts"

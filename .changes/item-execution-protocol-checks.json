@@ -1,0 +1,6 @@
+{
+  "summary": "start-item and resume-item now refuse with DELIVERY_DEPENDENCY_UNMET until every Item the Item's execution_after names is integrated, which means its remote Item tip records integrated and the Integration contains that exact tip. push-item now refuses a committed product or test path outside the Item's path_claims with DELIVERY_PATH_CLAIM_EXCEEDED: a claim covers its path and every path below it, paths under workspace/docs/ keep the Delivery control, Architecture and projection rules, and a path the product tip holds exactly as the Item's integration_base_commit does is not the Item's change. An active Item whose product change lies outside its claims needs a plan revision that claims those paths before it can push. A rejected atomic push now reports DELIVERY_FENCE_LEASE_LOST when the project Fence moved, DELIVERY_LEASE_LOST when another leased ref moved and DELIVERY_REMOTE_ATOMIC_UNSUPPORTED when the remote takes the push only without --atomic, read from the refetched refs instead of Git's own words; any other rejection keeps Git's report.",
+  "components": {
+    "software-engineering-team": "patch"
+  }
+}

@@ -44,6 +44,34 @@ class DeliveryResultTests(unittest.TestCase):
         self.assertEqual(uncertain["mutation_state"], "uncertain")
         self.assertEqual(uncertain["findings"][0]["code"], "DELIVERY_PR_UNCERTAIN")
 
+    @staticmethod
+    def refusal_findings(text: str) -> list[tuple[str, str]]:
+        result = delivery_result.from_raw("merge-pr", {"ok": False, "errors": [text]})
+        return [(finding["code"], finding["message"]) for finding in result["findings"]]
+
+    def test_unknown_uppercase_first_word_stays_in_the_message(self):
+        for text in ("HEAD moved since the fence was written", "MASTER.md is missing frontmatter",
+                     "DELIVERY_NOT_A_CODE: detail stays"):
+            with self.subTest(text=text):
+                self.assertEqual(self.refusal_findings(text), [("DELIVERY_INPUT_INVALID", text)])
+
+    def test_known_code_prefix_becomes_the_finding_code(self):
+        self.assertEqual(
+            self.refusal_findings("DELIVERY_WORKTREE_UNSAFE: commit or remove changes before push: a.md"),
+            [("DELIVERY_WORKTREE_UNSAFE", "commit or remove changes before push: a.md")],
+        )
+
+    def test_known_code_keeps_every_line_of_its_detail(self):
+        self.assertEqual(
+            self.refusal_findings("DELIVERY_WORKTREE_UNSAFE: commit or remove changes:\na.md\nb.md"),
+            [("DELIVERY_WORKTREE_UNSAFE", "commit or remove changes:\na.md\nb.md")],
+        )
+
+    def test_message_without_a_code_prefix_is_kept_whole(self):
+        for text in ("project root is not a Git worktree", "GitHub PR head changed during merge"):
+            with self.subTest(text=text):
+                self.assertEqual(self.refusal_findings(text), [("DELIVERY_INPUT_INVALID", text)])
+
     def test_malformed_records_fail_closed_inside_valid_envelope(self):
         result = delivery_result.from_raw(
             "inspect",

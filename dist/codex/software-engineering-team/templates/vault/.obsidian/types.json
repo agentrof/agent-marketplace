@@ -132,6 +132,8 @@
     "dependency_audit_command": "text",
     "dependency_audit_workdir": "text",
     "dependency_audit_rationale": "text",
+    "pull_request_check_source": "text",
+    "pull_request_check_provider": "text",
     "env_command": "text",
     "env_workdir": "text",
     "scenarios": "multitext",

@@ -1,0 +1,6 @@
+{
+  "summary": "A Delivery Review that is invalidated and published again can open its PR again on the machine that opened it: the new prepare-pr-creation intent takes over the provider receipt the earlier intent left, and open-pr records the PR the provider still shows without a provider call, where it used to refuse because a different provider receipt already existed. The earlier receipt still refuses, now under DELIVERY_PR_UNCERTAIN, when its provider call started and no exact Delivery PR is visible, or when it names a PR other than the exact Delivery PR.",
+  "components": {
+    "software-engineering-team": "patch"
+  }
+}

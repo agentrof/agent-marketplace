@@ -71,6 +71,11 @@ In every case the H1 repeats the title byte-for-byte.
 - Inline flow lists (`tags: [a, b]`) are denied at write time: the
   stdlib parsers read them as scalars, and the contract is one dash
   item per line.
+- Text that plain YAML would misread (a leading quote or indicator,
+  surrounding spaces, `: `, ` #`, a trailing colon or quote, a line
+  break) is one double-quoted JSON string:
+  `title: "Checkout: \"express\" lane"`. The stdlib parsers decode it
+  to the exact text, so a rewrite never adds backslashes.
 - Dates are `YYYY-MM-DD`. Stamped dates (`approved_at`, `decided_at`)
   are written only by their owning verb off the UTC clock; the guard
   denies a hand-typed value.

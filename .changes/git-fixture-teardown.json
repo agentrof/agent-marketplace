@@ -1,0 +1,4 @@
+{
+  "summary": "Every test fixture repository is created with automatic Git maintenance off, and fixture trees that hold written history are removed through one shared helper that retries while Git finishes a late write, so release, publish and delivery tests no longer fail their teardown when Git 2.54's geometric maintenance repacks in the background.",
+  "components": {}
+}

@@ -1,0 +1,6 @@
+{
+  "summary": "A Delivery refusal that starts with a registered finding code now keeps every line of its detail in the finding message instead of stopping at the first line break.",
+  "components": {
+    "software-engineering-team": "patch"
+  }
+}

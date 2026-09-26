@@ -1,0 +1,6 @@
+{
+  "summary": "A quoted frontmatter value no longer gains backslashes each time a compiler rewrites its note. Every compiler now writes text that plain YAML would misread as one double-quoted JSON string and reads it back to the exact text, so a Delivery goal or title such as Fix the \"login\": flow keeps its bytes and its hashes across rewrites, and text that starts or ends with a quote, carries surrounding spaces or holds a line break survives too. A note parses exactly as before unless a double-quoted value holds a backslash escape or starts or ends with an apostrophe inside its quotes; such a value now reads as its decoded text, the value Obsidian shows. An approved Experience package keeps its source digest when a later rewrite quotes its titles.",
+  "components": {
+    "software-engineering-team": "patch"
+  }
+}

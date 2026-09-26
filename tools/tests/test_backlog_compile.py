@@ -16,6 +16,7 @@ sys.path.insert(0, str(COMPILER.parent))
 import backlog_compile
 import landscape_check
 import stage_package
+from tools.tests.git_fixture import init_repository, remove_temporary
 
 
 class BacklogCompilerTests(unittest.TestCase):
@@ -329,7 +330,7 @@ class BacklogUpstreamApprovalTests(unittest.TestCase):
 
     def setUp(self):
         self.temporary = tempfile.TemporaryDirectory()
-        self.addCleanup(self.temporary.cleanup)
+        self.addCleanup(remove_temporary, self.temporary)
         self.docs = Path(self.temporary.name) / "project with spaces/workspace/docs"
         self.tree = self.docs / "solution-design"
         self.landscape = self.tree / "landscape.md"
@@ -376,8 +377,8 @@ class BacklogUpstreamApprovalTests(unittest.TestCase):
 
     def commit_solution(self):
         project = self.docs.parents[1]
+        init_repository(project)
         commands = [
-            ["init", "--quiet"],
             ["add", "--", "workspace/docs/solution-design"],
             ["-c", "user.name=Test", "-c", "user.email=test@example.com",
              "-c", "commit.gpgsign=false", "commit", "--quiet", "-m", "Approve solution fixture"],

@@ -35,7 +35,8 @@
     "lock_path": ".agentrof/agent-marketplace/.runtime/provider-receipts/pr-<dlv-id>.json.lock",
     "states": ["prepared", "call_started", "verified"],
     "required_fields": ["schema_version", "kind", "state", "delivery", "intent_oid", "provider", "attempt", "url", "receipt_digest"],
-    "call_started_rule": "exclusive exact-preimage transition persisted before provider mutation; response loss is requery-only"
+    "call_started_rule": "exclusive exact-preimage transition persisted before provider mutation; response loss is requery-only",
+    "supersession_rule": "a later PR-creation intent replaces an earlier intent's receipt unless it is call_started with no exact Delivery PR visible or verified for another PR; those refuse with DELIVERY_PR_UNCERTAIN"
   },
   "target_update_rule": {
     "intent": "project-fence-v2 Target-Update-Intent and Attempt are durable before direct/provider target mutation",

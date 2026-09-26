@@ -25,7 +25,9 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import stage_package
-from ba_compile import without_generated_relations
+from ba_compile import (
+    frontmatter_scalar, frontmatter_value, quoted_scalar, without_generated_relations,
+)
 
 
 GENERATED = "_generated"
@@ -938,7 +940,7 @@ def fm(path: Path) -> tuple[dict, str]:
         if not line:
             continue
         if line.startswith("- ") and current:
-            data.setdefault(current, []).append(line[2:].strip().strip("\"'"))
+            data.setdefault(current, []).append(frontmatter_value(line[2:].strip()))
             continue
         if ":" not in line:
             raise ValueError(f"unparseable frontmatter line {number + 1}")
@@ -955,22 +957,39 @@ def fm(path: Path) -> tuple[dict, str]:
             elif value.isdigit():
                 data[key] = int(value)
             else:
-                data[key] = value.strip("\"'")
+                data[key] = frontmatter_value(value)
     if end < 0:
         raise ValueError("unterminated frontmatter")
     return data, "\n".join(lines[end + 1:]).strip() + "\n"
 
 
-def render_fm(data: dict, body: str) -> str:
+def render_fm(data: dict, body: str, *, digest: bool = False) -> str:
+    """Render one Experience note, or with ``digest`` its source-digest form.
+
+    The digest form keeps the plain scalars and JSON items that approved
+    source digests were computed over, so quoting a value in the note leaves
+    its digest unchanged. Only text with a line break, which no earlier note
+    line could hold, is quoted there as well to keep the rows unambiguous.
+    """
+    def item(value: object) -> str:
+        if digest or not isinstance(value, str):
+            return json.dumps(value, ensure_ascii=False)
+        return quoted_scalar(value)
+
+    def scalar(value: object) -> str:
+        if not isinstance(value, str) or (digest and value.splitlines() in ([], [value])):
+            return str(value)
+        return frontmatter_scalar(value)
+
     rows = ["---"]
     for key, value in data.items():
         if isinstance(value, list):
             rows.append(f"{key}:")
-            rows.extend(f"  - {json.dumps(item, ensure_ascii=False)}" for item in value)
+            rows.extend(f"  - {item(entry)}" for entry in value)
         elif isinstance(value, dict):
             rows.append(f"{key}: {json.dumps(value, ensure_ascii=False, sort_keys=True)}")
         else:
-            rows.append(f"{key}: {value}")
+            rows.append(f"{key}: {scalar(value)}")
     return "\n".join(rows + ["---", "", body.rstrip(), ""])
 
 
@@ -2528,7 +2547,7 @@ def source_digest(
             stable.pop("retired_at_utc", None)
         digest.update(path.relative_to(package).as_posix().encode())
         digest.update(b"\0")
-        digest.update(render_fm(stable, without_generated_relations(body)).encode())
+        digest.update(render_fm(stable, without_generated_relations(body), digest=True).encode())
         digest.update(b"\0")
     legacy_digest = digest.copy()
     artifacts = package / "artifacts"

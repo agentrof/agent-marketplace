@@ -12,6 +12,7 @@ from types import SimpleNamespace
 from unittest import mock
 
 from tools.tests import backlog_fixture
+from tools.tests.git_fixture import init_repository, remove_temporary
 
 compiler = backlog_fixture.backlog_compile
 
@@ -25,7 +26,7 @@ class EarlierClock(datetime):
 class BacklogApprovalPreservationTests(unittest.TestCase):
     def setUp(self):
         self.temporary = tempfile.TemporaryDirectory()
-        self.addCleanup(self.temporary.cleanup)
+        self.addCleanup(remove_temporary, self.temporary)
         self.project = Path(self.temporary.name).resolve()
         self.docs = self.project / "workspace/docs"
         with mock.patch.object(compiler, "datetime", EarlierClock):
@@ -34,7 +35,7 @@ class BacklogApprovalPreservationTests(unittest.TestCase):
         self.old_review = self.docs / "backlog/reviews/round-1-backlog-review.md"
         self.story = self.docs / "backlog/epics/delivery-fixture/stories/auth-01/story.md"
         self.epic_review = self.docs / "backlog/epics/delivery-fixture/reviews/round-1-epic-review.md"
-        self.git("init")
+        init_repository(self.project)
         self.git("config", "user.name", "Jane Doe")
         self.git("config", "user.email", "jane@example.invalid")
         self.commit()

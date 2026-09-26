@@ -1890,14 +1890,7 @@ def reserve_delivery(project_root: Path, delivery_id: str, remote: str = "origin
          "Governance-Hash": governed_governance_hash(root),
          "Barrier-Kind": "none", "Barrier-Epoch": "none"},
     )
-    push_args = ["push", "--atomic", remote,
-                 f"--force-with-lease={refs['fence']}:",
-                 f"--force-with-lease={refs['integration']}:",
-                 f"{fence_oid}:{refs['fence']}", f"{integration_oid}:{refs['integration']}"]
-    result = subprocess.run(["git", *push_args], cwd=root, text=True,
-                            capture_output=True, check=False)
-    if result.returncode:
-        raise RuntimeError(result.stderr.strip() or "atomic Delivery reservation rejected")
+    atomic_push(root, remote, [(refs["fence"], "", fence_oid), (refs["integration"], "", integration_oid)])
     return {"ok": True, "delivery": delivery_id, "target_branch": target_branch,
             "target": target_oid, "fence": fence_oid, "integration": integration_oid,
             "refs": short_refs(delivery_id)}

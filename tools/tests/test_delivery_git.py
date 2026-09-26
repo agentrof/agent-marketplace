@@ -1306,6 +1306,40 @@ class DeliveryGitTests(unittest.TestCase):
             with self.assertRaises(RuntimeError):
                 delivery_git.reserve_delivery(project, "DLV-001")
 
+    def test_reservation_names_the_lease_a_concurrent_reservation_took(self):
+        """A Fence another host opens after the absence check is named from the refetched refs."""
+        temporary, project = self.make_project()
+        self.addCleanup(remove_temporary, temporary)
+        docs = project / "workspace" / "docs"
+        (docs / "maps").mkdir(parents=True, exist_ok=True)
+        make_approved_backlog(docs)
+        dod = type("Args", (), {"docs": str(docs), "title": "Project", "file": None})
+        self.assertEqual(delivery_compile.init_dod(dod), 0)
+        self.assertEqual(delivery_compile.approve_dod(dod), 0)
+        delivery_git.run_git(project, "add", "workspace")
+        delivery_git.run_git(project, "commit", "-qm", "approved backlog")
+        delivery_git.run_git(project, "push", "-q")
+        init = type("Args", (), {"docs": str(docs), "id": None, "slug": "auth", "goal": "Authenticate",
+                                 "outcome": None, "target_branch": "main", "story": ["AUTH-01"]})
+        self.assertEqual(delivery_compile.init_delivery(init), 0)
+        self.assertEqual(delivery_compile.approve_scope(type("Args", (), {"docs": str(docs), "delivery": "DLV-001"})), 0)
+        refs = delivery_git.canonical_refs("DLV-001")
+        package_paths = delivery_git.package_paths
+        opened = []
+
+        def open_fence_concurrently(*args, **kwargs):
+            if not opened:
+                opened.append(delivery_git.remote_oid(project, "origin", "refs/heads/main"))
+                delivery_git.atomic_push(project, "origin", [(refs["fence"], "", opened[0])])
+            return package_paths(*args, **kwargs)
+
+        with mock.patch.object(delivery_git, "package_paths", side_effect=open_fence_concurrently):
+            finding = self.refused_finding(lambda: delivery_git.reserve_delivery(project, "DLV-001"))
+        self.assertEqual(finding, ("DELIVERY_FENCE_LEASE_LOST", "the project Fence moved, so the atomic push changed no ref: "
+                                   f"{refs['fence']} is {opened[0]}, leased as absent"))
+        self.assertEqual(delivery_git.remote_oid(project, "origin", refs["fence"]), opened[0])
+        self.assertFalse(delivery_git.remote_has_ref(project, "origin", refs["integration"]))
+
     def test_candidate_map_excludes_unpublished_local_governance(self):
         temporary, project = self.make_project()
         self.addCleanup(remove_temporary, temporary)

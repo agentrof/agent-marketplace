@@ -208,9 +208,10 @@ def from_raw(operation: str, raw: dict, *, error: str | None = None) -> dict:
         messages.extend(str(item) for item in errors)
     for message in messages:
         text = str(message)
-        match = re.match(r"([A-Z][A-Z0-9_.-]{2,63})[: ]?(.*)", text)
-        code = match.group(1) if match and match.group(1) in FINDING_CODES else "DELIVERY_INPUT_INVALID"
-        detail = match.group(2).strip() if match else text
+        match = re.match(r"([A-Z][A-Z0-9_.-]{2,63})[: ]?(.*)", text, re.DOTALL)
+        known = match is not None and match.group(1) in FINDING_CODES
+        code = match.group(1) if known else "DELIVERY_INPUT_INVALID"
+        detail = match.group(2).strip() if known else text
         findings.append({"code": code, "severity": "blocker", "refs": [], "paths": [],
                          "message": detail or code, "next_entry": None})
     for finding in raw.get("findings", []) if isinstance(raw.get("findings"), list) else []:

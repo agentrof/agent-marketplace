@@ -29,7 +29,7 @@ def run_git(root: Path, *args: str) -> str:
 
 def run_gh(root: Path, *args: str) -> str:
     if shutil.which("gh") is None:
-        raise ProviderError("GitHub provider requires the authenticated gh CLI")
+        raise ProviderError("DELIVERY_PROVIDER_UNSUPPORTED: GitHub provider requires the authenticated gh CLI")
     result = subprocess.run(["gh", *args], cwd=root, text=True,
                             capture_output=True, check=False)
     if result.returncode:
@@ -43,13 +43,13 @@ def repository_from_remote(root: Path, remote: str = "origin") -> str:
         value = "https://github.com/" + value.split(":", 1)[1]
     parsed = urlsplit(value)
     if parsed.netloc != "github.com":
-        raise ProviderError("Delivery PR provider requires a GitHub remote")
+        raise ProviderError("DELIVERY_PROVIDER_UNSUPPORTED: Delivery PR provider requires a GitHub remote")
     path = parsed.path.strip("/")
     if path.endswith(".git"):
         path = path[:-4]
     parts = path.split("/")
     if len(parts) != 2 or not all(parts):
-        raise ProviderError("GitHub remote must identify exactly owner/repository")
+        raise ProviderError("DELIVERY_PROVIDER_UNSUPPORTED: GitHub remote must identify exactly owner/repository")
     return "/".join(parts)
 
 
@@ -75,9 +75,9 @@ class GitHubProvider:
         try:
             value = json.loads(raw or "[]")
         except json.JSONDecodeError as exc:
-            raise ProviderError("GitHub returned invalid PR JSON") from exc
+            raise ProviderError("DELIVERY_PR_UNCERTAIN: GitHub returned invalid PR JSON") from exc
         if not isinstance(value, list) or any(not isinstance(item, dict) for item in value):
-            raise ProviderError("GitHub PR response shape is invalid")
+            raise ProviderError("DELIVERY_PR_UNCERTAIN: GitHub PR response shape is invalid")
         return value
 
     def inspect_pull_request(self, url: str) -> dict:
@@ -92,11 +92,11 @@ class GitHubProvider:
         try:
             value = json.loads(raw or "{}")
         except json.JSONDecodeError as exc:
-            raise ProviderError("GitHub returned invalid PR JSON") from exc
+            raise ProviderError("DELIVERY_PR_UNCERTAIN: GitHub returned invalid PR JSON") from exc
         if not isinstance(value, dict):
-            raise ProviderError("GitHub PR response shape is invalid")
+            raise ProviderError("DELIVERY_PR_UNCERTAIN: GitHub PR response shape is invalid")
         if not isinstance(value.get("url"), str) or not value["url"].startswith("https://github.com/"):
-            raise ProviderError("GitHub PR response has no canonical URL")
+            raise ProviderError("DELIVERY_PR_UNCERTAIN: GitHub PR response has no canonical URL")
         return value
 
     def exact_unmerged(self, head: str, base: str) -> list[dict]:
@@ -171,7 +171,7 @@ class GitHubProvider:
         )
         url = result.strip().splitlines()[-1] if result.strip() else ""
         if not url.startswith("https://github.com/"):
-            raise ProviderError("GitHub did not return a canonical PR URL")
+            raise ProviderError("DELIVERY_PR_UNCERTAIN: GitHub did not return a canonical PR URL")
         return {"url": url}
 
     def ensure_draft(self, url: str) -> dict:
@@ -189,13 +189,13 @@ class GitHubProvider:
         )
         value = self.inspect_pull_request(url)
         if str(value.get("state", "")).upper() != "MERGED":
-            raise ProviderError("GitHub PR merge call returned before the PR was merged")
+            raise ProviderError("DELIVERY_MERGE_PROOF_INVALID: GitHub PR merge call returned before the PR was merged")
         merge_value = value.get("mergeCommit")
         merge_oid = merge_value.get("oid") if isinstance(merge_value, dict) else merge_value
         if not isinstance(merge_oid, str) or not merge_oid:
-            raise ProviderError("GitHub PR has no provider-confirmed merge commit")
+            raise ProviderError("DELIVERY_MERGE_PROOF_INVALID: GitHub PR has no provider-confirmed merge commit")
         observed_head = value.get("headRefOid")
         if observed_head != head_oid:
-            raise ProviderError("GitHub PR head changed during merge")
+            raise ProviderError("DELIVERY_PR_HEAD_BASE_MISMATCH: GitHub PR head changed during merge")
         return {"url": value["url"], "head": head_oid,
                 "merge_commit": merge_oid, "provider": value}

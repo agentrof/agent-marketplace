@@ -49,6 +49,9 @@ from ba_compile import (
     LINK_RE,
     NAMESPACED_ID_RE,
     WIKILINK_RE,
+    frontmatter_item,
+    frontmatter_scalar,
+    frontmatter_value,
     parse_frontmatter,
     split_wikilink,
 )
@@ -2433,12 +2436,10 @@ def deid_lead_decision(policy: dict, note: Note,
         stripped = lines[i].strip()
         if not stripped.startswith("title:"):
             continue
-        value = stripped[len("title:"):].strip().strip("\"'")
+        value = frontmatter_value(stripped[len("title:"):].strip())
         if value.startswith(prefix):
             indent = lines[i][:len(lines[i]) - len(lines[i].lstrip())]
-            new_value = value[len(prefix):]
-            quoted = f'"{new_value}"' if ":" in new_value else new_value
-            lines[i] = f"{indent}title: {quoted}"
+            lines[i] = f"{indent}title: {frontmatter_scalar(value[len(prefix):])}"
             changed += 1
         break
     for i in range(note.fm_end - 1, len(lines)):
@@ -2520,13 +2521,13 @@ def normalize_fm_line(vault: Vault, note: Note, line: str) -> tuple[str, int]:
     for key in DOC_REF_KEYS:
         if not stripped.startswith(f"{key}:"):
             continue
-        value = stripped[len(key) + 1:].strip().strip("\"'")
+        value = frontmatter_value(stripped[len(key) + 1:].strip())
         if not value:
             return line, 0
         indent = line[:len(line) - len(line.lstrip())]
         if value.startswith("[["):
             if key in LIST_REF_KEYS:
-                return f"{indent}{key}:\n{indent}  - \"{value}\"", 1
+                return f"{indent}{key}:\n{indent}  - {frontmatter_item(value)}", 1
             return line, 0
         resolved = (note.path.parent / value).resolve()
         try:
@@ -2534,7 +2535,7 @@ def normalize_fm_line(vault: Vault, note: Note, line: str) -> tuple[str, int]:
         except ValueError:
             return line, 0
         if rel in vault.index and rel.endswith(".md"):
-            link = f"\"[[{rel[:-3]}]]\""
+            link = frontmatter_scalar(f"[[{rel[:-3]}]]")
             if key in LIST_REF_KEYS:
                 return f"{indent}{key}:\n{indent}  - {link}", 1
             return f"{indent}{key}: {link}", 1

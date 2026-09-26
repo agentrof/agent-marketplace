@@ -18,9 +18,13 @@ import tempfile
 from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
 
-from ba_compile import parse_frontmatter, without_generated_relations
+from ba_compile import (
+    frontmatter_item, frontmatter_scalar, parse_frontmatter, without_generated_relations,
+)
 import backlog_compile
 import operation_compile
+import requirement_compile
+import requirement_route
 import stage_package
 
 
@@ -73,6 +77,8 @@ DOD_SOURCE_FIELDS = (
     "definition_of_done_source_hash",
 )
 GIT_OID_RE = re.compile(r"^[0-9a-f]{40,64}$")
+# The record of the "Record PR" commit that delivery_git writes as the PR head.
+PR_RECORDED = "pr-url-recorded-v1"
 
 
 def atomic_text(path: Path, text: str) -> None:
@@ -100,24 +106,14 @@ def docs_root(value: str | Path) -> Path:
     return path
 
 
-def scalar(value: object) -> str:
-    if isinstance(value, bool):
-        return "true" if value else "false"
-    text = str(value)
-    if (not text or text != text.strip() or ": " in text or text.startswith("[[")
-            or text.lower() in {"true", "false", "null"}):
-        return json.dumps(text, ensure_ascii=False)
-    return text
-
-
 def frontmatter(props: dict, body: str) -> str:
     rows = ["---"]
     for key, value in props.items():
         if isinstance(value, list):
             rows.append(f"{key}:")
-            rows.extend(f"  - {scalar(item)}" for item in value)
+            rows.extend(f"  - {frontmatter_item(item)}" for item in value)
         else:
-            rows.append(f"{key}: {scalar(value)}")
+            rows.append(f"{key}: {frontmatter_scalar(value)}")
     rows.extend(["---", "", body.rstrip(), ""])
     return "\n".join(rows)
 
@@ -319,7 +315,7 @@ def approved_dod_source(docs: Path) -> tuple[dict, list[str]]:
     if not isinstance(revision, int) or revision < 1:
         return {}, ["approved Definition of Done has an invalid revision"]
     return {
-        "definition_of_done_path": str(path.relative_to(docs)),
+        "definition_of_done_path": path.relative_to(docs).as_posix(),
         "definition_of_done_revision": revision,
         "definition_of_done_source_hash": source_hash,
     }, []
@@ -461,8 +457,11 @@ def render_map(docs: Path) -> None:
         except (OSError, ValueError):
             continue
         identifier = str(props.get("id", directory.name)).strip()
+        # The tracked status, never the one derived from Git history: the target
+        # branch carries the Integration branch's bytes after a merge, so a map
+        # that rendered history would go stale on one of the two.
         status = str(props.get("status", "unknown"))
-        rows.append(f"- {link(str(path.relative_to(docs)), identifier)} — `{status}`")
+        rows.append(f"- {link(path.relative_to(docs).as_posix(), identifier)} — `{status}`")
     # vault_check render-relations normalizes authored notes to this ending too.
     atomic_text(map_path, "\n".join(rows).rstrip() + "\n")
 
@@ -574,9 +573,15 @@ def init_delivery(args) -> int:
         print(json.dumps({"ok": False, "errors": [f"Delivery already exists: {root}"]}))
         return 1
     stories = list(args.story or [])
-    sources, backlog_snapshot, source_errors = approved_backlog_sources(docs, stories)
-    dod_snapshot, dod_errors = approved_dod_source(docs)
-    errors = sorted(set(source_errors + dod_errors))
+    # One read-only candidate snapshot serves the strict read and the handoff check.
+    with stage_package.candidate_session():
+        sources, backlog_snapshot, source_errors = approved_backlog_sources(docs, stories)
+        dod_snapshot, dod_errors = approved_dod_source(docs)
+        errors = sorted(set(source_errors + dod_errors))
+        # The proposal refuses a selection that scope approval, the handoff, would refuse.
+        if not errors:
+            errors = handoff_binding_findings(
+                docs, {story: sources[story]["story_path"] for story in stories})
     if errors:
         print(json.dumps({"ok": False, "errors": errors}, indent=2, ensure_ascii=False))
         return 2
@@ -624,6 +629,114 @@ def init_delivery(args) -> int:
     return 0
 
 
+def pr_recorded_props(props: dict, body: str) -> dict | None:
+    """Return a Delivery's front matter once its PR is recorded, or None when it keeps its status.
+
+    Recording the PR hands a reviewed Delivery over to its merge. A cancelled
+    Delivery publishes its cancellation through the same PR and stays cancelled.
+    """
+    if props.get("status") != "review":
+        return None
+    recorded = dict(props)
+    recorded["status"] = "awaiting_merge"
+    recorded["tags"] = [tag for tag in recorded.get("tags", []) if not str(tag).startswith("status/")] + ["status/awaiting-merge"]
+    recorded["source_hash"] = content_hash(recorded, body)
+    return recorded
+
+
+class MergeStateUnknown(RuntimeError):
+    """Git cannot tell whether a Delivery's recorded PR head was merged."""
+
+
+def _git_query(cwd: Path, *args: str) -> str:
+    """Run one read-only Git query in the checkout holding *cwd*.
+
+    A query Git cannot answer raises MergeStateUnknown, so a missing or broken
+    history is reported instead of reading as an unmerged Delivery.
+    """
+    try:
+        result = subprocess.run(["git", "--no-replace-objects", "-C", str(cwd), *args],
+                                capture_output=True, encoding="utf-8", errors="replace", check=False)
+    except OSError as exc:
+        raise MergeStateUnknown(f"Delivery merge state cannot be evaluated: {exc}") from exc
+    if result.returncode:
+        detail = next((line.strip() for line in result.stderr.splitlines() if line.strip()),
+                      f"git {args[0]} exited with {result.returncode}")
+        raise MergeStateUnknown(f"Delivery merge state cannot be evaluated: {detail}")
+    return result.stdout
+
+
+def recorded_pr_merged(cwd: Path, delivery_id: str) -> bool:
+    """Prove offline that HEAD contains a merge of this Delivery's recorded PR head.
+
+    The proof is a two-parent merge reachable from HEAD, on any path, whose
+    second parent is the Delivery's "Record PR" commit: its trailers name its
+    record and this Delivery, and its only parent is the intent it names. The
+    next Delivery's Integration reaches the target's merge only through the
+    second parent of a target refresh, so the path is not restricted. The
+    merge itself must carry no Agentrof-Record trailer: the coordinator marks
+    every commit it writes with one, and its own two-parent commits, such as
+    the reopen commit whose second parent is the Integration head, merge
+    nothing into the target. The one caveat: a manual merge of the Integration
+    branch into any other branch also counts. A fast-forward, a squash or a
+    rewritten head proves nothing. A shallow history or a failed Git query
+    raises MergeStateUnknown instead of proving nothing.
+    """
+    from delivery_git import trailer
+
+    if not DELIVERY_ID_RE.fullmatch(delivery_id):
+        return False
+    if _git_query(cwd, "rev-parse", "--is-shallow-repository").strip() == "true":
+        raise MergeStateUnknown("Delivery merge state cannot be evaluated in a shallow clone; "
+                                "fetch the full history, for example with git fetch --unshallow")
+    listed = _git_query(cwd, "rev-list", "--fixed-strings", "--all-match",
+                        f"--grep=Agentrof-Record: {PR_RECORDED}",
+                        f"--grep=Agentrof-Delivery: {delivery_id}", "HEAD", "--")
+    heads = set()
+    for oid in listed.split():
+        header, _, message = _git_query(cwd, "cat-file", "commit", oid).partition("\n\n")
+        parents = [line.split()[1] for line in header.splitlines() if line.startswith("parent ")]
+        if (trailer(message, "Record") == PR_RECORDED and trailer(message, "Delivery") == delivery_id
+                and parents == [trailer(message, "Intent")]):
+            heads.add(oid)
+    if not heads:
+        return False
+    # A commit that a recorded head already contains cannot merge it, so the
+    # walk stops where the Delivery branched off.
+    merges = _git_query(cwd, "rev-list", "--merges", "--parents",
+                        "HEAD", "--not", *sorted(heads), "--")
+    for fields in (line.split() for line in merges.splitlines()):
+        if len(fields) == 3 and fields[2] in heads:
+            _header, _, message = _git_query(cwd, "cat-file", "commit", fields[0]).partition("\n\n")
+            if trailer(message, "Record") is None:
+                return True
+    return False
+
+
+def delivery_state(root: Path, props: dict) -> tuple[object, str | None]:
+    """Return a Delivery's semantic status and the finding that stops its derivation.
+
+    A Delivery whose Review records its PR is merged once HEAD contains a merge
+    of its recorded PR head. That holds in awaiting_merge and in review, where a
+    PR recorded before the record set awaiting_merge left it. When Git cannot
+    tell, the tracked status comes back with the finding that says why.
+    """
+    status = props.get("status")
+    if status not in {"review", "awaiting_merge"}:
+        return status, None
+    try:
+        review, _ = split_note(root / "delivery-review.md")
+    except (OSError, ValueError):
+        return status, None
+    if not review.get("pull_request_url"):
+        return status, None
+    try:
+        merged = recorded_pr_merged(root, str(props.get("id", "")))
+    except MergeStateUnknown as exc:
+        return status, str(exc)
+    return ("merged" if merged else status), None
+
+
 def delivery_findings(docs: Path, identifier: str, *,
                       check_item_operation_bindings: bool = True,
                       compare_source_pins: bool = True) -> tuple[Path | None, list[str]]:
@@ -659,10 +772,16 @@ def delivery_findings(docs: Path, identifier: str, *,
     # Closed Deliveries preserve their pinned historical source baseline. Every
     # mutable Delivery phase must instead prove that its selected Story/Test
     # Plan and Definition of Done are still the exact approved source bytes.
-    if props.get("status") not in {"merged", "cancelled"}:
+    # A Delivery is closed as merged once HEAD contains a merge of its recorded
+    # PR head; when Git cannot tell, that finding stands in for both checks.
+    status, unknown = delivery_state(root, props)
+    if unknown is not None:
+        errors.append(unknown)
+    elif status not in {"merged", "cancelled"}:
         _, source_errors = delivery_source_findings(docs, root, props, compare_pins=compare_source_pins)
         errors.extend(source_errors)
-    if check_item_operation_bindings and props.get("status") in {"execution_approved", "active", "review", "pr_handoff", "awaiting_merge"}:
+    if (check_item_operation_bindings and unknown is None
+            and status in {"execution_approved", "active", "review", "pr_handoff", "awaiting_merge"}):
         for item_path in item_paths:
             try:
                 item_props, _item_body = split_note(item_path)
@@ -684,11 +803,158 @@ def check_delivery(args) -> int:
             props, _ = split_note(root / "delivery.md")
         except (OSError, ValueError):
             pass
-    result = {"ok": not errors, "id": props.get("id"), "status": props.get("status"), "errors": errors}
+    status = delivery_state(root, props)[0] if root is not None else props.get("status")
+    result = {"ok": not errors, "id": props.get("id"), "status": status, "errors": errors}
     print(json.dumps(result, indent=2, ensure_ascii=False))
     return 0 if not errors else 1
 
 
+def implemented_requirement_findings(docs: Path, stories: dict[str, dict]) -> list[str]:
+    """Require every Requirement a selected Story implements to route to backlog.
+
+    The Requirement entry only inspects a terminal Requirement, so that finding
+    routes to a backlog revision that re-traces or drops the Story instead.
+    """
+    paths = {f"requirements/{path.stem}": path for path in requirement_compile.requirement_paths(docs)}
+    routes: dict[str, dict] = {}
+    errors: list[str] = []
+    for story_id, props in sorted(stories.items()):
+        for value in backlog_compile.values(props, "implements"):
+            parts = backlog_compile.split_wikilink(value)
+            path = paths.get(parts[0]) if parts else None
+            identifier = requirement_compile.requirement_id(path) if path else ""
+            if not requirement_route.REQ_ID_RE.fullmatch(identifier):
+                errors.append(f"{story_id} implements a link that resolves to no Requirement: {value}")
+                continue
+            if identifier not in routes:
+                routes[identifier] = requirement_route.route(docs, identifier)
+            routing = routes[identifier]
+            status = routing.get("status")
+            if status == "approved" and routing.get("action") == "backlog":
+                continue
+            if status in requirement_compile.TERMINAL_STATUSES:
+                successor = ""
+                if status == "superseded":
+                    relation = requirement_compile.split_note(path)[0].get("superseded_by", "")
+                    target = backlog_compile.split_wikilink(str(relation))
+                    successor = requirement_compile.requirement_id(paths[target[0]]) \
+                        if target and target[0] in paths else ""
+                errors.append(
+                    f"{story_id} implements {identifier}, which is {status}"
+                    + (f" by {successor}" if successor else "")
+                    + f" and cannot be rebound; begin a backlog revision that re-traces {story_id} "
+                    f"to {successor or 'a current Requirement'} or drops it, before handoff"
+                )
+                continue
+            reason = routing.get("reason", "")
+            remedy = f"rebind it through the Requirement entry, /requirement {identifier}"
+            if not reason and status != "approved":
+                reason = f"Requirement status is {status}"
+            elif not reason and routing.get("stage") == "requirement":
+                # An approved Requirement whose semantic hash drifted routes to its own
+                # stage with no reason; the Requirement compiler names the drift. That
+                # entry cannot revise an invalid Requirement, so the text comes back first.
+                reason = "; ".join(requirement_compile.requirement_findings(path, require_approved=True))
+                remedy = (f"restore its approved text, since the Requirement entry cannot revise an "
+                          f"invalid Requirement, then continue through /requirement {identifier}")
+            errors.append(
+                f"{story_id} implements {identifier}, which does not route to backlog: "
+                f"stage {routing.get('stage', 'requirement')}, action {routing.get('action', 'requirement')}"
+                + (f", reason: {reason}" if reason else "")
+                + f"; {remedy}, before handoff"
+            )
+    return errors
+
+
+def application_binding_findings(docs: Path, citing: list[str]) -> list[str]:
+    """Require a backlog whose selected Stories cite Experience records to bind the current application.
+
+    Compiler-owned input_bindings bind it in either planning mode. A
+    requirement-mode backlog approved before those bindings existed is
+    transitional: until its next revision it binds through its root
+    Requirement's Experience Stage Results, and binds none when that
+    Requirement marks Experience not_applicable. A backlog without a planning
+    mode predates application receipts.
+    """
+    props, _ = backlog_compile.parse_front_matter(docs / "backlog" / "backlog.md")
+    mode = str(props.get("planning_mode", "")).strip().casefold()
+    if mode not in {"manual", "requirement"}:
+        return []
+    requirement = str(props.get("requirement_ref", "")).strip()
+    disposition, results = "", []
+    if mode == "requirement":
+        path = next((path for path in requirement_compile.requirement_paths(docs)
+                     if requirement_compile.requirement_id(path) == requirement), None)
+        try:
+            body = requirement_compile.split_note(path)[1] if path else ""
+        except (OSError, ValueError):
+            body = ""
+        disposition = next((row[1] for row in requirement_compile.impact_rows(body)
+                            if row[0] == "experience-design"), "")
+        results = requirement_compile.stage_results(body).get("experience-design", [])
+    bindings = backlog_compile.values(props, "input_bindings")
+    bound = mode == "manual" or bool(bindings)
+    label = (f"the {mode}-mode input_bindings" if bound
+             else f"root Requirement {requirement}'s Experience Stage Results")
+    refs: list[str] = []
+    problems: list[str] = []
+    if bound:
+        rows, problems = backlog_compile.verify_input_bindings(
+            docs, [binding for binding in bindings if binding.startswith("experience-design|")],
+            "backlog/backlog.md")
+        refs = [reference for _stage, reference, _digest in rows]
+    elif disposition == "not_applicable":
+        problems.append(f"root Requirement {requirement} marks experience-design not_applicable")
+    else:
+        refs = [reference for reference, _digest in results]
+        for reference, digest in results:
+            _receipt, invalid = stage_package.verify(
+                docs, "experience-design", reference, digest,
+                require_committed=True, require_strict_current=True)
+            problems.extend(invalid)
+    if not refs and not problems:
+        problems.append(f"{label} hold no application receipt")
+    elif refs and not requirement_compile.valid_experience_receipt_refs(refs, docs):
+        problems.insert(0, f"{label} are not the current application with its exact process receipts")
+    if not problems:
+        return []
+    current = next((str(item["result_ref"]) for item in stage_package.candidates(docs, "experience-design")
+                    if item.get("result_type") == "experience-application"), "")
+    if mode == "manual":
+        remedy = "begin a manual-mode backlog revision whose --input-ref values pin it"
+    elif disposition == "not_applicable":
+        remedy = "begin a requirement-mode backlog revision that pins it with --input-ref"
+    else:
+        remedy = (f"rebind {requirement}'s Experience stage through /requirement {requirement}, "
+                  "then begin a requirement-mode backlog revision that binds it")
+    return [
+        f"{', '.join(citing)} {'cites' if len(citing) == 1 else 'cite'} experience_refs, but the backlog "
+        f"does not bind the globally current {current or 'application receipt, and none resolves now'}: "
+        + "; ".join(problems) + f"; {remedy}, before handoff"
+    ]
+
+
+def handoff_binding_findings(docs: Path, story_paths: dict[str, str]) -> list[str]:
+    """Refuse a selection whose Stories rest on non-current upstream bindings.
+
+    A reserved Delivery keeps verifying its pinned inputs historically, so these
+    rules apply only when the proposal is rendered and at scope approval: every
+    Requirement a selected Story implements must route to backlog, and a
+    selection that cites Experience records needs the backlog to bind the
+    globally current application receipt.
+    """
+    stories = {story_id: backlog_compile.parse_front_matter(docs / path)[0]
+               for story_id, path in story_paths.items()}
+    citing = sorted(story_id for story_id, props in stories.items()
+                    if backlog_compile.values(props, "experience_refs"))
+    errors = implemented_requirement_findings(docs, stories)
+    if citing:
+        errors.extend(application_binding_findings(docs, citing))
+    return errors
+
+
+# One read-only candidate snapshot serves the historical read and the handoff check.
+@stage_package.candidate_session()
 def approve_scope(args) -> int:
     docs = docs_root(args.docs)
     root, errors = delivery_findings(docs, args.delivery)
@@ -701,6 +967,12 @@ def approve_scope(args) -> int:
     dod = delivery_root(docs) / "definition-of-done.md"
     if not dod.exists() or split_note(dod)[0].get("status") != "approved":
         errors.append("Definition of Done must be approved before scope approval")
+    # Scope approval is the handoff: the selected Stories' upstream bindings must
+    # be current now, while every later phase keeps the historical read above.
+    if not errors:
+        items = [split_note(item_path)[0] for item_path in sorted(root.glob("items/*/item.md"))]
+        errors.extend(handoff_binding_findings(
+            docs, {str(item["story_id"]): str(item["story_path"]) for item in items}))
     if errors:
         print(json.dumps({"ok": False, "errors": errors}, indent=2)); return 1
     props["status"] = "scope_approved"
@@ -887,6 +1159,8 @@ def reopen_findings(reopen: list[str], item_records: list[tuple[Path, dict]]) ->
 # merge-pr merges a Delivery PR only on green provider checks, so execution
 # approval requires a GitHub workflow that the Delivery PR runs: a `.yml` or
 # `.yaml` file directly in `.github/workflows/`, the only place GitHub reads.
+# An approved Verification Contract that declares an external source of those
+# checks lifts the requirement.
 # The check reads lines instead of parsing YAML to stay dependency-free. It
 # accepts a top-level `on` key, bare or quoted, whose value is one event or a
 # one-line flow sequence, or whose direct children are event keys or block
@@ -1050,9 +1324,28 @@ def pull_request_workflow_findings(docs: Path, delivery: str, remote: str = "ori
     types = " or ".join(filter(None, (", ".join(names[:-1]), names[-1])))
     return [f"Execution approval requires a workflow in .github/workflows/ triggered by pull_request "
             f"or pull_request_target, listing no activity types or including {types}, since merge-pr "
-            f"needs a green check on the Delivery PR; none {where}. Materialize one with "
+            f"needs a green check on the Delivery PR; none {where}. When the checks come from outside "
+            "the repository's workflows, declare pull_request_check_source: external in an approved "
+            "Verification Contract revision instead; otherwise materialize the workflow with "
             "operation_compile.py render-ci as the CI bootstrap contract "
             f"(skill-content/setup/references/ci-bootstrap.md) describes{remedy}"]
+
+
+def approved_pull_request_checks(docs: Path) -> dict:
+    """Where the approved current Verification Contract declares the Delivery PR checks come from.
+
+    Without such a contract, approval is refused anyway and the default stands.
+    """
+    receipt, errors = operation_compile.check_contract(docs, "verification")
+    props = {}
+    if not errors and receipt.get("current"):
+        props, _body = operation_compile.parse(operation_compile.contract_path(docs, "verification"))
+    source, provider = operation_compile.pull_request_checks(props)
+    if source != "external":
+        return {"source": source}
+    return {"source": source, "provider": provider,
+            "merge_requirement": "No repository workflow is required, but merge-pr still merges the "
+                                 f"Delivery PR only on green checks, so {provider} must report them on it"}
 
 
 def approve_execution(args) -> int:
@@ -1079,7 +1372,9 @@ def approve_execution(args) -> int:
     plan_errors = source_errors + reopen_findings(reopen, item_records)
     if not plan_errors:
         plan_errors = execution_plan_findings(root, sources, docs)
-    plan_errors += pull_request_workflow_findings(docs, args.delivery, getattr(args, "remote", "origin"))
+    pull_request_checks = approved_pull_request_checks(docs)
+    if pull_request_checks["source"] != "external":
+        plan_errors += pull_request_workflow_findings(docs, args.delivery, getattr(args, "remote", "origin"))
     if plan_errors:
         print(json.dumps({"ok": False, "errors": sorted(set(plan_errors))}, indent=2)); return 1
     refreshed_sources: list[str] = []
@@ -1142,16 +1437,16 @@ def approve_execution(args) -> int:
                 )
                 ev_props = {"type": kind, "id": f"{props['id']}-{story}-{'CR' if kind == 'code-review' else 'QA'}",
                             "title": evidence_title,
-                            "status": status, "derives_from": [link(str(item_path.relative_to(docs)), item_props["title"])],
+                            "status": status, "derives_from": [link(item_path.relative_to(docs).as_posix(), item_props["title"])],
                             "item_plan_hash": item_props["item_plan_hash"], "tags": [f"doc/{kind}", f"status/{status}"]}
-                atomic_text(evidence, frontmatter(ev_props, body_for("item", ev_props["title"], {"Navigation": link(str(item_path.relative_to(docs)), item_props["title"])})))
+                atomic_text(evidence, frontmatter(ev_props, body_for("item", ev_props["title"], {"Navigation": link(item_path.relative_to(docs).as_posix(), item_props["title"])})))
     plan_path = root / "execution-plan.md"
     plan_subject = str(props.get("goal", props["id"])).strip()
     plan_props = {"type": "execution-plan", "id": f"{props['id']}-EXEC", "title": f"Execution approach for {plan_subject}",
                   "status": "approved", "revision": 1, "scope_hash": props["scope_hash"],
                   "item_plan_hashes": sorted(item_hashes),
                   "operation_contract_hashes": sorted(operation_hashes),
-                  "derives_from": [link(str(path.relative_to(docs)), props["id"])],
+                  "derives_from": [link(path.relative_to(docs).as_posix(), props["id"])],
                   "tags": ["doc/execution-plan", "status/approved"]}
     plan_body = body_for("execution-plan", plan_props["title"], {
         "Preconditions": "Approved backlog Story/Test Plan snapshots, the pinned Definition of Done and the exact Operation Contract hashes are current.",
@@ -1164,7 +1459,7 @@ def approve_execution(args) -> int:
         "Verification Strategy": "Each Item must bind review and verification to its exact worktree product commit before integration.",
         "Failure and Recovery": "A stale source snapshot, target conflict or missing verified writer receipt blocks activation and requires the named recovery path.",
         "Approval": "Execution approval binds this plan hash and the exact Item plan hashes listed in front matter.",
-        "Navigation": link(str(path.relative_to(docs)), props["id"]),
+        "Navigation": link(path.relative_to(docs).as_posix(), props["id"]),
     })
     plan_props["plan_hash"] = content_hash(plan_props, plan_body, exclude=MUTABLE | {"plan_hash"})
     plan_props["approved_at_utc"] = utc_now()
@@ -1180,7 +1475,7 @@ def approve_execution(args) -> int:
     atomic_text(path, frontmatter(props, body))
     print(json.dumps({"ok": True, "id": props["id"], "plan_hash": props["plan_hash"], "items": item_ids,
                       "refreshed_sources": refreshed_sources, "refreshed_delivery_pins": refreshed_delivery_pins,
-                      "rebound": rebound}, indent=2)); return 0
+                      "rebound": rebound, "pull_request_checks": pull_request_checks}, indent=2)); return 0
 
 
 def status(args) -> int:
@@ -1188,10 +1483,13 @@ def status(args) -> int:
     root = find_delivery(docs, args.delivery)
     if root is None: print(json.dumps({"ok": False, "errors": ["Delivery not found"]}, indent=2)); return 1
     props, _ = split_note(root / "delivery.md")
-    result = {"ok": True, "id": props.get("id"), "status": props.get("status"), "path": str(root),
+    state, unknown = delivery_state(root, props)
+    result = {"ok": unknown is None, "id": props.get("id"), "status": state, "path": str(root),
               "execution_plan": (root / "execution-plan.md").exists(),
               "items": sorted(path.parent.name.upper() for path in root.glob("items/*/item.md"))}
-    print(json.dumps(result, indent=2)); return 0
+    if unknown is not None:
+        result["errors"] = [unknown]
+    print(json.dumps(result, indent=2)); return 0 if unknown is None else 1
 
 
 def render(args) -> int:
@@ -1346,7 +1644,7 @@ def approve_review(args) -> int:
     review_subject = str(delivery_props.get("goal", args.delivery)).strip()
     review_props = {"type": "delivery-review", "id": f"{args.delivery}-REVIEW",
                     "title": f"Outcome review for {review_subject}",
-                    "status": "approved", "derives_from": [link(str(delivery_path_value.relative_to(docs)), args.delivery)],
+                    "status": "approved", "derives_from": [link(delivery_path_value.relative_to(docs).as_posix(), args.delivery)],
                     "plan_hash": delivery_props.get("plan_hash", "none"),
                     "reviewed_commit": reviewed_commit,
                     "reviewed_integration_commit": reviewed_integration,
@@ -1362,7 +1660,7 @@ def approve_review(args) -> int:
                     and text and text != SECTION_PLACEHOLDER}
     review_body = body_for("delivery-review", review_props["title"], {
         "Goal Outcome": delivery_props.get("goal", ""), "Verdict": "Approved for PR handoff.", **authored,
-        "Navigation": link(str(delivery_path_value.relative_to(docs)), args.delivery)})
+        "Navigation": link(delivery_path_value.relative_to(docs).as_posix(), args.delivery)})
     review_props["approval_hash"] = content_hash(review_props, review_body, exclude=MUTABLE | {"approval_hash"})
     review_props["source_hash"] = content_hash(review_props, review_body)
     atomic_text(review_path, frontmatter(review_props, review_body))
@@ -1373,16 +1671,31 @@ def approve_review(args) -> int:
     print(json.dumps({"ok": True, "review": str(review_path), "approval_hash": review_props["approval_hash"]}, indent=2)); return 0
 
 
-def record_pr(args) -> int:
-    docs = docs_root(args.docs)
-    root = find_delivery(docs, args.delivery)
+def record_pr_url(docs: Path, delivery_id: str, url: str) -> None:
+    """Record a PR URL in the local Delivery Review and move a reviewed Delivery to awaiting_merge.
+
+    It prints nothing, so open-pr can record the PR and still print only its own result.
+    """
+    root = find_delivery(docs, delivery_id)
     review = root / "delivery-review.md" if root else None
     if review is None or not review.exists():
-        print(json.dumps({"ok": False, "errors": ["Delivery Review not found"]}, indent=2)); return 1
+        raise RuntimeError("Delivery Review not found")
     props, body = split_note(review)
-    props["pull_request_url"] = args.url
+    props["pull_request_url"] = url
     props["source_hash"] = content_hash(props, body, exclude=MUTABLE - {"pull_request_url"})
     atomic_text(review, frontmatter(props, body))
+    delivery_path_value = root / "delivery.md"
+    delivery_props, delivery_body = split_note(delivery_path_value)
+    recorded = pr_recorded_props(delivery_props, delivery_body)
+    if recorded is not None:
+        atomic_text(delivery_path_value, frontmatter(recorded, delivery_body))
+
+
+def record_pr(args) -> int:
+    try:
+        record_pr_url(docs_root(args.docs), args.delivery, args.url)
+    except RuntimeError as exc:
+        print(json.dumps({"ok": False, "errors": [str(exc)]}, indent=2)); return 1
     print(json.dumps({"ok": True, "pull_request_url": args.url}, indent=2)); return 0
 
 

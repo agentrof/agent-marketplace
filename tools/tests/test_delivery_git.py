@@ -712,6 +712,61 @@ class DeliveryGitTests(unittest.TestCase):
         self.revise_selected_story(docs)
         self.assertEqual(delivery_compile.delivery_findings(docs, "DLV-001")[1], [])
 
+    def test_delivery_recorded_while_in_review_is_merged_by_its_pr_merge(self):
+        """A PR recorded before the record moved the Delivery to awaiting_merge left
+        it in review; a merge of that recorded head closes it all the same."""
+        temporary, project, _docs, _product_tip, _intent = self.prepare_pr_intent()
+        self.addCleanup(remove_temporary, temporary)
+        with mock.patch("delivery_provider.GitHubProvider", self.fake_provider_type({})), \
+                mock.patch("delivery_compile.pr_recorded_props", return_value=None):
+            delivery_git.open_pr(project, "DLV-001")
+        merged, integration = (checkout / "workspace/docs" for checkout in self.merge_and_integration_checkouts(project))
+        package = delivery_compile.find_delivery(merged, "DLV-001")
+        self.assertEqual(delivery_compile.split_note(package / "delivery.md")[0]["status"], "review")
+        self.assertEqual(self.reported_status(merged), "merged")
+        self.assertEqual(self.reported_status(integration), "review")
+        for docs in (merged, integration):
+            self.revise_selected_story(docs)
+        self.assertEqual(delivery_compile.delivery_findings(merged, "DLV-001")[1], [])
+        self.assertIn("Delivery backlog_package_hash is stale against the approved backlog",
+                      delivery_compile.delivery_findings(integration, "DLV-001")[1])
+
+    def test_reopen_after_the_pr_record_does_not_prove_a_merge(self):
+        """reopen-item writes a two-parent control commit whose second parent is the
+        recorded PR head. Only the provider's merge of the re-recorded head closes
+        the Delivery."""
+        temporary, project, docs, _product_tip, _intent = self.prepare_pr_intent()
+        self.addCleanup(remove_temporary, temporary)
+        state: dict = {}
+        with mock.patch("delivery_provider.GitHubProvider", self.fake_provider_type(state)):
+            record = delivery_git.open_pr(project, "DLV-001")["integration"]
+        reopened = delivery_git.reopen_item(project, "DLV-001", "AUTH-01")
+        self.assertEqual(delivery_git.run_git(project, "rev-parse", reopened["item"] + "^2"), record)
+        worktree = Path(reopened["worktree"])
+        self.assertEqual(self.reported_status(worktree / "workspace/docs"), "awaiting_merge")
+        self.commit_item_product_change(str(worktree), "def authenticate():\n    return 'v2'\n")
+        self.assertEqual(self.approve_item_evidence(str(worktree)), 0)
+        delivery_git.push_item(project, "DLV-001", "AUTH-01")
+        integrated = delivery_git.integrate_item(project, "DLV-001", "AUTH-01")["integration"]
+        view = Path(temporary.name) / "integration-view"
+        subprocess.run(["git", "-C", str(project), "worktree", "add", "-q", "--detach", str(view), integrated], check=True)
+        self.assertEqual(self.reported_status(view / "workspace/docs"), "awaiting_merge")
+        review = type("Args", (), {"docs": str(docs), "delivery": "DLV-001",
+                                   "reviewed_commit": integrated, "reviewed_integration_commit": integrated})
+        self.assertEqual(delivery_compile.approve_review(review), 0)
+        delivery_git.publish_delivery_review(project, "DLV-001")
+        with mock.patch("delivery_provider.GitHubProvider", self.fake_provider_type(state)):
+            rerecorded = delivery_git.open_pr(project, "DLV-001")
+            delivery_git.merge_pr(project, "DLV-001")
+        self.assertTrue(rerecorded["adopted"])
+        checkout = Path(temporary.name) / "main-after-merge"
+        subprocess.run(["git", "clone", "-q", "-c", "gc.auto=0", str(project / "remote.git"), str(checkout)], check=True)
+        self.assertEqual(delivery_git.run_git(checkout, "rev-parse", "HEAD^2"), rerecorded["integration"])
+        self.assertEqual(self.reported_status(checkout / "workspace/docs"), "merged")
+        self.revise_selected_story(view / "workspace/docs")
+        self.assertIn("Delivery backlog_package_hash is stale against the approved backlog",
+                      delivery_compile.delivery_findings(view / "workspace/docs", "DLV-001")[1])
+
     def test_scope_cancellation_projection_is_sorted_and_closed(self):
         stories = {
             "AUTH-02": {"disposition": "not_started", "tip": "none"},

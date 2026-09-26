@@ -316,19 +316,25 @@ merge method is a merge commit; squash and rebase results fail closed. Release
 Management is not part of Delivery closure.
 
 The tracked status stays `awaiting_merge` after the merge, because the target
-branch receives the PR head's bytes. The Delivery compiler derives `merged`
-offline from Git: the current branch reaches, on any path, a two-parent merge
-whose second parent is the Delivery's recorded PR head, identified by its
-record, Delivery and intent trailers. A later Delivery's Integration branch
-therefore still sees the target's merge after a target refresh brought it in
-through a second parent. The one caveat is that a manual merge of the
-Integration branch into any other branch also counts as proof; the controlled
-Integration refs make that unlikely. Without that proof, for example on the
-Integration branch itself, after a fast-forward or squash, or outside a Git
-checkout, the Delivery stays `awaiting_merge` and is still checked against its
-current approved sources. A merged Delivery keeps its pinned historical
-sources, as a cancelled one does. The Delivery map shows the tracked status,
-so the Integration branch and the target branch render the same map.
+branch receives the PR head's bytes. The Delivery map shows that tracked
+status, so the Integration branch and the target branch render the same map.
+The Delivery compiler derives `merged` offline from Git for a Delivery in
+`awaiting_merge`, or in `review` when its PR was recorded before the record
+set `awaiting_merge`. The proof is a two-parent merge that the current branch
+reaches on any path, whose second parent is the Delivery's recorded PR head,
+identified by its record, Delivery and intent trailers, and whose own message
+carries no `Agentrof-Record` trailer. The coordinator writes that trailer on
+every commit it creates, so its own two-parent commits never count, such as
+the `reopen-item` commit whose second parent is the recorded PR head; a
+provider merge commit or a manual `git merge` does. A later Delivery's
+Integration branch therefore still sees the target's merge after a target
+refresh brought it in through a second parent. The one caveat is that a manual
+merge of the Integration branch into any other branch also counts as proof;
+the controlled Integration refs make that unlikely. Without that proof, for
+example on the Integration branch itself, after a fast-forward or squash, or
+outside a Git checkout, the Delivery keeps its tracked status and is still
+checked against its current approved sources. A merged Delivery keeps its
+pinned historical sources, as a cancelled one does.
 
 ## Target changes, recovery and cancellation
 

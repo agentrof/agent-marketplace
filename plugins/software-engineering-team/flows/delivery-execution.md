@@ -50,10 +50,12 @@ The Git coordinator first publishes the approved Review, then
 publishes one durable PR-creation intent and records the provider URL as its
 exact descendant. That record is the PR head and moves the reviewed Delivery
 to `awaiting_merge`. The compiler reports `merged` only when the current
-branch reaches, on any path, a two-parent merge of that exact head; a manual
-merge of the Integration branch into another branch would also count. A
-merged Delivery keeps its pinned sources, and the Delivery map keeps the
-tracked status.
+branch reaches, on any path, a two-parent merge of that exact head that
+carries no `Agentrof-Record` trailer, also for a PR recorded while the
+Delivery stayed in `review`. Coordinator commits, such as the reopen commit,
+never count; a manual merge of the Integration branch into another branch
+would. A merged Delivery keeps its pinned sources, and the Delivery map keeps
+the tracked status.
 Provider create/merge calls are adapter-owned and must
 requery the intent and reviewed Integration head before any external mutation.
 Before Item work starts, `/deliver DLV-###` may run the internal

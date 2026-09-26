@@ -661,10 +661,13 @@ def recorded_pr_merged(docs: Path, delivery_id: str) -> bool:
     second parent is the Delivery's "Record PR" commit: its trailers name its
     record and this Delivery, and its only parent is the intent it names. The
     next Delivery's Integration reaches the target's merge only through the
-    second parent of a target refresh, so the path is not restricted. The one
-    caveat: a manual merge of the Integration branch into any other branch
-    also counts. A fast-forward, a squash, a rewritten head or a directory
-    outside a Git checkout proves nothing.
+    second parent of a target refresh, so the path is not restricted. The
+    merge itself must carry no Agentrof-Record trailer: the coordinator marks
+    every commit it writes with one, and its own two-parent commits, such as
+    the reopen commit whose second parent is the Integration head, merge
+    nothing into the target. The one caveat: a manual merge of the Integration
+    branch into any other branch also counts. A fast-forward, a squash, a
+    rewritten head or a directory outside a Git checkout proves nothing.
     """
     from delivery_git import trailer
 
@@ -686,14 +689,21 @@ def recorded_pr_merged(docs: Path, delivery_id: str) -> bool:
     # walk stops where the Delivery branched off.
     merges = _git_query(docs, "rev-list", "--merges", "--parents",
                         "HEAD", "--not", *sorted(heads), "--")
-    return any(len(fields) == 3 and fields[2] in heads
-               for fields in (line.split() for line in (merges or "").splitlines()))
+    for fields in (line.split() for line in (merges or "").splitlines()):
+        if len(fields) == 3 and fields[2] in heads:
+            _header, _, message = (_git_query(docs, "cat-file", "commit", fields[0]) or "").partition("\n\n")
+            if message and trailer(message, "Record") is None:
+                return True
+    return False
 
 
 def delivery_status(docs: Path, props: dict) -> object:
-    """Return the semantic status: a Delivery awaiting merge is merged once HEAD contains a merge of its PR head."""
+    """Return the semantic status: a Delivery in review or awaiting merge is merged once HEAD contains a merge of its PR head.
+
+    A PR recorded before the record set awaiting_merge left its Delivery in review.
+    """
     status = props.get("status")
-    if status == "awaiting_merge" and recorded_pr_merged(docs, str(props.get("id", ""))):
+    if status in {"review", "awaiting_merge"} and recorded_pr_merged(docs, str(props.get("id", ""))):
         return "merged"
     return status
 

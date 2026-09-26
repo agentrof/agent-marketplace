@@ -1161,7 +1161,7 @@ class ScopeHandoffBindingTests(unittest.TestCase):
 
     def setUp(self):
         self.temporary = tempfile.TemporaryDirectory()
-        self.addCleanup(self.temporary.cleanup)
+        self.addCleanup(remove_temporary, self.temporary)
         self.root = Path(self.temporary.name)
         self.docs = self.root / "workspace" / "docs"
         (self.docs / "maps").mkdir(parents=True)
@@ -1173,8 +1173,7 @@ class ScopeHandoffBindingTests(unittest.TestCase):
         with contextlib.redirect_stdout(io.StringIO()):
             delivery_compile.init_dod(dod)
             delivery_compile.approve_dod(dod)
-        subprocess.run(["git", "init", "-q", "-b", "main", str(self.root)], check=True)
-        subprocess.run(["git", "-C", str(self.root), "config", "gc.auto", "0"], check=True)
+        init_repository(self.root, initial_branch="main")
         self.commit("approved backlog")
 
     def commit(self, message: str) -> None:

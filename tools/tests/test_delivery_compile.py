@@ -1143,7 +1143,7 @@ class DeliveryCompilerTests(unittest.TestCase):
 
 
 class ScopeHandoffBindingTests(unittest.TestCase):
-    """Scope approval is the handoff that refuses non-current upstream bindings."""
+    """The proposal and scope approval, the handoff, refuse non-current upstream bindings."""
 
     STORY = "backlog/epics/delivery-fixture/stories/auth-01/story.md"
     TEST_PLAN = "backlog/epics/delivery-fixture/stories/auth-01/test-plan.md"
@@ -1154,6 +1154,10 @@ class ScopeHandoffBindingTests(unittest.TestCase):
     INPUT_REF_REMEDY = "begin a requirement-mode backlog revision that pins it with --input-ref, before handoff"
     REBIND_REMEDY = ("rebind REQ-002's Experience stage through /requirement REQ-002, then begin a "
                      "requirement-mode backlog revision that binds it, before handoff")
+    STALE_FINDING = ("AUTH-01 implements REQ-001, which does not route to backlog: stage business-analysis, "
+                     "action repair, reason: business-analysis/delivery/space package hash is stale or does "
+                     "not match expected hash; rebind it through the Requirement entry, /requirement REQ-001, "
+                     "before handoff")
 
     def setUp(self):
         self.temporary = tempfile.TemporaryDirectory()
@@ -1272,8 +1276,8 @@ class ScopeHandoffBindingTests(unittest.TestCase):
         """
         return mock.patch.object(backlog_compile, "validate_experience_ref")
 
-    def propose(self, *, historical_inputs: bool = False) -> None:
-        """Create the local DLV-001 proposal for AUTH-01.
+    def init(self, *, historical_inputs: bool = False) -> tuple[int, list[str]]:
+        """Propose DLV-001 for AUTH-01 and return init's exit code and errors.
 
         A new proposal reads the backlog strictly, and a strict read refuses a
         legacy-readonly input binding. This fixture's analysis, solution and
@@ -1287,9 +1291,14 @@ class ScopeHandoffBindingTests(unittest.TestCase):
         historical = mock.patch.object(
             backlog_compile, "planning_package_findings",
             side_effect=lambda docs, props, path, allow_historical=False: read(docs, props, path, allow_historical=True))
-        with (historical if historical_inputs else contextlib.nullcontext()), \
-                contextlib.redirect_stdout(io.StringIO()):
-            self.assertEqual(delivery_compile.init_delivery(args), 0)
+        output = io.StringIO()
+        with (historical if historical_inputs else contextlib.nullcontext()), contextlib.redirect_stdout(output):
+            code = delivery_compile.init_delivery(args)
+        return code, json.loads(output.getvalue()).get("errors", [])
+
+    def propose(self, *, historical_inputs: bool = False) -> None:
+        """Create the local DLV-001 proposal for AUTH-01."""
+        self.assertEqual(self.init(historical_inputs=historical_inputs), (0, []))
 
     def approve_scope(self) -> tuple[int, list[str]]:
         output = io.StringIO()
@@ -1297,33 +1306,40 @@ class ScopeHandoffBindingTests(unittest.TestCase):
             code = delivery_compile.approve_scope(type("Args", (), {"docs": str(self.docs), "delivery": "DLV-001"}))
         return code, json.loads(output.getvalue()).get("errors", [])
 
-    def implemented_selection(self) -> Path:
-        """Propose AUTH-01, which implements the current REQ-001, under root Requirement REQ-002."""
+    def implemented_selection(self, *, propose: bool = True) -> Path:
+        """Let AUTH-01 implement the current REQ-001 under root Requirement REQ-002, and propose it."""
         implemented = self.requirement("REQ-001", "account-access", ("business-analysis",))
         requirement_compile.bind_stage(implemented, "business-analysis", "business-analysis/delivery/space")
         root = self.requirement("REQ-002", "pin-acquisition")
         self.requirement_mode(root, origin_mode="manual",
                               implements=[f"[[requirements/{implemented.stem}|REQ-001]]"], **self.TECHNICAL)
         self.assertEqual(requirement_route.route(self.docs, "REQ-001")["action"], "backlog")
-        self.propose()
+        if propose:
+            self.propose()
         return implemented
 
-    def stale_requirement_selection(self) -> Path:
-        """Select AUTH-01, which implements REQ-001, then revise the analysis REQ-001 bound."""
-        implemented = self.implemented_selection()
+    def revise_analysis(self) -> None:
+        """Revise the analysis package that REQ-001's Stage Result binds."""
         space = self.docs / "business-analysis/delivery/space.md"
         space.write_text(space.read_text(encoding="utf-8") + "\nThe space gains a revised boundary.\n",
                          encoding="utf-8")
         self.commit("revise the analysis package")
+
+    def stale_requirement_selection(self) -> Path:
+        """Select AUTH-01, which implements REQ-001, then revise the analysis REQ-001 bound."""
+        implemented = self.implemented_selection()
+        self.revise_analysis()
         return implemented
+
+    def test_proposal_refuses_a_story_whose_requirement_does_not_route_to_backlog(self):
+        self.implemented_selection(propose=False)
+        self.revise_analysis()
+        self.assertEqual(self.init(), (2, [self.STALE_FINDING]))
+        self.assertIsNone(delivery_compile.find_delivery(self.docs, "DLV-001"))
 
     def test_scope_refuses_a_story_whose_requirement_has_a_stale_stage_result(self):
         self.stale_requirement_selection()
-        self.assertEqual(self.approve_scope(), (1, [
-            "AUTH-01 implements REQ-001, which does not route to backlog: stage business-analysis, "
-            "action repair, reason: business-analysis/delivery/space package hash is stale or does not "
-            "match expected hash; rebind it through the Requirement entry, /requirement REQ-001, before handoff",
-        ]))
+        self.assertEqual(self.approve_scope(), (1, [self.STALE_FINDING]))
         props, _body = delivery_compile.split_note(delivery_compile.find_delivery(self.docs, "DLV-001") / "delivery.md")
         self.assertEqual(props["status"], "scope_proposed")
 
@@ -1382,17 +1398,20 @@ class ScopeHandoffBindingTests(unittest.TestCase):
             "/requirement REQ-001, before handoff",
         ]))
 
-    def test_scope_refuses_experience_refs_when_the_root_requirement_marks_experience_not_applicable(self):
+    def test_proposal_and_scope_refuse_experience_refs_when_the_root_marks_experience_not_applicable(self):
         application, _hash = self.publish_application()
         root = self.requirement("REQ-002", "pin-acquisition")
+        finding = (f"AUTH-01 cites experience_refs, but the backlog does not bind the globally current "
+                   f"{application}: root Requirement REQ-002 marks experience-design not_applicable; "
+                   f"{self.INPUT_REF_REMEDY}")
         with self.experience_refs_resolve():
             self.requirement_mode(root, origin_mode="manual", experience_refs=[self.CHECKOUT_REF])
-            self.propose()
-            self.assertEqual(self.approve_scope(), (1, [
-                f"AUTH-01 cites experience_refs, but the backlog does not bind the globally current "
-                f"{application}: root Requirement REQ-002 marks experience-design not_applicable; "
-                f"{self.INPUT_REF_REMEDY}",
-            ]))
+            self.assertEqual(self.init(), (2, [finding]))
+            self.assertIsNone(delivery_compile.find_delivery(self.docs, "DLV-001"))
+            # A proposal rendered before init ran this check still meets it at the handoff.
+            with mock.patch.object(delivery_compile, "handoff_binding_findings", return_value=[]):
+                self.propose()
+            self.assertEqual(self.approve_scope(), (1, [finding]))
 
     def test_scope_refuses_a_root_requirement_that_binds_an_earlier_application(self):
         receipts = self.legacy_receipts()

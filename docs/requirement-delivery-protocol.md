@@ -301,9 +301,10 @@ Provider calls are elected by crash-durable receipts and are never repeated
 blindly after an ambiguous result.
 
 Closure requires provider-confirmed merge evidence for the exact reviewed
-head, successful required checks and target ancestry. The merge method is a
-merge commit; squash and rebase results fail closed. Release Management is not
-part of Delivery closure.
+head, passing provider checks with at least one success, and target ancestry.
+A skipped or neutral check passes but does not count as that success. The
+merge method is a merge commit; squash and rebase results fail closed. Release
+Management is not part of Delivery closure.
 
 ## Target changes, recovery and cancellation
 

@@ -600,6 +600,33 @@ class DeliveryGitTests(unittest.TestCase):
             self.assertEqual(delivery_git.finish_source_handoff(project)["mode"], "open")
         finally:
             remove_temporary(temporary)
+
+    def test_direct_target_update_names_the_lease_it_lost(self):
+        """A target that moves after the update call was elected is named from the refetched ref."""
+        temporary, project = self.make_project()
+        self.addCleanup(remove_temporary, temporary)
+        delivery_git.begin_source_handoff(project, "sha256:" + "a" * 64)
+        base = delivery_git.run_git(project, "rev-parse", "HEAD")
+        (project / "handoff.txt").write_text("target candidate\n", encoding="utf-8")
+        candidate = delivery_git.commit_tree(project, base, ["handoff.txt"], "Target candidate", {})
+        carrier = "refs/heads/handoff-carrier"
+        delivery_git.atomic_push(project, "origin", [(carrier, "", candidate)])
+        delivery_git.authorize_target_update(project, "source_handoff", "sha256:" + "b" * 64, "origin",
+                                             "direct_target", carrier, "direct", candidate, base, "upstream")
+        (project / "concurrent.txt").write_text("concurrent target change\n", encoding="utf-8")
+        moved = delivery_git.commit_tree(project, base, ["concurrent.txt"], "Concurrent target change", {})
+        mark_call_started = delivery_git.mark_target_call_started
+
+        def move_target_after_election(root, mode, attempt):
+            started = mark_call_started(root, mode, attempt)
+            delivery_git.atomic_push(root, "origin", [("refs/heads/main", base, moved)])
+            return started
+
+        with mock.patch.object(delivery_git, "mark_target_call_started", side_effect=move_target_after_election):
+            code, message = self.refused_finding(lambda: delivery_git.apply_target_update(project, "source_handoff"))
+        self.assertEqual((code, message), ("DELIVERY_LEASE_LOST", "a leased ref moved, so the atomic push changed "
+                                                                  f"no ref: refs/heads/main is {moved}, leased as {base}"))
+        self.assertEqual(delivery_git.remote_oid(project, "origin", "refs/heads/main"), moved)
     def test_open_and_merge_pr_use_the_exact_reviewed_integration_head(self):
         temporary, project, _docs, product_tip, intent = self.prepare_pr_intent()
         try:

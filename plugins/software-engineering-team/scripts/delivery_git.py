@@ -2870,14 +2870,7 @@ def apply_target_update(project_root: Path, mode: str = "source_handoff",
         receipt = mark_target_call_started(root, mode, attempt)
     if carrier == "direct_target":
         target_ref = f"refs/heads/{target_branch}"
-        push = subprocess.run(
-            ["git", "push", "--atomic", remote,
-             f"--force-with-lease={target_ref}:{base}",
-             f"{values['Target-Carrier-Head']}:{target_ref}"],
-            cwd=root, text=True, capture_output=True, check=False,
-        )
-        if push.returncode:
-            raise RuntimeError(push.stderr.strip() or "direct target update was rejected")
+        atomic_push(root, remote, [(target_ref, base, values["Target-Carrier-Head"])])
         verified = mark_target_verified(root, mode, attempt)
         return {"ok": True, "mode": mode, "carrier": carrier,
                 "target": target_ref, "target_oid": values["Target-Carrier-Head"],

@@ -26,9 +26,10 @@ name, per-file write targets). Bash pre/post snapshots guard both vault
 inventory and the machine-managed projection of workspace/config.json.
 The inventory stays in the project runtime. A private, short-lived recovery
 capsule outside the command's project tree lets post restore the config even
-when that command removes its project-local snapshot. When the command removes
-the whole project root, nothing protected remains there, so post releases the
-guard state and allows the command. Stdlib only.
+when that command removes its project-local snapshot. When the project root no
+longer exists at its recorded path after the command, removed or moved away,
+nothing protected remains there, so post releases the guard state and allows
+the command. Stdlib only.
 """
 
 from __future__ import annotations
@@ -3343,7 +3344,7 @@ def another_experience_writer_is_active(project: Path, payload: dict) -> bool:
 
 
 def project_root_removed(project: Path) -> bool:
-    """Report a recorded project root that no longer exists at all.
+    """Report a recorded project root that no longer exists at its path.
 
     Only plain absence counts: the root and any missing ancestor must be
     reported as not found, never as unreadable, looping or not a directory,
@@ -3617,13 +3618,13 @@ def shell_verify(payload: dict) -> int:
             and not recovery_error
             and project_root_removed(project)
         ):
-            # The command removed the project it ran in, such as a Delivery
-            # coordinator removing its own Item worktree. Nothing protected
-            # remains at the capsule's project root and restore never
-            # recreates a missing project; the finally block releases the
-            # guard state.
+            # Typically the command removed the worktree it ran in, such as a
+            # Delivery coordinator removing its own Item worktree; a project
+            # moved away looks the same. Nothing protected remains at the
+            # capsule's project root and restore never recreates a missing
+            # project; the finally block releases the guard state.
             print(
-                f"vault law: this Bash command removed its project {project};"
+                f"vault law: project {project} no longer exists at its recorded path;"
                 " no protected state remains there to verify",
                 file=sys.stderr,
             )

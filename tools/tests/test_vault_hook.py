@@ -3281,7 +3281,7 @@ class VaultHookShellContractTests(unittest.TestCase):
                     self.assertEqual(
                         after.returncode, 0, after.stdout + after.stderr,
                     )
-                    self.assertIn("removed its project", after.stderr)
+                    self.assertIn("no longer exists at its recorded path", after.stderr)
                     self.assertFalse(recovery.exists())
                     self.assertFalse(os.path.lexists(item))
                     self.assertEqual(primary_config.read_bytes(), primary_bytes)
@@ -3335,7 +3335,7 @@ class VaultHookShellContractTests(unittest.TestCase):
                 after = self.run_hook("post", payload)
                 self.assertEqual(after.returncode, 2)
                 self.assertIn("project-local vault snapshot", after.stderr)
-                self.assertNotIn("removed its project", after.stderr)
+                self.assertNotIn("no longer exists at its recorded path", after.stderr)
 
     def test_project_replaced_by_an_alias_is_not_treated_as_removed(self):
         for dangling in (False, True):
@@ -3360,7 +3360,7 @@ class VaultHookShellContractTests(unittest.TestCase):
                     after = self.run_hook("post", payload)
                     self.assertEqual(after.returncode, 2)
                     self.assertIn("failed closed", after.stderr)
-                    self.assertNotIn("removed its project", after.stderr)
+                    self.assertNotIn("no longer exists at its recorded path", after.stderr)
                 finally:
                     recovery.unlink(missing_ok=True)
                     if self.hook.path_is_alias(item):
@@ -3394,7 +3394,7 @@ class VaultHookShellContractTests(unittest.TestCase):
                     after = self.run_hook("post", payload)
                     self.assertEqual(after.returncode, 2)
                     self.assertIn("failed closed", after.stderr)
-                    self.assertNotIn("removed its project", after.stderr)
+                    self.assertNotIn("no longer exists at its recorded path", after.stderr)
                     self.assertFalse(os.path.lexists(root))
                 finally:
                     recovery.unlink(missing_ok=True)

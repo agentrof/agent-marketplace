@@ -18,7 +18,9 @@ import tempfile
 from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
 
-from ba_compile import parse_frontmatter, without_generated_relations
+from ba_compile import (
+    frontmatter_item, frontmatter_scalar, parse_frontmatter, without_generated_relations,
+)
 import backlog_compile
 import operation_compile
 import requirement_compile
@@ -104,24 +106,14 @@ def docs_root(value: str | Path) -> Path:
     return path
 
 
-def scalar(value: object) -> str:
-    if isinstance(value, bool):
-        return "true" if value else "false"
-    text = str(value)
-    if (not text or text != text.strip() or ": " in text or text.startswith("[[")
-            or text.lower() in {"true", "false", "null"}):
-        return json.dumps(text, ensure_ascii=False)
-    return text
-
-
 def frontmatter(props: dict, body: str) -> str:
     rows = ["---"]
     for key, value in props.items():
         if isinstance(value, list):
             rows.append(f"{key}:")
-            rows.extend(f"  - {scalar(item)}" for item in value)
+            rows.extend(f"  - {frontmatter_item(item)}" for item in value)
         else:
-            rows.append(f"{key}: {scalar(value)}")
+            rows.append(f"{key}: {frontmatter_scalar(value)}")
     rows.extend(["---", "", body.rstrip(), ""])
     return "\n".join(rows)
 

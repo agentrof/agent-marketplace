@@ -606,7 +606,9 @@ class DeliveryCompilerTests(unittest.TestCase):
     def publish(self):
         """Give the fixture a remote whose main carries the committed workflow."""
         remote = self.root / "remote.git"
-        subprocess.run(["git", "init", "-q", "--bare", str(remote)], check=True)
+        # Name the branch: a bare repository otherwise takes the host default, and a clone
+        # of one whose HEAD names a missing branch checks out nothing.
+        subprocess.run(["git", "init", "-q", "--bare", "-b", "main", str(remote)], check=True)
         self.git("remote", "add", "origin", str(remote))
         self.git("push", "-q", "-u", "origin", "main")
         return remote

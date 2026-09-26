@@ -1,0 +1,6 @@
+{
+  "summary": "The Delivery Git coordinator's open-pr command now prints only its result envelope, whether it creates the PR or adopts an existing one. It used to print the local record-pr result first, so its output was two JSON documents that a caller could not parse as one.",
+  "components": {
+    "software-engineering-team": "patch"
+  }
+}

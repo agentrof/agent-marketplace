@@ -12,6 +12,35 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 PLUGIN = ROOT / "plugins" / "software-engineering-team"
+sys.path.insert(0, str(PLUGIN / "scripts"))
+import delivery_result  # noqa: E402
+
+# Declared finding codes that no refusal carries yet, each with why it has no emitter.
+# A code leaves this map in the change that makes a refusal emit it.
+RESERVED_FINDING_CODES = {
+    **dict.fromkeys((
+        "REQUIREMENT_ID_COLLISION", "REQUIREMENT_NOT_CURRENT", "REQUIREMENT_STAGE_ORDER",
+        "REQUIREMENT_STAGE_IMPACT_INVALID", "REQUIREMENT_NOT_INCORPORATED",
+    ), "the Requirement Flow compilers check Requirement records and report plain errors, not this envelope"),
+    "BACKLOG_REVISION_STALE": "a stale backlog pin reaches the coordinator only inside the Delivery package findings",
+    "BACKLOG_SOURCE_CLAIMED": "backlog_compile checks backlog revisions and reports plain errors, not this envelope",
+    "BACKLOG_COVERAGE_MISMATCH": "backlog_compile checks backlog coverage and reports plain errors, not this envelope",
+    "DELIVERY_SCOPE_STALE": "no verb compares the local scope_hash with the published Scope-Hash; stale sources surface in the package findings",
+    "DELIVERY_DEPENDENCY_UNMET": "start-item does not check execution_after predecessors or waits_for bindings yet",
+    "DELIVERY_ITEM_ALREADY_INTEGRATED": "a repeated integrate-item is refused at the Slot check, before the Item status is read",
+    "DELIVERY_PATH_CLAIM_EXCEEDED": "push-item does not compare the product change with the Item's path_claims yet",
+    "DELIVERY_CONTRACT_CLAIM_EXCEEDED": "no verb checks a product change against the Item's contract_claims yet",
+    "DELIVERY_CANCELLATION_FINALIZATION_STALE": "cancel-delivery finalizes in one atomic push and has no resume path that could meet a stale finalization",
+    "DELIVERY_SOURCE_HANDOFF_STALE": "no verb compares a held handoff's Source-Intent with the current sources yet",
+    "DELIVERY_FENCE_LEASE_LOST": "atomic_push reports git's refusal as is; the refetch that would classify a lost Fence lease is not implemented",
+    "DELIVERY_LEASE_LOST": "atomic_push reports git's refusal as is; the refetch that would classify a lost lease is not implemented",
+    "DELIVERY_REMOTE_ATOMIC_UNSUPPORTED": "a remote without atomic push support fails inside atomic_push, which reports git's refusal as is",
+    "DELIVERY_SLOT_DUPLICATE": "no verb refuses two Slot refs that hold the same Item tip yet",
+    "DELIVERY_PR_INTENT_STRANDED": "an elected PR call that left no PR is reported as DELIVERY_PR_UNCERTAIN; no verb declares the intent stranded",
+    "DELIVERY_POST_MERGE_TRANSITION": "merge-pr returns the merged evidence and no verb refuses a post-merge transition yet",
+    "DELIVERY_UPGRADE_CONTRACT_MISMATCH": "no verb compares the Fence Upgrade-Contract with a Delivery's upgrade barrier yet",
+    "DELIVERY_UPGRADE_HANDOFF_COLLISION": "no verb detects a colliding upgrade target handoff yet",
+}
 COORDINATOR_COMMANDS = {
     "names",
     "preflight",
@@ -86,6 +115,55 @@ class DeliveryProtocolTests(unittest.TestCase):
         self.assertEqual(len(records["records"]), len(set(records["records"])))
         self.assertEqual(records["unknown_record_policy"], "fail_closed")
         self.assertEqual(set(records["records"]), set(records["subjects"]))
+
+    def test_every_declared_finding_code_is_emitted_or_reserved(self):
+        """A declared code is carried by a shipped refusal, or reserved with the reason it is not.
+
+        A refusal carries its code as the ``CODE: detail`` prefix the result envelope
+        parses, or as the code of a structured finding. A prefix in a declared family
+        that the contract does not declare is refused too, because the envelope would
+        silently report it as DELIVERY_INPUT_INVALID.
+        """
+        declared = set(self.load_contract("delivery-result-contract.json")["finding_codes"])
+        self.assertEqual(set(delivery_result.FINDING_CODES), declared)
+        families = "|".join(sorted({code.split("_", 1)[0] for code in declared}))
+        prefix = re.compile(rf"^((?:{families})_[A-Z0-9_]+):")
+
+        def envelope_code(message: str) -> str:
+            return delivery_result.from_raw("scan", {"ok": False, "errors": [message]})["findings"][0]["code"]
+
+        emitted = {envelope_code("an unclassified refusal")}
+        undeclared = []
+        for script in sorted((PLUGIN / "scripts").glob("*.py")):
+            if script.name == "delivery_result.py":
+                continue
+            for node in ast.walk(ast.parse(script.read_text(encoding="utf-8"))):
+                if isinstance(node, ast.Dict):
+                    emitted.update(
+                        value.value for key, value in zip(node.keys, node.values)
+                        if isinstance(key, ast.Constant) and key.value == "code"
+                        and isinstance(value, ast.Constant) and value.value in declared)
+                    continue
+                if not isinstance(node, ast.Constant) or not isinstance(node.value, str):
+                    continue
+                match = prefix.match(node.value)
+                if match is None:
+                    continue
+                code = match.group(1)
+                if code not in declared:
+                    undeclared.append(f"{script.name}:{node.lineno}: {code}")
+                    continue
+                self.assertEqual(envelope_code(node.value), code, f"{script.name}:{node.lineno}")
+                emitted.add(code)
+
+        reserved = set(RESERVED_FINDING_CODES)
+        self.assertEqual(undeclared, [], "a refusal prefix names a code the contract does not declare")
+        self.assertEqual(sorted(declared - emitted - reserved), [],
+                         "emit the code from its refusal or reserve it with the reason it has none")
+        self.assertEqual(sorted(emitted & reserved), [], "an emitted code leaves the reserved map")
+        self.assertEqual(sorted(reserved - declared), [], "only a declared code can be reserved")
+        for code, reason in RESERVED_FINDING_CODES.items():
+            self.assertRegex(reason, r"^\S[^\n]*$", code)
 
     def test_runtime_record_emitters_match_the_closed_registry(self):
         source = (PLUGIN / "scripts/delivery_git.py").read_text(encoding="utf-8")

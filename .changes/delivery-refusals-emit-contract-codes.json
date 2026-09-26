@@ -1,0 +1,6 @@
+{
+  "summary": "Delivery coordinator refusals now report the finding code the result contract declares for them, such as DELIVERY_PR_STATE_INVALID, DELIVERY_PR_HEAD_BASE_MISMATCH, DELIVERY_MERGE_PROOF_INVALID, DELIVERY_FENCE_MODE, DELIVERY_ITEM_NOT_READY or DELIVERY_WORKTREE_UNSAFE, instead of DELIVERY_INPUT_INVALID, and keep their message. The target refresh and activation refusals that began with claimed_source_violation or target convergence required now report DELIVERY_TARGET_SOURCE_VIOLATION and DELIVERY_TARGET_CONVERGENCE_REQUIRED. A refusal with no matching declared code still reports DELIVERY_INPUT_INVALID.",
+  "components": {
+    "software-engineering-team": "patch"
+  }
+}

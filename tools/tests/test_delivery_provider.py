@@ -210,6 +210,53 @@ class DeliveryProviderTests(unittest.TestCase):
                                  ["DELIVERY_REQUIRED_CHECK_FAILED"])
                 self.assertTrue(result["findings"][0]["message"].startswith("GitHub required check"))
 
+    def test_provider_refusals_report_their_finding_codes(self):
+        """A provider refusal reaches the result envelope under its own code, with its words intact."""
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            subprocess.run(["git", "init", "-q", str(root)], check=True)
+            subprocess.run(["git", "-C", str(root), "remote", "add", "origin", "https://gitlab.com/a/b.git"], check=True)
+            subprocess.run(["git", "-C", str(root), "remote", "add", "owner", "https://github.com/agentrof"], check=True)
+            provider = self.github_provider()
+            url = "https://github.com/agentrof/example/pull/17"
+
+            def without_gh():
+                with patch.object(delivery_provider.shutil, "which", return_value=None):
+                    delivery_provider.run_gh(root, "pr", "list")
+
+            def when_gh_prints(output, call):
+                with patch.object(delivery_provider, "run_gh", return_value=output):
+                    call()
+
+            def merge_then_read(response):
+                with patch.object(delivery_provider, "run_gh", side_effect=["", json.dumps(response)]):
+                    provider.merge_commit(url, "a" * 40)
+
+            for code, message, refusal in (
+                ("DELIVERY_PROVIDER_UNSUPPORTED", "Delivery PR provider requires a GitHub remote",
+                 lambda: delivery_provider.repository_from_remote(root)),
+                ("DELIVERY_PROVIDER_UNSUPPORTED", "GitHub remote must identify exactly owner/repository",
+                 lambda: delivery_provider.repository_from_remote(root, "owner")),
+                ("DELIVERY_PROVIDER_UNSUPPORTED", "GitHub provider requires the authenticated gh CLI", without_gh),
+                ("DELIVERY_PR_UNCERTAIN", "GitHub returned invalid PR JSON",
+                 lambda: when_gh_prints("not json", lambda: provider.list_pull_requests("head", "main"))),
+                ("DELIVERY_PR_UNCERTAIN", "GitHub did not return a canonical PR URL",
+                 lambda: when_gh_prints("", lambda: provider.create_draft("head", "main", "Title", "Body"))),
+                ("DELIVERY_MERGE_PROOF_INVALID", "GitHub PR merge call returned before the PR was merged",
+                 lambda: merge_then_read({"url": url, "state": "OPEN", "headRefOid": "a" * 40})),
+                ("DELIVERY_MERGE_PROOF_INVALID", "GitHub PR has no provider-confirmed merge commit",
+                 lambda: merge_then_read({"url": url, "state": "MERGED", "headRefOid": "a" * 40})),
+                ("DELIVERY_PR_HEAD_BASE_MISMATCH", "GitHub PR head changed during merge",
+                 lambda: merge_then_read({"url": url, "state": "MERGED", "headRefOid": "c" * 40,
+                                          "mergeCommit": {"oid": "b" * 40}})),
+            ):
+                with self.subTest(message=message):
+                    with self.assertRaises(delivery_provider.ProviderError) as refused:
+                        refusal()
+                    result = delivery_result.from_raw("merge-pr", {"ok": False, "errors": [str(refused.exception)]})
+                    self.assertEqual([(finding["code"], finding["message"]) for finding in result["findings"]],
+                                     [(code, message)])
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -575,9 +575,11 @@ class DeliveryCompilerTests(unittest.TestCase):
     def test_execution_approval_evaluates_pull_request_activity_types(self):
         plan_args = self.scope_ready_for_execution()
         workflow = self.root / ".github" / "workflows" / "tests.yml"
-        # This repository's release workflow uses this form; it runs only when a PR closes.
+        # This repository's release workflow uses the first form; it runs only when a PR closes.
+        # Opening and reopening check earlier heads than the one that merge-pr reads.
         for trigger, expected in (("on:\n  pull_request_target:\n    types: [closed]\n", 1),
-                                  ("on:\n  pull_request_target:\n    types: [closed, opened]\n", 0)):
+                                  ("on:\n  pull_request_target:\n    types: [opened, reopened]\n", 1),
+                                  ("on:\n  pull_request_target:\n    types: [closed, synchronize]\n", 0)):
             with self.subTest(trigger=trigger):
                 workflow.write_text(trigger + WORKFLOW_JOBS, encoding="utf-8")
                 self.commit_workflows()
@@ -589,7 +591,8 @@ class DeliveryCompilerTests(unittest.TestCase):
             "scalar of another type": ("on:\n  pull_request:\n    types: closed\n", set()),
             "counted scalar": ("on:\n  pull_request:\n    types: synchronize\n", {"pull_request"}),
             "block list of other types": ("on:\n  pull_request:\n    types:\n      - closed\n      - labeled\n", set()),
-            "block list with a counted type": ("on:\n  pull_request:\n    types:\n      - labeled\n      - reopened\n", {"pull_request"}),
+            "block list with a counted type": ("on:\n  pull_request:\n    types:\n      - labeled\n      - synchronize\n", {"pull_request"}),
+            "block list of earlier heads": ("on:\n  pull_request:\n    types:\n      - opened\n      - reopened\n", set()),
             "compact block list": ("on:\n  pull_request:\n    types:\n    - closed\n    branches: [main]\n", set()),
             "types after a filter": ("on:\n  pull_request:\n    branches: [main]\n    types: [closed]\n", set()),
             "flow mapping of other types": ("on:\n  pull_request: {types: [closed], branches: [main]}\n", set()),

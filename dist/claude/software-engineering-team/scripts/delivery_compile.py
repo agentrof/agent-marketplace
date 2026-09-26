@@ -896,8 +896,11 @@ def reopen_findings(reopen: list[str], item_records: list[tuple[Path, dict]]) ->
 # other flow mappings, flow sequences that span lines, anchors, aliases or tags,
 # and it does not evaluate branch or path filters.
 PULL_REQUEST_EVENTS = {"pull_request", "pull_request_target"}
-# GitHub runs a pull request workflow for these activity types when it lists none.
-PULL_REQUEST_ACTIVITY_TYPES = {"opened", "synchronize", "reopened"}
+# merge-pr reads the checks of the head that record-pr-remote pushes after the
+# Delivery PR opens. Of the activity types GitHub runs a pull request workflow for
+# when it lists none, only synchronize fires for that push; opened and reopened
+# check earlier heads.
+PULL_REQUEST_ACTIVITY_TYPES = {"synchronize"}
 YAML_COMMENT_RE = re.compile(r"(?:^|\s)#.*$")
 TRIGGER_KEY_RE = re.compile(r"""^(?:on|"on"|'on')\s*:(?:\s+(?P<value>.*))?$""")
 FLOW_TYPES_RE = re.compile(r"""[{,]\s*["']?types["']?\s*:\s*(\[[^\]]*\]|[^,}]+)""")

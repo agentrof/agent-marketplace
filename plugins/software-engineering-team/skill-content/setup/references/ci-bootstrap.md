@@ -9,11 +9,14 @@ the project then commits it and pushes it to the target branch.
 
 A workflow counts when it is a `.yml` or `.yaml` file directly in
 `.github/workflows/`, its top-level `on` names `pull_request` or
-`pull_request_target`, and that event lists no `types` or includes `opened`,
-`synchronize` or `reopened` among them. The test job is optional, so a
-workflow that runs only the portable vault gate counts. Counting does not
-guarantee a mergeable check: `merge-pr` still refuses a job skipped by its
-`if:` condition and a green commit status, which reports no conclusion
+`pull_request_target`, and that event lists no `types` or includes
+`synchronize`. After the PR opens, `open-pr` pushes the Integration head that
+records its URL, and `merge-pr` reads that head's checks. Only `synchronize`
+runs for that push; `opened` and `reopened` alone check earlier heads. The
+test job is optional, so a workflow that runs only the portable vault gate
+counts. Counting does not guarantee a mergeable check: `merge-pr` still
+refuses a job skipped by its `if:` condition and a green commit status, which
+reports no conclusion
 ([agentrof/agent-marketplace#229](https://github.com/agentrof/agent-marketplace/issues/229)).
 
 The check reads committed trees with local Git and never fetches. GitHub runs a

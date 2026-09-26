@@ -391,6 +391,31 @@ class OperationGovernanceTests(unittest.TestCase):
                     self.assertNotIn("approved_at_utc", props)
             self.assertEqual(props["revision"], 2)
 
+    def test_refused_governance_approval_leaves_the_draft_byte_identical(self):
+        """The writer fixes a refused draft and approves it again, without a revision."""
+        sys.path.insert(0, str(SCRIPTS))
+        import delivery_governance
+
+        with tempfile.TemporaryDirectory() as temporary:
+            docs = Path(temporary) / "workspace/docs"
+            initialized = self.invoke(GOVERNANCE, "init", "--docs", str(docs), "--max-parallel", "2")
+            self.assertEqual(initialized.returncode, 0, initialized.stdout + initialized.stderr)
+            path = delivery_governance.path_for(docs)
+            props, body = delivery_governance.read(path)
+            path.write_text(delivery_governance.render({**props, "max_parallel": 0}, body), encoding="utf-8")
+            draft = path.read_bytes()
+            refused = self.invoke(GOVERNANCE, "approve", "--docs", str(docs))
+            self.assertEqual(refused.returncode, 2, refused.stdout + refused.stderr)
+            self.assertEqual(json.loads(refused.stdout)["errors"],
+                             ["approval check failed: max_parallel must be a positive integer"])
+            self.assertEqual(path.read_bytes(), draft)
+            path.write_text(delivery_governance.render({**props, "max_parallel": 3}, body), encoding="utf-8")
+            approved = self.invoke(GOVERNANCE, "approve", "--docs", str(docs))
+            self.assertEqual(approved.returncode, 0, approved.stdout + approved.stderr)
+            receipt = json.loads(approved.stdout)
+            self.assertEqual((receipt["status"], receipt["revision"], receipt["max_parallel"], receipt["current"]),
+                             ("approved", 1, 3, True))
+
     def test_operation_receipts_survive_only_generated_relation_changes(self):
         sys.path.insert(0, str(SCRIPTS))
         import delivery_compile

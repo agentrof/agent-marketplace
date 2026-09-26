@@ -72,11 +72,15 @@ def contract_path(docs: Path, kind: str) -> Path:
     return docs / "operation" / FILE_FOR[kind]
 
 
-def parse(path: Path) -> tuple[dict, str]:
-    props, body_line, error = parse_frontmatter(path.read_text(encoding="utf-8"))
+def parse_text(text: str, path: Path) -> tuple[dict, str]:
+    props, body_line, error = parse_frontmatter(text)
     if error:
         raise ValueError(f"{path}: {error}")
-    return props, "\n".join(path.read_text(encoding="utf-8").splitlines()[body_line - 1:]).strip()
+    return props, "\n".join(text.splitlines()[body_line - 1:]).strip()
+
+
+def parse(path: Path) -> tuple[dict, str]:
+    return parse_text(path.read_text(encoding="utf-8"), path)
 
 
 def render(props: dict, body: str) -> str:
@@ -154,12 +158,13 @@ def accepted_solution_ref(docs: Path, value: object) -> bool:
     return props.get("status") == "accepted" and not package_errors
 
 
-def check_contract(docs: Path, kind: str) -> tuple[dict, list[str]]:
+def check_contract(docs: Path, kind: str, text: str | None = None) -> tuple[dict, list[str]]:
+    """Check the contract file, or ``text`` as its content before it is written."""
     path = contract_path(docs, kind)
-    if not path.is_file():
+    if text is None and not path.is_file():
         return {}, [f"missing {kind} contract: {path}"]
     try:
-        props, body = parse(path)
+        props, body = parse(path) if text is None else parse_text(text, path)
     except (OSError, ValueError) as exc:
         return {}, [str(exc)]
     errors: list[str] = []
@@ -296,10 +301,12 @@ def approve(args) -> int:
     props["tags"] = [f"doc/{TYPE_FOR[args.kind]}", "status/approved"]
     props["approved_at_utc"] = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
     props["source_hash"] = source_hash(props, body)
-    path.write_text(render(props, body), encoding="utf-8")
-    value, errors = check_contract(docs, args.kind)
+    text = render(props, body)
+    # Check the text the file will hold before writing it, so a refusal leaves the draft as it was.
+    value, errors = check_contract(docs, args.kind, text)
     if errors:
         raise ValueError("approval check failed: " + "; ".join(errors))
+    path.write_text(text, encoding="utf-8")
     print(json.dumps(value, sort_keys=True))
     return 0
 

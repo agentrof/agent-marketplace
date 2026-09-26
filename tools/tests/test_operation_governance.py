@@ -224,6 +224,33 @@ class OperationGovernanceTests(unittest.TestCase):
                 self.assertEqual(approved.returncode, 0, approved.stdout + approved.stderr)
                 self.assertEqual(operation_findings(docs), [])
 
+    def test_refused_approval_leaves_the_draft_byte_identical(self):
+        """The writer fixes a refused draft and approves it again, without a revision."""
+        sys.path.insert(0, str(SCRIPTS))
+        import operation_compile
+
+        for kind, command_field in (("verification", "test_command"),
+                                    ("environment", "env_command")):
+            with self.subTest(kind=kind), tempfile.TemporaryDirectory() as temporary:
+                docs = Path(temporary) / "workspace/docs"
+                ref = self.approved_solution(docs)
+                args = ("--docs", str(docs), "--kind", kind)
+                initialized = self.invoke(OPERATION, "init", *args, "--constrained-by", f"[[{ref}|SD-001]]")
+                self.assertEqual(initialized.returncode, 0, initialized.stdout + initialized.stderr)
+                path = operation_compile.contract_path(docs, kind)
+                draft = path.read_bytes()
+                refused = self.invoke(OPERATION, "approve", *args)
+                self.assertEqual(refused.returncode, 2, refused.stdout + refused.stderr)
+                self.assertEqual(json.loads(refused.stdout)["errors"],
+                                 [f"approval check failed: {command_field} is required"])
+                self.assertEqual(path.read_bytes(), draft)
+                declare(path, **{command_field: f"make {kind}"})
+                approved = self.invoke(OPERATION, "approve", *args)
+                self.assertEqual(approved.returncode, 0, approved.stdout + approved.stderr)
+                receipt = json.loads(approved.stdout)
+                self.assertEqual((receipt["status"], receipt["revision"], receipt["current"]),
+                                 ("approved", 1, True))
+
     def test_begin_revision_leaves_no_empty_hash_for_the_vault_to_reject(self):
         """An unset hash is absent, not present and empty."""
         sys.path.insert(0, str(SCRIPTS))

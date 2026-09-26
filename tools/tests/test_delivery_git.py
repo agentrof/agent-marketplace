@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import contextlib
+import errno
 import io
 import os
 import sys
@@ -12,6 +13,7 @@ import hashlib
 import shutil
 import subprocess
 import tempfile
+import time
 import unittest
 from unittest import mock
 from pathlib import Path, PureWindowsPath
@@ -25,6 +27,7 @@ import delivery_compile  # noqa: E402
 import delivery_governance  # noqa: E402
 import delivery_provider  # noqa: E402
 import delivery_result  # noqa: E402
+import file_lock  # noqa: E402
 import operation_compile  # noqa: E402
 import architecture_compile  # noqa: E402
 import stage_package  # noqa: E402
@@ -439,6 +442,104 @@ class DeliveryGitTests(unittest.TestCase):
                     "refs/heads/agentrof/items/auth-01",
                     "refs/heads/agentrof/slots/001", "b" * 40,
                 )
+
+    def test_receipt_lock_takes_the_host_lock_around_the_transition(self):
+        """A host with fcntl blocks on an flock. Native Windows has no fcntl, so there the
+        receipt lock locks its lock file's first byte through msvcrt, waits while another
+        process holds that byte and releases it before closing the file, also when the
+        guarded transition fails (#246). An msvcrt error that is not contention raises
+        instead of waiting forever."""
+        events = []
+        outcomes = []
+
+        class Fcntl:
+            LOCK_EX, LOCK_NB, LOCK_UN = 2, 4, 8
+
+            @staticmethod
+            def flock(descriptor, operation):
+                events.append(("flock", operation))
+
+        class Msvcrt:
+            LK_UNLCK, LK_NBLCK = 0, 2
+
+            @staticmethod
+            def locking(descriptor, mode, size):
+                # msvcrt locks from the descriptor's position: record it, then move it
+                # off the first byte so every later call must seek back.
+                events.append(("locking", mode, size, os.lseek(descriptor, 0, os.SEEK_CUR)))
+                os.lseek(descriptor, 1, os.SEEK_SET)
+                if outcomes:
+                    raise outcomes.pop(0)
+
+        close = os.close
+
+        def record_close(descriptor):
+            events.append(("close",))
+            close(descriptor)
+
+        busy = PermissionError(errno.EACCES, "Permission denied")
+        failed = (RuntimeError, "^transition failed$")
+        lock_byte, unlock_byte = ("locking", Msvcrt.LK_NBLCK, 1, 0), ("locking", Msvcrt.LK_UNLCK, 1, 0)
+        wait = ("wait", file_lock.POLL_SECONDS)
+        for host, modules, raised, error, expected in (
+            ("fcntl", {"fcntl": Fcntl, "msvcrt": None}, [], failed,
+             [("flock", Fcntl.LOCK_EX), ("transition",), ("flock", Fcntl.LOCK_UN), ("close",)]),
+            ("native Windows", {"fcntl": None, "msvcrt": Msvcrt}, [busy, busy], failed,
+             [lock_byte, wait, lock_byte, wait, lock_byte, ("transition",), unlock_byte, ("close",)]),
+            ("native Windows without contention", {"fcntl": None, "msvcrt": Msvcrt},
+             [OSError(errno.EBADF, "Bad file descriptor")], (OSError, "Bad file descriptor"),
+             [lock_byte, ("close",)]),
+        ):
+            with self.subTest(host=host), tempfile.TemporaryDirectory() as temporary:
+                events.clear()
+                outcomes[:] = raised
+                path = Path(temporary) / "receipts" / "item-dlv-001-auth-01.json.lock"
+                with mock.patch.dict(sys.modules, modules), \
+                        mock.patch.object(file_lock.time, "sleep", side_effect=lambda seconds: events.append(("wait", seconds))), \
+                        mock.patch.object(delivery_git.os, "close", side_effect=record_close):
+                    with self.assertRaisesRegex(*error):
+                        with delivery_git.receipt_lock(path):
+                            events.append(("transition",))
+                            raise RuntimeError("transition failed")
+                self.assertEqual(events, expected)
+
+    def test_receipt_lock_is_released_when_its_holder_dies(self):
+        """The receipt lock belongs to the process that holds it: once that process is killed,
+        the next writer takes the lock with nothing stale to clear (#246). The host's own lock
+        runs here, msvcrt on native Windows."""
+        holder_script = (
+            "import sys, time\n"
+            "from pathlib import Path\n"
+            "sys.path.insert(0, sys.argv[1])\n"
+            "import delivery_git\n"
+            "with delivery_git.receipt_lock(Path(sys.argv[2])):\n"
+            "    print('held', flush=True)\n"
+            "    time.sleep(600)\n"
+        )
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "receipts" / "item-dlv-001-auth-01.json.lock"
+            holder = subprocess.Popen(
+                [sys.executable, "-c", holder_script,
+                 str(ROOT / "plugins" / "software-engineering-team" / "scripts"), str(path)],
+                stdout=subprocess.PIPE, text=True)
+            try:
+                self.assertEqual(holder.stdout.readline(), "held\n")
+                descriptor = os.open(path, os.O_RDWR)
+                try:
+                    self.assertFalse(file_lock.try_lock(descriptor))
+                    holder.kill()
+                    holder.wait()
+                    deadline = time.monotonic() + 30
+                    while not file_lock.try_lock(descriptor):
+                        self.assertLess(time.monotonic(), deadline, "the killed holder still holds the receipt lock")
+                        time.sleep(file_lock.POLL_SECONDS)
+                    file_lock.unlock(descriptor)
+                finally:
+                    os.close(descriptor)
+            finally:
+                holder.kill()
+                holder.wait()
+                holder.stdout.close()
 
     def test_earlier_provider_receipt_gives_way_unless_it_guards_a_pr_the_provider_does_not_show(self):
         """A new PR intent takes over the receipt an earlier intent left, which then can no longer

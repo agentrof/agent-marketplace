@@ -25,6 +25,7 @@ from urllib.parse import urlsplit
 import delivery_governance
 
 import delivery_result
+import file_lock
 from vault_check import rel_posix
 
 
@@ -46,14 +47,6 @@ FENCE_CANONICAL_KEYS = (
     "Target-Carrier-Head", "Target-Carrier-Base", "Upgrade-Phase",
     "Upgrade-Contract", "Handoff-Target",
 )
-
-
-def _fcntl_module():
-    """Load the optional POSIX lock module without adding a runtime dependency."""
-    try:
-        return __import__("fcntl")
-    except ImportError:  # pragma: no cover - Windows hosts use the adapter fallback.
-        return None
 
 
 def validate_delivery_id(value: str) -> str:
@@ -152,15 +145,13 @@ def receipt_lock(lock_path: Path):
     """Hold a crash-releasing process lock across receipt preimage transitions."""
     lock_path.parent.mkdir(parents=True, exist_ok=True)
     descriptor = os.open(lock_path, os.O_CREAT | os.O_RDWR, 0o600)
-    module = _fcntl_module()
     try:
-        if module is None:
-            raise RuntimeError("receipt locking is unavailable on this host")
-        module.flock(descriptor, module.LOCK_EX)
-        yield
+        file_lock.lock(descriptor)
+        try:
+            yield
+        finally:
+            file_lock.unlock(descriptor)
     finally:
-        if module is not None:
-            module.flock(descriptor, module.LOCK_UN)
         os.close(descriptor)
 
 

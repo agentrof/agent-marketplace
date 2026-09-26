@@ -24,6 +24,7 @@ from pathlib import Path
 
 import marketplace_paths
 import delivery_governance
+import file_lock
 import operation_compile
 import project_config
 import setup_check
@@ -230,37 +231,26 @@ def refresh_guard(root: Path, timeout_seconds: float = 3.0):
     runtime = create_runtime(root)
     guard_path = runtime / "setup-apply.guard"
     handle = guard_path.open("a+b")
-    windows = os.name == "nt"
     acquired = False
     try:
         deadline = time.monotonic() + timeout_seconds
         while time.monotonic() < deadline:
             try:
-                if windows:
-                    msvcrt = __import__("msvcrt")
-                    if guard_path.stat().st_size == 0:
-                        handle.write(b"\0")
-                        handle.flush()
-                    handle.seek(0)
-                    msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1)
-                else:
-                    fcntl = __import__("fcntl")
-                    fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
-                acquired = True
-                break
+                if os.name == "nt" and guard_path.stat().st_size == 0:
+                    handle.write(b"\0")
+                    handle.flush()
+                acquired = file_lock.try_lock(handle.fileno())
             except OSError:
-                time.sleep(0.05)
+                pass
+            if acquired:
+                break
+            time.sleep(0.05)
         if not acquired:
             raise SetupError("maintenance_busy: setup/projector maintenance lock is busy")
         yield
     finally:
-        if acquired and windows:
-            msvcrt = __import__("msvcrt")
-            handle.seek(0)
-            msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)
-        elif acquired:
-            fcntl = __import__("fcntl")
-            fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+        if acquired:
+            file_lock.unlock(handle.fileno())
         handle.close()
 
 

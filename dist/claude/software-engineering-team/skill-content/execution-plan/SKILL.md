@@ -31,3 +31,6 @@ revision prepares to reopen; only those sealed Items are rebound to the current
 Operation contracts. It does not create branches, worktrees, slots or
 remote refs. Publication is a later explicit `delivery_git.py
 publish-execution-plan` operation.
+
+Approval also carries the pull request workflow precondition that
+`flows/execution-planning.md` states.

@@ -5,6 +5,9 @@ from __future__ import annotations
 import contextlib
 import io
 import json
+import os
+import shutil
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -26,6 +29,11 @@ import vault_check  # noqa: E402
 from backlog_fixture import make_approved_backlog  # noqa: E402
 
 
+WORKFLOW_JOBS = "jobs:\n  test:\n    runs-on: ubuntu-latest\n    steps:\n      - run: make test\n"
+GIT_IDENTITY = {"GIT_AUTHOR_NAME": "Test", "GIT_AUTHOR_EMAIL": "test@example.com",
+                "GIT_COMMITTER_NAME": "Test", "GIT_COMMITTER_EMAIL": "test@example.com"}
+
+
 class DeliveryCompilerTests(unittest.TestCase):
     def setUp(self):
         self.temporary = tempfile.TemporaryDirectory()
@@ -41,9 +49,24 @@ class DeliveryCompilerTests(unittest.TestCase):
             }), encoding="utf-8"
         )
         make_approved_backlog(self.docs)
+        workflows = self.root / ".github" / "workflows"
+        workflows.mkdir(parents=True)
+        (workflows / "tests.yml").write_text("on:\n  pull_request:\n" + WORKFLOW_JOBS, encoding="utf-8")
+        # A checkout of its own keeps the workflow lookup inside this fixture.
+        self.git("init", "-q", "-b", "main")
+        self.commit_workflows()
 
     def tearDown(self):
         self.temporary.cleanup()
+
+    def git(self, *args, cwd=None):
+        subprocess.run(["git", "-C", str(cwd or self.root), *args], check=True, capture_output=True,
+                       env={**os.environ, **GIT_IDENTITY})
+
+    def commit_workflows(self, *paths):
+        """Commit the fixture's workflow directories, as a project commits its CI."""
+        self.git("add", "--all", "--", *(paths or (".github",)))
+        self.git("commit", "-q", "--allow-empty", "-m", "workflows")
 
     def approve_dod(self):
         args = type("Args", (), {"docs": str(self.docs), "title": "Project", "file": None})
@@ -459,6 +482,249 @@ class DeliveryCompilerTests(unittest.TestCase):
         )
         self.assertEqual(delivery_compile.check_delivery(plan_args), 0)
         self.assert_delivery_vault_contract()
+
+    def scope_ready_for_execution(self):
+        """Return approval arguments for one scope-approved Delivery with a claimed Item."""
+        self.approve_verification_contract()
+        self.approve_dod()
+        init_args = type("Args", (), {"docs": str(self.docs), "id": None, "slug": "auth",
+                                      "goal": "Authenticate", "outcome": None,
+                                      "target_branch": "main", "story": ["AUTH-01"]})
+        self.assertEqual(delivery_compile.init_delivery(init_args), 0)
+        plan_args = type("Args", (), {"docs": str(self.docs), "delivery": "DLV-001"})
+        self.assertEqual(delivery_compile.approve_scope(plan_args), 0)
+        item = delivery_compile.find_delivery(self.docs, "DLV-001") / "items" / "auth-01" / "item.md"
+        props, body = delivery_compile.split_note(item)
+        props["path_claims"] = ["src/auth.py"]
+        props["contract_claims"] = ["auth:session"]
+        delivery_compile.atomic_text(item, delivery_compile.frontmatter(props, body))
+        return plan_args
+
+    def approve_execution_result(self, args):
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output):
+            code = delivery_compile.approve_execution(args)
+        return code, json.loads(output.getvalue())
+
+    def delivery_bytes(self):
+        root = delivery_compile.find_delivery(self.docs, "DLV-001")
+        return {path: path.read_bytes() for path in root.rglob("*") if path.is_file()}
+
+    def test_execution_approval_refuses_without_workflows_until_render_ci_adds_one(self):
+        plan_args = self.scope_ready_for_execution()
+        shutil.rmtree(self.root / ".github")
+        self.commit_workflows()
+        before = self.delivery_bytes()
+        code, result = self.approve_execution_result(plan_args)
+        self.assertEqual(code, 1)
+        [error] = result["errors"]
+        self.assertIn("triggered by pull_request or pull_request_target", error)
+        self.assertIn("none is committed in HEAD.", error)
+        self.assertIn("operation_compile.py render-ci", error)
+        self.assertIn("skill-content/setup/references/ci-bootstrap.md", error)
+        self.assertTrue(error.endswith("then commit it"), error)
+        self.assertEqual(self.delivery_bytes(), before)
+
+        render = type("Args", (), {"docs": str(self.docs), "template": None, "include_environment": False,
+                                   "output": str(self.root / ".github" / "workflows" / "tests.yml")})
+        with contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(operation_compile.render_ci(render), 0)
+        # render-ci only writes the file; the Delivery PR carries what is committed.
+        self.assertEqual(self.approve_execution_result(plan_args)[0], 1)
+        self.commit_workflows()
+        self.assertEqual(self.approve_execution_result(plan_args)[0], 0)
+
+    def test_execution_approval_reads_committed_workflows_not_the_working_tree(self):
+        plan_args = self.scope_ready_for_execution()
+        workflows = self.root / ".github" / "workflows"
+        (workflows / "tests.yml").write_text("on: push\n" + WORKFLOW_JOBS, encoding="utf-8")
+        self.commit_workflows()
+        for state in ("untracked", "staged", "modified"):
+            with self.subTest(state=state):
+                if state == "untracked":
+                    (workflows / "pull-request.yml").write_text("on: pull_request\n" + WORKFLOW_JOBS, encoding="utf-8")
+                elif state == "staged":
+                    self.git("add", "--", ".github")
+                else:
+                    self.git("rm", "-q", "--cached", "--", ".github/workflows/pull-request.yml")
+                    (workflows / "pull-request.yml").unlink()
+                    (workflows / "tests.yml").write_text("on: pull_request\n" + WORKFLOW_JOBS, encoding="utf-8")
+                code, result = self.approve_execution_result(plan_args)
+                self.assertEqual(code, 1)
+                self.assertTrue(any("none is committed in HEAD" in error for error in result["errors"]), result)
+        self.commit_workflows()
+        self.assertEqual(self.approve_execution_result(plan_args)[0], 0)
+        # The committed trigger still counts while the working tree edits it away.
+        (workflows / "tests.yml").write_text("on: push\n" + WORKFLOW_JOBS, encoding="utf-8")
+        self.assertEqual(self.approve_execution_result(plan_args)[0], 0)
+
+    def test_execution_approval_refuses_workflows_that_pull_requests_do_not_trigger(self):
+        plan_args = self.scope_ready_for_execution()
+        workflow = self.root / ".github" / "workflows" / "tests.yml"
+        for trigger in ("on: push\n", "on: [push, workflow_dispatch]\n",
+                        "on:\n  push:\n    branches: [main]\n",
+                        "on:\n  push:\n  # pull_request:\n",
+                        "on:\n  workflow_dispatch:\n    inputs:\n      pull_request:\n        type: string\n"):
+            with self.subTest(trigger=trigger):
+                workflow.write_text(trigger + WORKFLOW_JOBS, encoding="utf-8")
+                self.commit_workflows()
+                code, result = self.approve_execution_result(plan_args)
+                self.assertEqual(code, 1)
+                self.assertTrue(any("render-ci" in error for error in result["errors"]), result)
+
+    def test_execution_approval_evaluates_pull_request_activity_types(self):
+        plan_args = self.scope_ready_for_execution()
+        workflow = self.root / ".github" / "workflows" / "tests.yml"
+        # This repository's release workflow uses the first form; it runs only when a PR closes.
+        # Opening and reopening check earlier heads than the one that merge-pr reads.
+        for trigger, expected in (("on:\n  pull_request_target:\n    types: [closed]\n", 1),
+                                  ("on:\n  pull_request_target:\n    types: [opened, reopened]\n", 1),
+                                  ("on:\n  pull_request_target:\n    types: [closed, synchronize]\n", 0)):
+            with self.subTest(trigger=trigger):
+                workflow.write_text(trigger + WORKFLOW_JOBS, encoding="utf-8")
+                self.commit_workflows()
+                self.assertEqual(self.approve_execution_result(plan_args)[0], expected)
+        forms = {
+            "inline list of other types": ("on:\n  pull_request:\n    types: [closed, labeled]\n", set()),
+            "inline list with a counted type": ("on:\n  pull_request:\n    types: [labeled, synchronize]\n", {"pull_request"}),
+            "quoted inline list": ("on:\n  pull_request:\n    types: [\"closed\", 'edited']\n", set()),
+            "scalar of another type": ("on:\n  pull_request:\n    types: closed\n", set()),
+            "counted scalar": ("on:\n  pull_request:\n    types: synchronize\n", {"pull_request"}),
+            "block list of other types": ("on:\n  pull_request:\n    types:\n      - closed\n      - labeled\n", set()),
+            "block list with a counted type": ("on:\n  pull_request:\n    types:\n      - labeled\n      - synchronize\n", {"pull_request"}),
+            "block list of earlier heads": ("on:\n  pull_request:\n    types:\n      - opened\n      - reopened\n", set()),
+            "compact block list": ("on:\n  pull_request:\n    types:\n    - closed\n    branches: [main]\n", set()),
+            "types after a filter": ("on:\n  pull_request:\n    branches: [main]\n    types: [closed]\n", set()),
+            "flow mapping of other types": ("on:\n  pull_request: {types: [closed], branches: [main]}\n", set()),
+            "flow mapping without types": ("on:\n  pull_request: {branches: [main]}\n", {"pull_request"}),
+            "one event of two counts": ("on:\n  pull_request_target:\n    types: [closed]\n  pull_request:\n", {"pull_request"}),
+        }
+        for name, (trigger, expected) in forms.items():
+            with self.subTest(form=name):
+                self.assertEqual(delivery_compile.pull_request_triggers(trigger + WORKFLOW_JOBS), expected)
+
+    def publish(self):
+        """Give the fixture a remote whose main carries the committed workflow."""
+        remote = self.root / "remote.git"
+        # Name the branch: a bare repository otherwise takes the host default, and a clone
+        # of one whose HEAD names a missing branch checks out nothing.
+        subprocess.run(["git", "init", "-q", "--bare", "-b", "main", str(remote)], check=True)
+        self.git("remote", "add", "origin", str(remote))
+        self.git("push", "-q", "-u", "origin", "main")
+        return remote
+
+    def test_execution_approval_reads_the_target_remote_tracking_ref_instead_of_head(self):
+        plan_args = self.scope_ready_for_execution()
+        remote = self.publish()
+        workflow = self.root / ".github" / "workflows" / "tests.yml"
+        # A removal that is not pushed leaves the workflow on the target the PR merges into.
+        shutil.rmtree(self.root / ".github")
+        self.commit_workflows()
+        self.assertEqual(self.approve_execution_result(plan_args)[0], 0)
+        self.git("push", "-q", "origin", "main")
+        code, result = self.approve_execution_result(plan_args)
+        self.assertEqual(code, 1)
+        [error] = result["errors"]
+        self.assertIn("none is committed in refs/remotes/origin/main.", error)
+        self.assertTrue(error.endswith("commit it, push it to main on origin and fetch"), error)
+        # A commit that is not pushed is not on the target yet.
+        workflow.parent.mkdir(parents=True)
+        workflow.write_text("on: pull_request\n" + WORKFLOW_JOBS, encoding="utf-8")
+        self.commit_workflows()
+        self.assertEqual(self.approve_execution_result(plan_args)[0], 1)
+        self.git("reset", "-q", "--hard", "origin/main")
+        # A workflow merged on the provider, here pushed from another clone, counts after a fetch.
+        clone = self.root / "clone"
+        subprocess.run(["git", "clone", "-q", str(remote), str(clone)], check=True)
+        (clone / ".github" / "workflows").mkdir(parents=True)
+        (clone / ".github" / "workflows" / "tests.yml").write_text("on: pull_request\n" + WORKFLOW_JOBS, encoding="utf-8")
+        self.git("add", "--all", "--", ".github", cwd=clone)
+        self.git("commit", "-q", "-m", "Add the pull request workflow", cwd=clone)
+        self.git("push", "-q", "origin", "main", cwd=clone)
+        self.assertEqual(self.approve_execution_result(plan_args)[0], 1)
+        self.git("fetch", "-q", "origin")
+        self.assertEqual(self.approve_execution_result(plan_args)[0], 0)
+
+    def test_execution_approval_reads_pull_request_triggers_on_the_integration_ref(self):
+        plan_args = self.scope_ready_for_execution()
+        self.publish()
+        shutil.rmtree(self.root / ".github")
+        self.commit_workflows()
+        self.git("push", "-q", "origin", "main")
+        workflow = self.root / ".github" / "workflows" / "tests.yml"
+        # Integration carries a workflow the target lacks, as when an integrated Item added CI.
+        # The PR merge commit holds it for pull_request; pull_request_target reads the default branch.
+        for trigger, expected in (("on: pull_request_target\n", 1), ("on: pull_request\n", 0)):
+            with self.subTest(trigger=trigger):
+                workflow.parent.mkdir(parents=True, exist_ok=True)
+                workflow.write_text(trigger + WORKFLOW_JOBS, encoding="utf-8")
+                self.commit_workflows()
+                self.git("push", "-q", "--force", "origin", "HEAD:refs/heads/agentrof/deliveries/dlv-001")
+                self.git("reset", "-q", "--hard", "origin/main")
+                code, result = self.approve_execution_result(plan_args)
+                self.assertEqual(code, expected)
+                if expected:
+                    self.assertTrue(any(
+                        "none is committed in refs/remotes/origin/main or "
+                        "refs/remotes/origin/agentrof/deliveries/dlv-001." in error
+                        for error in result["errors"]), result)
+
+    def test_execution_approval_reads_the_working_tree_only_outside_a_git_checkout(self):
+        if any((parent / ".git").exists() for parent in self.root.parents):
+            self.skipTest("the temporary directory lies inside a Git checkout")
+        plan_args = self.scope_ready_for_execution()
+        shutil.rmtree(self.root / ".git")
+        self.assertEqual(self.approve_execution_result(plan_args)[0], 0)
+        (self.root / ".github" / "workflows" / "tests.yml").write_text("on: push\n" + WORKFLOW_JOBS, encoding="utf-8")
+        code, result = self.approve_execution_result(plan_args)
+        self.assertEqual(code, 1)
+        self.assertTrue(any("outside a Git checkout" in error for error in result["errors"]), result)
+
+    def test_pull_request_triggers_read_each_trigger_form(self):
+        forms = {
+            "scalar": "on: {event}\n",
+            "inline list": "on: [push, {event}]\n",
+            "quoted inline list": "on: [ \"push\", '{event}' ]\n",
+            "mapping": "on:\n  push:\n    branches: [main]\n  {event}:\n    branches: [main]\n",
+            "quoted keys": "\"on\":\n  '{event}':\n",
+            "trailing comment": "on: {event}  # every change\n",
+            "mapping comments": "on:  # triggers\n  push:  # pushes\n  {event}:  # reviews\n",
+            "block list": "on:\n  - push\n  - {event}\n",
+            "compact block list": "on:\n- push\n- {event}\n",
+        }
+        # The same form naming pull_request_review must be refused, which proves the form is parsed.
+        for name, form in forms.items():
+            for event, expected in (("pull_request", {"pull_request"}),
+                                    ("pull_request_target", {"pull_request_target"}),
+                                    ("pull_request_review", set())):
+                with self.subTest(form=name, event=event):
+                    self.assertEqual(delivery_compile.pull_request_triggers(
+                        form.format(event=event) + WORKFLOW_JOBS), expected)
+
+    def test_execution_approval_reads_workflows_at_the_git_checkout_root(self):
+        # GitHub reads workflows only at the checkout root, above a project in a subdirectory.
+        product = self.root / "product"
+        product.mkdir()
+        (self.root / "workspace").rename(product / "workspace")
+        self.docs = product / "workspace" / "docs"
+        plan_args = self.scope_ready_for_execution()
+        (self.root / ".github").rename(product / ".github")
+        self.commit_workflows(".github", "product/.github")
+        self.assertEqual(self.approve_execution_result(plan_args)[0], 1)
+        (product / ".github").rename(self.root / ".github")
+        self.commit_workflows(".github", "product/.github")
+        self.assertEqual(self.approve_execution_result(plan_args)[0], 0)
+
+    def test_execution_reapproval_rechecks_the_pull_request_workflow(self):
+        plan_args = self.scope_ready_for_execution()
+        self.assertEqual(self.approve_execution_result(plan_args)[0], 0)
+        shutil.rmtree(self.root / ".github")
+        self.commit_workflows()
+        before = self.delivery_bytes()
+        code, result = self.approve_execution_result(plan_args)
+        self.assertEqual(code, 1)
+        self.assertTrue(any("render-ci" in error for error in result["errors"]), result)
+        self.assertEqual(self.delivery_bytes(), before)
 
     def execution_topology_fixture(self):
         self.approve_verification_contract()

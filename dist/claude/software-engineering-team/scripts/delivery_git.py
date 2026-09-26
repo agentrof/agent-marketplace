@@ -950,7 +950,8 @@ def _normalise_control_trailers(trailers: dict[str, str]) -> dict[str, str]:
     return value
 
 
-def resolve_target(root: Path, remote: str) -> tuple[str, str]:
+def resolve_target_branch(root: Path, remote: str) -> str:
+    """Name the target branch from local refs alone: the remote's default branch, else the current one."""
     try:
         symbolic = run_git(root, "symbolic-ref", f"refs/remotes/{remote}/HEAD")
         branch = symbolic.removeprefix(f"refs/remotes/{remote}/")
@@ -958,6 +959,11 @@ def resolve_target(root: Path, remote: str) -> tuple[str, str]:
         branch = run_git(root, "branch", "--show-current")
     if not branch:
         raise RuntimeError("target branch cannot be resolved")
+    return branch
+
+
+def resolve_target(root: Path, remote: str) -> tuple[str, str]:
+    branch = resolve_target_branch(root, remote)
     remote_line = run_git(root, "ls-remote", remote, f"refs/heads/{branch}")
     if remote_line:
         oid = remote_line.split()[0]

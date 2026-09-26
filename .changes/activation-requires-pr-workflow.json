@@ -1,0 +1,6 @@
+{
+  "summary": "Execution approval now refuses, on every approval and re-approval, until a committed workflow will run on the Delivery PR, read with local Git from the target's and the Delivery Integration's remote-tracking refs with its activity types evaluated, so a Delivery can no longer stop at merge-pr without a green check.",
+  "components": {
+    "software-engineering-team": "patch"
+  }
+}

@@ -199,6 +199,12 @@ Item marked `runtime_required: true` additionally pins the approved
 Environment Contract. Contract hash drift blocks Item start, resume, reopen and
 takeover; Operation remains outside Requirement and product-stage routing.
 
+Closure requires successful provider checks, so execution approval also
+carries the pull request workflow precondition that
+`plugins/software-engineering-team/flows/execution-planning.md` states and
+`plugins/software-engineering-team/skill-content/setup/references/ci-bootstrap.md`
+defines.
+
 ## Git topology
 
 The canonical remote refs are:

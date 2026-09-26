@@ -189,6 +189,17 @@ class ProjectConfigTests(unittest.TestCase):
             "test and environment commands": (
                 {"test_command": "make test", "env_command": "./tools/env"},
                 {"verification": {"test_command": "make test"}, "environment": {"env_command": "./tools/env"}}),
+            "test and mutation commands": (
+                {"test_command": "make test", "mutation_command": "make mutation"},
+                {"verification": {"test_command": "make test", "mutation_disposition": "required",
+                                  "mutation_command": "make mutation", "mutation_rationale": None}}),
+            "mutation command only": (
+                {"mutation_command": "make mutation"},
+                {"verification": {"test_command": None, "mutation_disposition": "required",
+                                  "mutation_command": "make mutation"}}),
+            "empty commands": (
+                {"test_command": "", "env_command": ""},
+                {"verification": {"test_command": None}, "environment": {"env_command": None}}),
         }
         for name, (config, expected) in cases.items():
             with self.subTest(case=name), tempfile.TemporaryDirectory() as temporary:

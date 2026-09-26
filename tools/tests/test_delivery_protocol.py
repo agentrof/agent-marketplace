@@ -113,6 +113,33 @@ class DeliveryProtocolTests(unittest.TestCase):
             for fields in variants:
                 self.assertLessEqual(fields, allowed, record)
 
+    def test_every_coordinator_commit_carries_a_control_record(self):
+        """The Delivery compiler never takes a merge that carries a control record
+        as proof that a PR merged, so every commit the coordinator writes carries one."""
+        tree = ast.parse((PLUGIN / "scripts/delivery_git.py").read_text(encoding="utf-8"))
+        functions = [node for node in ast.walk(tree) if isinstance(node, ast.FunctionDef)]
+        writers = {function.name for function in functions
+                   if any(isinstance(node, ast.Constant) and node.value == "commit-tree"
+                          for node in ast.walk(function))}
+        self.assertEqual(writers, {"commit_tree", "commit_replacements", "merge_candidate", "revert_merge_candidate"})
+
+        def carries_record(node: ast.AST | None, scope: ast.FunctionDef) -> bool:
+            if isinstance(node, ast.Name):
+                assigned = [assign.value for assign in ast.walk(scope) if isinstance(assign, ast.Assign)
+                            and any(isinstance(target, ast.Name) and target.id == node.id for target in assign.targets)]
+                return len(assigned) == 1 and carries_record(assigned[0], scope)
+            return isinstance(node, ast.Dict) and any(
+                isinstance(key, ast.Constant) and key.value == "Record"
+                and isinstance(value, ast.Constant) and bool(value.value)
+                for key, value in zip(node.keys, node.values))
+
+        unmarked = sorted({call.lineno for scope in functions for call in ast.walk(scope)
+                           if isinstance(call, ast.Call) and isinstance(call.func, ast.Name)
+                           and call.func.id in writers
+                           and not carries_record(call.args[4] if len(call.args) > 4 else next(
+                               (keyword.value for keyword in call.keywords if keyword.arg == "trailers"), None), scope)})
+        self.assertEqual(unmarked, [], "coordinator commits without an Agentrof-Record trailer")
+
     def test_provider_and_receipt_contracts_match_runtime_surface(self):
         provider = self.load_contract("delivery-provider-contract.json")
         receipt = self.load_contract("delivery-receipt-contract.json")

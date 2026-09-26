@@ -55,8 +55,10 @@ at least one must have succeeded, immediately before the merge
 call and in merged evidence. Squash, rebase and a different PR are never
 accepted as closure evidence. Recording the PR moves the Delivery to
 `awaiting_merge`; `status` reports `merged` only when the current branch
-reaches a two-parent merge of that recorded PR head, on any path. A manual
-merge of the Integration branch into another branch would also count.
+reaches, on any path, a two-parent merge of that recorded PR head that carries
+no `Agentrof-Record` trailer, also for a PR recorded while the Delivery stayed
+in `review`. Coordinator commits, such as the reopen commit, never count; a
+manual merge of the Integration branch into another branch would.
 Release management is deliberately out of scope. No command may infer a
 status from a branch name alone; the compiler and verified remote evidence are
 the source of semantic truth.

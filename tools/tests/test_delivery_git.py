@@ -1003,6 +1003,21 @@ class DeliveryGitTests(unittest.TestCase):
         self.assertEqual(self.reported_status(checkout / "workspace/docs"), "cancelled")
         self.assertEqual(delivery_compile.split_note(checkout / review)[1], cancellation_body)
 
+    def test_pr_opened_after_a_cancellation_has_the_cancellation_review_as_its_body(self):
+        """A Delivery cancelled after its Review approval, before any PR existed,
+        opens its PR with the published cancellation Review, while the local
+        Review still holds the approval that the cancellation replaced."""
+        temporary, project, docs, _product_tip, _intent = self.prepare_pr_intent()
+        self.addCleanup(remove_temporary, temporary)
+        review = delivery_compile.find_delivery(docs, "DLV-001").relative_to(project).as_posix() + "/delivery-review.md"
+        cancelled = delivery_git.cancel_delivery(project, "DLV-001", "The owner withdrew the request")
+        delivery_git.prepare_pr_creation(project, "DLV-001")
+        state: dict = {}
+        with mock.patch("delivery_provider.GitHubProvider", self.fake_provider_type(state)):
+            self.assertTrue(delivery_git.open_pr(project, "DLV-001")["provider_call"])
+        self.assertEqual(state["body"], delivery_git.split_remote_note(
+            project, cancelled["review"], review, delivery_compile.split_note)[1])
+
     def test_scope_cancellation_projection_is_sorted_and_closed(self):
         stories = {
             "AUTH-02": {"disposition": "not_started", "tip": "none"},

@@ -1189,7 +1189,7 @@ def open_pr(project_root: Path, delivery_id: str, remote: str = "origin") -> dic
         raise RuntimeError("Delivery package not found")
     delivery_props, _ = split_note(directory / "delivery.md")
     review_path = directory / "delivery-review.md"
-    review_props, review_body = split_note(review_path)
+    review_props, _ = split_note(review_path)
     refs = canonical_refs(delivery_id)
     integration_oid = remote_oid(root, remote, refs["integration"])
     integration_message = commit_message(root, integration_oid)
@@ -1260,6 +1260,9 @@ def open_pr(project_root: Path, delivery_id: str, remote: str = "origin") -> dic
                 "provider_call": False, "adopted": True,
                 "integration": recorded["integration"], "fence": recorded["fence"],
                 "refs": short_refs(delivery_id)}
+    # The PR body is the Review published at the intent. A cancellation writes
+    # its Review on the Integration alone, so the local Review may be stale.
+    _, review_body = split_remote_note(root, integration_oid, rel_posix(root, review_path), split_note)
     existing = provider.exact_unmerged(head, target_branch)
     if len(existing) > 1:
         raise RuntimeError("DELIVERY_PR_DUPLICATE: multiple exact unmerged Delivery PRs exist")

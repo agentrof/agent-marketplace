@@ -1,0 +1,6 @@
+{
+  "summary": "A Delivery cancelled after its Review approval and before any PR existed now opens its PR with the published cancellation Review as the body, instead of the local Review that still holds the earlier approval.",
+  "components": {
+    "software-engineering-team": "patch"
+  }
+}

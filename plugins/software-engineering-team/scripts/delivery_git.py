@@ -616,6 +616,20 @@ def worktree_pending_paths(root: Path, path: Path) -> set[str]:
     return pending
 
 
+def worktree_holds_blob(worktree: Path, relative: str, oid: str) -> bool:
+    """Whether Git would store the worktree file at *relative* as exactly blob *oid*.
+
+    Git hashes the file through its clean filter, as git add does, so a checkout
+    that converted line endings, as core.autocrlf does by default on native
+    Windows, still holds the blob it came from. A link or any other file that is
+    not regular holds no blob.
+    """
+    path = worktree / relative
+    if path.is_symlink() or not path.is_file():
+        return False
+    return run_git(worktree, "hash-object", "--path", relative, "--", str(path)) == oid
+
+
 def advance_worktree_to_candidate(root: Path, path: Path, candidate_oid: str) -> None:
     """Move a worktree only after proving the candidate already contains its bytes."""
     if worktree_pending_paths(root, path):
@@ -3897,7 +3911,8 @@ def push_item(project_root: Path, delivery_id: str, story_id: str,
     committed_item = subprocess.run(
         ["git", "--no-replace-objects", "show", f"{product_tip}:{relative_item}"],
         cwd=root, capture_output=True, check=True).stdout
-    if item_path.is_symlink() or item_path.read_bytes() != committed_item:
+    committed_oid = run_git(root, "--no-replace-objects", "rev-parse", f"{product_tip}:{relative_item}")
+    if not worktree_holds_blob(worktree, relative_item, committed_oid):
         raise RuntimeError("DELIVERY_WORKTREE_UNSAFE: Item worktree control differs from the committed product tip")
     from ba_compile import parse_frontmatter
     item_text = committed_item.decode("utf-8")

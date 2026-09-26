@@ -644,17 +644,29 @@ def pr_recorded_props(props: dict, body: str) -> dict | None:
     return recorded
 
 
-def _git_query(cwd: Path, *args: str) -> str | None:
-    """Run one read-only Git query in the checkout holding *cwd*; None when Git cannot answer."""
+class MergeStateUnknown(RuntimeError):
+    """Git cannot tell whether a Delivery's recorded PR head was merged."""
+
+
+def _git_query(cwd: Path, *args: str) -> str:
+    """Run one read-only Git query in the checkout holding *cwd*.
+
+    A query Git cannot answer raises MergeStateUnknown, so a missing or broken
+    history is reported instead of reading as an unmerged Delivery.
+    """
     try:
         result = subprocess.run(["git", "--no-replace-objects", "-C", str(cwd), *args],
                                 capture_output=True, encoding="utf-8", errors="replace", check=False)
-    except OSError:
-        return None
-    return result.stdout if result.returncode == 0 else None
+    except OSError as exc:
+        raise MergeStateUnknown(f"Delivery merge state cannot be evaluated: {exc}") from exc
+    if result.returncode:
+        detail = next((line.strip() for line in result.stderr.splitlines() if line.strip()),
+                      f"git {args[0]} exited with {result.returncode}")
+        raise MergeStateUnknown(f"Delivery merge state cannot be evaluated: {detail}")
+    return result.stdout
 
 
-def recorded_pr_merged(docs: Path, delivery_id: str) -> bool:
+def recorded_pr_merged(cwd: Path, delivery_id: str) -> bool:
     """Prove offline that HEAD contains a merge of this Delivery's recorded PR head.
 
     The proof is a two-parent merge reachable from HEAD, on any path, whose
@@ -666,19 +678,23 @@ def recorded_pr_merged(docs: Path, delivery_id: str) -> bool:
     every commit it writes with one, and its own two-parent commits, such as
     the reopen commit whose second parent is the Integration head, merge
     nothing into the target. The one caveat: a manual merge of the Integration
-    branch into any other branch also counts. A fast-forward, a squash, a
-    rewritten head or a directory outside a Git checkout proves nothing.
+    branch into any other branch also counts. A fast-forward, a squash or a
+    rewritten head proves nothing. A shallow history or a failed Git query
+    raises MergeStateUnknown instead of proving nothing.
     """
     from delivery_git import trailer
 
     if not DELIVERY_ID_RE.fullmatch(delivery_id):
         return False
-    listed = _git_query(docs, "rev-list", "--fixed-strings", "--all-match",
+    if _git_query(cwd, "rev-parse", "--is-shallow-repository").strip() == "true":
+        raise MergeStateUnknown("Delivery merge state cannot be evaluated in a shallow clone; "
+                                "fetch the full history, for example with git fetch --unshallow")
+    listed = _git_query(cwd, "rev-list", "--fixed-strings", "--all-match",
                         f"--grep=Agentrof-Record: {PR_RECORDED}",
                         f"--grep=Agentrof-Delivery: {delivery_id}", "HEAD", "--")
     heads = set()
-    for oid in (listed or "").split():
-        header, _, message = (_git_query(docs, "cat-file", "commit", oid) or "").partition("\n\n")
+    for oid in listed.split():
+        header, _, message = _git_query(cwd, "cat-file", "commit", oid).partition("\n\n")
         parents = [line.split()[1] for line in header.splitlines() if line.startswith("parent ")]
         if (trailer(message, "Record") == PR_RECORDED and trailer(message, "Delivery") == delivery_id
                 and parents == [trailer(message, "Intent")]):
@@ -687,25 +703,38 @@ def recorded_pr_merged(docs: Path, delivery_id: str) -> bool:
         return False
     # A commit that a recorded head already contains cannot merge it, so the
     # walk stops where the Delivery branched off.
-    merges = _git_query(docs, "rev-list", "--merges", "--parents",
+    merges = _git_query(cwd, "rev-list", "--merges", "--parents",
                         "HEAD", "--not", *sorted(heads), "--")
-    for fields in (line.split() for line in (merges or "").splitlines()):
+    for fields in (line.split() for line in merges.splitlines()):
         if len(fields) == 3 and fields[2] in heads:
-            _header, _, message = (_git_query(docs, "cat-file", "commit", fields[0]) or "").partition("\n\n")
-            if message and trailer(message, "Record") is None:
+            _header, _, message = _git_query(cwd, "cat-file", "commit", fields[0]).partition("\n\n")
+            if trailer(message, "Record") is None:
                 return True
     return False
 
 
-def delivery_status(docs: Path, props: dict) -> object:
-    """Return the semantic status: a Delivery in review or awaiting merge is merged once HEAD contains a merge of its PR head.
+def delivery_state(root: Path, props: dict) -> tuple[object, str | None]:
+    """Return a Delivery's semantic status and the finding that stops its derivation.
 
-    A PR recorded before the record set awaiting_merge left its Delivery in review.
+    A Delivery whose Review records its PR is merged once HEAD contains a merge
+    of its recorded PR head. That holds in awaiting_merge and in review, where a
+    PR recorded before the record set awaiting_merge left it. When Git cannot
+    tell, the tracked status comes back with the finding that says why.
     """
     status = props.get("status")
-    if status in {"review", "awaiting_merge"} and recorded_pr_merged(docs, str(props.get("id", ""))):
-        return "merged"
-    return status
+    if status not in {"review", "awaiting_merge"}:
+        return status, None
+    try:
+        review, _ = split_note(root / "delivery-review.md")
+    except (OSError, ValueError):
+        return status, None
+    if not review.get("pull_request_url"):
+        return status, None
+    try:
+        merged = recorded_pr_merged(root, str(props.get("id", "")))
+    except MergeStateUnknown as exc:
+        return status, str(exc)
+    return ("merged" if merged else status), None
 
 
 def delivery_findings(docs: Path, identifier: str, *,
@@ -743,12 +772,16 @@ def delivery_findings(docs: Path, identifier: str, *,
     # Closed Deliveries preserve their pinned historical source baseline. Every
     # mutable Delivery phase must instead prove that its selected Story/Test
     # Plan and Definition of Done are still the exact approved source bytes.
-    # A Delivery is closed as merged once HEAD contains a merge of its recorded PR head.
-    status = delivery_status(docs, props)
-    if status not in {"merged", "cancelled"}:
+    # A Delivery is closed as merged once HEAD contains a merge of its recorded
+    # PR head; when Git cannot tell, that finding stands in for both checks.
+    status, unknown = delivery_state(root, props)
+    if unknown is not None:
+        errors.append(unknown)
+    elif status not in {"merged", "cancelled"}:
         _, source_errors = delivery_source_findings(docs, root, props, compare_pins=compare_source_pins)
         errors.extend(source_errors)
-    if check_item_operation_bindings and status in {"execution_approved", "active", "review", "pr_handoff", "awaiting_merge"}:
+    if (check_item_operation_bindings and unknown is None
+            and status in {"execution_approved", "active", "review", "pr_handoff", "awaiting_merge"}):
         for item_path in item_paths:
             try:
                 item_props, _item_body = split_note(item_path)
@@ -770,7 +803,8 @@ def check_delivery(args) -> int:
             props, _ = split_note(root / "delivery.md")
         except (OSError, ValueError):
             pass
-    result = {"ok": not errors, "id": props.get("id"), "status": delivery_status(docs, props), "errors": errors}
+    status = delivery_state(root, props)[0] if root is not None else props.get("status")
+    result = {"ok": not errors, "id": props.get("id"), "status": status, "errors": errors}
     print(json.dumps(result, indent=2, ensure_ascii=False))
     return 0 if not errors else 1
 
@@ -1297,10 +1331,13 @@ def status(args) -> int:
     root = find_delivery(docs, args.delivery)
     if root is None: print(json.dumps({"ok": False, "errors": ["Delivery not found"]}, indent=2)); return 1
     props, _ = split_note(root / "delivery.md")
-    result = {"ok": True, "id": props.get("id"), "status": delivery_status(docs, props), "path": str(root),
+    state, unknown = delivery_state(root, props)
+    result = {"ok": unknown is None, "id": props.get("id"), "status": state, "path": str(root),
               "execution_plan": (root / "execution-plan.md").exists(),
               "items": sorted(path.parent.name.upper() for path in root.glob("items/*/item.md"))}
-    print(json.dumps(result, indent=2)); return 0
+    if unknown is not None:
+        result["errors"] = [unknown]
+    print(json.dumps(result, indent=2)); return 0 if unknown is None else 1
 
 
 def render(args) -> int:

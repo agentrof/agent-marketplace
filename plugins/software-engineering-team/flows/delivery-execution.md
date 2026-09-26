@@ -55,7 +55,8 @@ carries no `Agentrof-Record` trailer, also for a PR recorded while the
 Delivery stayed in `review`. Coordinator commits, such as the reopen commit,
 never count; a manual merge of the Integration branch into another branch
 would. A merged Delivery keeps its pinned sources, and the Delivery map keeps
-the tracked status.
+the tracked status. A shallow clone or a failed Git query makes `status` and
+`check` fail with an explicit finding.
 Provider create/merge calls are adapter-owned and must
 requery the intent and reviewed Integration head before any external mutation.
 Before Item work starts, `/deliver DLV-###` may run the internal

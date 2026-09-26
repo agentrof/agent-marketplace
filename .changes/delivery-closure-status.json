@@ -1,5 +1,5 @@
 {
-  "summary": "Recording a Delivery PR now moves the Delivery to awaiting_merge in the PR head itself, and the Delivery compiler reports it as merged once the current branch reaches a merge of that exact recorded head, including through a target refresh, so a merged Delivery keeps its pinned historical sources instead of failing its check after a later backlog revision. A Delivery whose PR was recorded while it stayed in review is closed the same way, and the coordinator's own commits, such as the reopen commit, never count as that merge.",
+  "summary": "Recording a Delivery PR now moves the Delivery to awaiting_merge in the PR head itself, and the Delivery compiler reports it as merged once the current branch reaches a merge of that exact recorded head, including through a target refresh, so a merged Delivery keeps its pinned historical sources instead of failing its check after a later backlog revision. A Delivery whose PR was recorded while it stayed in review is closed the same way, the coordinator's own commits, such as the reopen commit, never count as that merge, and a shallow clone or a failed Git query is reported as a finding instead of an unmerged Delivery.",
   "components": {
     "software-engineering-team": "patch"
   }

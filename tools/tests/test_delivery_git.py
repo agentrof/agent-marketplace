@@ -581,11 +581,16 @@ class DeliveryGitTests(unittest.TestCase):
             remove_temporary(temporary)
 
     @staticmethod
-    def reported_status(docs: Path) -> str:
+    def reported(docs: Path) -> tuple[int, dict]:
         output = io.StringIO()
         with contextlib.redirect_stdout(output):
-            delivery_compile.status(type("Args", (), {"docs": str(docs), "delivery": "DLV-001"}))
-        return json.loads(output.getvalue())["status"]
+            code = delivery_compile.status(type("Args", (), {"docs": str(docs), "delivery": "DLV-001"}))
+        return code, json.loads(output.getvalue())
+
+    def reported_status(self, docs: Path) -> str:
+        code, reported = self.reported(docs)
+        self.assertEqual((code, reported["ok"]), (0, True), reported)
+        return reported["status"]
 
     def merge_and_integration_checkouts(self, project: Path) -> tuple[Path, Path]:
         """Clone the remote, merge the PR head into its main with --no-ff and keep the Integration beside it."""
@@ -663,10 +668,6 @@ class DeliveryGitTests(unittest.TestCase):
         self.assertEqual(delivery_git.run_git(merged, "rev-parse", "HEAD^2"), head)
         self.assertEqual(self.reported_status(merged / "workspace/docs"), "merged")
         self.assertEqual(self.reported_status(integration / "workspace/docs"), "awaiting_merge")
-        exported = merged.parent / "exported"
-        shutil.copytree(merged / "workspace", exported / "workspace")
-        with mock.patch.dict("os.environ", {"GIT_CEILING_DIRECTORIES": str(merged.parent)}):
-            self.assertEqual(self.reported_status(exported / "workspace/docs"), "awaiting_merge")
         # The map renders tracked bytes only, so the target branch keeps the
         # Integration's map and a fresh render there changes nothing.
         map_path = merged / "workspace/docs/maps/delivery.md"
@@ -766,6 +767,49 @@ class DeliveryGitTests(unittest.TestCase):
         self.revise_selected_story(view / "workspace/docs")
         self.assertIn("Delivery backlog_package_hash is stale against the approved backlog",
                       delivery_compile.delivery_findings(view / "workspace/docs", "DLV-001")[1])
+
+    def test_merge_state_git_cannot_evaluate_is_reported(self):
+        temporary, project, _docs, _product_tip, _intent = self.prepare_pr_intent()
+        self.addCleanup(remove_temporary, temporary)
+        outside = tempfile.TemporaryDirectory()
+        self.addCleanup(remove_temporary, outside)
+        unrecorded = Path(outside.name) / "unrecorded"
+        shutil.copytree(project / "workspace", unrecorded / "workspace")
+        with mock.patch("delivery_provider.GitHubProvider", self.fake_provider_type({})):
+            delivery_git.open_pr(project, "DLV-001")
+        # A Review that records no PR leaves nothing to prove, so no history is needed.
+        with mock.patch.dict("os.environ", {"GIT_CEILING_DIRECTORIES": outside.name}):
+            self.assertEqual(self.reported_status(unrecorded / "workspace/docs"), "review")
+        merged, _integration = self.merge_and_integration_checkouts(project)
+        shallow = merged.parent / "shallow"
+        subprocess.run(["git", "clone", "-q", "--depth", "1", "-c", "gc.auto=0", merged.as_uri(), str(shallow)], check=True)
+        exported = merged.parent / "exported"
+        shutil.copytree(merged / "workspace", exported / "workspace")
+        run = subprocess.run
+
+        def failing_walk(command, *args, **kwargs):
+            if "--merges" in command:
+                return subprocess.CompletedProcess(command, 128, "", "fatal: simulated walk failure\n")
+            return run(command, *args, **kwargs)
+
+        cases = (
+            (shallow, contextlib.nullcontext(),
+             "Delivery merge state cannot be evaluated in a shallow clone; fetch the full history,"
+             " for example with git fetch --unshallow"),
+            (exported, mock.patch.dict("os.environ", {"GIT_CEILING_DIRECTORIES": str(merged.parent)}),
+             "Delivery merge state cannot be evaluated: "),
+            (merged, mock.patch("delivery_compile.subprocess.run", side_effect=failing_walk),
+             "Delivery merge state cannot be evaluated: fatal: simulated walk failure"),
+        )
+        for checkout, context, finding in cases:
+            with self.subTest(checkout=checkout.name), context:
+                docs = checkout / "workspace/docs"
+                code, reported = self.reported(docs)
+                self.assertEqual((code, reported["ok"], reported["status"]), (1, False, "awaiting_merge"))
+                self.assertEqual(len(reported["errors"]), 1, reported)
+                self.assertTrue(reported["errors"][0].startswith(finding), reported)
+                self.assertEqual(delivery_compile.delivery_findings(docs, "DLV-001")[1], reported["errors"])
+        self.assertEqual(self.reported_status(merged / "workspace/docs"), "merged")
 
     def test_scope_cancellation_projection_is_sorted_and_closed(self):
         stories = {

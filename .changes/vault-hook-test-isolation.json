@@ -1,0 +1,4 @@
+{
+  "summary": "Each vault hook shell test keeps its recovery capsules in a temporary root of its own and uses a session id unique to the run, so two overlapping local test runs can no longer read, consume or poison each other's capsules.",
+  "components": {}
+}

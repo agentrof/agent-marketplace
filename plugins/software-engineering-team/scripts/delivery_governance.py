@@ -33,12 +33,15 @@ def path_for(docs: Path) -> Path:
     return docs / RELATIVE
 
 
-def read(path: Path) -> tuple[dict, str]:
-    text = path.read_text(encoding="utf-8")
+def parse_text(text: str, path: Path) -> tuple[dict, str]:
     props, body_line, error = parse_frontmatter(text)
     if error:
         raise ValueError(f"{path}: {error}")
     return props, "\n".join(text.splitlines()[body_line - 1:]).strip()
+
+
+def read(path: Path) -> tuple[dict, str]:
+    return parse_text(path.read_text(encoding="utf-8"), path)
 
 
 def render(props: dict, body: str) -> str:
@@ -61,12 +64,13 @@ def governance_hash(props: dict, body: str) -> str:
     ).encode("utf-8")).hexdigest()
 
 
-def status(docs: Path) -> tuple[dict, list[str]]:
+def status(docs: Path, text: str | None = None) -> tuple[dict, list[str]]:
+    """Check the governance file, or ``text`` as its content before it is written."""
     path = path_for(docs)
-    if not path.is_file():
+    if text is None and not path.is_file():
         return {}, [f"missing delivery governance: {path}"]
     try:
-        props, body = read(path)
+        props, body = read(path) if text is None else parse_text(text, path)
     except (OSError, ValueError) as exc:
         return {}, [str(exc)]
     errors: list[str] = []
@@ -143,10 +147,12 @@ def approve(args) -> int:
     digest = governance_hash(props, body)
     props["governance_hash"] = digest
     props["source_hash"] = digest
-    path.write_text(render(props, body), encoding="utf-8")
-    value, errors = status(docs)
+    text = render(props, body)
+    # Check the text the file will hold before writing it, so a refusal leaves the draft as it was.
+    value, errors = status(docs, text)
     if errors:
         raise ValueError("approval check failed: " + "; ".join(errors))
+    path.write_text(text, encoding="utf-8")
     print(json.dumps(value, sort_keys=True))
     return 0
 

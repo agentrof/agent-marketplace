@@ -529,5 +529,163 @@ class ProjectVaultContractTests(unittest.TestCase):
             self.assertEqual(result.returncode, 1)
             self.assertIn("unknown top-level directory 'unknown'", result.stdout)
 
+
+class AliasOwnershipTests(unittest.TestCase):
+    """An id-shaped link alias targets the one note that owns the id."""
+
+    REVIEW = "backlog/reviews/round-9-backlog-review.md"
+    EPIC = "backlog/epics/workspace"
+
+    @classmethod
+    def setUpClass(cls):
+        if str(PLUGIN / "scripts") not in sys.path:
+            sys.path.insert(0, str(PLUGIN / "scripts"))
+        import vault_check
+
+        cls.vault_check = vault_check
+
+    @staticmethod
+    def note(title: str, *aliases: str, body: str = "") -> str:
+        rows = "".join(f"  - {alias}\n" for alias in aliases)
+        return (
+            f"---\ntitle: {title}\n"
+            + (f"aliases:\n{rows}" if rows else "")
+            + f"---\n\n# {title}\n\n{body}"
+        )
+
+    def alias_findings(self, files: dict[str, str]) -> list[tuple]:
+        """Check a vault whose review note links from body line 7 onward."""
+        with tempfile.TemporaryDirectory() as temporary:
+            docs = Path(temporary)
+            for rel, text in files.items():
+                path = docs / rel
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text(text, encoding="utf-8")
+            vault = self.vault_check.build_vault(
+                docs, self.vault_check.load_policy(POLICY)
+            )
+            findings: list = []
+            self.vault_check.check_alias_ownership(vault, findings)
+        return [(f.path, f.line, f.check, f.message) for f in findings]
+
+    def misowned(
+        self, line: int, alias: str, target: str, owner: str
+    ) -> tuple:
+        return (
+            self.REVIEW, line, "alias_ownership",
+            f"alias '{alias}' decorates a link to '{target}' but the id's"
+            f" owning note is {owner}",
+        )
+
+    def backlog_notes(self, review_body: str) -> dict[str, str]:
+        return {
+            f"{self.EPIC}/epic.md": self.note("Workspace epic", "EP-004"),
+            f"{self.EPIC}/reviews/round-4-epic-review.md": self.note(
+                "Workspace epic review", "EP-004-REVIEW-004"
+            ),
+            f"{self.EPIC}/stories/handoff/story.md": self.note(
+                "Handoff story", "ST-009"
+            ),
+            "requirements/req-001-platform-naming.md": self.note(
+                "Platform naming requirement", "REQ-001"
+            ),
+            "delivery/deliveries/dlv-001-first-slice/delivery.md": self.note(
+                "First slice delivery", "DLV-001"
+            ),
+            self.REVIEW: self.note("Backlog review", body=review_body),
+        }
+
+    def test_note_owned_id_on_another_target_is_an_error(self):
+        epic = self.EPIC
+        review = f"{epic}/reviews/round-4-epic-review"
+        requirement = "requirements/req-001-platform-naming"
+        delivery = "delivery/deliveries/dlv-001-first-slice/delivery"
+        files = self.backlog_notes(
+            f"- [[{review}|EP-004]]\n"
+            f"- [[{epic}/epic|ST-009]]\n"
+            f"- [[{delivery}|REQ-001]]\n"
+            f"- [[{requirement}|DLV-001]]\n"
+        )
+        self.assertEqual(self.alias_findings(files), [
+            self.misowned(7, "EP-004", review, f"{epic}/epic.md"),
+            self.misowned(8, "ST-009", f"{epic}/epic",
+                          f"{epic}/stories/handoff/story.md"),
+            self.misowned(9, "REQ-001", delivery, f"{requirement}.md"),
+            self.misowned(10, "DLV-001", requirement, f"{delivery}.md"),
+        ])
+
+    def test_note_owned_id_on_its_owner_passes(self):
+        epic = self.EPIC
+        files = self.backlog_notes(
+            f"- [[{epic}/epic|EP-004]]\n"
+            f"- [[{epic}/epic#^scope|EP-004]]\n"
+            f"| epic | [[{epic}/epic\\|EP-004]] |\n"
+            f"- [[{epic}/stories/handoff/story|EP-004]]\n"
+        )
+        # Only the fourth link misses its owner; the first three pass.
+        self.assertEqual(self.alias_findings(files), [
+            self.misowned(10, "EP-004", f"{epic}/stories/handoff/story",
+                          f"{epic}/epic.md"),
+        ])
+
+    def test_id_declared_by_two_notes_is_skipped(self):
+        one = "backlog/epics/alpha/stories/one/story"
+        two = "backlog/epics/alpha/stories/two/story"
+        files = {
+            f"{one}.md": self.note("Alpha story one", "ST-001"),
+            "backlog/epics/beta/stories/one/story.md": self.note(
+                "Beta story one", "ST-001"
+            ),
+            # One note listing its id twice still owns it, and a
+            # machine-directory note never competes for ownership.
+            f"{two}.md": self.note("Alpha story two", "ST-002", "ST-002"),
+            "backlog/_generated/mirror.md": self.note(
+                "Machine mirror", "ST-002"
+            ),
+            self.REVIEW: self.note(
+                "Backlog review",
+                body=f"- [[{two}|ST-001]]\n- [[{one}|ST-002]]\n",
+            ),
+        }
+        self.assertEqual(self.alias_findings(files), [
+            self.misowned(8, "ST-002", one, f"{two}.md"),
+        ])
+
+    def test_decision_and_registry_ownership_is_unchanged(self):
+        decision = "solution-design/decisions/dispatch-decision"
+        story = f"{self.EPIC}/stories/dispatch/story"
+        rules = "business-analysis/shop/domains/inventory/rules/stock-rules"
+        item = "business-analysis/shop/domains/inventory/entities/item-entity"
+        # The story and the entity also declare the ids, which never
+        # outranks the decision tree or the space registry.
+        files = {
+            f"{decision}.md": self.note("Dispatch decision", "SD-001"),
+            f"{story}.md": self.note("Dispatch story", "ST-001", "SD-001"),
+            f"{rules}.md": self.note("Stock rules"),
+            f"{item}.md": self.note("Item entity", "BR-INV-001"),
+            "business-analysis/shop/_generated/registry.json": json.dumps({
+                "ids": {"BR-INV-001": {
+                    "doc": "domains/inventory/rules/stock-rules.md"}},
+            }),
+            self.REVIEW: self.note(
+                "Backlog review",
+                body=(
+                    f"- [[{decision}|SD-001]]\n"
+                    f"- [[{story}|SD-001]]\n"
+                    f"- [[{rules}|BR-INV-001]]\n"
+                    f"- [[{item}|BR-INV-001]]\n"
+                ),
+            ),
+        }
+        self.assertEqual(self.alias_findings(files), [
+            self.misowned(8, "SD-001", story, f"{decision}.md"),
+            (
+                self.REVIEW, 10, "alias_ownership",
+                f"alias 'BR-INV-001' decorates a link to '{item}' but the"
+                f" registry declares its owner as {rules}.md",
+            ),
+        ])
+
+
 if __name__ == "__main__":
     unittest.main()

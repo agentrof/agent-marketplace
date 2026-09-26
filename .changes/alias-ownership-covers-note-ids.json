@@ -1,0 +1,6 @@
+{
+  "summary": "The vault check now refuses a link whose id-shaped alias, such as EP-004, ST-009, REQ-001 or DLV-001, targets any note other than the one whose frontmatter aliases declare that id, as it already did for decision and BA ids; an id declared by two notes is skipped rather than guessed. To repair a link the check now refuses, point it at the declaring note or give it a readable alias.",
+  "components": {
+    "software-engineering-team": "patch"
+  }
+}

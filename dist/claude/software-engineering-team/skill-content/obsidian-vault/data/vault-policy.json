@@ -399,6 +399,8 @@
     "dependency_audit_command": "text",
     "dependency_audit_workdir": "text",
     "dependency_audit_rationale": "text",
+    "pull_request_check_source": "text",
+    "pull_request_check_provider": "text",
     "env_command": "text",
     "env_workdir": "text",
     "scenarios": "multitext",
@@ -507,7 +509,7 @@
     "code_review": ["item_plan_hash", "reviewed_commit", "source_hash"],
     "verification": ["item_plan_hash", "verified_commit", "test_plan_source_hash", "source_hash"],
     "delivery_review": ["plan_hash", "reviewed_commit", "reviewed_integration_commit", "approved_at_utc", "approval_hash", "source_hash"],
-    "operation": ["revision", "constrained_by", "source_hash", "approved_at_utc", "test_command", "test_workdir", "mutation_disposition", "mutation_command", "mutation_workdir", "mutation_rationale", "dependency_audit_disposition", "dependency_audit_command", "dependency_audit_workdir", "dependency_audit_rationale", "env_command", "env_workdir", "scenarios", "tolerated_warnings", "service_catalog"],
+    "operation": ["revision", "constrained_by", "source_hash", "approved_at_utc", "test_command", "test_workdir", "mutation_disposition", "mutation_command", "mutation_workdir", "mutation_rationale", "dependency_audit_disposition", "dependency_audit_command", "dependency_audit_workdir", "dependency_audit_rationale", "pull_request_check_source", "pull_request_check_provider", "env_command", "env_workdir", "scenarios", "tolerated_warnings", "service_catalog"],
     "delivery_governance": ["revision", "max_parallel", "governance_hash", "source_hash", "approved_at_utc"]
   },
   "fragment_graph_groups": {

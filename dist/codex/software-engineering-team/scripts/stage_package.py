@@ -189,10 +189,11 @@ def tree_hash(root: Path, omitted_fields: set[str]) -> str:
 def is_committed(package_root: Path) -> bool:
     """Ignore generated relations and safe policy metadata, never authored drift."""
     import experience_application_check
+    from vault_check import rel_posix
 
     root = next((p for p in (package_root, *package_root.parents)
                  if (p / ".git").exists()), package_root.parent)
-    relative = package_root.relative_to(root)
+    relative = rel_posix(root, package_root)
 
     def safe_metadata(path: Path, *, missing: bool = False) -> bool:
         if not experience_application_check.is_os_metadata_path(path):
@@ -206,7 +207,7 @@ def is_committed(package_root: Path) -> bool:
             if not missing:
                 return False
             previous = subprocess.run(
-                ["git", "--no-replace-objects", "--literal-pathspecs", "ls-tree", "-z", "HEAD", "--", path.relative_to(root).as_posix()],
+                ["git", "--no-replace-objects", "--literal-pathspecs", "ls-tree", "-z", "HEAD", "--", rel_posix(root, path)],
                 cwd=root, capture_output=True, check=False,
             )
             rows = [row for row in previous.stdout.split(b"\0") if row]
@@ -230,11 +231,11 @@ def is_committed(package_root: Path) -> bool:
                 if not safe_metadata(path):
                     return False
         changed = subprocess.run(
-            ["git", "--no-replace-objects", "--literal-pathspecs", "diff", "--name-only", "-z", "HEAD", "--", str(relative)],
+            ["git", "--no-replace-objects", "--literal-pathspecs", "diff", "--name-only", "-z", "HEAD", "--", relative],
             cwd=root, capture_output=True, check=False,
         )
         untracked = subprocess.run(
-            ["git", "--no-replace-objects", "--literal-pathspecs", "ls-files", "--others", "--exclude-standard", "-z", "--", str(relative)],
+            ["git", "--no-replace-objects", "--literal-pathspecs", "ls-files", "--others", "--exclude-standard", "-z", "--", relative],
             cwd=root, capture_output=True, check=False,
         )
         if changed.returncode != 0 or untracked.returncode != 0:
@@ -251,7 +252,7 @@ def is_committed(package_root: Path) -> bool:
             if path.suffix != ".md" or path.is_symlink() or not path.is_file():
                 return False
             head = subprocess.run(
-                ["git", "--no-replace-objects", "show", f"HEAD:{path.relative_to(root).as_posix()}"],
+                ["git", "--no-replace-objects", "show", f"HEAD:{rel_posix(root, path)}"],
                 cwd=root, capture_output=True, check=False,
             )
             if head.returncode != 0:
@@ -268,7 +269,7 @@ def is_committed(package_root: Path) -> bool:
             if not stat.S_ISDIR(path.lstat().st_mode) and not safe_metadata(path)
         } if artifacts.is_dir() else set()
         committed_artifacts = subprocess.run(
-            ["git", "--no-replace-objects", "--literal-pathspecs", "ls-tree", "-r", "--name-only", "-z", "HEAD", "--", artifacts.relative_to(root).as_posix()],
+            ["git", "--no-replace-objects", "--literal-pathspecs", "ls-tree", "-r", "--name-only", "-z", "HEAD", "--", rel_posix(root, artifacts)],
             cwd=root, capture_output=True, check=False,
         )
         if committed_artifacts.returncode != 0:

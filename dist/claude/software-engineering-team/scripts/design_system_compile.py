@@ -12,7 +12,9 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 import stage_package
-from ba_compile import without_generated_relations as without_generated_relation_text
+from ba_compile import (
+    frontmatter_value, without_generated_relations as without_generated_relation_text,
+)
 
 HASH_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
 MACHINE_FIELDS = {
@@ -94,7 +96,7 @@ def parse_frontmatter(path: Path) -> tuple[dict, list[str], int]:
         if ":" not in value:
             raise ValueError(f"unparseable frontmatter line {index + 1}")
         key, scalar = value.split(":", 1)
-        scalar = scalar.strip().strip("\"'")
+        scalar = frontmatter_value(scalar.strip())
         fields[key.strip()] = int(scalar) if scalar.isdigit() else scalar
     if end < 0:
         raise ValueError("MASTER.md frontmatter is unterminated")

@@ -1,11 +1,13 @@
 # CI Bootstrap
 
 This is the deferred Delivery activation contract. Project setup does not
-materialize CI. `delivery_compile.py approve-execution` refuses, on every
-approval and re-approval, until a committed workflow will run on the Delivery
-PR, because `merge-pr` merges that PR only on green provider checks. When none
-exists, offer the packaged `templates/ci-tests.yml` before execution approval;
-the project then commits it and pushes it to the target branch.
+materialize CI. `merge-pr` merges a Delivery PR only on green provider checks,
+so `delivery_compile.py approve-execution` refuses, on every approval and
+re-approval, until a committed workflow will run on that PR or the approved
+Verification Contract declares that its checks come from outside the
+repository's workflows. When neither holds, offer the packaged
+`templates/ci-tests.yml` before execution approval; the project then commits it
+and pushes it to the target branch.
 
 A workflow counts when it is a `.yml` or `.yaml` file directly in
 `.github/workflows/`, its top-level `on` names `pull_request` or
@@ -28,11 +30,19 @@ the target's, which is the default branch whenever
 stands in; outside a Git checkout, the working tree does. A written but
 uncommitted workflow, or one not yet pushed and fetched, does not count.
 
-A project whose pull request checks come from an external CI provider or an
-organization-level required workflow still needs a minimal `pull_request`
-workflow here, and one that runs only the portable vault gate suffices. A
-declared exemption is tracked in
-[agentrof/agent-marketplace#230](https://github.com/agentrof/agent-marketplace/issues/230).
+The Verification Contract's `pull_request_check_source` names where the
+Delivery PR checks come from. `repository_workflow`, the default for a contract
+without the field, requires the workflow above. A project whose checks come
+from an external CI reporting through the Checks API or commit statuses, or
+from an organization-level required workflow or ruleset, declares `external`
+and names that source in `pull_request_check_provider`. The operation compiler
+refuses any other source, an external source without a provider, and a
+provider for `repository_workflow`. Approval then requires no workflow. It
+reports the declared provider because `merge-pr` still merges the Delivery PR
+only on green checks, so that provider must report them on the Delivery PR and,
+like any CI, run the portable vault gate below. The source is contract content,
+so changing it takes a contract revision and approval, whose new hash blocks
+Item start, resume, reopen and takeover until execution is approved again.
 
 The check parses lines, not YAML. It reads a top-level `on` whose value is one
 event or a one-line list, or whose direct children are event keys or list
@@ -56,6 +66,9 @@ gitignore template from the product's declared project-local roots. No token
 is written literally to a consuming repository.
 
 - Refuse materialization while any placeholder source is absent.
+- Refuse materialization for a contract that declares an `external`
+  `pull_request_check_source`; that project runs no repository workflow for
+  its checks.
 - Use `test_command` and its declared `test_workdir` from the approved
   Verification Contract.
 - Use the contract's explicit dependency-audit disposition and command. The

@@ -19,7 +19,9 @@ import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 
-from ba_compile import parse_frontmatter, without_generated_relations
+from ba_compile import (
+    frontmatter_item, frontmatter_scalar, parse_frontmatter, without_generated_relations,
+)
 
 
 SLUG = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
@@ -69,16 +71,15 @@ def docs_root(value: str | Path) -> Path:
 
 
 def frontmatter(props: dict, body: str) -> str:
-    from delivery_compile import scalar
     rows = ["---"]
     for key, value in props.items():
         if isinstance(value, list):
             rows.append(f"{key}:")
-            rows.extend(f"  - {scalar(item)}" for item in value)
+            rows.extend(f"  - {frontmatter_item(item)}" for item in value)
         elif isinstance(value, bool):
             rows.append(f"{key}: {'true' if value else 'false'}")
         else:
-            rows.append(f"{key}: {scalar(value)}")
+            rows.append(f"{key}: {frontmatter_scalar(value)}")
     return "\n".join([*rows, "---", "", body.rstrip(), ""])
 
 

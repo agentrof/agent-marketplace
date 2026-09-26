@@ -855,17 +855,21 @@ def implemented_requirement_findings(docs: Path, stories: dict[str, dict]) -> li
                 )
                 continue
             reason = routing.get("reason", "")
+            remedy = f"rebind it through the Requirement entry, /requirement {identifier}"
             if not reason and status != "approved":
                 reason = f"Requirement status is {status}"
             elif not reason and routing.get("stage") == "requirement":
                 # An approved Requirement whose semantic hash drifted routes to its own
-                # stage with no reason; the Requirement compiler names the drift.
+                # stage with no reason; the Requirement compiler names the drift. That
+                # entry cannot revise an invalid Requirement, so the text comes back first.
                 reason = "; ".join(requirement_compile.requirement_findings(path, require_approved=True))
+                remedy = (f"restore its approved text, since the Requirement entry cannot revise an "
+                          f"invalid Requirement, then continue through /requirement {identifier}")
             errors.append(
                 f"{story_id} implements {identifier}, which does not route to backlog: "
                 f"stage {routing.get('stage', 'requirement')}, action {routing.get('action', 'requirement')}"
                 + (f", reason: {reason}" if reason else "")
-                + f"; rebind it through the Requirement entry, /requirement {identifier}, before handoff"
+                + f"; {remedy}, before handoff"
             )
     return errors
 

@@ -1394,8 +1394,9 @@ class ScopeHandoffBindingTests(unittest.TestCase):
         self.commit("edit REQ-001 after approval")
         self.assertEqual(self.approve_scope(), (1, [
             "AUTH-01 implements REQ-001, which does not route to backlog: stage requirement, action "
-            "requirement, reason: approved source_hash is stale; rebind it through the Requirement entry, "
-            "/requirement REQ-001, before handoff",
+            "requirement, reason: approved source_hash is stale; restore its approved text, since the "
+            "Requirement entry cannot revise an invalid Requirement, then continue through /requirement "
+            "REQ-001, before handoff",
         ]))
 
     def test_proposal_and_scope_refuse_experience_refs_when_the_root_marks_experience_not_applicable(self):

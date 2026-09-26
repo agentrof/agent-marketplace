@@ -182,14 +182,17 @@ first. A superseded, withdrawn or `resolved_no_change` Requirement cannot be
 rebound, so approval names its successor when it has one and routes to a
 backlog revision that re-traces the Story to a current Requirement or drops it.
 When a selected Story cites `experience_refs`, the backlog must bind the
-globally current `application@rN`: through its compiler-owned
-`input_bindings` in manual mode, and in requirement mode whenever the backlog
-carries them; otherwise a requirement-mode backlog binds it through its root
-Requirement's Experience Stage Results. A root Requirement that marks
-Experience `not_applicable` binds none, so approval names the current receipt
-and the two remedies: a manual-mode backlog revision whose `input_bindings` pin
-it, or a Requirement whose Experience stage binds it. A backlog without a
-planning mode predates application receipts and is not held to that rule.
+globally current `application@rN` in its compiler-owned `input_bindings`, in
+either planning mode; otherwise approval names that receipt and the remedy for
+the backlog's mode. A manual-mode backlog revision pins it with `--input-ref`.
+A requirement-mode revision binds the root Requirement's Experience Stage
+Results, rebound first through `/requirement REQ-###`, or, when that
+Requirement marks Experience `not_applicable`, pins it with `--input-ref` at
+`begin-revision`. A requirement-mode backlog approved before it carried
+`input_bindings` is transitional: until its next revision it binds through its
+root Requirement's Experience Stage Results, and binds none when that
+Requirement marks Experience `not_applicable`. A backlog without a planning
+mode predates application receipts and is not held to that rule.
 
 A Delivery is one reviewable outcome. It has no duration, estimate, cadence,
 capacity or release field. Before reservation, declining or stopping leaves no

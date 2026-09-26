@@ -338,7 +338,16 @@ def _write_provider_receipt_locked(path: Path, receipt: dict) -> dict:
 
 
 def create_provider_receipt(main_worktree: Path, delivery_id: str,
-                            intent_oid: str, attempt: str) -> dict:
+                            intent_oid: str, attempt: str, *,
+                            exact_pr_url: str | None = None) -> dict:
+    """Persist the prepared receipt of one PR intent before any provider call.
+
+    A Review published again brings a new intent while the earlier intent's
+    receipt stays behind. That receipt gives way unless it still guards a PR
+    the provider does not show: a call that started while no exact Delivery
+    PR is visible, or a verified PR other than *exact_pr_url*, the one exact
+    Delivery PR the provider shows now.
+    """
     path, lock = provider_receipt_paths(main_worktree, delivery_id)
     if not OID_RE.fullmatch(intent_oid) or not EPOCH_RE.fullmatch(attempt):
         raise ValueError("provider receipt intent or attempt is invalid")
@@ -348,9 +357,14 @@ def create_provider_receipt(main_worktree: Path, delivery_id: str,
     with receipt_lock(lock):
         if path.exists():
             existing = _validate_provider_receipt(json.loads(path.read_text(encoding="utf-8")))
-            if (existing["intent_oid"], existing["attempt"]) != (intent_oid, attempt):
-                raise RuntimeError("a different provider receipt already exists")
-            return existing
+            if (existing["intent_oid"], existing["attempt"]) == (intent_oid, attempt):
+                return existing
+            if existing["state"] == "call_started" and exact_pr_url is None:
+                raise RuntimeError("DELIVERY_PR_UNCERTAIN: a different provider receipt already exists: "
+                                   "its provider call started and no exact Delivery PR is visible")
+            if existing["state"] == "verified" and existing["url"] != exact_pr_url:
+                raise RuntimeError("DELIVERY_PR_UNCERTAIN: a different provider receipt already exists: "
+                                   f"it names {existing['url']}, which is not the exact Delivery PR")
         return _validate_provider_receipt(_write_provider_receipt_locked(path, value))
 
 
@@ -1266,7 +1280,9 @@ def open_pr(project_root: Path, delivery_id: str, remote: str = "origin") -> dic
     existing = provider.exact_unmerged(head, target_branch)
     if len(existing) > 1:
         raise RuntimeError("DELIVERY_PR_DUPLICATE: multiple exact unmerged Delivery PRs exist")
-    receipt = create_provider_receipt(root, delivery_id, integration_oid, attempt)
+    shown = existing[0].get("url") if existing else None
+    receipt = create_provider_receipt(root, delivery_id, integration_oid, attempt,
+                                      exact_pr_url=shown if isinstance(shown, str) else None)
     if receipt["state"] == "verified" and receipt.get("url") not in {None, "none"}:
         return {"ok": True, "delivery": delivery_id, "pull_request_url": receipt["url"],
                 "reused": True, "provider_call": False}

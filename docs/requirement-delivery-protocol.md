@@ -327,10 +327,14 @@ The coordinator publishes that Review, elects one durable PR intent and uses
 the provider adapter to create or adopt exactly one PR for the Delivery. The PR
 head is the Integration branch and its base is the resolved target branch.
 Provider calls are elected by crash-durable receipts and are never repeated
-blindly after an ambiguous result. The commit that records the PR URL becomes
-the PR head. It also moves a reviewed Delivery from `review` to
-`awaiting_merge` and re-renders the Delivery map; a cancelled Delivery keeps
-`cancelled`.
+blindly after an ambiguous result. When a Review is published again, the next
+PR-creation intent takes over the receipt the earlier intent left, unless that
+receipt still guards a PR the provider does not show: a call that started
+while no exact Delivery PR is visible, or a verified PR other than the exact
+Delivery PR. Such a receipt refuses the intent with `DELIVERY_PR_UNCERTAIN`.
+The commit that records the PR URL becomes the PR head. It also moves a
+reviewed Delivery from `review` to `awaiting_merge` and re-renders the
+Delivery map; a cancelled Delivery keeps `cancelled`.
 
 Closure requires provider-confirmed merge evidence for the exact reviewed
 head, passing provider checks with at least one success, and target ancestry.

@@ -3436,7 +3436,8 @@ def start_item(project_root: Path, delivery_id: str, story_id: str,
     except RuntimeError:
         observed_item = remote_oid(root, remote, refs["item"]) if remote_has_ref(root, remote, refs["item"]) else None
         observed_slot = remote_oid(root, remote, slot_ref) if remote_has_ref(root, remote, slot_ref) else None
-        if observed_item is None and observed_slot is None:
+        # Absent or unchanged proves the activation took no effect; the Slot was leased absent.
+        if observed_item in (None, item_oid) and observed_slot is None:
             discard_pending_writer_receipt(root, delivery_id, story_id, item_candidate)
         elif observed_item == item_candidate and observed_slot == item_candidate:
             require_current_activation_target(root, remote, delivery_id, story_id, target_before,

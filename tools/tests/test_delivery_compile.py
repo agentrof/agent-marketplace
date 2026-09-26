@@ -27,6 +27,7 @@ import operation_compile  # noqa: E402
 import stage_package  # noqa: E402
 import vault_check  # noqa: E402
 from backlog_fixture import make_approved_backlog  # noqa: E402
+from git_fixture import init_repository, remove_temporary  # noqa: E402
 
 
 WORKFLOW_JOBS = "jobs:\n  test:\n    runs-on: ubuntu-latest\n    steps:\n      - run: make test\n"
@@ -53,11 +54,11 @@ class DeliveryCompilerTests(unittest.TestCase):
         workflows.mkdir(parents=True)
         (workflows / "tests.yml").write_text("on:\n  pull_request:\n" + WORKFLOW_JOBS, encoding="utf-8")
         # A checkout of its own keeps the workflow lookup inside this fixture.
-        self.git("init", "-q", "-b", "main")
+        init_repository(self.root, initial_branch="main")
         self.commit_workflows()
 
     def tearDown(self):
-        self.temporary.cleanup()
+        remove_temporary(self.temporary)
 
     def git(self, *args, cwd=None):
         subprocess.run(["git", "-C", str(cwd or self.root), *args], check=True, capture_output=True,
@@ -608,7 +609,7 @@ class DeliveryCompilerTests(unittest.TestCase):
         remote = self.root / "remote.git"
         # Name the branch: a bare repository otherwise takes the host default, and a clone
         # of one whose HEAD names a missing branch checks out nothing.
-        subprocess.run(["git", "init", "-q", "--bare", "-b", "main", str(remote)], check=True)
+        init_repository(remote, bare=True, initial_branch="main")
         self.git("remote", "add", "origin", str(remote))
         self.git("push", "-q", "-u", "origin", "main")
         return remote

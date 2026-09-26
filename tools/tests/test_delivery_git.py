@@ -887,6 +887,52 @@ class DeliveryGitTests(unittest.TestCase):
                          ["pr-url-recorded-v1", intent["intent"], "17"])
         self.assertEqual(receipt(), [intent["intent"], intent["attempt"], "verified", url])
 
+    def test_open_pr_resumes_an_adoption_that_stopped_before_its_record(self):
+        """open-pr that stopped after pushing its adoption intent, before the PR record, resumes on
+        the next run for the one PR that intent names. A provider that shows another PR is refused
+        and the intent stays; no run creates a PR."""
+        temporary, project, docs, _product_tip, _intent = self.prepare_pr_intent()
+        self.addCleanup(remove_temporary, temporary)
+        state: dict = {}
+        with mock.patch("delivery_provider.GitHubProvider", self.fake_provider_type(state)):
+            url = delivery_git.open_pr(project, "DLV-001")["pull_request_url"]
+        self.republish_review(project, docs)
+
+        class AdoptingProvider(self.fake_provider_type(state)):
+            def create_draft(self, head: str, base: str, title: str, body: str) -> dict:
+                raise AssertionError("an adoption never creates a PR")
+
+        class OtherPrProvider(AdoptingProvider):
+            def _record(self, head: str, base: str) -> dict:
+                return {**super()._record(head, base), "number": 18,
+                        "url": "https://github.com/agentrof/example/pull/18"}
+
+        class Interrupted(Exception):
+            """open-pr stops once its adoption intent is on the remote."""
+
+        integration = delivery_git.canonical_refs("DLV-001")["integration"]
+        with mock.patch("delivery_provider.GitHubProvider", AdoptingProvider), \
+                mock.patch("delivery_compile.record_pr_url", side_effect=Interrupted), \
+                self.assertRaises(Interrupted):
+            delivery_git.open_pr(project, "DLV-001")
+        intent = delivery_git.remote_oid(project, "origin", integration)
+        self.assertEqual(delivery_git.trailer(delivery_git.commit_message(project, intent), "Record"),
+                         "pr-adoption-intent-v1")
+        with mock.patch("delivery_provider.GitHubProvider", OtherPrProvider), \
+                self.assertRaises(RuntimeError) as refused:
+            delivery_git.open_pr(project, "DLV-001")
+        result = delivery_result.from_raw("open-pr", {"ok": False, "errors": [str(refused.exception)]})
+        self.assertEqual([(finding["code"], finding["message"]) for finding in result["findings"]],
+                         [("DELIVERY_PR_UNCERTAIN", "the exact Delivery PR is not the PR the adoption intent names")])
+        self.assertEqual(delivery_git.remote_oid(project, "origin", integration), intent)
+        with mock.patch("delivery_provider.GitHubProvider", AdoptingProvider):
+            resumed = delivery_git.open_pr(project, "DLV-001")
+        self.assertEqual((resumed["pull_request_url"], resumed["provider_call"], resumed["adopted"]), (url, False, True))
+        record = delivery_git.commit_message(project, resumed["integration"])
+        self.assertEqual([delivery_git.trailer(record, key) for key in ("Record", "Intent", "Pull-Request")],
+                         ["pr-url-recorded-v1", intent, "17"])
+        self.assertEqual(delivery_git.remote_oid(project, "origin", integration), resumed["integration"])
+
     def test_published_review_and_pr_carry_the_authored_delivery_review(self):
         authored = {"Scope Disposition": "AUTH-01 delivered as planned.",
                     "Deviations": "The owner added session expiry on 2026-01-01.",

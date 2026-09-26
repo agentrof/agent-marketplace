@@ -349,6 +349,9 @@ PR-creation intent takes over the receipt the earlier intent left, unless that
 receipt still guards a PR the provider does not show: a call that started
 while no exact Delivery PR is visible, or a verified PR other than the exact
 Delivery PR. Such a receipt refuses the intent with `DELIVERY_PR_UNCERTAIN`.
+An adoption intent names the one PR it adopts. When `open-pr` stops after that
+intent and before the PR record, its next run records that PR, never creates
+one, and refuses any other PR with `DELIVERY_PR_UNCERTAIN`.
 The commit that records the PR URL becomes the PR head. It also moves a
 reviewed Delivery from `review` to `awaiting_merge` and re-renders the
 Delivery map; a cancelled Delivery keeps `cancelled`.

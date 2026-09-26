@@ -1285,11 +1285,10 @@ def open_pr(project_root: Path, delivery_id: str, remote: str = "origin") -> dic
         canonical_url, _ = canonical_github_pr(url)
         return {"ok": True, "delivery": delivery_id, "pull_request_url": canonical_url,
                 "reused": True, "provider_call": False}
-    adoption = False
     provider = GitHubProvider(root, remote)
     target_branch, _ = resolve_target(root, remote)
     head = short_refs(delivery_id)["integration"]
-    if record_name == "delivery-review-published-v1":
+    if record_name in {"delivery-review-published-v1", "pr-adoption-intent-v1"}:
         existing = provider.exact_unmerged(head, target_branch)
         if len(existing) != 1:
             raise RuntimeError("external PR adoption requires exactly one unmerged exact PR")
@@ -1304,48 +1303,47 @@ def open_pr(project_root: Path, delivery_id: str, remote: str = "origin") -> dic
         if not isinstance(url, str):
             raise ProviderError("DELIVERY_PR_UNCERTAIN: external PR has no canonical URL")
         canonical_url, number = canonical_github_pr(url)
+        url_hash = "sha256:" + hashlib.sha256(canonical_url.encode("utf-8")).hexdigest()
+        # An adoption that stopped before its record resumes from its intent,
+        # which names the one PR it adopts; the provider must show that PR.
+        if record_name == "pr-adoption-intent-v1" and (
+                trailer(integration_message, "Pull-Request"), trailer(integration_message, "URL-Hash")) != (number, url_hash):
+            raise RuntimeError("DELIVERY_PR_UNCERTAIN: the exact Delivery PR is not the PR the adoption intent names")
         if not pr.get("isDraft"):
             provider.ensure_draft(canonical_url)
-        fence_oid = remote_oid(root, remote, refs["fence"])
-        fence_message = commit_message(root, fence_oid)
-        adoption_intent = commit_tree(
-            root, integration_oid, [], f"Adopt PR for {delivery_id}",
-            {"Record": "pr-adoption-intent-v1", "Protocol": "1", "Delivery": delivery_id,
-             "Review-Head": integration_oid, "Target": trailer(fence_message, "Target") or "none",
-             "Provider": "github", "Pull-Request": number,
-             "URL-Hash": "sha256:" + hashlib.sha256(canonical_url.encode("utf-8")).hexdigest()},
-        )
-        fence_candidate = commit_tree(
-            root, fence_oid, [], "Fence project in open mode",
-            {"Record": "project-fence-v2", "Protocol": "2", "Mode": "open",
-             "Epoch": trailer(fence_message, "Epoch") or epoch_token(),
-             "Target": trailer(fence_message, "Target") or "none",
-             "Governance-Hash": trailer(fence_message, "Governance-Hash") or "none",
-             **carried_fence_barrier(fence_message)},
-        )
-        atomic_push(root, remote, [(refs["fence"], fence_oid, fence_candidate),
-                                   (refs["integration"], integration_oid, adoption_intent)])
-        integration_oid = adoption_intent
-        integration_message = commit_message(root, integration_oid)
-        record_name = "pr-adoption-intent-v1"
-        adoption = True
-    if record_name != "pr-creation-intent-v1":
-        if record_name != "pr-adoption-intent-v1":
-            raise RuntimeError("open-pr requires an unmatched PR creation or adoption intent")
-    attempt = trailer(integration_message, "Attempt")
-    if not adoption and not attempt:
-        raise RuntimeError("DELIVERY_COORDINATION_CORRUPT: PR creation intent has no Attempt")
-    if adoption:
+        if record_name == "delivery-review-published-v1":
+            fence_oid = remote_oid(root, remote, refs["fence"])
+            fence_message = commit_message(root, fence_oid)
+            adoption_intent = commit_tree(
+                root, integration_oid, [], f"Adopt PR for {delivery_id}",
+                {"Record": "pr-adoption-intent-v1", "Protocol": "1", "Delivery": delivery_id,
+                 "Review-Head": integration_oid, "Target": trailer(fence_message, "Target") or "none",
+                 "Provider": "github", "Pull-Request": number, "URL-Hash": url_hash},
+            )
+            fence_candidate = commit_tree(
+                root, fence_oid, [], "Fence project in open mode",
+                {"Record": "project-fence-v2", "Protocol": "2", "Mode": "open",
+                 "Epoch": trailer(fence_message, "Epoch") or epoch_token(),
+                 "Target": trailer(fence_message, "Target") or "none",
+                 "Governance-Hash": trailer(fence_message, "Governance-Hash") or "none",
+                 **carried_fence_barrier(fence_message)},
+            )
+            atomic_push(root, remote, [(refs["fence"], fence_oid, fence_candidate),
+                                       (refs["integration"], integration_oid, adoption_intent)])
         # The provider was already normalized to draft and the exact URL is
         # carried by the adoption intent. No create receipt or provider POST
         # is permitted on this path.
-        canonical_url, _ = canonical_github_pr(url)
         record_pr_url(docs, delivery_id, canonical_url)
         recorded = record_pr_remote(root, delivery_id, canonical_url, remote)
         return {"ok": True, "delivery": delivery_id, "pull_request_url": canonical_url,
                 "provider_call": False, "adopted": True,
                 "integration": recorded["integration"], "fence": recorded["fence"],
                 "refs": short_refs(delivery_id)}
+    if record_name != "pr-creation-intent-v1":
+        raise RuntimeError("open-pr requires an unmatched PR creation or adoption intent")
+    attempt = trailer(integration_message, "Attempt")
+    if not attempt:
+        raise RuntimeError("DELIVERY_COORDINATION_CORRUPT: PR creation intent has no Attempt")
     # The PR body is the Review published at the intent. A cancellation writes
     # its Review on the Integration alone, so the local Review may be stale.
     _, review_body = split_remote_note(root, integration_oid, rel_posix(root, review_path), split_note)

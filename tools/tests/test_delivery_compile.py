@@ -678,7 +678,9 @@ class DeliveryCompilerTests(unittest.TestCase):
         if any((parent / ".git").exists() for parent in self.root.parents):
             self.skipTest("the temporary directory lies inside a Git checkout")
         plan_args = self.scope_ready_for_execution()
-        shutil.rmtree(self.root / ".git")
+        # Git writes its object files read-only, which native Windows refuses to delete;
+        # moving the repository aside leaves the fixture outside a checkout on every host.
+        (self.root / ".git").rename(self.root / "former-git-directory")
         self.assertEqual(self.approve_execution_result(plan_args)[0], 0)
         (self.root / ".github" / "workflows" / "tests.yml").write_text("on: push\n" + WORKFLOW_JOBS, encoding="utf-8")
         code, result = self.approve_execution_result(plan_args)

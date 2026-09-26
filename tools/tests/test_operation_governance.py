@@ -28,13 +28,25 @@ def frontmatter(props: dict, body: str = "# Note\n") -> str:
     return "\n".join(lines + ["---", "", body])
 
 
-def declare(path: Path, **fields: str) -> None:
+def declare(path: Path, **fields: object) -> None:
     """Declare fields in an Operation Contract draft, as its writer does."""
     sys.path.insert(0, str(SCRIPTS))
     import operation_compile
 
     props, body = operation_compile.parse(path)
     path.write_text(operation_compile.render({**props, **fields}, body), encoding="utf-8")
+
+
+def operation_findings(docs: Path) -> list[tuple[str, str]]:
+    """The vault's frontmatter findings on the Operation Contracts."""
+    sys.path.insert(0, str(SCRIPTS))
+    import vault_check
+
+    findings = []
+    policy = vault_check.load_policy(vault_check.DEFAULT_POLICY)
+    vault_check.check_frontmatter_props(vault_check.build_vault(docs, policy), findings)
+    return [(finding.path, finding.message) for finding in findings
+            if finding.path.startswith("operation/")]
 
 
 class OperationGovernanceTests(unittest.TestCase):
@@ -197,15 +209,6 @@ class OperationGovernanceTests(unittest.TestCase):
         """An unset command, like an unset hash, is absent, not present and empty."""
         sys.path.insert(0, str(SCRIPTS))
         import operation_compile
-        import vault_check
-
-        policy = vault_check.load_policy(vault_check.DEFAULT_POLICY)
-
-        def operation_findings(docs):
-            findings = []
-            vault_check.check_frontmatter_props(vault_check.build_vault(docs, policy), findings)
-            return [(finding.path, finding.message) for finding in findings
-                    if finding.path.startswith("operation/")]
 
         for kind, command_field in (("verification", "test_command"),
                                     ("environment", "env_command")):
@@ -250,6 +253,33 @@ class OperationGovernanceTests(unittest.TestCase):
                 receipt = json.loads(approved.stdout)
                 self.assertEqual((receipt["status"], receipt["revision"], receipt["current"]),
                                  ("approved", 1, True))
+
+    def test_unbound_draft_omits_constrained_by_and_approval_names_it(self):
+        """A draft without a Solution decision has no empty relation; approval names the key to declare."""
+        sys.path.insert(0, str(SCRIPTS))
+        import operation_compile
+
+        for kind, command_field in (("verification", "test_command"),
+                                    ("environment", "env_command")):
+            with self.subTest(kind=kind), tempfile.TemporaryDirectory() as temporary:
+                docs = Path(temporary) / "workspace/docs"
+                ref = self.approved_solution(docs)
+                args = ("--docs", str(docs), "--kind", kind)
+                initialized = self.invoke(OPERATION, "init", *args)
+                self.assertEqual(initialized.returncode, 0, initialized.stdout + initialized.stderr)
+                path = operation_compile.contract_path(docs, kind)
+                self.assertNotIn("constrained_by", operation_compile.parse(path)[0])
+                self.assertEqual(operation_findings(docs), [])
+                declare(path, **{command_field: f"make {kind}"})
+                refused = self.invoke(OPERATION, "approve", *args)
+                self.assertEqual(refused.returncode, 2, refused.stdout + refused.stderr)
+                self.assertEqual(json.loads(refused.stdout)["errors"], [
+                    "approval check failed: approved contract must cite at least one accepted "
+                    "Solution decision in constrained_by"])
+                declare(path, constrained_by=[f"[[{ref}|SD-001]]"])
+                approved = self.invoke(OPERATION, "approve", *args)
+                self.assertEqual(approved.returncode, 0, approved.stdout + approved.stderr)
+                self.assertEqual(operation_findings(docs), [])
 
     def test_begin_revision_leaves_no_empty_hash_for_the_vault_to_reject(self):
         """An unset hash is absent, not present and empty."""

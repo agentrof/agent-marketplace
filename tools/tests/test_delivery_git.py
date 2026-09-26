@@ -22,6 +22,7 @@ import delivery_git  # noqa: E402
 import delivery_compile  # noqa: E402
 import delivery_governance  # noqa: E402
 import delivery_provider  # noqa: E402
+import delivery_result  # noqa: E402
 import operation_compile  # noqa: E402
 import architecture_compile  # noqa: E402
 import vault_check  # noqa: E402
@@ -301,6 +302,63 @@ class DeliveryGitTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             delivery_git.short_refs("DLV-001", "AUTH/01")
 
+    def test_coordinator_refusals_report_their_finding_codes(self):
+        """A coordinator refusal reaches the result envelope under its own code, with its words intact."""
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(remove_temporary, temporary)
+        root, remote = Path(temporary.name) / "project", Path(temporary.name) / "remote.git"
+        init_repository(root)
+        init_repository(remote, bare=True)
+        delivery_git.run_git(root, "config", "user.email", "test@example.com")
+        delivery_git.run_git(root, "config", "user.name", "Test")
+        for name in ("base", "target"):
+            (root / f"{name}.txt").write_text(name + "\n", encoding="utf-8")
+            delivery_git.run_git(root, "add", f"{name}.txt")
+            delivery_git.run_git(root, "commit", "-qm", name)
+        base, target = delivery_git.run_git(root, "rev-parse", "HEAD^", "HEAD").split()
+        delivery_git.run_git(root, "remote", "add", "origin", str(remote))
+        delivery_git.run_git(root, "push", "-q", "origin", "main")
+        refs = delivery_git.canonical_refs("DLV-001", "AUTH-01", 1)
+        missing = Path(temporary.name) / "missing-worktree"
+
+        def fence(mode: str, fence_target: str) -> str:
+            return ("Fence project\n\nAgentrof-Record: project-fence-v2\n"
+                    f"Agentrof-Mode: {mode}\nAgentrof-Target: {fence_target}\n")
+
+        for code, message, refusal in (
+            ("DELIVERY_SLOT_INVALID", "slot must be a positive number rendered with at least three digits",
+             lambda: delivery_git.slot_key(0)),
+            ("DELIVERY_CANCELLATION_INVALID", "unsupported cancellation disposition",
+             lambda: delivery_git.cancellation_projection(
+                 "DLV-001", "none", "Stop", {"AUTH-01": {"disposition": "paused", "tip": "none"}}, target)),
+            ("DELIVERY_TARGET_IMPACT_INVALID", "target impact requires exact previous and current target OIDs",
+             lambda: delivery_git.target_impact_hash("DLV-001", "none", target, {})),
+            ("DELIVERY_FENCE_MISSING", "remote ref is absent: refs/heads/agentrof/fence",
+             lambda: delivery_git.remote_oid(root, "origin", refs["fence"])),
+            ("DELIVERY_ITEM_REF_MISSING", "remote ref is absent: refs/heads/agentrof/items/auth-01",
+             lambda: delivery_git.remote_oid(root, "origin", refs["item"])),
+            ("DELIVERY_ITEM_SLOT_MISSING", "remote ref is absent: refs/heads/agentrof/slots/001",
+             lambda: delivery_git.remote_oid(root, "origin", refs["slot"])),
+            ("DELIVERY_FENCE_MODE", "writer readiness requires an open Fence",
+             lambda: delivery_git.require_target_ancestry(root, "origin", fence("upgrade", target), target)),
+            ("DELIVERY_TARGET_DRIFT", "target advanced; refresh the Delivery before Item activation",
+             lambda: delivery_git.require_target_ancestry(root, "origin", fence("open", base), target)),
+            ("DELIVERY_TARGET_CONVERGENCE_REQUIRED", "Integration does not contain the current target",
+             lambda: delivery_git.require_target_ancestry(root, "origin", fence("open", target), base)),
+            ("DELIVERY_WORKTREE_UNSAFE", f"Item worktree is missing: {missing}",
+             lambda: delivery_git.worktree_is_clean_and_at(root, missing, target)),
+            ("DELIVERY_LOCAL_REF_DIVERGED", "Item worktree HEAD differs from the remote Item tip",
+             lambda: delivery_git.worktree_is_clean_and_at(root, root, base)),
+            ("DELIVERY_WRITER_RECEIPT_MISSING", "push-item requires this machine's verified Item writer receipt",
+             lambda: delivery_git.active_writer_receipt(root, "DLV-001", "AUTH-01", target, refs["slot"])),
+        ):
+            with self.subTest(code=code):
+                with self.assertRaises((RuntimeError, ValueError)) as refused:
+                    refusal()
+                result = delivery_result.from_raw("refusal", {"ok": False, "errors": [str(refused.exception)]})
+                self.assertEqual([(finding["code"], finding["message"]) for finding in result["findings"]],
+                                 [(code, message)])
+
     def test_worktree_paths_have_no_branch_or_worktree_for_fence_slot(self):
         paths = delivery_git.worktree_paths(Path("/project"), "DLV-001", "AUTH-01")
         self.assertEqual(str(paths["integration"]), "/project/.agentrof/agent-marketplace/.runtime/worktrees/dlv-001/integration")
@@ -512,6 +570,64 @@ class DeliveryGitTests(unittest.TestCase):
             ])
             self.assertNotIn("merged", state)
             self.assertEqual(delivery_git.remote_oid(project, "origin", "refs/heads/main"), target)
+        finally:
+            remove_temporary(temporary)
+
+    def merge_pr_findings(self, project: Path, provider_type) -> list[tuple[str, str]]:
+        """Run merge-pr through its command boundary and return the refusal's findings."""
+        output = io.StringIO()
+        with mock.patch("delivery_provider.GitHubProvider", provider_type), contextlib.redirect_stdout(output):
+            exit_code = delivery_git.main(["merge-pr", "--project-root", str(project), "--delivery", "DLV-001"])
+        envelope = json.loads(output.getvalue())
+        self.assertEqual((exit_code, envelope["ok"]), (1, False))
+        return [(finding["code"], finding["message"]) for finding in envelope["findings"]]
+
+    def test_merge_pr_refusals_report_their_finding_codes(self):
+        """A PR that cannot close the Delivery is refused under the code that says why, before any merge."""
+        temporary, project, _docs, _product_tip, _intent = self.prepare_pr_intent()
+        try:
+            with mock.patch("delivery_provider.GitHubProvider", self.fake_provider_type({})):
+                delivery_git.open_pr(project, "DLV-001")
+            integration = delivery_git.remote_oid(
+                project, "origin", delivery_git.canonical_refs("DLV-001")["integration"])
+            target = delivery_git.remote_oid(project, "origin", "refs/heads/main")
+            fake_provider_type = self.fake_provider_type
+
+            def provider(state, listed=None, viewed=None):
+                """The provider double whose listed PR, and its view before the merge call, differ as given."""
+                class Variant(fake_provider_type(state)):
+                    def _record(self, head: str, base: str) -> dict:
+                        return {**super()._record(head, base), **(listed or {})}
+
+                    def inspect_pull_request(self, url: str) -> dict:
+                        return {**super().inspect_pull_request(url), **(viewed or {})}
+                return Variant
+
+            merged = {"created": True, "merged": True}
+            for code, message, provider_type in (
+                ("DELIVERY_PR_HEAD_BASE_MISMATCH", "exactly one lifecycle PR is required", provider({})),
+                ("DELIVERY_PR_STATE_INVALID", "Delivery PR head/base/state is not mergeable",
+                 provider({"created": True}, listed={"state": "CLOSED"})),
+                ("DELIVERY_PR_HEAD_BASE_MISMATCH", "Delivery PR head/base/state is not mergeable",
+                 provider({"created": True}, listed={"baseRefName": "release"})),
+                ("DELIVERY_PR_STATE_INVALID", "Delivery PR changed before the merge call",
+                 provider({"created": True}, viewed={"isDraft": True})),
+                ("DELIVERY_PR_HEAD_BASE_MISMATCH", "Delivery PR changed before the merge call",
+                 provider({"created": True}, viewed={"headRefOid": "0" * 40})),
+                ("DELIVERY_MERGE_PROOF_INVALID", "provider did not return an exact merge commit",
+                 provider({**merged, "merge": None})),
+                ("DELIVERY_MERGE_PROOF_INVALID", "provider merge is not present in the exact target ancestry",
+                 provider({**merged, "merge": integration})),
+            ):
+                with self.subTest(code=code, message=message):
+                    self.assertEqual(self.merge_pr_findings(project, provider_type), [(code, message)])
+                    self.assertEqual(delivery_git.remote_oid(project, "origin", "refs/heads/main"), target)
+            # A fast-forward puts the reviewed head itself on the target: no merge commit binds it.
+            delivery_git.atomic_push(project, "origin", [("refs/heads/main", target, integration)])
+            self.assertEqual(self.merge_pr_findings(project, provider({**merged, "merge": integration})), [
+                ("DELIVERY_MERGE_POLICY_INVALID",
+                 "provider merge is not an exact two-parent merge of the reviewed Integration"),
+            ])
         finally:
             remove_temporary(temporary)
 
@@ -1948,7 +2064,7 @@ class DeliveryGitTests(unittest.TestCase):
         source.write_text("new_target_code = True\n", encoding="utf-8")
         _target, fence = self.governance_target_handoff(project, docs, ["src/new.py"])
         item.unlink()  # Local cache loss must not hide the authoritative remote claim.
-        with self.assertRaisesRegex(RuntimeError, "claimed_source_violation"):
+        with self.assertRaisesRegex(RuntimeError, r"^DELIVERY_TARGET_SOURCE_VIOLATION: target changed claimed paths src/new\.py$"):
             delivery_git.refresh_target(project, "DLV-001")
         refs = delivery_git.canonical_refs("DLV-001")
         self.assertEqual(delivery_git.remote_oid(project, "origin", refs["integration"]), claimed["integration"])

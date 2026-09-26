@@ -75,7 +75,7 @@ def story_key(value: str) -> str:
 def slot_key(value: str | int) -> str:
     text = f"{value:03d}" if isinstance(value, int) else str(value)
     if not SLOT_RE.fullmatch(text) or int(text) == 0:
-        raise ValueError("slot must be a positive number rendered with at least three digits")
+        raise ValueError("DELIVERY_SLOT_INVALID: slot must be a positive number rendered with at least three digits")
     return text
 
 
@@ -250,7 +250,7 @@ def create_writer_receipt(main_worktree: Path, delivery_id: str, story_id: str,
                 if existing["state"] != "verified" or not allow_verified_replace:
                     raise RuntimeError("a different active writer receipt already exists")
                 if expected_previous_oid is not None and existing["candidate_oid"] != expected_previous_oid:
-                    raise RuntimeError("takeover receipt does not match the previous writer tip")
+                    raise RuntimeError("DELIVERY_WRITER_RECEIPT_STALE: takeover receipt does not match the previous writer tip")
             elif existing["state"] == "pending" or not allow_verified_replace:
                 return existing
         _write_writer_receipt_locked(receipt_path, receipt)
@@ -263,10 +263,10 @@ def promote_writer_receipt(main_worktree: Path, delivery_id: str, story_id: str,
     receipt_path, lock_path = writer_receipt_paths(main_worktree, delivery_id, story_id)
     with receipt_lock(lock_path):
         if not receipt_path.exists():
-            raise RuntimeError("pending writer receipt is missing")
+            raise RuntimeError("DELIVERY_WRITER_RECEIPT_MISSING: pending writer receipt is missing")
         receipt = _validate_receipt(json.loads(receipt_path.read_text(encoding="utf-8")))
         if receipt["candidate_oid"] != candidate_oid:
-            raise RuntimeError("writer receipt candidate does not match remote activation")
+            raise RuntimeError("DELIVERY_WRITER_RECEIPT_STALE: writer receipt candidate does not match remote activation")
         if receipt["state"] == "verified":
             return receipt
         receipt["state"] = "verified"
@@ -359,7 +359,7 @@ def mark_provider_call_started(main_worktree: Path, delivery_id: str,
     with receipt_lock(lock):
         receipt = _validate_provider_receipt(json.loads(path.read_text(encoding="utf-8"))) if path.exists() else None
         if receipt is None or (receipt["intent_oid"], receipt["attempt"]) != (intent_oid, attempt):
-            raise RuntimeError("provider receipt preimage is missing or stale")
+            raise RuntimeError("DELIVERY_PR_UNCERTAIN: provider receipt preimage is missing or stale")
         if receipt["state"] in {"call_started", "verified"}:
             return receipt, False
         receipt["state"] = "call_started"
@@ -373,7 +373,7 @@ def mark_provider_verified(main_worktree: Path, delivery_id: str,
     with receipt_lock(lock):
         receipt = _validate_provider_receipt(json.loads(path.read_text(encoding="utf-8"))) if path.exists() else None
         if receipt is None or (receipt["intent_oid"], receipt["attempt"]) != (intent_oid, attempt):
-            raise RuntimeError("provider receipt preimage is missing or stale")
+            raise RuntimeError("DELIVERY_PR_UNCERTAIN: provider receipt preimage is missing or stale")
         receipt["state"] = "verified"
         receipt["url"] = canonical_url
         return _validate_provider_receipt(_write_provider_receipt_locked(path, receipt))
@@ -436,7 +436,7 @@ def create_target_update_receipt(main_worktree: Path, mode: str, attempt: str,
         if path.exists():
             existing = _validate_target_receipt(json.loads(path.read_text(encoding="utf-8")))
             if existing["attempt"] != attempt:
-                raise RuntimeError("a different target update receipt already exists")
+                raise RuntimeError("DELIVERY_TARGET_UPDATE_UNCERTAIN: a different target update receipt already exists")
             return existing
         _write_provider_receipt_locked(path, value)
         return _validate_target_receipt(json.loads(path.read_text(encoding="utf-8")))
@@ -446,10 +446,10 @@ def mark_target_call_started(main_worktree: Path, mode: str, attempt: str) -> di
     path, lock = target_receipt_paths(main_worktree, mode)
     with receipt_lock(lock):
         if not path.exists():
-            raise RuntimeError("target update receipt is missing")
+            raise RuntimeError("DELIVERY_TARGET_UPDATE_UNCERTAIN: target update receipt is missing")
         value = _validate_target_receipt(json.loads(path.read_text(encoding="utf-8")))
         if value["attempt"] != attempt:
-            raise RuntimeError("target update receipt attempt is stale")
+            raise RuntimeError("DELIVERY_TARGET_UPDATE_UNCERTAIN: target update receipt attempt is stale")
         if value["state"] == "prepared":
             value["state"] = "call_started"
             _write_provider_receipt_locked(path, value)
@@ -460,10 +460,10 @@ def mark_target_verified(main_worktree: Path, mode: str, attempt: str) -> dict:
     path, lock = target_receipt_paths(main_worktree, mode)
     with receipt_lock(lock):
         if not path.exists():
-            raise RuntimeError("target update receipt is missing")
+            raise RuntimeError("DELIVERY_TARGET_UPDATE_UNCERTAIN: target update receipt is missing")
         value = _validate_target_receipt(json.loads(path.read_text(encoding="utf-8")))
         if value["attempt"] != attempt:
-            raise RuntimeError("target update receipt attempt is stale")
+            raise RuntimeError("DELIVERY_TARGET_UPDATE_UNCERTAIN: target update receipt attempt is stale")
         value["state"] = "verified"
         _write_provider_receipt_locked(path, value)
         return _validate_target_receipt(json.loads(path.read_text(encoding="utf-8")))
@@ -488,7 +488,7 @@ def clear_target_update_receipt(main_worktree: Path, mode: str, attempt: str) ->
             return
         value = _validate_target_receipt(json.loads(path.read_text(encoding="utf-8")))
         if value["state"] != "verified" or value["attempt"] != attempt:
-            raise RuntimeError("cannot clear an unverified or different target update receipt")
+            raise RuntimeError("DELIVERY_TARGET_UPDATE_UNCERTAIN: cannot clear an unverified or different target update receipt")
         path.unlink()
         _fsync_directory(path.parent)
 
@@ -502,9 +502,9 @@ def materialize_item_worktree(main_worktree: Path, delivery_id: str, story_id: s
         try:
             current = run_git(main_worktree, "-C", str(path), "rev-parse", "HEAD")
         except RuntimeError as exc:
-            raise RuntimeError(f"Item worktree path is occupied: {path}") from exc
+            raise RuntimeError(f"DELIVERY_WORKTREE_UNSAFE: Item worktree path is occupied: {path}") from exc
         if current != candidate_oid:
-            raise RuntimeError(f"Item worktree is attached to a different OID: {path}")
+            raise RuntimeError(f"DELIVERY_LOCAL_REF_DIVERGED: Item worktree is attached to a different OID: {path}")
         return path
     run_git(main_worktree, "worktree", "add", "--detach", str(path), candidate_oid)
     return path
@@ -532,10 +532,10 @@ def split_remote_note(root: Path, oid: str, relative_path: str,
 
 def worktree_is_clean_and_at(root: Path, path: Path, expected_oid: str) -> None:
     if not path.is_dir():
-        raise RuntimeError(f"Item worktree is missing: {path}")
+        raise RuntimeError(f"DELIVERY_WORKTREE_UNSAFE: Item worktree is missing: {path}")
     head = run_git(root, "-C", str(path), "rev-parse", "HEAD")
     if head != expected_oid:
-        raise RuntimeError("Item worktree HEAD differs from the remote Item tip")
+        raise RuntimeError("DELIVERY_LOCAL_REF_DIVERGED: Item worktree HEAD differs from the remote Item tip")
     dirty = run_git(root, "-C", str(path), "status", "--porcelain", "--untracked-files=all")
     if dirty:
         raise RuntimeError("DELIVERY_WORKTREE_UNSAFE: clean the Item worktree before pause")
@@ -543,10 +543,10 @@ def worktree_is_clean_and_at(root: Path, path: Path, expected_oid: str) -> None:
 
 def worktree_head(root: Path, path: Path) -> str:
     if not path.is_dir():
-        raise RuntimeError(f"Item worktree is missing: {path}")
+        raise RuntimeError(f"DELIVERY_WORKTREE_UNSAFE: Item worktree is missing: {path}")
     head = run_git(root, "-C", str(path), "rev-parse", "HEAD")
     if not OID_RE.fullmatch(head):
-        raise RuntimeError("Item worktree has no valid HEAD")
+        raise RuntimeError("DELIVERY_WORKTREE_UNSAFE: Item worktree has no valid HEAD")
     return head
 
 
@@ -571,7 +571,7 @@ def require_visible_item_index(worktree: Path) -> None:
     hidden = [entry[2:] for entry in result.stdout.split("\0")
               if entry and (entry[0] == "S" or entry[0].islower())]
     if hidden:
-        raise RuntimeError("Item index flags hide tracked paths from verification: "
+        raise RuntimeError("DELIVERY_WORKTREE_UNSAFE: Item index flags hide tracked paths from verification: "
                            + json.dumps(sorted(hidden), ensure_ascii=False))
 
 
@@ -597,7 +597,7 @@ def advance_worktree_to_candidate(root: Path, path: Path, candidate_oid: str) ->
             text=True, capture_output=True, check=False,
         )
         if comparison.returncode == 1:
-            raise RuntimeError("published Item candidate does not contain the current worktree bytes")
+            raise RuntimeError("DELIVERY_WORKTREE_UNSAFE: published Item candidate does not contain the current worktree bytes")
         if comparison.returncode:
             raise RuntimeError(comparison.stderr.strip() or "cannot compare Item worktree to candidate")
     run_git(root, "-C", str(path), "reset", "--hard", candidate_oid)
@@ -609,12 +609,12 @@ def active_writer_receipt(root: Path, delivery_id: str, story_id: str,
     receipt = read_writer_receipt(root, delivery_id, story_id)
     refs = canonical_refs(delivery_id, story_id)
     if receipt is None or receipt.get("state") != "verified":
-        raise RuntimeError("push-item requires this machine's verified Item writer receipt")
+        raise RuntimeError("DELIVERY_WRITER_RECEIPT_MISSING: push-item requires this machine's verified Item writer receipt")
     if receipt.get("item_ref") != refs["item"] or receipt.get("slot_ref") != slot_ref:
-        raise RuntimeError("Item writer receipt does not match the current Item Slot pair")
+        raise RuntimeError("DELIVERY_WRITER_RECEIPT_STALE: Item writer receipt does not match the current Item Slot pair")
     candidate = str(receipt.get("candidate_oid", ""))
     if not is_ancestor(root, candidate, item_oid):
-        raise RuntimeError("Item writer receipt is stale against the remote Item tip")
+        raise RuntimeError("DELIVERY_WRITER_RECEIPT_STALE: Item writer receipt is stale against the remote Item tip")
     return receipt
 
 
@@ -765,7 +765,7 @@ def delivery_projection_changes(root: Path, tree: str,
                     continue
                 errors = item_operation_findings(docs, actual)
                 if errors:
-                    raise RuntimeError("Delivery candidate Operation bindings are invalid: " + "; ".join(errors))
+                    raise RuntimeError("DELIVERY_PLAN_STALE: Delivery candidate Operation bindings are invalid: " + "; ".join(errors))
         return changes
 
 
@@ -827,10 +827,19 @@ def remote_has_ref(root: Path, remote: str, ref: str) -> bool:
     return bool(output.strip())
 
 
+# The finding-code prefix an absent coordination ref reports, by the ref family it names.
+ABSENT_REF_PREFIXES = (
+    ("refs/heads/agentrof/fence", "DELIVERY_FENCE_MISSING: "),
+    ("refs/heads/agentrof/items/", "DELIVERY_ITEM_REF_MISSING: "),
+    ("refs/heads/agentrof/slots/", "DELIVERY_ITEM_SLOT_MISSING: "),
+)
+
+
 def remote_oid(root: Path, remote: str, ref: str) -> str:
     output = run_git(root, "ls-remote", remote, ref)
     if not output:
-        raise RuntimeError(f"remote ref is absent: {ref}")
+        code = next((prefix for family, prefix in ABSENT_REF_PREFIXES if ref.startswith(family)), "")
+        raise RuntimeError(f"{code}remote ref is absent: {ref}")
     return output.split()[0]
 
 
@@ -990,7 +999,7 @@ def package_paths(root: Path, directory: Path, docs: Path,
     paths = []
     for path in directory.rglob("*"):
         if path.is_symlink():
-            raise RuntimeError("Delivery publication forbids symlink package paths")
+            raise RuntimeError("DELIVERY_PATH_ESCAPE: Delivery publication forbids symlink package paths")
         if not path.is_file():
             continue
         if is_os_metadata_path(path) and path.stat().st_nlink == 1:
@@ -1016,11 +1025,11 @@ def assert_integrated_items(root: Path, remote: str, directory: Path,
         relative = str(item_path.relative_to(root))
         item_props, _ = split_remote_note(root, item_oid, relative, split_note)
         if item_props.get("status") != "integrated":
-            raise RuntimeError(f"Delivery Item is not integrated: {story}")
+            raise RuntimeError(f"DELIVERY_ITEM_NOT_READY: Delivery Item is not integrated: {story}")
         try:
             run_git(root, "merge-base", "--is-ancestor", item_oid, integration_oid)
         except RuntimeError as exc:
-            raise RuntimeError(f"Integration does not contain exact Item tip: {story}") from exc
+            raise RuntimeError(f"DELIVERY_COORDINATION_CORRUPT: Integration does not contain exact Item tip: {story}") from exc
         stories.append(story)
     if not stories:
         raise RuntimeError("Delivery Review requires at least one integrated Item")
@@ -1048,11 +1057,11 @@ def publish_delivery_review(project_root: Path, delivery_id: str,
     integration_oid = remote_oid(root, remote, refs["integration"])
     fence_message = commit_message(root, fence_oid)
     if trailer(fence_message, "Record") != "project-fence-v2" or trailer(fence_message, "Mode") != "open":
-        raise RuntimeError("publish-delivery-review requires an open Fence")
+        raise RuntimeError("DELIVERY_FENCE_MODE: publish-delivery-review requires an open Fence")
     stories = assert_integrated_items(root, remote, directory, integration_oid, delivery_id)
     reviewed_parent = str(review_props.get("reviewed_integration_commit", "none"))
     if reviewed_parent != integration_oid:
-        raise RuntimeError("Delivery Review reviewed_integration_commit is stale")
+        raise RuntimeError("DELIVERY_REVIEW_STALE: Delivery Review reviewed_integration_commit is stale")
     candidate = commit_tree(
         root, integration_oid, package_paths(root, directory, docs, include_items=False),
         f"Publish delivery review for {delivery_id}",
@@ -1087,7 +1096,7 @@ def prepare_pr_creation(project_root: Path, delivery_id: str,
     if trailer(integration_message, "Record") != "delivery-review-published-v1":
         raise RuntimeError("PR creation requires a published Delivery Review")
     if trailer(fence_message, "Mode") != "open":
-        raise RuntimeError("PR creation requires an open Fence")
+        raise RuntimeError("DELIVERY_FENCE_MODE: PR creation requires an open Fence")
     attempt = epoch_token()
     target = trailer(fence_message, "Target") or "none"
     intent = commit_tree(
@@ -1196,14 +1205,14 @@ def open_pr(project_root: Path, delivery_id: str, remote: str = "origin") -> dic
             raise RuntimeError("external PR adoption requires exactly one unmerged exact PR")
         pr = existing[0]
         if str(pr.get("state", "")).upper() != "OPEN":
-            raise RuntimeError("external closed-unmerged PR requires explicit provider reopen before adoption")
+            raise RuntimeError("DELIVERY_PR_STATE_INVALID: external closed-unmerged PR requires explicit provider reopen before adoption")
         if pr.get("headRefName") != head or pr.get("baseRefName") != target_branch:
-            raise RuntimeError("external PR head/base does not match the Delivery")
+            raise RuntimeError("DELIVERY_PR_HEAD_BASE_MISMATCH: external PR head/base does not match the Delivery")
         if pr.get("headRefOid") and pr.get("headRefOid") != integration_oid:
-            raise RuntimeError("external PR head does not match the reviewed Integration")
+            raise RuntimeError("DELIVERY_PR_HEAD_BASE_MISMATCH: external PR head does not match the reviewed Integration")
         url = pr.get("url")
         if not isinstance(url, str):
-            raise ProviderError("external PR has no canonical URL")
+            raise ProviderError("DELIVERY_PR_UNCERTAIN: external PR has no canonical URL")
         canonical_url, number = canonical_github_pr(url)
         if not pr.get("isDraft"):
             provider.ensure_draft(canonical_url)
@@ -1235,7 +1244,7 @@ def open_pr(project_root: Path, delivery_id: str, remote: str = "origin") -> dic
             raise RuntimeError("open-pr requires an unmatched PR creation or adoption intent")
     attempt = trailer(integration_message, "Attempt")
     if not adoption and not attempt:
-        raise RuntimeError("PR creation intent has no Attempt")
+        raise RuntimeError("DELIVERY_COORDINATION_CORRUPT: PR creation intent has no Attempt")
     if adoption:
         # The provider was already normalized to draft and the exact URL is
         # carried by the adoption intent. No create receipt or provider POST
@@ -1249,7 +1258,7 @@ def open_pr(project_root: Path, delivery_id: str, remote: str = "origin") -> dic
                 "refs": short_refs(delivery_id)}
     existing = provider.exact_unmerged(head, target_branch)
     if len(existing) > 1:
-        raise RuntimeError("multiple exact unmerged Delivery PRs exist")
+        raise RuntimeError("DELIVERY_PR_DUPLICATE: multiple exact unmerged Delivery PRs exist")
     receipt = create_provider_receipt(root, delivery_id, integration_oid, attempt)
     if receipt["state"] == "verified" and receipt.get("url") not in {None, "none"}:
         return {"ok": True, "delivery": delivery_id, "pull_request_url": receipt["url"],
@@ -1257,10 +1266,10 @@ def open_pr(project_root: Path, delivery_id: str, remote: str = "origin") -> dic
     if existing:
         pr = existing[0]
         if str(pr.get("state", "")).upper() != "OPEN":
-            raise RuntimeError("exact Delivery PR is closed without merge; manual reopen is required")
+            raise RuntimeError("DELIVERY_PR_STATE_INVALID: exact Delivery PR is closed without merge; manual reopen is required")
         url = pr.get("url")
         if not isinstance(url, str):
-            raise ProviderError("GitHub exact PR has no URL")
+            raise ProviderError("DELIVERY_PR_UNCERTAIN: GitHub exact PR has no URL")
         provider.ensure_draft(url)
         provider_call = False
     else:
@@ -1307,38 +1316,41 @@ def merge_pr(project_root: Path, delivery_id: str, remote: str = "origin") -> di
     candidates = [item for item in provider.list_pull_requests(short_refs(delivery_id)["integration"], target_branch)
                   if str(item.get("url", "")) == canonical_url]
     if len(candidates) != 1:
-        raise ProviderError("exactly one lifecycle PR is required")
+        raise ProviderError("DELIVERY_PR_HEAD_BASE_MISMATCH: exactly one lifecycle PR is required")
     pr = candidates[0]
     if str(pr.get("state", "")).upper() == "MERGED":
         merged = pr
     else:
-        if str(pr.get("state", "")).upper() != "OPEN" or pr.get("headRefName") != short_refs(delivery_id)["integration"] or pr.get("baseRefName") != target_branch:
-            raise ProviderError("Delivery PR head/base/state is not mergeable")
+        if str(pr.get("state", "")).upper() != "OPEN":
+            raise ProviderError("DELIVERY_PR_STATE_INVALID: Delivery PR head/base/state is not mergeable")
+        if pr.get("headRefName") != short_refs(delivery_id)["integration"] or pr.get("baseRefName") != target_branch:
+            raise ProviderError("DELIVERY_PR_HEAD_BASE_MISMATCH: Delivery PR head/base/state is not mergeable")
         if pr.get("isDraft"):
             provider.make_ready(canonical_url)
         head_now = remote_oid(root, remote, refs["integration"])
         if head_now != integration_oid:
-            raise RuntimeError("Integration advanced after PR review; re-run Delivery Review")
+            raise RuntimeError("DELIVERY_REVIEW_STALE: Integration advanced after PR review; re-run Delivery Review")
         current = provider.inspect_pull_request(canonical_url)
-        if (str(current.get("state", "")).upper() != "OPEN" or current.get("isDraft")
-                or current.get("headRefName") != short_refs(delivery_id)["integration"]
+        if str(current.get("state", "")).upper() != "OPEN" or current.get("isDraft"):
+            raise ProviderError("DELIVERY_PR_STATE_INVALID: Delivery PR changed before the merge call")
+        if (current.get("headRefName") != short_refs(delivery_id)["integration"]
                 or current.get("baseRefName") != target_branch
                 or current.get("headRefOid") != integration_oid):
-            raise ProviderError("Delivery PR changed before the merge call")
+            raise ProviderError("DELIVERY_PR_HEAD_BASE_MISMATCH: Delivery PR changed before the merge call")
         provider.require_green_checks(current)
         provider.merge_commit(canonical_url, integration_oid)
         refreshed = [item for item in provider.list_pull_requests(short_refs(delivery_id)["integration"], target_branch)
                      if str(item.get("url", "")) == canonical_url]
         if len(refreshed) != 1:
-            raise ProviderError("merged PR cannot be reconstructed")
+            raise ProviderError("DELIVERY_PR_UNCERTAIN: merged PR cannot be reconstructed")
         merged = refreshed[0]
     if str(merged.get("state", "")).upper() != "MERGED":
-        raise ProviderError("provider PR is not merged")
+        raise ProviderError("DELIVERY_MERGE_PROOF_INVALID: provider PR is not merged")
     provider.require_green_checks(merged)
     merge_value = merged.get("mergeCommit")
     merge_oid = merge_value.get("oid") if isinstance(merge_value, dict) else merge_value
     if not isinstance(merge_oid, str) or not OID_RE.fullmatch(merge_oid):
-        raise ProviderError("provider did not return an exact merge commit")
+        raise ProviderError("DELIVERY_MERGE_PROOF_INVALID: provider did not return an exact merge commit")
     target_after = resolve_target(root, remote)[1]
     run_git(root, "fetch", "--no-tags", remote, f"refs/heads/{target_branch}:refs/remotes/{remote}/{target_branch}")
     try:
@@ -1346,11 +1358,11 @@ def merge_pr(project_root: Path, delivery_id: str, remote: str = "origin") -> di
         run_git(root, "merge-base", "--is-ancestor", integration_oid, target_after)
         merge_object = run_git(root, "cat-file", "-p", merge_oid)
     except RuntimeError as exc:
-        raise RuntimeError("provider merge is not present in the exact target ancestry") from exc
+        raise RuntimeError("DELIVERY_MERGE_PROOF_INVALID: provider merge is not present in the exact target ancestry") from exc
     parents = [line.split(" ", 1)[1] for line in merge_object.splitlines()
                if line.startswith("parent ") and " " in line]
     if len(parents) != 2 or parents[1] != integration_oid:
-        raise ProviderError("provider merge is not an exact two-parent merge of the reviewed Integration")
+        raise ProviderError("DELIVERY_MERGE_POLICY_INVALID: provider merge is not an exact two-parent merge of the reviewed Integration")
     return {"ok": True, "delivery": delivery_id, "status": "merged",
             "pull_request_url": canonical_url, "merge_commit": merge_oid,
             "target_before": target_before, "target_after": target_after,
@@ -1377,7 +1389,7 @@ def invalidate_delivery_review(project_root: Path, delivery_id: str,
     fence_message = commit_message(root, fence_oid)
     integration_message = commit_message(root, integration_oid)
     if trailer(fence_message, "Mode") != "open":
-        raise RuntimeError("review invalidation requires an open Fence")
+        raise RuntimeError("DELIVERY_FENCE_MODE: review invalidation requires an open Fence")
     if trailer(integration_message, "Record") not in {"delivery-review-published-v1", "pr-url-recorded-v1"}:
         raise RuntimeError("review invalidation requires a published current Review")
     review_path = directory / "delivery-review.md"
@@ -1416,22 +1428,22 @@ def invalidate_delivery_review(project_root: Path, delivery_id: str,
 def cancellation_projection(delivery_id: str, scope_hash: str, reason: str,
                              stories: dict[str, dict[str, str]], target: str) -> tuple[dict, str]:
     if not reason.strip() or not OID_RE.fullmatch(target):
-        raise ValueError("cancellation reason and exact target OID are required")
+        raise ValueError("DELIVERY_CANCELLATION_INVALID: cancellation reason and exact target OID are required")
     normalized = {}
     for story, value in sorted(stories.items()):
         validate_story_id(story)
         if set(value) != {"disposition", "tip"}:
-            raise ValueError("cancellation story projection has unexpected keys")
+            raise ValueError("DELIVERY_CANCELLATION_INVALID: cancellation story projection has unexpected keys")
         disposition = str(value["disposition"])
         tip = str(value["tip"])
         if disposition == "not_started":
             if tip != "none":
-                raise ValueError("not_started cancellation stories must use tip none")
+                raise ValueError("DELIVERY_CANCELLATION_INVALID: not_started cancellation stories must use tip none")
         elif disposition in {"integrated_reverted", "unintegrated_discarded"}:
             if not OID_RE.fullmatch(tip):
-                raise ValueError("executed cancellation stories require an exact previous Item tip")
+                raise ValueError("DELIVERY_CANCELLATION_INVALID: executed cancellation stories require an exact previous Item tip")
         else:
-            raise ValueError("unsupported cancellation disposition")
+            raise ValueError("DELIVERY_CANCELLATION_INVALID: unsupported cancellation disposition")
         normalized[story] = {"disposition": disposition, "tip": tip}
     projection = {"delivery": delivery_id, "reason": reason.strip(),
                   "scope_hash": scope_hash, "stories": normalized, "target": target}
@@ -1448,12 +1460,12 @@ def cancellation_projection_hash(delivery_id: str, intent_hash: str,
     target package reproducible after an accepted-response-loss recovery.
     """
     if not EPOCH_RE.fullmatch(barrier_epoch):
-        raise ValueError("cancellation barrier epoch is invalid")
+        raise ValueError("DELIVERY_CANCELLATION_INVALID: cancellation barrier epoch is invalid")
     final_stories = {}
     for story, value in sorted(stories.items()):
         validate_story_id(story)
         if set(value) != {"disposition", "tip"}:
-            raise ValueError("cancellation finalization story projection has unexpected keys")
+            raise ValueError("DELIVERY_CANCELLATION_INVALID: cancellation finalization story projection has unexpected keys")
         final_stories[story] = {
             "disposition": str(value["disposition"]),
             "previous_tip": str(value["tip"]),
@@ -1479,7 +1491,7 @@ def revert_merge_candidate(root: Path, base: str, merge_oid: str,
     """
     parents = run_git(root, "show", "-s", "--format=%P", merge_oid).split()
     if len(parents) < 2:
-        raise RuntimeError(f"integrated Item tip is not a merge commit: {merge_oid}")
+        raise RuntimeError(f"DELIVERY_COORDINATION_CORRUPT: integrated Item tip is not a merge commit: {merge_oid}")
     first_parent = parents[0]
     with tempfile.TemporaryDirectory(prefix="agentrof-revert-index-") as temporary:
         index = Path(temporary) / "index"
@@ -1516,7 +1528,7 @@ def revert_merge_candidate(root: Path, base: str, merge_oid: str,
             current_entry = entry(base, path)
             if current_entry != merge_entry and current_entry != parent_entry:
                 raise RuntimeError(
-                    "cancellation revert conflicts with current Integration: "
+                    "DELIVERY_CANCELLATION_INVALID: cancellation revert conflicts with current Integration: "
                     f"{path} (base={current_entry}, merge={merge_entry}, "
                     f"parent={parent_entry})"
                 )
@@ -1569,7 +1581,7 @@ def cancel_delivery(project_root: Path, delivery_id: str, reason: str,
     delivery_path_value = directory / "delivery.md"
     local_props, _ = split_note(delivery_path_value)
     if local_props.get("status") in {"draft", "cancelled", "target_merged"}:
-        raise RuntimeError("cancel-delivery requires a nonterminal approved Delivery")
+        raise RuntimeError("DELIVERY_CANCELLATION_INVALID: cancel-delivery requires a nonterminal approved Delivery")
     refs = canonical_refs(delivery_id)
     fence_oid = remote_oid(root, remote, refs["fence"])
     integration_oid = remote_oid(root, remote, refs["integration"])
@@ -1577,7 +1589,7 @@ def cancel_delivery(project_root: Path, delivery_id: str, reason: str,
     integration_message = commit_message(root, integration_oid)
     if trailer(fence_message, "Mode") != "open" or trailer(integration_message, "Record") in {
             "cancellation-intent-v1", "delivery-barrier-v1", "cancellation-finalized-v1"}:
-        raise RuntimeError("Delivery already has a barrier or non-open Fence")
+        raise RuntimeError("DELIVERY_BARRIER_ACTIVE: Delivery already has a barrier or non-open Fence")
 
     relative_delivery = str(delivery_path_value.relative_to(root))
     remote_props, remote_body = split_remote_note(root, integration_oid, relative_delivery, split_note)
@@ -1595,7 +1607,7 @@ def cancel_delivery(project_root: Path, delivery_id: str, reason: str,
             item_oid = remote_oid(root, remote, item_ref)
             item_props, item_body = split_remote_note(root, item_oid, relative_item, split_note)
             if item_props.get("status") == "cancelled":
-                raise RuntimeError(f"Item is already cancelled: {story}")
+                raise RuntimeError(f"DELIVERY_CANCELLATION_INVALID: Item is already cancelled: {story}")
             disposition = "integrated_reverted" if item_props.get("status") == "integrated" else "unintegrated_discarded"
             context.update({"item_oid": item_oid, "slot": next((key for key, oid in all_slots.items() if oid == item_oid), None),
                             "props": item_props, "body": item_body})
@@ -1643,7 +1655,7 @@ def cancel_delivery(project_root: Path, delivery_id: str, reason: str,
                 break
         if merge_oid is None:
             raise RuntimeError(
-                f"Integration history has no exact Item merge for {story}"
+                f"DELIVERY_COORDINATION_CORRUPT: Integration history has no exact Item merge for {story}"
             )
         integrated.append((story, merge_oid))
     integrated.sort(key=lambda pair: first_parent_order[pair[1]])
@@ -1781,7 +1793,7 @@ def reserve_delivery(project_root: Path, delivery_id: str, remote: str = "origin
     target_branch, target_oid = resolve_target(root, remote)
     refs = canonical_refs(delivery_id)
     if any(remote_has_ref(root, remote, ref) for ref in refs.values()):
-        raise RuntimeError("reservation requires absent Fence and Integration refs")
+        raise RuntimeError("DELIVERY_REF_COLLISION: reservation requires absent Fence and Integration refs")
     package = package_paths(root, directory, docs, include_map=False)
     integration_oid = commit_tree(
         root, target_oid, sorted(set(package)),
@@ -1826,7 +1838,7 @@ def execution_operation_inputs(root: Path, directory: Path, docs: Path) -> tuple
         if props.get("status") not in TERMINAL_ITEM_STATUSES:
             errors = item_operation_findings(docs, props)
             if errors:
-                raise RuntimeError("Item Operation bindings are invalid: " + "; ".join(errors))
+                raise RuntimeError("DELIVERY_PLAN_STALE: Item Operation bindings are invalid: " + "; ".join(errors))
         bindings[item.relative_to(docs).as_posix()] = {
             key: props.get(key) for key in (*OPERATION_BINDING_FIELDS, "runtime_required")}
         if props.get("runtime_required"):
@@ -1858,7 +1870,7 @@ def publish_execution_plan(project_root: Path, delivery_id: str,
     integration_oid = remote_oid(root, remote, refs["integration"])
     fence_message = commit_message(root, fence_oid)
     if trailer(fence_message, "Record") != "project-fence-v2" or trailer(fence_message, "Mode") != "open":
-        raise RuntimeError("publish-execution-plan requires an open Fence")
+        raise RuntimeError("DELIVERY_FENCE_MODE: publish-execution-plan requires an open Fence")
     package = package_paths(root, directory, docs, include_map=False)
     operation_paths, operation_bindings = execution_operation_inputs(root, directory, docs)
     integration_candidate = commit_tree(
@@ -1887,7 +1899,7 @@ def target_impact_hash(delivery_id: str, previous_target: str, target: str,
                        barrier_epoch: str = "none") -> str:
     """Return the canonical target-impact digest for a nonempty mapping."""
     if not OID_RE.fullmatch(previous_target) or not OID_RE.fullmatch(target):
-        raise ValueError("target impact requires exact previous and current target OIDs")
+        raise ValueError("DELIVERY_TARGET_IMPACT_INVALID: target impact requires exact previous and current target OIDs")
     value = {
         "barrier_epoch": barrier_epoch,
         "delivery": delivery_id,
@@ -1920,14 +1932,14 @@ def fetch_target(root: Path, remote: str) -> tuple[str, str]:
 def require_target_ancestry(root: Path, remote: str, fence_message: str,
                             integration_oid: str, item_oid: str | None = None) -> str:
     if trailer(fence_message, "Record") != "project-fence-v2" or trailer(fence_message, "Mode") != "open":
-        raise RuntimeError("writer readiness requires an open Fence")
+        raise RuntimeError("DELIVERY_FENCE_MODE: writer readiness requires an open Fence")
     _branch, target = fetch_target(root, remote)
     if trailer(fence_message, "Target") != target:
-        raise RuntimeError("target advanced; refresh the Delivery before Item activation")
+        raise RuntimeError("DELIVERY_TARGET_DRIFT: target advanced; refresh the Delivery before Item activation")
     if not is_ancestor(root, target, integration_oid):
-        raise RuntimeError("target convergence required: Integration does not contain the current target")
+        raise RuntimeError("DELIVERY_TARGET_CONVERGENCE_REQUIRED: Integration does not contain the current target")
     if item_oid is not None and not is_ancestor(root, target, item_oid):
-        raise RuntimeError("target convergence required: Item does not contain the current target")
+        raise RuntimeError("DELIVERY_TARGET_CONVERGENCE_REQUIRED: Item does not contain the current target")
     return target
 
 
@@ -1992,7 +2004,7 @@ def target_input_bindings(root: Path, directory: Path, integration: str,
             continue
         props, digest = split_remote_note(root, target, path, reader)
         if props.get("status") != status or props.get("source_hash") != expected or digest != expected:
-            raise RuntimeError("target changed a pinned source or Operation receipt: " + path)
+            raise RuntimeError("DELIVERY_TARGET_SOURCE_VIOLATION: target changed a pinned source or Operation receipt: " + path)
     return bindings
 
 
@@ -2056,10 +2068,10 @@ def refresh_target(project_root: Path, delivery_id: str,
     integration_oid = remote_oid(root, remote, refs["integration"])
     fence_message = commit_message(root, fence_oid)
     if trailer(fence_message, "Record") != "project-fence-v2" or trailer(fence_message, "Mode") != "open":
-        raise RuntimeError("target-refresh requires an open Fence")
+        raise RuntimeError("DELIVERY_FENCE_MODE: target-refresh requires an open Fence")
     previous_target = trailer(fence_message, "Target")
     if not previous_target or not OID_RE.fullmatch(previous_target):
-        raise RuntimeError("Fence has no valid target baseline")
+        raise RuntimeError("DELIVERY_FENCE_CORRUPT: Fence has no valid target baseline")
     _target_branch, target = fetch_target(root, remote)
     integrated = is_ancestor(root, target, integration_oid)
     if target == previous_target and integrated:
@@ -2092,7 +2104,7 @@ def refresh_target(project_root: Path, delivery_id: str,
     from delivery_compile import _claims_overlap
     overlaps = sorted(path for path in changed if any(_claims_overlap(path, claim) for claim in claimed))
     if overlaps:
-        raise RuntimeError("claimed_source_violation: target changed claimed paths " + ", ".join(overlaps))
+        raise RuntimeError("DELIVERY_TARGET_SOURCE_VIOLATION: target changed claimed paths " + ", ".join(overlaps))
     final_candidate = merge_candidate(
         root, integration_oid, target, f"Refresh target for {delivery_id}",
         {"Record": "target-refresh-v1", "Protocol": "1", "Delivery": delivery_id,
@@ -2140,11 +2152,11 @@ def revise_unclaimed_scope(project_root: Path, delivery_id: str,
     integration_oid = remote_oid(root, remote, refs["integration"])
     fence_message = commit_message(root, fence_oid)
     if trailer(fence_message, "Mode") != "open":
-        raise RuntimeError("revise-unclaimed-scope requires an open Fence")
+        raise RuntimeError("DELIVERY_FENCE_MODE: revise-unclaimed-scope requires an open Fence")
     for item_path in sorted(directory.glob("items/*/item.md")):
         story = item_path.parent.name.upper()
         if remote_has_ref(root, remote, canonical_refs(delivery_id, story)["item"]):
-            raise RuntimeError(f"scope revision is forbidden after Item claim: {story}")
+            raise RuntimeError(f"DELIVERY_CLAIM_CONFLICT: scope revision is forbidden after Item claim: {story}")
     occupied = remote_slot_oids(root, remote)
     if occupied:
         raise RuntimeError("scope revision requires no active global Slot")
@@ -2287,17 +2299,17 @@ def authorize_target_update(project_root: Path, mode: str = "source_handoff",
     if candidate_hash == "none" or not re.fullmatch(r"sha256:[0-9a-f]{64}", candidate_hash):
         raise ValueError("candidate_hash must be a canonical sha256 digest")
     if carrier_kind not in {"github_pr", "direct_target"}:
-        raise ValueError("carrier_kind must be github_pr or direct_target")
+        raise ValueError("DELIVERY_TARGET_CARRIER_INVALID: carrier_kind must be github_pr or direct_target")
     if target_repository not in {"upstream"} and not re.fullmatch(
             r"github:[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", target_repository):
-        raise ValueError("target_repository must be upstream or github:<owner>/<repo>")
+        raise ValueError("DELIVERY_TARGET_CARRIER_INVALID: target_repository must be upstream or github:<owner>/<repo>")
     if (not carrier_ref.startswith("refs/heads/") or carrier_ref.startswith("refs/heads/agentrof/")
             or not OID_RE.fullmatch(carrier_head) or not OID_RE.fullmatch(carrier_base)):
-        raise ValueError("carrier ref/head/base is invalid")
+        raise ValueError("DELIVERY_TARGET_CARRIER_INVALID: carrier ref/head/base is invalid")
     if carrier_kind == "github_pr" and not re.fullmatch(r"pr:[1-9][0-9]*", carrier_object):
-        raise ValueError("github_pr carrier_object must be pr:<number>")
+        raise ValueError("DELIVERY_TARGET_CARRIER_INVALID: github_pr carrier_object must be pr:<number>")
     if carrier_kind == "direct_target" and carrier_object != "direct":
-        raise ValueError("direct_target carrier_object must be direct")
+        raise ValueError("DELIVERY_TARGET_CARRIER_INVALID: direct_target carrier_object must be direct")
     observed_carrier = remote_oid(root, remote, carrier_ref)
     if observed_carrier != carrier_head:
         raise RuntimeError("DELIVERY_TARGET_CARRIER_INVALID: carrier ref does not equal carrier head")
@@ -2340,7 +2352,7 @@ def finish_source_handoff(project_root: Path, remote: str = "origin") -> dict:
     if values["Mode"] not in {"source_handoff", "governance", "upgrade"}:
         raise RuntimeError("DELIVERY_FENCE_MODE: no source handoff is active")
     if values["Target-Update-Intent"] == "none":
-        raise RuntimeError("finish-source-handoff requires an authorized target-update intent")
+        raise RuntimeError("DELIVERY_TARGET_CONVERGENCE_REQUIRED: finish-source-handoff requires an authorized target-update intent")
     _branch, target = resolve_target(root, remote)
     handoff_mode = values["Mode"]
     attempt = values["Target-Update-Attempt"]
@@ -2601,14 +2613,14 @@ def upgrade_fence_v1(project_root: Path, *, dry_run: bool = False,
     fence_oid = remote_oid(root, remote, ref)
     message = commit_message(root, fence_oid)
     if trailer(message, "Record") != "project-fence-v1" or trailer(message, "Protocol") != "1":
-        raise RuntimeError("upgrade-fence-v1 requires an exact protocol-1 Fence")
+        raise RuntimeError("DELIVERY_PROTOCOL_UNSUPPORTED: upgrade-fence-v1 requires an exact protocol-1 Fence")
     if trailer(message, "Mode") != "open":
-        raise RuntimeError("v1 Fence must be quiesced in open mode before migration")
+        raise RuntimeError("DELIVERY_FENCE_MODE: v1 Fence must be quiesced in open mode before migration")
     if remote_slot_oids(root, remote):
-        raise RuntimeError("v1 Fence migration requires every Delivery Slot to be free")
+        raise RuntimeError("DELIVERY_UPGRADE_INCOMPATIBLE: v1 Fence migration requires every Delivery Slot to be free")
     target = trailer(message, "Target") or "none"
     if not OID_RE.fullmatch(target):
-        raise RuntimeError("v1 Fence target is invalid")
+        raise RuntimeError("DELIVERY_FENCE_CORRUPT: v1 Fence target is invalid")
     prior_epoch = trailer(message, "Epoch") or epoch_token()
     _validate_epoch(prior_epoch)
     governance, errors = delivery_governance.status(root / "workspace" / "docs")
@@ -2842,7 +2854,7 @@ def claim_items(project_root: Path, delivery_id: str, remote: str = "origin") ->
     integration_oid = remote_oid(root, remote, refs["integration"])
     fence_message = commit_message(root, fence_oid)
     if trailer(fence_message, "Record") != "project-fence-v2" or trailer(fence_message, "Mode") != "open":
-        raise RuntimeError("claim-items requires an open Fence")
+        raise RuntimeError("DELIVERY_FENCE_MODE: claim-items requires an open Fence")
     require_target_ancestry(root, remote, fence_message, integration_oid)
     marker = commit_tree(root, integration_oid, [], f"Establish claims for {delivery_id}",
                          {"Record": "claims-established-v1", "Protocol": "1", "Delivery": delivery_id,
@@ -2861,7 +2873,7 @@ def claim_items(project_root: Path, delivery_id: str, remote: str = "origin") ->
         story = item_path.parent.name.upper()
         item_ref = canonical_refs(delivery_id, story)["item"]
         if remote_has_ref(root, remote, item_ref):
-            raise RuntimeError(f"story is already claimed: {story}")
+            raise RuntimeError(f"DELIVERY_CLAIM_CONFLICT: story is already claimed: {story}")
         item_props, item_body = split_note(item_path)
         item_props["integration_base_commit"] = marker
         item_props["source_hash"] = content_hash(item_props, item_body)
@@ -2916,7 +2928,7 @@ def require_item_operation_bindings(root: Path, item_props: dict) -> None:
     from delivery_compile import item_operation_findings
     findings = item_operation_findings(root / "workspace" / "docs", item_props)
     if findings:
-        raise RuntimeError("Item Operation Contract bindings are invalid: " + "; ".join(findings))
+        raise RuntimeError("DELIVERY_PLAN_STALE: Item Operation Contract bindings are invalid: " + "; ".join(findings))
 
 
 def require_item_architecture_binding(worktree: Path, item_props: dict,
@@ -3112,7 +3124,7 @@ def require_current_activation_target(root: Path, remote: str, delivery_id: str,
                                    (slot_ref, item_candidate, "")])
         discard_pending_writer_receipt(root, delivery_id, story_id, item_candidate)
         raise RuntimeError(
-            "target advanced after Item activation; Item was paused before worktree creation"
+            "DELIVERY_TARGET_DRIFT: target advanced after Item activation; Item was paused before worktree creation"
         )
 
 
@@ -3161,16 +3173,16 @@ def start_item(project_root: Path, delivery_id: str, story_id: str,
     item_oid = remote_oid(root, remote, refs["item"])
     fence_message = commit_message(root, fence_oid)
     if trailer(fence_message, "Record") != "project-fence-v2" or trailer(fence_message, "Mode") != "open":
-        raise RuntimeError("start-item requires an open Fence")
+        raise RuntimeError("DELIVERY_FENCE_MODE: start-item requires an open Fence")
     fence_target = trailer(fence_message, "Target")
     if not fence_target or not OID_RE.fullmatch(fence_target):
-        raise RuntimeError("start-item requires a valid Fence target baseline")
+        raise RuntimeError("DELIVERY_FENCE_CORRUPT: start-item requires a valid Fence target baseline")
     target_before = require_target_ancestry(root, remote, fence_message, integration_oid, item_oid)
     max_parallel = project_max_parallel(root, trailer(fence_message, "Governance-Hash") or "none")
     occupied = remote_slot_oids(root, remote)
     free = next((slot for slot in range(1, max_parallel + 1) if slot_key(slot) not in occupied), None)
     if free is None:
-        raise RuntimeError("no global execution Slot is available")
+        raise RuntimeError("DELIVERY_SLOT_UNAVAILABLE: no global execution Slot is available")
     slot = slot_key(free)
     slot_ref = canonical_refs(delivery_id, story_id, slot)["slot"]
     item_path = directory / "items" / story_key(story_id) / "item.md"
@@ -3269,7 +3281,7 @@ def _set_active_item_status(project_root: Path, delivery_id: str, story_id: str,
     slots = remote_slot_oids(root, remote)
     slot = next((key for key, oid in slots.items() if oid == item_oid), None)
     if slot is None:
-        raise RuntimeError("Item and Slot refs diverge; refuse active status transition")
+        raise RuntimeError("DELIVERY_ITEM_SLOT_DIVERGED: Item and Slot refs diverge; refuse active status transition")
     relative_item = str((directory / "items" / story_key(story_id) / "item.md").relative_to(root))
     props, body = split_remote_note(root, item_oid, relative_item, split_note)
     if props.get("status") not in {"active", "blocked"}:
@@ -3330,7 +3342,7 @@ def reopen_item(project_root: Path, delivery_id: str, story_id: str,
     item_oid = remote_oid(root, remote, refs["item"])
     fence_message = commit_message(root, fence_oid)
     if trailer(fence_message, "Mode") != "open":
-        raise RuntimeError("reopen-item requires an open Fence")
+        raise RuntimeError("DELIVERY_FENCE_MODE: reopen-item requires an open Fence")
     if not is_ancestor(root, item_oid, integration_oid):
         raise RuntimeError("reopen-item requires an Item its Integration has absorbed")
     target_before = require_target_ancestry(root, remote, fence_message, integration_oid)
@@ -3366,7 +3378,7 @@ def reopen_item(project_root: Path, delivery_id: str, story_id: str,
     occupied = remote_slot_oids(root, remote)
     free = next((slot for slot in range(1, max_parallel + 1) if slot_key(slot) not in occupied), None)
     if free is None:
-        raise RuntimeError("no global execution Slot is available for reopen")
+        raise RuntimeError("DELIVERY_SLOT_UNAVAILABLE: no global execution Slot is available for reopen")
     slot = slot_key(free)
     slot_ref = canonical_refs(delivery_id, story_id, slot)["slot"]
     fence_candidate = commit_tree(
@@ -3409,7 +3421,7 @@ def pause_item(project_root: Path, delivery_id: str, story_id: str,
     slots = remote_slot_oids(root, remote)
     slot = next((key for key, oid in slots.items() if oid == item_oid), None)
     if slot is None:
-        raise RuntimeError("pause-item requires one exact Item Slot pair")
+        raise RuntimeError("DELIVERY_ITEM_SLOT_DIVERGED: pause-item requires one exact Item Slot pair")
     slot_ref = f"refs/heads/agentrof/slots/{slot}"
     worktree = worktree_paths(root, delivery_id, story_id)["item"]
     worktree_is_clean_and_at(root, worktree, item_oid)
@@ -3482,7 +3494,7 @@ def takeover_item(project_root: Path, delivery_id: str, story_id: str,
     slots = remote_slot_oids(root, remote)
     slot = next((key for key, oid in slots.items() if oid == item_oid), None)
     if slot is None:
-        raise RuntimeError("takeover requires one exact existing Item Slot pair")
+        raise RuntimeError("DELIVERY_ITEM_SLOT_DIVERGED: takeover requires one exact existing Item Slot pair")
     slot_ref = f"refs/heads/agentrof/slots/{slot}"
     relative_item = str((directory / "items" / story_key(story_id) / "item.md").relative_to(root))
     item_props, item_body = split_remote_note(root, item_oid, relative_item, split_note)
@@ -3560,7 +3572,7 @@ def push_item(project_root: Path, delivery_id: str, story_id: str,
     slots = remote_slot_oids(root, remote)
     slot = next((key for key, oid in slots.items() if oid == item_oid), None)
     if slot is None:
-        raise RuntimeError("Item and Slot refs diverge; refuse active writer push")
+        raise RuntimeError("DELIVERY_ITEM_SLOT_DIVERGED: Item and Slot refs diverge; refuse active writer push")
     slot_ref = f"refs/heads/agentrof/slots/{slot}"; slot_oid = slots[slot]
     receipt = active_writer_receipt(root, delivery_id, story_id, item_oid, slot_ref)
     relative_delivery = directory.relative_to(root)
@@ -3568,13 +3580,13 @@ def push_item(project_root: Path, delivery_id: str, story_id: str,
     require_visible_item_index(worktree)
     product_tip = worktree_head(root, worktree)
     if product_tip == item_oid or not is_ancestor(root, item_oid, product_tip):
-        raise RuntimeError("push-item requires a committed product/test change after the active remote Item tip")
+        raise RuntimeError("DELIVERY_ITEM_NOT_READY: push-item requires a committed product/test change after the active remote Item tip")
     relative_item = str(relative_delivery / "items" / story_key(story_id) / "item.md")
     relative_review = str(relative_delivery / "items" / story_key(story_id) / "code-review.md")
     relative_verification = str(relative_delivery / "items" / story_key(story_id) / "verification.md")
     committed_changes = set(run_git(root, "diff", "--name-only", item_oid, product_tip).splitlines())
     if not committed_changes:
-        raise RuntimeError("push-item requires a committed product/test change")
+        raise RuntimeError("DELIVERY_ITEM_NOT_READY: push-item requires a committed product/test change")
     # A converged Item is checked against the Integration's own line, which
     # another host may have advanced since this one last saw it.
     integration_oid = remote_oid(root, remote, refs["integration"])
@@ -3588,12 +3600,12 @@ def push_item(project_root: Path, delivery_id: str, story_id: str,
         raise RuntimeError(f"DELIVERY_WORKTREE_UNSAFE: commit or remove non-evidence changes before push: {unexpected}")
     item_path = worktree / relative_item
     if not item_path.exists():
-        raise RuntimeError(f"missing Item worktree projection: {item_path}")
+        raise RuntimeError(f"DELIVERY_WORKTREE_UNSAFE: missing Item worktree projection: {item_path}")
     committed_item = subprocess.run(
         ["git", "--no-replace-objects", "show", f"{product_tip}:{relative_item}"],
         cwd=root, capture_output=True, check=True).stdout
     if item_path.is_symlink() or item_path.read_bytes() != committed_item:
-        raise RuntimeError("Item worktree control differs from the committed product tip")
+        raise RuntimeError("DELIVERY_WORKTREE_UNSAFE: Item worktree control differs from the committed product tip")
     from ba_compile import parse_frontmatter
     item_text = committed_item.decode("utf-8")
     item_props, body_line, error = parse_frontmatter(item_text)
@@ -3606,24 +3618,24 @@ def push_item(project_root: Path, delivery_id: str, story_id: str,
     review = item_path.parent / "code-review.md"
     verification = item_path.parent / "verification.md"
     if not review.exists() or not verification.exists():
-        raise RuntimeError("push-item requires Item review and verification files")
+        raise RuntimeError("DELIVERY_ITEM_NOT_READY: push-item requires Item review and verification files")
     from delivery_compile import item_evidence_file_findings
     evidence_findings = item_evidence_file_findings(worktree, product_tip, (review, verification))
     if evidence_findings:
-        raise RuntimeError("; ".join(evidence_findings))
+        raise RuntimeError("DELIVERY_WORKTREE_UNSAFE: " + "; ".join(evidence_findings))
     review_props, review_body = split_note(review)
     verification_props, verification_body = split_note(verification)
     if review_props.get("status") != "approved" or verification_props.get("status") != "passed":
-        raise RuntimeError("push-item requires approved code review and passed verification")
+        raise RuntimeError("DELIVERY_ITEM_NOT_READY: push-item requires approved code review and passed verification")
     if review_props.get("reviewed_commit") != product_tip or verification_props.get("verified_commit") != product_tip:
-        raise RuntimeError("Item evidence must bind the exact committed product/test tip")
+        raise RuntimeError("DELIVERY_ITEM_NOT_READY: Item evidence must bind the exact committed product/test tip")
     if review_props.get("item_plan_hash") != item_props.get("item_plan_hash") or verification_props.get("item_plan_hash") != item_props.get("item_plan_hash"):
-        raise RuntimeError("Item evidence does not bind the active Item plan hash")
+        raise RuntimeError("DELIVERY_ITEM_NOT_READY: Item evidence does not bind the active Item plan hash")
     require_item_architecture_binding(worktree, item_props, story_id, tree=product_tip)
     if review_props.get("source_hash") != content_hash(review_props, review_body):
-        raise RuntimeError("code review source_hash is stale")
+        raise RuntimeError("DELIVERY_ITEM_NOT_READY: code review source_hash is stale")
     if verification_props.get("source_hash") != content_hash(verification_props, verification_body):
-        raise RuntimeError("verification source_hash is stale")
+        raise RuntimeError("DELIVERY_ITEM_NOT_READY: verification source_hash is stale")
     item_props["source_hash"] = content_hash(item_props, item_body)
     replacements = {
         relative_item: frontmatter(item_props, item_body),
@@ -3660,7 +3672,7 @@ def integrate_item(project_root: Path, delivery_id: str, story_id: str,
     slots = remote_slot_oids(root, remote)
     slot = next((key for key, oid in slots.items() if oid == item_oid), None)
     if slot is None:
-        raise RuntimeError("Item and Slot refs diverge; refuse integration")
+        raise RuntimeError("DELIVERY_ITEM_SLOT_DIVERGED: Item and Slot refs diverge; refuse integration")
     slot_ref = f"refs/heads/agentrof/slots/{slot}"; slot_oid = slots[slot]
     active_writer_receipt(root, delivery_id, story_id, item_oid, slot_ref)
     worktree = worktree_paths(root, delivery_id, story_id)["item"]
@@ -3675,20 +3687,20 @@ def integrate_item(project_root: Path, delivery_id: str, story_id: str,
     review_props, review_body = split_remote_note(root, item_oid, relative_review, split_note)
     verification_props, verification_body = split_remote_note(root, item_oid, relative_verification, split_note)
     if review_props.get("status") != "approved" or verification_props.get("status") != "passed":
-        raise RuntimeError("integrate-item requires approved code review and passed verification")
+        raise RuntimeError("DELIVERY_ITEM_NOT_READY: integrate-item requires approved code review and passed verification")
     parents = run_git(root, "show", "-s", "--format=%P", item_oid).split()
     if len(parents) != 1 or not OID_RE.fullmatch(parents[0]):
-        raise RuntimeError("integrate-item requires one exact Item evidence parent")
+        raise RuntimeError("DELIVERY_ITEM_NOT_READY: integrate-item requires one exact Item evidence parent")
     product_tip = parents[0]
     if review_props.get("reviewed_commit") != product_tip or verification_props.get("verified_commit") != product_tip:
-        raise RuntimeError("integrate-item evidence does not bind the published product/test tip")
+        raise RuntimeError("DELIVERY_ITEM_NOT_READY: integrate-item evidence does not bind the published product/test tip")
     if review_props.get("item_plan_hash") != item_props.get("item_plan_hash") or verification_props.get("item_plan_hash") != item_props.get("item_plan_hash"):
-        raise RuntimeError("integrate-item evidence does not bind the Item plan hash")
+        raise RuntimeError("DELIVERY_ITEM_NOT_READY: integrate-item evidence does not bind the Item plan hash")
     require_item_architecture_binding(worktree, item_props, story_id, tree=item_oid)
     if review_props.get("source_hash") != content_hash(review_props, review_body):
-        raise RuntimeError("integrate-item code review source_hash is stale")
+        raise RuntimeError("DELIVERY_ITEM_NOT_READY: integrate-item code review source_hash is stale")
     if verification_props.get("source_hash") != content_hash(verification_props, verification_body):
-        raise RuntimeError("integrate-item verification source_hash is stale")
+        raise RuntimeError("DELIVERY_ITEM_NOT_READY: integrate-item verification source_hash is stale")
     if not is_ancestor(root, item_oid, product_tip) and not is_ancestor(root, product_tip, item_oid):
         raise RuntimeError("integrate-item Item evidence ancestry is invalid")
     item_props["status"] = "integrated"
@@ -3760,7 +3772,7 @@ def require_delivery_controls_unchanged(root: Path, directory: Path, reference: 
     before, after = snapshot(reference), snapshot(candidate)
     changed = sorted(path for path in before.keys() | after.keys() if before.get(path) != after.get(path))
     if changed:
-        raise RuntimeError("target changed selected Delivery control content or path set: " + ", ".join(changed))
+        raise RuntimeError("DELIVERY_TARGET_SOURCE_VIOLATION: target changed selected Delivery control content or path set: " + ", ".join(changed))
 
 
 def reconcile_delivery_projection_conflicts(root: Path, env: dict) -> None:

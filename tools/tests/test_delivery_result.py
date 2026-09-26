@@ -61,6 +61,12 @@ class DeliveryResultTests(unittest.TestCase):
             [("DELIVERY_WORKTREE_UNSAFE", "commit or remove changes before push: a.md")],
         )
 
+    def test_known_code_keeps_every_line_of_its_detail(self):
+        self.assertEqual(
+            self.refusal_findings("DELIVERY_WORKTREE_UNSAFE: commit or remove changes:\na.md\nb.md"),
+            [("DELIVERY_WORKTREE_UNSAFE", "commit or remove changes:\na.md\nb.md")],
+        )
+
     def test_message_without_a_code_prefix_is_kept_whole(self):
         for text in ("project root is not a Git worktree", "GitHub PR head changed during merge"):
             with self.subTest(text=text):

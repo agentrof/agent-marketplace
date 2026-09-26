@@ -359,11 +359,11 @@ local Review only mirrors the URL and must match it when one exists, so a
 Delivery cancelled before it had a local Review still reaches the target
 through its PR. The record also moves a reviewed Delivery from `review` to
 `awaiting_merge` and re-renders the Delivery map; a cancelled Delivery keeps
-`cancelled`. A cancellation that reaches a PR opened before it, created or
-adopted, first replaces that PR's body with the cancellation Review, so the
-provider no longer shows the approval it replaced. The body update is
-idempotent and precedes the record, so a rerun after a lost response sends it
-again.
+`cancelled`. A PR that already exists when `open-pr` records it, adopted or
+found by a new PR intent, first gets the Review at that intent as its body, so
+the provider shows the published Review, such as a cancellation, and not an
+earlier Review or a body written by hand. The body update is idempotent and
+precedes the record, so a rerun after a lost response sends it again.
 
 Closure requires provider-confirmed merge evidence for the exact reviewed
 head, passing provider checks with at least one success, and target ancestry.

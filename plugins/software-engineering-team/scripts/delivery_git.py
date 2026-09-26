@@ -1295,17 +1295,16 @@ def record_pr_remote(project_root: Path, delivery_id: str, url: str,
             "pull_request": number, "refs": short_refs(delivery_id)}
 
 
-def replace_pr_body_with_cancellation(root: Path, provider, oid: str, review_path: Path, url: str) -> None:
-    """Give an existing Delivery PR the cancellation Review in *oid*'s tree as its body.
+def set_pr_body_to_review(root: Path, provider, oid: str, review_path: Path, url: str) -> None:
+    """Give an existing Delivery PR the Review in *oid*'s tree as its body.
 
-    The PR keeps the body it was opened with, such as the approval that the
-    cancellation replaced. open-pr sets the body before the PR record, so a
-    run that stops in between sets the same body again on its next run.
+    The PR keeps the body it was opened with: an earlier Review, the approval
+    that a cancellation replaced, or what its author wrote by hand. open-pr
+    sets the body before the PR record, so a run that stops in between sets
+    the same body again on its next run.
     """
     from delivery_compile import split_note
-    props, body = split_remote_note(root, oid, rel_posix(root, review_path), split_note)
-    if props.get("cancellation_intent_hash"):
-        provider.update_body(url, body)
+    provider.update_body(url, split_remote_note(root, oid, rel_posix(root, review_path), split_note)[1])
 
 
 def open_pr(project_root: Path, delivery_id: str, remote: str = "origin") -> dict:
@@ -1372,7 +1371,7 @@ def open_pr(project_root: Path, delivery_id: str, remote: str = "origin") -> dic
         # The provider was already normalized to draft and the exact URL is
         # carried by the adoption intent. No create receipt or provider POST
         # is permitted on this path.
-        replace_pr_body_with_cancellation(root, provider, integration_oid, review_path, canonical_url)
+        set_pr_body_to_review(root, provider, integration_oid, review_path, canonical_url)
         record_pr_url(docs, delivery_id, canonical_url)
         recorded = record_pr_remote(root, delivery_id, canonical_url, remote)
         return {"ok": True, "delivery": delivery_id, "pull_request_url": canonical_url,
@@ -1415,7 +1414,7 @@ def open_pr(project_root: Path, delivery_id: str, remote: str = "origin") -> dic
         provider_call = True
     canonical_url, _ = canonical_github_pr(url)
     if existing:
-        replace_pr_body_with_cancellation(root, provider, integration_oid, review_path, canonical_url)
+        set_pr_body_to_review(root, provider, integration_oid, review_path, canonical_url)
     record_pr_url(docs, delivery_id, canonical_url)
     recorded = record_pr_remote(root, delivery_id, canonical_url, remote)
     mark_provider_verified(root, delivery_id, integration_oid, attempt, canonical_url)

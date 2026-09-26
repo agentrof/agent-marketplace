@@ -149,6 +149,50 @@ class DeliveryCompilerTests(unittest.TestCase):
         globals[1][0].unlink()
         check_map(set())
 
+    def init_auth_delivery(self):
+        self.approve_dod()
+        init = type("Args", (), {"docs": str(self.docs), "id": None, "slug": "auth",
+                                 "goal": "Authenticate", "outcome": None, "target_branch": "main",
+                                 "story": ["AUTH-01"]})
+        self.assertEqual(delivery_compile.init_delivery(init), 0)
+
+    def test_map_render_is_byte_stable_and_ends_with_one_newline(self):
+        """The map ends with one newline whether or not it lists a Delivery."""
+        map_path = self.docs / "maps/delivery.md"
+
+        def render_twice() -> str:
+            delivery_compile.render_map(self.docs)
+            first = map_path.read_bytes()
+            delivery_compile.render_map(self.docs)
+            self.assertEqual(map_path.read_bytes(), first)
+            # Text mode folds a native CRLF ending, so a doubled ending shows on every OS.
+            text = map_path.read_text(encoding="utf-8")
+            self.assertTrue(text.endswith("\n") and not text.endswith("\n\n"), text[-60:])
+            return text
+
+        self.assertNotIn("|DLV-001]]", render_twice())
+        self.init_auth_delivery()
+        self.assertIn("|DLV-001]]", render_twice())
+
+    def test_relation_render_keeps_the_seeded_and_the_rendered_map(self):
+        """vault_check render-relations ends every authored note with exactly one
+        newline, so the governance seed and the renderer must already end that way."""
+        policy = vault_check.load_policy(vault_check.DEFAULT_POLICY)
+        map_path = self.docs / "maps/delivery.md"
+
+        def render_relations() -> str:
+            before = map_path.read_bytes()
+            self.assertEqual(vault_check.cmd_render_relations(type("Args", (), {"vault": self.docs}), policy), 0)
+            self.assertEqual(map_path.read_bytes(), before)
+            return map_path.read_text(encoding="utf-8")
+
+        self.assertEqual(delivery_governance.init(type("Args", (), {"docs": str(self.docs), "max_parallel": 1})), 0)
+        template = SCRIPTS.parent / "templates" / "vault" / "maps" / "delivery.md"
+        # The seed is written in text mode, so compare text, not native line endings.
+        self.assertEqual(render_relations(), template.read_text(encoding="utf-8"))
+        self.init_auth_delivery()
+        self.assertIn("|DLV-001]]", render_relations())
+
     def test_dod_bootstrap_approval_and_revision_keep_one_path(self):
         args = type("Args", (), {"docs": str(self.docs), "title": "Project", "file": None})
         self.assertEqual(delivery_compile.init_dod(args), 0)

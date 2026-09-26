@@ -1181,7 +1181,7 @@ def record_pr_remote(project_root: Path, delivery_id: str, url: str,
 def open_pr(project_root: Path, delivery_id: str, remote: str = "origin") -> dict:
     """Create or resume exactly one GitHub draft PR after a durable intent."""
     root = main_worktree(project_root.resolve())
-    from delivery_compile import docs_root, find_delivery, split_note, record_pr
+    from delivery_compile import docs_root, find_delivery, split_note, record_pr_url
     from delivery_provider import GitHubProvider, ProviderError
     docs = docs_root(root)
     directory = find_delivery(docs, delivery_id)
@@ -1254,7 +1254,7 @@ def open_pr(project_root: Path, delivery_id: str, remote: str = "origin") -> dic
         # carried by the adoption intent. No create receipt or provider POST
         # is permitted on this path.
         canonical_url, _ = canonical_github_pr(url)
-        record_pr(type("Args", (), {"docs": str(docs), "delivery": delivery_id, "url": canonical_url}))
+        record_pr_url(docs, delivery_id, canonical_url)
         recorded = record_pr_remote(root, delivery_id, canonical_url, remote)
         return {"ok": True, "delivery": delivery_id, "pull_request_url": canonical_url,
                 "provider_call": False, "adopted": True,
@@ -1288,7 +1288,7 @@ def open_pr(project_root: Path, delivery_id: str, remote: str = "origin") -> dic
         url = created["url"]
         provider_call = True
     canonical_url, _ = canonical_github_pr(url)
-    record_pr(type("Args", (), {"docs": str(docs), "delivery": delivery_id, "url": canonical_url}))
+    record_pr_url(docs, delivery_id, canonical_url)
     recorded = record_pr_remote(root, delivery_id, canonical_url, remote)
     mark_provider_verified(root, delivery_id, integration_oid, attempt, canonical_url)
     return {"ok": True, "delivery": delivery_id, "pull_request_url": canonical_url,

@@ -1671,14 +1671,17 @@ def approve_review(args) -> int:
     print(json.dumps({"ok": True, "review": str(review_path), "approval_hash": review_props["approval_hash"]}, indent=2)); return 0
 
 
-def record_pr(args) -> int:
-    docs = docs_root(args.docs)
-    root = find_delivery(docs, args.delivery)
+def record_pr_url(docs: Path, delivery_id: str, url: str) -> None:
+    """Record a PR URL in the local Delivery Review and move a reviewed Delivery to awaiting_merge.
+
+    It prints nothing, so open-pr can record the PR and still print only its own result.
+    """
+    root = find_delivery(docs, delivery_id)
     review = root / "delivery-review.md" if root else None
     if review is None or not review.exists():
-        print(json.dumps({"ok": False, "errors": ["Delivery Review not found"]}, indent=2)); return 1
+        raise RuntimeError("Delivery Review not found")
     props, body = split_note(review)
-    props["pull_request_url"] = args.url
+    props["pull_request_url"] = url
     props["source_hash"] = content_hash(props, body, exclude=MUTABLE - {"pull_request_url"})
     atomic_text(review, frontmatter(props, body))
     delivery_path_value = root / "delivery.md"
@@ -1686,6 +1689,13 @@ def record_pr(args) -> int:
     recorded = pr_recorded_props(delivery_props, delivery_body)
     if recorded is not None:
         atomic_text(delivery_path_value, frontmatter(recorded, delivery_body))
+
+
+def record_pr(args) -> int:
+    try:
+        record_pr_url(docs_root(args.docs), args.delivery, args.url)
+    except RuntimeError as exc:
+        print(json.dumps({"ok": False, "errors": [str(exc)]}, indent=2)); return 1
     print(json.dumps({"ok": True, "pull_request_url": args.url}, indent=2)); return 0
 
 

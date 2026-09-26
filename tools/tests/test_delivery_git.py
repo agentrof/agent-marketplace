@@ -579,6 +579,46 @@ class DeliveryGitTests(unittest.TestCase):
         finally:
             remove_temporary(temporary)
 
+    def open_pr_command(self, project: Path, state: dict) -> tuple[int, dict]:
+        """Run open-pr through its command boundary and parse its whole stdout as one JSON document."""
+        output = io.StringIO()
+        with mock.patch("delivery_provider.GitHubProvider", self.fake_provider_type(state)), \
+                contextlib.redirect_stdout(output):
+            exit_code = delivery_git.main(["open-pr", "--project-root", str(project), "--delivery", "DLV-001"])
+        return exit_code, json.loads(output.getvalue())
+
+    def republish_review(self, project: Path, docs: Path) -> None:
+        """Invalidate the published Review, approve it again on the new Integration head and publish it."""
+        delivery_git.invalidate_delivery_review(project, "DLV-001", "REVIEW_FINDING", "sha256:" + "0" * 64)
+        head = delivery_git.remote_oid(project, "origin", delivery_git.canonical_refs("DLV-001")["integration"])
+        self.assertEqual(delivery_compile.approve_review(type("Args", (), {
+            "docs": str(docs), "delivery": "DLV-001",
+            "reviewed_commit": head, "reviewed_integration_commit": head,
+        })), 0)
+        delivery_git.publish_delivery_review(project, "DLV-001")
+
+    def test_open_pr_prints_only_its_result_envelope(self):
+        """open-pr records the PR in the local Review on both of its paths, creating the PR and
+        adopting the one a republished Review already has, and prints only its result envelope."""
+        temporary, project, docs, _product_tip, _intent = self.prepare_pr_intent()
+        self.addCleanup(remove_temporary, temporary)
+        url = "https://github.com/agentrof/example/pull/17"
+        review = delivery_compile.find_delivery(docs, "DLV-001") / "delivery-review.md"
+        state: dict = {}
+        exit_code, created = self.open_pr_command(project, state)
+        self.assertEqual((exit_code, created["ok"], created["operation"]), (0, True, "open-pr"))
+        self.assertIn({"kind": "provider", "target": "pull_request_url", "value": url}, created["observations"])
+        self.assertEqual(delivery_compile.split_note(review)[0]["pull_request_url"], url)
+        self.republish_review(project, docs)
+        self.assertNotIn("pull_request_url", delivery_compile.split_note(review)[0])
+        exit_code, adopted = self.open_pr_command(project, state)
+        self.assertEqual((exit_code, adopted["ok"], adopted["operation"]), (0, True, "open-pr"))
+        self.assertIn({"kind": "provider", "target": "pull_request_url", "value": url}, adopted["observations"])
+        self.assertEqual(delivery_compile.split_note(review)[0]["pull_request_url"], url)
+        record = next(item["value"] for item in adopted["observations"] if item["target"] == "integration")
+        self.assertEqual(delivery_git.trailer(delivery_git.commit_message(project, record + "^"), "Record"),
+                         "pr-adoption-intent-v1")
+
     def test_merge_pr_reports_a_red_check_as_a_required_check_failure(self):
         """The provider's own green-check rule refuses before the merge call, under its finding code."""
         temporary, project, _docs, _product_tip, _intent = self.prepare_pr_intent()

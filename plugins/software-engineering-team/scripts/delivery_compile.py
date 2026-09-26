@@ -581,9 +581,15 @@ def init_delivery(args) -> int:
         print(json.dumps({"ok": False, "errors": [f"Delivery already exists: {root}"]}))
         return 1
     stories = list(args.story or [])
-    sources, backlog_snapshot, source_errors = approved_backlog_sources(docs, stories)
-    dod_snapshot, dod_errors = approved_dod_source(docs)
-    errors = sorted(set(source_errors + dod_errors))
+    # One read-only candidate snapshot serves the strict read and the handoff check.
+    with stage_package.candidate_session():
+        sources, backlog_snapshot, source_errors = approved_backlog_sources(docs, stories)
+        dod_snapshot, dod_errors = approved_dod_source(docs)
+        errors = sorted(set(source_errors + dod_errors))
+        # The proposal refuses a selection that scope approval, the handoff, would refuse.
+        if not errors:
+            errors = handoff_binding_findings(
+                docs, {story: sources[story]["story_path"] for story in stories})
     if errors:
         print(json.dumps({"ok": False, "errors": errors}, indent=2, ensure_ascii=False))
         return 2
@@ -932,19 +938,17 @@ def application_binding_findings(docs: Path, citing: list[str]) -> list[str]:
     ]
 
 
-def handoff_binding_findings(docs: Path, root: Path) -> list[str]:
-    """Refuse a scope handoff whose selected Stories rest on non-current upstream bindings.
+def handoff_binding_findings(docs: Path, story_paths: dict[str, str]) -> list[str]:
+    """Refuse a selection whose Stories rest on non-current upstream bindings.
 
     A reserved Delivery keeps verifying its pinned inputs historically, so these
-    rules apply at scope approval only: every Requirement a selected Story
-    implements must route to backlog, and a selection that cites Experience
-    records needs the backlog to bind the globally current application receipt.
+    rules apply only when the proposal is rendered and at scope approval: every
+    Requirement a selected Story implements must route to backlog, and a
+    selection that cites Experience records needs the backlog to bind the
+    globally current application receipt.
     """
-    stories: dict[str, dict] = {}
-    for item_path in sorted(root.glob("items/*/item.md")):
-        item_props, _ = split_note(item_path)
-        story_props, _ = backlog_compile.parse_front_matter(docs / str(item_props["story_path"]))
-        stories[str(item_props["story_id"])] = story_props
+    stories = {story_id: backlog_compile.parse_front_matter(docs / path)[0]
+               for story_id, path in story_paths.items()}
     citing = sorted(story_id for story_id, props in stories.items()
                     if backlog_compile.values(props, "experience_refs"))
     errors = implemented_requirement_findings(docs, stories)
@@ -970,7 +974,9 @@ def approve_scope(args) -> int:
     # Scope approval is the handoff: the selected Stories' upstream bindings must
     # be current now, while every later phase keeps the historical read above.
     if not errors:
-        errors.extend(handoff_binding_findings(docs, root))
+        items = [split_note(item_path)[0] for item_path in sorted(root.glob("items/*/item.md"))]
+        errors.extend(handoff_binding_findings(
+            docs, {str(item["story_id"]): str(item["story_path"]) for item in items}))
     if errors:
         print(json.dumps({"ok": False, "errors": errors}, indent=2)); return 1
     props["status"] = "scope_approved"

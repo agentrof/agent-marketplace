@@ -24,13 +24,14 @@ Read `flows/delivery-planning.md` completely before creating the proposal.
 1. Confirm the approved backlog, the exact story and test-plan links, and the
    approved Definition of Done.
 2. Run `delivery_compile.py init` in the project workspace to render the
-   temporary semantic proposal. Show goal, observable outcome, exclusions,
-   dependencies and conflicts.
+   temporary semantic proposal. It refuses a selected Story whose implemented
+   Requirement or Experience application binding is not current; show the
+   finding and route to the remedy it names. Otherwise show goal, observable
+   outcome, exclusions, dependencies and conflicts.
 3. After the user approves scope, run `approve-scope`; only the later Git
-   coordinator may publish the package and reserve the Delivery. It refuses a
-   selected Story whose implemented Requirement or Experience application
-   binding is no longer current; show the finding and route to the remedy it
-   names before approving again.
+   coordinator may publish the package and reserve the Delivery. It repeats
+   the binding check, since a binding can change after the proposal; show any
+   finding and route to the remedy it names before approving again.
 4. If the Definition of Done is absent, route through `/configure DOD` and
    return to the original goal after the protected documentation handoff.
 

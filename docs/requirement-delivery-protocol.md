@@ -138,8 +138,8 @@ An application-only revision leaves process receipts unchanged but still
 advances the application receipt. Any approved package-set or application delta
 makes the preceding application receipt non-current. Requirement Stage Results
 and an existing backlog must rebind the new receipt through their normal
-revision before a new handoff; Delivery scope approval enforces that rebind for
-the Stories it selects. An already-created nonterminal Delivery remains
+revision before a new handoff; Delivery Planning enforces that rebind for the
+Stories it selects. An already-created nonterminal Delivery remains
 bound to its exact approved backlog package and selected Story/Test Plan hashes;
 an unrelated later application revision cannot invalidate those immutable
 inputs. Mechanical coverage proves that selected exact refs have declared
@@ -174,18 +174,20 @@ binds the goal, exact Story set, dependency facts, Definition of Done and
 target branch. The Git coordinator then reserves the Delivery by atomically
 creating its Integration ref with the project Fence lease.
 
-Scope approval is the handoff check for upstream bindings. Every Requirement
-that a selected Story `implements` must be approved and route to `backlog`;
-otherwise approval names the Story, the Requirement and the router's stage,
-action and reason, and the Requirement is rebound through `/requirement REQ-###`
-first. A superseded, withdrawn or `resolved_no_change` Requirement cannot be
-rebound, so approval names its successor when it has one and routes to a
-backlog revision that re-traces the Story to a current Requirement or drops it.
-When a selected Story cites `experience_refs`, the backlog must bind the
-globally current `application@rN` in its compiler-owned `input_bindings`, in
-either planning mode; otherwise approval names that receipt and the remedy for
-the backlog's mode. A manual-mode backlog revision pins it with `--input-ref`.
-A requirement-mode revision binds the root Requirement's Experience Stage
+Scope approval is the handoff check for upstream bindings, and `init` runs the
+same check before it renders the proposal, so a selection that cannot be handed
+off is refused before the user decides on it. Every Requirement that a selected
+Story `implements` must be approved and route to `backlog`; otherwise the check
+names the Story, the Requirement and the router's stage, action and reason, and
+the Requirement is rebound through `/requirement REQ-###` first. A superseded,
+withdrawn or `resolved_no_change` Requirement cannot be rebound, so the check
+names its successor when it has one and routes to a backlog revision that
+re-traces the Story to a current Requirement or drops it. When a selected Story
+cites `experience_refs`, the backlog must bind the globally current
+`application@rN` in its compiler-owned `input_bindings`, in either planning
+mode; otherwise the check names that receipt and the remedy for the backlog's
+mode. A manual-mode backlog revision pins it with `--input-ref`. A
+requirement-mode revision binds the root Requirement's Experience Stage
 Results, rebound first through `/requirement REQ-###`, or, when that
 Requirement marks Experience `not_applicable`, pins it with `--input-ref` at
 `begin-revision`. A requirement-mode backlog approved before it carried

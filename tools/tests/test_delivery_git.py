@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import ast
+import contextlib
+import io
 import sys
 import json
 import hashlib
@@ -19,6 +21,7 @@ sys.path.insert(0, str(ROOT / "tools" / "tests"))
 import delivery_git  # noqa: E402
 import delivery_compile  # noqa: E402
 import delivery_governance  # noqa: E402
+import delivery_provider  # noqa: E402
 import operation_compile  # noqa: E402
 import architecture_compile  # noqa: E402
 import vault_check  # noqa: E402
@@ -499,6 +502,40 @@ class DeliveryGitTests(unittest.TestCase):
             self.assertEqual(parents[1], merged["reviewed_integration"])
         finally:
             remove_temporary(temporary)
+
+    def test_merge_pr_reports_a_red_check_as_a_required_check_failure(self):
+        """The provider's own green-check rule refuses before the merge call, under its finding code."""
+        temporary, project, _docs, _product_tip, _intent = self.prepare_pr_intent()
+        try:
+            state: dict = {}
+
+            class RedCheckProvider(self.fake_provider_type(state), delivery_provider.GitHubProvider):
+                require_green_checks = delivery_provider.GitHubProvider.require_green_checks
+
+                def _record(self, head: str, base: str) -> dict:
+                    record = super()._record(head, base)
+                    record["statusCheckRollup"] = [
+                        {"__typename": "CheckRun", "name": "checks", "status": "COMPLETED", "conclusion": "SUCCESS"},
+                        {"__typename": "StatusContext", "context": "ci/deploy", "state": "PENDING"},
+                    ]
+                    return record
+
+            with mock.patch("delivery_provider.GitHubProvider", RedCheckProvider):
+                delivery_git.open_pr(project, "DLV-001")
+                target = delivery_git.remote_oid(project, "origin", "refs/heads/main")
+                output = io.StringIO()
+                with contextlib.redirect_stdout(output):
+                    exit_code = delivery_git.main(["merge-pr", "--project-root", str(project), "--delivery", "DLV-001"])
+            findings = json.loads(output.getvalue())["findings"]
+            self.assertEqual(exit_code, 1)
+            self.assertEqual([(finding["code"], finding["message"]) for finding in findings], [
+                ("DELIVERY_REQUIRED_CHECK_FAILED", "GitHub required check is not green: ci/deploy (PENDING)"),
+            ])
+            self.assertNotIn("merged", state)
+            self.assertEqual(delivery_git.remote_oid(project, "origin", "refs/heads/main"), target)
+        finally:
+            remove_temporary(temporary)
+
     def test_review_publication_regenerates_the_delivery_projections(self):
         """The published Review is a new note: the Integration's map and relation
         projections are derived from the published tree, never taken from a local

@@ -139,26 +139,29 @@ class GitHubProvider:
         not block, as GitHub accepts both for required checks, but it cannot
         authorize the merge call: an absent rollup, or one without a passing
         entry, fails. Any other result, including pending, expected,
-        cancelled, stale or missing, blocks.
+        cancelled, stale or missing, blocks. Every refusal carries the
+        DELIVERY_REQUIRED_CHECK_FAILED finding code.
         """
         checks = pull_request.get("statusCheckRollup")
         if not isinstance(checks, list) or not checks:
-            raise ProviderError("GitHub required checks are absent")
+            raise ProviderError("DELIVERY_REQUIRED_CHECK_FAILED: GitHub required checks are absent")
         passed = False
         waived = []
         for check in checks:
             if not isinstance(check, dict):
-                raise ProviderError("GitHub required check response is malformed")
+                raise ProviderError("DELIVERY_REQUIRED_CHECK_FAILED: GitHub required check response is malformed")
             name = str(check.get("name") or check.get("context") or "unnamed check")
             verdict, reported = self._rollup_verdict(check)
             if verdict == "block":
-                raise ProviderError(f"GitHub required check is not green: {name} ({reported})")
+                raise ProviderError("DELIVERY_REQUIRED_CHECK_FAILED: GitHub required check is not green: "
+                                    f"{name} ({reported})")
             if verdict == "pass":
                 passed = True
             else:
                 waived.append(f"{name} ({reported})")
         if not passed:
-            raise ProviderError("GitHub required checks have no successful check: " + ", ".join(waived))
+            raise ProviderError("DELIVERY_REQUIRED_CHECK_FAILED: GitHub required checks have no successful check: "
+                                + ", ".join(waived))
 
     def create_draft(self, head: str, base: str, title: str, body: str) -> dict:
         result = run_gh(

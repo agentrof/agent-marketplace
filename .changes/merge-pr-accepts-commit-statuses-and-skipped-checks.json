@@ -1,5 +1,5 @@
 {
-  "summary": "Merging a Delivery PR now accepts a successful commit status, which reports a state and no conclusion, and no longer refuses a check run that GitHub reports skipped or neutral, such as a job skipped by its if condition; pending, failed, cancelled, timed-out and stale checks still block, and at least one check must have succeeded.",
+  "summary": "Merging a Delivery PR now accepts a successful commit status, which reports a state and no conclusion, and no longer refuses a check run that GitHub reports skipped or neutral, such as a job skipped by its if condition; pending, failed, cancelled, timed-out and stale checks still block, and at least one check must have succeeded. A refused check is now reported as DELIVERY_REQUIRED_CHECK_FAILED instead of DELIVERY_INPUT_INVALID.",
   "components": {
     "software-engineering-team": "patch"
   }

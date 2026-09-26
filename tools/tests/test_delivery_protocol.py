@@ -26,7 +26,6 @@ RESERVED_FINDING_CODES = {
     "BACKLOG_SOURCE_CLAIMED": "backlog_compile checks backlog revisions and reports plain errors, not this envelope",
     "BACKLOG_COVERAGE_MISMATCH": "backlog_compile checks backlog coverage and reports plain errors, not this envelope",
     "DELIVERY_SCOPE_STALE": "no verb compares the local scope_hash with the published Scope-Hash; stale sources surface in the package findings",
-    "DELIVERY_DEPENDENCY_UNMET": "start-item does not check execution_after predecessors or waits_for bindings yet",
     "DELIVERY_ITEM_ALREADY_INTEGRATED": "a repeated integrate-item is refused at the Slot check, before the Item status is read",
     "DELIVERY_PATH_CLAIM_EXCEEDED": "push-item does not compare the product change with the Item's path_claims yet",
     "DELIVERY_CONTRACT_CLAIM_EXCEEDED": "no verb checks a product change against the Item's contract_claims yet",

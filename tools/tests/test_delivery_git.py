@@ -2896,6 +2896,71 @@ class DeliveryGitTests(unittest.TestCase):
             "cancellation-finalized-v1",
         )
 
+    def refused_finding(self, refusal) -> tuple[str, str]:
+        """The code and message a coordinator refusal reaches the result envelope with."""
+        with self.assertRaises(RuntimeError) as refused:
+            refusal()
+        finding = delivery_result.from_raw("refusal", {"ok": False, "errors": [str(refused.exception)]})["findings"][0]
+        return finding["code"], finding["message"]
+
+    def claim_ordered_items(self) -> Path:
+        """Claim one Delivery whose AUTH-02 executes after AUTH-01."""
+        temporary, project = self.make_project()
+        self.addCleanup(remove_temporary, temporary)
+        docs = project / "workspace" / "docs"
+        (docs / "maps").mkdir(parents=True, exist_ok=True)
+        make_approved_backlog(docs, "AUTH-01", "AUTH-02")
+        delivery_git.run_git(project, "add", "workspace")
+        delivery_git.run_git(project, "commit", "-qm", "approved backlog")
+        delivery_git.run_git(project, "push", "-q")
+        dod = type("Args", (), {"docs": str(docs), "title": "Project", "file": None})
+        self.assertEqual(delivery_compile.init_dod(dod), 0)
+        self.assertEqual(delivery_compile.approve_dod(dod), 0)
+        init = type("Args", (), {"docs": str(docs), "id": None, "slug": None, "goal": "SAML authentication",
+                                 "outcome": None, "target_branch": "main", "story": ["AUTH-01", "AUTH-02"]})
+        self.assertEqual(delivery_compile.init_delivery(init), 0)
+        scope = type("Args", (), {"docs": str(docs), "delivery": "DLV-001"})
+        self.assertEqual(delivery_compile.approve_scope(scope), 0)
+        delivery_git.run_git(project, "add", "workspace/docs")
+        delivery_git.run_git(project, "commit", "-qm", "scope")
+        delivery_git.run_git(project, "push", "-q")
+        delivery_git.reserve_delivery(project, "DLV-001")
+        self.author_execution_topology(docs)
+        later = delivery_compile.find_delivery(docs, "DLV-001") / "items" / "auth-02" / "item.md"
+        props, body = delivery_compile.split_note(later)
+        props["path_claims"] = ["src/session.py"]
+        props["execution_after"] = ["AUTH-01"]
+        delivery_compile.atomic_text(later, delivery_compile.frontmatter(props, body))
+        self.assertEqual(delivery_compile.approve_execution(scope), 0)
+        delivery_git.publish_execution_plan(project, "DLV-001")
+        delivery_git.refresh_target(project, "DLV-001")
+        self.assertEqual(delivery_git.claim_items(project, "DLV-001")["claims"], ["AUTH-01", "AUTH-02"])
+        return project
+
+    def test_start_item_waits_until_the_items_it_executes_after_are_integrated(self):
+        """An Item starts only once each Item its plan orders it after is integrated."""
+        project = self.claim_ordered_items()
+
+        def refuse_later_start():
+            before = delivery_git.run_git(project, "ls-remote", "origin")
+            code, message = self.refused_finding(lambda: delivery_git.start_item(project, "DLV-001", "AUTH-02"))
+            self.assertEqual((code, message), ("DELIVERY_DEPENDENCY_UNMET",
+                                               "AUTH-02 starts only after these Items are integrated: AUTH-01"))
+            self.assertEqual(delivery_git.run_git(project, "ls-remote", "origin"), before)
+            self.assertIsNone(delivery_git.read_writer_receipt(project, "DLV-001", "AUTH-02"))
+
+        refuse_later_start()
+        delivery_git.start_item(project, "DLV-001", "AUTH-01")
+        delivery_git.pause_item(project, "DLV-001", "AUTH-01")
+        refuse_later_start()
+        resumed = delivery_git.resume_item(project, "DLV-001", "AUTH-01")
+        self.commit_item_product_change(resumed["worktree"], "def authenticate():\n    return 'v1'\n")
+        self.assertEqual(self.approve_item_evidence(resumed["worktree"]), 0)
+        delivery_git.push_item(project, "DLV-001", "AUTH-01")
+        delivery_git.integrate_item(project, "DLV-001", "AUTH-01")
+        started = delivery_git.start_item(project, "DLV-001", "AUTH-02")
+        self.assertEqual((started["story"], started["slot"]), ("AUTH-02", "001"))
+
 
 if __name__ == "__main__":
     unittest.main()

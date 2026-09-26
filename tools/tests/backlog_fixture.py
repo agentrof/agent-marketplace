@@ -146,25 +146,30 @@ def _author_story(story: Path, test_plan: Path, story_id: str) -> None:
     test_plan.write_text(text, encoding="utf-8")
 
 
-def make_approved_backlog(docs: Path, story_id: str = "AUTH-01") -> None:
-    """Materialize one valid approved package in ``docs`` for Delivery tests."""
+def make_approved_backlog(docs: Path, story_id: str = "AUTH-01", *later_story_ids: str) -> None:
+    """Materialize one valid approved package in ``docs`` for Delivery tests.
+
+    Each later Story joins the same epic with no dependency on the first.
+    """
     _write_upstreams(docs)
     epic = "delivery-fixture"
-    slug = story_id.lower()
+    story_ids = (story_id, *later_story_ids)
     with contextlib.redirect_stdout(io.StringIO()):
         backlog_compile.init(SimpleNamespace(docs=str(docs)))
         backlog_compile.stub_epic(SimpleNamespace(
             docs=str(docs), slug=epic, id="EP-001", title=None,
             goal="Enable customers to access approved account capabilities.",
         ))
-        backlog_compile.stub_story(SimpleNamespace(
-            docs=str(docs), epic=epic, slug=slug, id=story_id, title=None,
-            scope=f"Deliver the observable outcome defined by {story_id}.",
-            work_kind="feature", criterion_ref=[CRITERION], experience_ref=[EXPERIENCE],
-            evidence_ref=[], uses_design=[DESIGN], constrained_by=[CONSTRAINT],
-        ))
-    base = docs / "backlog/epics" / epic / "stories" / slug
-    _author_story(base / "story.md", base / "test-plan.md", story_id)
+        for story in story_ids:
+            backlog_compile.stub_story(SimpleNamespace(
+                docs=str(docs), epic=epic, slug=story.lower(), id=story, title=None,
+                scope=f"Deliver the observable outcome defined by {story}.",
+                work_kind="feature", criterion_ref=[CRITERION], experience_ref=[EXPERIENCE],
+                evidence_ref=[], uses_design=[DESIGN], constrained_by=[CONSTRAINT],
+            ))
+    for story in story_ids:
+        base = docs / "backlog/epics" / epic / "stories" / story.lower()
+        _author_story(base / "story.md", base / "test-plan.md", story)
 
     root_review = docs / "backlog/reviews/round-1-backlog-review.md"
     root_props, _ = backlog_compile.parse_front_matter(root_review)
@@ -184,11 +189,11 @@ def make_approved_backlog(docs: Path, story_id: str = "AUTH-01") -> None:
     epic_props, _ = backlog_compile.parse_front_matter(epic_review)
     epic_props.update({
         "verdict": "approved",
-        "verifies": [
-            f"[[backlog/epics/{epic}/stories/{slug}/story|{story_id}]]",
-            f"[[backlog/epics/{epic}/stories/{slug}/test-plan|{story_id}-TP]]",
-        ],
-        "scenario_refs": [f"{story_id}-TS-001"],
+        "verifies": [link for story in story_ids for link in (
+            f"[[backlog/epics/{epic}/stories/{story.lower()}/story|{story}]]",
+            f"[[backlog/epics/{epic}/stories/{story.lower()}/test-plan|{story}-TP]]",
+        )],
+        "scenario_refs": [f"{story}-TS-001" for story in story_ids],
         "dependency_refs": [],
     })
     epic_review.write_text(backlog_compile.front_matter(

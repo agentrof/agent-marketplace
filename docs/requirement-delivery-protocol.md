@@ -276,10 +276,12 @@ mutation is legal until that conversion succeeds.
 
 `/deliver DLV-###` derives state from tracked files and freshly verified remote
 refs. Starting an Item requires the current plan, source hashes, target,
-predecessors, claims, Fence and one free Slot to pass. Before the atomic remote
-transaction, the coordinator writes an ignored pending receipt. It promotes
-the receipt only after Item and Slot refs both equal the accepted candidate,
-then creates the Item worktree from that exact OID.
+predecessors, claims, Fence and one free Slot to pass. Each Item its
+`execution_after` names must be integrated first: its remote Item tip records
+`integrated` and the Integration contains that exact tip. Before the atomic
+remote transaction, the coordinator writes an ignored pending receipt. It
+promotes the receipt only after Item and Slot refs both equal the accepted
+candidate, then creates the Item worktree from that exact OID.
 
 An active writer may push only while its receipt epoch matches the remote Item
 and Slot lineage. Pause requires a clean worktree whose local head equals the

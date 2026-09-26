@@ -4,8 +4,10 @@ Spawn template: paste `{{constitution}}` into every role prompt.
 
 `/deliver DLV-###` resumes from tracked Delivery files and verified remote
 evidence. It starts or resumes one Item only when its exact plan, target,
-predecessor, Fence and global slot checks pass. Product and test changes stay
-on the Item worktree; Integration accepts only reviewed, verified Item
+predecessor, Fence and global slot checks pass. Each Item its
+`execution_after` names must be integrated first: its remote Item tip records
+`integrated` and the Integration contains that tip. Product and test changes
+stay on the Item worktree; Integration accepts only reviewed, verified Item
 handoffs and compiler-owned projections.
 
 Activation writes an ignored pending writer receipt before the atomic Item,

@@ -44,7 +44,8 @@ aliases:
   reads PREFIX-, an optional node code, then three or more digits
   (`SD-007`, `EP-004`, `DEC-INV-001`). The owner is the decision note
   for a decision id, the note the space registry names for a BA row id,
-  and otherwise the one authored note whose `aliases` declare the id;
+  and otherwise the one authored note outside the policy `machine_dirs`
+  whose `aliases` declare the id;
   an id declared by two notes has no owner and is not checked.
 
 ## Title law

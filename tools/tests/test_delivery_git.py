@@ -2557,6 +2557,38 @@ class DeliveryGitTests(unittest.TestCase):
                 started = delivery_git.start_item(project, "DLV-001", "AUTH-01")
                 self.assertEqual((started["slot"], started["receipt"]["state"]), ("001", "verified"))
 
+    def test_rejected_reopen_and_takeover_leave_the_writer_state_as_it_was(self):
+        """Neither changed a ref, so the pending receipt goes; takeover gives back the receipt and worktree it replaced."""
+        for action in ("reopen", "takeover"):
+            with self.subTest(action=action):
+                project, _docs, _directory, _item, _reserved = self.prepare_execution_with_draft_reserved_contracts(False)
+                delivery_git.publish_execution_plan(project, "DLV-001")
+                delivery_git.claim_items(project, "DLV-001")
+                active = delivery_git.start_item(project, "DLV-001", "AUTH-01")
+                if action == "reopen":
+                    self.commit_item_product_change(active["worktree"], "def authenticate():\n    return True\n")
+                    self.assertEqual(self.approve_item_evidence(active["worktree"]), 0)
+                    delivery_git.push_item(project, "DLV-001", "AUTH-01")
+                    delivery_git.integrate_item(project, "DLV-001", "AUTH-01")
+                    verb = lambda: delivery_git.reopen_item(project, "DLV-001", "AUTH-01")  # noqa: E731
+                else:
+                    verb = lambda: delivery_git.takeover_item(project, "DLV-001", "AUTH-01", confirm=True)  # noqa: E731
+                item_ref = delivery_git.canonical_refs("DLV-001", "AUTH-01")["item"]
+                tip = delivery_git.remote_oid(project, "origin", item_ref)
+                receipt = delivery_git.read_writer_receipt(project, "DLV-001", "AUTH-01")
+                code, _message = self.refused_under_concurrent_coordinator(verb)
+                self.assertEqual(code, "DELIVERY_FENCE_LEASE_LOST")
+                self.assertEqual(delivery_git.remote_oid(project, "origin", item_ref), tip)
+                self.assertEqual(delivery_git.read_writer_receipt(project, "DLV-001", "AUTH-01"), receipt)
+                worktree = delivery_git.worktree_paths(project, "DLV-001", "AUTH-01")["item"]
+                if action == "takeover":
+                    self.assertEqual(receipt["state"], "verified")
+                    self.assertEqual(delivery_git.worktree_head(project, worktree), tip)
+                else:
+                    self.assertIsNone(receipt)
+                    self.assertFalse(worktree.exists())
+                self.assertEqual(verb()["receipt"]["state"], "verified")
+
     def test_merge_candidate_preserves_disjoint_additions_and_rejects_conflicts(self):
         temporary, project = self.make_project()
         self.addCleanup(remove_temporary, temporary)

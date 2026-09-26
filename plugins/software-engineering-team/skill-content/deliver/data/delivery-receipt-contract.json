@@ -21,7 +21,7 @@
   "transition_contract": {
     "pending": "written before the activation CAS",
     "verified": "written only after Item and Slot remotely equal candidate_oid",
-    "rejection": "pending may be deleted once the refetched Item ref is absent or still holds the tip the activation leased; the activation pushes all its refs atomically, so that proves none changed, whatever the Slot holds",
+    "rejection": "pending may be deleted once the refetched Item ref is absent or still holds the tip the activation leased; the activation pushes all its refs atomically, so that proves none changed, whatever the Slot holds; a takeover puts back the verified receipt it replaced",
     "response_loss": "preserve pending and requery; never blind-repeat the remote mutation"
   },
   "election": {

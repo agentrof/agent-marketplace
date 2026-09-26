@@ -11,7 +11,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 from unittest import mock
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -975,7 +975,7 @@ class DeliveryCompilerTests(unittest.TestCase):
         review_path = root / "delivery-review.md"
         review = type("Args", (), {"docs": str(self.docs), "delivery": "DLV-001",
                                      "reviewed_commit": "a" * 40, "reviewed_integration_commit": "b" * 40})
-        navigation = delivery_compile.link(str((root / "delivery.md").relative_to(self.docs)), "DLV-001")
+        navigation = delivery_compile.link((root / "delivery.md").relative_to(self.docs).as_posix(), "DLV-001")
         # Without an authored draft the approval writes the template it always wrote.
         self.assertEqual(delivery_compile.approve_review(review), 0)
         props, template = delivery_compile.split_note(review_path)
@@ -1001,6 +1001,39 @@ class DeliveryCompilerTests(unittest.TestCase):
         self.assertEqual(props["status"], "approved")
         self.assertEqual(props["approval_hash"], delivery_compile.content_hash(
             props, body, exclude=delivery_compile.MUTABLE | {"approval_hash"}))
+
+    def test_vault_paths_stay_posix_on_a_host_with_backslash_separators(self):
+        """A vault path uses forward slashes on every host (#228)."""
+
+        # Native Windows renders a relative path with backslashes; the files stay real.
+        class WindowsRelative(type(self.docs)):
+            def relative_to(self, *other):
+                return PureWindowsPath(*super().relative_to(*other).parts)
+
+        self.approve_verification_contract()
+        self.approve_dod()
+        init = type("Args", (), {"docs": str(self.docs), "id": None, "slug": "auth",
+                                 "goal": "Authenticate", "outcome": None, "target_branch": "main",
+                                 "story": ["AUTH-01"]})
+        args = type("Args", (), {"docs": str(self.docs), "delivery": "DLV-001",
+                                 "reviewed_commit": "a" * 40, "reviewed_integration_commit": "b" * 40})
+        docs_root = delivery_compile.docs_root
+        with mock.patch.object(delivery_compile, "docs_root", lambda value: WindowsRelative(docs_root(value))):
+            self.assertEqual(delivery_compile.init_delivery(init), 0)
+            self.assertEqual(delivery_compile.approve_scope(args), 0)
+            root = delivery_compile.find_delivery(delivery_compile.docs_root(str(self.docs)), "DLV-001")
+            # Paths the compiler finds by globbing must carry the simulation too.
+            self.assertIsInstance(root, WindowsRelative)
+            item = root / "items/auth-01/item.md"
+            props, body = delivery_compile.split_note(item)
+            props["path_claims"] = ["src/auth.py"]
+            delivery_compile.atomic_text(item, delivery_compile.frontmatter(props, body))
+            self.assertEqual(delivery_compile.approve_execution(args), 0)
+            self.assertEqual(delivery_compile.approve_review(args), 0)
+        for note in [self.docs / "maps/delivery.md", *sorted((self.docs / "delivery").rglob("*.md"))]:
+            with self.subTest(note=note.relative_to(self.docs).as_posix()):
+                self.assertNotIn("\\", note.read_text(encoding="utf-8"))
+        self.assert_delivery_vault_contract()
 
     def test_scope_rejects_unknown_story_and_execution_rejects_unclaimed_topology(self):
         self.approve_dod()

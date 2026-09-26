@@ -1,5 +1,5 @@
 {
-  "summary": "start-item and resume-item now refuse with DELIVERY_DEPENDENCY_UNMET until every Item the Item's execution_after names is integrated, which means its remote Item tip records integrated and the Integration contains that exact tip.",
+  "summary": "start-item and resume-item now refuse with DELIVERY_DEPENDENCY_UNMET until every Item the Item's execution_after names is integrated, which means its remote Item tip records integrated and the Integration contains that exact tip. push-item now refuses a committed product or test path outside the Item's path_claims with DELIVERY_PATH_CLAIM_EXCEEDED: a claim covers its path and every path below it, paths under workspace/docs/ keep the Delivery control, Architecture and projection rules, and a path the product tip holds exactly as the Item's integration_base_commit does is not the Item's change. An active Item whose product change lies outside its claims needs a plan revision that claims those paths before it can push.",
   "components": {
     "software-engineering-team": "patch"
   }

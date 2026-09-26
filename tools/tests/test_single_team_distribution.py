@@ -20,6 +20,7 @@ sys.path.insert(0, str(TESTS_DIR.parent))
 
 import build_distributions  # noqa: E402
 import fixtures  # noqa: E402
+import git_fixture  # noqa: E402
 
 
 class SingleTeamDistributionTests(unittest.TestCase):
@@ -209,10 +210,7 @@ class SingleTeamDistributionTests(unittest.TestCase):
         (self.root / ".gitattributes").write_bytes(
             b"*.csv -text\ndist/** -text\n"
         )
-        subprocess.run(
-            ["git", "init", "-b", "main"], cwd=self.root, check=True,
-            capture_output=True, text=True,
-        )
+        git_fixture.init_repository(self.root, initial_branch="main")
         subprocess.run(
             ["git", "config", "core.autocrlf", "true"],
             cwd=self.root, check=True, capture_output=True, text=True,
@@ -243,10 +241,7 @@ class SingleTeamDistributionTests(unittest.TestCase):
         self.assertEqual(checkout_identity, blob_identity)
 
     def test_snapshot_is_stable_across_staging_a_crlf_text_edit(self):
-        subprocess.run(
-            ["git", "init", "-b", "main"], cwd=self.root, check=True,
-            capture_output=True, text=True,
-        )
+        git_fixture.init_repository(self.root, initial_branch="main")
         subprocess.run(
             ["git", "config", "core.autocrlf", "true"],
             cwd=self.root, check=True, capture_output=True, text=True,
@@ -321,10 +316,7 @@ class SingleTeamDistributionTests(unittest.TestCase):
         )
         source = self.root / "plugins" / fixtures.PLUGIN / relative
         source.write_bytes(payload)
-        subprocess.run(
-            ["git", "init", "-b", "main"], cwd=self.root, check=True,
-            capture_output=True, text=True,
-        )
+        git_fixture.init_repository(self.root, initial_branch="main")
         subprocess.run(
             ["git", "config", "core.autocrlf", "true"],
             cwd=self.root, check=True, capture_output=True, text=True,

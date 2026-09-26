@@ -25,7 +25,9 @@ except ImportError:  # direct library use outside the packaged scripts dir
 import requirement_compile
 import requirement_route
 import stage_package
-from ba_compile import without_generated_relations
+from ba_compile import (
+    frontmatter_item, frontmatter_scalar, frontmatter_value, without_generated_relations,
+)
 
 
 ID_RE = re.compile(r"^[A-Z][A-Z0-9]*-[0-9]{2,}$")
@@ -187,7 +189,7 @@ def parse_scalar(value: str):
         return value.lower() == "true"
     if value.isdigit():
         return int(value)
-    return value.strip("\"'")
+    return frontmatter_value(value)
 
 
 def parse_front_matter(path: Path) -> tuple[dict, str]:
@@ -228,14 +230,9 @@ def front_matter(props: dict, body: str) -> str:
     for key, value in props.items():
         if isinstance(value, list):
             lines.append(f"{key}:")
-            for item in value:
-                rendered = (f'"{item}"' if isinstance(item, str)
-                            and item.startswith("[[") else item)
-                lines.append(f"  - {rendered}")
+            lines.extend(f"  - {frontmatter_item(item)}" for item in value)
         elif value is not None:
-            rendered = (f'"{value}"' if isinstance(value, str)
-                        and value.startswith("[[") else value)
-            lines.append(f"{key}: {rendered}")
+            lines.append(f"{key}: {frontmatter_scalar(value)}")
     lines.extend(["---", body.lstrip("\n")])
     return "\n".join(lines).rstrip() + "\n"
 

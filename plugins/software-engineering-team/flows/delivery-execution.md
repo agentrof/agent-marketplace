@@ -4,8 +4,10 @@ Spawn template: paste `{{constitution}}` into every role prompt.
 
 `/deliver DLV-###` resumes from tracked Delivery files and verified remote
 evidence. It starts or resumes one Item only when its exact plan, target,
-predecessor, Fence and global slot checks pass. Product and test changes stay
-on the Item worktree; Integration accepts only reviewed, verified Item
+predecessor, Fence and global slot checks pass. Each Item its
+`execution_after` names must be integrated first: its remote Item tip records
+`integrated` and the Integration contains that tip. Product and test changes
+stay on the Item worktree; Integration accepts only reviewed, verified Item
 handoffs and compiler-owned projections.
 
 Activation writes an ignored pending writer receipt before the atomic Item,
@@ -37,6 +39,10 @@ as its `integration_base_commit`. The commit must lie on the Integration's own
 line after the Item's previous base and be contained in the product tip, and
 the Item record keeps the commit's plan-owned fields with only its own status,
 stamp and base.
+`push-item` also rejects a product or test path outside the Item's path claims,
+which cover their paths and everything below them. Vault paths keep the
+control, Architecture and projection rules, and a path held exactly as the
+Item's `integration_base_commit` holds it is not the Item's change.
 `integrate-item` reads the
 evidence from the remote Item ref and requires that its exact direct parent is
 the reviewed and verified product/test tip.
@@ -48,7 +54,16 @@ section, fills only the sections left empty and the navigation the compiler
 owns, and binds that content in its approval hash; the PR body is that Review.
 The Git coordinator first publishes the approved Review, then
 publishes one durable PR-creation intent and records the provider URL as its
-exact descendant. Provider create/merge calls are adapter-owned and must
+exact descendant. That record is the PR head and moves the reviewed Delivery
+to `awaiting_merge`. The compiler reports `merged` only when the current
+branch reaches, on any path, a two-parent merge of that exact head that
+carries no `Agentrof-Record` trailer, also for a PR recorded while the
+Delivery stayed in `review`. Coordinator commits, such as the reopen commit,
+never count; a manual merge of the Integration branch into another branch
+would. A merged Delivery keeps its pinned sources, and the Delivery map keeps
+the tracked status. A shallow clone or a failed Git query makes `status` and
+`check` fail with an explicit finding.
+Provider create/merge calls are adapter-owned and must
 requery the intent and reviewed Integration head before any external mutation.
 Before Item work starts, `/deliver DLV-###` may run the internal
 `refresh-target` coordinator. A disjoint target advance becomes one
@@ -60,4 +75,6 @@ Authored merge conflicts remain unresolved. No stale target grants a Slot or
 worktree. `reopen-item` reactivates a sealed Item on the Integration that
 absorbed it, so a target refreshed after integration never strands the Item.
 Failed checks, target drift, review changes and process loss become explicit
-resumable states. Release Management is intentionally not part of this flow.
+resumable states. A rejected remote transaction changes no ref and names the
+lease it lost, or a remote without atomic push support, from the refetched
+refs. Release Management is intentionally not part of this flow.

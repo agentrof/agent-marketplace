@@ -1,0 +1,6 @@
+{
+  "summary": "A Delivery command result now keeps a refusal message whole when it starts with an uppercase word that is not a finding code, such as HEAD or JSON, instead of dropping that word; a known code prefix such as DELIVERY_WORKTREE_UNSAFE still becomes the finding code and leaves only the detail.",
+  "components": {
+    "software-engineering-team": "patch"
+  }
+}

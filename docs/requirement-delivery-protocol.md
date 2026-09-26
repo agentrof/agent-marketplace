@@ -138,7 +138,8 @@ An application-only revision leaves process receipts unchanged but still
 advances the application receipt. Any approved package-set or application delta
 makes the preceding application receipt non-current. Requirement Stage Results
 and an existing backlog must rebind the new receipt through their normal
-revision before a new handoff. An already-created nonterminal Delivery remains
+revision before a new handoff; Delivery Planning enforces that rebind for the
+Stories it selects. An already-created nonterminal Delivery remains
 bound to its exact approved backlog package and selected Story/Test Plan hashes;
 an unrelated later application revision cannot invalidate those immutable
 inputs. Mechanical coverage proves that selected exact refs have declared
@@ -173,6 +174,28 @@ binds the goal, exact Story set, dependency facts, Definition of Done and
 target branch. The Git coordinator then reserves the Delivery by atomically
 creating its Integration ref with the project Fence lease.
 
+Scope approval is the handoff check for upstream bindings, and `init` runs the
+same check before it renders the proposal, so a selection that cannot be handed
+off is refused before the user decides on it. Every Requirement that a selected
+Story `implements` must be approved and route to `backlog`; otherwise the check
+names the Story, the Requirement and the router's stage, action and reason, and
+the Requirement is rebound through `/requirement REQ-###` first. A superseded,
+withdrawn or `resolved_no_change` Requirement cannot be rebound, so the check
+names its successor when it has one and routes to a backlog revision that
+re-traces the Story to a current Requirement or drops it. When a selected Story
+cites `experience_refs`, the backlog must bind the globally current
+`application@rN` in its compiler-owned `input_bindings`, in either planning
+mode; otherwise the check names that receipt and the remedy for the backlog's
+mode. A manual-mode backlog revision pins it with `--input-ref`. A
+requirement-mode revision binds the root Requirement's Experience Stage
+Results, rebound first through `/requirement REQ-###`, or, when that
+Requirement marks Experience `not_applicable`, pins it with `--input-ref` at
+`begin-revision`. A requirement-mode backlog approved before it carried
+`input_bindings` is transitional: until its next revision it binds through its
+root Requirement's Experience Stage Results, and binds none when that
+Requirement marks Experience `not_applicable`. A backlog without a planning
+mode predates application receipts and is not held to that rule.
+
 A Delivery is one reviewable outcome. It has no duration, estimate, cadence,
 capacity or release field. Before reservation, declining or stopping leaves no
 tracked file, ID, ref or provider object. After reservation, its ID,
@@ -200,7 +223,7 @@ Environment Contract. Contract hash drift blocks Item start, resume, reopen and
 takeover; Operation remains outside Requirement and product-stage routing.
 
 Closure requires successful provider checks, so execution approval also
-carries the pull request workflow precondition that
+carries the pull request check precondition that
 `plugins/software-engineering-team/flows/execution-planning.md` states and
 `plugins/software-engineering-team/skill-content/setup/references/ci-bootstrap.md`
 defines.
@@ -253,10 +276,12 @@ mutation is legal until that conversion succeeds.
 
 `/deliver DLV-###` derives state from tracked files and freshly verified remote
 refs. Starting an Item requires the current plan, source hashes, target,
-predecessors, claims, Fence and one free Slot to pass. Before the atomic remote
-transaction, the coordinator writes an ignored pending receipt. It promotes
-the receipt only after Item and Slot refs both equal the accepted candidate,
-then creates the Item worktree from that exact OID.
+predecessors, claims, Fence and one free Slot to pass. Each Item its
+`execution_after` names must be integrated first: its remote Item tip records
+`integrated` and the Integration contains that exact tip. Before the atomic
+remote transaction, the coordinator writes an ignored pending receipt. It
+promotes the receipt only after Item and Slot refs both equal the accepted
+candidate, then creates the Item worktree from that exact OID.
 
 An active writer may push only while its receipt epoch matches the remote Item
 and Slot lineage. Pause requires a clean worktree whose local head equals the
@@ -282,7 +307,11 @@ that Integration commit's Delivery controls, byte for byte, and the commit as
 the Item's `integration_base_commit`, when the commit lies on the Integration's
 own line after the Item's previous base and the product tip contains it. The
 Item record must then hold that commit's plan-owned fields and change only its
-own status, stamp and base.
+own status, stamp and base. The push also refuses a committed product or test
+path outside the Item's path claims, where a claim covers its path and every
+path below it. Vault paths keep the control, Architecture and projection rules
+instead, and a path the product tip holds exactly as the Item's
+`integration_base_commit` does is not the Item's change.
 
 Integration reads the Item, Code Review and Verification records from the
 remote Item tip, not from the primary worktree. It accepts an Item only when
@@ -304,13 +333,46 @@ The coordinator publishes that Review, elects one durable PR intent and uses
 the provider adapter to create or adopt exactly one PR for the Delivery. The PR
 head is the Integration branch and its base is the resolved target branch.
 Provider calls are elected by crash-durable receipts and are never repeated
-blindly after an ambiguous result.
+blindly after an ambiguous result. When a Review is published again, the next
+PR-creation intent takes over the receipt the earlier intent left, unless that
+receipt still guards a PR the provider does not show: a call that started
+while no exact Delivery PR is visible, or a verified PR other than the exact
+Delivery PR. Such a receipt refuses the intent with `DELIVERY_PR_UNCERTAIN`.
+The commit that records the PR URL becomes the PR head. It also moves a
+reviewed Delivery from `review` to `awaiting_merge` and re-renders the
+Delivery map; a cancelled Delivery keeps `cancelled`.
 
 Closure requires provider-confirmed merge evidence for the exact reviewed
 head, passing provider checks with at least one success, and target ancestry.
 A skipped or neutral check passes but does not count as that success. The
 merge method is a merge commit; squash and rebase results fail closed. Release
 Management is not part of Delivery closure.
+
+The tracked status stays `awaiting_merge` after the merge, because the target
+branch receives the PR head's bytes. The Delivery map shows that tracked
+status, so the Integration branch and the target branch render the same map.
+The Delivery compiler derives `merged` offline from Git for a Delivery in
+`awaiting_merge`, or in `review` when its PR was recorded before the record
+set `awaiting_merge`. The proof is a two-parent merge that the current branch
+reaches on any path, whose second parent is the Delivery's recorded PR head,
+identified by its record, Delivery and intent trailers, and whose own message
+carries no `Agentrof-Record` trailer. The coordinator writes that trailer on
+every commit it creates, so its own two-parent commits never count, such as
+the `reopen-item` commit whose second parent is the recorded PR head; a
+provider merge commit or a manual `git merge` does. A later Delivery's
+Integration branch therefore still sees the target's merge after a target
+refresh brought it in through a second parent. The one caveat is that a manual
+merge of the Integration branch into any other branch also counts as proof;
+the controlled Integration refs make that unlikely. Without that proof, for
+example on the Integration branch itself or after a fast-forward or squash,
+the Delivery keeps its tracked status and is still checked against its current
+approved sources. A merged Delivery keeps its pinned historical sources, as a
+cancelled one does. Only a Delivery whose Review records its PR is derived;
+any other keeps its tracked status without a Git query. When Git cannot
+evaluate the proof, in a shallow clone, outside a Git checkout or after a
+failed Git query, `check` and `status` fail with that finding instead of
+reporting the tracked status as the answer, so a CI job that checks a
+Delivery needs the full history.
 
 ## Target changes, recovery and cancellation
 
@@ -321,9 +383,11 @@ revision and Item reconciliation protocol. No stale target grants a Slot,
 worktree, Review approval or merge action.
 
 Every mutating coordinator operation supports exact refetch classification:
-accepted, rejected, response uncertain or repository incident. Recovery never
-reconstructs semantic state from a local receipt alone. Remote records and
-tracked package hashes remain authoritative.
+accepted, rejected, response uncertain or repository incident. A rejected
+atomic push is named from the refetched refs, never from Git's wording: a moved
+Fence lease, any other moved lease, or a remote that takes the same push only
+without atomic support. Recovery never reconstructs semantic state from a local
+receipt alone. Remote records and tracked package hashes remain authoritative.
 
 Cancellation is an explicit action inside `/deliver DLV-###`. Its approved
 intent freezes exact Story dispositions, quiesces active Items, reverts

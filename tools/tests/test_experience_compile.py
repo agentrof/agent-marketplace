@@ -20,6 +20,7 @@ VAULT_CHECK = ROOT / "plugins/software-engineering-team/scripts/vault_check.py"
 sys.path.insert(0, str(COMPILER.parent))
 import experience_compile
 import experience_application_check
+from tools.tests.git_fixture import init_repository, temporary_directory
 
 
 class ExperienceCompilerTests(unittest.TestCase):
@@ -839,7 +840,7 @@ class ExperienceCompilerTests(unittest.TestCase):
             self.assertEqual(self.tree_snapshot(fixture["docs"]), before)
 
     def test_abort_open_scope_restores_only_tracked_updates(self):
-        with tempfile.TemporaryDirectory() as raw:
+        with temporary_directory() as raw:
             project = Path(raw)
             root = project / "workspace/docs/experience-design"
             package = root / "experiences/checkout"
@@ -860,11 +861,7 @@ class ExperienceCompilerTests(unittest.TestCase):
             approved_preimage = experience_compile.render_fm(approved, body)
             experience.write_text(approved_preimage, encoding="utf-8")
             approved_source = experience_compile.source_digest(package)
-            initialized = subprocess.run(
-                ["git", "init", "-q", str(project)],
-                cwd=ROOT, text=True, capture_output=True, check=False,
-            )
-            self.assertEqual(initialized.returncode, 0, initialized.stderr)
+            init_repository(project)
             committed = subprocess.run(
                 ["git", "-C", str(project), "add", "."],
                 text=True, capture_output=True, check=False,
@@ -946,18 +943,14 @@ class ExperienceCompilerTests(unittest.TestCase):
             self.assertFalse(application_state.exists())
 
     def test_abort_open_scope_refuses_untracked_author_content(self):
-        with tempfile.TemporaryDirectory() as raw:
+        with temporary_directory() as raw:
             project = Path(raw)
             root = project / "workspace/docs/experience-design"
             package = root / "experiences/checkout"
             package.mkdir(parents=True)
             experience = package / "experience.md"
             experience.write_text("approved preimage\n", encoding="utf-8")
-            initialized = subprocess.run(
-                ["git", "init", "-q", str(project)],
-                cwd=ROOT, text=True, capture_output=True, check=False,
-            )
-            self.assertEqual(initialized.returncode, 0, initialized.stderr)
+            init_repository(project)
             subprocess.run(["git", "-C", str(project), "add", "."], check=True)
             subprocess.run([
                 "git", "-C", str(project), "-c", "user.name=Test",
@@ -1013,18 +1006,14 @@ class ExperienceCompilerTests(unittest.TestCase):
             self.assertTrue(author_note.is_file())
 
     def test_abort_open_scope_refuses_staged_package_content(self):
-        with tempfile.TemporaryDirectory() as raw:
+        with temporary_directory() as raw:
             project = Path(raw)
             root = project / "workspace/docs/experience-design"
             package = root / "experiences/checkout"
             package.mkdir(parents=True)
             experience = package / "experience.md"
             experience.write_text("approved preimage\n", encoding="utf-8")
-            initialized = subprocess.run(
-                ["git", "init", "-q", str(project)],
-                cwd=ROOT, text=True, capture_output=True, check=False,
-            )
-            self.assertEqual(initialized.returncode, 0, initialized.stderr)
+            init_repository(project)
             subprocess.run(["git", "-C", str(project), "add", "."], check=True)
             subprocess.run([
                 "git", "-C", str(project), "-c", "user.name=Test",
@@ -2454,14 +2443,7 @@ class ExperienceCompilerTests(unittest.TestCase):
     def test_all_active_stubs_pass_scoped_vault_and_compiler_contracts(self):
         with tempfile.TemporaryDirectory() as raw:
             project = Path(raw)
-            repository = subprocess.run(
-                ["git", "init", "-q", str(project)],
-                cwd=ROOT, text=True, capture_output=True, check=False,
-            )
-            self.assertEqual(
-                repository.returncode, 0,
-                repository.stdout + repository.stderr,
-            )
+            init_repository(project)
             setup = subprocess.run(
                 [sys.executable, str(SETUP), "apply", "--project-root",
                  str(project), "--json"],

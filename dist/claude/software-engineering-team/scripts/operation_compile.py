@@ -20,7 +20,9 @@ import tempfile
 from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
 
-from ba_compile import parse_frontmatter, without_generated_relations
+from ba_compile import (
+    frontmatter_item, frontmatter_scalar, parse_frontmatter, without_generated_relations,
+)
 import stage_package
 
 
@@ -46,6 +48,9 @@ WORKDIR_FIELDS = {
     "environment": ("env_workdir",),
 }
 DISPOSITIONS = {"required", "not_applicable"}
+# Where the checks that merge-pr requires on a Delivery PR come from. The first
+# is the default, so a contract approved before the field existed keeps it.
+PULL_REQUEST_CHECK_SOURCES = ("repository_workflow", "external")
 TOKEN_RE = re.compile(r"(?:\{\{[^{}]+\}\}|\$\{[^{}]+\})")
 CREDENTIAL_RE = re.compile(
     r"(?i)(?:api[_-]?key|token|password|secret)\s*=\s*[^\s]+"
@@ -67,19 +72,15 @@ def contract_path(docs: Path, kind: str) -> Path:
     return docs / "operation" / FILE_FOR[kind]
 
 
-def parse(path: Path) -> tuple[dict, str]:
-    props, body_line, error = parse_frontmatter(path.read_text(encoding="utf-8"))
+def parse_text(text: str, path: Path) -> tuple[dict, str]:
+    props, body_line, error = parse_frontmatter(text)
     if error:
         raise ValueError(f"{path}: {error}")
-    return props, "\n".join(path.read_text(encoding="utf-8").splitlines()[body_line - 1:]).strip()
+    return props, "\n".join(text.splitlines()[body_line - 1:]).strip()
 
 
-def scalar(value: object) -> str:
-    if isinstance(value, list):
-        return "\n".join(f"  - {scalar(item)}" for item in value)
-    if isinstance(value, str) and value.startswith("[["):
-        return f'"{value}"'
-    return str(value)
+def parse(path: Path) -> tuple[dict, str]:
+    return parse_text(path.read_text(encoding="utf-8"), path)
 
 
 def render(props: dict, body: str) -> str:
@@ -87,9 +88,9 @@ def render(props: dict, body: str) -> str:
     for key, value in props.items():
         if isinstance(value, list):
             lines.append(f"{key}:")
-            lines.extend(f"  - {scalar(item)}" for item in value)
+            lines.extend(f"  - {frontmatter_item(item)}" for item in value)
         else:
-            lines.append(f"{key}: {scalar(value)}")
+            lines.append(f"{key}: {frontmatter_scalar(value)}")
     lines.extend(["---", "", body.strip(), ""])
     return "\n".join(lines)
 
@@ -131,6 +132,12 @@ def valid_workdir(value: object) -> bool:
     )
 
 
+def pull_request_checks(props: dict) -> tuple[object, object]:
+    """The declared source of Delivery PR checks and the provider that reports them."""
+    return (props.get("pull_request_check_source", PULL_REQUEST_CHECK_SOURCES[0]),
+            props.get("pull_request_check_provider", ""))
+
+
 def accepted_solution_ref(docs: Path, value: object) -> bool:
     if not isinstance(value, str) or not value.strip():
         return False
@@ -151,12 +158,13 @@ def accepted_solution_ref(docs: Path, value: object) -> bool:
     return props.get("status") == "accepted" and not package_errors
 
 
-def check_contract(docs: Path, kind: str) -> tuple[dict, list[str]]:
+def check_contract(docs: Path, kind: str, text: str | None = None) -> tuple[dict, list[str]]:
+    """Check the contract file, or ``text`` as its content before it is written."""
     path = contract_path(docs, kind)
-    if not path.is_file():
+    if text is None and not path.is_file():
         return {}, [f"missing {kind} contract: {path}"]
     try:
-        props, body = parse(path)
+        props, body = parse(path) if text is None else parse_text(text, path)
     except (OSError, ValueError) as exc:
         return {}, [str(exc)]
     errors: list[str] = []
@@ -180,7 +188,7 @@ def check_contract(docs: Path, kind: str) -> tuple[dict, list[str]]:
             errors.append(f"{field} must be a normalized repository-relative path")
     if kind == "verification":
         if props.get("status") == "approved" and (not isinstance(refs, list) or not refs):
-            errors.append("approved contract must cite at least one accepted Solution decision")
+            errors.append("approved contract must cite at least one accepted Solution decision in constrained_by")
         if props.get("status") == "approved" and (not isinstance(props.get("test_command"), str) or not props["test_command"].strip()):
             errors.append("test_command is required")
         for prefix in ("mutation", "dependency_audit"):
@@ -193,9 +201,19 @@ def check_contract(docs: Path, kind: str) -> tuple[dict, list[str]]:
                 errors.append(f"{prefix}_command is required when disposition is required")
             if disposition == "not_applicable" and (not isinstance(rationale, str) or not rationale.strip()):
                 errors.append(f"{prefix}_rationale is required when disposition is not_applicable")
+        source, provider = pull_request_checks(props)
+        if source not in PULL_REQUEST_CHECK_SOURCES:
+            errors.append("pull_request_check_source must be repository_workflow or external")
+        elif source == "external":
+            if (not isinstance(provider, str) or not provider.strip()
+                    or TOKEN_RE.search(provider) or CREDENTIAL_RE.search(provider)):
+                errors.append("pull_request_check_provider must name the external source of pull request "
+                              "checks, without a credential literal or an unresolved token")
+        elif provider:
+            errors.append("pull_request_check_provider is declared only with pull_request_check_source external")
     else:
         if props.get("status") == "approved" and (not isinstance(refs, list) or not refs):
-            errors.append("approved contract must cite at least one accepted Solution decision")
+            errors.append("approved contract must cite at least one accepted Solution decision in constrained_by")
         if props.get("status") == "approved" and (not isinstance(props.get("env_command"), str) or not props["env_command"].strip()):
             errors.append("env_command is required")
         scenarios = props.get("scenarios")
@@ -216,21 +234,25 @@ def check_contract(docs: Path, kind: str) -> tuple[dict, list[str]]:
 
 
 def initial_props(kind: str, refs: list[str]) -> dict:
+    # The hash, the commands and an unbound relation start absent: the vault
+    # rejects an empty relation, and an empty value parses as a list, which
+    # it rejects for these text properties.
     common = {
         "type": TYPE_FOR[kind], "title": TYPE_FOR[kind].replace("-", " ").title(),
-        "status": "draft", "revision": 1, "constrained_by": refs,
-        "source_hash": "", "tags": [f"doc/{TYPE_FOR[kind]}", "status/draft"],
+        "status": "draft", "revision": 1, **({"constrained_by": refs} if refs else {}),
+        "tags": [f"doc/{TYPE_FOR[kind]}", "status/draft"],
     }
     if kind == "verification":
         return common | {
-            "test_command": "", "test_workdir": ".",
-            "mutation_disposition": "not_applicable", "mutation_command": "",
+            "test_workdir": ".",
+            "mutation_disposition": "not_applicable",
             "mutation_workdir": ".", "mutation_rationale": "Describe why mutation testing is not applicable.",
-            "dependency_audit_disposition": "not_applicable", "dependency_audit_command": "",
+            "dependency_audit_disposition": "not_applicable",
             "dependency_audit_workdir": ".", "dependency_audit_rationale": "Describe why dependency auditing is not applicable.",
+            "pull_request_check_source": PULL_REQUEST_CHECK_SOURCES[0],
         }
     return common | {
-        "env_command": "", "env_workdir": ".", "scenarios": ["default"],
+        "env_workdir": ".", "scenarios": ["default"],
         "tolerated_warnings": [], "service_catalog": [],
     }
 
@@ -280,10 +302,12 @@ def approve(args) -> int:
     props["tags"] = [f"doc/{TYPE_FOR[args.kind]}", "status/approved"]
     props["approved_at_utc"] = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
     props["source_hash"] = source_hash(props, body)
-    path.write_text(render(props, body), encoding="utf-8")
-    value, errors = check_contract(docs, args.kind)
+    text = render(props, body)
+    # Check the text the file will hold before writing it, so a refusal leaves the draft as it was.
+    value, errors = check_contract(docs, args.kind, text)
     if errors:
         raise ValueError("approval check failed: " + "; ".join(errors))
+    path.write_text(text, encoding="utf-8")
     print(json.dumps(value, sort_keys=True))
     return 0
 
@@ -341,6 +365,11 @@ def render_ci(args) -> int:
     if errors or not verification.get("current"):
         raise ValueError("approved current Verification Contract is required: " + "; ".join(errors))
     verification_props, _body = parse(contract_path(docs, "verification"))
+    source, provider = pull_request_checks(verification_props)
+    if source == "external":
+        raise ValueError(f"the approved Verification Contract declares that {provider} reports the pull "
+                         "request checks, so the project uses no repository workflow for render-ci to "
+                         "materialize")
     environment_props = None
     if args.include_environment:
         environment, env_errors = check_contract(docs, "environment")

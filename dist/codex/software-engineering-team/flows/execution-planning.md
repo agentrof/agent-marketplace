@@ -27,8 +27,11 @@ Approval, and every re-approval, also refuses until a committed workflow will
 run on the Delivery PR, because the final merge needs a green provider check.
 When none exists, offer the one that `operation_compile.py render-ci`
 materializes; it counts once it is committed and pushed to the target branch.
-`skill-content/setup/references/ci-bootstrap.md` defines which workflows and
-refs count.
+A project whose checks come from outside its workflows instead declares that
+source in the approved Verification Contract; approval then requires no
+workflow and reports that the declared provider must still turn the Delivery
+PR's checks green. `skill-content/setup/references/ci-bootstrap.md` defines
+which workflows, refs and declarations count.
 
 Every Item also declares `architecture_impact: required|not_applicable`, its
 exact Solution component refs, requested architecture record kinds and a

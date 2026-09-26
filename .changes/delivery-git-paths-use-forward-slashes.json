@@ -1,0 +1,6 @@
+{
+  "summary": "On native Windows the Delivery coordinator now hands Git every repository path with forward slashes, as on every other host, instead of backslash paths that name no file in a Git tree, and compares the paths Git returns in the same form; the commit check behind stage receipts names its package the same way.",
+  "components": {
+    "software-engineering-team": "patch"
+  }
+}

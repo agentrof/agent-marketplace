@@ -12,6 +12,7 @@ import sys
 import tempfile
 import time
 import unittest
+import uuid
 from contextlib import redirect_stderr
 from pathlib import Path
 from types import SimpleNamespace
@@ -26,6 +27,7 @@ if str(SCRIPTS) not in sys.path:
 
 import experience_application_check
 import experience_compile
+from tools.tests.git_fixture import init_repository, temporary_directory
 
 
 def load_hook():
@@ -34,6 +36,28 @@ def load_hook():
     assert spec.loader is not None
     spec.loader.exec_module(module)
     return module
+
+
+# Hook events of concurrent local runs never share a session id.
+SESSION = f"shell-contract-{uuid.uuid4().hex[:12]}"
+
+
+def isolate_recovery_root(test: unittest.TestCase) -> Path:
+    """Give one test its own temporary root for the hook's recovery capsules.
+
+    The hook keeps capsules under tempfile.gettempdir(), which every local run
+    of this suite shares. A hook run as a subprocess reads TMPDIR; an in-process
+    call reads the directory tempfile has cached.
+    """
+    temporary = tempfile.TemporaryDirectory()
+    test.addCleanup(temporary.cleanup)
+    for patcher in (
+        mock.patch.dict(os.environ, {"TMPDIR": temporary.name}),
+        mock.patch.object(tempfile, "tempdir", temporary.name),
+    ):
+        patcher.start()
+        test.addCleanup(patcher.stop)
+    return Path(temporary.name)
 
 
 class VaultHookPrototypeTests(unittest.TestCase):
@@ -560,6 +584,7 @@ class VaultHookPrototypeTests(unittest.TestCase):
 class VaultHookShellContractTests(unittest.TestCase):
     def setUp(self):
         self.hook = load_hook()
+        self.temporary_root = isolate_recovery_root(self)
 
     @staticmethod
     def project(root: Path) -> tuple[Path, Path]:
@@ -592,7 +617,7 @@ class VaultHookShellContractTests(unittest.TestCase):
             "tool_name": "Bash",
             "tool_input": {field: command},
             "cwd": str(root),
-            "session_id": "shell-contract",
+            "session_id": SESSION,
             "tool_use_id": "shell-contract-event",
         }
 
@@ -1357,14 +1382,7 @@ class VaultHookShellContractTests(unittest.TestCase):
         self, root: Path, package: Path,
     ) -> tuple[Path, Path]:
         docs, _config = self.project(root)
-        repository = subprocess.run(
-            ["git", "init", str(root)],
-            capture_output=True, text=True, check=False,
-        )
-        self.assertEqual(
-            repository.returncode, 0,
-            repository.stdout + repository.stderr,
-        )
+        init_repository(root)
         setup = subprocess.run(
             [
                 sys.executable,
@@ -2781,7 +2799,7 @@ class VaultHookShellContractTests(unittest.TestCase):
             )
             payload = {
                 **self.payload(root, "python3 unrelated.py"),
-                "session_id": "missing-post-event-session",
+                "session_id": SESSION + "-missing-post-event",
                 "tool_use_id": "present-only-in-pre",
             }
             before = self.run_hook("pre", payload)
@@ -2842,6 +2860,21 @@ class VaultHookShellContractTests(unittest.TestCase):
             })
             self.assertEqual(after.returncode, 2)
             self.assertIn("binding changed", after.stderr)
+
+    def test_recovery_capsules_stay_in_a_root_private_to_the_test(self):
+        """Another local run of this suite must never read or expire this test's capsule."""
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            self.project(root)
+            payload = self.payload(root, "python3 unrelated.py")
+            before = self.run_hook("pre", payload)
+            self.assertEqual(before.returncode, 0, before.stdout + before.stderr)
+            capsule = self.hook.recovery_path(payload)
+            self.assertTrue(capsule.is_file())
+            self.assertEqual(capsule.parent.parent, self.temporary_root)
+            after = self.run_hook("post", payload)
+            self.assertEqual(after.returncode, 0, after.stdout + after.stderr)
+            self.assertFalse(capsule.exists())
 
     def test_workspace_symlink_swap_restores_local_protected_state(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -3484,14 +3517,7 @@ class VaultHookShellContractTests(unittest.TestCase):
             with self.subTest(host=host), tempfile.TemporaryDirectory() as temporary:
                 root = Path(temporary)
                 docs, _config = self.project(root)
-                repository = subprocess.run(
-                    ["git", "init", str(root)],
-                    capture_output=True, text=True, check=False,
-                )
-                self.assertEqual(
-                    repository.returncode, 0,
-                    repository.stdout + repository.stderr,
-                )
+                init_repository(root)
                 package = ROOT / "dist" / host / "software-engineering-team"
                 setup = subprocess.run(
                     [
@@ -3800,17 +3826,10 @@ class VaultHookShellContractTests(unittest.TestCase):
     def test_issue_77_bare_init_preserves_real_codex_draft(self):
         if shutil.which("python3") is None:
             self.skipTest("python3 is unavailable")
-        with tempfile.TemporaryDirectory() as temporary:
+        with temporary_directory() as temporary:
             root = Path(temporary) / "Issue 77 (bare init)"
             root.mkdir()
-            repository = subprocess.run(
-                ["git", "init", str(root)],
-                capture_output=True, text=True, check=False,
-            )
-            self.assertEqual(
-                repository.returncode, 0,
-                repository.stdout + repository.stderr,
-            )
+            init_repository(root)
             package = ROOT / "dist" / "codex" / "software-engineering-team"
             setup = subprocess.run(
                 [

@@ -1,0 +1,4 @@
+{
+  "summary": "The vault checker's test suite now has the builder registry its CHECK_IDS comment names: one builder per check id fires exactly its check on a copy of a valid project vault, and a meta-test keeps the registry in lockstep with CHECK_IDS.",
+  "components": {}
+}

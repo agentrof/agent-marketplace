@@ -14,20 +14,21 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "plugins" / "software-engineering-team" / "scripts"))
 import delivery_provider  # noqa: E402
 import delivery_result  # noqa: E402
+from tools.tests.git_fixture import init_repository  # noqa: E402
 
 
 class DeliveryProviderTests(unittest.TestCase):
     def test_repository_normalizes_https_and_scp_github_remotes(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
-            subprocess.run(["git", "init", "-q", str(root)], check=True)
+            init_repository(root)
             subprocess.run(["git", "-C", str(root), "remote", "add", "origin", "git@github.com:agentrof/example.git"], check=True)
             self.assertEqual(delivery_provider.repository_from_remote(root), "agentrof/example")
 
     def test_canonical_pr_url_rejects_query_fragment_and_zero(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
-            subprocess.run(["git", "init", "-q", str(root)], check=True)
+            init_repository(root)
             subprocess.run(["git", "-C", str(root), "remote", "add", "origin", "https://gitlab.com/a/b.git"], check=True)
             with self.assertRaises(delivery_provider.ProviderError):
                 delivery_provider.repository_from_remote(root)
@@ -46,7 +47,7 @@ class DeliveryProviderTests(unittest.TestCase):
     def test_merge_commit_requires_provider_confirmed_merge_object(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
-            subprocess.run(["git", "init", "-q", str(root)], check=True)
+            init_repository(root)
             subprocess.run(["git", "-C", str(root), "remote", "add", "origin", "https://github.com/agentrof/example.git"], check=True)
             response = {
                 "url": "https://github.com/agentrof/example/pull/17",
@@ -64,7 +65,7 @@ class DeliveryProviderTests(unittest.TestCase):
     def test_merge_commit_rejects_provider_without_merge_commit(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
-            subprocess.run(["git", "init", "-q", str(root)], check=True)
+            init_repository(root)
             subprocess.run(["git", "-C", str(root), "remote", "add", "origin", "https://github.com/agentrof/example.git"], check=True)
             response = {"url": "https://github.com/agentrof/example/pull/17", "state": "MERGED"}
             with patch.object(delivery_provider, "run_gh", side_effect=["", json.dumps(response)]):
@@ -76,7 +77,7 @@ class DeliveryProviderTests(unittest.TestCase):
     def test_merge_commit_rejects_changed_provider_head(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
-            subprocess.run(["git", "init", "-q", str(root)], check=True)
+            init_repository(root)
             subprocess.run(["git", "-C", str(root), "remote", "add", "origin", "https://github.com/agentrof/example.git"], check=True)
             response = {
                 "url": "https://github.com/agentrof/example/pull/17",
@@ -93,7 +94,7 @@ class DeliveryProviderTests(unittest.TestCase):
     def test_required_checks_must_be_complete_and_successful(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
-            subprocess.run(["git", "init", "-q", str(root)], check=True)
+            init_repository(root)
             subprocess.run(["git", "-C", str(root), "remote", "add", "origin", "https://github.com/agentrof/example.git"], check=True)
             provider = delivery_provider.GitHubProvider(root)
             provider.require_green_checks({
@@ -112,7 +113,7 @@ class DeliveryProviderTests(unittest.TestCase):
         temporary = tempfile.TemporaryDirectory()
         self.addCleanup(temporary.cleanup)
         root = Path(temporary.name)
-        subprocess.run(["git", "init", "-q", str(root)], check=True)
+        init_repository(root)
         subprocess.run(["git", "-C", str(root), "remote", "add", "origin", "https://github.com/agentrof/example.git"], check=True)
         return delivery_provider.GitHubProvider(root)
 
@@ -208,6 +209,53 @@ class DeliveryProviderTests(unittest.TestCase):
                 self.assertEqual([finding["code"] for finding in result["findings"]],
                                  ["DELIVERY_REQUIRED_CHECK_FAILED"])
                 self.assertTrue(result["findings"][0]["message"].startswith("GitHub required check"))
+
+    def test_provider_refusals_report_their_finding_codes(self):
+        """A provider refusal reaches the result envelope under its own code, with its words intact."""
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            init_repository(root)
+            subprocess.run(["git", "-C", str(root), "remote", "add", "origin", "https://gitlab.com/a/b.git"], check=True)
+            subprocess.run(["git", "-C", str(root), "remote", "add", "owner", "https://github.com/agentrof"], check=True)
+            provider = self.github_provider()
+            url = "https://github.com/agentrof/example/pull/17"
+
+            def without_gh():
+                with patch.object(delivery_provider.shutil, "which", return_value=None):
+                    delivery_provider.run_gh(root, "pr", "list")
+
+            def when_gh_prints(output, call):
+                with patch.object(delivery_provider, "run_gh", return_value=output):
+                    call()
+
+            def merge_then_read(response):
+                with patch.object(delivery_provider, "run_gh", side_effect=["", json.dumps(response)]):
+                    provider.merge_commit(url, "a" * 40)
+
+            for code, message, refusal in (
+                ("DELIVERY_PROVIDER_UNSUPPORTED", "Delivery PR provider requires a GitHub remote",
+                 lambda: delivery_provider.repository_from_remote(root)),
+                ("DELIVERY_PROVIDER_UNSUPPORTED", "GitHub remote must identify exactly owner/repository",
+                 lambda: delivery_provider.repository_from_remote(root, "owner")),
+                ("DELIVERY_PROVIDER_UNSUPPORTED", "GitHub provider requires the authenticated gh CLI", without_gh),
+                ("DELIVERY_PR_UNCERTAIN", "GitHub returned invalid PR JSON",
+                 lambda: when_gh_prints("not json", lambda: provider.list_pull_requests("head", "main"))),
+                ("DELIVERY_PR_UNCERTAIN", "GitHub did not return a canonical PR URL",
+                 lambda: when_gh_prints("", lambda: provider.create_draft("head", "main", "Title", "Body"))),
+                ("DELIVERY_MERGE_PROOF_INVALID", "GitHub PR merge call returned before the PR was merged",
+                 lambda: merge_then_read({"url": url, "state": "OPEN", "headRefOid": "a" * 40})),
+                ("DELIVERY_MERGE_PROOF_INVALID", "GitHub PR has no provider-confirmed merge commit",
+                 lambda: merge_then_read({"url": url, "state": "MERGED", "headRefOid": "a" * 40})),
+                ("DELIVERY_PR_HEAD_BASE_MISMATCH", "GitHub PR head changed during merge",
+                 lambda: merge_then_read({"url": url, "state": "MERGED", "headRefOid": "c" * 40,
+                                          "mergeCommit": {"oid": "b" * 40}})),
+            ):
+                with self.subTest(message=message):
+                    with self.assertRaises(delivery_provider.ProviderError) as refused:
+                        refusal()
+                    result = delivery_result.from_raw("merge-pr", {"ok": False, "errors": [str(refused.exception)]})
+                    self.assertEqual([(finding["code"], finding["message"]) for finding in result["findings"]],
+                                     [(code, message)])
 
 
 if __name__ == "__main__":

@@ -12,13 +12,15 @@ Requirement stage and it does not alter product-stage package hashes.
 1. Resolve the selected kind. `qa-engineer` is the only Verification Contract
    writer; `devops-engineer` is the only Environment Contract writer. Both
    record exact accepted/current Solution decision references, repository
-   relative workdirs and command semantics.
+   relative workdirs and command semantics. Verification also records where
+   Delivery PR checks come from, as
+   `skill-content/setup/references/ci-bootstrap.md` defines.
 2. Run `operation_compile.py check --kind <kind> --json`. An approved contract
    changes only after `begin-revision`; a changed or superseded cited Solution
    decision makes the contract unusable until it is revised and re-approved.
 3. Spawn the non-writing counterpart as a read-only reviewer when the contract
-   crosses test/runtime boundaries. The review prompt includes the exact
-   contract path, accepted Solution references, command safety lens and
-   `SELF-CHECK`.
+   crosses test/runtime boundaries or changes where Delivery PR checks come
+   from. The review prompt includes the exact contract path, accepted Solution
+   references, command safety lens and `SELF-CHECK`.
 4. Approve with `operation_compile.py approve --kind <kind>`. Return the exact
    contract receipt. Do not run a downstream product stage automatically.

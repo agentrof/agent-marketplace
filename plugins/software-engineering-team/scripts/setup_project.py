@@ -425,11 +425,13 @@ def legacy_operation_updates(workspace_root: Path, config: dict) -> tuple[dict[P
     legacy_env = config.get("env_command")
     if not verification.exists() and (isinstance(legacy_test, str) or isinstance(legacy_mutation, str)):
         props = operation_compile.initial_props("verification", [])
-        props["test_command"] = legacy_test if isinstance(legacy_test, str) else ""
+        # A value with nothing to migrate stays absent: the vault rejects an empty text property.
+        if isinstance(legacy_test, str) and legacy_test.strip():
+            props["test_command"] = legacy_test
         if isinstance(legacy_mutation, str) and legacy_mutation.strip():
             props["mutation_disposition"] = "required"
             props["mutation_command"] = legacy_mutation
-            props["mutation_rationale"] = ""
+            props.pop("mutation_rationale", None)
         body = "# Verification Contract\n\n## Contract\n\nMigrated from retired workspace config. Bind this draft to accepted Solution decisions before approval.\n\n## Navigation <!-- sec: nav -->\n\n[[maps/operation|Operation]]"
         updates[verification] = operation_compile.render(props, body)
     legacy_environment = workspace_root / "environment" / "contract.md"
@@ -451,7 +453,8 @@ def legacy_operation_updates(workspace_root: Path, config: dict) -> tuple[dict[P
             deletions.append(legacy_environment)
     elif not environment.exists() and isinstance(legacy_env, str):
         props = operation_compile.initial_props("environment", [])
-        props["env_command"] = legacy_env
+        if legacy_env.strip():
+            props["env_command"] = legacy_env
         body = "# Environment Contract\n\n## Contract\n\nMigrated from retired workspace config. Bind this draft to accepted Solution decisions before approval.\n\n## Navigation <!-- sec: nav -->\n\n[[maps/operation|Operation]]"
         updates[environment] = operation_compile.render(props, body)
     return updates, deletions, blockers

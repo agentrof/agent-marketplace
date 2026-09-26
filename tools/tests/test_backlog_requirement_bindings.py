@@ -10,6 +10,7 @@ from types import SimpleNamespace
 from unittest import mock
 
 from tools.tests import backlog_fixture
+from tools.tests.git_fixture import init_repository, remove_temporary
 
 compiler = backlog_fixture.backlog_compile
 stage_package = backlog_fixture.stage_package
@@ -44,7 +45,7 @@ CARRIED = [
 class RequirementBindingTests(unittest.TestCase):
     def setUp(self):
         self.temporary = tempfile.TemporaryDirectory()
-        self.addCleanup(self.temporary.cleanup)
+        self.addCleanup(remove_temporary, self.temporary)
         self.project = Path(self.temporary.name).resolve()
         self.docs = self.project / "workspace/docs"
         (self.docs / "maps").mkdir(parents=True)
@@ -175,7 +176,8 @@ class RequirementBindingTests(unittest.TestCase):
         with contextlib.redirect_stdout(io.StringIO()):
             backlog_fixture.make_approved_backlog(self.docs)
         self.requirement({})
-        for args in (["init", "--quiet"], ["add", "-A"],
+        init_repository(self.project)
+        for args in (["add", "-A"],
                      ["-c", "user.name=Jane Doe", "-c", "user.email=jane@example.invalid",
                       "commit", "--quiet", "-m", "Approved backlog fixture"]):
             subprocess.run(["git", *args], cwd=self.project, check=True, capture_output=True)

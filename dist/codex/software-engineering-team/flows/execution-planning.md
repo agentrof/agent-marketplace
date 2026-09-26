@@ -23,12 +23,12 @@ evidence was produced against unless the approval names it with `--reopen`;
 that Item is rebound to the current contracts, stays integrated, and can then
 be reopened.
 
-Approval also refuses while the repository has no workflow in
-`.github/workflows/` triggered by `pull_request` or `pull_request_target`,
-because the final merge needs a green provider check on the Delivery PR. Every
-approval, including a re-approval, repeats this check. When no such workflow
-exists, offer the one that `operation_compile.py render-ci` materializes, as
-the setup CI bootstrap reference describes.
+Approval, and every re-approval, also refuses until a committed workflow will
+run on the Delivery PR, because the final merge needs a green provider check.
+When none exists, offer the one that `operation_compile.py render-ci`
+materializes; it counts once it is committed and pushed to the target branch.
+`skill-content/setup/references/ci-bootstrap.md` defines which workflows and
+refs count.
 
 Every Item also declares `architecture_impact: required|not_applicable`, its
 exact Solution component refs, requested architecture record kinds and a

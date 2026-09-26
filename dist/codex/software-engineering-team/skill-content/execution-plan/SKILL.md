@@ -32,7 +32,5 @@ Operation contracts. It does not create branches, worktrees, slots or
 remote refs. Publication is a later explicit `delivery_git.py
 publish-execution-plan` operation.
 
-Every approval, including a re-approval, refuses while the repository has no
-workflow in `.github/workflows/` triggered by `pull_request` or
-`pull_request_target`; offer the workflow that `operation_compile.py
-render-ci` materializes, as the setup CI bootstrap reference describes.
+Approval also carries the pull request workflow precondition that
+`flows/execution-planning.md` states.

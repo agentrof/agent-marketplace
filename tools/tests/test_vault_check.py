@@ -24,6 +24,7 @@ SCRIPTS = ROOT / "plugins" / "software-engineering-team" / "scripts"
 sys.path.insert(0, str(SCRIPTS))
 
 import vault_check  # noqa: E402
+from tools.tests.git_fixture import init_repository  # noqa: E402
 
 MAP = "maps/solution-design.md"
 LANDSCAPE = "solution-design/landscape.md"
@@ -117,7 +118,7 @@ def findings(docs: Path) -> list[dict]:
 
 
 def make_valid_vault(project: Path) -> Path:
-    subprocess.run(["git", "init", "-q", str(project)], check=True)
+    init_repository(project)
     result = subprocess.run(
         [sys.executable, str(SCRIPTS / "setup_project.py"), "--project-root", str(project)],
         cwd=ROOT, capture_output=True, text=True, check=False,

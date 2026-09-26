@@ -49,8 +49,9 @@ Integration, Item and Slot tips.
 The PR handoff uses `prepare-pr-creation`, `open-pr` and `merge-pr` internally:
 the provider adapter must make the exact reviewed head ready, use a merge
 commit with an exact head lease and prove that the resulting merge commit is
-in the target ancestry before reporting `merged`. Every provider-reported
-required check must be complete and successful immediately before the merge
+in the target ancestry before reporting `merged`. A provider-reported check
+passes when its result is success, skipped or neutral; all must pass, and
+at least one must have succeeded, immediately before the merge
 call and in merged evidence. Squash, rebase and a different PR are never
 accepted as closure evidence.
 Release management is deliberately out of scope. No command may infer a

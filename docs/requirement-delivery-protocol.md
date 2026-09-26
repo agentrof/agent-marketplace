@@ -176,8 +176,11 @@ creating its Integration ref with the project Fence lease.
 
 Scope approval is the handoff check for upstream bindings. Every Requirement
 that a selected Story `implements` must be approved and route to `backlog`;
-otherwise approval names the Story, the Requirement and the router's stage and
-reason, and the Requirement is rebound through `/requirement REQ-###` first.
+otherwise approval names the Story, the Requirement and the router's stage,
+action and reason, and the Requirement is rebound through `/requirement REQ-###`
+first. A superseded, withdrawn or `resolved_no_change` Requirement cannot be
+rebound, so approval names its successor when it has one and routes to a
+backlog revision that re-traces the Story to a current Requirement or drops it.
 When a selected Story cites `experience_refs`, the backlog must bind the
 globally current `application@rN`: through its compiler-owned
 `input_bindings` in manual mode, and in requirement mode whenever the backlog

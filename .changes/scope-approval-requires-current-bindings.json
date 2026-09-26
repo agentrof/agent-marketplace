@@ -1,5 +1,5 @@
 {
-  "summary": "Delivery scope approval now refuses a selected Story whose implemented Requirement no longer routes to backlog, and a selection citing Experience records when the backlog does not bind the globally current application receipt, naming the Story, Requirement or current application@rN and the remedy.",
+  "summary": "Delivery scope approval now refuses a selected Story whose implemented Requirement no longer routes to backlog, and a selection citing Experience records when the backlog does not bind the globally current application receipt, naming the Story, Requirement or current application@rN and the remedy. A superseded, withdrawn or resolved_no_change Requirement cannot be rebound, so its finding names the successor where one exists and routes to a backlog revision that re-traces the Story or drops it.",
   "components": {
     "software-engineering-team": "patch"
   }

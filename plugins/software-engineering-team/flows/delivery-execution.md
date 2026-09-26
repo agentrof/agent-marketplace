@@ -75,4 +75,6 @@ Authored merge conflicts remain unresolved. No stale target grants a Slot or
 worktree. `reopen-item` reactivates a sealed Item on the Integration that
 absorbed it, so a target refreshed after integration never strands the Item.
 Failed checks, target drift, review changes and process loss become explicit
-resumable states. Release Management is intentionally not part of this flow.
+resumable states. A rejected remote transaction changes no ref and names the
+lease it lost, or a remote without atomic push support, from the refetched
+refs. Release Management is intentionally not part of this flow.

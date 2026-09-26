@@ -887,6 +887,8 @@ def reopen_findings(reopen: list[str], item_records: list[tuple[Path, dict]]) ->
 # merge-pr merges a Delivery PR only on green provider checks, so execution
 # approval requires a GitHub workflow that the Delivery PR runs: a `.yml` or
 # `.yaml` file directly in `.github/workflows/`, the only place GitHub reads.
+# An approved Verification Contract that declares an external source of those
+# checks lifts the requirement.
 # The check reads lines instead of parsing YAML to stay dependency-free. It
 # accepts a top-level `on` key, bare or quoted, whose value is one event or a
 # one-line flow sequence, or whose direct children are event keys or block
@@ -1050,9 +1052,28 @@ def pull_request_workflow_findings(docs: Path, delivery: str, remote: str = "ori
     types = " or ".join(filter(None, (", ".join(names[:-1]), names[-1])))
     return [f"Execution approval requires a workflow in .github/workflows/ triggered by pull_request "
             f"or pull_request_target, listing no activity types or including {types}, since merge-pr "
-            f"needs a green check on the Delivery PR; none {where}. Materialize one with "
+            f"needs a green check on the Delivery PR; none {where}. When the checks come from outside "
+            "the repository's workflows, declare pull_request_check_source: external in an approved "
+            "Verification Contract revision instead; otherwise materialize the workflow with "
             "operation_compile.py render-ci as the CI bootstrap contract "
             f"(skill-content/setup/references/ci-bootstrap.md) describes{remedy}"]
+
+
+def approved_pull_request_checks(docs: Path) -> dict:
+    """Where the approved current Verification Contract declares the Delivery PR checks come from.
+
+    Without such a contract, approval is refused anyway and the default stands.
+    """
+    receipt, errors = operation_compile.check_contract(docs, "verification")
+    props = {}
+    if not errors and receipt.get("current"):
+        props, _body = operation_compile.parse(operation_compile.contract_path(docs, "verification"))
+    source, provider = operation_compile.pull_request_checks(props)
+    if source != "external":
+        return {"source": source}
+    return {"source": source, "provider": provider,
+            "merge_requirement": "No repository workflow is required, but merge-pr still merges the "
+                                 f"Delivery PR only on green checks, so {provider} must report them on it"}
 
 
 def approve_execution(args) -> int:
@@ -1079,7 +1100,9 @@ def approve_execution(args) -> int:
     plan_errors = source_errors + reopen_findings(reopen, item_records)
     if not plan_errors:
         plan_errors = execution_plan_findings(root, sources, docs)
-    plan_errors += pull_request_workflow_findings(docs, args.delivery, getattr(args, "remote", "origin"))
+    pull_request_checks = approved_pull_request_checks(docs)
+    if pull_request_checks["source"] != "external":
+        plan_errors += pull_request_workflow_findings(docs, args.delivery, getattr(args, "remote", "origin"))
     if plan_errors:
         print(json.dumps({"ok": False, "errors": sorted(set(plan_errors))}, indent=2)); return 1
     refreshed_sources: list[str] = []
@@ -1180,7 +1203,7 @@ def approve_execution(args) -> int:
     atomic_text(path, frontmatter(props, body))
     print(json.dumps({"ok": True, "id": props["id"], "plan_hash": props["plan_hash"], "items": item_ids,
                       "refreshed_sources": refreshed_sources, "refreshed_delivery_pins": refreshed_delivery_pins,
-                      "rebound": rebound}, indent=2)); return 0
+                      "rebound": rebound, "pull_request_checks": pull_request_checks}, indent=2)); return 0
 
 
 def status(args) -> int:

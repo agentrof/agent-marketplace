@@ -14,7 +14,7 @@ The other configuration targets are documents with their own lifecycle:
 | Concern | Authoritative location | Owner |
 |---|---|---|
 | Technology, database, environment and integration choice | accepted Solution Design decision plus `_generated/capability-registry.json` | Solution Architect |
-| Test, mutation and dependency-audit commands | `workspace/docs/operation/verification-contract.md` | QA Engineer |
+| Test, mutation and dependency-audit commands and the source of Delivery PR checks | `workspace/docs/operation/verification-contract.md` | QA Engineer |
 | Runtime environment command and scenarios | `workspace/docs/operation/environment-contract.md` | DevOps Engineer |
 | Maximum active Delivery Items | `workspace/docs/delivery/governance/governance.md` | Delivery Governance compiler |
 

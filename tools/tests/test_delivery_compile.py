@@ -727,6 +727,99 @@ class DeliveryCompilerTests(unittest.TestCase):
         self.assertTrue(any("render-ci" in error for error in result["errors"]), result)
         self.assertEqual(self.delivery_bytes(), before)
 
+    def declare_pull_request_checks(self, source, provider=None):
+        """Revise and approve the Verification Contract with one pull request check source, or none."""
+        args = type("Args", (), {"docs": str(self.docs), "kind": "verification",
+                                 "constrained_by": None, "json": False})
+        path = operation_compile.contract_path(self.docs, "verification")
+        with contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(operation_compile.revise(args), 0)
+            props, body = operation_compile.parse(path)
+            props.pop("pull_request_check_source", None)
+            props.pop("pull_request_check_provider", None)
+            if source is not None:
+                props["pull_request_check_source"] = source
+            if provider is not None:
+                props["pull_request_check_provider"] = provider
+            operation_compile.atomic_text(path, operation_compile.render(props, body))
+            self.assertEqual(operation_compile.approve(args), 0)
+
+    def check_delivery_result(self, args):
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output):
+            code = delivery_compile.check_delivery(args)
+        return code, json.loads(output.getvalue())
+
+    def test_execution_approval_honours_an_external_pull_request_check_source(self):
+        plan_args = self.scope_ready_for_execution()
+        shutil.rmtree(self.root / ".github")
+        self.commit_workflows()
+        self.declare_pull_request_checks("external", "Buildkite pipeline acme/web")
+        code, result = self.approve_execution_result(plan_args)
+        self.assertEqual(code, 0, result)
+        checks = result["pull_request_checks"]
+        self.assertEqual((checks["source"], checks["provider"]), ("external", "Buildkite pipeline acme/web"))
+        # Approval checked no workflow, so it states what merge-pr still requires.
+        self.assertIn("merge-pr still merges the Delivery PR only on green checks", checks["merge_requirement"])
+        self.assertIn("Buildkite pipeline acme/web must report them", checks["merge_requirement"])
+        # The Item binds the exact contract that carries the declaration.
+        receipt, errors = operation_compile.check_contract(self.docs, "verification")
+        self.assertEqual(errors, [])
+        item = delivery_compile.find_delivery(self.docs, "DLV-001") / "items" / "auth-01" / "item.md"
+        self.assertEqual(delivery_compile.split_note(item)[0]["verification_contract_hash"], receipt["source_hash"])
+
+    def test_execution_approval_requires_a_workflow_for_the_repository_workflow_source(self):
+        plan_args = self.scope_ready_for_execution()
+        shutil.rmtree(self.root / ".github")
+        self.commit_workflows()
+        # Declared, and absent as from a contract approved before the field existed.
+        for source in ("repository_workflow", None):
+            with self.subTest(source=source):
+                self.declare_pull_request_checks(source)
+                contract, _body = operation_compile.parse(operation_compile.contract_path(self.docs, "verification"))
+                self.assertEqual(contract.get("pull_request_check_source"), source)
+                before = self.delivery_bytes()
+                code, result = self.approve_execution_result(plan_args)
+                self.assertEqual(code, 1)
+                [error] = result["errors"]
+                self.assertIn("none is committed in HEAD.", error)
+                self.assertIn("declare pull_request_check_source: external in an approved Verification "
+                              "Contract revision instead", error)
+                self.assertIn("operation_compile.py render-ci", error)
+                self.assertEqual(self.delivery_bytes(), before)
+
+    def test_a_changed_pull_request_check_source_takes_contract_and_execution_reapproval(self):
+        plan_args = self.scope_ready_for_execution()
+        self.assertEqual(self.approve_execution_result(plan_args)[0], 0)
+        shutil.rmtree(self.root / ".github")
+        self.commit_workflows()
+        path = operation_compile.contract_path(self.docs, "verification")
+        approved = path.read_text(encoding="utf-8")
+        # An approved contract edited in place is stale, and its edit is not honoured.
+        path.write_text(approved.replace(
+            "pull_request_check_source: repository_workflow\n",
+            "pull_request_check_source: external\npull_request_check_provider: Buildkite\n"), encoding="utf-8")
+        code, result = self.approve_execution_result(plan_args)
+        self.assertEqual(code, 1)
+        self.assertTrue(any("source_hash is stale" in error for error in result["errors"]), result)
+        self.assertTrue(any("render-ci" in error for error in result["errors"]), result)
+        path.write_text(approved, encoding="utf-8")
+        # A revision changes the contract hash, so the open Item stays blocked until execution is re-approved.
+        self.declare_pull_request_checks("external", "Buildkite")
+        code, result = self.check_delivery_result(plan_args)
+        self.assertEqual(code, 1)
+        self.assertTrue(any("Verification Contract binding is stale or missing" in error
+                            for error in result["errors"]), result)
+        code, result = self.approve_execution_result(plan_args)
+        self.assertEqual(code, 0, result)
+        self.assertEqual(result["pull_request_checks"]["source"], "external")
+        self.assertEqual(self.check_delivery_result(plan_args)[0], 0)
+        # Returning to the repository workflow source requires the workflow again.
+        self.declare_pull_request_checks("repository_workflow")
+        code, result = self.approve_execution_result(plan_args)
+        self.assertEqual(code, 1)
+        self.assertTrue(any("render-ci" in error for error in result["errors"]), result)
+
     def execution_topology_fixture(self):
         self.approve_verification_contract()
         self.approve_dod()

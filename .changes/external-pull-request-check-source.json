@@ -1,0 +1,6 @@
+{
+  "summary": "The Verification Contract can now declare that a project's Delivery PR checks come from outside its repository workflows, such as an external CI or an organization-level required workflow, with pull_request_check_source: external and a pull_request_check_provider label. Execution approval then requires no workflow and states that merge-pr still merges only on green checks, render-ci refuses to materialize a workflow for that contract, and the operation compiler refuses an unknown source, an external source without a provider and a provider for a repository workflow. A contract without the field keeps the repository workflow requirement.",
+  "components": {
+    "software-engineering-team": "minor"
+  }
+}

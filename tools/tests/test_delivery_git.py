@@ -430,6 +430,46 @@ class DeliveryGitTests(unittest.TestCase):
                     "refs/heads/agentrof/slots/001", "b" * 40,
                 )
 
+    def test_earlier_provider_receipt_gives_way_unless_it_guards_a_pr_the_provider_does_not_show(self):
+        """A new PR intent takes over the receipt an earlier intent left, which then can no longer
+        elect a call. A receipt whose call started with no exact PR in sight, or that names another
+        PR, refuses the new intent and stays."""
+        url, other = "https://github.com/agentrof/example/pull/17", "https://github.com/agentrof/example/pull/18"
+        earlier, current = ("a" * 40, "A" * 22), ("b" * 40, "B" * 22)
+        started = ("a different provider receipt already exists: "
+                   "its provider call started and no exact Delivery PR is visible")
+        named = f"a different provider receipt already exists: it names {url}, which is not the exact Delivery PR"
+        for state, shown, refusal in (
+            ("prepared", None, None),
+            ("call_started", url, None),
+            ("call_started", None, started),
+            ("verified", url, None),
+            ("verified", other, named),
+            ("verified", None, named),
+        ):
+            with self.subTest(state=state, shown=shown), tempfile.TemporaryDirectory() as temporary:
+                root = Path(temporary)
+                delivery_git.create_provider_receipt(root, "DLV-001", *earlier)
+                if state != "prepared":
+                    delivery_git.mark_provider_call_started(root, "DLV-001", *earlier)
+                if state == "verified":
+                    delivery_git.mark_provider_verified(root, "DLV-001", *earlier, url)
+                if refusal is None:
+                    receipt = delivery_git.create_provider_receipt(root, "DLV-001", *current, exact_pr_url=shown)
+                    self.assertEqual([receipt[key] for key in ("intent_oid", "attempt", "state", "url")],
+                                     [*current, "prepared", "none"])
+                    with self.assertRaisesRegex(RuntimeError, "^DELIVERY_PR_UNCERTAIN: provider receipt preimage"):
+                        delivery_git.mark_provider_call_started(root, "DLV-001", *earlier)
+                    continue
+                with self.assertRaises(RuntimeError) as refused:
+                    delivery_git.create_provider_receipt(root, "DLV-001", *current, exact_pr_url=shown)
+                result = delivery_result.from_raw("open-pr", {"ok": False, "errors": [str(refused.exception)]})
+                self.assertEqual([(finding["code"], finding["message"]) for finding in result["findings"]],
+                                 [("DELIVERY_PR_UNCERTAIN", refusal)])
+                path, _lock = delivery_git.provider_receipt_paths(root, "DLV-001")
+                kept = json.loads(path.read_text(encoding="utf-8"))
+                self.assertEqual([kept[key] for key in ("intent_oid", "attempt", "state")], [*earlier, state])
+
     def test_source_handoff_intent_is_durable_and_abort_after_intent_is_blocked(self):
         temporary, project = self.make_project()
         try:
@@ -745,6 +785,31 @@ class DeliveryGitTests(unittest.TestCase):
             self.assertEqual(props["source_hash"], delivery_compile.content_hash(props, body))
         finally:
             remove_temporary(temporary)
+
+    def test_republished_review_opens_its_pr_again_on_the_same_machine(self):
+        """A Review invalidated after open-pr and published again gets a new PR intent. On the
+        machine that opened the PR, that intent takes over the earlier verified receipt, which names
+        the PR the provider still shows, and records that PR again without a provider call."""
+        temporary, project, docs, _product_tip, first_intent = self.prepare_pr_intent()
+        self.addCleanup(remove_temporary, temporary)
+        receipt_path, _lock = delivery_git.provider_receipt_paths(project, "DLV-001")
+
+        def receipt() -> list[str]:
+            value = json.loads(receipt_path.read_text(encoding="utf-8"))
+            return [value[key] for key in ("intent_oid", "attempt", "state", "url")]
+
+        with mock.patch("delivery_provider.GitHubProvider", self.fake_provider_type({})):
+            opened = delivery_git.open_pr(project, "DLV-001")
+            url = opened["pull_request_url"]
+            self.assertEqual(receipt(), [first_intent["intent"], first_intent["attempt"], "verified", url])
+            self.republish_review(project, docs)
+            intent = delivery_git.prepare_pr_creation(project, "DLV-001")
+            reopened = delivery_git.open_pr(project, "DLV-001")
+        self.assertEqual((reopened["pull_request_url"], reopened["provider_call"]), (url, False))
+        record = delivery_git.commit_message(project, reopened["integration"])
+        self.assertEqual([delivery_git.trailer(record, key) for key in ("Record", "Intent", "Pull-Request")],
+                         ["pr-url-recorded-v1", intent["intent"], "17"])
+        self.assertEqual(receipt(), [intent["intent"], intent["attempt"], "verified", url])
 
     def test_published_review_and_pr_carry_the_authored_delivery_review(self):
         authored = {"Scope Disposition": "AUTH-01 delivered as planned.",

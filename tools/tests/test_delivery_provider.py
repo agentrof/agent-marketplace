@@ -91,6 +91,20 @@ class DeliveryProviderTests(unittest.TestCase):
                         response["url"], "a" * 40
                     )
 
+    def test_update_body_sends_only_the_body_to_the_exact_pr(self):
+        """The body reaches GitHub's pull request update as JSON on standard input, not through
+        gh pr edit, and GitHub's answer must name the same PR."""
+        provider = self.github_provider()
+        url = "https://github.com/agentrof/example/pull/17"
+        body = "## Verdict\n\nCancellation approved and finalized with exact Item dispositions.\n"
+        answer = subprocess.CompletedProcess([], 0, json.dumps({"html_url": url, "body": body}), "")
+        with patch.object(delivery_provider.shutil, "which", return_value="/usr/bin/gh"), \
+                patch.object(delivery_provider.subprocess, "run", return_value=answer) as run:
+            self.assertEqual(provider.update_body(url, body), {"url": url})
+        self.assertEqual(run.call_args.args, (["gh", "api", "--hostname", "github.com", "--method", "PATCH",
+                                               "repos/agentrof/example/pulls/17", "--input", "-"],))
+        self.assertEqual(json.loads(run.call_args.kwargs["input"]), {"body": body})
+
     def test_required_checks_must_be_complete_and_successful(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
@@ -242,6 +256,11 @@ class DeliveryProviderTests(unittest.TestCase):
                  lambda: when_gh_prints("not json", lambda: provider.list_pull_requests("head", "main"))),
                 ("DELIVERY_PR_UNCERTAIN", "GitHub did not return a canonical PR URL",
                  lambda: when_gh_prints("", lambda: provider.create_draft("head", "main", "Title", "Body"))),
+                ("DELIVERY_PR_UNCERTAIN", "GitHub returned invalid PR JSON",
+                 lambda: when_gh_prints("not json", lambda: provider.update_body(url, "Body"))),
+                ("DELIVERY_PR_UNCERTAIN", "GitHub did not confirm the PR body update",
+                 lambda: when_gh_prints(json.dumps({"html_url": "https://github.com/agentrof/example/pull/18"}),
+                                        lambda: provider.update_body(url, "Body"))),
                 ("DELIVERY_MERGE_PROOF_INVALID", "GitHub PR merge call returned before the PR was merged",
                  lambda: merge_then_read({"url": url, "state": "OPEN", "headRefOid": "a" * 40})),
                 ("DELIVERY_MERGE_PROOF_INVALID", "GitHub PR has no provider-confirmed merge commit",

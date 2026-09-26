@@ -1,0 +1,6 @@
+{
+  "summary": "A Delivery cancelled after its PR was opened now gives that PR the published cancellation Review as its body when open-pr records the cancellation, whether it adopts the PR or a new PR intent finds it, instead of leaving the body that still states the earlier approval. The GitHub adapter updates the body through the pull request REST endpoint with gh api, which sends the body alone and needs no read access to the PR's reviewers or projects.",
+  "components": {
+    "software-engineering-team": "patch"
+  }
+}

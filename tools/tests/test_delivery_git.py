@@ -601,8 +601,12 @@ class DeliveryGitTests(unittest.TestCase):
         finally:
             remove_temporary(temporary)
 
-    def test_direct_target_update_names_the_lease_it_lost(self):
-        """A target that moves after the update call was elected is named from the refetched ref."""
+    def lose_direct_target_update(self, onto_candidate: bool = False) -> tuple[Path, str, str, str, tuple[str, str]]:
+        """Elect a direct target update, move the target before its push lands, and return the refusal.
+
+        The concurrent target commit builds on the base, or on the candidate as
+        if the update had landed and its response were lost.
+        """
         temporary, project = self.make_project()
         self.addCleanup(remove_temporary, temporary)
         delivery_git.begin_source_handoff(project, "sha256:" + "a" * 64)
@@ -614,7 +618,8 @@ class DeliveryGitTests(unittest.TestCase):
         delivery_git.authorize_target_update(project, "source_handoff", "sha256:" + "b" * 64, "origin",
                                              "direct_target", carrier, "direct", candidate, base, "upstream")
         (project / "concurrent.txt").write_text("concurrent target change\n", encoding="utf-8")
-        moved = delivery_git.commit_tree(project, base, ["concurrent.txt"], "Concurrent target change", {})
+        moved = delivery_git.commit_tree(project, candidate if onto_candidate else base, ["concurrent.txt"],
+                                         "Concurrent target change", {})
         mark_call_started = delivery_git.mark_target_call_started
 
         def move_target_after_election(root, mode, attempt):
@@ -623,10 +628,54 @@ class DeliveryGitTests(unittest.TestCase):
             return started
 
         with mock.patch.object(delivery_git, "mark_target_call_started", side_effect=move_target_after_election):
-            code, message = self.refused_finding(lambda: delivery_git.apply_target_update(project, "source_handoff"))
-        self.assertEqual((code, message), ("DELIVERY_LEASE_LOST", "a leased ref moved, so the atomic push changed "
-                                                                  f"no ref: refs/heads/main is {moved}, leased as {base}"))
+            refusal = self.refused_finding(lambda: delivery_git.apply_target_update(project, "source_handoff"))
         self.assertEqual(delivery_git.remote_oid(project, "origin", "refs/heads/main"), moved)
+        return project, base, candidate, moved, refusal
+
+    @staticmethod
+    def target_update_state(project: Path) -> str:
+        path, _lock = delivery_git.target_receipt_paths(project, "source_handoff")
+        return json.loads(path.read_text(encoding="utf-8"))["state"] if path.exists() else "absent"
+
+    def test_direct_target_update_names_the_lease_it_lost(self):
+        """A target that moves after the update call was elected is named from the refetched ref."""
+        _project, base, _candidate, moved, refusal = self.lose_direct_target_update()
+        self.assertEqual(refusal, ("DELIVERY_LEASE_LOST", "a leased ref moved, so the atomic push changed no ref: "
+                                   f"refs/heads/main is {moved}, leased as {base}; the target does not contain "
+                                   "the update, so its call was released for a fresh attempt or an abort"))
+
+    def test_direct_target_update_that_took_no_effect_releases_its_call(self):
+        """A target without the candidate proves the push changed nothing, so the call is released for a fresh
+        attempt or an abort; a target that holds the candidate proves nothing and keeps the call elected."""
+        for follow_up in ("reauthorize", "abort"):
+            with self.subTest(follow_up=follow_up):
+                project, _base, candidate, moved, _refusal = self.lose_direct_target_update()
+                self.assertEqual(self.target_update_state(project), "prepared")
+                if follow_up == "reauthorize":
+                    delivery_git.reauthorize_target_update(project, "source_handoff")
+                    self.assertEqual(delivery_git.apply_target_update(project, "source_handoff")["receipt"]["state"],
+                                     "verified")
+                    target = delivery_git.finish_source_handoff(project)["target"]
+                    self.assertTrue(delivery_git.is_ancestor(project, candidate, target))
+                    self.assertTrue(delivery_git.is_ancestor(project, moved, target))
+                else:
+                    self.assertEqual(delivery_git.abort_source_handoff(project)["mode"], "open")
+                    _ref, _fence, values = delivery_git._fence_context(project, "origin")
+                    self.assertEqual(values["Target-Update-Intent"], "none")
+                    self.assertEqual(delivery_git.remote_oid(project, "origin", "refs/heads/main"), moved)
+                self.assertEqual(self.target_update_state(project), "absent")
+        with self.subTest(follow_up="none without the proof"):
+            project, _base, _candidate, _moved, _refusal = self.lose_direct_target_update(onto_candidate=True)
+            self.assertEqual(self.target_update_state(project), "call_started")
+            for verb, message in (
+                (delivery_git.apply_target_update, "target moved after target mutation election"),
+                (delivery_git.reauthorize_target_update, "only an unspent prepared attempt can be reauthorized"),
+                (delivery_git.abort_source_handoff, "abort after a target-update intent requires this host's "
+                                                    "prepared direct attempt, absent from the target"),
+            ):
+                self.assertEqual(self.refused_finding(lambda: verb(project)), ("DELIVERY_TARGET_UPDATE_UNCERTAIN", message))
+            self.assertEqual(self.target_update_state(project), "call_started")
+
     def test_open_and_merge_pr_use_the_exact_reviewed_integration_head(self):
         temporary, project, _docs, product_tip, intent = self.prepare_pr_intent()
         try:

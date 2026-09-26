@@ -399,6 +399,11 @@ atomic push is named from the refetched refs, never from Git's wording: a moved
 Fence lease, any other moved lease, or a remote that takes the same push only
 without atomic support. Recovery never reconstructs semantic state from a local
 receipt alone. Remote records and tracked package hashes remain authoritative.
+A direct target update the remote rejected while the refetched target does not
+contain its carrier head changed nothing: that is the zero-effect proof, so its
+elected call returns to `prepared` in the target update receipt, and the host
+that holds the receipt can reauthorize a fresh attempt or abort the handoff.
+Any other rejected or unanswered update call is never repeated blindly.
 
 Cancellation is an explicit action inside `/deliver DLV-###`. Its approved
 intent freezes exact Story dispositions, quiesces active Items, reverts

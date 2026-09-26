@@ -200,7 +200,7 @@ Environment Contract. Contract hash drift blocks Item start, resume, reopen and
 takeover; Operation remains outside Requirement and product-stage routing.
 
 Closure requires successful provider checks, so execution approval also
-carries the pull request workflow precondition that
+carries the pull request check precondition that
 `plugins/software-engineering-team/flows/execution-planning.md` states and
 `plugins/software-engineering-team/skill-content/setup/references/ci-bootstrap.md`
 defines.

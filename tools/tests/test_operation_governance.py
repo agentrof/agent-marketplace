@@ -75,6 +75,94 @@ class OperationGovernanceTests(unittest.TestCase):
             self.assertIn("run: make audit", ci)
             self.assertNotIn("{{", ci)
 
+    def test_pull_request_check_source_is_validated(self):
+        sys.path.insert(0, str(SCRIPTS))
+        import operation_compile
+        import vault_check
+
+        with tempfile.TemporaryDirectory() as temporary:
+            docs = Path(temporary) / "workspace" / "docs"
+            ref = self.approved_solution(docs)
+            args = ("--docs", str(docs), "--kind", "verification")
+            initialized = self.invoke(OPERATION, "init", *args, "--constrained-by", f"[[{ref}|SD-001]]")
+            self.assertEqual(initialized.returncode, 0, initialized.stdout + initialized.stderr)
+            path = operation_compile.contract_path(docs, "verification")
+            draft, body = operation_compile.parse(path)
+            # A new contract states the default rather than leaving it implicit.
+            self.assertEqual(draft.pop("pull_request_check_source"), "repository_workflow")
+            draft["test_command"] = "make test"
+            source_error = "pull_request_check_source must be repository_workflow or external"
+            provider_error = "pull_request_check_provider must name the external source"
+            stray_error = "pull_request_check_provider is declared only with pull_request_check_source external"
+            external = {"pull_request_check_source": "external"}
+            cases = {
+                "absent, as approved before the field existed": ({}, None),
+                "repository workflow": ({"pull_request_check_source": "repository_workflow"}, None),
+                "external with its provider": (
+                    {**external, "pull_request_check_provider": "Buildkite pipeline acme/web"}, None),
+                "unknown source": ({"pull_request_check_source": "github_actions"}, source_error),
+                "empty source": ({"pull_request_check_source": ""}, source_error),
+                "listed source": ({"pull_request_check_source": ["external"]}, source_error),
+                "external without a provider": (external, provider_error),
+                "external with an empty provider": ({**external, "pull_request_check_provider": ""}, provider_error),
+                "listed provider": ({**external, "pull_request_check_provider": ["Buildkite"]}, provider_error),
+                "provider with an unresolved token": (
+                    {**external, "pull_request_check_provider": "{{ci_provider}}"}, provider_error),
+                "provider with a credential literal": (
+                    {**external, "pull_request_check_provider": "Buildkite token=abc123"}, provider_error),
+                "provider for a repository workflow": (
+                    {"pull_request_check_source": "repository_workflow",
+                     "pull_request_check_provider": "Buildkite"}, stray_error),
+                "provider without a source": ({"pull_request_check_provider": "Buildkite"}, stray_error),
+            }
+            policy = vault_check.load_policy(vault_check.DEFAULT_POLICY)
+            for name, (fields, error) in cases.items():
+                with self.subTest(case=name):
+                    path.write_text(operation_compile.render({**draft, **fields}, body), encoding="utf-8")
+                    checked = self.invoke(OPERATION, "check", *args, "--json")
+                    approved = self.invoke(OPERATION, "approve", *args)
+                    if error is None:
+                        self.assertEqual(checked.returncode, 0, checked.stdout + checked.stderr)
+                        self.assertEqual(approved.returncode, 0, approved.stdout + approved.stderr)
+                        receipt, errors = operation_compile.check_contract(docs, "verification")
+                        self.assertEqual((errors, receipt["current"]), ([], True))
+                        # The vault property schema is closed, so both fields must be registered in it.
+                        findings = []
+                        vault_check.check_frontmatter_props(vault_check.build_vault(docs, policy), findings)
+                        self.assertEqual([finding for finding in findings
+                                          if "pull_request_check" in finding.message], [])
+                    else:
+                        self.assertEqual(checked.returncode, 1, checked.stdout + checked.stderr)
+                        [message] = json.loads(checked.stdout)["errors"]
+                        self.assertTrue(message.startswith(error), message)
+                        self.assertEqual(approved.returncode, 2, approved.stdout + approved.stderr)
+                        self.assertIn(error, approved.stdout)
+
+    def test_render_ci_refuses_an_external_pull_request_check_source(self):
+        sys.path.insert(0, str(SCRIPTS))
+        import operation_compile
+
+        with tempfile.TemporaryDirectory() as temporary:
+            docs = Path(temporary) / "workspace" / "docs"
+            ref = self.approved_solution(docs)
+            args = ("--docs", str(docs), "--kind", "verification")
+            initialized = self.invoke(OPERATION, "init", *args, "--constrained-by", ref)
+            self.assertEqual(initialized.returncode, 0, initialized.stdout + initialized.stderr)
+            path = operation_compile.contract_path(docs, "verification")
+            props, body = operation_compile.parse(path)
+            props.update(test_command="make test", pull_request_check_source="external",
+                         pull_request_check_provider="Buildkite pipeline acme/web")
+            path.write_text(operation_compile.render(props, body), encoding="utf-8")
+            approved = self.invoke(OPERATION, "approve", *args)
+            self.assertEqual(approved.returncode, 0, approved.stdout + approved.stderr)
+            output = docs.parent.parent / ".github" / "workflows" / "tests.yml"
+            rendered = self.invoke(OPERATION, "render-ci", "--docs", str(docs), "--output", str(output))
+            self.assertEqual(rendered.returncode, 2, rendered.stdout + rendered.stderr)
+            [error] = json.loads(rendered.stdout)["errors"]
+            self.assertIn("Buildkite pipeline acme/web reports the pull request checks", error)
+            self.assertIn("no repository workflow", error)
+            self.assertFalse(output.exists())
+
     def test_environment_and_governance_require_lifecycle_revisions(self):
         with tempfile.TemporaryDirectory() as temporary:
             docs = Path(temporary) / "workspace" / "docs"

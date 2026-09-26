@@ -46,6 +46,9 @@ WORKDIR_FIELDS = {
     "environment": ("env_workdir",),
 }
 DISPOSITIONS = {"required", "not_applicable"}
+# Where the checks that merge-pr requires on a Delivery PR come from. The first
+# is the default, so a contract approved before the field existed keeps it.
+PULL_REQUEST_CHECK_SOURCES = ("repository_workflow", "external")
 TOKEN_RE = re.compile(r"(?:\{\{[^{}]+\}\}|\$\{[^{}]+\})")
 CREDENTIAL_RE = re.compile(
     r"(?i)(?:api[_-]?key|token|password|secret)\s*=\s*[^\s]+"
@@ -131,6 +134,12 @@ def valid_workdir(value: object) -> bool:
     )
 
 
+def pull_request_checks(props: dict) -> tuple[object, object]:
+    """The declared source of Delivery PR checks and the provider that reports them."""
+    return (props.get("pull_request_check_source", PULL_REQUEST_CHECK_SOURCES[0]),
+            props.get("pull_request_check_provider", ""))
+
+
 def accepted_solution_ref(docs: Path, value: object) -> bool:
     if not isinstance(value, str) or not value.strip():
         return False
@@ -193,6 +202,16 @@ def check_contract(docs: Path, kind: str) -> tuple[dict, list[str]]:
                 errors.append(f"{prefix}_command is required when disposition is required")
             if disposition == "not_applicable" and (not isinstance(rationale, str) or not rationale.strip()):
                 errors.append(f"{prefix}_rationale is required when disposition is not_applicable")
+        source, provider = pull_request_checks(props)
+        if source not in PULL_REQUEST_CHECK_SOURCES:
+            errors.append("pull_request_check_source must be repository_workflow or external")
+        elif source == "external":
+            if (not isinstance(provider, str) or not provider.strip()
+                    or TOKEN_RE.search(provider) or CREDENTIAL_RE.search(provider)):
+                errors.append("pull_request_check_provider must name the external source of pull request "
+                              "checks, without a credential literal or an unresolved token")
+        elif provider:
+            errors.append("pull_request_check_provider is declared only with pull_request_check_source external")
     else:
         if props.get("status") == "approved" and (not isinstance(refs, list) or not refs):
             errors.append("approved contract must cite at least one accepted Solution decision")
@@ -228,6 +247,7 @@ def initial_props(kind: str, refs: list[str]) -> dict:
             "mutation_workdir": ".", "mutation_rationale": "Describe why mutation testing is not applicable.",
             "dependency_audit_disposition": "not_applicable", "dependency_audit_command": "",
             "dependency_audit_workdir": ".", "dependency_audit_rationale": "Describe why dependency auditing is not applicable.",
+            "pull_request_check_source": PULL_REQUEST_CHECK_SOURCES[0],
         }
     return common | {
         "env_command": "", "env_workdir": ".", "scenarios": ["default"],
@@ -341,6 +361,11 @@ def render_ci(args) -> int:
     if errors or not verification.get("current"):
         raise ValueError("approved current Verification Contract is required: " + "; ".join(errors))
     verification_props, _body = parse(contract_path(docs, "verification"))
+    source, provider = pull_request_checks(verification_props)
+    if source == "external":
+        raise ValueError(f"the approved Verification Contract declares that {provider} reports the pull "
+                         "request checks, so the project uses no repository workflow for render-ci to "
+                         "materialize")
     environment_props = None
     if args.include_environment:
         environment, env_errors = check_contract(docs, "environment")

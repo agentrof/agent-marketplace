@@ -1,0 +1,6 @@
+{
+  "summary": "start-item and resume-item now also wait for each Story the Item's waits_for names. Such a Story is met when its remote Item tip records integrated and this Delivery's Integration contains that exact tip, which for a Story of another Delivery means that Delivery merged into the target and this one refreshed onto it; until then the start refuses with DELIVERY_DEPENDENCY_UNMET and names the Story and its Delivery. A Story no Delivery has claimed, or one its Delivery cancelled, refuses the same way and names a backlog revision as the way out.",
+  "components": {
+    "software-engineering-team": "patch"
+  }
+}

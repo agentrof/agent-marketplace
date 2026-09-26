@@ -2963,6 +2963,101 @@ class DeliveryGitTests(unittest.TestCase):
         started = delivery_git.start_item(project, "DLV-001", "AUTH-02")
         self.assertEqual((started["story"], started["slot"]), ("AUTH-02", "001"))
 
+    def claim_waiting_deliveries(self, claim_dependency: bool = True) -> Path:
+        """Claim DLV-002, whose AUTH-02 waits for AUTH-01 of DLV-001, and DLV-001 unless told not to."""
+        temporary, project = self.make_project()
+        self.addCleanup(remove_temporary, temporary)
+        docs = project / "workspace" / "docs"
+        (docs / "maps").mkdir(parents=True, exist_ok=True)
+        make_approved_backlog(docs, "AUTH-01", "AUTH-02")
+        dod = type("Args", (), {"docs": str(docs), "title": "Project", "file": None})
+        self.assertEqual(delivery_compile.init_dod(dod), 0)
+        self.assertEqual(delivery_compile.approve_dod(dod), 0)
+        delivery_git.run_git(project, "add", "workspace")
+        delivery_git.run_git(project, "commit", "-qm", "approved backlog")
+        delivery_git.run_git(project, "push", "-q")
+        for delivery, slug, story in (("DLV-001", "auth", "AUTH-01"), ("DLV-002", "session", "AUTH-02")):
+            init = type("Args", (), {"docs": str(docs), "id": delivery, "slug": slug, "goal": f"Deliver {story}",
+                                     "outcome": None, "target_branch": "main", "story": [story]})
+            self.assertEqual(delivery_compile.init_delivery(init), 0)
+            self.assertEqual(delivery_compile.approve_scope(type("Args", (), {"docs": str(docs), "delivery": delivery})), 0)
+        reserved = delivery_git.reserve_delivery(project, "DLV-001")
+        # reserve-delivery takes only a ref-free project, so the second Integration is created directly.
+        second = delivery_compile.find_delivery(docs, "DLV-002")
+        reservation = delivery_git.commit_tree(
+            project, reserved["target"], delivery_git.package_paths(project, second, docs, include_map=False),
+            "Reserve Delivery DLV-002", {"Record": "delivery-reservation-v1", "Protocol": "1", "Delivery": "DLV-002",
+                                         "Slug": "session", "Target": reserved["target"]},
+            delivery_projections=True)
+        delivery_git.atomic_push(project, "origin", [(delivery_git.canonical_refs("DLV-002")["integration"], "", reservation)])
+        self.author_execution_topology(docs)
+        waiting = second / "items" / "auth-02" / "item.md"
+        props, body = delivery_compile.split_note(waiting)
+        props["path_claims"] = ["src/session.py"]
+        props["waits_for"] = ["AUTH-01"]
+        delivery_compile.atomic_text(waiting, delivery_compile.frontmatter(props, body))
+        for delivery in ("DLV-001", "DLV-002"):
+            self.assertEqual(delivery_compile.approve_execution(type("Args", (), {"docs": str(docs), "delivery": delivery})), 0)
+            delivery_git.publish_execution_plan(project, delivery)
+        for delivery in ("DLV-001", "DLV-002") if claim_dependency else ("DLV-002",):
+            delivery_git.claim_items(project, delivery)
+        return project
+
+    def refuse_waiting_start(self, project: Path, checkout: Path, expected: tuple[str, str]) -> None:
+        """start-item of DLV-002's AUTH-02 refuses as expected and changes no ref or receipt."""
+        before = delivery_git.run_git(project, "ls-remote", "origin")
+        self.assertEqual(self.refused_finding(lambda: delivery_git.start_item(checkout, "DLV-002", "AUTH-02")), expected)
+        self.assertEqual(delivery_git.run_git(project, "ls-remote", "origin"), before)
+        self.assertIsNone(delivery_git.read_writer_receipt(checkout, "DLV-002", "AUTH-02"))
+
+    def test_start_item_waits_until_its_integration_holds_the_integrated_waits_for_story(self):
+        """A waits_for Story is met once its Delivery merged into the target and this Delivery refreshed onto it."""
+        project = self.claim_waiting_deliveries()
+        waiting = ("DELIVERY_DEPENDENCY_UNMET",
+                   "AUTH-02 starts only after this Integration holds these Stories integrated: AUTH-01 from DLV-001; "
+                   "merge their Deliveries into the target, then refresh this one")
+        self.refuse_waiting_start(project, project, waiting)
+        active = delivery_git.start_item(project, "DLV-001", "AUTH-01")
+        # Another host that fetched after this activation: integration moves no Fence, so that
+        # host still reads the current Fence but lacks AUTH-01's integrated tip.
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(remove_temporary, temporary)
+        other = Path(temporary.name) / "other"
+        subprocess.run(["git", "clone", "-q", "-c", "gc.auto=0", "-c", "maintenance.auto=false",
+                        str(project / "remote.git"), str(other)], check=True)
+        delivery_git.run_git(other, "checkout", "-q", "--detach", "origin/agentrof/deliveries/dlv-002")
+        self.commit_item_product_change(active["worktree"], "def authenticate():\n    return 'v1'\n")
+        self.assertEqual(self.approve_item_evidence(active["worktree"]), 0)
+        delivery_git.push_item(project, "DLV-001", "AUTH-01")
+        integrated = delivery_git.integrate_item(project, "DLV-001", "AUTH-01")
+        self.refuse_waiting_start(project, project, waiting)
+        self.refuse_waiting_start(project, other, waiting)
+        target = delivery_git.remote_oid(project, "origin", "refs/heads/main")
+        merged = delivery_git.merge_candidate(project, target, integrated["integration"], "Merge pull request #1", {})
+        delivery_git.atomic_push(project, "origin", [("refs/heads/main", target, merged)])
+        self.refuse_waiting_start(project, project, ("DELIVERY_TARGET_DRIFT",
+                                                     "target advanced; refresh the Delivery before Item activation"))
+        integration_ref = delivery_git.canonical_refs("DLV-002")["integration"]
+        before_refresh = delivery_git.remote_oid(project, "origin", integration_ref)
+        self.assertEqual(delivery_git.unmet_waits_for(project.resolve(), "origin", "DLV-002", before_refresh, ["AUTH-01"]),
+                         (["AUTH-01 from DLV-001"], []))
+        delivery_git.refresh_target(project, "DLV-002")
+        started = delivery_git.start_item(project, "DLV-002", "AUTH-02")
+        self.assertEqual((started["story"], started["slot"]), ("AUTH-02", "001"))
+
+    def test_start_item_refuses_a_waits_for_story_no_delivery_is_delivering(self):
+        """A Story no Delivery claimed, or one its Delivery cancelled, names a backlog revision as the way out."""
+        project = self.claim_waiting_deliveries(claim_dependency=False)
+
+        def undeliverable(reason: str) -> tuple[str, str]:
+            return ("DELIVERY_DEPENDENCY_UNMET", f"AUTH-02 waits for Stories no Delivery is delivering: {reason}; "
+                                                 "revise the backlog so AUTH-02 no longer depends on them")
+
+        self.refuse_waiting_start(project, project, undeliverable("AUTH-01 was never claimed"))
+        delivery_git.claim_items(project, "DLV-001")
+        delivery_git.cancel_delivery(project, "DLV-001", "Authentication moves to a later Delivery")
+        self.refuse_waiting_start(project, project, undeliverable("AUTH-01 was cancelled with DLV-001"))
+
     def test_push_item_refuses_product_paths_outside_the_item_path_claims(self):
         """A claim covers its path and every path below it. The vault keeps its own rules,
         and what the Item's integration base carries is not the Item's change."""

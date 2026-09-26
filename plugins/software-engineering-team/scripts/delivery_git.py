@@ -3288,6 +3288,52 @@ def unintegrated_predecessors(root: Path, remote: str, delivery_id: str, directo
     return waiting
 
 
+def unmet_waits_for(root: Path, remote: str, delivery_id: str, integration_oid: str,
+                    waits_for) -> tuple[list[str], list[str]]:
+    """The Stories one Item waits for that it cannot start after yet.
+
+    A waits_for Story is met when its remote Item tip records status integrated
+    and this Delivery's Integration contains that exact tip: the Story's own
+    Delivery merged into the target and this Delivery refreshed onto it. The
+    tip's Delivery trailer names the package that records the Story's status.
+    The first list names each Story still on its way, with its Delivery. The
+    second names each Story no Delivery is delivering: one never claimed, and
+    one its Delivery cancelled, whose Item ref keeps any other Delivery from
+    claiming it again.
+    """
+    from delivery_compile import delivery_root, docs_root, split_note
+    stories = sorted(set(waits_for or []))
+    if not stories:
+        return [], []
+    deliveries = rel_posix(root, delivery_root(docs_root(root)) / "deliveries")
+    item_refs = {story: canonical_refs(delivery_id, story)["item"] for story in stories}
+    tips = remote_ref_oids(root, remote, list(item_refs.values()))
+    waiting, undeliverable = [], []
+    for story in stories:
+        tip = tips[item_refs[story]]
+        if not tip:
+            undeliverable.append(f"{story} was never claimed")
+            continue
+        if subprocess.run(["git", "cat-file", "-e", tip + "^{commit}"], cwd=root,
+                          capture_output=True, check=False).returncode:
+            # Another Delivery's Item advances on its own hosts, and integration moves no Fence.
+            run_git(root, "fetch", "--no-tags", remote, item_refs[story])
+        owner = trailer(commit_message(root, tip), "Delivery") or ""
+        packages = [path for path in run_git(root, "ls-tree", "-z", "--name-only", tip, "--",
+                                             deliveries + "/").split("\0")
+                    if owner and path.rsplit("/", 1)[-1].startswith(owner.lower() + "-")]
+        if len(packages) != 1:
+            raise RuntimeError(f"DELIVERY_COORDINATION_CORRUPT: the Item tip of {story} does not hold "
+                               f"one package of its Delivery {owner or 'none'}")
+        relative = f"{packages[0]}/items/{story_key(story)}/item.md"
+        status = split_remote_note(root, tip, relative, split_note)[0].get("status")
+        if status == "cancelled":
+            undeliverable.append(f"{story} was cancelled with {owner}")
+        elif status != "integrated" or not is_ancestor(root, tip, integration_oid):
+            waiting.append(f"{story} from {owner}")
+    return waiting, undeliverable
+
+
 def start_item(project_root: Path, delivery_id: str, story_id: str,
                remote: str = "origin", allowed_statuses: set[str] | None = None) -> dict:
     root = main_worktree(project_root.resolve())
@@ -3333,6 +3379,16 @@ def start_item(project_root: Path, delivery_id: str, story_id: str,
     if waiting:
         raise RuntimeError(f"DELIVERY_DEPENDENCY_UNMET: {story_id} starts only after these Items are integrated: "
                            + ", ".join(waiting))
+    waiting, undeliverable = unmet_waits_for(root, remote, delivery_id, integration_oid,
+                                             plan_props.get("waits_for"))
+    if undeliverable:
+        raise RuntimeError(f"DELIVERY_DEPENDENCY_UNMET: {story_id} waits for Stories no Delivery is delivering: "
+                           + ", ".join(undeliverable)
+                           + f"; revise the backlog so {story_id} no longer depends on them")
+    if waiting:
+        raise RuntimeError(f"DELIVERY_DEPENDENCY_UNMET: {story_id} starts only after this Integration holds "
+                           "these Stories integrated: " + ", ".join(waiting)
+                           + "; merge their Deliveries into the target, then refresh this one")
     item_props = dict(plan_props)
     for key in ITEM_WRITER_FIELDS:
         if key in live_props:

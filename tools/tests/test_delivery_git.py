@@ -187,8 +187,8 @@ class DeliveryGitTests(unittest.TestCase):
         self.assertEqual(local_auto_gc, "0")
         self.assertEqual(remote_auto_gc, "0")
 
-    def prepare_pr_intent(self, author_review=None):
-        """Build one real remote Delivery through its durable PR intent."""
+    def reserve_scope(self):
+        """Build one real remote Delivery reserved at its scope approval, before any Item or Review."""
         temporary, project = self.make_project()
         docs = project / "workspace" / "docs"
         (docs / "maps").mkdir(parents=True, exist_ok=True)
@@ -212,6 +212,12 @@ class DeliveryGitTests(unittest.TestCase):
         subprocess.run(["git", "-C", str(project), "commit", "-qm", "scope"], check=True)
         subprocess.run(["git", "-C", str(project), "push", "-q"], check=True)
         delivery_git.reserve_delivery(project, "DLV-001")
+        return temporary, project, docs
+
+    def prepare_pr_intent(self, author_review=None):
+        """Build one real remote Delivery through its durable PR intent."""
+        temporary, project, docs = self.reserve_scope()
+        scope = type("Args", (), {"docs": str(docs), "delivery": "DLV-001"})
         self.author_execution_topology(docs)
         self.assertEqual(delivery_compile.approve_execution(scope), 0)
         delivery_git.publish_execution_plan(project, "DLV-001")
@@ -1042,6 +1048,7 @@ class DeliveryGitTests(unittest.TestCase):
             again = delivery_git.open_pr(project, "DLV-001")
         self.assertTrue(again["reused"])
         self.assertFalse(again["provider_call"])
+        self.assertEqual(again["pull_request_url"], opened["pull_request_url"])
         self.assertEqual(delivery_git.remote_oid(project, "origin", delivery_git.canonical_refs("DLV-001")["integration"]), head)
         self.assertEqual((package / "delivery.md").read_bytes(), recorded)
 
@@ -1269,6 +1276,67 @@ class DeliveryGitTests(unittest.TestCase):
                     project, cancelled["review"], review, delivery_compile.split_note)[1]
                 self.assertNotEqual(approval, cancellation)
                 self.assertEqual(state["body"], cancellation)
+
+    def test_delivery_cancelled_before_its_review_reaches_the_target_through_its_pr(self):
+        """A Delivery cancelled at its scope reservation never has a local Review. open-pr opens,
+        records and finds its PR again, and merge-pr merges it, from the PR record alone; the target
+        shows the cancelled Delivery with its cancellation Review, and no local Review is written."""
+        temporary, project, docs = self.reserve_scope()
+        self.addCleanup(remove_temporary, temporary)
+        package = delivery_compile.find_delivery(docs, "DLV-001")
+        review = package.relative_to(project).as_posix() + "/delivery-review.md"
+        cancelled = delivery_git.cancel_delivery(project, "DLV-001", "The owner withdrew the request")
+        delivery_git.prepare_pr_creation(project, "DLV-001")
+        state: dict = {}
+        with mock.patch("delivery_provider.GitHubProvider", self.fake_provider_type(state)):
+            opened = delivery_git.open_pr(project, "DLV-001")
+            again = delivery_git.open_pr(project, "DLV-001")
+            merged = delivery_git.merge_pr(project, "DLV-001")
+        url = opened["pull_request_url"]
+        cancellation = delivery_git.split_remote_note(project, cancelled["review"], review, delivery_compile.split_note)[1]
+        self.assertEqual((opened["provider_call"], state["title"], state["body"]), (True, "SAML authentication", cancellation))
+        self.assertEqual((again["pull_request_url"], again["reused"]), (url, True))
+        self.assertEqual((merged["status"], merged["pull_request_url"], merged["reviewed_integration"]),
+                         ("merged", url, opened["integration"]))
+        self.assertFalse((package / "delivery-review.md").exists())
+        checkout = Path(temporary.name) / "main-after-merge"
+        subprocess.run(["git", "clone", "-q", "-c", "gc.auto=0", str(project / "remote.git"), str(checkout)], check=True)
+        self.assertEqual(delivery_git.run_git(checkout, "rev-parse", "HEAD^2"), opened["integration"])
+        self.assertEqual(self.reported_status(checkout / "workspace/docs"), "cancelled")
+        props, body = delivery_compile.split_note(checkout / review)
+        self.assertEqual((props["pull_request_url"], body), (url, cancellation))
+        self.assertEqual(delivery_compile.delivery_findings(checkout / "workspace/docs", "DLV-001")[1], [])
+
+    def test_record_pr_remote_checks_the_local_mirror_and_the_adoption_intent(self):
+        """record-pr-remote refuses a URL that an existing local Review does not mirror, as it did
+        before the PR record became the only source of the URL, and a PR other than the one an
+        adoption intent names; it records the named PR once the mirror carries it."""
+        temporary, project, docs, _product_tip, _intent = self.prepare_pr_intent()
+        self.addCleanup(remove_temporary, temporary)
+        url, other = "https://github.com/agentrof/example/pull/17", "https://github.com/agentrof/example/pull/18"
+        integration = delivery_git.canonical_refs("DLV-001")["integration"]
+        creation_intent = delivery_git.remote_oid(project, "origin", integration)
+        self.assertEqual(self.refused_finding(lambda: delivery_git.record_pr_remote(project, "DLV-001", url)),
+                         ("DELIVERY_INPUT_INVALID", "local Delivery Review URL does not match the requested PR"))
+        self.assertEqual(delivery_git.remote_oid(project, "origin", integration), creation_intent)
+        state: dict = {}
+        with mock.patch("delivery_provider.GitHubProvider", self.fake_provider_type(state)):
+            delivery_git.open_pr(project, "DLV-001")
+            self.republish_review(project, docs)
+            with mock.patch("delivery_compile.record_pr_url", side_effect=RuntimeError("stopped")), \
+                    self.assertRaises(RuntimeError):
+                delivery_git.open_pr(project, "DLV-001")
+        adoption_intent = delivery_git.remote_oid(project, "origin", integration)
+        self.assertEqual(delivery_git.trailer(delivery_git.commit_message(project, adoption_intent), "Record"),
+                         "pr-adoption-intent-v1")
+        delivery_compile.record_pr_url(docs, "DLV-001", other)
+        self.assertEqual(self.refused_finding(lambda: delivery_git.record_pr_remote(project, "DLV-001", other)),
+                         ("DELIVERY_PR_UNCERTAIN", "the requested PR is not the PR the adoption intent names"))
+        self.assertEqual(delivery_git.remote_oid(project, "origin", integration), adoption_intent)
+        delivery_compile.record_pr_url(docs, "DLV-001", url)
+        recorded = delivery_git.record_pr_remote(project, "DLV-001", url)
+        self.assertEqual(delivery_git.trailer(delivery_git.commit_message(project, recorded["integration"]), "Intent"),
+                         adoption_intent)
 
     def test_scope_cancellation_projection_is_sorted_and_closed(self):
         stories = {

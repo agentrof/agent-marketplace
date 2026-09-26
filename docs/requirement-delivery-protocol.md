@@ -352,13 +352,18 @@ Delivery PR. Such a receipt refuses the intent with `DELIVERY_PR_UNCERTAIN`.
 An adoption intent names the one PR it adopts. When `open-pr` stops after that
 intent and before the PR record, its next run records that PR, never creates
 one, and refuses any other PR with `DELIVERY_PR_UNCERTAIN`.
-The commit that records the PR URL becomes the PR head. It also moves a
-reviewed Delivery from `review` to `awaiting_merge` and re-renders the
-Delivery map; a cancelled Delivery keeps `cancelled`. A cancellation that
-reaches a PR opened before it, created or adopted, first replaces that PR's
-body with the cancellation Review, so the provider no longer shows the
-approval it replaced. The body update is idempotent and precedes the record,
-so a rerun after a lost response sends it again.
+The commit that records the PR URL becomes the PR head. That record is the
+only source of the PR URL: its published Review names the PR, its trailers
+bind it by number and hash, and `open-pr` and `merge-pr` read the URL there. A
+local Review only mirrors the URL and must match it when one exists, so a
+Delivery cancelled before it had a local Review still reaches the target
+through its PR. The record also moves a reviewed Delivery from `review` to
+`awaiting_merge` and re-renders the Delivery map; a cancelled Delivery keeps
+`cancelled`. A cancellation that reaches a PR opened before it, created or
+adopted, first replaces that PR's body with the cancellation Review, so the
+provider no longer shows the approval it replaced. The body update is
+idempotent and precedes the record, so a rerun after a lost response sends it
+again.
 
 Closure requires provider-confirmed merge evidence for the exact reviewed
 head, passing provider checks with at least one success, and target ancestry.

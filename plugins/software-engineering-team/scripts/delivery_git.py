@@ -1079,6 +1079,32 @@ def canonical_github_pr(value: str) -> tuple[str, str]:
     return f"https://github.com/{owner}/{repo}/pull/{number}", number
 
 
+def pr_url_hash(url: str) -> str:
+    """The URL-Hash trailer value that binds a canonical PR URL in a control record."""
+    return "sha256:" + hashlib.sha256(url.encode("utf-8")).hexdigest()
+
+
+def binds_pr(message: str, url: str) -> bool:
+    """Whether a control record's Pull-Request and URL-Hash trailers name the canonical PR *url*."""
+    _, number = canonical_github_pr(url)
+    return (trailer(message, "Pull-Request"), trailer(message, "URL-Hash")) == (number, pr_url_hash(url))
+
+
+def recorded_pr_url(root: Path, record: str, review_path: Path) -> str:
+    """Return the PR URL that the PR record *record* carries.
+
+    The record is the only source of the URL: its published Review names the
+    PR and its trailers bind it. A local Review only mirrors the URL, and a
+    Delivery cancelled before it had one has none.
+    """
+    from delivery_compile import split_note
+    props, _ = split_remote_note(root, record, rel_posix(root, review_path), split_note)
+    canonical_url, _ = canonical_github_pr(str(props.get("pull_request_url", "")))
+    if not binds_pr(commit_message(root, record), canonical_url):
+        raise RuntimeError("DELIVERY_COORDINATION_CORRUPT: the PR record's Review names a PR its trailers do not bind")
+    return canonical_url
+
+
 def package_paths(root: Path, directory: Path, docs: Path,
                   include_items: bool = True, include_map: bool = True) -> list[str]:
     from experience_application_check import is_os_metadata_path
@@ -1212,7 +1238,9 @@ def record_pr_remote(project_root: Path, delivery_id: str, url: str,
     awaiting_merge and re-renders the projections that mirror its status.
     It carries the Review published before the intent and adds only the PR
     URL: a cancellation writes its Review on the Integration alone, so the
-    local Review may still hold the approval it replaced.
+    local Review may still hold the approval it replaced. That record is the
+    only source of the URL; a local Review, when there is one, must already
+    mirror it.
     """
     root = main_worktree(project_root.resolve())
     from delivery_compile import docs_root, find_delivery, split_note, frontmatter, content_hash, pr_recorded_props
@@ -1222,14 +1250,17 @@ def record_pr_remote(project_root: Path, delivery_id: str, url: str,
     if directory is None:
         raise RuntimeError("Delivery package not found")
     review_path = directory / "delivery-review.md"
-    if split_note(review_path)[0].get("pull_request_url") != canonical_url:
+    if review_path.exists() and split_note(review_path)[0].get("pull_request_url") != canonical_url:
         raise RuntimeError("local Delivery Review URL does not match the requested PR")
     refs = canonical_refs(delivery_id)
     fence_oid = remote_oid(root, remote, refs["fence"])
     integration_oid = remote_oid(root, remote, refs["integration"])
     intent_message = commit_message(root, integration_oid)
-    if trailer(intent_message, "Record") not in {"pr-creation-intent-v1", "pr-adoption-intent-v1"}:
+    intent_record = trailer(intent_message, "Record")
+    if intent_record not in {"pr-creation-intent-v1", "pr-adoption-intent-v1"}:
         raise RuntimeError("record-pr requires the exact unmatched PR intent")
+    if intent_record == "pr-adoption-intent-v1" and not binds_pr(intent_message, canonical_url):
+        raise RuntimeError("DELIVERY_PR_UNCERTAIN: the requested PR is not the PR the adoption intent names")
     relative_review = rel_posix(root, review_path)
     review_props, review_body = split_remote_note(root, integration_oid, relative_review, split_note)
     review_props["pull_request_url"] = canonical_url
@@ -1245,7 +1276,7 @@ def record_pr_remote(project_root: Path, delivery_id: str, url: str,
         f"Record PR for {delivery_id}",
         {"Record": "pr-url-recorded-v1", "Protocol": "1", "Delivery": delivery_id,
          "Intent": integration_oid, "Provider": "github", "Pull-Request": number,
-         "URL-Hash": "sha256:" + hashlib.sha256(canonical_url.encode("utf-8")).hexdigest()},
+         "URL-Hash": pr_url_hash(canonical_url)},
         delivery_projections=recorded is not None,
     )
     fence_message = commit_message(root, fence_oid)
@@ -1286,17 +1317,14 @@ def open_pr(project_root: Path, delivery_id: str, remote: str = "origin") -> dic
     directory = find_delivery(docs, delivery_id)
     if directory is None:
         raise RuntimeError("Delivery package not found")
-    delivery_props, _ = split_note(directory / "delivery.md")
     review_path = directory / "delivery-review.md"
-    review_props, _ = split_note(review_path)
     refs = canonical_refs(delivery_id)
     integration_oid = remote_oid(root, remote, refs["integration"])
     integration_message = commit_message(root, integration_oid)
     record_name = trailer(integration_message, "Record")
     if record_name == "pr-url-recorded-v1":
-        url = str(review_props.get("pull_request_url", ""))
-        canonical_url, _ = canonical_github_pr(url)
-        return {"ok": True, "delivery": delivery_id, "pull_request_url": canonical_url,
+        return {"ok": True, "delivery": delivery_id,
+                "pull_request_url": recorded_pr_url(root, integration_oid, review_path),
                 "reused": True, "provider_call": False}
     provider = GitHubProvider(root, remote)
     target_branch, _ = resolve_target(root, remote)
@@ -1316,11 +1344,9 @@ def open_pr(project_root: Path, delivery_id: str, remote: str = "origin") -> dic
         if not isinstance(url, str):
             raise ProviderError("DELIVERY_PR_UNCERTAIN: external PR has no canonical URL")
         canonical_url, number = canonical_github_pr(url)
-        url_hash = "sha256:" + hashlib.sha256(canonical_url.encode("utf-8")).hexdigest()
         # An adoption that stopped before its record resumes from its intent,
         # which names the one PR it adopts; the provider must show that PR.
-        if record_name == "pr-adoption-intent-v1" and (
-                trailer(integration_message, "Pull-Request"), trailer(integration_message, "URL-Hash")) != (number, url_hash):
+        if record_name == "pr-adoption-intent-v1" and not binds_pr(integration_message, canonical_url):
             raise RuntimeError("DELIVERY_PR_UNCERTAIN: the exact Delivery PR is not the PR the adoption intent names")
         if not pr.get("isDraft"):
             provider.ensure_draft(canonical_url)
@@ -1331,7 +1357,7 @@ def open_pr(project_root: Path, delivery_id: str, remote: str = "origin") -> dic
                 root, integration_oid, [], f"Adopt PR for {delivery_id}",
                 {"Record": "pr-adoption-intent-v1", "Protocol": "1", "Delivery": delivery_id,
                  "Review-Head": integration_oid, "Target": trailer(fence_message, "Target") or "none",
-                 "Provider": "github", "Pull-Request": number, "URL-Hash": url_hash},
+                 "Provider": "github", "Pull-Request": number, "URL-Hash": pr_url_hash(canonical_url)},
             )
             fence_candidate = commit_tree(
                 root, fence_oid, [], "Fence project in open mode",
@@ -1383,8 +1409,8 @@ def open_pr(project_root: Path, delivery_id: str, remote: str = "origin") -> dic
         receipt, elected = mark_provider_call_started(root, delivery_id, integration_oid, attempt)
         if not elected:
             raise RuntimeError("DELIVERY_PR_UNCERTAIN: another process owns the provider call")
-        title_value = str(delivery_props.get("goal", delivery_id))
-        created = provider.create_draft(head, target_branch, title_value, review_body)
+        delivery_props, _ = split_remote_note(root, integration_oid, rel_posix(root, directory / "delivery.md"), split_note)
+        created = provider.create_draft(head, target_branch, str(delivery_props.get("goal", delivery_id)), review_body)
         url = created["url"]
         provider_call = True
     canonical_url, _ = canonical_github_pr(url)
@@ -1406,20 +1432,18 @@ def merge_pr(project_root: Path, delivery_id: str, remote: str = "origin") -> di
     is never interpreted as successful closure.
     """
     root = main_worktree(project_root.resolve())
-    from delivery_compile import docs_root, find_delivery, split_note
+    from delivery_compile import docs_root, find_delivery
     from delivery_provider import GitHubProvider, ProviderError
     docs = docs_root(root)
     directory = find_delivery(docs, delivery_id)
     if directory is None:
         raise RuntimeError("Delivery package not found")
-    review_props, _ = split_note(directory / "delivery-review.md")
-    url = str(review_props.get("pull_request_url", ""))
-    canonical_url, _ = canonical_github_pr(url)
     refs = canonical_refs(delivery_id)
     integration_oid = remote_oid(root, remote, refs["integration"])
     integration_message = commit_message(root, integration_oid)
     if trailer(integration_message, "Record") != "pr-url-recorded-v1":
         raise RuntimeError("merge-pr requires the current recorded Delivery PR")
+    canonical_url = recorded_pr_url(root, integration_oid, directory / "delivery-review.md")
     target_branch, target_before = resolve_target(root, remote)
     provider = GitHubProvider(root, remote)
     candidates = [item for item in provider.list_pull_requests(short_refs(delivery_id)["integration"], target_branch)

@@ -930,7 +930,8 @@ class DeliveryGitTests(unittest.TestCase):
     def test_cancelled_delivery_stays_cancelled_through_its_pr_record_and_merge(self):
         temporary, project, docs, _product_tip, _intent = self.prepare_pr_intent()
         self.addCleanup(remove_temporary, temporary)
-        relative = delivery_compile.find_delivery(docs, "DLV-001").relative_to(project).as_posix() + "/delivery.md"
+        package = delivery_compile.find_delivery(docs, "DLV-001").relative_to(project).as_posix()
+        relative, review = package + "/delivery.md", package + "/delivery-review.md"
 
         def published_status() -> str:
             head = delivery_git.remote_oid(project, "origin", delivery_git.canonical_refs("DLV-001")["integration"])
@@ -940,16 +941,28 @@ class DeliveryGitTests(unittest.TestCase):
         with mock.patch("delivery_provider.GitHubProvider", self.fake_provider_type(state)):
             delivery_git.open_pr(project, "DLV-001")
             self.assertEqual(published_status(), "awaiting_merge")
-            delivery_git.cancel_delivery(project, "DLV-001", "The owner withdrew the request")
+            cancelled = delivery_git.cancel_delivery(project, "DLV-001", "The owner withdrew the request")
             self.assertEqual(published_status(), "cancelled")
             rerecorded = delivery_git.open_pr(project, "DLV-001")
             self.assertTrue(rerecorded["adopted"])
             self.assertEqual(published_status(), "cancelled")
             delivery_git.merge_pr(project, "DLV-001")
+        # The PR head keeps the cancellation Review and adds only the PR URL. The
+        # local Review still holds the approval that the cancellation replaced.
+        props, body = delivery_git.split_remote_note(
+            project, rerecorded["integration"], review, delivery_compile.split_note)
+        cancellation, cancellation_body = delivery_git.split_remote_note(
+            project, cancelled["review"], review, delivery_compile.split_note)
+        self.assertEqual(body, cancellation_body)
+        self.assertEqual(props.pop("pull_request_url"), rerecorded["pull_request_url"])
+        for fields in (props, cancellation):
+            fields.pop("source_hash")
+        self.assertEqual(props, cancellation)
         checkout = Path(temporary.name) / "main-after-merge"
         subprocess.run(["git", "clone", "-q", "-c", "gc.auto=0", str(project / "remote.git"), str(checkout)], check=True)
         self.assertEqual(delivery_git.run_git(checkout, "rev-parse", "HEAD^2"), rerecorded["integration"])
         self.assertEqual(self.reported_status(checkout / "workspace/docs"), "cancelled")
+        self.assertEqual(delivery_compile.split_note(checkout / review)[1], cancellation_body)
 
     def test_scope_cancellation_projection_is_sorted_and_closed(self):
         stories = {

@@ -1123,6 +1123,9 @@ def record_pr_remote(project_root: Path, delivery_id: str, url: str,
 
     The same commit, which is the PR head, moves a reviewed Delivery to
     awaiting_merge and re-renders the projections that mirror its status.
+    It carries the Review published before the intent and adds only the PR
+    URL: a cancellation writes its Review on the Integration alone, so the
+    local Review may still hold the approval it replaced.
     """
     root = main_worktree(project_root.resolve())
     from delivery_compile import docs_root, find_delivery, split_note, frontmatter, content_hash, pr_recorded_props
@@ -1132,8 +1135,7 @@ def record_pr_remote(project_root: Path, delivery_id: str, url: str,
     if directory is None:
         raise RuntimeError("Delivery package not found")
     review_path = directory / "delivery-review.md"
-    review_props, review_body = split_note(review_path)
-    if review_props.get("pull_request_url") != canonical_url:
+    if split_note(review_path)[0].get("pull_request_url") != canonical_url:
         raise RuntimeError("local Delivery Review URL does not match the requested PR")
     refs = canonical_refs(delivery_id)
     fence_oid = remote_oid(root, remote, refs["fence"])
@@ -1141,9 +1143,10 @@ def record_pr_remote(project_root: Path, delivery_id: str, url: str,
     intent_message = commit_message(root, integration_oid)
     if trailer(intent_message, "Record") not in {"pr-creation-intent-v1", "pr-adoption-intent-v1"}:
         raise RuntimeError("record-pr requires the exact unmatched PR intent")
+    relative_review = str(review_path.relative_to(root))
+    review_props, review_body = split_remote_note(root, integration_oid, relative_review, split_note)
     review_props["pull_request_url"] = canonical_url
     review_props["source_hash"] = content_hash(review_props, review_body, exclude={"status", "approved_at_utc", "source_hash", "approval_hash"})
-    relative_review = str(review_path.relative_to(root))
     replacements = {relative_review: frontmatter(review_props, review_body)}
     relative_delivery = str((directory / "delivery.md").relative_to(root))
     delivery_props, delivery_body = split_remote_note(root, integration_oid, relative_delivery, split_note)

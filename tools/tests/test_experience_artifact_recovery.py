@@ -10,6 +10,7 @@ from pathlib import Path
 from unittest import mock
 
 from tools.tests import test_experience_compile as fixtures
+from tools.tests.git_fixture import init_repository, remove_temporary
 
 compiler = fixtures.experience_compile
 application = fixtures.experience_application_check
@@ -18,7 +19,7 @@ application = fixtures.experience_application_check
 class ArtifactRecoveryTests(unittest.TestCase):
     def setUp(self):
         self.temporary = tempfile.TemporaryDirectory()
-        self.addCleanup(self.temporary.cleanup)
+        self.addCleanup(remove_temporary, self.temporary)
         self.project = Path(self.temporary.name).resolve()
         self.helpers = fixtures.ExperienceCompilerTests()
         self.fixture = self.helpers.orphaned_create_scope(
@@ -48,7 +49,7 @@ class ArtifactRecoveryTests(unittest.TestCase):
         (self.root / application.REGISTRY_RELATIVE).write_bytes(application.canonical(self.history[-1]))
         (self.root / application.LEDGER_RELATIVE).write_bytes(application.canonical({"schema_version": 3, "revisions": self.history}))
         (self.project / ".gitignore").write_text(".agentrof/\n.DS_Store\n")
-        self.git("init")
+        init_repository(self.project)
         self.git("config", "user.name", "Jane Doe")
         self.git("config", "user.email", "jane@example.invalid")
         self.commit()

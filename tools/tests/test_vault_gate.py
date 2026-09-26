@@ -8,6 +8,8 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from tools.tests.git_fixture import init_repository
+
 
 ROOT = Path(__file__).resolve().parents[2]
 SETUP = ROOT / "plugins/software-engineering-team/scripts/setup_project.py"
@@ -16,7 +18,7 @@ GATE_INSTALLER = ROOT / "plugins/software-engineering-team/scripts/vault_gate.py
 
 class PortableVaultGateTests(unittest.TestCase):
     def setup_project(self, root: Path) -> Path:
-        subprocess.run(["git", "init", "-q", str(root)], check=True)
+        init_repository(root)
         result = subprocess.run(
             [sys.executable, str(SETUP), "--project-root", str(root)],
             cwd=ROOT, capture_output=True, text=True, check=False,

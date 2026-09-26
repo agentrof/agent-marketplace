@@ -18,6 +18,7 @@ sys.path.insert(0, str(TESTS_DIR.parent))
 
 import build_distributions  # noqa: E402
 import fixtures  # noqa: E402
+import git_fixture  # noqa: E402
 
 
 class PackageRefreshAcceptanceTests(unittest.TestCase):
@@ -42,12 +43,7 @@ class PackageRefreshAcceptanceTests(unittest.TestCase):
             self.fail(f"{script.name} did not emit JSON: {exc}: {result.stdout}")
 
     def initialize_project(self, package: Path, project: Path, host: str) -> None:
-        subprocess.run(
-            ["git", "init", "--initial-branch=main", str(project)],
-            capture_output=True,
-            text=True,
-            check=True,
-        )
+        git_fixture.init_repository(project, initial_branch="main")
         setup = package / "scripts" / "setup_project.py"
         initialized = self.run_json(
             setup,

@@ -18,6 +18,7 @@ sys.path.insert(0, str(TESTS_DIR.parent))
 
 import build_distributions  # noqa: E402
 import fixtures  # noqa: E402
+import git_fixture  # noqa: E402
 import release  # noqa: E402
 
 
@@ -299,7 +300,7 @@ class BootstrapCandidatePolicyTests(unittest.TestCase):
         self.root = Path(self.tmp.name) / "repository"
         self.root.mkdir()
         fixtures.make_valid_root(self.root)
-        self.git("init", "-b", "main")
+        git_fixture.init_repository(self.root, initial_branch="main")
         self.git("config", "user.name", "Bootstrap Policy Test")
         self.git("config", "user.email", "bootstrap-policy@example.test")
         self.git("add", "--all")
@@ -318,7 +319,7 @@ class BootstrapCandidatePolicyTests(unittest.TestCase):
         self.main_sha = self.git("rev-parse", "HEAD")
 
     def tearDown(self):
-        self.tmp.cleanup()
+        git_fixture.remove_temporary(self.tmp)
 
     def git(self, *args: str) -> str:
         completed = subprocess.run(
@@ -448,7 +449,7 @@ class ReleasePullRequestPolicyTests(unittest.TestCase):
         fixtures.make_valid_root(self.root)
         fixtures.copy("tools/release.py", self.root)
         fixtures.copy("tools/build_distributions.py", self.root)
-        self.git("init", "-b", "main")
+        git_fixture.init_repository(self.root, initial_branch="main")
         # Hosted runners may materialize text with a different checkout EOL.
         self.git("config", "core.autocrlf", "true")
         self.git("config", "user.name", "Release Policy Test")
@@ -482,7 +483,7 @@ class ReleasePullRequestPolicyTests(unittest.TestCase):
         self.git("checkout", "--detach", self.base_sha)
 
     def tearDown(self):
-        self.tmp.cleanup()
+        git_fixture.remove_temporary(self.tmp)
 
     def git(self, *args: str) -> str:
         completed = subprocess.run(
@@ -666,8 +667,8 @@ class ReleaseFinalizeTests(unittest.TestCase):
         temporary = Path(self.tmp.name)
         self.remote = temporary / "remote.git"
         self.root = temporary / "work"
-        self.git_run("git", "init", "--bare", str(self.remote), cwd=temporary)
-        self.git_run("git", "init", "-b", "main", str(self.root), cwd=temporary)
+        git_fixture.init_repository(self.remote, bare=True)
+        git_fixture.init_repository(self.root, initial_branch="main")
         self.git_run("git", "config", "user.name", "Release Test")
         self.git_run("git", "config", "user.email", "release@example.test")
         (self.root / ".release").mkdir()
@@ -692,7 +693,7 @@ class ReleaseFinalizeTests(unittest.TestCase):
         self.git_run("git", "switch", self.FEATURE)
 
     def tearDown(self):
-        self.tmp.cleanup()
+        git_fixture.remove_temporary(self.tmp)
 
     def git_run(self, *args: str, cwd=None) -> subprocess.CompletedProcess:
         return subprocess.run(
@@ -825,8 +826,8 @@ class ReleaseBranchPublicationTests(unittest.TestCase):
         temporary = Path(self.tmp.name)
         self.remote = temporary / "remote.git"
         self.root = temporary / "work"
-        self.git_run("git", "init", "--bare", str(self.remote), cwd=temporary)
-        self.git_run("git", "init", "-b", "main", str(self.root), cwd=temporary)
+        git_fixture.init_repository(self.remote, bare=True)
+        git_fixture.init_repository(self.root, initial_branch="main")
         self.git_run("git", "config", "user.name", "Release Test")
         self.git_run("git", "config", "user.email", "release@example.test")
         self.git_run("git", "commit", "--allow-empty", "-m", "main")
@@ -838,7 +839,7 @@ class ReleaseBranchPublicationTests(unittest.TestCase):
         self.release_sha = release.git(self.root, "rev-parse", "HEAD")
 
     def tearDown(self):
-        self.tmp.cleanup()
+        git_fixture.remove_temporary(self.tmp)
 
     def git_run(self, *args: str, cwd=None) -> subprocess.CompletedProcess:
         return subprocess.run(
@@ -864,6 +865,7 @@ class ReleaseBranchPublicationTests(unittest.TestCase):
                 "git", "clone", "--branch", "main", str(self.remote),
                 str(peer), cwd=Path(self.tmp.name),
             )
+            git_fixture.disable_automatic_maintenance(peer / ".git")
             self.git_run("git", "config", "user.name", "Peer", cwd=peer)
             self.git_run(
                 "git", "config", "user.email", "peer@example.test", cwd=peer
@@ -888,7 +890,7 @@ class ReleaseBranchPublicationTests(unittest.TestCase):
 
 class BootstrapFinalizeTests(unittest.TestCase):
     def test_bootstrap_release_reaches_the_clean_main_terminal_state(self):
-        with tempfile.TemporaryDirectory() as temporary:
+        with git_fixture.temporary_directory() as temporary:
             temporary_path = Path(temporary)
             remote = temporary_path / "remote.git"
             root = temporary_path / "work"
@@ -899,14 +901,8 @@ class BootstrapFinalizeTests(unittest.TestCase):
                     capture_output=True, text=True, check=True,
                 )
 
-            subprocess.run(
-                ["git", "init", "--bare", str(remote)],
-                cwd=temporary_path, capture_output=True, text=True, check=True,
-            )
-            subprocess.run(
-                ["git", "init", "-b", "main", str(root)],
-                cwd=temporary_path, capture_output=True, text=True, check=True,
-            )
+            git_fixture.init_repository(remote, bare=True)
+            git_fixture.init_repository(root, initial_branch="main")
             run("git", "config", "user.name", "Bootstrap Test")
             run("git", "config", "user.email", "bootstrap@example.test")
             (root / "versions.json").write_text(json.dumps({

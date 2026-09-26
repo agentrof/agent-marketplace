@@ -26,6 +26,7 @@ if str(SCRIPTS) not in sys.path:
 
 import experience_application_check
 import experience_compile
+from tools.tests.git_fixture import init_repository, temporary_directory
 
 
 def load_hook():
@@ -1357,14 +1358,7 @@ class VaultHookShellContractTests(unittest.TestCase):
         self, root: Path, package: Path,
     ) -> tuple[Path, Path]:
         docs, _config = self.project(root)
-        repository = subprocess.run(
-            ["git", "init", str(root)],
-            capture_output=True, text=True, check=False,
-        )
-        self.assertEqual(
-            repository.returncode, 0,
-            repository.stdout + repository.stderr,
-        )
+        init_repository(root)
         setup = subprocess.run(
             [
                 sys.executable,
@@ -3484,14 +3478,7 @@ class VaultHookShellContractTests(unittest.TestCase):
             with self.subTest(host=host), tempfile.TemporaryDirectory() as temporary:
                 root = Path(temporary)
                 docs, _config = self.project(root)
-                repository = subprocess.run(
-                    ["git", "init", str(root)],
-                    capture_output=True, text=True, check=False,
-                )
-                self.assertEqual(
-                    repository.returncode, 0,
-                    repository.stdout + repository.stderr,
-                )
+                init_repository(root)
                 package = ROOT / "dist" / host / "software-engineering-team"
                 setup = subprocess.run(
                     [
@@ -3800,17 +3787,10 @@ class VaultHookShellContractTests(unittest.TestCase):
     def test_issue_77_bare_init_preserves_real_codex_draft(self):
         if shutil.which("python3") is None:
             self.skipTest("python3 is unavailable")
-        with tempfile.TemporaryDirectory() as temporary:
+        with temporary_directory() as temporary:
             root = Path(temporary) / "Issue 77 (bare init)"
             root.mkdir()
-            repository = subprocess.run(
-                ["git", "init", str(root)],
-                capture_output=True, text=True, check=False,
-            )
-            self.assertEqual(
-                repository.returncode, 0,
-                repository.stdout + repository.stderr,
-            )
+            init_repository(root)
             package = ROOT / "dist" / "codex" / "software-engineering-team"
             setup = subprocess.run(
                 [

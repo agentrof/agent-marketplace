@@ -21,6 +21,7 @@ if str(SCRIPTS) not in sys.path:
     sys.path.insert(0, str(SCRIPTS))
 import vault_check as vault_payload
 import setup_project as setup_module
+from tools.tests.git_fixture import init_repository
 from unittest import mock
 
 
@@ -34,7 +35,7 @@ class SetupProjectTests(unittest.TestCase):
     def test_bootstrap_is_project_local_and_idempotent(self):
         with tempfile.TemporaryDirectory() as temporary:
             project = Path(temporary)
-            subprocess.run(["git", "init", "-q", str(project)], check=True)
+            init_repository(project)
             inspected = self.run_script(
                 SETUP, "inspect", "--project-root", str(project), "--json"
             )
@@ -122,7 +123,7 @@ class SetupProjectTests(unittest.TestCase):
     def test_preflight_allows_an_unconfigured_git_project(self):
         with tempfile.TemporaryDirectory() as temporary:
             project = Path(temporary)
-            subprocess.run(["git", "init", "-q", str(project)], check=True)
+            init_repository(project)
             result = self.run_script(
                 CHECK, "preflight", "--project-root", str(project), "--json"
             )
@@ -132,7 +133,7 @@ class SetupProjectTests(unittest.TestCase):
     def test_refresh_inspect_check_apply_converges_and_preserves_project_data(self):
         with tempfile.TemporaryDirectory() as temporary:
             project = Path(temporary)
-            subprocess.run(["git", "init", "-q", str(project)], check=True)
+            init_repository(project)
             first = self.run_script(
                 SETUP, "apply", "--project-root", str(project), "--json",
             )
@@ -289,7 +290,7 @@ class SetupProjectTests(unittest.TestCase):
     def test_inspect_migrates_retired_nested_fields_before_any_write(self):
         with tempfile.TemporaryDirectory() as temporary:
             project = Path(temporary)
-            subprocess.run(["git", "init", "-q", str(project)], check=True)
+            init_repository(project)
             setup = self.run_script(SETUP, "apply", "--project-root", str(project))
             self.assertEqual(setup.returncode, 0, setup.stdout + setup.stderr)
             config_path = project / "workspace/config.json"
@@ -327,7 +328,7 @@ class SetupProjectTests(unittest.TestCase):
     def test_inspect_surfaces_forbidden_runtime_state_before_apply(self):
         with tempfile.TemporaryDirectory() as temporary:
             project = Path(temporary)
-            subprocess.run(["git", "init", "-q", str(project)], check=True)
+            init_repository(project)
             setup = self.run_script(
                 SETUP, "apply", "--project-root", str(project), "--json"
             )
@@ -350,7 +351,7 @@ class SetupProjectTests(unittest.TestCase):
     def test_setup_accepts_process_local_experience_prototype_files(self):
         with tempfile.TemporaryDirectory() as temporary:
             project = Path(temporary)
-            subprocess.run(["git", "init", "-q", str(project)], check=True)
+            init_repository(project)
             setup = self.run_script(
                 SETUP, "apply", "--project-root", str(project), "--json"
             )
@@ -371,7 +372,7 @@ class SetupProjectTests(unittest.TestCase):
     def test_setup_refuses_nested_legacy_experience_registry(self):
         with tempfile.TemporaryDirectory() as temporary:
             project = Path(temporary)
-            subprocess.run(["git", "init", "-q", str(project)], check=True)
+            init_repository(project)
             setup = self.run_script(
                 SETUP, "apply", "--project-root", str(project), "--json"
             )
@@ -402,7 +403,7 @@ class SetupProjectTests(unittest.TestCase):
     def test_setup_refuses_symlink_anywhere_in_experience_subtree(self):
         with tempfile.TemporaryDirectory() as temporary:
             project = Path(temporary)
-            subprocess.run(["git", "init", "-q", str(project)], check=True)
+            init_repository(project)
             setup = self.run_script(
                 SETUP, "apply", "--project-root", str(project), "--json"
             )
@@ -441,7 +442,7 @@ class SetupProjectTests(unittest.TestCase):
     def test_setup_and_check_refuse_hardlinks_in_experience_subtree(self):
         with tempfile.TemporaryDirectory() as temporary:
             project = Path(temporary)
-            subprocess.run(["git", "init", "-q", str(project)], check=True)
+            init_repository(project)
             setup = self.run_script(
                 SETUP, "apply", "--project-root", str(project), "--json"
             )
@@ -479,7 +480,7 @@ class SetupProjectTests(unittest.TestCase):
     def test_refresh_rolls_back_every_managed_write_on_closing_failure(self):
         with tempfile.TemporaryDirectory() as temporary:
             project = Path(temporary)
-            subprocess.run(["git", "init", "-q", str(project)], check=True)
+            init_repository(project)
             setup = self.run_script(SETUP, "--project-root", str(project))
             self.assertEqual(setup.returncode, 0, setup.stdout + setup.stderr)
             config_path = project / "workspace/config.json"
@@ -518,7 +519,7 @@ class SetupProjectTests(unittest.TestCase):
     def test_rollback_preserves_concurrent_authored_markdown(self):
         with tempfile.TemporaryDirectory() as temporary:
             project = Path(temporary)
-            subprocess.run(["git", "init", "-q", str(project)], check=True)
+            init_repository(project)
             setup = self.run_script(SETUP, "apply", "--project-root", str(project))
             self.assertEqual(setup.returncode, 0, setup.stdout + setup.stderr)
             graph_path = project / "workspace/docs/.obsidian/graph.json"
@@ -560,7 +561,7 @@ class SetupProjectTests(unittest.TestCase):
     def test_rollback_preserves_concurrent_edit_to_unchanged_managed_note(self):
         with tempfile.TemporaryDirectory() as temporary:
             project = Path(temporary)
-            subprocess.run(["git", "init", "-q", str(project)], check=True)
+            init_repository(project)
             setup = self.run_script(SETUP, "apply", "--project-root", str(project))
             self.assertEqual(setup.returncode, 0, setup.stdout + setup.stderr)
             graph_path = project / "workspace/docs/.obsidian/graph.json"
@@ -607,7 +608,7 @@ class SetupProjectTests(unittest.TestCase):
     def test_rollback_reports_concurrent_edit_to_written_target(self):
         with tempfile.TemporaryDirectory() as temporary:
             project = Path(temporary)
-            subprocess.run(["git", "init", "-q", str(project)], check=True)
+            init_repository(project)
             setup = self.run_script(SETUP, "apply", "--project-root", str(project))
             self.assertEqual(setup.returncode, 0, setup.stdout + setup.stderr)
             graph_path = (
@@ -658,7 +659,7 @@ class SetupProjectTests(unittest.TestCase):
     def test_pre_replace_recheck_preserves_racing_target_edit(self):
         with tempfile.TemporaryDirectory() as temporary:
             project = Path(temporary)
-            subprocess.run(["git", "init", "-q", str(project)], check=True)
+            init_repository(project)
             setup = self.run_script(SETUP, "apply", "--project-root", str(project))
             self.assertEqual(setup.returncode, 0, setup.stdout + setup.stderr)
             graph_path = (
@@ -714,7 +715,7 @@ class SetupProjectTests(unittest.TestCase):
     def test_noncanonical_managed_workspace_is_rejected(self):
         with tempfile.TemporaryDirectory() as temporary:
             project = Path(temporary)
-            subprocess.run(["git", "init", "-q", str(project)], check=True)
+            init_repository(project)
             alternate = project / "alternate"
             alternate.mkdir()
             (alternate / "config.json").write_text(json.dumps({
@@ -729,7 +730,7 @@ class SetupProjectTests(unittest.TestCase):
     def test_setup_check_rejects_database_state_in_runtime(self):
         with tempfile.TemporaryDirectory() as temporary:
             project = Path(temporary)
-            subprocess.run(["git", "init", "-q", str(project)], check=True)
+            init_repository(project)
             setup = self.run_script(SETUP, "--project-root", str(project))
             self.assertEqual(setup.returncode, 0, setup.stdout + setup.stderr)
             database = (
@@ -749,7 +750,7 @@ class SetupProjectTests(unittest.TestCase):
         """Scratch is where the required cadence writes its tool output."""
         with tempfile.TemporaryDirectory() as temporary:
             project = Path(temporary)
-            subprocess.run(["git", "init", "-q", str(project)], check=True)
+            init_repository(project)
             setup = self.run_script(SETUP, "--project-root", str(project))
             self.assertEqual(setup.returncode, 0, setup.stdout + setup.stderr)
             runtime = project / ".agentrof" / "agent-marketplace" / ".runtime"
@@ -779,7 +780,7 @@ class SetupProjectTests(unittest.TestCase):
     def test_setup_check_rejects_state_next_to_the_runtime_directory(self):
         with tempfile.TemporaryDirectory() as temporary:
             project = Path(temporary)
-            subprocess.run(["git", "init", "-q", str(project)], check=True)
+            init_repository(project)
             setup = self.run_script(SETUP, "--project-root", str(project))
             self.assertEqual(setup.returncode, 0, setup.stdout + setup.stderr)
             residue = project / ".agentrof/agent-marketplace/backlog.json"
@@ -794,7 +795,7 @@ class SetupProjectTests(unittest.TestCase):
     def test_local_obsidian_plugin_projection_is_recreated_but_not_clone_truth(self):
         with tempfile.TemporaryDirectory() as temporary:
             project = Path(temporary)
-            subprocess.run(["git", "init", "-q", str(project)], check=True)
+            init_repository(project)
             setup = self.run_script(SETUP, "--project-root", str(project))
             self.assertEqual(setup.returncode, 0, setup.stdout + setup.stderr)
             obsidian = project / "workspace/docs/.obsidian"
@@ -895,7 +896,7 @@ class SetupProjectTests(unittest.TestCase):
     def test_backlog_init_requires_explicit_modern_mode(self):
         with tempfile.TemporaryDirectory() as temporary:
             project = Path(temporary)
-            subprocess.run(["git", "init", "-q", str(project)], check=True)
+            init_repository(project)
             setup = self.run_script(SETUP, "--project-root", str(project))
             self.assertEqual(setup.returncode, 0, setup.stderr)
             docs = project / "workspace" / "docs"
@@ -909,7 +910,7 @@ class SetupProjectTests(unittest.TestCase):
             target = Path(temporary) / "outside"
             project.mkdir()
             target.mkdir()
-            subprocess.run(["git", "init", "-q", str(project)], check=True)
+            init_repository(project)
             (project / ".agentrof").symlink_to(target, target_is_directory=True)
             result = self.run_script(
                 SETUP, "--project-root", str(project), "--json"
@@ -921,7 +922,7 @@ class SetupProjectTests(unittest.TestCase):
     def test_concurrent_identical_setup_converges(self):
         with tempfile.TemporaryDirectory() as temporary:
             project = Path(temporary)
-            subprocess.run(["git", "init", "-q", str(project)], check=True)
+            init_repository(project)
             command = [
                 sys.executable, str(SETUP), "--project-root", str(project), "--json"
             ]

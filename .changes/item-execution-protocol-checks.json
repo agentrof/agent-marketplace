@@ -1,0 +1,6 @@
+{
+  "summary": "start-item and resume-item now refuse with DELIVERY_DEPENDENCY_UNMET until every Item the Item's execution_after names is integrated, which means its remote Item tip records integrated and the Integration contains that exact tip.",
+  "components": {
+    "software-engineering-team": "patch"
+  }
+}

@@ -3183,6 +3183,27 @@ def published_plan_blobs(root: Path, source: str, paths: list[str]) -> dict[str,
     return values
 
 
+def unintegrated_predecessors(root: Path, remote: str, delivery_id: str, directory: Path,
+                              integration_oid: str, predecessors) -> list[str]:
+    """The Items one Item executes after that are not integrated yet.
+
+    An Item is integrated when its remote Item tip records status integrated and
+    the Integration contains that exact tip, as publish-delivery-review requires
+    of every Item. A tip this checkout lacks cannot be in the Integration.
+    """
+    from delivery_compile import split_note
+    waiting = []
+    for story in sorted(set(predecessors or [])):
+        tip = remote_oid(root, remote, canonical_refs(delivery_id, story)["item"])
+        relative = (directory / "items" / story_key(story) / "item.md").relative_to(root).as_posix()
+        present = subprocess.run(["git", "cat-file", "-e", tip + "^{commit}"], cwd=root,
+                                 capture_output=True, check=False).returncode == 0
+        if not (present and is_ancestor(root, tip, integration_oid)
+                and split_remote_note(root, tip, relative, split_note)[0].get("status") == "integrated"):
+            waiting.append(story)
+    return waiting
+
+
 def start_item(project_root: Path, delivery_id: str, story_id: str,
                remote: str = "origin", allowed_statuses: set[str] | None = None) -> dict:
     root = main_worktree(project_root.resolve())
@@ -3223,6 +3244,11 @@ def start_item(project_root: Path, delivery_id: str, story_id: str,
     # The plan owns the Item's claims and bindings; the Item ref owns its lifecycle and
     # whatever its writer has already stamped.
     plan_props, _plan_body = split_remote_note(root, integration_oid, relative_item, split_note)
+    waiting = unintegrated_predecessors(root, remote, delivery_id, directory, integration_oid,
+                                        plan_props.get("execution_after"))
+    if waiting:
+        raise RuntimeError(f"DELIVERY_DEPENDENCY_UNMET: {story_id} starts only after these Items are integrated: "
+                           + ", ".join(waiting))
     item_props = dict(plan_props)
     for key in ITEM_WRITER_FIELDS:
         if key in live_props:

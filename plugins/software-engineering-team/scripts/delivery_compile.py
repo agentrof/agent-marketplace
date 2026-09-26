@@ -319,7 +319,7 @@ def approved_dod_source(docs: Path) -> tuple[dict, list[str]]:
     if not isinstance(revision, int) or revision < 1:
         return {}, ["approved Definition of Done has an invalid revision"]
     return {
-        "definition_of_done_path": str(path.relative_to(docs)),
+        "definition_of_done_path": path.relative_to(docs).as_posix(),
         "definition_of_done_revision": revision,
         "definition_of_done_source_hash": source_hash,
     }, []
@@ -462,7 +462,7 @@ def render_map(docs: Path) -> None:
             continue
         identifier = str(props.get("id", directory.name)).strip()
         status = str(props.get("status", "unknown"))
-        rows.append(f"- {link(str(path.relative_to(docs)), identifier)} — `{status}`")
+        rows.append(f"- {link(path.relative_to(docs).as_posix(), identifier)} — `{status}`")
     # vault_check render-relations normalizes authored notes to this ending too.
     atomic_text(map_path, "\n".join(rows).rstrip() + "\n")
 
@@ -1142,16 +1142,16 @@ def approve_execution(args) -> int:
                 )
                 ev_props = {"type": kind, "id": f"{props['id']}-{story}-{'CR' if kind == 'code-review' else 'QA'}",
                             "title": evidence_title,
-                            "status": status, "derives_from": [link(str(item_path.relative_to(docs)), item_props["title"])],
+                            "status": status, "derives_from": [link(item_path.relative_to(docs).as_posix(), item_props["title"])],
                             "item_plan_hash": item_props["item_plan_hash"], "tags": [f"doc/{kind}", f"status/{status}"]}
-                atomic_text(evidence, frontmatter(ev_props, body_for("item", ev_props["title"], {"Navigation": link(str(item_path.relative_to(docs)), item_props["title"])})))
+                atomic_text(evidence, frontmatter(ev_props, body_for("item", ev_props["title"], {"Navigation": link(item_path.relative_to(docs).as_posix(), item_props["title"])})))
     plan_path = root / "execution-plan.md"
     plan_subject = str(props.get("goal", props["id"])).strip()
     plan_props = {"type": "execution-plan", "id": f"{props['id']}-EXEC", "title": f"Execution approach for {plan_subject}",
                   "status": "approved", "revision": 1, "scope_hash": props["scope_hash"],
                   "item_plan_hashes": sorted(item_hashes),
                   "operation_contract_hashes": sorted(operation_hashes),
-                  "derives_from": [link(str(path.relative_to(docs)), props["id"])],
+                  "derives_from": [link(path.relative_to(docs).as_posix(), props["id"])],
                   "tags": ["doc/execution-plan", "status/approved"]}
     plan_body = body_for("execution-plan", plan_props["title"], {
         "Preconditions": "Approved backlog Story/Test Plan snapshots, the pinned Definition of Done and the exact Operation Contract hashes are current.",
@@ -1164,7 +1164,7 @@ def approve_execution(args) -> int:
         "Verification Strategy": "Each Item must bind review and verification to its exact worktree product commit before integration.",
         "Failure and Recovery": "A stale source snapshot, target conflict or missing verified writer receipt blocks activation and requires the named recovery path.",
         "Approval": "Execution approval binds this plan hash and the exact Item plan hashes listed in front matter.",
-        "Navigation": link(str(path.relative_to(docs)), props["id"]),
+        "Navigation": link(path.relative_to(docs).as_posix(), props["id"]),
     })
     plan_props["plan_hash"] = content_hash(plan_props, plan_body, exclude=MUTABLE | {"plan_hash"})
     plan_props["approved_at_utc"] = utc_now()
@@ -1346,7 +1346,7 @@ def approve_review(args) -> int:
     review_subject = str(delivery_props.get("goal", args.delivery)).strip()
     review_props = {"type": "delivery-review", "id": f"{args.delivery}-REVIEW",
                     "title": f"Outcome review for {review_subject}",
-                    "status": "approved", "derives_from": [link(str(delivery_path_value.relative_to(docs)), args.delivery)],
+                    "status": "approved", "derives_from": [link(delivery_path_value.relative_to(docs).as_posix(), args.delivery)],
                     "plan_hash": delivery_props.get("plan_hash", "none"),
                     "reviewed_commit": reviewed_commit,
                     "reviewed_integration_commit": reviewed_integration,
@@ -1362,7 +1362,7 @@ def approve_review(args) -> int:
                     and text and text != SECTION_PLACEHOLDER}
     review_body = body_for("delivery-review", review_props["title"], {
         "Goal Outcome": delivery_props.get("goal", ""), "Verdict": "Approved for PR handoff.", **authored,
-        "Navigation": link(str(delivery_path_value.relative_to(docs)), args.delivery)})
+        "Navigation": link(delivery_path_value.relative_to(docs).as_posix(), args.delivery)})
     review_props["approval_hash"] = content_hash(review_props, review_body, exclude=MUTABLE | {"approval_hash"})
     review_props["source_hash"] = content_hash(review_props, review_body)
     atomic_text(review_path, frontmatter(review_props, review_body))

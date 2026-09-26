@@ -104,25 +104,64 @@ class GitHubProvider:
                 if item.get("headRefName") == head and item.get("baseRefName") == base
                 and str(item.get("state", "")).upper() != "MERGED"]
 
+    @staticmethod
+    def _rollup_verdict(check: dict) -> tuple[str, str]:
+        """Return ``pass``, ``waive`` or ``block`` and the result GitHub reported.
+
+        gh names each entry's GraphQL type: a CheckRun reports ``status`` and
+        ``conclusion``, a StatusContext (commit status) only ``state``. An
+        entry without a type is read as a check run.
+        """
+        kind = check.get("__typename") or "CheckRun"
+        if kind == "StatusContext":
+            state = str(check.get("state") or "").upper()
+            return ("pass" if state == "SUCCESS" else "block"), state or "no state"
+        if kind != "CheckRun":
+            return "block", f"unsupported type {kind}"
+        status = str(check.get("status") or "").upper()
+        if status != "COMPLETED":
+            return "block", status or "no status"
+        conclusion = str(check.get("conclusion") or "").upper()
+        if conclusion == "SUCCESS":
+            return "pass", conclusion
+        if conclusion in {"SKIPPED", "NEUTRAL"}:
+            return "waive", conclusion
+        return "block", conclusion or "no conclusion"
+
     def require_green_checks(self, pull_request: dict) -> None:
-        """Fail closed unless every provider-reported required check succeeded.
+        """Fail closed unless the provider rollup is green on its own evidence.
 
         Delivery does not infer a green provider state from a mergeable PR or
         branch protection alone. GitHub's rollup is the provider evidence
-        available to both a normal merge and clean-clone recovery, so an absent,
-        pending, neutral or failed entry cannot authorize the merge call.
+        available to both a normal merge and clean-clone recovery. A check run
+        passes when it completed with success and a commit status when its
+        state is success. A check run that completed skipped or neutral does
+        not block, as GitHub accepts both for required checks, but it cannot
+        authorize the merge call: an absent rollup, or one without a passing
+        entry, fails. Any other result, including pending, expected,
+        cancelled, stale or missing, blocks. Every refusal carries the
+        DELIVERY_REQUIRED_CHECK_FAILED finding code.
         """
         checks = pull_request.get("statusCheckRollup")
         if not isinstance(checks, list) or not checks:
-            raise ProviderError("GitHub required checks are absent")
+            raise ProviderError("DELIVERY_REQUIRED_CHECK_FAILED: GitHub required checks are absent")
+        passed = False
+        waived = []
         for check in checks:
             if not isinstance(check, dict):
-                raise ProviderError("GitHub required check response is malformed")
-            status = str(check.get("status") or check.get("state") or "").upper()
-            conclusion = str(check.get("conclusion") or "").upper()
+                raise ProviderError("DELIVERY_REQUIRED_CHECK_FAILED: GitHub required check response is malformed")
             name = str(check.get("name") or check.get("context") or "unnamed check")
-            if status not in {"COMPLETED", "SUCCESS"} or conclusion != "SUCCESS":
-                raise ProviderError(f"GitHub required check is not green: {name}")
+            verdict, reported = self._rollup_verdict(check)
+            if verdict == "block":
+                raise ProviderError("DELIVERY_REQUIRED_CHECK_FAILED: GitHub required check is not green: "
+                                    f"{name} ({reported})")
+            if verdict == "pass":
+                passed = True
+            else:
+                waived.append(f"{name} ({reported})")
+        if not passed:
+            raise ProviderError("DELIVERY_REQUIRED_CHECK_FAILED: GitHub required checks have no successful check: "
+                                + ", ".join(waived))
 
     def create_draft(self, head: str, base: str, title: str, body: str) -> dict:
         result = run_gh(

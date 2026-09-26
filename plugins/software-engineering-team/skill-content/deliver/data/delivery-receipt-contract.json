@@ -41,6 +41,7 @@
   "target_update_rule": {
     "intent": "project-fence-v2 Target-Update-Intent and Attempt are durable before direct/provider target mutation",
     "reauthorization": "only conclusive zero-target-effect permits a fresh Attempt",
+    "zero_target_effect": "a direct target push the remote rejected while the refetched target history lacks the carrier head changed nothing; its started call returns to prepared, and the host that holds the prepared receipt may reauthorize or abort the handoff",
     "ambiguous_or_partial": "never blind-repeat; requery or manual incident"
   },
   "target_update_receipt": {
@@ -54,6 +55,7 @@
       "carrier_ref", "carrier_object", "carrier_head", "carrier_base",
       "receipt_digest"
     ],
-    "election": "one process-shared exact-preimage prepared-to-call_started transition; crash after call_started is requery-only"
+    "election": "one process-shared exact-preimage prepared-to-call_started transition; crash after call_started is requery-only",
+    "release": "call_started returns to prepared only on the zero_target_effect proof"
   }
 }

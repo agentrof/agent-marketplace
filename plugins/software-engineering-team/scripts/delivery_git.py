@@ -478,6 +478,20 @@ def mark_target_call_started(main_worktree: Path, mode: str, attempt: str) -> di
         return _validate_target_receipt(json.loads(path.read_text(encoding="utf-8")))
 
 
+def release_target_call(main_worktree: Path, mode: str, attempt: str) -> dict:
+    """Return this attempt's started update call to prepared once it provably took no effect."""
+    path, lock = target_receipt_paths(main_worktree, mode)
+    with receipt_lock(lock):
+        if not path.exists():
+            raise RuntimeError("DELIVERY_TARGET_UPDATE_UNCERTAIN: target update receipt is missing")
+        value = _validate_target_receipt(json.loads(path.read_text(encoding="utf-8")))
+        if value["attempt"] != attempt or value["state"] != "call_started":
+            raise RuntimeError("DELIVERY_TARGET_UPDATE_UNCERTAIN: only this attempt's started call can be released")
+        value["state"] = "prepared"
+        _write_provider_receipt_locked(path, value)
+        return _validate_target_receipt(json.loads(path.read_text(encoding="utf-8")))
+
+
 def mark_target_verified(main_worktree: Path, mode: str, attempt: str) -> dict:
     path, lock = target_receipt_paths(main_worktree, mode)
     with receipt_lock(lock):
@@ -2003,6 +2017,20 @@ def fetch_target(root: Path, remote: str) -> tuple[str, str]:
     return branch, run_git(root, "rev-parse", tracking)
 
 
+def direct_update_took_no_effect(root: Path, remote: str, head: str) -> bool:
+    """Whether the refetched target proves that a direct target update changed nothing.
+
+    The update moves only the target, to the carrier head, so a target whose
+    history lacks that head was not changed by it. A target that cannot be
+    refetched proves nothing.
+    """
+    try:
+        _branch, target = fetch_target(root, remote)
+        return not is_ancestor(root, head, target)
+    except RuntimeError:
+        return False
+
+
 def require_target_ancestry(root: Path, remote: str, fence_message: str,
                             integration_oid: str, item_oid: str | None = None) -> str:
     if trailer(fence_message, "Record") != "project-fence-v2" or trailer(fence_message, "Mode") != "open":
@@ -2457,24 +2485,43 @@ def finish_source_handoff(project_root: Path, remote: str = "origin") -> dict:
 
 
 def abort_source_handoff(project_root: Path, remote: str = "origin") -> dict:
-    """Abort only an acquired handoff whose external write never began."""
+    """Abort only an acquired handoff whose external write never began or took no effect.
+
+    Past a target-update intent, only the host whose receipt holds the current
+    direct attempt still prepared can abort, and only while the target does not
+    contain the carrier head. It holds that receipt's lock throughout, so no
+    update call can start meanwhile.
+    """
     root = main_worktree(project_root.resolve())
     ref, fence_oid, values = _fence_context(root, remote)
     if values["Mode"] not in {"source_handoff", "governance", "upgrade"}:
         raise RuntimeError("DELIVERY_FENCE_MODE: no source handoff is active")
-    if values["Target-Update-Intent"] != "none":
-        raise RuntimeError("DELIVERY_TARGET_UPDATE_UNCERTAIN: abort is forbidden after target-update intent")
-    values.update({"Mode": "open", "Epoch": epoch_token(), "Source-Kind": "none",
-                   "Source-Intent": "none",
-                   "Barrier-Kind": "none", "Barrier-Epoch": "none",
-                   "Target-Update-Intent": "none", "Target-Update-Attempt": "none",
-                   "Target-Repository": "none", "Target-Carrier-Kind": "none",
-                   "Target-Carrier-Ref": "none", "Target-Carrier-Object": "none",
-                   "Target-Carrier-Head": "none", "Target-Carrier-Base": "none",
-                   "Upgrade-Phase": "none",
-                   "Upgrade-Contract": "none", "Handoff-Target": "none"})
-    candidate = _fence_child(root, fence_oid, values, "Abort source handoff")
-    atomic_push(root, remote, [(ref, fence_oid, candidate)])
+    receipt_path, lock_path = target_receipt_paths(root, values["Mode"])
+    intent, attempt = values["Target-Update-Intent"], values["Target-Update-Attempt"]
+    with contextlib.ExitStack() as held:
+        if intent != "none":
+            held.enter_context(receipt_lock(lock_path))
+            receipt = (_validate_target_receipt(json.loads(receipt_path.read_text(encoding="utf-8")))
+                       if receipt_path.exists() else None)
+            if (values["Target-Carrier-Kind"] != "direct_target" or receipt is None
+                    or receipt["attempt"] != attempt or receipt["state"] != "prepared"
+                    or not direct_update_took_no_effect(root, remote, values["Target-Carrier-Head"])):
+                raise RuntimeError("DELIVERY_TARGET_UPDATE_UNCERTAIN: abort after a target-update intent "
+                                   "requires this host's prepared direct attempt, absent from the target")
+        values.update({"Mode": "open", "Epoch": epoch_token(), "Source-Kind": "none",
+                       "Source-Intent": "none",
+                       "Barrier-Kind": "none", "Barrier-Epoch": "none",
+                       "Target-Update-Intent": "none", "Target-Update-Attempt": "none",
+                       "Target-Repository": "none", "Target-Carrier-Kind": "none",
+                       "Target-Carrier-Ref": "none", "Target-Carrier-Object": "none",
+                       "Target-Carrier-Head": "none", "Target-Carrier-Base": "none",
+                       "Upgrade-Phase": "none",
+                       "Upgrade-Contract": "none", "Handoff-Target": "none"})
+        candidate = _fence_child(root, fence_oid, values, "Abort source handoff")
+        atomic_push(root, remote, [(ref, fence_oid, candidate)])
+        if intent != "none":
+            receipt_path.unlink()
+            _fsync_directory(receipt_path.parent)
     return {"ok": True, "mode": "open", "fence": candidate}
 
 
@@ -2870,11 +2917,18 @@ def apply_target_update(project_root: Path, mode: str = "source_handoff",
         receipt = mark_target_call_started(root, mode, attempt)
     if carrier == "direct_target":
         target_ref = f"refs/heads/{target_branch}"
-        atomic_push(root, remote, [(target_ref, base, values["Target-Carrier-Head"])])
+        head = values["Target-Carrier-Head"]
+        try:
+            atomic_push(root, remote, [(target_ref, base, head)])
+        except RuntimeError as exc:
+            if not direct_update_took_no_effect(root, remote, head):
+                raise
+            release_target_call(root, mode, attempt)
+            raise RuntimeError(f"{exc}; the target does not contain the update, so its call was released "
+                               "for a fresh attempt or an abort") from exc
         verified = mark_target_verified(root, mode, attempt)
         return {"ok": True, "mode": mode, "carrier": carrier,
-                "target": target_ref, "target_oid": values["Target-Carrier-Head"],
-                "receipt": verified}
+                "target": target_ref, "target_oid": head, "receipt": verified}
     if carrier == "github_pr":
         from delivery_provider import GitHubProvider
         repository = values["Target-Repository"].removeprefix("github:")

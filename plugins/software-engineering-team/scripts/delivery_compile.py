@@ -867,60 +867,68 @@ def implemented_requirement_findings(docs: Path, stories: dict[str, dict]) -> li
 def application_binding_findings(docs: Path, citing: list[str]) -> list[str]:
     """Require a backlog whose selected Stories cite Experience records to bind the current application.
 
-    Compiler-owned input_bindings bind it in manual mode, and in requirement
-    mode whenever the backlog carries them. A requirement-mode backlog without
-    them binds it through its root Requirement's Experience Stage Results. A
-    backlog without a planning mode predates application receipts.
+    Compiler-owned input_bindings bind it in either planning mode. A
+    requirement-mode backlog approved before those bindings existed is
+    transitional: until its next revision it binds through its root
+    Requirement's Experience Stage Results, and binds none when that
+    Requirement marks Experience not_applicable. A backlog without a planning
+    mode predates application receipts.
     """
     props, _ = backlog_compile.parse_front_matter(docs / "backlog" / "backlog.md")
     mode = str(props.get("planning_mode", "")).strip().casefold()
     if mode not in {"manual", "requirement"}:
         return []
-    bound: list[tuple[str, str]] = []
-    for binding in backlog_compile.values(props, "input_bindings"):
-        stage, _separator, remainder = binding.partition("|")
-        reference, _separator, digest = remainder.partition("|")
-        if stage == "experience-design":
-            bound.append((reference, digest))
-    rows: list[tuple[str, str]] = []
-    problems: list[str] = []
-    if mode == "manual" or bound:
-        label = f"the {mode}-mode input_bindings"
-        rows = bound
-    else:
-        requirement = str(props.get("requirement_ref", "")).strip()
-        label = f"root Requirement {requirement}'s Experience Stage Results"
+    requirement = str(props.get("requirement_ref", "")).strip()
+    disposition, results = "", []
+    if mode == "requirement":
         path = next((path for path in requirement_compile.requirement_paths(docs)
                      if requirement_compile.requirement_id(path) == requirement), None)
         try:
             body = requirement_compile.split_note(path)[1] if path else ""
         except (OSError, ValueError):
             body = ""
-        dispositions = {stage: disposition for stage, disposition, _refs, _why
-                        in requirement_compile.impact_rows(body)}
-        if dispositions.get("experience-design") == "not_applicable":
-            problems.append(f"root Requirement {requirement} marks experience-design not_applicable")
-        else:
-            rows = requirement_compile.stage_results(body).get("experience-design", [])
-    if not problems and not rows:
+        disposition = next((row[1] for row in requirement_compile.impact_rows(body)
+                            if row[0] == "experience-design"), "")
+        results = requirement_compile.stage_results(body).get("experience-design", [])
+    bindings = backlog_compile.values(props, "input_bindings")
+    bound = mode == "manual" or bool(bindings)
+    label = (f"the {mode}-mode input_bindings" if bound
+             else f"root Requirement {requirement}'s Experience Stage Results")
+    refs: list[str] = []
+    problems: list[str] = []
+    if bound:
+        rows, problems = backlog_compile.verify_input_bindings(
+            docs, [binding for binding in bindings if binding.startswith("experience-design|")],
+            "backlog/backlog.md")
+        refs = [reference for _stage, reference, _digest in rows]
+    elif disposition == "not_applicable":
+        problems.append(f"root Requirement {requirement} marks experience-design not_applicable")
+    else:
+        refs = [reference for reference, _digest in results]
+        for reference, digest in results:
+            _receipt, invalid = stage_package.verify(
+                docs, "experience-design", reference, digest,
+                require_committed=True, require_strict_current=True)
+            problems.extend(invalid)
+    if not refs and not problems:
         problems.append(f"{label} hold no application receipt")
-    if rows and not requirement_compile.valid_experience_receipt_refs([ref for ref, _digest in rows], docs):
-        problems.append(f"{label} are not the current application with its exact process receipts")
-    for reference, digest in rows:
-        _receipt, invalid = stage_package.verify(
-            docs, "experience-design", reference, digest,
-            require_committed=True, require_strict_current=True)
-        problems.extend(invalid)
+    elif refs and not requirement_compile.valid_experience_receipt_refs(refs, docs):
+        problems.insert(0, f"{label} are not the current application with its exact process receipts")
     if not problems:
         return []
     current = next((str(item["result_ref"]) for item in stage_package.candidates(docs, "experience-design")
                     if item.get("result_type") == "experience-application"), "")
+    if mode == "manual":
+        remedy = "begin a manual-mode backlog revision whose --input-ref values pin it"
+    elif disposition == "not_applicable":
+        remedy = "begin a requirement-mode backlog revision that pins it with --input-ref"
+    else:
+        remedy = (f"rebind {requirement}'s Experience stage through /requirement {requirement}, "
+                  "then begin a requirement-mode backlog revision that binds it")
     return [
         f"{', '.join(citing)} {'cites' if len(citing) == 1 else 'cite'} experience_refs, but the backlog "
         f"does not bind the globally current {current or 'application receipt, and none resolves now'}: "
-        + "; ".join(problems)
-        + "; bind it before handoff through a manual-mode backlog revision whose input_bindings pin it, "
-        "or through a Requirement whose Experience stage binds it"
+        + "; ".join(problems) + f"; {remedy}, before handoff"
     ]
 
 

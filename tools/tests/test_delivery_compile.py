@@ -1150,8 +1150,10 @@ class ScopeHandoffBindingTests(unittest.TestCase):
     EVIDENCE = "[[solution-design/decisions/fixture-api|Fixture API]]"
     TECHNICAL = {"work_kind": "technical", "experience_refs": [], "related_to": [EVIDENCE]}
     CHECKOUT_REF = "checkout:SCR-001@r1"
-    REMEDY = ("bind it before handoff through a manual-mode backlog revision whose input_bindings "
-              "pin it, or through a Requirement whose Experience stage binds it")
+    MANUAL_REMEDY = "begin a manual-mode backlog revision whose --input-ref values pin it, before handoff"
+    INPUT_REF_REMEDY = "begin a requirement-mode backlog revision that pins it with --input-ref, before handoff"
+    REBIND_REMEDY = ("rebind REQ-002's Experience stage through /requirement REQ-002, then begin a "
+                     "requirement-mode backlog revision that binds it, before handoff")
 
     def setUp(self):
         self.temporary = tempfile.TemporaryDirectory()
@@ -1388,7 +1390,8 @@ class ScopeHandoffBindingTests(unittest.TestCase):
             self.propose()
             self.assertEqual(self.approve_scope(), (1, [
                 f"AUTH-01 cites experience_refs, but the backlog does not bind the globally current "
-                f"{application}: root Requirement REQ-002 marks experience-design not_applicable; {self.REMEDY}",
+                f"{application}: root Requirement REQ-002 marks experience-design not_applicable; "
+                f"{self.INPUT_REF_REMEDY}",
             ]))
 
     def test_scope_refuses_a_root_requirement_that_binds_an_earlier_application(self):
@@ -1408,7 +1411,7 @@ class ScopeHandoffBindingTests(unittest.TestCase):
                 f"AUTH-01 cites experience_refs, but the backlog does not bind the globally current {current}: "
                 f"root Requirement REQ-002's Experience Stage Results are not the current application with its "
                 f"exact process receipts; experience-design receipt must use its canonical result_ref, got "
-                f"{earlier}; {self.REMEDY}",
+                f"{earlier}; {self.REBIND_REMEDY}",
             ]))
 
     def manual_mode(self) -> str:
@@ -1439,8 +1442,8 @@ class ScopeHandoffBindingTests(unittest.TestCase):
             self.assertEqual(self.approve_scope(), (1, [
                 f"AUTH-01 cites experience_refs, but the backlog does not bind the globally current {current}: "
                 f"the manual-mode input_bindings are not the current application with its exact process "
-                f"receipts; experience-design receipt must use its canonical result_ref, got {earlier}; "
-                f"{self.REMEDY}",
+                f"receipts; backlog/backlog.md input binding: experience-design receipt must use its "
+                f"canonical result_ref, got {earlier}; {self.MANUAL_REMEDY}",
             ]))
 
     def requirement_mode_with_bindings(self) -> tuple[str, str]:
@@ -1469,8 +1472,31 @@ class ScopeHandoffBindingTests(unittest.TestCase):
             self.assertEqual(self.approve_scope(), (1, [
                 f"AUTH-01 cites experience_refs, but the backlog does not bind the globally current {current}: "
                 f"the requirement-mode input_bindings are not the current application with its exact process "
-                f"receipts; experience-design receipt must use its canonical result_ref, got {earlier}; "
-                f"{self.REMEDY}",
+                f"receipts; backlog/backlog.md input binding: experience-design receipt must use its "
+                f"canonical result_ref, got {earlier}; {self.INPUT_REF_REMEDY}",
+            ]))
+
+    def test_scope_names_the_requirement_rebind_when_bindings_follow_an_earlier_root_result(self):
+        receipts = self.legacy_receipts()
+        earlier, earlier_hash = self.publish_application()
+        root = self.requirement("REQ-002", "account-screens", requirement_compile.STAGES)
+        self.commit("upstream packages")
+        for stage, ref, _digest in receipts:
+            requirement_compile.bind_stage(root, stage, ref)
+        requirement_compile.bind_stage(root, "experience-design", earlier)
+        bindings = [f"{stage}|{ref}|{digest}" for stage, ref, digest in receipts]
+        self.edit("backlog/backlog.md", input_bindings=sorted(
+            [*bindings, f"experience-design|{earlier}|{earlier_hash}"]))
+        with self.experience_refs_resolve():
+            self.requirement_mode(root, origin_mode="manual", experience_refs=[self.CHECKOUT_REF])
+            self.propose(historical_inputs=True)
+            current, _hash = self.publish_application()
+            self.commit("application-only revision")
+            self.assertEqual(self.approve_scope(), (1, [
+                f"AUTH-01 cites experience_refs, but the backlog does not bind the globally current {current}: "
+                f"the requirement-mode input_bindings are not the current application with its exact process "
+                f"receipts; backlog/backlog.md input binding: experience-design receipt must use its "
+                f"canonical result_ref, got {earlier}; {self.REBIND_REMEDY}",
             ]))
 
     def test_scope_accepts_a_selection_without_experience_refs_on_current_requirements(self):

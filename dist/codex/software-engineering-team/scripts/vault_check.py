@@ -1887,7 +1887,8 @@ def check_obsidian_payload(vault: Vault, findings: list[Finding],
                     "error", ".obsidian/types.json", 1, "obsidian_payload",
                     f"property '{key}' must be typed '{expected}'",
                     "types.json is derived from vault-policy.json"
-                    " property_types; restore the drifted entry"))
+                    " property_types; run the setup package refresh,"
+                    " which rewrites it after a package upgrade"))
         for key in policy.get("retired_managed_properties", []):
             if key in declared:
                 findings.append(Finding(

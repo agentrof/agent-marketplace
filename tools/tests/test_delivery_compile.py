@@ -1194,6 +1194,12 @@ class ScopeHandoffBindingTests(unittest.TestCase):
 
     def requirement(self, identifier: str, slug: str, applicable: tuple[str, ...] = ()) -> Path:
         """Approve one Requirement whose stages outside *applicable* are not_applicable."""
+        path = self.draft_requirement(identifier, slug, applicable)
+        requirement_compile.approve_requirement(path)
+        return path
+
+    def draft_requirement(self, identifier: str, slug: str, applicable: tuple[str, ...] = ()) -> Path:
+        """Author one approvable draft Requirement whose stages outside *applicable* are not_applicable."""
         path = requirement_compile.create_requirement(
             self.docs, slug, f"Account change {identifier}", "feature", "normal", identifier, [])
         props, body = requirement_compile.split_note(path)
@@ -1209,7 +1215,6 @@ class ScopeHandoffBindingTests(unittest.TestCase):
                 f"| {stage} | {'required' if stage in applicable else 'not_applicable'} |  | "
                 f"The {stage} impact was reviewed for this change. |")
         path.write_text(requirement_compile.render_note(props, body), encoding="utf-8")
-        requirement_compile.approve_requirement(path)
         return path
 
     def requirement_mode(self, root: Path, **story) -> None:
@@ -1290,8 +1295,8 @@ class ScopeHandoffBindingTests(unittest.TestCase):
             code = delivery_compile.approve_scope(type("Args", (), {"docs": str(self.docs), "delivery": "DLV-001"}))
         return code, json.loads(output.getvalue()).get("errors", [])
 
-    def stale_requirement_selection(self) -> Path:
-        """Select AUTH-01, which implements REQ-001, then revise the analysis REQ-001 bound."""
+    def implemented_selection(self) -> Path:
+        """Propose AUTH-01, which implements the current REQ-001, under root Requirement REQ-002."""
         implemented = self.requirement("REQ-001", "account-access", ("business-analysis",))
         requirement_compile.bind_stage(implemented, "business-analysis", "business-analysis/delivery/space")
         root = self.requirement("REQ-002", "pin-acquisition")
@@ -1299,6 +1304,11 @@ class ScopeHandoffBindingTests(unittest.TestCase):
                               implements=[f"[[requirements/{implemented.stem}|REQ-001]]"], **self.TECHNICAL)
         self.assertEqual(requirement_route.route(self.docs, "REQ-001")["action"], "backlog")
         self.propose()
+        return implemented
+
+    def stale_requirement_selection(self) -> Path:
+        """Select AUTH-01, which implements REQ-001, then revise the analysis REQ-001 bound."""
+        implemented = self.implemented_selection()
         space = self.docs / "business-analysis/delivery/space.md"
         space.write_text(space.read_text(encoding="utf-8") + "\nThe space gains a revised boundary.\n",
                          encoding="utf-8")
@@ -1321,6 +1331,54 @@ class ScopeHandoffBindingTests(unittest.TestCase):
         requirement_compile.bind_stage(implemented, "business-analysis", "business-analysis/delivery/space")
         self.commit("rebind REQ-001")
         self.assertEqual(self.approve_scope(), (0, []))
+
+    def test_scope_routes_a_story_whose_requirement_is_superseded_to_a_backlog_revision(self):
+        implemented = self.implemented_selection()
+        replacement = self.draft_requirement("REQ-003", "account-access-v2")
+        props, body = requirement_compile.split_note(replacement)
+        props["supersedes"] = [f"[[requirements/{implemented.stem}|REQ-001]]"]
+        replacement.write_text(requirement_compile.render_note(props, body), encoding="utf-8")
+        requirement_compile.supersede_requirement(implemented, replacement)
+        self.commit("supersede REQ-001 with REQ-003")
+        self.assertEqual(requirement_route.route(self.docs, "REQ-001")["actions"], ["inspect"])
+        self.assertEqual(self.approve_scope(), (1, [
+            "AUTH-01 implements REQ-001, which is superseded by REQ-003 and cannot be rebound; begin a "
+            "backlog revision that re-traces AUTH-01 to REQ-003 or drops it, before handoff",
+        ]))
+
+    def terminal_selection(self, status: str, reason: str) -> None:
+        """Propose AUTH-01, then end the Requirement it implements with *status*."""
+        implemented = self.implemented_selection()
+        requirement_compile.transition_terminal(implemented, status, reason, [])
+        self.commit(f"end REQ-001 as {status}")
+        self.assertEqual(requirement_route.route(self.docs, "REQ-001")["actions"], ["inspect"])
+
+    def test_scope_routes_a_story_whose_requirement_is_withdrawn_to_a_backlog_revision(self):
+        self.terminal_selection("withdrawn", "The account change is no longer requested.")
+        self.assertEqual(self.approve_scope(), (1, [
+            "AUTH-01 implements REQ-001, which is withdrawn and cannot be rebound; begin a backlog revision "
+            "that re-traces AUTH-01 to a current Requirement or drops it, before handoff",
+        ]))
+
+    def test_scope_routes_a_story_whose_requirement_is_resolved_without_change_to_a_backlog_revision(self):
+        self.terminal_selection("resolved_no_change", "The approved account boundary already holds.")
+        self.assertEqual(self.approve_scope(), (1, [
+            "AUTH-01 implements REQ-001, which is resolved_no_change and cannot be rebound; begin a backlog "
+            "revision that re-traces AUTH-01 to a current Requirement or drops it, before handoff",
+        ]))
+
+    def test_scope_names_the_drift_of_a_requirement_edited_after_approval(self):
+        implemented = self.implemented_selection()
+        props, body = requirement_compile.split_note(implemented)
+        implemented.write_text(requirement_compile.render_note(props, body.replace(
+            "Customers need one bounded account change.", "Customers need two bounded account changes.")),
+            encoding="utf-8")
+        self.commit("edit REQ-001 after approval")
+        self.assertEqual(self.approve_scope(), (1, [
+            "AUTH-01 implements REQ-001, which does not route to backlog: stage requirement, action "
+            "requirement, reason: approved source_hash is stale; rebind it through the Requirement entry, "
+            "/requirement REQ-001, before handoff",
+        ]))
 
     def test_scope_refuses_experience_refs_when_the_root_requirement_marks_experience_not_applicable(self):
         application, _hash = self.publish_application()

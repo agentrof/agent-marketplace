@@ -14,11 +14,13 @@ reservation, the Delivery ID, goal-derived slug and scope hash are immutable.
 
 Scope approval checks the selection's upstream bindings before the handoff.
 It refuses a selected Story whose implemented Requirement does not route to
-backlog; rebind that Requirement through `/requirement REQ-###` first. When a
-selected Story cites `experience_refs`, the backlog must bind the globally
-current `application@rN` through its compiler-owned `input_bindings` (manual
-mode, or a requirement-mode backlog that carries them) or its root
-Requirement's Experience Stage Results; otherwise approval names the current
-receipt and refuses until a manual-mode backlog revision pins it or a
-Requirement's Experience stage binds it. A reserved Delivery keeps verifying
-its pinned inputs historically.
+backlog; rebind that Requirement through `/requirement REQ-###` first. A
+superseded, withdrawn or `resolved_no_change` Requirement cannot be rebound, so
+a backlog revision re-traces the Story to a current Requirement, such as the
+named successor, or drops it. When a selected Story cites `experience_refs`,
+the backlog must bind the globally current `application@rN` through its
+compiler-owned `input_bindings` (manual mode, or a requirement-mode backlog
+that carries them) or its root Requirement's Experience Stage Results;
+otherwise approval names the current receipt and refuses until a manual-mode
+backlog revision pins it or a Requirement's Experience stage binds it. A
+reserved Delivery keeps verifying its pinned inputs historically.

@@ -812,7 +812,11 @@ def check_delivery(args) -> int:
 
 
 def implemented_requirement_findings(docs: Path, stories: dict[str, dict]) -> list[str]:
-    """Require every Requirement a selected Story implements to route to backlog."""
+    """Require every Requirement a selected Story implements to route to backlog.
+
+    The Requirement entry only inspects a terminal Requirement, so that finding
+    routes to a backlog revision that re-traces or drops the Story instead.
+    """
     paths = {f"requirements/{path.stem}": path for path in requirement_compile.requirement_paths(docs)}
     routes: dict[str, dict] = {}
     errors: list[str] = []
@@ -830,7 +834,27 @@ def implemented_requirement_findings(docs: Path, stories: dict[str, dict]) -> li
             status = routing.get("status")
             if status == "approved" and routing.get("action") == "backlog":
                 continue
-            reason = routing.get("reason") or ("" if status == "approved" else f"Requirement status is {status}")
+            if status in requirement_compile.TERMINAL_STATUSES:
+                successor = ""
+                if status == "superseded":
+                    relation = requirement_compile.split_note(path)[0].get("superseded_by", "")
+                    target = backlog_compile.split_wikilink(str(relation))
+                    successor = requirement_compile.requirement_id(paths[target[0]]) \
+                        if target and target[0] in paths else ""
+                errors.append(
+                    f"{story_id} implements {identifier}, which is {status}"
+                    + (f" by {successor}" if successor else "")
+                    + f" and cannot be rebound; begin a backlog revision that re-traces {story_id} "
+                    f"to {successor or 'a current Requirement'} or drops it, before handoff"
+                )
+                continue
+            reason = routing.get("reason", "")
+            if not reason and status != "approved":
+                reason = f"Requirement status is {status}"
+            elif not reason and routing.get("stage") == "requirement":
+                # An approved Requirement whose semantic hash drifted routes to its own
+                # stage with no reason; the Requirement compiler names the drift.
+                reason = "; ".join(requirement_compile.requirement_findings(path, require_approved=True))
             errors.append(
                 f"{story_id} implements {identifier}, which does not route to backlog: "
                 f"stage {routing.get('stage', 'requirement')}, action {routing.get('action', 'requirement')}"

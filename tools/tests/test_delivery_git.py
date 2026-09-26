@@ -713,10 +713,16 @@ class DeliveryGitTests(unittest.TestCase):
             exit_code = delivery_git.main(["open-pr", "--project-root", str(project), "--delivery", "DLV-001"])
         return exit_code, json.loads(output.getvalue())
 
-    def republish_review(self, project: Path, docs: Path) -> None:
-        """Invalidate the published Review, approve it again on the new Integration head and publish it."""
+    def republish_review(self, project: Path, docs: Path, authored: dict | None = None) -> None:
+        """Invalidate the published Review, approve it again on the new Integration head, from a
+        draft with the *authored* sections when given, and publish it."""
         delivery_git.invalidate_delivery_review(project, "DLV-001", "REVIEW_FINDING", "sha256:" + "0" * 64)
         head = delivery_git.remote_oid(project, "origin", delivery_git.canonical_refs("DLV-001")["integration"])
+        if authored is not None:
+            path = delivery_compile.find_delivery(docs, "DLV-001") / "delivery-review.md"
+            path.write_text(delivery_compile.frontmatter(
+                {"type": "delivery-review", "status": "draft"},
+                delivery_compile.body_for("delivery-review", "Draft review", authored)), encoding="utf-8")
         self.assertEqual(delivery_compile.approve_review(type("Args", (), {
             "docs": str(docs), "delivery": "DLV-001",
             "reviewed_commit": head, "reviewed_integration_commit": head,
@@ -1276,6 +1282,30 @@ class DeliveryGitTests(unittest.TestCase):
                     project, cancelled["review"], review, delivery_compile.split_note)[1]
                 self.assertNotEqual(approval, cancellation)
                 self.assertEqual(state["body"], cancellation)
+
+    def test_a_pr_that_already_exists_gets_the_review_at_its_intent_as_its_body(self):
+        """A Review published again with new text becomes the body of the PR that already exists,
+        whether open-pr adopts that PR or a new PR intent finds it, instead of the earlier Review."""
+        deviations = "Session expiry was dropped after the finding."
+        for prepared in (False, True):
+            with self.subTest(prepared=prepared):
+                temporary, project, docs, _product_tip, _intent = self.prepare_pr_intent()
+                self.addCleanup(remove_temporary, temporary)
+                review = delivery_compile.find_delivery(docs, "DLV-001").relative_to(project).as_posix() + "/delivery-review.md"
+                state: dict = {}
+                with mock.patch("delivery_provider.GitHubProvider", self.fake_provider_type(state)):
+                    delivery_git.open_pr(project, "DLV-001")
+                    earlier = state["body"]
+                    self.republish_review(project, docs, {"Deviations": deviations})
+                    if prepared:
+                        delivery_git.prepare_pr_creation(project, "DLV-001")
+                    reopened = delivery_git.open_pr(project, "DLV-001")
+                self.assertFalse(reopened["provider_call"])
+                republished = delivery_git.split_remote_note(
+                    project, reopened["integration"], review, delivery_compile.split_note)[1]
+                self.assertNotIn(deviations, earlier)
+                self.assertIn(deviations, republished)
+                self.assertEqual(state["body"], republished)
 
     def test_delivery_cancelled_before_its_review_reaches_the_target_through_its_pr(self):
         """A Delivery cancelled at its scope reservation never has a local Review. open-pr opens,

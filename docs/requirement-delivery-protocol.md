@@ -278,10 +278,17 @@ mutation is legal until that conversion succeeds.
 refs. Starting an Item requires the current plan, source hashes, target,
 predecessors, claims, Fence and one free Slot to pass. Each Item its
 `execution_after` names must be integrated first: its remote Item tip records
-`integrated` and the Integration contains that exact tip. Before the atomic
-remote transaction, the coordinator writes an ignored pending receipt. It
-promotes the receipt only after Item and Slot refs both equal the accepted
-candidate, then creates the Item worktree from that exact OID.
+`integrated` and the Integration contains that exact tip. Each Story its
+`waits_for` names is met the same way against this Delivery's Integration,
+which for a Story of another Delivery means that Delivery merged into the
+target and this one refreshed onto it. The `Agentrof-Delivery` trailer of the
+Story's Item tip names the package that records its status. A Story no
+Delivery has claimed, or one its Delivery cancelled, fails closed with
+`DELIVERY_DEPENDENCY_UNMET`, and the refusal names a backlog revision as the
+way out. Before the atomic remote transaction, the coordinator writes an
+ignored pending receipt. It promotes the receipt only after Item and Slot refs
+both equal the accepted candidate, then creates the Item worktree from that
+exact OID.
 
 An active writer may push only while its receipt epoch matches the remote Item
 and Slot lineage. Pause requires a clean worktree whose local head equals the

@@ -1,0 +1,6 @@
+{
+  "summary": "operation_compile.py init no longer writes an empty source_hash or empty command fields into a new Verification or Environment Contract. The vault check rejected each of them as a property type error, and the not-applicable mutation and dependency audit commands carried two of those errors into the approved contract. A command now stays absent until its writer declares it, and approval still names a required command that is missing.",
+  "components": {
+    "software-engineering-team": "patch"
+  }
+}

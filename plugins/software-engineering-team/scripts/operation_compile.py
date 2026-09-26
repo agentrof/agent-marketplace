@@ -229,22 +229,24 @@ def check_contract(docs: Path, kind: str) -> tuple[dict, list[str]]:
 
 
 def initial_props(kind: str, refs: list[str]) -> dict:
+    # The hash and the commands start absent: an empty value parses as a
+    # list, which the vault rejects for these text properties.
     common = {
         "type": TYPE_FOR[kind], "title": TYPE_FOR[kind].replace("-", " ").title(),
         "status": "draft", "revision": 1, "constrained_by": refs,
-        "source_hash": "", "tags": [f"doc/{TYPE_FOR[kind]}", "status/draft"],
+        "tags": [f"doc/{TYPE_FOR[kind]}", "status/draft"],
     }
     if kind == "verification":
         return common | {
-            "test_command": "", "test_workdir": ".",
-            "mutation_disposition": "not_applicable", "mutation_command": "",
+            "test_workdir": ".",
+            "mutation_disposition": "not_applicable",
             "mutation_workdir": ".", "mutation_rationale": "Describe why mutation testing is not applicable.",
-            "dependency_audit_disposition": "not_applicable", "dependency_audit_command": "",
+            "dependency_audit_disposition": "not_applicable",
             "dependency_audit_workdir": ".", "dependency_audit_rationale": "Describe why dependency auditing is not applicable.",
             "pull_request_check_source": PULL_REQUEST_CHECK_SOURCES[0],
         }
     return common | {
-        "env_command": "", "env_workdir": ".", "scenarios": ["default"],
+        "env_workdir": ".", "scenarios": ["default"],
         "tolerated_warnings": [], "service_catalog": [],
     }
 

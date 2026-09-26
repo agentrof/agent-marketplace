@@ -28,6 +28,15 @@ def frontmatter(props: dict, body: str = "# Note\n") -> str:
     return "\n".join(lines + ["---", "", body])
 
 
+def declare(path: Path, **fields: str) -> None:
+    """Declare fields in an Operation Contract draft, as its writer does."""
+    sys.path.insert(0, str(SCRIPTS))
+    import operation_compile
+
+    props, body = operation_compile.parse(path)
+    path.write_text(operation_compile.render({**props, **fields}, body), encoding="utf-8")
+
+
 class OperationGovernanceTests(unittest.TestCase):
     def invoke(self, script: Path, *args: str):
         return subprocess.run([sys.executable, str(script), *args], cwd=ROOT,
@@ -60,11 +69,8 @@ class OperationGovernanceTests(unittest.TestCase):
                                    "--kind", "verification", "--constrained-by", ref)
             self.assertEqual(initialized.returncode, 0, initialized.stdout + initialized.stderr)
             contract = docs / "operation" / "verification-contract.md"
-            text = contract.read_text(encoding="utf-8")
-            text = text.replace("test_command: \n", "test_command: make test\n")
-            text = text.replace("dependency_audit_disposition: not_applicable", "dependency_audit_disposition: required")
-            text = text.replace("dependency_audit_command: \n", "dependency_audit_command: make audit\n")
-            contract.write_text(text, encoding="utf-8")
+            declare(contract, test_command="make test", dependency_audit_disposition="required",
+                    dependency_audit_command="make audit")
             approved = self.invoke(OPERATION, "approve", "--docs", str(docs), "--kind", "verification")
             self.assertEqual(approved.returncode, 0, approved.stdout + approved.stderr)
             output = docs.parent.parent / ".github" / "workflows" / "tests.yml"
@@ -171,8 +177,7 @@ class OperationGovernanceTests(unittest.TestCase):
                                    "--kind", "environment", "--constrained-by", ref)
             self.assertEqual(initialized.returncode, 0, initialized.stdout + initialized.stderr)
             contract = docs / "operation" / "environment-contract.md"
-            contract.write_text(contract.read_text(encoding="utf-8").replace(
-                "env_command: \n", "env_command: ./tools/env\n"), encoding="utf-8")
+            declare(contract, env_command="./tools/env")
             approved = self.invoke(OPERATION, "approve", "--docs", str(docs), "--kind", "environment")
             self.assertEqual(approved.returncode, 0, approved.stdout + approved.stderr)
             revised = self.invoke(OPERATION, "begin-revision", "--docs", str(docs), "--kind", "environment")
@@ -187,6 +192,37 @@ class OperationGovernanceTests(unittest.TestCase):
             self.assertTrue(value["current"])
             revised = self.invoke(GOVERNANCE, "begin-revision", "--docs", str(docs))
             self.assertEqual(revised.returncode, 0, revised.stdout + revised.stderr)
+
+    def test_init_leaves_no_empty_text_property_for_the_vault_to_reject(self):
+        """An unset command, like an unset hash, is absent, not present and empty."""
+        sys.path.insert(0, str(SCRIPTS))
+        import operation_compile
+        import vault_check
+
+        policy = vault_check.load_policy(vault_check.DEFAULT_POLICY)
+
+        def operation_findings(docs):
+            findings = []
+            vault_check.check_frontmatter_props(vault_check.build_vault(docs, policy), findings)
+            return [(finding.path, finding.message) for finding in findings
+                    if finding.path.startswith("operation/")]
+
+        for kind, command_field in (("verification", "test_command"),
+                                    ("environment", "env_command")):
+            with self.subTest(kind=kind), tempfile.TemporaryDirectory() as temporary:
+                docs = Path(temporary) / "workspace/docs"
+                ref = self.approved_solution(docs)
+                args = ("--docs", str(docs), "--kind", kind)
+                initialized = self.invoke(OPERATION, "init", *args, "--constrained-by", f"[[{ref}|SD-001]]")
+                self.assertEqual(initialized.returncode, 0, initialized.stdout + initialized.stderr)
+                self.assertEqual(operation_findings(docs), [])
+                checked = self.invoke(OPERATION, "check", *args)
+                self.assertEqual(checked.returncode, 0, checked.stdout + checked.stderr)
+                # Approval keeps absent the commands the writer left unset, such as not-applicable ones.
+                declare(operation_compile.contract_path(docs, kind), **{command_field: f"make {kind}"})
+                approved = self.invoke(OPERATION, "approve", *args)
+                self.assertEqual(approved.returncode, 0, approved.stdout + approved.stderr)
+                self.assertEqual(operation_findings(docs), [])
 
     def test_begin_revision_leaves_no_empty_hash_for_the_vault_to_reject(self):
         """An unset hash is absent, not present and empty."""
@@ -209,9 +245,7 @@ class OperationGovernanceTests(unittest.TestCase):
                     initialized.stdout + initialized.stderr,
                 )
                 path = operation_compile.contract_path(docs, kind)
-                path.write_text(path.read_text(encoding="utf-8").replace(
-                    f"{command_field}: \n", f"{command_field}: make {kind}\n",
-                ), encoding="utf-8")
+                declare(path, **{command_field: f"make {kind}"})
                 approved = self.invoke(OPERATION, "approve", *args)
                 self.assertEqual(
                     approved.returncode, 0, approved.stdout + approved.stderr,
@@ -265,8 +299,7 @@ class OperationGovernanceTests(unittest.TestCase):
                     return props, body
 
                 _props, initial_body = assert_quoted_relation()
-                path.write_text(path.read_text(encoding="utf-8").replace(
-                    f"{command_field}: \n", f"{command_field}: make {kind}\n"), encoding="utf-8")
+                declare(path, **{command_field: f"make {kind}"})
                 for revision in (1, 2):
                     approved = self.invoke(OPERATION, "approve", *args)
                     self.assertEqual(approved.returncode, 0, approved.stdout + approved.stderr)

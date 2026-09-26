@@ -420,8 +420,8 @@ class DeliveryGitTests(unittest.TestCase):
 
     def test_worktree_paths_have_no_branch_or_worktree_for_fence_slot(self):
         paths = delivery_git.worktree_paths(Path("/project"), "DLV-001", "AUTH-01")
-        self.assertEqual(str(paths["integration"]), "/project/.agentrof/agent-marketplace/.runtime/worktrees/dlv-001/integration")
-        self.assertEqual(str(paths["item"]), "/project/.agentrof/agent-marketplace/.runtime/worktrees/dlv-001/items/auth-01")
+        self.assertEqual(paths["integration"].as_posix(), "/project/.agentrof/agent-marketplace/.runtime/worktrees/dlv-001/integration")
+        self.assertEqual(paths["item"].as_posix(), "/project/.agentrof/agent-marketplace/.runtime/worktrees/dlv-001/items/auth-01")
 
     def test_writer_receipt_is_exact_and_same_candidate_is_idempotent(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -651,8 +651,13 @@ class DeliveryGitTests(unittest.TestCase):
         finally:
             remove_temporary(temporary)
     def test_target_reauthorization_is_fail_closed_without_zero_effect_proof(self):
-        with self.assertRaises(RuntimeError):
-            delivery_git.reauthorize_target_update(Path("/tmp"))
+        # A directory that exists on every host and that no checkout encloses.
+        with tempfile.TemporaryDirectory() as outside, \
+                mock.patch.dict("os.environ", {"GIT_CEILING_DIRECTORIES": outside}):
+            project = Path(outside) / "project"
+            project.mkdir()
+            with self.assertRaises(RuntimeError):
+                delivery_git.reauthorize_target_update(project)
 
     def test_prepared_target_update_reauthorizes_atomically_after_target_drift(self):
         temporary, project = self.make_project()
@@ -1923,7 +1928,8 @@ class DeliveryGitTests(unittest.TestCase):
         active = delivery_git.start_item(project, "DLV-001", "AUTH-01")
         worktree = Path(active["worktree"])
         item = worktree / directory.relative_to(project) / "items/auth-01/item.md"
-        original = item.read_bytes()
+        # Text mode folds native CRLF from checkout or render, so the body check holds on every OS.
+        original = item.read_text(encoding="utf-8")
         before, before_body = delivery_compile.split_note(item)
         active_docs = worktree / "workspace/docs"
         self.assertEqual(architecture_compile.init_root(active_docs, "AUTH-01"), 0)
@@ -1934,7 +1940,7 @@ class DeliveryGitTests(unittest.TestCase):
         self.assertEqual(props["item_plan_hash"], before["item_plan_hash"])
         self.assertEqual(props["source_hash"], delivery_compile.content_hash(props, body))
         self.assertEqual(body, before_body)
-        self.assertEqual(item.read_bytes().split(b"\n---\n", 1)[1], original.split(b"\n---\n", 1)[1])
+        self.assertEqual(item.read_text(encoding="utf-8").split("\n---\n", 1)[1], original.split("\n---\n", 1)[1])
         self.assertEqual({key: value for key, value in props.items() if key not in {"source_hash", "architecture_delta_hash"}},
                          {key: value for key, value in before.items() if key not in {"source_hash", "architecture_delta_hash"}})
         (worktree / "src").mkdir()
@@ -2052,14 +2058,19 @@ class DeliveryGitTests(unittest.TestCase):
             "new_item": lambda: (package / "items/extra").mkdir(),
             "deleted_evidence": lambda: (item.parent / "verification.md").unlink(),
             "non_markdown": lambda: (package / "extra\ncontrol.json").write_text("{}"),
-            "mode": lambda: item.chmod(0o755),
-            "symlink": lambda: (item.unlink(), item.symlink_to("code-review.md")),
+            # Native Windows files carry no executable bit, so the index records the
+            # mode there; a POSIX checkout records it from the file as well.
+            "mode": lambda: (item.chmod(0o755), delivery_git.run_git(
+                worktree, "update-index", "--chmod=+x", item.relative_to(worktree).as_posix())),
+            "symlink": lambda: (item.unlink(), self.symlink_or_skip(item, "code-review.md")),
             "missing_hash": lambda: mutate_note(item, "architecture_delta_hash", "none"),
             "wrong_hash": lambda: mutate_note(item, "architecture_delta_hash", "sha256:" + "0" * 64),
             "source_hash": lambda: item.write_text(item.read_text().replace("source_hash: sha256:", "source_hash: broken:")),
         }
         for label, mutation in mutations.items():
             with self.subTest(label=label):
+                if label == "non_markdown" and os.name == "nt":
+                    self.skipTest("POSIX opaque filename contract: native Windows refuses a newline in a file name")
                 delivery_git.run_git(worktree, "reset", "--hard", clean)
                 delivery_git.run_git(worktree, "clean", "-fd")
                 mutation()
@@ -2099,11 +2110,13 @@ class DeliveryGitTests(unittest.TestCase):
                     lookalike.parent.mkdir(parents=True)
                     lookalike.write_text("untracked report lookalike\n")
                 elif label == "symlink":
-                    review.unlink(); review.symlink_to(worktree / "src/auth.py")
+                    review.unlink(); self.symlink_or_skip(review, worktree / "src/auth.py")
                 elif label == "hardlink":
                     os.link(review, project / "report-hardlink.md")
                 else:
                     review.chmod(0o755)
+                    if not review.stat().st_mode & 0o111:
+                        self.skipTest("fixture filesystem has no executable mode")
                 before = review.read_bytes()
                 self.assertNotEqual(self.approve_item_evidence(str(worktree)), 0)
                 self.assertEqual(review.read_bytes(), before)
@@ -2156,7 +2169,7 @@ class DeliveryGitTests(unittest.TestCase):
                 elif label == "missing_seal":
                     (architecture / "_ledger/records/IFC-001/r1.json").unlink()
                 elif label == "symlink_record":
-                    record.unlink(); record.symlink_to("../../../component.md")
+                    record.unlink(); self.symlink_or_skip(record, "../../../component.md")
                 elif label == "stale_record":
                     record.write_text(record.read_text() + "\nChanged after seal.\n")
                 else:
@@ -2447,7 +2460,7 @@ class DeliveryGitTests(unittest.TestCase):
                 path.write_text("Integration generated view\n", encoding="utf-8")
                 ours = delivery_git.commit_tree(project, base, [relative], "Integration projection", {})
                 path.unlink()
-                path.symlink_to("unrelated-target")
+                self.symlink_or_skip(path, "unrelated-target")
                 theirs = delivery_git.commit_tree(project, base, [relative], "Target symlink", {})
                 with self.assertRaisesRegex(RuntimeError, "unmerged"):
                     delivery_git.merge_candidate(project, ours, theirs, "Reject structural conflict", {}, delivery_projections=True)

@@ -23,6 +23,13 @@ evidence was produced against unless the approval names it with `--reopen`;
 that Item is rebound to the current contracts, stays integrated, and can then
 be reopened.
 
+Approval, and every re-approval, also refuses until a committed workflow will
+run on the Delivery PR, because the final merge needs a green provider check.
+When none exists, offer the one that `operation_compile.py render-ci`
+materializes; it counts once it is committed and pushed to the target branch.
+`skill-content/setup/references/ci-bootstrap.md` defines which workflows and
+refs count.
+
 Every Item also declares `architecture_impact: required|not_applicable`, its
 exact Solution component refs, requested architecture record kinds and a
 reason. A required impact places `software_architect` first in the Item role

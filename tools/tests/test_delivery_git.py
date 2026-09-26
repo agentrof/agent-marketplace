@@ -11,7 +11,7 @@ import subprocess
 import tempfile
 import unittest
 from unittest import mock
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "plugins" / "software-engineering-team" / "scripts"))
@@ -32,6 +32,26 @@ def write_pull_request_workflow(project: Path) -> None:
     workflow = project / ".github" / "workflows" / "tests.yml"
     workflow.parent.mkdir(parents=True)
     workflow.write_text("on:\n  pull_request:\n", encoding="utf-8")
+
+
+class WindowsVaultPath(type(Path())):
+    """A local path whose path relative to another path of this type renders as on native Windows."""
+
+    def relative_to(self, *other):
+        relative = super().relative_to(*other)
+        if other and isinstance(other[0], WindowsVaultPath):
+            return PureWindowsPath(*relative.parts)
+        return relative
+
+
+def windows_vault_paths():
+    """Render paths inside the Delivery vault as native Windows renders them.
+
+    The files stay real. A path relative to the Git checkout keeps its
+    separator: its Windows handling is #236.
+    """
+    docs_root = delivery_compile.docs_root
+    return mock.patch.object(delivery_compile, "docs_root", lambda value: WindowsVaultPath(docs_root(value)))
 
 
 class DeliveryGitTests(unittest.TestCase):
@@ -632,6 +652,33 @@ class DeliveryGitTests(unittest.TestCase):
             self.assertIn("|DLV-001]] — `cancelled`", published_map)
             tree = delivery_git.run_git(project, "rev-parse", integration + "^{tree}")
             self.assertEqual(delivery_git.delivery_projection_changes(project, tree), {})
+
+    def test_cancellation_review_links_stay_posix_on_a_host_with_backslash_separators(self):
+        """The cancellation Review links its Delivery with forward slashes on every host (#228)."""
+        temporary, project = self.make_project()
+        self.addCleanup(remove_temporary, temporary)
+        docs = project / "workspace/docs"
+        make_approved_backlog(docs)
+        dod = type("Args", (), {"docs": str(docs), "title": "Project", "file": None})
+        self.assertEqual(delivery_compile.init_dod(dod), 0)
+        self.assertEqual(delivery_compile.approve_dod(dod), 0)
+        init = type("Args", (), {"docs": str(docs), "id": None, "slug": "auth",
+                                 "goal": "Authenticate", "outcome": None,
+                                 "target_branch": "main", "story": ["AUTH-01"]})
+        self.assertEqual(delivery_compile.init_delivery(init), 0)
+        self.assertEqual(delivery_compile.approve_scope(
+            type("Args", (), {"docs": str(docs), "delivery": "DLV-001"})), 0)
+        delivery_git.run_git(project, "add", "workspace")
+        delivery_git.run_git(project, "commit", "-qm", "Approve scope")
+        delivery_git.run_git(project, "push", "-q")
+        delivery_git.reserve_delivery(project, "DLV-001")
+        with windows_vault_paths():
+            cancelled = delivery_git.cancel_delivery(project, "DLV-001", "Request withdrawn")
+        review = delivery_git.run_git(project, "show", cancelled["review"]
+                                      + ":workspace/docs/delivery/deliveries/dlv-001-auth/delivery-review.md")
+        self.assertNotIn("\\", review)
+        # derives_from and the Navigation section
+        self.assertEqual(review.count("[[delivery/deliveries/dlv-001-auth/delivery|DLV-001]]"), 2, review)
 
     def test_ref_free_reservation_pushes_fence_and_integration_atomically(self):
         with temporary_directory() as temporary:

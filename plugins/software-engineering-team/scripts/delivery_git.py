@@ -1705,7 +1705,7 @@ def cancel_delivery(project_root: Path, delivery_id: str, reason: str,
     review_props = {
         "type": "delivery-review", "id": f"{delivery_id}-REVIEW",
         "title": f"Outcome review for {review_subject}",
-        "status": "approved", "derives_from": [f"[[{delivery_path_value.relative_to(docs).with_suffix('')}|{delivery_id}]]"],
+        "status": "approved", "derives_from": [f"[[{delivery_path_value.relative_to(docs).with_suffix('').as_posix()}|{delivery_id}]]"],
         "scope_hash": scope_hash, "cancellation_intent_hash": intent_hash,
         "cancellation_projection_hash": projection_hash, "reviewed_integration_commit": finalization,
         "approved_at_utc": datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z"),
@@ -1715,7 +1715,7 @@ def cancel_delivery(project_root: Path, delivery_id: str, reason: str,
         "Goal Outcome": remote_props.get("goal", ""),
         "Verdict": "Cancellation approved and finalized with exact Item dispositions.",
         "Cancellation": reason.strip(), "Cancellation Projection": _canonical_json(projection),
-        "Navigation": f"[[{delivery_path_value.relative_to(docs).with_suffix('')}|{delivery_id}]]",
+        "Navigation": f"[[{delivery_path_value.relative_to(docs).with_suffix('').as_posix()}|{delivery_id}]]",
     })
     review_props["approval_hash"] = content_hash(review_props, review_body, exclude={"status", "approved_at_utc", "source_hash", "approval_hash"})
     review_props["source_hash"] = content_hash(review_props, review_body)

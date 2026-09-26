@@ -11,7 +11,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
-from pathlib import Path, PureWindowsPath
+from pathlib import Path
 from unittest import mock
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -1004,12 +1004,7 @@ class DeliveryCompilerTests(unittest.TestCase):
 
     def test_vault_paths_stay_posix_on_a_host_with_backslash_separators(self):
         """A vault path uses forward slashes on every host (#228)."""
-
-        # Native Windows renders a relative path with backslashes; the files stay real.
-        class WindowsRelative(type(self.docs)):
-            def relative_to(self, *other):
-                return PureWindowsPath(*super().relative_to(*other).parts)
-
+        from test_delivery_git import WindowsVaultPath, windows_vault_paths
         self.approve_verification_contract()
         self.approve_dod()
         init = type("Args", (), {"docs": str(self.docs), "id": None, "slug": "auth",
@@ -1017,13 +1012,12 @@ class DeliveryCompilerTests(unittest.TestCase):
                                  "story": ["AUTH-01"]})
         args = type("Args", (), {"docs": str(self.docs), "delivery": "DLV-001",
                                  "reviewed_commit": "a" * 40, "reviewed_integration_commit": "b" * 40})
-        docs_root = delivery_compile.docs_root
-        with mock.patch.object(delivery_compile, "docs_root", lambda value: WindowsRelative(docs_root(value))):
+        with windows_vault_paths():
             self.assertEqual(delivery_compile.init_delivery(init), 0)
             self.assertEqual(delivery_compile.approve_scope(args), 0)
             root = delivery_compile.find_delivery(delivery_compile.docs_root(str(self.docs)), "DLV-001")
             # Paths the compiler finds by globbing must carry the simulation too.
-            self.assertIsInstance(root, WindowsRelative)
+            self.assertIsInstance(root, WindowsVaultPath)
             item = root / "items/auth-01/item.md"
             props, body = delivery_compile.split_note(item)
             props["path_claims"] = ["src/auth.py"]

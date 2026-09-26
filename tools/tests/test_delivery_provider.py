@@ -13,6 +13,7 @@ from unittest.mock import patch
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "plugins" / "software-engineering-team" / "scripts"))
 import delivery_provider  # noqa: E402
+import delivery_result  # noqa: E402
 
 
 class DeliveryProviderTests(unittest.TestCase):
@@ -195,6 +196,18 @@ class DeliveryProviderTests(unittest.TestCase):
         with self.assertRaisesRegex(delivery_provider.ProviderError,
                                     r"not green: preview \(unsupported type Deployment\)"):
             provider.require_green_checks({"statusCheckRollup": [self.check_run("check"), unknown]})
+
+    def test_every_check_refusal_reports_the_required_check_finding(self):
+        provider = self.github_provider()
+        for rollup in (None, [], ["not an entry"], [self.check_run("tests", "IN_PROGRESS", "")],
+                       [self.check_run("release-pr-policy", conclusion="SKIPPED")]):
+            with self.subTest(rollup=rollup):
+                with self.assertRaises(delivery_provider.ProviderError) as refused:
+                    provider.require_green_checks({"statusCheckRollup": rollup})
+                result = delivery_result.from_raw("merge-pr", {"ok": False, "errors": [str(refused.exception)]})
+                self.assertEqual([finding["code"] for finding in result["findings"]],
+                                 ["DELIVERY_REQUIRED_CHECK_FAILED"])
+                self.assertTrue(result["findings"][0]["message"].startswith("GitHub required check"))
 
 
 if __name__ == "__main__":

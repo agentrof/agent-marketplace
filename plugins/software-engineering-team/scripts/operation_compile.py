@@ -20,7 +20,9 @@ import tempfile
 from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
 
-from ba_compile import parse_frontmatter, without_generated_relations
+from ba_compile import (
+    frontmatter_item, frontmatter_scalar, parse_frontmatter, without_generated_relations,
+)
 import stage_package
 
 
@@ -77,22 +79,14 @@ def parse(path: Path) -> tuple[dict, str]:
     return props, "\n".join(path.read_text(encoding="utf-8").splitlines()[body_line - 1:]).strip()
 
 
-def scalar(value: object) -> str:
-    if isinstance(value, list):
-        return "\n".join(f"  - {scalar(item)}" for item in value)
-    if isinstance(value, str) and value.startswith("[["):
-        return f'"{value}"'
-    return str(value)
-
-
 def render(props: dict, body: str) -> str:
     lines = ["---"]
     for key, value in props.items():
         if isinstance(value, list):
             lines.append(f"{key}:")
-            lines.extend(f"  - {scalar(item)}" for item in value)
+            lines.extend(f"  - {frontmatter_item(item)}" for item in value)
         else:
-            lines.append(f"{key}: {scalar(value)}")
+            lines.append(f"{key}: {frontmatter_scalar(value)}")
     lines.extend(["---", "", body.strip(), ""])
     return "\n".join(lines)
 

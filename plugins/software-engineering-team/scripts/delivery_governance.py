@@ -10,7 +10,9 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
-from ba_compile import parse_frontmatter, without_generated_relations
+from ba_compile import (
+    frontmatter_item, frontmatter_scalar, parse_frontmatter, without_generated_relations,
+)
 
 
 RELATIVE = Path("delivery/governance/governance.md")
@@ -44,9 +46,9 @@ def render(props: dict, body: str) -> str:
     for key, value in props.items():
         if isinstance(value, list):
             lines.append(f"{key}:")
-            lines.extend(f"  - {item}" for item in value)
+            lines.extend(f"  - {frontmatter_item(item)}" for item in value)
         else:
-            lines.append(f"{key}: {value}")
+            lines.append(f"{key}: {frontmatter_scalar(value)}")
     return "\n".join(lines + ["---", "", body.strip(), ""])
 
 

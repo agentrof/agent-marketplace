@@ -254,6 +254,28 @@ class ProjectVaultContractTests(unittest.TestCase):
             self.assertEqual(second.returncode, 0, second.stdout + second.stderr)
             self.assertEqual(note.read_bytes(), normalized)
 
+    def test_normalize_keeps_quotes_in_a_title_it_strips_an_id_lead_from(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            workspace = self.setup_project(Path(temporary))
+            note = workspace / "docs/solution-design/decisions/greeting-decision.md"
+            note.parent.mkdir(parents=True)
+            note.write_text(
+                self.decision_note("Greeting", "SD-001")
+                .replace("title: Greeting", 'title: "SD-001: Say \\"hi\\": now"')
+                .replace("# Greeting", '# SD-001: Say "hi": now'),
+                encoding="utf-8",
+            )
+            for _run in range(2):
+                result = self.run_vault(
+                    "normalize", "--vault", str(workspace / "docs"), "--json"
+                )
+                self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+                text = note.read_text(encoding="utf-8")
+                self.assertIn('title: "Say \\"hi\\": now"\n', text)
+                self.assertIn('\n# Say "hi": now\n', text)
+            self.assertNotIn("is not byte-identical to the title",
+                             self.check_vault(workspace).stdout)
+
     def test_decision_revision_lineage_is_not_read_as_a_supersede_chain(self):
         for lineage, ok in (("ARC:ROOT:ADR-003@r1", True),
                             ("ARC:orders-api:HUB-orders-api@r12", True),

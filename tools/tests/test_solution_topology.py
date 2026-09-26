@@ -10,11 +10,12 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "plugins/software-engineering-team/scripts"))
 import landscape_check
 import stage_package
+from tools.tests.git_fixture import init_repository, temporary_directory
 
 
 class SolutionTopologyTests(unittest.TestCase):
     def test_inverse_relation_projection_does_not_dirty_stage_receipt(self):
-        with tempfile.TemporaryDirectory() as raw:
+        with temporary_directory() as raw:
             root = Path(raw) / "project"
             package = root / "workspace/docs/solution-design"
             note = package / "decisions/runtime.md"
@@ -23,8 +24,8 @@ class SolutionTopologyTests(unittest.TestCase):
             note.write_text("# Runtime\n", encoding="utf-8")
             asset.parent.mkdir(parents=True)
             asset.write_bytes(b"approved artifact")
+            init_repository(root)
             for command in (
-                ("git", "init", "-q"),
                 ("git", "config", "user.email", "test@example.com"),
                 ("git", "config", "user.name", "Test User"),
                 ("git", "add", "."),

@@ -6,7 +6,6 @@ import json
 import io
 import subprocess
 import sys
-import tempfile
 import unittest
 from contextlib import redirect_stdout
 from pathlib import Path
@@ -17,6 +16,7 @@ TOOLS = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(TOOLS))
 
 import release_publish  # noqa: E402
+from tools.tests.git_fixture import init_repository, temporary_directory  # noqa: E402
 
 
 CANDIDATE = "c" * 40
@@ -465,18 +465,12 @@ class ValidationTests(unittest.TestCase):
 
 class GitTransactionIntegrationTests(unittest.TestCase):
     def test_real_bare_remote_stages_and_rolls_back_atomically(self):
-        with tempfile.TemporaryDirectory() as temporary:
+        with temporary_directory() as temporary:
             root = Path(temporary)
             remote = root / "remote.git"
             work = root / "work"
-            subprocess.run(
-                ["git", "init", "--bare", str(remote)],
-                check=True, capture_output=True, text=True,
-            )
-            subprocess.run(
-                ["git", "init", "-b", "main", str(work)],
-                check=True, capture_output=True, text=True,
-            )
+            init_repository(remote, bare=True)
+            init_repository(work, initial_branch="main")
 
             def git(*args: str) -> str:
                 completed = subprocess.run(

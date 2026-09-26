@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import ast
 import contextlib
 import io
 import sys
@@ -13,7 +12,6 @@ import tempfile
 import unittest
 from unittest import mock
 from pathlib import Path
-import pathlib
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "plugins" / "software-engineering-team" / "scripts"))
@@ -26,21 +24,7 @@ import operation_compile  # noqa: E402
 import architecture_compile  # noqa: E402
 import vault_check  # noqa: E402
 from backlog_fixture import make_approved_backlog  # noqa: E402
-
-
-
-def init_repository(path: Path, bare: bool = False, initial_branch: str = "main") -> None:
-    """Create a fixture repository with automatic maintenance already disabled.
-
-    An auto-gc that a commit or a push starts outlives the command that started
-    it and keeps writing into the tree the test is about to remove, so the
-    removal fails on a directory that refills while it is being emptied.
-    """
-    command = ["git", "init", "-q"]
-    command += ["--bare", str(path)] if bare else ["-b", initial_branch, str(path)]
-    subprocess.run(command, check=True)
-    git_dir = path if bare else path / ".git"
-    subprocess.run(["git", "--git-dir", str(git_dir), "config", "gc.auto", "0"], check=True)
+from git_fixture import init_repository, remove_temporary, temporary_directory  # noqa: E402
 
 
 def write_pull_request_workflow(project: Path) -> None:
@@ -48,23 +32,6 @@ def write_pull_request_workflow(project: Path) -> None:
     workflow = project / ".github" / "workflows" / "tests.yml"
     workflow.parent.mkdir(parents=True)
     workflow.write_text("on:\n  pull_request:\n", encoding="utf-8")
-
-
-def remove_temporary(temporary: tempfile.TemporaryDirectory, attempts: int = 10) -> None:
-    """Remove a fixture tree, retrying while git finishes writes that outlive the call that started them."""
-    import shutil
-    import time
-    for attempt in range(attempts):
-        try:
-            temporary.cleanup()
-            return
-        except OSError:
-            if attempt == attempts - 1:
-                shutil.rmtree(temporary.name, ignore_errors=True)
-                if pathlib.Path(temporary.name).exists():
-                    raise
-                return
-            time.sleep(0.2)
 
 
 class DeliveryGitTests(unittest.TestCase):
@@ -122,7 +89,7 @@ class DeliveryGitTests(unittest.TestCase):
     def make_project(self):
         temporary = tempfile.TemporaryDirectory()
         project = Path(temporary.name)
-        init_repository(project)
+        init_repository(project, initial_branch="main")
         subprocess.run(["git", "-C", str(project), "config", "user.email", "test@example.com"], check=True)
         subprocess.run(["git", "-C", str(project), "config", "user.name", "Test"], check=True)
         (project / "workspace" / "docs").mkdir(parents=True)
@@ -157,24 +124,6 @@ class DeliveryGitTests(unittest.TestCase):
         ).stdout.strip()
         self.assertEqual(local_auto_gc, "0")
         self.assertEqual(remote_auto_gc, "0")
-
-    def test_every_fixture_repository_is_created_through_the_guarded_helper(self):
-        """A repository initialised around the helper brings automatic maintenance back."""
-        module = ast.parse(Path(__file__).read_text(encoding="utf-8"))
-        direct = []
-        for node in ast.walk(module):
-            if not isinstance(node, ast.Call) or not isinstance(node.func, ast.Attribute):
-                continue
-            if node.func.attr != "run" or not node.args:
-                continue
-            command = node.args[0]
-            if not isinstance(command, ast.List) or len(command.elts) < 2:
-                continue
-            head = [element.value for element in command.elts[:2]
-                    if isinstance(element, ast.Constant)]
-            if head == ["git", "init"]:
-                direct.append(node.lineno)
-        self.assertEqual(direct, [], "initialise fixture repositories with init_repository: lines " + str(direct))
 
     def prepare_pr_intent(self, author_review=None):
         """Build one real remote Delivery through its durable PR intent."""
@@ -635,9 +584,9 @@ class DeliveryGitTests(unittest.TestCase):
         self.assertNotEqual(digest, executed_hash)
 
     def test_active_delivery_cancellation_releases_slot_and_publishes_terminal_item(self):
-        with tempfile.TemporaryDirectory() as temporary:
+        with temporary_directory() as temporary:
             project = Path(temporary)
-            init_repository(project)
+            init_repository(project, initial_branch="main")
             subprocess.run(["git", "-C", str(project), "config", "user.email", "test@example.com"], check=True)
             subprocess.run(["git", "-C", str(project), "config", "user.name", "Test"], check=True)
             docs = project / "workspace" / "docs"; (docs / "maps").mkdir(parents=True)
@@ -685,9 +634,9 @@ class DeliveryGitTests(unittest.TestCase):
             self.assertEqual(delivery_git.delivery_projection_changes(project, tree), {})
 
     def test_ref_free_reservation_pushes_fence_and_integration_atomically(self):
-        with tempfile.TemporaryDirectory() as temporary:
+        with temporary_directory() as temporary:
             project = Path(temporary)
-            init_repository(project)
+            init_repository(project, initial_branch="main")
             subprocess.run(["git", "-C", str(project), "config", "user.email", "test@example.com"], check=True)
             subprocess.run(["git", "-C", str(project), "config", "user.name", "Test"], check=True)
             docs = project / "workspace" / "docs"

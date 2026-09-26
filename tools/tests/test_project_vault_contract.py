@@ -9,6 +9,8 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from tools.tests.git_fixture import init_repository
+
 
 ROOT = Path(__file__).resolve().parents[2]
 PLUGIN = ROOT / "plugins" / "software-engineering-team"
@@ -34,7 +36,7 @@ BACKLOG_COLORS = {
 
 class ProjectVaultContractTests(unittest.TestCase):
     def setup_project(self, root: Path) -> Path:
-        subprocess.run(["git", "init", "-q", str(root)], check=True)
+        init_repository(root)
         result = subprocess.run(
             [sys.executable, str(SETUP), "--project-root", str(root)],
             cwd=ROOT,

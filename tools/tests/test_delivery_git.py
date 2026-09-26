@@ -811,6 +811,30 @@ class DeliveryGitTests(unittest.TestCase):
                 self.assertEqual(delivery_compile.delivery_findings(docs, "DLV-001")[1], reported["errors"])
         self.assertEqual(self.reported_status(merged / "workspace/docs"), "merged")
 
+    def test_cancelled_delivery_stays_cancelled_through_its_pr_record_and_merge(self):
+        temporary, project, docs, _product_tip, _intent = self.prepare_pr_intent()
+        self.addCleanup(remove_temporary, temporary)
+        relative = delivery_compile.find_delivery(docs, "DLV-001").relative_to(project).as_posix() + "/delivery.md"
+
+        def published_status() -> str:
+            head = delivery_git.remote_oid(project, "origin", delivery_git.canonical_refs("DLV-001")["integration"])
+            return delivery_git.split_remote_note(project, head, relative, delivery_compile.split_note)[0]["status"]
+
+        state: dict = {}
+        with mock.patch("delivery_provider.GitHubProvider", self.fake_provider_type(state)):
+            delivery_git.open_pr(project, "DLV-001")
+            self.assertEqual(published_status(), "awaiting_merge")
+            delivery_git.cancel_delivery(project, "DLV-001", "The owner withdrew the request")
+            self.assertEqual(published_status(), "cancelled")
+            rerecorded = delivery_git.open_pr(project, "DLV-001")
+            self.assertTrue(rerecorded["adopted"])
+            self.assertEqual(published_status(), "cancelled")
+            delivery_git.merge_pr(project, "DLV-001")
+        checkout = Path(temporary.name) / "main-after-merge"
+        subprocess.run(["git", "clone", "-q", "-c", "gc.auto=0", str(project / "remote.git"), str(checkout)], check=True)
+        self.assertEqual(delivery_git.run_git(checkout, "rev-parse", "HEAD^2"), rerecorded["integration"])
+        self.assertEqual(self.reported_status(checkout / "workspace/docs"), "cancelled")
+
     def test_scope_cancellation_projection_is_sorted_and_closed(self):
         stories = {
             "AUTH-02": {"disposition": "not_started", "tip": "none"},

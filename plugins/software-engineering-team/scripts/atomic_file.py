@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
-"""Replace one text file atomically with the mode a plain write gives it.
+"""Replace one file atomically with the mode a plain write gives it.
 
 tempfile.mkstemp creates its file owner-only and os.replace keeps that mode,
 so a replacement sets the mode before it lands: an existing file keeps its
 own mode, and a new file takes 0666 less the process umask, as open() gives
-it. The text is UTF-8 with LF line endings on every OS.
+it. Text is written as UTF-8 with LF line endings on every OS.
 """
 
 from __future__ import annotations
@@ -27,20 +27,40 @@ def replacement_mode(path: Path) -> int:
         return 0o666 & ~umask
 
 
-def replace_text(path: Path, text: str,
-                 before_replace: Callable[[], None] | None = None) -> None:
-    """Write text beside path, then replace path with it in one step."""
+def discard(temporary: Path) -> None:
+    """Remove a temporary file that took a read-only mode from its target.
+
+    Windows refuses to delete a read-only file, which is the mode the
+    temporary copies from a read-only target whose replacement then fails.
+    """
+    try:
+        temporary.unlink(missing_ok=True)
+    except PermissionError:
+        os.chmod(temporary, stat.S_IREAD | stat.S_IWRITE)
+        temporary.unlink(missing_ok=True)
+
+
+def replace_bytes(path: Path, data: bytes,
+                  before_replace: Callable[[], None] | None = None) -> None:
+    """Write data beside path, then replace path with it in one step."""
     path.parent.mkdir(parents=True, exist_ok=True)
     descriptor, raw = tempfile.mkstemp(prefix=f".{path.name}.", dir=path.parent)
     temporary = Path(raw)
     try:
-        with os.fdopen(descriptor, "w", encoding="utf-8", newline="\n") as handle:
-            handle.write(text)
+        with os.fdopen(descriptor, "wb") as handle:
+            handle.write(data)
             handle.flush()
             os.fsync(handle.fileno())
         os.chmod(temporary, replacement_mode(path))
         if before_replace is not None:
             before_replace()
         os.replace(temporary, path)
-    finally:
-        temporary.unlink(missing_ok=True)
+    except BaseException:
+        discard(temporary)
+        raise
+
+
+def replace_text(path: Path, text: str,
+                 before_replace: Callable[[], None] | None = None) -> None:
+    """Replace path with text as UTF-8, keeping its LF line endings."""
+    replace_bytes(path, text.encode("utf-8"), before_replace)

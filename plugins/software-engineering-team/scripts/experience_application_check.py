@@ -14,10 +14,11 @@ import hashlib
 import json
 import os
 import stat
-import tempfile
 import unicodedata
 from functools import lru_cache
 from pathlib import Path
+
+import atomic_file
 
 
 ARTIFACTS_RELATIVE = Path("artifacts")
@@ -646,19 +647,7 @@ def artifact_snapshot_paths(root_value: str | Path, registry: dict) -> list[Path
     return [*paths, root / REGISTRY_RELATIVE, root / LEDGER_RELATIVE]
 
 
-def _atomic_write(path: Path, content: bytes) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    descriptor, temporary = tempfile.mkstemp(prefix=f".{path.name}.", suffix=".tmp", dir=path.parent)
-    temporary_path = Path(temporary)
-    try:
-        with os.fdopen(descriptor, "wb") as stream:
-            stream.write(content)
-            stream.flush()
-            os.fsync(stream.fileno())
-        os.replace(temporary_path, path)
-    except BaseException:
-        temporary_path.unlink(missing_ok=True)
-        raise
+_atomic_write = atomic_file.replace_bytes
 
 
 def write_registry_and_ledger(root_value: str | Path, registry: dict) -> None:

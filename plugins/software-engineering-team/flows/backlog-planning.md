@@ -244,7 +244,9 @@ backlog_compile.py check --docs <workspace>/docs --approved --render --json
 Approval stamps the package, root backlog, epics, reviews and test plans while
 stories remain `planned`. Existing valid unchanged source approvals retain
 their timestamps, hashes and bytes; previously approved reviews are immutable
-and changes require a new review round. Commit `workspace/docs/backlog/` and the updated
+and changes require a new review round. Setup's managed `.gitattributes` rule
+checks `workspace/docs/` out without line-ending conversion, which keeps these
+bytes exact on Windows. Commit `workspace/docs/backlog/` and the updated
 `workspace/config.json` in the same project change. Report the package hash
 and exact generated views. A newer approved Experience application receipt,
 including one caused by an application-only revision, makes the backlog input

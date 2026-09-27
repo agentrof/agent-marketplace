@@ -1,5 +1,5 @@
 {
-  "build_id": "snapshot.55d1aeec40bb517045cce52917b262f88071f6b3c7404fc38e7ed3e9f7cfd3ef",
+  "build_id": "snapshot.23235bb7a79b78ed61be638c30552839720d0b8aa60ca28a8f0cb46c198977f3",
   "component": "software-engineering-team",
   "delivery_protocol": {
     "read_max": 1,
@@ -35,7 +35,7 @@
     "constitution.md": "32177174a6855417d1bfca8ffdb91011b525443c696d824e7ccad4cd4e457cde",
     "flows/backlog-planning.md": "42a6a11bd323987d395a470ea66b1d3f16c64004e9f10f49fc21889a5133d0e3",
     "flows/business-analysis.md": "67b69348c59746263ded358459f51ab9653914ba1a4d597c3fb31d7b2557e2c3",
-    "flows/delivery-execution.md": "22efa545014715f09cfec0d0fd2081ae17d302feeffee616e70b24190e090d31",
+    "flows/delivery-execution.md": "a0c0833b7193b751a844b91aa9bbdb5e8dd9ec52ecc751a149985f6534b68197",
     "flows/delivery-governance.md": "35bb00cea1ad2a11cde0f522c3fcca117db74dc4dff3a314cd4bba45b8c37f2d",
     "flows/delivery-planning.md": "32ed9912457b48aa1ac8043ddd54b06a2c3f764c238fa150609e8df8007e9a42",
     "flows/design-system.md": "d8beee971392da1f39f91627999cbf0dbec948eb27947c1eb2aed3960c0e8773",
@@ -53,8 +53,8 @@
     "scripts/atomic_file.py": "e344f194df592cf648b406f9f7b10b4a11a8ca2a49a1e604c90d27ad84765446",
     "scripts/ba_compile.py": "953bbc848ccf1e698c6e72d4d9985b8387f87e38150e81cee22649de0977d631",
     "scripts/backlog_compile.py": "94c313adcbb6f98a4d3b9ee7486e520caaed4e4a1ebe2400b0658faabdd76678",
-    "scripts/delivery_compile.py": "7916eedd23632c0431aed4a3d89082d031fcf657a93ba12e6af50d7c1e3555e2",
-    "scripts/delivery_git.py": "062acaa4be728b1967e941fc456dfd7e164a352004dcf211515842ca19da580d",
+    "scripts/delivery_compile.py": "19c349851ce59275f88ec6e0e2c3d5e7152c8d4a111246e533bc176e5401cc79",
+    "scripts/delivery_git.py": "c1246e5f19b9fa09b406c1dc448f1b0db845666803f5174e5fe7b7a637fd18ff",
     "scripts/delivery_governance.py": "70939ac67c9ac359f00a5cc7cee25a84e0b724527b34b3f6e22243e5fb66ec27",
     "scripts/delivery_provider.py": "ff5d20f83641ebd8aed44c106c00012326a7d210f1c30a64633fac169e23e37d",
     "scripts/delivery_result.py": "bac5397e14522b5ddddc05fcca514010790ad0c97f624de86e00f9109f79c4db",
@@ -91,7 +91,7 @@
     "skill-content/code-review/references/smells.md": "83febb50fbca82cbe6915a3e005ec647b34b374e376deaff403897d38e579c92",
     "skill-content/configure/SKILL.md": "4f522c2129cc94e320b8619c9a3a635bfece49b9ea206266fe62ed204f7bf350",
     "skill-content/configure/references/config-contract.md": "04f130c78d7e9c0fe49b673b1f286c7d625233fdb71fbe6556c1206533b70a90",
-    "skill-content/deliver/SKILL.md": "d18624e8f3856a32b01003034eee801c592ad1799d4fa7d1ab0771f5cbee7449",
+    "skill-content/deliver/SKILL.md": "b19641aaa6f690d8294edb1143b1e46550e8c91e0ebc2a6697111031878f97a4",
     "skill-content/deliver/data/delivery-control-record-contract.json": "035df8a2dd36543054ebf7138a94cb5a0f4bd75e7138dbd69852ea32985b430c",
     "skill-content/deliver/data/delivery-document-contract.json": "30e7edf5a40bfb5f96ea43e170c060a384463d37deccba018cfdb8c5db84a7e8",
     "skill-content/deliver/data/delivery-protocol-1.json": "448c7a970a9ae38bb9348b96a2cfa2f2833b895e28bc84c5a3c87e622ce5b0d9",
@@ -283,6 +283,6 @@
   "schema_version": 3,
   "source_channel": "snapshot",
   "source_commit": "",
-  "source_ref": "snapshot.55d1aeec40bb517045cce52917b262f88071f6b3c7404fc38e7ed3e9f7cfd3ef",
+  "source_ref": "snapshot.23235bb7a79b78ed61be638c30552839720d0b8aa60ca28a8f0cb46c198977f3",
   "version": "0.4.0"
 }

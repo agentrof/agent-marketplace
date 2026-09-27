@@ -10,11 +10,13 @@ predecessor, Fence and global slot checks pass. Each Item its
 names must reach this Integration the same way, which for a Story of another
 Delivery means that Delivery merged into the target and this one refreshed
 onto it; its Item tip's `Agentrof-Delivery` trailer names the package that
-records its status. A Story no Delivery has claimed, or one its Delivery
-cancelled, refuses the start with `DELIVERY_DEPENDENCY_UNMET` and names a
-backlog revision as the way out. Product and test changes stay on the Item
-worktree; Integration accepts only reviewed, verified Item handoffs and
-compiler-owned projections.
+records its status. Once that Delivery merged and dropped the Item ref, its
+package in this Integration answers instead, trusted only where this
+Integration also holds the merge of its recorded PR. A Story no Delivery has
+claimed, or one its Delivery cancelled, refuses the start with
+`DELIVERY_DEPENDENCY_UNMET` and names a backlog revision as the way out.
+Product and test changes stay on the Item worktree; Integration accepts only
+reviewed, verified Item handoffs and compiler-owned projections.
 
 Activation writes an ignored pending writer receipt before the atomic Item,
 Slot, Integration and Fence transaction. The receipt is promoted only after
@@ -67,7 +69,9 @@ carries no `Agentrof-Record` trailer, also for a PR recorded while the
 Delivery stayed in `review`. Coordinator commits, such as the reopen commit,
 never count; a manual merge of the Integration branch into another branch
 would. A merged Delivery keeps its pinned sources, and the Delivery map keeps
-the tracked status. A shallow clone or a failed Git query makes `status` and
+the tracked status. Proving the merge deletes the Delivery's Integration ref
+and its integrated Item refs; a cancelled Story keeps its Item ref, and the
+project Fence stays. A shallow clone or a failed Git query makes `status` and
 `check` fail with an explicit finding.
 Provider create/merge calls are adapter-owned and must
 requery the intent and reviewed Integration head before any external mutation.

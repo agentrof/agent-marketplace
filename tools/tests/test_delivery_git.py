@@ -4041,7 +4041,7 @@ class DeliveryGitTests(unittest.TestCase):
         merged = self.merge_waited_for_delivery(project)
         self.assertEqual(self.coordination_branches(project),
                          ["agentrof/deliveries/dlv-002", "agentrof/fence", "agentrof/items/auth-02"])
-        self.assertEqual(delivery_git.merged_story_owners(project, merged["reviewed_integration"], ["AUTH-01"]), {})
+        self.assertEqual(delivery_git.merged_story_owners(project.resolve(), merged["reviewed_integration"], ["AUTH-01"]), {})
         integration_ref = delivery_git.canonical_refs("DLV-002")["integration"]
         before_refresh = delivery_git.remote_oid(project, "origin", integration_ref)
         self.assertEqual(delivery_git.unmet_waits_for(project.resolve(), "origin", "DLV-002", before_refresh, ["AUTH-01"]),

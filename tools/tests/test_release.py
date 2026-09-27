@@ -819,6 +819,97 @@ class ReleaseFinalizeTests(unittest.TestCase):
             f"refs/remotes/origin/{self.FEATURE}",
         ))
 
+    def branch_refs(self, branch: str) -> tuple[bool, bool]:
+        """Return whether the local repository and the origin remote hold the branch."""
+        return (
+            release.git_ok(
+                self.root, "show-ref", "--verify", "--quiet", f"refs/heads/{branch}"
+            ),
+            release.git_ok(
+                self.remote, "show-ref", "--verify", "--quiet", f"refs/heads/{branch}"
+            ),
+        )
+
+    def test_apply_deletes_a_merged_claude_branch_locally_and_on_origin(self):
+        branch = "claude/delivery-map-ends-with-newline"
+        self.git_run("git", "branch", branch, "main")
+        self.git_run("git", "push", "origin", branch)
+        self.git_run("git", "fetch", "origin", "--prune", "--tags")
+        self.git_run("git", "switch", branch)
+
+        result = release.finalize_local_release(
+            self.root, self.VERSION, [branch, "release/stable"], apply=True,
+        )
+
+        self.assertEqual(
+            result["branches"][0], {"branch": branch, "local": True, "remote": True}
+        )
+        self.assertEqual(self.branch_refs(branch), (False, False))
+        self.assertFalse(release.git_ok(
+            self.root, "show-ref", "--verify", "--quiet",
+            f"refs/remotes/origin/{branch}",
+        ))
+        self.assertEqual(self.branch_refs(self.FEATURE), (True, True))
+        self.assertEqual(
+            self.git_run("git", "branch", "--show-current").stdout.strip(), "main"
+        )
+        self.assertEqual(self.git_run("git", "status", "--porcelain").stdout, "")
+
+    def test_unmerged_claude_branch_is_never_deleted(self):
+        branch = "claude/scope-approval-requires-current-bindings"
+        self.git_run("git", "switch", "-c", branch, "main")
+        (self.root / "unmerged.txt").write_text("not released\n", encoding="utf-8")
+        self.git_run("git", "add", "unmerged.txt")
+        self.git_run("git", "commit", "-m", "unmerged")
+        self.git_run("git", "push", "origin", branch)
+        with self.assertRaisesRegex(release.ReleaseError, "unmerged local branch"):
+            release.finalize_local_release(
+                self.root, self.VERSION, [branch], apply=True
+            )
+        self.assertEqual(self.branch_refs(branch), (True, True))
+        self.assertEqual(
+            self.git_run("git", "branch", "--show-current").stdout.strip(), branch
+        )
+
+    def test_branch_outside_every_declared_host_prefix_is_refused(self):
+        branch = "feature/issue-42"
+        self.git_run("git", "branch", branch, "main")
+        self.git_run("git", "push", "origin", branch)
+        with self.assertRaisesRegex(release.ReleaseError, "bounded"):
+            release.finalize_local_release(
+                self.root, self.VERSION, [branch], apply=True
+            )
+        self.assertEqual(self.branch_refs(branch), (True, True))
+        for near_miss in (
+            "claude-code/issue-42",
+            "Claude/issue-42",
+            "claude/Issue-42",
+            "claude/issue_42",
+            "claude/nested/issue-42",
+            "claude/",
+            "claude/" + "a" * release.MAX_FINALIZE_BRANCH_CHARS,
+        ):
+            with self.subTest(branch=near_miss), \
+                    self.assertRaisesRegex(release.ReleaseError, "bounded"):
+                release.validate_finalize_branch(near_miss)
+
+    def test_cleanup_prefixes_are_read_from_the_host_adapter_registry(self):
+        self.assertEqual(release.finalize_branch_prefixes(), ("claude/", "codex/"))
+        registry = {
+            "other": build_distributions.HostAdapter(
+                "other", {"feature_branch_prefix": "other-agent/"}, None,
+            ),
+        }
+        with mock.patch.object(
+            build_distributions, "load_adapters", return_value=registry,
+        ):
+            release.validate_finalize_branch("other-agent/issue-42")
+            for branch in ("claude/issue-42", "codex/issue-42"):
+                with self.subTest(branch=branch), self.assertRaisesRegex(
+                    release.ReleaseError, "bounded other-agent/<kebab-name> branch",
+                ):
+                    release.validate_finalize_branch(branch)
+
 
 class ReleaseBranchPublicationTests(unittest.TestCase):
     def setUp(self):

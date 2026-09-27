@@ -88,8 +88,10 @@ MANUAL_ISSUE_REQUEST
 5. Route suspected vulnerabilities through private security reporting. Do not
    copy sensitive details into public branches, logs, or PRs.
 
-The normal branch form is `codex/issue-<number>-<kebab-summary>`. An existing
-repository convention may narrow that name further.
+The normal branch form is `<prefix>issue-<number>-<kebab-summary>`, where
+`<prefix>` is the `feature_branch_prefix` that `platforms/<host>/adapter.json`
+declares for the host running the session. An existing repository convention
+may narrow that name further.
 
 ### 2. Establish root cause
 
@@ -250,18 +252,23 @@ approval unless scope becomes ambiguous or a gate fails:
    of `origin/main`. Align local `main` with `origin/main` and local `stable`
    with `origin/stable`, prune tracking refs, switch to `main`, and require an
    empty worktree. Use the fail-closed finalizer with each selected branch
-   named explicitly:
+   named explicitly. Besides `release/stable`, it accepts a bounded
+   `<prefix><kebab-name>` branch for each `feature_branch_prefix` a registered
+   host declares in `platforms/<host>/adapter.json`, currently `claude/` for
+   Claude Code and `codex/` for Codex:
 
    ```console
    python3 tools/release.py finalize-local --version X.Y.Z \
-     --branch codex/issue-123-summary --branch release/stable --apply
+     --branch claude/issue-123-summary --branch codex/issue-124-summary \
+     --branch release/stable --apply
    ```
 
 The finalizer refuses dirty state, mismatched stable/tag refs, a stable release
 that is not an ancestor of main, an incomplete remote release branch,
-unsupported or duplicate branch names, branches checked out in another
-worktree, divergent local protected branches, and any selected branch not
-proven merged into `origin/main`.
+unbounded or duplicate branch names, names outside `release/stable` and the
+declared host prefixes, branches checked out in another worktree, divergent
+local protected branches, and any selected branch not proven merged into
+`origin/main`.
 
 If an invariant fails, stop at the current recoverable state and report the
 exact gate. Never repair a release by moving an existing tag, force-pushing

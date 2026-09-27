@@ -666,21 +666,23 @@ def _git_query(cwd: Path, *args: str) -> str:
     return result.stdout
 
 
-def recorded_pr_merged(cwd: Path, delivery_id: str) -> bool:
-    """Prove offline that HEAD contains a merge of this Delivery's recorded PR head.
+def recorded_pr_merged(cwd: Path, delivery_id: str, head: str = "HEAD") -> bool:
+    """Prove offline that *head* contains a merge of this Delivery's recorded PR head.
 
-    The proof is a two-parent merge reachable from HEAD, on any path, whose
-    second parent is the Delivery's "Record PR" commit: its trailers name its
-    record and this Delivery, and its only parent is the intent it names. The
-    next Delivery's Integration reaches the target's merge only through the
-    second parent of a target refresh, so the path is not restricted. The
-    merge itself must carry no Agentrof-Record trailer: the coordinator marks
-    every commit it writes with one, and its own two-parent commits, such as
-    the reopen commit whose second parent is the Integration head, merge
-    nothing into the target. The one caveat: a manual merge of the Integration
-    branch into any other branch also counts. A fast-forward, a squash or a
-    rewritten head proves nothing. A shallow history or a failed Git query
-    raises MergeStateUnknown instead of proving nothing.
+    *head* is the checked-out HEAD unless the caller names a commit, as the
+    coordinator names the fetched target tip. The proof is a two-parent merge
+    reachable from *head*, on any path, whose second parent is the Delivery's
+    "Record PR" commit: its trailers name its record and this Delivery, and
+    its only parent is the intent it names. The next Delivery's Integration
+    reaches the target's merge only through the second parent of a target
+    refresh, so the path is not restricted. The merge itself must carry no
+    Agentrof-Record trailer: the coordinator marks every commit it writes with
+    one, and its own two-parent commits, such as the reopen commit whose
+    second parent is the Integration head, merge nothing into the target. The
+    one caveat: a manual merge of the Integration branch into any other branch
+    also counts. A fast-forward, a squash or a rewritten head proves nothing.
+    A shallow history or a failed Git query raises MergeStateUnknown instead
+    of proving nothing.
     """
     from delivery_git import trailer
 
@@ -691,7 +693,7 @@ def recorded_pr_merged(cwd: Path, delivery_id: str) -> bool:
                                 "fetch the full history, for example with git fetch --unshallow")
     listed = _git_query(cwd, "rev-list", "--fixed-strings", "--all-match",
                         f"--grep=Agentrof-Record: {PR_RECORDED}",
-                        f"--grep=Agentrof-Delivery: {delivery_id}", "HEAD", "--")
+                        f"--grep=Agentrof-Delivery: {delivery_id}", head, "--")
     heads = set()
     for oid in listed.split():
         header, _, message = _git_query(cwd, "cat-file", "commit", oid).partition("\n\n")
@@ -704,7 +706,7 @@ def recorded_pr_merged(cwd: Path, delivery_id: str) -> bool:
     # A commit that a recorded head already contains cannot merge it, so the
     # walk stops where the Delivery branched off.
     merges = _git_query(cwd, "rev-list", "--merges", "--parents",
-                        "HEAD", "--not", *sorted(heads), "--")
+                        head, "--not", *sorted(heads), "--")
     for fields in (line.split() for line in merges.splitlines()):
         if len(fields) == 3 and fields[2] in heads:
             _header, _, message = _git_query(cwd, "cat-file", "commit", fields[0]).partition("\n\n")

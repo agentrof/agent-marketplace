@@ -423,7 +423,10 @@ A direct target update the remote rejected while the refetched target does not
 contain its carrier head changed nothing: that is the zero-effect proof, so its
 elected call returns to `prepared` in the target update receipt, and the host
 that holds the receipt can reauthorize a fresh attempt or abort the handoff.
-Any other rejected or unanswered update call is never repeated blindly.
+Any other rejected or unanswered update call is never repeated blindly. An
+authorization whose Fence push the remote rejected keeps its prepared receipt
+unless the refetched Fence never took the authorizing candidate, so a Fence
+that may carry the intent still has the receipt its handoff needs.
 
 Cancellation is an explicit action inside `/deliver DLV-###`. Its approved
 intent freezes exact Story dispositions, quiesces active Items, reverts

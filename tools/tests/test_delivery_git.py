@@ -799,6 +799,45 @@ class DeliveryGitTests(unittest.TestCase):
                 self.assertEqual(self.refused_finding(lambda: verb(project)), ("DELIVERY_TARGET_UPDATE_UNCERTAIN", message))
             self.assertEqual(self.target_update_state(project), "call_started")
 
+    def test_authorization_whose_fence_push_may_have_landed_keeps_its_receipt(self):
+        """A Fence that holds the authorized candidate, or moved on from it, may carry the intent, so the
+        prepared receipt stays and the handoff goes on; a Fence that never took it lets the receipt go."""
+        for case in ("landed", "moved on", "never taken"):
+            with self.subTest(case=case):
+                temporary, project = self.make_project()
+                self.addCleanup(remove_temporary, temporary)
+                delivery_git.begin_source_handoff(project, "sha256:" + "a" * 64)
+                base = delivery_git.run_git(project, "rev-parse", "HEAD")
+                (project / "handoff.txt").write_text("target candidate\n", encoding="utf-8")
+                candidate = delivery_git.commit_tree(project, base, ["handoff.txt"], "Target candidate", {})
+                carrier = "refs/heads/handoff-carrier"
+                delivery_git.atomic_push(project, "origin", [(carrier, "", candidate)])
+
+                def authorize():
+                    return delivery_git.authorize_target_update(
+                        project, "source_handoff", "sha256:" + "b" * 64, "origin",
+                        "direct_target", carrier, "direct", candidate, base, "upstream")
+
+                def advance_fence():
+                    ref, fence, values = delivery_git._fence_context(project, "origin")
+                    child = delivery_git._fence_child(project, fence, values, "Another coordinator")
+                    delivery_git.run_git(project, "push", "-q", "origin", f"--force-with-lease={ref}:{fence}",
+                                         f"{child}:{ref}")
+
+                if case == "never taken":
+                    code, _message = self.refused_under_concurrent_coordinator(authorize)
+                    self.assertEqual(code, "DELIVERY_FENCE_LEASE_LOST")
+                    self.assertEqual(self.target_update_state(project), "absent")
+                    authorize()
+                else:
+                    with self.lost_push_response(advance_fence if case == "moved on" else None):
+                        code, _message = self.refused_finding(authorize)
+                    self.assertEqual(code, "DELIVERY_TRANSACTION_UNCERTAIN")
+                    self.assertEqual(self.target_update_state(project), "prepared")
+                self.assertEqual(delivery_git.apply_target_update(project, "source_handoff")["receipt"]["state"],
+                                 "verified")
+                self.assertEqual(delivery_git.finish_source_handoff(project)["target"], candidate)
+
     def test_open_and_merge_pr_use_the_exact_reviewed_integration_head(self):
         temporary, project, _docs, product_tip, intent = self.prepare_pr_intent()
         try:

@@ -1004,6 +1004,19 @@ def history_holds(root: Path, remote: str, ref: str, oid: str, candidate: str) -
     return is_ancestor(root, candidate, oid)
 
 
+def push_never_landed(root: Path, remote: str, ref: str, candidate: str) -> bool:
+    """Whether the refetched *ref* proves that a push of *candidate* to it never landed.
+
+    A ref whose history holds the candidate may have taken it, and a ref that
+    cannot be read proves nothing.
+    """
+    try:
+        oid = remote_ref_oids(root, remote, [ref])[ref]
+        return not oid or not history_holds(root, remote, ref, oid, candidate)
+    except RuntimeError:
+        return False
+
+
 def refused_transaction(root: Path, remote: str, updates: list[tuple[str, str, str]]) -> str | None:
     """Name why the remote refused an atomic transaction, or None when that is unproven.
 
@@ -2505,13 +2518,14 @@ def authorize_target_update(project_root: Path, mode: str = "source_handoff",
     try:
         atomic_push(root, remote, [(ref, fence_oid, candidate)])
     except Exception:
-        # A conclusive Fence lease rejection leaves no target mutation; the
-        # pending local candidate may be discarded and retried by a fresh
-        # authorizing observation. Ambiguous transport remains conservative.
-        try:
-            discard_target_update_receipt(root, mode, values["Target-Update-Attempt"])
-        except Exception:
-            pass
+        # Only a Fence that provably never took the candidate lets the prepared
+        # receipt go, so a fresh authorization can retry; a Fence that may carry
+        # the intent keeps the receipt its handoff needs.
+        if push_never_landed(root, remote, ref, candidate):
+            try:
+                discard_target_update_receipt(root, mode, values["Target-Update-Attempt"])
+            except Exception:
+                pass
         raise
     return {"ok": True, "mode": mode, "fence": candidate,
             "target_update_intent": candidate_hash, "attempt": values["Target-Update-Attempt"],

@@ -1,0 +1,6 @@
+{
+  "summary": "reopen-item and takeover-item now promote their pending writer receipt when their push reports an error while the refetched Item and Slot refs both hold their candidate, as start-item already did: the transaction landed and only its response was lost. Their receipt used to stay pending, so the Item stayed active without a writer and every later takeover refused with \"a different active writer receipt already exists\".",
+  "components": {
+    "software-engineering-team": "patch"
+  }
+}

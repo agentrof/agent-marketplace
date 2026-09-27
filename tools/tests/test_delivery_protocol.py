@@ -32,9 +32,15 @@ RESERVED_FINDING_CODES = {
     "DELIVERY_SOURCE_HANDOFF_STALE": "no verb compares a held handoff's Source-Intent with the current sources yet",
     "DELIVERY_SLOT_DUPLICATE": "no verb refuses two Slot refs that hold the same Item tip yet",
     "DELIVERY_PR_INTENT_STRANDED": "an elected PR call that left no PR is reported as DELIVERY_PR_UNCERTAIN; no verb declares the intent stranded",
-    "DELIVERY_POST_MERGE_TRANSITION": "merge-pr returns the merged evidence and no verb refuses a post-merge transition yet",
     "DELIVERY_UPGRADE_CONTRACT_MISMATCH": "no verb compares the Fence Upgrade-Contract with a Delivery's upgrade barrier yet",
     "DELIVERY_UPGRADE_HANDOFF_COLLISION": "no verb detects a colliding upgrade target handoff yet",
+}
+# Coordinator functions that write a Delivery's refs and still run once the target has merged its PR,
+# each with why. Every other one refuses with DELIVERY_POST_MERGE_TRANSITION.
+OPEN_AFTER_MERGE = {
+    "reserve_delivery": "it writes only while the Delivery refs are absent, which they never are after a merge",
+    **dict.fromkeys(("finish_plan_revision", "abort_plan_revision", "finish_upgrade", "abort_upgrade"),
+                    "it releases a barrier on the project Fence, which every other Delivery waits for"),
 }
 COORDINATOR_COMMANDS = {
     "names",
@@ -345,6 +351,31 @@ class DeliveryProtocolTests(unittest.TestCase):
         parser_functions = set(re.findall(r'set_defaults\(func="([^"]+)"\)', source))
         dispatched = set(re.findall(r'args\.func == "([^"]+)"', source))
         self.assertTrue(parser_functions <= dispatched | {"names", "preflight"})
+
+    def test_every_delivery_writer_refuses_a_merged_delivery(self):
+        """A verb that writes a Delivery's refs refuses once the target has merged the Delivery's
+        PR: its function reaches refuse_merged_delivery, or OPEN_AFTER_MERGE names it with why not."""
+        source = (PLUGIN / "scripts/delivery_git.py").read_text(encoding="utf-8")
+        functions = {node.name: node for node in ast.walk(ast.parse(source)) if isinstance(node, ast.FunctionDef)}
+        calls = {name: {call.func.id for call in ast.walk(node)
+                        if isinstance(call, ast.Call) and isinstance(call.func, ast.Name)}
+                 for name, node in functions.items()}
+
+        def reaches(name: str, callee: str, seen: frozenset = frozenset()) -> bool:
+            if name in seen or name not in calls:
+                return False
+            return callee in calls[name] or any(reaches(inner, callee, seen | {name}) for inner in calls[name])
+
+        verbs = set(re.findall(r'args\.func == "[^"]+":\n\s+result = (\w+)\([^\n]*args\.delivery', source))
+        writers = {name for name in verbs if reaches(name, "atomic_push")}
+        self.assertGreaterEqual(len(writers), 20)
+        self.assertEqual(sorted(name for name in writers - set(OPEN_AFTER_MERGE)
+                                if not reaches(name, "refuse_merged_delivery")), [],
+                         "a Delivery writer that changes a merged Delivery")
+        self.assertEqual(sorted(set(OPEN_AFTER_MERGE) - writers), [], "only a Delivery writer can stay open")
+        self.assertEqual(sorted(name for name in OPEN_AFTER_MERGE if reaches(name, "refuse_merged_delivery")), [])
+        for name, reason in OPEN_AFTER_MERGE.items():
+            self.assertRegex(reason, r"^\S[^\n]*$", name)
 
     def test_every_internal_verb_renders_help_without_project_mutation(self):
         script = PLUGIN / "scripts/delivery_git.py"

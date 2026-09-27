@@ -1,0 +1,6 @@
+{
+  "summary": "The Delivery Git coordinator's verify-merge command now only checks a merge: it reports the merge evidence of a PR the provider already shows as merged, through the same proof merge-pr uses, and refuses any other PR with DELIVERY_MERGE_PROOF_INVALID. It was an alias of merge-pr, so on an open PR with green checks it made the PR ready and merged it.",
+  "components": {
+    "software-engineering-team": "patch"
+  }
+}

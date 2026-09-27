@@ -4,6 +4,7 @@ import argparse
 import json
 import os
 import shutil
+import stat
 import subprocess
 import sys
 import tempfile
@@ -1118,6 +1119,53 @@ class SetupProjectTests(unittest.TestCase):
             self.assertEqual(
                 self.git(project, "status", "--porcelain", "--", relative), b""
             )
+
+    @unittest.skipIf(os.name == "nt", "POSIX file mode contract")
+    def test_setup_gives_new_files_the_umask_mode_and_keeps_existing_modes(self):
+        previous = os.umask(0o022)
+        try:
+            with tempfile.TemporaryDirectory() as temporary:
+                project = Path(temporary)
+                init_repository(project)
+                applied = self.run_script(
+                    SETUP, "apply", "--project-root", str(project), "--json"
+                )
+                self.assertEqual(
+                    applied.returncode, 0, applied.stdout + applied.stderr
+                )
+                reports = sorted(
+                    (project / "workspace/docs/maps/_generated").glob("*.md")
+                )
+                self.assertTrue(reports)
+                ignore = project / ".gitignore"
+                config = project / "workspace/config.json"
+                for path in (ignore, project / ".gitattributes", config, reports[0]):
+                    with self.subTest(created=path.name):
+                        self.assertEqual(stat.S_IMODE(path.stat().st_mode), 0o644)
+
+                ignore.write_text(ignore.read_text(encoding="utf-8").replace(
+                    "workspace/docs/.trash/", "workspace/docs/.stale-trash/",
+                ), encoding="utf-8")
+                value = json.loads(config.read_text(encoding="utf-8"))
+                value["custom_project_field"] = True
+                config.write_text(json.dumps(value) + "\n", encoding="utf-8")
+                for path in (ignore, config):
+                    path.chmod(0o640)
+                applied = self.run_script(
+                    SETUP, "apply", "--project-root", str(project), "--json"
+                )
+                self.assertEqual(
+                    applied.returncode, 0, applied.stdout + applied.stderr
+                )
+                rewritten = {
+                    item["path"] for item in json.loads(applied.stdout)["applied_operations"]
+                }
+                self.assertTrue({".gitignore", "workspace/config.json"} <= rewritten)
+                for path in (ignore, config):
+                    with self.subTest(existing=path.name):
+                        self.assertEqual(stat.S_IMODE(path.stat().st_mode), 0o640)
+        finally:
+            os.umask(previous)
 
 
 if __name__ == "__main__":

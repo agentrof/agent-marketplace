@@ -298,7 +298,10 @@ verified remote Item. A missing receipt denies local writer readiness. Explicit
 takeover elects a new epoch on the existing Item and Slot refs; it never
 allocates a second Slot. Reopen and takeover drop their pending receipt on the
 same proof as activation, and a takeover the remote rejects that way gives back
-the receipt and the worktree it replaced.
+the receipt and the worktree it replaced. When the push of a start, reopen or
+takeover reports an error while the refetched Item and Slot refs both hold its
+candidate, the transaction landed and only its response was lost: the verb
+still promotes the receipt, and a later takeover gives the host its worktree.
 
 Product and test changes stay on the Item branch. Before approving evidence,
 the active Item worktree may contain only edits to its initialized Code Review
@@ -369,7 +372,9 @@ Closure requires provider-confirmed merge evidence for the exact reviewed
 head, passing provider checks with at least one success, and target ancestry.
 A skipped or neutral check passes but does not count as that success. The
 merge method is a merge commit; squash and rebase results fail closed. Release
-Management is not part of Delivery closure.
+Management is not part of Delivery closure. `verify-merge` checks the same
+evidence without asking the provider to change the PR: it reports a PR that
+is already merged and refuses any other with `DELIVERY_MERGE_PROOF_INVALID`.
 
 The tracked status stays `awaiting_merge` after the merge, because the target
 branch receives the PR head's bytes. The Delivery map shows that tracked
@@ -397,6 +402,14 @@ failed Git query, `check` and `status` fail with that finding instead of
 reporting the tracked status as the answer, so a CI job that checks a
 Delivery needs the full history.
 
+A merged Delivery is closed. Every coordinator verb that would change its refs
+first decides as the compiler does: when the published Review records the PR,
+it asks the same proof of the freshly fetched target tip and refuses with
+`DELIVERY_POST_MERGE_TRANSITION` once the target holds it; a history that
+cannot answer refuses too. `open-pr` still reports the recorded PR,
+`merge-pr` still verifies the merge, and the release of a plan revision or
+upgrade barrier still runs, because the project Fence must not stay barred.
+
 ## Target changes, recovery and cancellation
 
 A disjoint target advance may be merged into Integration by the controlled
@@ -409,22 +422,32 @@ Every mutating coordinator operation supports exact refetch classification:
 accepted, rejected, response uncertain or repository incident. A rejected
 atomic push is named from the refetched refs, never from Git's wording: a moved
 Fence lease, any other moved lease, or a remote that takes the same push only
-without atomic support. Recovery never reconstructs semantic state from a local
-receipt alone. Remote records and tracked package hashes remain authoritative.
+without atomic support. A leased ref that holds the pushed candidate, or moved
+on from a history that holds it, is the response uncertain class: the push may
+have landed before its response was lost, so it reports
+`DELIVERY_TRANSACTION_UNCERTAIN`, never a lease that changed no ref, and the
+refs are read again before any retry. Recovery never reconstructs semantic
+state from a local receipt alone. Remote records and tracked package hashes
+remain authoritative.
 A direct target update the remote rejected while the refetched target does not
 contain its carrier head changed nothing: that is the zero-effect proof, so its
 elected call returns to `prepared` in the target update receipt, and the host
 that holds the receipt can reauthorize a fresh attempt or abort the handoff.
-Any other rejected or unanswered update call is never repeated blindly.
+Any other rejected or unanswered update call is never repeated blindly. An
+authorization whose Fence push the remote rejected keeps its prepared receipt
+unless the refetched Fence never took the authorizing candidate, so a Fence
+that may carry the intent still has the receipt its handoff needs.
 
 Cancellation is an explicit action inside `/deliver DLV-###`. Its approved
 intent freezes exact Story dispositions, quiesces active Items, reverts
 integrated Item merges in reverse order and publishes one cancellation Review
 through the same Integration branch and final PR. A scope-only or claims-free
 Delivery uses `not_started` dispositions and never fabricates Item refs,
-review evidence or integration bases. A Delivery whose published status is
-already `cancelled` refuses another cancellation with
-`DELIVERY_CANCELLATION_INVALID`.
+review evidence or integration bases. A cancellation is final: a Delivery
+whose published status is already `cancelled` refuses another cancellation and
+any invalidation of its cancellation Review with
+`DELIVERY_CANCELLATION_INVALID`, so that Review still reaches the target
+through the PR.
 
 ## Setup and package upgrade
 

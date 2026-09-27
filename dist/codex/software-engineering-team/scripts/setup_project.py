@@ -22,6 +22,7 @@ import time
 from datetime import datetime, timezone
 from pathlib import Path
 
+import atomic_file
 import marketplace_paths
 import delivery_governance
 import file_lock
@@ -53,21 +54,7 @@ class SetupError(RuntimeError):
     """A refresh cannot be planned or safely applied."""
 
 
-def atomic_text(path: Path, text: str, before_replace=None) -> None:
-    """Replace one file without exposing a partial write."""
-    path.parent.mkdir(parents=True, exist_ok=True)
-    fd, raw = tempfile.mkstemp(prefix=f".{path.name}.", dir=path.parent)
-    temporary = Path(raw)
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8") as handle:
-            handle.write(text)
-            handle.flush()
-            os.fsync(handle.fileno())
-        if before_replace is not None:
-            before_replace()
-        os.replace(temporary, path)
-    finally:
-        temporary.unlink(missing_ok=True)
+atomic_text = atomic_file.replace_text
 
 
 def atomic_bytes(path: Path, content: bytes, mode: int = 0o644,

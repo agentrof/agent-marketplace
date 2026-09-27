@@ -1629,10 +1629,10 @@ def write_stub(schema: dict, path: Path, doc_type: str, title: str,
                seed_rows: dict[str, list[str]] | None = None,
                **extra) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text("\n".join(
+    path.write_bytes(("\n".join(
         stub_lines(schema, doc_type, title, vault_prefix, nav_hub,
                    aliases, seed_rows, **extra)
-    ).rstrip("\n") + "\n", encoding="utf-8")
+    ).rstrip("\n") + "\n").encode("utf-8"))
 
 
 def next_ids(space: Space, code: str) -> dict[str, str]:
@@ -1704,10 +1704,10 @@ def cmd_init(args, schema: dict) -> int:
                f"{args.title} Non-Functional Budgets", nav_hub=hub,
                scope="space")
     budgets_path = space_dir / budgets_name
-    budgets_path.write_text(
+    budgets_path.write_bytes(
         budgets_path.read_text(encoding="utf-8")
-        .replace("To be analyzed.", "None stated, confirmed."),
-        encoding="utf-8")
+        .replace("To be analyzed.", "None stated, confirmed.")
+        .encode("utf-8"))
     print(f"ba_compile: space initialized at {space_dir} (code {args.code})")
     return 0
 
@@ -1857,14 +1857,14 @@ def remove_frontmatter_keys(text: str, keys: set[str]) -> str | None:
     return "".join(kept)
 
 
-def atomic_replace(path: Path, text: str, *, newline: str | None = None) -> None:
+def atomic_replace(path: Path, text: str) -> None:
     """Replace one authored note atomically without leaving a partial file."""
     mode = path.stat().st_mode & 0o777
     descriptor, temporary = tempfile.mkstemp(prefix=f".{path.name}.",
                                              dir=path.parent)
     temporary_path = Path(temporary)
     try:
-        with os.fdopen(descriptor, "w", encoding="utf-8", newline=newline) as handle:
+        with os.fdopen(descriptor, "w", encoding="utf-8", newline="\n") as handle:
             handle.write(text)
             handle.flush()
             os.fsync(handle.fileno())
@@ -2063,7 +2063,7 @@ def cmd_enter_review(args, schema: dict) -> int:
         print("ba_compile: FAIL: invalid review lifecycle postimage", file=sys.stderr)
         return 1
     try:
-        atomic_replace(doc.abs_path, updated, newline="")
+        atomic_replace(doc.abs_path, updated)
     except OSError as exc:
         print(f"ba_compile: FAIL: review write failed: {exc}", file=sys.stderr)
         return 1
@@ -2111,14 +2111,14 @@ def cmd_approve(args, schema: dict) -> int:
     # The tag mirror rides the same write (one-clock, one operation).
     updated = re.sub(r"(?m)^(\s*- status/)[a-z0-9-]+\s*$",
                      r"\g<1>approved", updated, count=1)
-    target.write_text(updated, encoding="utf-8")
+    target.write_bytes(updated.encode("utf-8"))
     space, base = scan_space(space_dir, schema)
     space.vault_root = vault_root
     findings = run_checks(space, base)
     blocking = [f for f in findings
                 if f.severity == "error" and f.path == rel]
     if blocking:
-        target.write_text(original, encoding="utf-8")
+        target.write_bytes(original.encode("utf-8"))
         emit(blocking, args.json)
         print(f"ba_compile: FAIL: {rel} does not pass the checks as"
               " approved; original restored", file=sys.stderr)
@@ -2318,7 +2318,7 @@ def cmd_render(args, schema: dict) -> int:
         if target.is_file() and \
                 target.read_text(encoding="utf-8", errors="replace") == content:
             continue
-        target.write_text(content, encoding="utf-8")
+        target.write_bytes(content.encode("utf-8"))
         wrote += 1
     removed = 0
     for stray in sorted(gen_dir.iterdir()):

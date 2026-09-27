@@ -56,6 +56,7 @@
       "receipt_digest"
     ],
     "election": "one process-shared exact-preimage prepared-to-call_started transition; crash after call_started is requery-only",
-    "release": "call_started returns to prepared only on the zero_target_effect proof"
+    "release": "call_started returns to prepared only on the zero_target_effect proof",
+    "authorization_rejection": "the prepared receipt goes only when the refetched Fence never took the authorizing candidate; a Fence that holds it, or moved on from a history that holds it, may carry the intent, so the receipt stays"
   }
 }

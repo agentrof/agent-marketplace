@@ -1473,12 +1473,15 @@ def open_pr(project_root: Path, delivery_id: str, remote: str = "origin") -> dic
             "fence": recorded["fence"], "refs": short_refs(delivery_id)}
 
 
-def merge_pr(project_root: Path, delivery_id: str, remote: str = "origin") -> dict:
+def merge_pr(project_root: Path, delivery_id: str, remote: str = "origin", *,
+             verify_only: bool = False) -> dict:
     """Merge the one reviewed PR with exact head/base evidence.
 
     Provider mutation is followed by a fresh all-state query and target
     ancestry proof. A ready/squash/rebase/admin result or missing merge object
-    is never interpreted as successful closure.
+    is never interpreted as successful closure. With *verify_only*, as
+    verify-merge calls it, no provider call changes the PR: a PR the provider
+    does not show as merged is refused, and a merged one gets the same proof.
     """
     root = main_worktree(project_root.resolve())
     from delivery_compile import docs_root, find_delivery
@@ -1500,7 +1503,7 @@ def merge_pr(project_root: Path, delivery_id: str, remote: str = "origin") -> di
     if len(candidates) != 1:
         raise ProviderError("DELIVERY_PR_HEAD_BASE_MISMATCH: exactly one lifecycle PR is required")
     pr = candidates[0]
-    if str(pr.get("state", "")).upper() == "MERGED":
+    if str(pr.get("state", "")).upper() == "MERGED" or verify_only:
         merged = pr
     else:
         if str(pr.get("state", "")).upper() != "OPEN":
@@ -4434,7 +4437,7 @@ def main(argv=None) -> int:
     merge_pr_parser = sub.add_parser("merge-pr"); merge_pr_parser.add_argument("--project-root", default="."); merge_pr_parser.add_argument("--delivery", required=True); merge_pr_parser.add_argument("--remote", default="origin"); merge_pr_parser.set_defaults(func="merge-pr")
     invalidate_review = sub.add_parser("invalidate-delivery-review"); invalidate_review.add_argument("--project-root", default="."); invalidate_review.add_argument("--delivery", required=True); invalidate_review.add_argument("--finding-code", required=True); invalidate_review.add_argument("--finding-hash", required=True); invalidate_review.add_argument("--remote", default="origin"); invalidate_review.set_defaults(func="invalidate-review")
     cancel = sub.add_parser("cancel-delivery"); cancel.add_argument("--project-root", default="."); cancel.add_argument("--delivery", required=True); cancel.add_argument("--reason", required=True); cancel.add_argument("--remote", default="origin"); cancel.set_defaults(func="cancel")
-    verify = sub.add_parser("verify-merge"); verify.add_argument("--project-root", default="."); verify.add_argument("--delivery", required=True); verify.add_argument("--remote", default="origin"); verify.set_defaults(func="merge-pr")
+    verify = sub.add_parser("verify-merge"); verify.add_argument("--project-root", default="."); verify.add_argument("--delivery", required=True); verify.add_argument("--remote", default="origin"); verify.set_defaults(func="verify-merge")
     reconcile = sub.add_parser("reconcile"); reconcile.add_argument("--project-root", default="."); reconcile.add_argument("--delivery", required=True); reconcile.add_argument("--remote", default="origin"); reconcile.set_defaults(func="reconcile")
     board = sub.add_parser("board"); board.add_argument("--project-root", default="."); board.add_argument("--delivery", required=True); board.add_argument("--remote", default="origin"); board.set_defaults(func="board")
     locate = sub.add_parser("locate"); locate.add_argument("--delivery", required=True); locate.add_argument("--story"); locate.add_argument("--slot"); locate.set_defaults(func="names")
@@ -4516,6 +4519,8 @@ def main(argv=None) -> int:
                 result = open_pr(Path(args.project_root), args.delivery, args.remote)
             elif args.func == "merge-pr":
                 result = merge_pr(Path(args.project_root), args.delivery, args.remote)
+            elif args.func == "verify-merge":
+                result = merge_pr(Path(args.project_root), args.delivery, args.remote, verify_only=True)
             elif args.func == "invalidate-review":
                 result = invalidate_delivery_review(Path(args.project_root), args.delivery, args.finding_code, args.finding_hash, args.remote)
             elif args.func == "cancel":

@@ -1031,6 +1031,37 @@ class DeliveryGitTests(unittest.TestCase):
         finally:
             remove_temporary(temporary)
 
+    def test_verify_merge_reports_a_merge_and_never_merges(self):
+        """verify-merge only reports a merge. On an open PR it refuses with
+        DELIVERY_MERGE_PROOF_INVALID, makes no provider call that changes the PR and leaves the
+        target; on the PR merge-pr merged it reports the same merge evidence."""
+        temporary, project, _docs, _product_tip, _intent = self.prepare_pr_intent()
+        self.addCleanup(remove_temporary, temporary)
+        state: dict = {}
+        provider = self.fake_provider_type(state)
+        with mock.patch("delivery_provider.GitHubProvider", provider):
+            delivery_git.open_pr(project, "DLV-001")
+
+        def verify() -> tuple[int, dict]:
+            output = io.StringIO()
+            with mock.patch("delivery_provider.GitHubProvider", provider), contextlib.redirect_stdout(output):
+                exit_code = delivery_git.main(["verify-merge", "--project-root", str(project), "--delivery", "DLV-001"])
+            return exit_code, json.loads(output.getvalue())
+
+        target = delivery_git.remote_oid(project, "origin", "refs/heads/main")
+        exit_code, refused = verify()
+        self.assertEqual((exit_code, [(finding["code"], finding["message"]) for finding in refused["findings"]]),
+                         (1, [("DELIVERY_MERGE_PROOF_INVALID", "provider PR is not merged")]))
+        self.assertEqual((state.get("merged"), state["draft"]), (None, True))
+        self.assertEqual(delivery_git.remote_oid(project, "origin", "refs/heads/main"), target)
+        with mock.patch("delivery_provider.GitHubProvider", provider):
+            merged = delivery_git.merge_pr(project, "DLV-001")
+        target = delivery_git.remote_oid(project, "origin", "refs/heads/main")
+        exit_code, verified = verify()
+        self.assertEqual((exit_code, verified["ok"], verified["operation"]), (0, True, "verify-merge"))
+        self.assertIn({"kind": "ref", "target": "merge_commit", "value": merged["merge_commit"]}, verified["observations"])
+        self.assertEqual(delivery_git.remote_oid(project, "origin", "refs/heads/main"), target)
+
     def test_review_publication_regenerates_the_delivery_projections(self):
         """The published Review is a new note: the Integration's map and relation
         projections are derived from the published tree, never taken from a local

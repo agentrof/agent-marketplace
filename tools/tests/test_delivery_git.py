@@ -3959,6 +3959,39 @@ class DeliveryGitTests(unittest.TestCase):
             self.symlink_or_skip(note, "twin.md")
             self.assertFalse(delivery_git.worktree_holds_blob(root, "notes/item.md", oid))
 
+    def test_worktree_file_holds_a_crlf_blob_that_git_add_keeps(self):
+        """Under core.autocrlf=true a blob committed with CRLF checks out unchanged, and git add
+        keeps the file as it is because its blob already holds CRLF, where the clean filter alone
+        would store LF. The unchanged checkout holds its blob; the same content rewritten with LF
+        does not, since git add then stores an LF blob (#247)."""
+        record = b"---\r\nstatus: active\r\n---\r\n\r\n# Item\r\n"
+        with temporary_directory() as temporary:
+            root = Path(temporary)
+            init_repository(root)
+            for key, value in (("user.email", "test@example.com"), ("user.name", "Test"),
+                               ("core.autocrlf", "false")):
+                delivery_git.run_git(root, "config", key, value)
+            note = root / "notes" / "item.md"
+            note.parent.mkdir()
+            note.write_bytes(record)
+            delivery_git.run_git(root, "add", "notes/item.md")
+            delivery_git.run_git(root, "commit", "-qm", "Item with CRLF")
+            oid = delivery_git.run_git(root, "rev-parse", "HEAD:notes/item.md")
+            delivery_git.run_git(root, "config", "core.autocrlf", "true")
+            note.unlink()
+            delivery_git.run_git(root, "checkout", "--", "notes/item.md")
+            self.assertEqual(note.read_bytes(), record)
+
+            def stored() -> str:
+                delivery_git.run_git(root, "add", "notes/item.md")
+                return delivery_git.run_git(root, "ls-files", "--stage", "--", "notes/item.md").split()[1]
+
+            self.assertTrue(delivery_git.worktree_holds_blob(root, "notes/item.md", oid))
+            self.assertEqual(stored(), oid)
+            note.write_bytes(record.replace(b"\r\n", b"\n"))
+            self.assertFalse(delivery_git.worktree_holds_blob(root, "notes/item.md", oid))
+            self.assertNotEqual(stored(), oid)
+
     @windows_text_pipes()
     def test_push_item_publishes_an_item_whose_checkout_converted_line_endings(self):
         """Git for Windows converts line endings on checkout by default (core.autocrlf=true), so

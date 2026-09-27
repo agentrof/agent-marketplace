@@ -623,13 +623,17 @@ def worktree_holds_blob(worktree: Path, relative: str, oid: str) -> bool:
 
     Git hashes the file through its clean filter, as git add does, so a checkout
     that converted line endings, as core.autocrlf does by default on native
-    Windows, still holds the blob it came from. A link or any other file that is
-    not regular holds no blob.
+    Windows, still holds the blob it came from. git add keeps a file whose blob
+    already holds CRLF as it is, where the clean filter alone would store LF, so
+    a file that holds the blob's own bytes holds it as well. A link or any other
+    file that is not regular holds no blob.
     """
     path = worktree / relative
     if path.is_symlink() or not path.is_file():
         return False
-    return run_git(worktree, "hash-object", "--path", relative, "--", str(path)) == oid
+    if run_git(worktree, "hash-object", "--path", relative, "--", str(path)) == oid:
+        return True
+    return run_git(worktree, "hash-object", "--no-filters", "--", str(path)) == oid
 
 
 def advance_worktree_to_candidate(root: Path, path: Path, candidate_oid: str) -> None:

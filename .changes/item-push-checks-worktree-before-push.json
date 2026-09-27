@@ -1,0 +1,6 @@
+{
+  "summary": "push-item now proves that the Item candidate it publishes holds every byte of the Item worktree before its atomic push, not after it. A worktree the candidate would change, such as a converged Item record a text-mode write on native Windows committed with CRLF under setup's `workspace/docs/** -text` rule, was refused only after the Item and Slot refs had moved, which left the Item published and its worktree behind; it is now refused before any ref moves, and the refusal names the files that differ.",
+  "components": {
+    "software-engineering-team": "patch"
+  }
+}

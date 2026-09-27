@@ -30,6 +30,7 @@ import delivery_result  # noqa: E402
 import file_lock  # noqa: E402
 import operation_compile  # noqa: E402
 import architecture_compile  # noqa: E402
+import setup_check  # noqa: E402
 import stage_package  # noqa: E402
 import vault_check  # noqa: E402
 from backlog_fixture import make_approved_backlog  # noqa: E402
@@ -2520,7 +2521,9 @@ class DeliveryGitTests(unittest.TestCase):
             converged[key] = mine[key]
         converged["integration_base_commit"] = base or integration
         converged["source_hash"] = delivery_compile.content_hash(converged, body)
-        item.write_text(delivery_compile.frontmatter(converged, body), encoding="utf-8")
+        # LF on every host, as the Delivery writers write a record: under setup's -text rule a
+        # text-mode write on native Windows would commit CRLF, which push-item refuses.
+        item.write_bytes(delivery_compile.frontmatter(converged, body).encode("utf-8"))
         delivery_git.run_git(worktree, "add", "-A", "workspace/docs")
         delivery_git.run_git(worktree, "commit", "-qm", "Take the republished Integration")
         return delivery_git.run_git(worktree, "rev-parse", "HEAD")
@@ -2545,6 +2548,41 @@ class DeliveryGitTests(unittest.TestCase):
         self.assertEqual(props["status"], "integrated")
         self.assertIn("Republished for the revised plan.", body)
         self.assertEqual(props["source_hash"], delivery_compile.content_hash(props, body))
+
+    def test_push_item_refuses_before_any_ref_moves_when_its_candidate_would_change_the_worktree(self):
+        """push-item republishes the Item record with LF and moves the Item worktree to that
+        candidate after the push. A converged record committed with CRLF, as a text-mode write on
+        native Windows commits it under setup's -text rule, differs from the candidate, so
+        push-item refuses before the atomic push: no ref moves, and the worktree keeps its commit
+        and its evidence (#247)."""
+        integration_ref = delivery_git.canonical_refs("DLV-001")["integration"]
+
+        def carry_managed_rule(project):
+            (project / ".gitattributes").write_bytes(
+                (setup_check.managed_attributes_block("workspace") + "\n").encode("utf-8"))
+            base = delivery_git.remote_oid(project, "origin", integration_ref)
+            carried = delivery_git.commit_tree(project, base, [".gitattributes"], "Carry the managed checkout rule", {})
+            delivery_git.atomic_push(project, "origin", [(integration_ref, base, carried)])
+
+        project, worktree, item, _active = self.prepare_stamped_architecture_item(before_publish=carry_managed_rule)
+        integration, relative = self.republish_integration_plan(project, worktree, item)
+        self.converge_on_integration(worktree, item, integration, relative)
+        item.write_bytes(item.read_bytes().replace(b"\n", b"\r\n"))
+        delivery_git.run_git(worktree, "add", relative["item"])
+        delivery_git.run_git(worktree, "commit", "-qm", "Save the converged record with CRLF")
+        self.assertIn(b"\r\n", subprocess.run(["git", "-C", str(worktree), "cat-file", "blob", "HEAD:" + relative["item"]],
+                                              capture_output=True, check=True).stdout)
+        self.assertEqual(self.approve_item_evidence(str(worktree)), 0)
+        head = delivery_git.run_git(worktree, "rev-parse", "HEAD")
+        pending = delivery_git.worktree_pending_paths(project, worktree)
+        before = delivery_git.run_git(project, "ls-remote", "origin")
+        with self.assertRaises(RuntimeError) as refused:
+            delivery_git.push_item(project, "DLV-001", "AUTH-01")
+        self.assertEqual(delivery_git.run_git(project, "ls-remote", "origin"), before)
+        self.assertEqual(delivery_git.run_git(worktree, "rev-parse", "HEAD"), head)
+        self.assertEqual(delivery_git.worktree_pending_paths(project, worktree), pending)
+        self.assertEqual(str(refused.exception), "DELIVERY_WORKTREE_UNSAFE: the Item candidate does not contain the "
+                                                 "current worktree bytes of " + relative["item"])
 
     def test_push_refuses_what_a_converged_item_does_not_carry(self):
         project, worktree, item, active = self.prepare_stamped_architecture_item()

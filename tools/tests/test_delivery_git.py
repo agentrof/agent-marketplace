@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import contextlib
+import errno
 import io
 import os
 import sys
@@ -12,6 +13,7 @@ import hashlib
 import shutil
 import subprocess
 import tempfile
+import time
 import unittest
 from unittest import mock
 from pathlib import Path, PureWindowsPath
@@ -25,6 +27,7 @@ import delivery_compile  # noqa: E402
 import delivery_governance  # noqa: E402
 import delivery_provider  # noqa: E402
 import delivery_result  # noqa: E402
+import file_lock  # noqa: E402
 import operation_compile  # noqa: E402
 import architecture_compile  # noqa: E402
 import stage_package  # noqa: E402
@@ -97,6 +100,13 @@ def git_path_arguments():
 
 
 class DeliveryGitTests(unittest.TestCase):
+    def symlink_or_skip(self, link: Path, target) -> None:
+        """Create a symlink, or skip the current test or subtest on a host that cannot."""
+        try:
+            link.symlink_to(target)
+        except OSError as exc:
+            self.skipTest(f"symlinks unavailable: {exc}")
+
     def approve_governance(self, docs: Path, max_parallel: int = 1) -> None:
         initialized = type("Args", (), {"docs": str(docs), "max_parallel": max_parallel})
         self.assertEqual(delivery_governance.init(initialized), 0)
@@ -187,8 +197,8 @@ class DeliveryGitTests(unittest.TestCase):
         self.assertEqual(local_auto_gc, "0")
         self.assertEqual(remote_auto_gc, "0")
 
-    def prepare_pr_intent(self, author_review=None):
-        """Build one real remote Delivery through its durable PR intent."""
+    def reserve_scope(self):
+        """Build one real remote Delivery reserved at its scope approval, before any Item or Review."""
         temporary, project = self.make_project()
         docs = project / "workspace" / "docs"
         (docs / "maps").mkdir(parents=True, exist_ok=True)
@@ -212,6 +222,12 @@ class DeliveryGitTests(unittest.TestCase):
         subprocess.run(["git", "-C", str(project), "commit", "-qm", "scope"], check=True)
         subprocess.run(["git", "-C", str(project), "push", "-q"], check=True)
         delivery_git.reserve_delivery(project, "DLV-001")
+        return temporary, project, docs
+
+    def prepare_pr_intent(self, author_review=None):
+        """Build one real remote Delivery through its durable PR intent."""
+        temporary, project, docs = self.reserve_scope()
+        scope = type("Args", (), {"docs": str(docs), "delivery": "DLV-001"})
         self.author_execution_topology(docs)
         self.assertEqual(delivery_compile.approve_execution(scope), 0)
         delivery_git.publish_execution_plan(project, "DLV-001")
@@ -280,6 +296,10 @@ class DeliveryGitTests(unittest.TestCase):
             def ensure_draft(self, url: str) -> dict:
                 state["draft"] = True
                 return {"url": url, "draft": True}
+
+            def update_body(self, url: str, body: str) -> dict:
+                state["body"] = body
+                return {"url": url}
 
             def make_ready(self, url: str) -> dict:
                 state["draft"] = False
@@ -400,8 +420,8 @@ class DeliveryGitTests(unittest.TestCase):
 
     def test_worktree_paths_have_no_branch_or_worktree_for_fence_slot(self):
         paths = delivery_git.worktree_paths(Path("/project"), "DLV-001", "AUTH-01")
-        self.assertEqual(str(paths["integration"]), "/project/.agentrof/agent-marketplace/.runtime/worktrees/dlv-001/integration")
-        self.assertEqual(str(paths["item"]), "/project/.agentrof/agent-marketplace/.runtime/worktrees/dlv-001/items/auth-01")
+        self.assertEqual(paths["integration"].as_posix(), "/project/.agentrof/agent-marketplace/.runtime/worktrees/dlv-001/integration")
+        self.assertEqual(paths["item"].as_posix(), "/project/.agentrof/agent-marketplace/.runtime/worktrees/dlv-001/items/auth-01")
 
     def test_writer_receipt_is_exact_and_same_candidate_is_idempotent(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -429,6 +449,104 @@ class DeliveryGitTests(unittest.TestCase):
                     "refs/heads/agentrof/items/auth-01",
                     "refs/heads/agentrof/slots/001", "b" * 40,
                 )
+
+    def test_receipt_lock_takes_the_host_lock_around_the_transition(self):
+        """A host with fcntl blocks on an flock. Native Windows has no fcntl, so there the
+        receipt lock locks its lock file's first byte through msvcrt, waits while another
+        process holds that byte and releases it before closing the file, also when the
+        guarded transition fails (#246). An msvcrt error that is not contention raises
+        instead of waiting forever."""
+        events = []
+        outcomes = []
+
+        class Fcntl:
+            LOCK_EX, LOCK_NB, LOCK_UN = 2, 4, 8
+
+            @staticmethod
+            def flock(descriptor, operation):
+                events.append(("flock", operation))
+
+        class Msvcrt:
+            LK_UNLCK, LK_NBLCK = 0, 2
+
+            @staticmethod
+            def locking(descriptor, mode, size):
+                # msvcrt locks from the descriptor's position: record it, then move it
+                # off the first byte so every later call must seek back.
+                events.append(("locking", mode, size, os.lseek(descriptor, 0, os.SEEK_CUR)))
+                os.lseek(descriptor, 1, os.SEEK_SET)
+                if outcomes:
+                    raise outcomes.pop(0)
+
+        close = os.close
+
+        def record_close(descriptor):
+            events.append(("close",))
+            close(descriptor)
+
+        busy = PermissionError(errno.EACCES, "Permission denied")
+        failed = (RuntimeError, "^transition failed$")
+        lock_byte, unlock_byte = ("locking", Msvcrt.LK_NBLCK, 1, 0), ("locking", Msvcrt.LK_UNLCK, 1, 0)
+        wait = ("wait", file_lock.POLL_SECONDS)
+        for host, modules, raised, error, expected in (
+            ("fcntl", {"fcntl": Fcntl, "msvcrt": None}, [], failed,
+             [("flock", Fcntl.LOCK_EX), ("transition",), ("flock", Fcntl.LOCK_UN), ("close",)]),
+            ("native Windows", {"fcntl": None, "msvcrt": Msvcrt}, [busy, busy], failed,
+             [lock_byte, wait, lock_byte, wait, lock_byte, ("transition",), unlock_byte, ("close",)]),
+            ("native Windows without contention", {"fcntl": None, "msvcrt": Msvcrt},
+             [OSError(errno.EBADF, "Bad file descriptor")], (OSError, "Bad file descriptor"),
+             [lock_byte, ("close",)]),
+        ):
+            with self.subTest(host=host), tempfile.TemporaryDirectory() as temporary:
+                events.clear()
+                outcomes[:] = raised
+                path = Path(temporary) / "receipts" / "item-dlv-001-auth-01.json.lock"
+                with mock.patch.dict(sys.modules, modules), \
+                        mock.patch.object(file_lock.time, "sleep", side_effect=lambda seconds: events.append(("wait", seconds))), \
+                        mock.patch.object(delivery_git.os, "close", side_effect=record_close):
+                    with self.assertRaisesRegex(*error):
+                        with delivery_git.receipt_lock(path):
+                            events.append(("transition",))
+                            raise RuntimeError("transition failed")
+                self.assertEqual(events, expected)
+
+    def test_receipt_lock_is_released_when_its_holder_dies(self):
+        """The receipt lock belongs to the process that holds it: once that process is killed,
+        the next writer takes the lock with nothing stale to clear (#246). The host's own lock
+        runs here, msvcrt on native Windows."""
+        holder_script = (
+            "import sys, time\n"
+            "from pathlib import Path\n"
+            "sys.path.insert(0, sys.argv[1])\n"
+            "import delivery_git\n"
+            "with delivery_git.receipt_lock(Path(sys.argv[2])):\n"
+            "    print('held', flush=True)\n"
+            "    time.sleep(600)\n"
+        )
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "receipts" / "item-dlv-001-auth-01.json.lock"
+            holder = subprocess.Popen(
+                [sys.executable, "-c", holder_script,
+                 str(ROOT / "plugins" / "software-engineering-team" / "scripts"), str(path)],
+                stdout=subprocess.PIPE, text=True)
+            try:
+                self.assertEqual(holder.stdout.readline(), "held\n")
+                descriptor = os.open(path, os.O_RDWR)
+                try:
+                    self.assertFalse(file_lock.try_lock(descriptor))
+                    holder.kill()
+                    holder.wait()
+                    deadline = time.monotonic() + 30
+                    while not file_lock.try_lock(descriptor):
+                        self.assertLess(time.monotonic(), deadline, "the killed holder still holds the receipt lock")
+                        time.sleep(file_lock.POLL_SECONDS)
+                    file_lock.unlock(descriptor)
+                finally:
+                    os.close(descriptor)
+            finally:
+                holder.kill()
+                holder.wait()
+                holder.stdout.close()
 
     def test_earlier_provider_receipt_gives_way_unless_it_guards_a_pr_the_provider_does_not_show(self):
         """A new PR intent takes over the receipt an earlier intent left, which then can no longer
@@ -533,8 +651,13 @@ class DeliveryGitTests(unittest.TestCase):
         finally:
             remove_temporary(temporary)
     def test_target_reauthorization_is_fail_closed_without_zero_effect_proof(self):
-        with self.assertRaises(RuntimeError):
-            delivery_git.reauthorize_target_update(Path("/tmp"))
+        # A directory that exists on every host and that no checkout encloses.
+        with tempfile.TemporaryDirectory() as outside, \
+                mock.patch.dict("os.environ", {"GIT_CEILING_DIRECTORIES": outside}):
+            project = Path(outside) / "project"
+            project.mkdir()
+            with self.assertRaises(RuntimeError):
+                delivery_git.reauthorize_target_update(project)
 
     def test_prepared_target_update_reauthorizes_atomically_after_target_drift(self):
         temporary, project = self.make_project()
@@ -600,6 +723,82 @@ class DeliveryGitTests(unittest.TestCase):
             self.assertEqual(delivery_git.finish_source_handoff(project)["mode"], "open")
         finally:
             remove_temporary(temporary)
+
+    def lose_direct_target_update(self, onto_candidate: bool = False) -> tuple[Path, str, str, str, tuple[str, str]]:
+        """Elect a direct target update, move the target before its push lands, and return the refusal.
+
+        The concurrent target commit builds on the base, or on the candidate as
+        if the update had landed and its response were lost.
+        """
+        temporary, project = self.make_project()
+        self.addCleanup(remove_temporary, temporary)
+        delivery_git.begin_source_handoff(project, "sha256:" + "a" * 64)
+        base = delivery_git.run_git(project, "rev-parse", "HEAD")
+        (project / "handoff.txt").write_text("target candidate\n", encoding="utf-8")
+        candidate = delivery_git.commit_tree(project, base, ["handoff.txt"], "Target candidate", {})
+        carrier = "refs/heads/handoff-carrier"
+        delivery_git.atomic_push(project, "origin", [(carrier, "", candidate)])
+        delivery_git.authorize_target_update(project, "source_handoff", "sha256:" + "b" * 64, "origin",
+                                             "direct_target", carrier, "direct", candidate, base, "upstream")
+        (project / "concurrent.txt").write_text("concurrent target change\n", encoding="utf-8")
+        moved = delivery_git.commit_tree(project, candidate if onto_candidate else base, ["concurrent.txt"],
+                                         "Concurrent target change", {})
+        mark_call_started = delivery_git.mark_target_call_started
+
+        def move_target_after_election(root, mode, attempt):
+            started = mark_call_started(root, mode, attempt)
+            delivery_git.atomic_push(root, "origin", [("refs/heads/main", base, moved)])
+            return started
+
+        with mock.patch.object(delivery_git, "mark_target_call_started", side_effect=move_target_after_election):
+            refusal = self.refused_finding(lambda: delivery_git.apply_target_update(project, "source_handoff"))
+        self.assertEqual(delivery_git.remote_oid(project, "origin", "refs/heads/main"), moved)
+        return project, base, candidate, moved, refusal
+
+    @staticmethod
+    def target_update_state(project: Path) -> str:
+        path, _lock = delivery_git.target_receipt_paths(project, "source_handoff")
+        return json.loads(path.read_text(encoding="utf-8"))["state"] if path.exists() else "absent"
+
+    def test_direct_target_update_names_the_lease_it_lost(self):
+        """A target that moves after the update call was elected is named from the refetched ref."""
+        _project, base, _candidate, moved, refusal = self.lose_direct_target_update()
+        self.assertEqual(refusal, ("DELIVERY_LEASE_LOST", "a leased ref moved, so the atomic push changed no ref: "
+                                   f"refs/heads/main is {moved}, leased as {base}; the target does not contain "
+                                   "the update, so its call was released for a fresh attempt or an abort"))
+
+    def test_direct_target_update_that_took_no_effect_releases_its_call(self):
+        """A target without the candidate proves the push changed nothing, so the call is released for a fresh
+        attempt or an abort; a target that holds the candidate proves nothing and keeps the call elected."""
+        for follow_up in ("reauthorize", "abort"):
+            with self.subTest(follow_up=follow_up):
+                project, _base, candidate, moved, _refusal = self.lose_direct_target_update()
+                self.assertEqual(self.target_update_state(project), "prepared")
+                if follow_up == "reauthorize":
+                    delivery_git.reauthorize_target_update(project, "source_handoff")
+                    self.assertEqual(delivery_git.apply_target_update(project, "source_handoff")["receipt"]["state"],
+                                     "verified")
+                    target = delivery_git.finish_source_handoff(project)["target"]
+                    self.assertTrue(delivery_git.is_ancestor(project, candidate, target))
+                    self.assertTrue(delivery_git.is_ancestor(project, moved, target))
+                else:
+                    self.assertEqual(delivery_git.abort_source_handoff(project)["mode"], "open")
+                    _ref, _fence, values = delivery_git._fence_context(project, "origin")
+                    self.assertEqual(values["Target-Update-Intent"], "none")
+                    self.assertEqual(delivery_git.remote_oid(project, "origin", "refs/heads/main"), moved)
+                self.assertEqual(self.target_update_state(project), "absent")
+        with self.subTest(follow_up="none without the proof"):
+            project, _base, _candidate, _moved, _refusal = self.lose_direct_target_update(onto_candidate=True)
+            self.assertEqual(self.target_update_state(project), "call_started")
+            for verb, message in (
+                (delivery_git.apply_target_update, "target moved after target mutation election"),
+                (delivery_git.reauthorize_target_update, "only an unspent prepared attempt can be reauthorized"),
+                (delivery_git.abort_source_handoff, "abort after a target-update intent requires this host's "
+                                                    "prepared direct attempt, absent from the target"),
+            ):
+                self.assertEqual(self.refused_finding(lambda: verb(project)), ("DELIVERY_TARGET_UPDATE_UNCERTAIN", message))
+            self.assertEqual(self.target_update_state(project), "call_started")
+
     def test_open_and_merge_pr_use_the_exact_reviewed_integration_head(self):
         temporary, project, _docs, product_tip, intent = self.prepare_pr_intent()
         try:
@@ -627,10 +826,16 @@ class DeliveryGitTests(unittest.TestCase):
             exit_code = delivery_git.main(["open-pr", "--project-root", str(project), "--delivery", "DLV-001"])
         return exit_code, json.loads(output.getvalue())
 
-    def republish_review(self, project: Path, docs: Path) -> None:
-        """Invalidate the published Review, approve it again on the new Integration head and publish it."""
+    def republish_review(self, project: Path, docs: Path, authored: dict | None = None) -> None:
+        """Invalidate the published Review, approve it again on the new Integration head, from a
+        draft with the *authored* sections when given, and publish it."""
         delivery_git.invalidate_delivery_review(project, "DLV-001", "REVIEW_FINDING", "sha256:" + "0" * 64)
         head = delivery_git.remote_oid(project, "origin", delivery_git.canonical_refs("DLV-001")["integration"])
+        if authored is not None:
+            path = delivery_compile.find_delivery(docs, "DLV-001") / "delivery-review.md"
+            path.write_text(delivery_compile.frontmatter(
+                {"type": "delivery-review", "status": "draft"},
+                delivery_compile.body_for("delivery-review", "Draft review", authored)), encoding="utf-8")
         self.assertEqual(delivery_compile.approve_review(type("Args", (), {
             "docs": str(docs), "delivery": "DLV-001",
             "reviewed_commit": head, "reviewed_integration_commit": head,
@@ -811,6 +1016,52 @@ class DeliveryGitTests(unittest.TestCase):
                          ["pr-url-recorded-v1", intent["intent"], "17"])
         self.assertEqual(receipt(), [intent["intent"], intent["attempt"], "verified", url])
 
+    def test_open_pr_resumes_an_adoption_that_stopped_before_its_record(self):
+        """open-pr that stopped after pushing its adoption intent, before the PR record, resumes on
+        the next run for the one PR that intent names. A provider that shows another PR is refused
+        and the intent stays; no run creates a PR."""
+        temporary, project, docs, _product_tip, _intent = self.prepare_pr_intent()
+        self.addCleanup(remove_temporary, temporary)
+        state: dict = {}
+        with mock.patch("delivery_provider.GitHubProvider", self.fake_provider_type(state)):
+            url = delivery_git.open_pr(project, "DLV-001")["pull_request_url"]
+        self.republish_review(project, docs)
+
+        class AdoptingProvider(self.fake_provider_type(state)):
+            def create_draft(self, head: str, base: str, title: str, body: str) -> dict:
+                raise AssertionError("an adoption never creates a PR")
+
+        class OtherPrProvider(AdoptingProvider):
+            def _record(self, head: str, base: str) -> dict:
+                return {**super()._record(head, base), "number": 18,
+                        "url": "https://github.com/agentrof/example/pull/18"}
+
+        class Interrupted(Exception):
+            """open-pr stops once its adoption intent is on the remote."""
+
+        integration = delivery_git.canonical_refs("DLV-001")["integration"]
+        with mock.patch("delivery_provider.GitHubProvider", AdoptingProvider), \
+                mock.patch("delivery_compile.record_pr_url", side_effect=Interrupted), \
+                self.assertRaises(Interrupted):
+            delivery_git.open_pr(project, "DLV-001")
+        intent = delivery_git.remote_oid(project, "origin", integration)
+        self.assertEqual(delivery_git.trailer(delivery_git.commit_message(project, intent), "Record"),
+                         "pr-adoption-intent-v1")
+        with mock.patch("delivery_provider.GitHubProvider", OtherPrProvider), \
+                self.assertRaises(RuntimeError) as refused:
+            delivery_git.open_pr(project, "DLV-001")
+        result = delivery_result.from_raw("open-pr", {"ok": False, "errors": [str(refused.exception)]})
+        self.assertEqual([(finding["code"], finding["message"]) for finding in result["findings"]],
+                         [("DELIVERY_PR_UNCERTAIN", "the exact Delivery PR is not the PR the adoption intent names")])
+        self.assertEqual(delivery_git.remote_oid(project, "origin", integration), intent)
+        with mock.patch("delivery_provider.GitHubProvider", AdoptingProvider):
+            resumed = delivery_git.open_pr(project, "DLV-001")
+        self.assertEqual((resumed["pull_request_url"], resumed["provider_call"], resumed["adopted"]), (url, False, True))
+        record = delivery_git.commit_message(project, resumed["integration"])
+        self.assertEqual([delivery_git.trailer(record, key) for key in ("Record", "Intent", "Pull-Request")],
+                         ["pr-url-recorded-v1", intent, "17"])
+        self.assertEqual(delivery_git.remote_oid(project, "origin", integration), resumed["integration"])
+
     def test_published_review_and_pr_carry_the_authored_delivery_review(self):
         authored = {"Scope Disposition": "AUTH-01 delivered as planned.",
                     "Deviations": "The owner added session expiry on 2026-01-01.",
@@ -916,6 +1167,7 @@ class DeliveryGitTests(unittest.TestCase):
             again = delivery_git.open_pr(project, "DLV-001")
         self.assertTrue(again["reused"])
         self.assertFalse(again["provider_call"])
+        self.assertEqual(again["pull_request_url"], opened["pull_request_url"])
         self.assertEqual(delivery_git.remote_oid(project, "origin", delivery_git.canonical_refs("DLV-001")["integration"]), head)
         self.assertEqual((package / "delivery.md").read_bytes(), recorded)
 
@@ -1123,6 +1375,128 @@ class DeliveryGitTests(unittest.TestCase):
         self.assertEqual(state["body"], delivery_git.split_remote_note(
             project, cancelled["review"], review, delivery_compile.split_note)[1])
 
+    def test_cancelling_after_the_pr_opened_gives_the_pr_the_cancellation_review_as_its_body(self):
+        """A Delivery cancelled after its PR was opened replaces that PR's approval body with the
+        published cancellation Review, whether open-pr adopts the PR or a new PR intent finds it."""
+        for prepared in (False, True):
+            with self.subTest(prepared=prepared):
+                temporary, project, docs, _product_tip, _intent = self.prepare_pr_intent()
+                self.addCleanup(remove_temporary, temporary)
+                review = delivery_compile.find_delivery(docs, "DLV-001").relative_to(project).as_posix() + "/delivery-review.md"
+                state: dict = {}
+                with mock.patch("delivery_provider.GitHubProvider", self.fake_provider_type(state)):
+                    delivery_git.open_pr(project, "DLV-001")
+                    approval = state["body"]
+                    cancelled = delivery_git.cancel_delivery(project, "DLV-001", "The owner withdrew the request")
+                    if prepared:
+                        delivery_git.prepare_pr_creation(project, "DLV-001")
+                    self.assertFalse(delivery_git.open_pr(project, "DLV-001")["provider_call"])
+                cancellation = delivery_git.split_remote_note(
+                    project, cancelled["review"], review, delivery_compile.split_note)[1]
+                self.assertNotEqual(approval, cancellation)
+                self.assertEqual(state["body"], cancellation)
+
+    def test_a_pr_that_already_exists_gets_the_review_at_its_intent_as_its_body(self):
+        """A Review published again with new text becomes the body of the PR that already exists,
+        whether open-pr adopts that PR or a new PR intent finds it, instead of the earlier Review."""
+        deviations = "Session expiry was dropped after the finding."
+        for prepared in (False, True):
+            with self.subTest(prepared=prepared):
+                temporary, project, docs, _product_tip, _intent = self.prepare_pr_intent()
+                self.addCleanup(remove_temporary, temporary)
+                review = delivery_compile.find_delivery(docs, "DLV-001").relative_to(project).as_posix() + "/delivery-review.md"
+                state: dict = {}
+                with mock.patch("delivery_provider.GitHubProvider", self.fake_provider_type(state)):
+                    delivery_git.open_pr(project, "DLV-001")
+                    earlier = state["body"]
+                    self.republish_review(project, docs, {"Deviations": deviations})
+                    if prepared:
+                        delivery_git.prepare_pr_creation(project, "DLV-001")
+                    reopened = delivery_git.open_pr(project, "DLV-001")
+                self.assertFalse(reopened["provider_call"])
+                republished = delivery_git.split_remote_note(
+                    project, reopened["integration"], review, delivery_compile.split_note)[1]
+                self.assertNotIn(deviations, earlier)
+                self.assertIn(deviations, republished)
+                self.assertEqual(state["body"], republished)
+
+    def test_delivery_cancelled_before_its_review_reaches_the_target_through_its_pr(self):
+        """A Delivery cancelled at its scope reservation never has a local Review. open-pr opens,
+        records and finds its PR again, and merge-pr merges it, from the PR record alone; the target
+        shows the cancelled Delivery with its cancellation Review, and no local Review is written."""
+        temporary, project, docs = self.reserve_scope()
+        self.addCleanup(remove_temporary, temporary)
+        package = delivery_compile.find_delivery(docs, "DLV-001")
+        review = package.relative_to(project).as_posix() + "/delivery-review.md"
+        cancelled = delivery_git.cancel_delivery(project, "DLV-001", "The owner withdrew the request")
+        delivery_git.prepare_pr_creation(project, "DLV-001")
+        state: dict = {}
+        with mock.patch("delivery_provider.GitHubProvider", self.fake_provider_type(state)):
+            opened = delivery_git.open_pr(project, "DLV-001")
+            again = delivery_git.open_pr(project, "DLV-001")
+            merged = delivery_git.merge_pr(project, "DLV-001")
+        url = opened["pull_request_url"]
+        cancellation = delivery_git.split_remote_note(project, cancelled["review"], review, delivery_compile.split_note)[1]
+        self.assertEqual((opened["provider_call"], state["title"], state["body"]), (True, "SAML authentication", cancellation))
+        self.assertEqual((again["pull_request_url"], again["reused"]), (url, True))
+        self.assertEqual((merged["status"], merged["pull_request_url"], merged["reviewed_integration"]),
+                         ("merged", url, opened["integration"]))
+        self.assertFalse((package / "delivery-review.md").exists())
+        checkout = Path(temporary.name) / "main-after-merge"
+        subprocess.run(["git", "clone", "-q", "-c", "gc.auto=0", str(project / "remote.git"), str(checkout)], check=True)
+        self.assertEqual(delivery_git.run_git(checkout, "rev-parse", "HEAD^2"), opened["integration"])
+        self.assertEqual(self.reported_status(checkout / "workspace/docs"), "cancelled")
+        props, body = delivery_compile.split_note(checkout / review)
+        self.assertEqual((props["pull_request_url"], body), (url, cancellation))
+        self.assertEqual(delivery_compile.delivery_findings(checkout / "workspace/docs", "DLV-001")[1], [])
+
+    def test_a_published_cancellation_refuses_a_second_cancellation(self):
+        """cancel-delivery judges a Delivery by its published status: the local delivery.md keeps
+        its scope status after a cancellation, and a Delivery without Item refs has no cancelled
+        Item to refuse on, so a second cancellation used to publish a second cancellation Review."""
+        temporary, project, docs = self.reserve_scope()
+        self.addCleanup(remove_temporary, temporary)
+        delivery_git.cancel_delivery(project, "DLV-001", "The owner withdrew the request")
+        package = delivery_compile.find_delivery(docs, "DLV-001")
+        self.assertEqual(delivery_compile.split_note(package / "delivery.md")[0]["status"], "scope_approved")
+        refs = delivery_git.canonical_refs("DLV-001")
+        before = [delivery_git.remote_oid(project, "origin", refs[name]) for name in ("fence", "integration")]
+        self.assertEqual(self.refused_finding(lambda: delivery_git.cancel_delivery(project, "DLV-001", "Withdrawn again")),
+                         ("DELIVERY_CANCELLATION_INVALID", "the published Delivery is already cancelled"))
+        self.assertEqual([delivery_git.remote_oid(project, "origin", refs[name]) for name in ("fence", "integration")],
+                         before)
+
+    def test_record_pr_remote_checks_the_local_mirror_and_the_adoption_intent(self):
+        """record-pr-remote refuses a URL that an existing local Review does not mirror, as it did
+        before the PR record became the only source of the URL, and a PR other than the one an
+        adoption intent names; it records the named PR once the mirror carries it."""
+        temporary, project, docs, _product_tip, _intent = self.prepare_pr_intent()
+        self.addCleanup(remove_temporary, temporary)
+        url, other = "https://github.com/agentrof/example/pull/17", "https://github.com/agentrof/example/pull/18"
+        integration = delivery_git.canonical_refs("DLV-001")["integration"]
+        creation_intent = delivery_git.remote_oid(project, "origin", integration)
+        self.assertEqual(self.refused_finding(lambda: delivery_git.record_pr_remote(project, "DLV-001", url)),
+                         ("DELIVERY_INPUT_INVALID", "local Delivery Review URL does not match the requested PR"))
+        self.assertEqual(delivery_git.remote_oid(project, "origin", integration), creation_intent)
+        state: dict = {}
+        with mock.patch("delivery_provider.GitHubProvider", self.fake_provider_type(state)):
+            delivery_git.open_pr(project, "DLV-001")
+            self.republish_review(project, docs)
+            with mock.patch("delivery_compile.record_pr_url", side_effect=RuntimeError("stopped")), \
+                    self.assertRaises(RuntimeError):
+                delivery_git.open_pr(project, "DLV-001")
+        adoption_intent = delivery_git.remote_oid(project, "origin", integration)
+        self.assertEqual(delivery_git.trailer(delivery_git.commit_message(project, adoption_intent), "Record"),
+                         "pr-adoption-intent-v1")
+        delivery_compile.record_pr_url(docs, "DLV-001", other)
+        self.assertEqual(self.refused_finding(lambda: delivery_git.record_pr_remote(project, "DLV-001", other)),
+                         ("DELIVERY_PR_UNCERTAIN", "the requested PR is not the PR the adoption intent names"))
+        self.assertEqual(delivery_git.remote_oid(project, "origin", integration), adoption_intent)
+        delivery_compile.record_pr_url(docs, "DLV-001", url)
+        recorded = delivery_git.record_pr_remote(project, "DLV-001", url)
+        self.assertEqual(delivery_git.trailer(delivery_git.commit_message(project, recorded["integration"]), "Intent"),
+                         adoption_intent)
+
     def test_scope_cancellation_projection_is_sorted_and_closed(self):
         stories = {
             "AUTH-02": {"disposition": "not_started", "tip": "none"},
@@ -1278,6 +1652,40 @@ class DeliveryGitTests(unittest.TestCase):
             self.assertIn("refs/heads/agentrof/deliveries/dlv-001", refs)
             with self.assertRaises(RuntimeError):
                 delivery_git.reserve_delivery(project, "DLV-001")
+
+    def test_reservation_names_the_lease_a_concurrent_reservation_took(self):
+        """A Fence another host opens after the absence check is named from the refetched refs."""
+        temporary, project = self.make_project()
+        self.addCleanup(remove_temporary, temporary)
+        docs = project / "workspace" / "docs"
+        (docs / "maps").mkdir(parents=True, exist_ok=True)
+        make_approved_backlog(docs)
+        dod = type("Args", (), {"docs": str(docs), "title": "Project", "file": None})
+        self.assertEqual(delivery_compile.init_dod(dod), 0)
+        self.assertEqual(delivery_compile.approve_dod(dod), 0)
+        delivery_git.run_git(project, "add", "workspace")
+        delivery_git.run_git(project, "commit", "-qm", "approved backlog")
+        delivery_git.run_git(project, "push", "-q")
+        init = type("Args", (), {"docs": str(docs), "id": None, "slug": "auth", "goal": "Authenticate",
+                                 "outcome": None, "target_branch": "main", "story": ["AUTH-01"]})
+        self.assertEqual(delivery_compile.init_delivery(init), 0)
+        self.assertEqual(delivery_compile.approve_scope(type("Args", (), {"docs": str(docs), "delivery": "DLV-001"})), 0)
+        refs = delivery_git.canonical_refs("DLV-001")
+        package_paths = delivery_git.package_paths
+        opened = []
+
+        def open_fence_concurrently(*args, **kwargs):
+            if not opened:
+                opened.append(delivery_git.remote_oid(project, "origin", "refs/heads/main"))
+                delivery_git.atomic_push(project, "origin", [(refs["fence"], "", opened[0])])
+            return package_paths(*args, **kwargs)
+
+        with mock.patch.object(delivery_git, "package_paths", side_effect=open_fence_concurrently):
+            finding = self.refused_finding(lambda: delivery_git.reserve_delivery(project, "DLV-001"))
+        self.assertEqual(finding, ("DELIVERY_FENCE_LEASE_LOST", "the project Fence moved, so the atomic push changed no ref: "
+                                   f"{refs['fence']} is {opened[0]}, leased as absent"))
+        self.assertEqual(delivery_git.remote_oid(project, "origin", refs["fence"]), opened[0])
+        self.assertFalse(delivery_git.remote_has_ref(project, "origin", refs["integration"]))
 
     def test_candidate_map_excludes_unpublished_local_governance(self):
         temporary, project = self.make_project()
@@ -1520,7 +1928,8 @@ class DeliveryGitTests(unittest.TestCase):
         active = delivery_git.start_item(project, "DLV-001", "AUTH-01")
         worktree = Path(active["worktree"])
         item = worktree / directory.relative_to(project) / "items/auth-01/item.md"
-        original = item.read_bytes()
+        # Text mode folds native CRLF from checkout or render, so the body check holds on every OS.
+        original = item.read_text(encoding="utf-8")
         before, before_body = delivery_compile.split_note(item)
         active_docs = worktree / "workspace/docs"
         self.assertEqual(architecture_compile.init_root(active_docs, "AUTH-01"), 0)
@@ -1531,7 +1940,7 @@ class DeliveryGitTests(unittest.TestCase):
         self.assertEqual(props["item_plan_hash"], before["item_plan_hash"])
         self.assertEqual(props["source_hash"], delivery_compile.content_hash(props, body))
         self.assertEqual(body, before_body)
-        self.assertEqual(item.read_bytes().split(b"\n---\n", 1)[1], original.split(b"\n---\n", 1)[1])
+        self.assertEqual(item.read_text(encoding="utf-8").split("\n---\n", 1)[1], original.split("\n---\n", 1)[1])
         self.assertEqual({key: value for key, value in props.items() if key not in {"source_hash", "architecture_delta_hash"}},
                          {key: value for key, value in before.items() if key not in {"source_hash", "architecture_delta_hash"}})
         (worktree / "src").mkdir()
@@ -1649,14 +2058,19 @@ class DeliveryGitTests(unittest.TestCase):
             "new_item": lambda: (package / "items/extra").mkdir(),
             "deleted_evidence": lambda: (item.parent / "verification.md").unlink(),
             "non_markdown": lambda: (package / "extra\ncontrol.json").write_text("{}"),
-            "mode": lambda: item.chmod(0o755),
-            "symlink": lambda: (item.unlink(), item.symlink_to("code-review.md")),
+            # Native Windows files carry no executable bit, so the index records the
+            # mode there; a POSIX checkout records it from the file as well.
+            "mode": lambda: (item.chmod(0o755), delivery_git.run_git(
+                worktree, "update-index", "--chmod=+x", item.relative_to(worktree).as_posix())),
+            "symlink": lambda: (item.unlink(), self.symlink_or_skip(item, "code-review.md")),
             "missing_hash": lambda: mutate_note(item, "architecture_delta_hash", "none"),
             "wrong_hash": lambda: mutate_note(item, "architecture_delta_hash", "sha256:" + "0" * 64),
             "source_hash": lambda: item.write_text(item.read_text().replace("source_hash: sha256:", "source_hash: broken:")),
         }
         for label, mutation in mutations.items():
             with self.subTest(label=label):
+                if label == "non_markdown" and os.name == "nt":
+                    self.skipTest("POSIX opaque filename contract: native Windows refuses a newline in a file name")
                 delivery_git.run_git(worktree, "reset", "--hard", clean)
                 delivery_git.run_git(worktree, "clean", "-fd")
                 mutation()
@@ -1696,11 +2110,13 @@ class DeliveryGitTests(unittest.TestCase):
                     lookalike.parent.mkdir(parents=True)
                     lookalike.write_text("untracked report lookalike\n")
                 elif label == "symlink":
-                    review.unlink(); review.symlink_to(worktree / "src/auth.py")
+                    review.unlink(); self.symlink_or_skip(review, worktree / "src/auth.py")
                 elif label == "hardlink":
                     os.link(review, project / "report-hardlink.md")
                 else:
                     review.chmod(0o755)
+                    if not review.stat().st_mode & 0o111:
+                        self.skipTest("fixture filesystem has no executable mode")
                 before = review.read_bytes()
                 self.assertNotEqual(self.approve_item_evidence(str(worktree)), 0)
                 self.assertEqual(review.read_bytes(), before)
@@ -1753,7 +2169,7 @@ class DeliveryGitTests(unittest.TestCase):
                 elif label == "missing_seal":
                     (architecture / "_ledger/records/IFC-001/r1.json").unlink()
                 elif label == "symlink_record":
-                    record.unlink(); record.symlink_to("../../../component.md")
+                    record.unlink(); self.symlink_or_skip(record, "../../../component.md")
                 elif label == "stale_record":
                     record.write_text(record.read_text() + "\nChanged after seal.\n")
                 else:
@@ -2044,7 +2460,7 @@ class DeliveryGitTests(unittest.TestCase):
                 path.write_text("Integration generated view\n", encoding="utf-8")
                 ours = delivery_git.commit_tree(project, base, [relative], "Integration projection", {})
                 path.unlink()
-                path.symlink_to("unrelated-target")
+                self.symlink_or_skip(path, "unrelated-target")
                 theirs = delivery_git.commit_tree(project, base, [relative], "Target symlink", {})
                 with self.assertRaisesRegex(RuntimeError, "unmerged"):
                     delivery_git.merge_candidate(project, ours, theirs, "Reject structural conflict", {}, delivery_projections=True)
@@ -2491,6 +2907,76 @@ class DeliveryGitTests(unittest.TestCase):
                 self.assertEqual(delivery_git.remote_slot_oids(project, "origin"), {})
                 self.assertIsNone(delivery_git.read_writer_receipt(project, "DLV-001", "AUTH-01"))
                 self.assertFalse(delivery_git.worktree_paths(project, "DLV-001", "AUTH-01")["item"].exists())
+
+    def refused_under_concurrent_coordinator(self, verb, taken_slot: str = "") -> tuple[str, str]:
+        """Refuse *verb* after another coordinator moves the Fence first and, when named, takes *taken_slot*."""
+        original_push = delivery_git.atomic_push
+        raced = []
+
+        def race(root, remote, updates):
+            if not raced:
+                ref, fence, values = delivery_git._fence_context(root, remote)
+                raced.append(delivery_git._fence_child(root, fence, values, "Concurrent coordinator update"))
+                taken = [(taken_slot, "", raced[0])] if taken_slot else []
+                original_push(root, remote, [(ref, fence, raced[0]), *taken])
+            return original_push(root, remote, updates)
+
+        with mock.patch.object(delivery_git, "atomic_push", side_effect=race):
+            return self.refused_finding(verb)
+
+    def test_rejected_activation_drops_its_pending_receipt_so_a_retry_starts(self):
+        """The activation is atomic, so an unchanged Item ref proves it changed no ref, whatever the Slot holds."""
+        for label, taken in (("lost Fence lease", False), ("Slot taken by a concurrent start", True)):
+            with self.subTest(label=label):
+                project, _docs, _directory, _item, _reserved = self.prepare_execution_with_draft_reserved_contracts(False)
+                delivery_git.publish_execution_plan(project, "DLV-001")
+                delivery_git.claim_items(project, "DLV-001")
+                refs = delivery_git.canonical_refs("DLV-001", "AUTH-01", 1)
+                claimed = delivery_git.remote_oid(project, "origin", refs["item"])
+                code, _message = self.refused_under_concurrent_coordinator(
+                    lambda: delivery_git.start_item(project, "DLV-001", "AUTH-01"), refs["slot"] if taken else "")
+                self.assertEqual(code, "DELIVERY_FENCE_LEASE_LOST")
+                self.assertEqual(delivery_git.remote_oid(project, "origin", refs["item"]), claimed)
+                self.assertIsNone(delivery_git.read_writer_receipt(project, "DLV-001", "AUTH-01"))
+                if taken:
+                    # The concurrent Item releases the Slot, as its pause or integration would.
+                    occupant = delivery_git.remote_oid(project, "origin", refs["slot"])
+                    delivery_git.atomic_push(project, "origin", [(refs["slot"], occupant, "")])
+                self.assertEqual(delivery_git.remote_slot_oids(project, "origin"), {})
+                started = delivery_git.start_item(project, "DLV-001", "AUTH-01")
+                self.assertEqual((started["slot"], started["receipt"]["state"]), ("001", "verified"))
+
+    def test_rejected_reopen_and_takeover_leave_the_writer_state_as_it_was(self):
+        """Neither changed a ref, so the pending receipt goes; takeover gives back the receipt and worktree it replaced."""
+        for action in ("reopen", "takeover"):
+            with self.subTest(action=action):
+                project, _docs, _directory, _item, _reserved = self.prepare_execution_with_draft_reserved_contracts(False)
+                delivery_git.publish_execution_plan(project, "DLV-001")
+                delivery_git.claim_items(project, "DLV-001")
+                active = delivery_git.start_item(project, "DLV-001", "AUTH-01")
+                if action == "reopen":
+                    self.commit_item_product_change(active["worktree"], "def authenticate():\n    return True\n")
+                    self.assertEqual(self.approve_item_evidence(active["worktree"]), 0)
+                    delivery_git.push_item(project, "DLV-001", "AUTH-01")
+                    delivery_git.integrate_item(project, "DLV-001", "AUTH-01")
+                    verb = lambda: delivery_git.reopen_item(project, "DLV-001", "AUTH-01")  # noqa: E731
+                else:
+                    verb = lambda: delivery_git.takeover_item(project, "DLV-001", "AUTH-01", confirm=True)  # noqa: E731
+                item_ref = delivery_git.canonical_refs("DLV-001", "AUTH-01")["item"]
+                tip = delivery_git.remote_oid(project, "origin", item_ref)
+                receipt = delivery_git.read_writer_receipt(project, "DLV-001", "AUTH-01")
+                code, _message = self.refused_under_concurrent_coordinator(verb)
+                self.assertEqual(code, "DELIVERY_FENCE_LEASE_LOST")
+                self.assertEqual(delivery_git.remote_oid(project, "origin", item_ref), tip)
+                self.assertEqual(delivery_git.read_writer_receipt(project, "DLV-001", "AUTH-01"), receipt)
+                worktree = delivery_git.worktree_paths(project, "DLV-001", "AUTH-01")["item"]
+                if action == "takeover":
+                    self.assertEqual(receipt["state"], "verified")
+                    self.assertEqual(delivery_git.worktree_head(project, worktree), tip)
+                else:
+                    self.assertIsNone(receipt)
+                    self.assertFalse(worktree.exists())
+                self.assertEqual(verb()["receipt"]["state"], "verified")
 
     def test_merge_candidate_preserves_disjoint_additions_and_rejects_conflicts(self):
         temporary, project = self.make_project()
@@ -2962,6 +3448,151 @@ class DeliveryGitTests(unittest.TestCase):
         delivery_git.integrate_item(project, "DLV-001", "AUTH-01")
         started = delivery_git.start_item(project, "DLV-001", "AUTH-02")
         self.assertEqual((started["story"], started["slot"]), ("AUTH-02", "001"))
+
+    def claim_waiting_deliveries(self, claim_dependency: bool = True) -> Path:
+        """Claim DLV-002, whose AUTH-02 waits for AUTH-01 of DLV-001, and DLV-001 unless told not to."""
+        temporary, project = self.make_project()
+        self.addCleanup(remove_temporary, temporary)
+        docs = project / "workspace" / "docs"
+        (docs / "maps").mkdir(parents=True, exist_ok=True)
+        make_approved_backlog(docs, "AUTH-01", "AUTH-02")
+        dod = type("Args", (), {"docs": str(docs), "title": "Project", "file": None})
+        self.assertEqual(delivery_compile.init_dod(dod), 0)
+        self.assertEqual(delivery_compile.approve_dod(dod), 0)
+        delivery_git.run_git(project, "add", "workspace")
+        delivery_git.run_git(project, "commit", "-qm", "approved backlog")
+        delivery_git.run_git(project, "push", "-q")
+        for delivery, slug, story in (("DLV-001", "auth", "AUTH-01"), ("DLV-002", "session", "AUTH-02")):
+            init = type("Args", (), {"docs": str(docs), "id": delivery, "slug": slug, "goal": f"Deliver {story}",
+                                     "outcome": None, "target_branch": "main", "story": [story]})
+            self.assertEqual(delivery_compile.init_delivery(init), 0)
+            self.assertEqual(delivery_compile.approve_scope(type("Args", (), {"docs": str(docs), "delivery": delivery})), 0)
+        reserved = delivery_git.reserve_delivery(project, "DLV-001")
+        # reserve-delivery takes only a ref-free project, so the second Integration is created directly.
+        second = delivery_compile.find_delivery(docs, "DLV-002")
+        reservation = delivery_git.commit_tree(
+            project, reserved["target"], delivery_git.package_paths(project, second, docs, include_map=False),
+            "Reserve Delivery DLV-002", {"Record": "delivery-reservation-v1", "Protocol": "1", "Delivery": "DLV-002",
+                                         "Slug": "session", "Target": reserved["target"]},
+            delivery_projections=True)
+        delivery_git.atomic_push(project, "origin", [(delivery_git.canonical_refs("DLV-002")["integration"], "", reservation)])
+        self.author_execution_topology(docs)
+        waiting = second / "items" / "auth-02" / "item.md"
+        props, body = delivery_compile.split_note(waiting)
+        props["path_claims"] = ["src/session.py"]
+        props["waits_for"] = ["AUTH-01"]
+        delivery_compile.atomic_text(waiting, delivery_compile.frontmatter(props, body))
+        for delivery in ("DLV-001", "DLV-002"):
+            self.assertEqual(delivery_compile.approve_execution(type("Args", (), {"docs": str(docs), "delivery": delivery})), 0)
+            delivery_git.publish_execution_plan(project, delivery)
+        for delivery in ("DLV-001", "DLV-002") if claim_dependency else ("DLV-002",):
+            delivery_git.claim_items(project, delivery)
+        return project
+
+    def refuse_waiting_start(self, project: Path, checkout: Path, expected: tuple[str, str]) -> None:
+        """start-item of DLV-002's AUTH-02 refuses as expected and changes no ref or receipt."""
+        before = delivery_git.run_git(project, "ls-remote", "origin")
+        self.assertEqual(self.refused_finding(lambda: delivery_git.start_item(checkout, "DLV-002", "AUTH-02")), expected)
+        self.assertEqual(delivery_git.run_git(project, "ls-remote", "origin"), before)
+        self.assertIsNone(delivery_git.read_writer_receipt(checkout, "DLV-002", "AUTH-02"))
+
+    def test_start_item_waits_until_its_integration_holds_the_integrated_waits_for_story(self):
+        """A waits_for Story is met once its Delivery merged into the target and this Delivery refreshed onto it."""
+        project = self.claim_waiting_deliveries()
+        waiting = ("DELIVERY_DEPENDENCY_UNMET",
+                   "AUTH-02 starts only after this Integration holds these Stories integrated: AUTH-01 from DLV-001; "
+                   "merge their Deliveries into the target, then refresh this one")
+        self.refuse_waiting_start(project, project, waiting)
+        active = delivery_git.start_item(project, "DLV-001", "AUTH-01")
+        # Another host that fetched after this activation: integration moves no Fence, so that
+        # host still reads the current Fence but lacks AUTH-01's integrated tip.
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(remove_temporary, temporary)
+        other = Path(temporary.name) / "other"
+        subprocess.run(["git", "clone", "-q", "-c", "gc.auto=0", "-c", "maintenance.auto=false",
+                        str(project / "remote.git"), str(other)], check=True)
+        delivery_git.run_git(other, "checkout", "-q", "--detach", "origin/agentrof/deliveries/dlv-002")
+        self.commit_item_product_change(active["worktree"], "def authenticate():\n    return 'v1'\n")
+        self.assertEqual(self.approve_item_evidence(active["worktree"]), 0)
+        delivery_git.push_item(project, "DLV-001", "AUTH-01")
+        integrated = delivery_git.integrate_item(project, "DLV-001", "AUTH-01")
+        self.refuse_waiting_start(project, project, waiting)
+        self.refuse_waiting_start(project, other, waiting)
+        target = delivery_git.remote_oid(project, "origin", "refs/heads/main")
+        merged = delivery_git.merge_candidate(project, target, integrated["integration"], "Merge pull request #1", {})
+        delivery_git.atomic_push(project, "origin", [("refs/heads/main", target, merged)])
+        self.refuse_waiting_start(project, project, ("DELIVERY_TARGET_DRIFT",
+                                                     "target advanced; refresh the Delivery before Item activation"))
+        integration_ref = delivery_git.canonical_refs("DLV-002")["integration"]
+        before_refresh = delivery_git.remote_oid(project, "origin", integration_ref)
+        self.assertEqual(delivery_git.unmet_waits_for(project.resolve(), "origin", "DLV-002", before_refresh, ["AUTH-01"]),
+                         (["AUTH-01 from DLV-001"], []))
+        delivery_git.refresh_target(project, "DLV-002")
+        started = delivery_git.start_item(project, "DLV-002", "AUTH-02")
+        self.assertEqual((started["story"], started["slot"]), ("AUTH-02", "001"))
+
+    def test_start_item_refuses_a_waits_for_story_no_delivery_is_delivering(self):
+        """A Story no Delivery claimed, or one its Delivery cancelled, names a backlog revision as the way out."""
+        project = self.claim_waiting_deliveries(claim_dependency=False)
+
+        def undeliverable(reason: str) -> tuple[str, str]:
+            return ("DELIVERY_DEPENDENCY_UNMET", f"AUTH-02 waits for Stories no Delivery is delivering: {reason}; "
+                                                 "revise the backlog so AUTH-02 no longer depends on them")
+
+        self.refuse_waiting_start(project, project, undeliverable("AUTH-01 was never claimed"))
+        delivery_git.claim_items(project, "DLV-001")
+        delivery_git.cancel_delivery(project, "DLV-001", "Authentication moves to a later Delivery")
+        self.refuse_waiting_start(project, project, undeliverable("AUTH-01 was cancelled with DLV-001"))
+
+    def test_worktree_file_holds_its_blob_as_git_stores_it(self):
+        """A worktree file holds a committed blob when Git would store it as that blob. A checkout
+        that converted line endings still holds it; the same bytes with the conversion off, a
+        changed, missing or linked file and a directory do not (#257)."""
+        committed = b"---\nstatus: active\n---\n\n# Item\n"
+        converted = committed.replace(b"\n", b"\r\n")
+        with temporary_directory() as temporary:
+            root = Path(temporary)
+            init_repository(root)
+            for key, value in (("user.email", "test@example.com"), ("user.name", "Test"),
+                               ("core.autocrlf", "true")):
+                delivery_git.run_git(root, "config", key, value)
+            note, twin = root / "notes" / "item.md", root / "notes" / "twin.md"
+            note.parent.mkdir()
+            note.write_bytes(committed)
+            delivery_git.run_git(root, "add", "notes/item.md")
+            delivery_git.run_git(root, "commit", "-qm", "Item")
+            oid = delivery_git.run_git(root, "rev-parse", "HEAD:notes/item.md")
+            note.unlink()
+            delivery_git.run_git(root, "checkout", "--", "notes/item.md")
+            self.assertEqual(note.read_bytes(), converted)
+            self.assertTrue(delivery_git.worktree_holds_blob(root, "notes/item.md", oid))
+            delivery_git.run_git(root, "config", "core.autocrlf", "false")
+            self.assertFalse(delivery_git.worktree_holds_blob(root, "notes/item.md", oid))
+            delivery_git.run_git(root, "config", "core.autocrlf", "true")
+            note.write_bytes(converted.replace(b"active", b"paused"))
+            self.assertFalse(delivery_git.worktree_holds_blob(root, "notes/item.md", oid))
+            note.unlink()
+            self.assertFalse(delivery_git.worktree_holds_blob(root, "notes/item.md", oid))
+            note.mkdir()
+            self.assertFalse(delivery_git.worktree_holds_blob(root, "notes/item.md", oid))
+            note.rmdir()
+            twin.write_bytes(committed)
+            self.symlink_or_skip(note, "twin.md")
+            self.assertFalse(delivery_git.worktree_holds_blob(root, "notes/item.md", oid))
+
+    def test_push_item_publishes_an_item_whose_checkout_converted_line_endings(self):
+        """Git for Windows converts line endings on checkout by default (core.autocrlf=true), so
+        the started Item's record ends its lines with CRLF while the commit holds LF. push-item
+        reads the record as Git stores it and publishes the Item (#257)."""
+        project, _docs, _directory, item, _reserved = self.prepare_execution_with_draft_reserved_contracts(False)
+        delivery_git.run_git(project, "config", "core.autocrlf", "true")
+        delivery_git.publish_execution_plan(project, "DLV-001")
+        delivery_git.claim_items(project, "DLV-001")
+        worktree = Path(delivery_git.start_item(project, "DLV-001", "AUTH-01")["worktree"])
+        self.assertIn(b"\r\n", (worktree / item.relative_to(project)).read_bytes())
+        product = self.commit_item_product_change(str(worktree), "def authenticate():\n    return True\n")
+        self.assertEqual(self.approve_item_evidence(str(worktree)), 0)
+        self.assertEqual(delivery_git.push_item(project, "DLV-001", "AUTH-01")["product_tip"], product)
 
     def test_push_item_refuses_product_paths_outside_the_item_path_claims(self):
         """A claim covers its path and every path below it. The vault keeps its own rules,

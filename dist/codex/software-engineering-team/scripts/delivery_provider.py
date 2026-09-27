@@ -27,10 +27,10 @@ def run_git(root: Path, *args: str) -> str:
     return result.stdout.strip()
 
 
-def run_gh(root: Path, *args: str) -> str:
+def run_gh(root: Path, *args: str, input_text: str | None = None) -> str:
     if shutil.which("gh") is None:
         raise ProviderError("DELIVERY_PROVIDER_UNSUPPORTED: GitHub provider requires the authenticated gh CLI")
-    result = subprocess.run(["gh", *args], cwd=root, text=True,
+    result = subprocess.run(["gh", *args], cwd=root, text=True, input=input_text,
                             capture_output=True, check=False)
     if result.returncode:
         raise ProviderError(result.stderr.strip() or "GitHub provider command failed")
@@ -177,6 +177,28 @@ class GitHubProvider:
     def ensure_draft(self, url: str) -> dict:
         run_gh(self.root, "pr", "ready", url, "--undo")
         return {"url": url, "draft": True}
+
+    def update_body(self, url: str, body: str) -> dict:
+        """Replace the body of the PR at the canonical *url*.
+
+        The REST update sends the body alone. ``gh pr edit`` first reads the
+        PR with fields such as its review requests and projects, which a token
+        that may update the PR cannot always read, and older gh releases fail
+        there on the retired Projects (classic) field. Setting the whole body
+        is idempotent, so a lost response is recovered by the same call.
+        """
+        parsed = urlsplit(url)
+        owner, repository, _pull, number = parsed.path.strip("/").split("/")
+        raw = run_gh(self.root, "api", "--hostname", parsed.netloc, "--method", "PATCH",
+                     f"repos/{owner}/{repository}/pulls/{number}", "--input", "-",
+                     input_text=json.dumps({"body": body}))
+        try:
+            value = json.loads(raw or "{}")
+        except json.JSONDecodeError as exc:
+            raise ProviderError("DELIVERY_PR_UNCERTAIN: GitHub returned invalid PR JSON") from exc
+        if not isinstance(value, dict) or value.get("html_url") != url:
+            raise ProviderError("DELIVERY_PR_UNCERTAIN: GitHub did not confirm the PR body update")
+        return {"url": url}
 
     def make_ready(self, url: str) -> dict:
         run_gh(self.root, "pr", "ready", url)

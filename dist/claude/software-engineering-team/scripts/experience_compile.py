@@ -24,6 +24,7 @@ import uuid
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
+import file_lock
 import stage_package
 from ba_compile import (
     frontmatter_scalar, frontmatter_value, quoted_scalar, without_generated_relations,
@@ -416,44 +417,22 @@ def command_experience_root(args) -> Path:
 
 def _lock_file(handle) -> None:
     deadline = time.monotonic() + TRANSACTION_TIMEOUT_SECONDS
-    if os.name == "nt":
-        import msvcrt
-        while True:
-            try:
-                handle.seek(0)
-                msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1)
-                return
-            except OSError:
-                if time.monotonic() >= deadline:
-                    raise ValueError(
-                        "timed out waiting for the project Experience transaction lock"
-                    )
-                time.sleep(0.05)
-    else:
-        import fcntl
-        while True:
-            try:
-                fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
-                return
-            except BlockingIOError:
-                if time.monotonic() >= deadline:
-                    raise ValueError(
-                        "timed out waiting for the project Experience transaction lock"
-                    )
-                time.sleep(0.05)
+    while not file_lock.try_lock(handle.fileno()):
+        if time.monotonic() >= deadline:
+            raise ValueError(
+                "timed out waiting for the project Experience transaction lock"
+            )
+        time.sleep(0.05)
 
 
 def _unlock_file(handle) -> None:
-    if os.name == "nt":
-        import msvcrt
-        handle.seek(0)
-        try:
-            msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)
-        except OSError:
-            pass
-    else:
-        import fcntl
-        fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+    try:
+        file_lock.unlock(handle.fileno())
+    except OSError:
+        # A failed Windows release is harmless: the handle closes right after,
+        # and closing it releases the byte lock too.
+        if os.name != "nt":
+            raise
 
 
 @contextlib.contextmanager

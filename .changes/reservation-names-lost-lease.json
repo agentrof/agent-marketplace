@@ -1,0 +1,6 @@
+{
+  "summary": "reserve-delivery now pushes the Fence and the Integration ref through the shared atomic push, so a ref another host creates between its absence check and its push reports DELIVERY_FENCE_LEASE_LOST or DELIVERY_LEASE_LOST, read from the refetched refs, instead of Git's own words under DELIVERY_INPUT_INVALID.",
+  "components": {
+    "software-engineering-team": "patch"
+  }
+}

@@ -1672,14 +1672,19 @@ def approve_review(args) -> int:
 
 
 def record_pr_url(docs: Path, delivery_id: str, url: str) -> None:
-    """Record a PR URL in the local Delivery Review and move a reviewed Delivery to awaiting_merge.
+    """Mirror a PR URL in the local Delivery Review and move a reviewed Delivery to awaiting_merge.
 
-    It prints nothing, so open-pr can record the PR and still print only its own result.
+    The PR record on the Integration is the only source of the URL. A Delivery
+    cancelled before it had a local Review has nothing to mirror, so its
+    package stays unchanged. It prints nothing, so open-pr can record the PR
+    and still print only its own result.
     """
     root = find_delivery(docs, delivery_id)
-    review = root / "delivery-review.md" if root else None
-    if review is None or not review.exists():
+    if root is None:
         raise RuntimeError("Delivery Review not found")
+    review = root / "delivery-review.md"
+    if not review.exists():
+        return
     props, body = split_note(review)
     props["pull_request_url"] = url
     props["source_hash"] = content_hash(props, body, exclude=MUTABLE - {"pull_request_url"})

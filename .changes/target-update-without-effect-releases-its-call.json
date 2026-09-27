@@ -1,0 +1,6 @@
+{
+  "summary": "A direct target update the remote rejected while the refetched target does not contain its carrier head now counts as the target update receipt's zero-effect proof: apply-target-update returns the elected call to prepared and says so, so reauthorize-target-update can take a fresh attempt, and abort-source-handoff now also aborts a handoff whose direct attempt this host holds prepared and the target does not contain. Such a handoff used to stay stranded, since every recovery verb refused its started call. Any rejected or unanswered update without that proof still keeps its call elected and is never repeated blindly.",
+  "components": {
+    "software-engineering-team": "patch"
+  }
+}

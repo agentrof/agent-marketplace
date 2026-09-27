@@ -1,0 +1,6 @@
+{
+  "summary": "reopen-item and takeover-item now drop their pending writer receipt after a push the remote rejected while the Item ref stayed absent or at the tip they leased, the same proof start-item uses, and takeover-item gives back the verified receipt and the Item worktree it had replaced. Both used to keep the pending receipt, so every retry refused with \"a different active writer receipt already exists\", and a rejected takeover left its host without its receipt and worktree.",
+  "components": {
+    "software-engineering-team": "patch"
+  }
+}

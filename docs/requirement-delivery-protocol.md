@@ -278,16 +278,27 @@ mutation is legal until that conversion succeeds.
 refs. Starting an Item requires the current plan, source hashes, target,
 predecessors, claims, Fence and one free Slot to pass. Each Item its
 `execution_after` names must be integrated first: its remote Item tip records
-`integrated` and the Integration contains that exact tip. Before the atomic
-remote transaction, the coordinator writes an ignored pending receipt. It
-promotes the receipt only after Item and Slot refs both equal the accepted
-candidate, then creates the Item worktree from that exact OID.
+`integrated` and the Integration contains that exact tip. Each Story its
+`waits_for` names is met the same way against this Delivery's Integration,
+which for a Story of another Delivery means that Delivery merged into the
+target and this one refreshed onto it. The `Agentrof-Delivery` trailer of the
+Story's Item tip names the package that records its status. A Story no
+Delivery has claimed, or one its Delivery cancelled, fails closed with
+`DELIVERY_DEPENDENCY_UNMET`, and the refusal names a backlog revision as the
+way out. Before the atomic remote transaction, the coordinator writes an
+ignored pending receipt. It promotes the receipt only after Item and Slot refs
+both equal the accepted candidate, then creates the Item worktree from that
+exact OID. A rejected transaction deletes the pending receipt once the
+refetched Item ref is absent or still holds the tip the activation leased: the
+transaction is atomic, so that proves no ref changed, whatever the Slot holds.
 
 An active writer may push only while its receipt epoch matches the remote Item
 and Slot lineage. Pause requires a clean worktree whose local head equals the
 verified remote Item. A missing receipt denies local writer readiness. Explicit
 takeover elects a new epoch on the existing Item and Slot refs; it never
-allocates a second Slot.
+allocates a second Slot. Reopen and takeover drop their pending receipt on the
+same proof as activation, and a takeover the remote rejects that way gives back
+the receipt and the worktree it replaced.
 
 Product and test changes stay on the Item branch. Before approving evidence,
 the active Item worktree may contain only edits to its initialized Code Review
@@ -338,9 +349,21 @@ PR-creation intent takes over the receipt the earlier intent left, unless that
 receipt still guards a PR the provider does not show: a call that started
 while no exact Delivery PR is visible, or a verified PR other than the exact
 Delivery PR. Such a receipt refuses the intent with `DELIVERY_PR_UNCERTAIN`.
-The commit that records the PR URL becomes the PR head. It also moves a
-reviewed Delivery from `review` to `awaiting_merge` and re-renders the
-Delivery map; a cancelled Delivery keeps `cancelled`.
+An adoption intent names the one PR it adopts. When `open-pr` stops after that
+intent and before the PR record, its next run records that PR, never creates
+one, and refuses any other PR with `DELIVERY_PR_UNCERTAIN`.
+The commit that records the PR URL becomes the PR head. That record is the
+only source of the PR URL: its published Review names the PR, its trailers
+bind it by number and hash, and `open-pr` and `merge-pr` read the URL there. A
+local Review only mirrors the URL and must match it when one exists, so a
+Delivery cancelled before it had a local Review still reaches the target
+through its PR. The record also moves a reviewed Delivery from `review` to
+`awaiting_merge` and re-renders the Delivery map; a cancelled Delivery keeps
+`cancelled`. A PR that already exists when `open-pr` records it, adopted or
+found by a new PR intent, first gets the Review at that intent as its body, so
+the provider shows the published Review, such as a cancellation, and not an
+earlier Review or a body written by hand. The body update is idempotent and
+precedes the record, so a rerun after a lost response sends it again.
 
 Closure requires provider-confirmed merge evidence for the exact reviewed
 head, passing provider checks with at least one success, and target ancestry.
@@ -388,13 +411,20 @@ atomic push is named from the refetched refs, never from Git's wording: a moved
 Fence lease, any other moved lease, or a remote that takes the same push only
 without atomic support. Recovery never reconstructs semantic state from a local
 receipt alone. Remote records and tracked package hashes remain authoritative.
+A direct target update the remote rejected while the refetched target does not
+contain its carrier head changed nothing: that is the zero-effect proof, so its
+elected call returns to `prepared` in the target update receipt, and the host
+that holds the receipt can reauthorize a fresh attempt or abort the handoff.
+Any other rejected or unanswered update call is never repeated blindly.
 
 Cancellation is an explicit action inside `/deliver DLV-###`. Its approved
 intent freezes exact Story dispositions, quiesces active Items, reverts
 integrated Item merges in reverse order and publishes one cancellation Review
 through the same Integration branch and final PR. A scope-only or claims-free
 Delivery uses `not_started` dispositions and never fabricates Item refs,
-review evidence or integration bases.
+review evidence or integration bases. A Delivery whose published status is
+already `cancelled` refuses another cancellation with
+`DELIVERY_CANCELLATION_INVALID`.
 
 ## Setup and package upgrade
 

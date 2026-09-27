@@ -1,6 +1,0 @@
-{
-  "summary": "Setup's package refresh returns tracked files that writers before v0.4.0 left owner-only (0600) in the workspace config, the governed vault and the managed root files to group and other read, as the umask allows and never with a write bit, and setup check reports them as drift; the vault guard accepts that read-only widening of compiler-owned Experience state and still restores every other mode change.",
-  "components": {
-    "software-engineering-team": "patch"
-  }
-}

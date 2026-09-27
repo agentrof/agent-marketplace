@@ -1,4 +1,0 @@
-{
-  "summary": "The release finalizer cleans up merged feature branches under the prefix each registered host adapter declares, claude/ for Claude Code and codex/ for Codex, instead of codex/ alone; unmerged, unbounded, duplicate and undeclared branch names are still refused.",
-  "components": {}
-}

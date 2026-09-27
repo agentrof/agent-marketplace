@@ -1,0 +1,6 @@
+{
+  "summary": "open-pr now resumes a PR adoption that stopped after its adoption intent reached the remote and before the PR record, where a rerun used to refuse with DELIVERY_COORDINATION_CORRUPT: PR creation intent has no Attempt and only a manual record-pr-remote could finish it. The rerun records the PR the intent names without creating one, and refuses under DELIVERY_PR_UNCERTAIN when the provider shows another PR.",
+  "components": {
+    "software-engineering-team": "patch"
+  }
+}

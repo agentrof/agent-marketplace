@@ -25,6 +25,7 @@ from urllib.parse import urlsplit
 import delivery_governance
 
 import delivery_result
+import file_lock
 from vault_check import rel_posix
 
 
@@ -46,14 +47,6 @@ FENCE_CANONICAL_KEYS = (
     "Target-Carrier-Head", "Target-Carrier-Base", "Upgrade-Phase",
     "Upgrade-Contract", "Handoff-Target",
 )
-
-
-def _fcntl_module():
-    """Load the optional POSIX lock module without adding a runtime dependency."""
-    try:
-        return __import__("fcntl")
-    except ImportError:  # pragma: no cover - Windows hosts use the adapter fallback.
-        return None
 
 
 def validate_delivery_id(value: str) -> str:
@@ -152,15 +145,13 @@ def receipt_lock(lock_path: Path):
     """Hold a crash-releasing process lock across receipt preimage transitions."""
     lock_path.parent.mkdir(parents=True, exist_ok=True)
     descriptor = os.open(lock_path, os.O_CREAT | os.O_RDWR, 0o600)
-    module = _fcntl_module()
     try:
-        if module is None:
-            raise RuntimeError("receipt locking is unavailable on this host")
-        module.flock(descriptor, module.LOCK_EX)
-        yield
+        file_lock.lock(descriptor)
+        try:
+            yield
+        finally:
+            file_lock.unlock(descriptor)
     finally:
-        if module is not None:
-            module.flock(descriptor, module.LOCK_UN)
         os.close(descriptor)
 
 
@@ -276,8 +267,12 @@ def promote_writer_receipt(main_worktree: Path, delivery_id: str, story_id: str,
 
 
 def discard_pending_writer_receipt(main_worktree: Path, delivery_id: str,
-                                   story_id: str, candidate_oid: str) -> None:
-    """Delete a pending receipt only after the remote CAS is conclusively rejected."""
+                                   story_id: str, candidate_oid: str,
+                                   replaced: dict | None = None) -> None:
+    """Delete a pending receipt only after the remote CAS is conclusively rejected.
+
+    A pending receipt that replaced a verified one gives that receipt back.
+    """
     receipt_path, lock_path = writer_receipt_paths(main_worktree, delivery_id, story_id)
     with receipt_lock(lock_path):
         if not receipt_path.exists():
@@ -285,6 +280,9 @@ def discard_pending_writer_receipt(main_worktree: Path, delivery_id: str,
         receipt = _validate_receipt(json.loads(receipt_path.read_text(encoding="utf-8")))
         if receipt["state"] != "pending" or receipt["candidate_oid"] != candidate_oid:
             raise RuntimeError("cannot discard a spent or different writer receipt")
+        if replaced is not None:
+            _write_writer_receipt_locked(receipt_path, replaced)
+            return
         receipt_path.unlink()
         _fsync_directory(receipt_path.parent)
 
@@ -471,6 +469,20 @@ def mark_target_call_started(main_worktree: Path, mode: str, attempt: str) -> di
         return _validate_target_receipt(json.loads(path.read_text(encoding="utf-8")))
 
 
+def release_target_call(main_worktree: Path, mode: str, attempt: str) -> dict:
+    """Return this attempt's started update call to prepared once it provably took no effect."""
+    path, lock = target_receipt_paths(main_worktree, mode)
+    with receipt_lock(lock):
+        if not path.exists():
+            raise RuntimeError("DELIVERY_TARGET_UPDATE_UNCERTAIN: target update receipt is missing")
+        value = _validate_target_receipt(json.loads(path.read_text(encoding="utf-8")))
+        if value["attempt"] != attempt or value["state"] != "call_started":
+            raise RuntimeError("DELIVERY_TARGET_UPDATE_UNCERTAIN: only this attempt's started call can be released")
+        value["state"] = "prepared"
+        _write_provider_receipt_locked(path, value)
+        return _validate_target_receipt(json.loads(path.read_text(encoding="utf-8")))
+
+
 def mark_target_verified(main_worktree: Path, mode: str, attempt: str) -> dict:
     path, lock = target_receipt_paths(main_worktree, mode)
     with receipt_lock(lock):
@@ -602,6 +614,20 @@ def worktree_pending_paths(root: Path, path: Path) -> set[str]:
             raise RuntimeError(result.stderr.strip() or "cannot inspect pending Item paths")
         pending.update(value for value in result.stdout.split("\0") if value)
     return pending
+
+
+def worktree_holds_blob(worktree: Path, relative: str, oid: str) -> bool:
+    """Whether Git would store the worktree file at *relative* as exactly blob *oid*.
+
+    Git hashes the file through its clean filter, as git add does, so a checkout
+    that converted line endings, as core.autocrlf does by default on native
+    Windows, still holds the blob it came from. A link or any other file that is
+    not regular holds no blob.
+    """
+    path = worktree / relative
+    if path.is_symlink() or not path.is_file():
+        return False
+    return run_git(worktree, "hash-object", "--path", relative, "--", str(path)) == oid
 
 
 def advance_worktree_to_candidate(root: Path, path: Path, candidate_oid: str) -> None:
@@ -1058,6 +1084,32 @@ def canonical_github_pr(value: str) -> tuple[str, str]:
     return f"https://github.com/{owner}/{repo}/pull/{number}", number
 
 
+def pr_url_hash(url: str) -> str:
+    """The URL-Hash trailer value that binds a canonical PR URL in a control record."""
+    return "sha256:" + hashlib.sha256(url.encode("utf-8")).hexdigest()
+
+
+def binds_pr(message: str, url: str) -> bool:
+    """Whether a control record's Pull-Request and URL-Hash trailers name the canonical PR *url*."""
+    _, number = canonical_github_pr(url)
+    return (trailer(message, "Pull-Request"), trailer(message, "URL-Hash")) == (number, pr_url_hash(url))
+
+
+def recorded_pr_url(root: Path, record: str, review_path: Path) -> str:
+    """Return the PR URL that the PR record *record* carries.
+
+    The record is the only source of the URL: its published Review names the
+    PR and its trailers bind it. A local Review only mirrors the URL, and a
+    Delivery cancelled before it had one has none.
+    """
+    from delivery_compile import split_note
+    props, _ = split_remote_note(root, record, rel_posix(root, review_path), split_note)
+    canonical_url, _ = canonical_github_pr(str(props.get("pull_request_url", "")))
+    if not binds_pr(commit_message(root, record), canonical_url):
+        raise RuntimeError("DELIVERY_COORDINATION_CORRUPT: the PR record's Review names a PR its trailers do not bind")
+    return canonical_url
+
+
 def package_paths(root: Path, directory: Path, docs: Path,
                   include_items: bool = True, include_map: bool = True) -> list[str]:
     from experience_application_check import is_os_metadata_path
@@ -1191,7 +1243,9 @@ def record_pr_remote(project_root: Path, delivery_id: str, url: str,
     awaiting_merge and re-renders the projections that mirror its status.
     It carries the Review published before the intent and adds only the PR
     URL: a cancellation writes its Review on the Integration alone, so the
-    local Review may still hold the approval it replaced.
+    local Review may still hold the approval it replaced. That record is the
+    only source of the URL; a local Review, when there is one, must already
+    mirror it.
     """
     root = main_worktree(project_root.resolve())
     from delivery_compile import docs_root, find_delivery, split_note, frontmatter, content_hash, pr_recorded_props
@@ -1201,14 +1255,17 @@ def record_pr_remote(project_root: Path, delivery_id: str, url: str,
     if directory is None:
         raise RuntimeError("Delivery package not found")
     review_path = directory / "delivery-review.md"
-    if split_note(review_path)[0].get("pull_request_url") != canonical_url:
+    if review_path.exists() and split_note(review_path)[0].get("pull_request_url") != canonical_url:
         raise RuntimeError("local Delivery Review URL does not match the requested PR")
     refs = canonical_refs(delivery_id)
     fence_oid = remote_oid(root, remote, refs["fence"])
     integration_oid = remote_oid(root, remote, refs["integration"])
     intent_message = commit_message(root, integration_oid)
-    if trailer(intent_message, "Record") not in {"pr-creation-intent-v1", "pr-adoption-intent-v1"}:
+    intent_record = trailer(intent_message, "Record")
+    if intent_record not in {"pr-creation-intent-v1", "pr-adoption-intent-v1"}:
         raise RuntimeError("record-pr requires the exact unmatched PR intent")
+    if intent_record == "pr-adoption-intent-v1" and not binds_pr(intent_message, canonical_url):
+        raise RuntimeError("DELIVERY_PR_UNCERTAIN: the requested PR is not the PR the adoption intent names")
     relative_review = rel_posix(root, review_path)
     review_props, review_body = split_remote_note(root, integration_oid, relative_review, split_note)
     review_props["pull_request_url"] = canonical_url
@@ -1224,7 +1281,7 @@ def record_pr_remote(project_root: Path, delivery_id: str, url: str,
         f"Record PR for {delivery_id}",
         {"Record": "pr-url-recorded-v1", "Protocol": "1", "Delivery": delivery_id,
          "Intent": integration_oid, "Provider": "github", "Pull-Request": number,
-         "URL-Hash": "sha256:" + hashlib.sha256(canonical_url.encode("utf-8")).hexdigest()},
+         "URL-Hash": pr_url_hash(canonical_url)},
         delivery_projections=recorded is not None,
     )
     fence_message = commit_message(root, fence_oid)
@@ -1243,6 +1300,18 @@ def record_pr_remote(project_root: Path, delivery_id: str, url: str,
             "pull_request": number, "refs": short_refs(delivery_id)}
 
 
+def set_pr_body_to_review(root: Path, provider, oid: str, review_path: Path, url: str) -> None:
+    """Give an existing Delivery PR the Review in *oid*'s tree as its body.
+
+    The PR keeps the body it was opened with: an earlier Review, the approval
+    that a cancellation replaced, or what its author wrote by hand. open-pr
+    sets the body before the PR record, so a run that stops in between sets
+    the same body again on its next run.
+    """
+    from delivery_compile import split_note
+    provider.update_body(url, split_remote_note(root, oid, rel_posix(root, review_path), split_note)[1])
+
+
 def open_pr(project_root: Path, delivery_id: str, remote: str = "origin") -> dict:
     """Create or resume exactly one GitHub draft PR after a durable intent."""
     root = main_worktree(project_root.resolve())
@@ -1252,23 +1321,19 @@ def open_pr(project_root: Path, delivery_id: str, remote: str = "origin") -> dic
     directory = find_delivery(docs, delivery_id)
     if directory is None:
         raise RuntimeError("Delivery package not found")
-    delivery_props, _ = split_note(directory / "delivery.md")
     review_path = directory / "delivery-review.md"
-    review_props, _ = split_note(review_path)
     refs = canonical_refs(delivery_id)
     integration_oid = remote_oid(root, remote, refs["integration"])
     integration_message = commit_message(root, integration_oid)
     record_name = trailer(integration_message, "Record")
     if record_name == "pr-url-recorded-v1":
-        url = str(review_props.get("pull_request_url", ""))
-        canonical_url, _ = canonical_github_pr(url)
-        return {"ok": True, "delivery": delivery_id, "pull_request_url": canonical_url,
+        return {"ok": True, "delivery": delivery_id,
+                "pull_request_url": recorded_pr_url(root, integration_oid, review_path),
                 "reused": True, "provider_call": False}
-    adoption = False
     provider = GitHubProvider(root, remote)
     target_branch, _ = resolve_target(root, remote)
     head = short_refs(delivery_id)["integration"]
-    if record_name == "delivery-review-published-v1":
+    if record_name in {"delivery-review-published-v1", "pr-adoption-intent-v1"}:
         existing = provider.exact_unmerged(head, target_branch)
         if len(existing) != 1:
             raise RuntimeError("external PR adoption requires exactly one unmerged exact PR")
@@ -1283,48 +1348,46 @@ def open_pr(project_root: Path, delivery_id: str, remote: str = "origin") -> dic
         if not isinstance(url, str):
             raise ProviderError("DELIVERY_PR_UNCERTAIN: external PR has no canonical URL")
         canonical_url, number = canonical_github_pr(url)
+        # An adoption that stopped before its record resumes from its intent,
+        # which names the one PR it adopts; the provider must show that PR.
+        if record_name == "pr-adoption-intent-v1" and not binds_pr(integration_message, canonical_url):
+            raise RuntimeError("DELIVERY_PR_UNCERTAIN: the exact Delivery PR is not the PR the adoption intent names")
         if not pr.get("isDraft"):
             provider.ensure_draft(canonical_url)
-        fence_oid = remote_oid(root, remote, refs["fence"])
-        fence_message = commit_message(root, fence_oid)
-        adoption_intent = commit_tree(
-            root, integration_oid, [], f"Adopt PR for {delivery_id}",
-            {"Record": "pr-adoption-intent-v1", "Protocol": "1", "Delivery": delivery_id,
-             "Review-Head": integration_oid, "Target": trailer(fence_message, "Target") or "none",
-             "Provider": "github", "Pull-Request": number,
-             "URL-Hash": "sha256:" + hashlib.sha256(canonical_url.encode("utf-8")).hexdigest()},
-        )
-        fence_candidate = commit_tree(
-            root, fence_oid, [], "Fence project in open mode",
-            {"Record": "project-fence-v2", "Protocol": "2", "Mode": "open",
-             "Epoch": trailer(fence_message, "Epoch") or epoch_token(),
-             "Target": trailer(fence_message, "Target") or "none",
-             "Governance-Hash": trailer(fence_message, "Governance-Hash") or "none",
-             **carried_fence_barrier(fence_message)},
-        )
-        atomic_push(root, remote, [(refs["fence"], fence_oid, fence_candidate),
-                                   (refs["integration"], integration_oid, adoption_intent)])
-        integration_oid = adoption_intent
-        integration_message = commit_message(root, integration_oid)
-        record_name = "pr-adoption-intent-v1"
-        adoption = True
-    if record_name != "pr-creation-intent-v1":
-        if record_name != "pr-adoption-intent-v1":
-            raise RuntimeError("open-pr requires an unmatched PR creation or adoption intent")
-    attempt = trailer(integration_message, "Attempt")
-    if not adoption and not attempt:
-        raise RuntimeError("DELIVERY_COORDINATION_CORRUPT: PR creation intent has no Attempt")
-    if adoption:
+        if record_name == "delivery-review-published-v1":
+            fence_oid = remote_oid(root, remote, refs["fence"])
+            fence_message = commit_message(root, fence_oid)
+            adoption_intent = commit_tree(
+                root, integration_oid, [], f"Adopt PR for {delivery_id}",
+                {"Record": "pr-adoption-intent-v1", "Protocol": "1", "Delivery": delivery_id,
+                 "Review-Head": integration_oid, "Target": trailer(fence_message, "Target") or "none",
+                 "Provider": "github", "Pull-Request": number, "URL-Hash": pr_url_hash(canonical_url)},
+            )
+            fence_candidate = commit_tree(
+                root, fence_oid, [], "Fence project in open mode",
+                {"Record": "project-fence-v2", "Protocol": "2", "Mode": "open",
+                 "Epoch": trailer(fence_message, "Epoch") or epoch_token(),
+                 "Target": trailer(fence_message, "Target") or "none",
+                 "Governance-Hash": trailer(fence_message, "Governance-Hash") or "none",
+                 **carried_fence_barrier(fence_message)},
+            )
+            atomic_push(root, remote, [(refs["fence"], fence_oid, fence_candidate),
+                                       (refs["integration"], integration_oid, adoption_intent)])
         # The provider was already normalized to draft and the exact URL is
         # carried by the adoption intent. No create receipt or provider POST
         # is permitted on this path.
-        canonical_url, _ = canonical_github_pr(url)
+        set_pr_body_to_review(root, provider, integration_oid, review_path, canonical_url)
         record_pr_url(docs, delivery_id, canonical_url)
         recorded = record_pr_remote(root, delivery_id, canonical_url, remote)
         return {"ok": True, "delivery": delivery_id, "pull_request_url": canonical_url,
                 "provider_call": False, "adopted": True,
                 "integration": recorded["integration"], "fence": recorded["fence"],
                 "refs": short_refs(delivery_id)}
+    if record_name != "pr-creation-intent-v1":
+        raise RuntimeError("open-pr requires an unmatched PR creation or adoption intent")
+    attempt = trailer(integration_message, "Attempt")
+    if not attempt:
+        raise RuntimeError("DELIVERY_COORDINATION_CORRUPT: PR creation intent has no Attempt")
     # The PR body is the Review published at the intent. A cancellation writes
     # its Review on the Integration alone, so the local Review may be stale.
     _, review_body = split_remote_note(root, integration_oid, rel_posix(root, review_path), split_note)
@@ -1350,11 +1413,13 @@ def open_pr(project_root: Path, delivery_id: str, remote: str = "origin") -> dic
         receipt, elected = mark_provider_call_started(root, delivery_id, integration_oid, attempt)
         if not elected:
             raise RuntimeError("DELIVERY_PR_UNCERTAIN: another process owns the provider call")
-        title_value = str(delivery_props.get("goal", delivery_id))
-        created = provider.create_draft(head, target_branch, title_value, review_body)
+        delivery_props, _ = split_remote_note(root, integration_oid, rel_posix(root, directory / "delivery.md"), split_note)
+        created = provider.create_draft(head, target_branch, str(delivery_props.get("goal", delivery_id)), review_body)
         url = created["url"]
         provider_call = True
     canonical_url, _ = canonical_github_pr(url)
+    if existing:
+        set_pr_body_to_review(root, provider, integration_oid, review_path, canonical_url)
     record_pr_url(docs, delivery_id, canonical_url)
     recorded = record_pr_remote(root, delivery_id, canonical_url, remote)
     mark_provider_verified(root, delivery_id, integration_oid, attempt, canonical_url)
@@ -1371,20 +1436,18 @@ def merge_pr(project_root: Path, delivery_id: str, remote: str = "origin") -> di
     is never interpreted as successful closure.
     """
     root = main_worktree(project_root.resolve())
-    from delivery_compile import docs_root, find_delivery, split_note
+    from delivery_compile import docs_root, find_delivery
     from delivery_provider import GitHubProvider, ProviderError
     docs = docs_root(root)
     directory = find_delivery(docs, delivery_id)
     if directory is None:
         raise RuntimeError("Delivery package not found")
-    review_props, _ = split_note(directory / "delivery-review.md")
-    url = str(review_props.get("pull_request_url", ""))
-    canonical_url, _ = canonical_github_pr(url)
     refs = canonical_refs(delivery_id)
     integration_oid = remote_oid(root, remote, refs["integration"])
     integration_message = commit_message(root, integration_oid)
     if trailer(integration_message, "Record") != "pr-url-recorded-v1":
         raise RuntimeError("merge-pr requires the current recorded Delivery PR")
+    canonical_url = recorded_pr_url(root, integration_oid, directory / "delivery-review.md")
     target_branch, target_before = resolve_target(root, remote)
     provider = GitHubProvider(root, remote)
     candidates = [item for item in provider.list_pull_requests(short_refs(delivery_id)["integration"], target_branch)
@@ -1667,6 +1730,10 @@ def cancel_delivery(project_root: Path, delivery_id: str, reason: str,
 
     relative_delivery = rel_posix(root, delivery_path_value)
     remote_props, remote_body = split_remote_note(root, integration_oid, relative_delivery, split_note)
+    # A cancellation publishes the cancelled status on the Integration alone,
+    # so the local delivery.md cannot tell that the Delivery is cancelled.
+    if remote_props.get("status") == "cancelled":
+        raise RuntimeError("DELIVERY_CANCELLATION_INVALID: the published Delivery is already cancelled")
     scope_hash = str(remote_props.get("scope_hash", "none"))
     all_slots = remote_slot_oids(root, remote)
     contexts: dict[str, dict] = {}
@@ -1883,14 +1950,7 @@ def reserve_delivery(project_root: Path, delivery_id: str, remote: str = "origin
          "Governance-Hash": governed_governance_hash(root),
          "Barrier-Kind": "none", "Barrier-Epoch": "none"},
     )
-    push_args = ["push", "--atomic", remote,
-                 f"--force-with-lease={refs['fence']}:",
-                 f"--force-with-lease={refs['integration']}:",
-                 f"{fence_oid}:{refs['fence']}", f"{integration_oid}:{refs['integration']}"]
-    result = subprocess.run(["git", *push_args], cwd=root, text=True,
-                            capture_output=True, check=False)
-    if result.returncode:
-        raise RuntimeError(result.stderr.strip() or "atomic Delivery reservation rejected")
+    atomic_push(root, remote, [(refs["fence"], "", fence_oid), (refs["integration"], "", integration_oid)])
     return {"ok": True, "delivery": delivery_id, "target_branch": target_branch,
             "target": target_oid, "fence": fence_oid, "integration": integration_oid,
             "refs": short_refs(delivery_id)}
@@ -2001,6 +2061,20 @@ def fetch_target(root: Path, remote: str) -> tuple[str, str]:
     tracking = f"refs/remotes/{remote}/{branch}"
     run_git(root, "fetch", "--no-tags", remote, f"refs/heads/{branch}:{tracking}")
     return branch, run_git(root, "rev-parse", tracking)
+
+
+def direct_update_took_no_effect(root: Path, remote: str, head: str) -> bool:
+    """Whether the refetched target proves that a direct target update changed nothing.
+
+    The update moves only the target, to the carrier head, so a target whose
+    history lacks that head was not changed by it. A target that cannot be
+    refetched proves nothing.
+    """
+    try:
+        _branch, target = fetch_target(root, remote)
+        return not is_ancestor(root, head, target)
+    except RuntimeError:
+        return False
 
 
 def require_target_ancestry(root: Path, remote: str, fence_message: str,
@@ -2457,24 +2531,43 @@ def finish_source_handoff(project_root: Path, remote: str = "origin") -> dict:
 
 
 def abort_source_handoff(project_root: Path, remote: str = "origin") -> dict:
-    """Abort only an acquired handoff whose external write never began."""
+    """Abort only an acquired handoff whose external write never began or took no effect.
+
+    Past a target-update intent, only the host whose receipt holds the current
+    direct attempt still prepared can abort, and only while the target does not
+    contain the carrier head. It holds that receipt's lock throughout, so no
+    update call can start meanwhile.
+    """
     root = main_worktree(project_root.resolve())
     ref, fence_oid, values = _fence_context(root, remote)
     if values["Mode"] not in {"source_handoff", "governance", "upgrade"}:
         raise RuntimeError("DELIVERY_FENCE_MODE: no source handoff is active")
-    if values["Target-Update-Intent"] != "none":
-        raise RuntimeError("DELIVERY_TARGET_UPDATE_UNCERTAIN: abort is forbidden after target-update intent")
-    values.update({"Mode": "open", "Epoch": epoch_token(), "Source-Kind": "none",
-                   "Source-Intent": "none",
-                   "Barrier-Kind": "none", "Barrier-Epoch": "none",
-                   "Target-Update-Intent": "none", "Target-Update-Attempt": "none",
-                   "Target-Repository": "none", "Target-Carrier-Kind": "none",
-                   "Target-Carrier-Ref": "none", "Target-Carrier-Object": "none",
-                   "Target-Carrier-Head": "none", "Target-Carrier-Base": "none",
-                   "Upgrade-Phase": "none",
-                   "Upgrade-Contract": "none", "Handoff-Target": "none"})
-    candidate = _fence_child(root, fence_oid, values, "Abort source handoff")
-    atomic_push(root, remote, [(ref, fence_oid, candidate)])
+    receipt_path, lock_path = target_receipt_paths(root, values["Mode"])
+    intent, attempt = values["Target-Update-Intent"], values["Target-Update-Attempt"]
+    with contextlib.ExitStack() as held:
+        if intent != "none":
+            held.enter_context(receipt_lock(lock_path))
+            receipt = (_validate_target_receipt(json.loads(receipt_path.read_text(encoding="utf-8")))
+                       if receipt_path.exists() else None)
+            if (values["Target-Carrier-Kind"] != "direct_target" or receipt is None
+                    or receipt["attempt"] != attempt or receipt["state"] != "prepared"
+                    or not direct_update_took_no_effect(root, remote, values["Target-Carrier-Head"])):
+                raise RuntimeError("DELIVERY_TARGET_UPDATE_UNCERTAIN: abort after a target-update intent "
+                                   "requires this host's prepared direct attempt, absent from the target")
+        values.update({"Mode": "open", "Epoch": epoch_token(), "Source-Kind": "none",
+                       "Source-Intent": "none",
+                       "Barrier-Kind": "none", "Barrier-Epoch": "none",
+                       "Target-Update-Intent": "none", "Target-Update-Attempt": "none",
+                       "Target-Repository": "none", "Target-Carrier-Kind": "none",
+                       "Target-Carrier-Ref": "none", "Target-Carrier-Object": "none",
+                       "Target-Carrier-Head": "none", "Target-Carrier-Base": "none",
+                       "Upgrade-Phase": "none",
+                       "Upgrade-Contract": "none", "Handoff-Target": "none"})
+        candidate = _fence_child(root, fence_oid, values, "Abort source handoff")
+        atomic_push(root, remote, [(ref, fence_oid, candidate)])
+        if intent != "none":
+            receipt_path.unlink()
+            _fsync_directory(receipt_path.parent)
     return {"ok": True, "mode": "open", "fence": candidate}
 
 
@@ -2870,18 +2963,18 @@ def apply_target_update(project_root: Path, mode: str = "source_handoff",
         receipt = mark_target_call_started(root, mode, attempt)
     if carrier == "direct_target":
         target_ref = f"refs/heads/{target_branch}"
-        push = subprocess.run(
-            ["git", "push", "--atomic", remote,
-             f"--force-with-lease={target_ref}:{base}",
-             f"{values['Target-Carrier-Head']}:{target_ref}"],
-            cwd=root, text=True, capture_output=True, check=False,
-        )
-        if push.returncode:
-            raise RuntimeError(push.stderr.strip() or "direct target update was rejected")
+        head = values["Target-Carrier-Head"]
+        try:
+            atomic_push(root, remote, [(target_ref, base, head)])
+        except RuntimeError as exc:
+            if not direct_update_took_no_effect(root, remote, head):
+                raise
+            release_target_call(root, mode, attempt)
+            raise RuntimeError(f"{exc}; the target does not contain the update, so its call was released "
+                               "for a fresh attempt or an abort") from exc
         verified = mark_target_verified(root, mode, attempt)
         return {"ok": True, "mode": mode, "carrier": carrier,
-                "target": target_ref, "target_oid": values["Target-Carrier-Head"],
-                "receipt": verified}
+                "target": target_ref, "target_oid": head, "receipt": verified}
     if carrier == "github_pr":
         from delivery_provider import GitHubProvider
         repository = values["Target-Repository"].removeprefix("github:")
@@ -3288,6 +3381,62 @@ def unintegrated_predecessors(root: Path, remote: str, delivery_id: str, directo
     return waiting
 
 
+def unmet_waits_for(root: Path, remote: str, delivery_id: str, integration_oid: str,
+                    waits_for) -> tuple[list[str], list[str]]:
+    """The Stories one Item waits for that it cannot start after yet.
+
+    A waits_for Story is met when its remote Item tip records status integrated
+    and this Delivery's Integration contains that exact tip: the Story's own
+    Delivery merged into the target and this Delivery refreshed onto it. The
+    tip's Delivery trailer names the package that records the Story's status.
+    The first list names each Story still on its way, with its Delivery. The
+    second names each Story no Delivery is delivering: one never claimed, and
+    one its Delivery cancelled, whose Item ref keeps any other Delivery from
+    claiming it again.
+    """
+    from delivery_compile import delivery_root, docs_root, split_note
+    stories = sorted(set(waits_for or []))
+    if not stories:
+        return [], []
+    deliveries = rel_posix(root, delivery_root(docs_root(root)) / "deliveries")
+    item_refs = {story: canonical_refs(delivery_id, story)["item"] for story in stories}
+    tips = remote_ref_oids(root, remote, list(item_refs.values()))
+    waiting, undeliverable = [], []
+    for story in stories:
+        tip = tips[item_refs[story]]
+        if not tip:
+            undeliverable.append(f"{story} was never claimed")
+            continue
+        if subprocess.run(["git", "cat-file", "-e", tip + "^{commit}"], cwd=root,
+                          capture_output=True, check=False).returncode:
+            # Another Delivery's Item advances on its own hosts, and integration moves no Fence.
+            run_git(root, "fetch", "--no-tags", remote, item_refs[story])
+        owner = trailer(commit_message(root, tip), "Delivery") or ""
+        packages = [path for path in run_git(root, "ls-tree", "-z", "--name-only", tip, "--",
+                                             deliveries + "/").split("\0")
+                    if owner and path.rsplit("/", 1)[-1].startswith(owner.lower() + "-")]
+        if len(packages) != 1:
+            raise RuntimeError(f"DELIVERY_COORDINATION_CORRUPT: the Item tip of {story} does not hold "
+                               f"one package of its Delivery {owner or 'none'}")
+        relative = f"{packages[0]}/items/{story_key(story)}/item.md"
+        status = split_remote_note(root, tip, relative, split_note)[0].get("status")
+        if status == "cancelled":
+            undeliverable.append(f"{story} was cancelled with {owner}")
+        elif status != "integrated" or not is_ancestor(root, tip, integration_oid):
+            waiting.append(f"{story} from {owner}")
+    return waiting, undeliverable
+
+
+def activation_took_no_effect(root: Path, remote: str, item_ref: str, leased_tip: str) -> bool:
+    """Whether a rejected activation provably changed no ref.
+
+    An activation pushes all its refs in one atomic transaction, so an Item ref
+    that is absent or still holds the tip the activation leased proves that none
+    changed, whatever the Slot holds now.
+    """
+    return remote_ref_oids(root, remote, [item_ref])[item_ref] in ("", leased_tip)
+
+
 def start_item(project_root: Path, delivery_id: str, story_id: str,
                remote: str = "origin", allowed_statuses: set[str] | None = None) -> dict:
     root = main_worktree(project_root.resolve())
@@ -3333,6 +3482,16 @@ def start_item(project_root: Path, delivery_id: str, story_id: str,
     if waiting:
         raise RuntimeError(f"DELIVERY_DEPENDENCY_UNMET: {story_id} starts only after these Items are integrated: "
                            + ", ".join(waiting))
+    waiting, undeliverable = unmet_waits_for(root, remote, delivery_id, integration_oid,
+                                             plan_props.get("waits_for"))
+    if undeliverable:
+        raise RuntimeError(f"DELIVERY_DEPENDENCY_UNMET: {story_id} waits for Stories no Delivery is delivering: "
+                           + ", ".join(undeliverable)
+                           + f"; revise the backlog so {story_id} no longer depends on them")
+    if waiting:
+        raise RuntimeError(f"DELIVERY_DEPENDENCY_UNMET: {story_id} starts only after this Integration holds "
+                           "these Stories integrated: " + ", ".join(waiting)
+                           + "; merge their Deliveries into the target, then refresh this one")
     item_props = dict(plan_props)
     for key in ITEM_WRITER_FIELDS:
         if key in live_props:
@@ -3378,11 +3537,10 @@ def start_item(project_root: Path, delivery_id: str, story_id: str,
     try:
         atomic_push(root, remote, updates)
     except RuntimeError:
-        observed_item = remote_oid(root, remote, refs["item"]) if remote_has_ref(root, remote, refs["item"]) else None
-        observed_slot = remote_oid(root, remote, slot_ref) if remote_has_ref(root, remote, slot_ref) else None
-        if observed_item is None and observed_slot is None:
+        if activation_took_no_effect(root, remote, refs["item"], item_oid):
             discard_pending_writer_receipt(root, delivery_id, story_id, item_candidate)
-        elif observed_item == item_candidate and observed_slot == item_candidate:
+        elif remote_ref_oids(root, remote, [refs["item"], slot_ref]) == {refs["item"]: item_candidate,
+                                                                        slot_ref: item_candidate}:
             require_current_activation_target(root, remote, delivery_id, story_id, target_before,
                                               slot, item_candidate, relative_item, item_props, item_body)
             promote_writer_receipt(root, delivery_id, story_id, item_candidate)
@@ -3526,10 +3684,15 @@ def reopen_item(project_root: Path, delivery_id: str, story_id: str,
         root, delivery_id, story_id, slot, writer, refs["item"], slot_ref,
         item_candidate, allow_verified_replace=True, expected_previous_oid=item_oid,
     )
-    atomic_push(root, remote, [(refs["fence"], fence_oid, fence_candidate),
-                               (refs["integration"], integration_oid, integration_candidate),
-                               (refs["item"], item_oid, item_candidate),
-                               (slot_ref, "", item_candidate)])
+    try:
+        atomic_push(root, remote, [(refs["fence"], fence_oid, fence_candidate),
+                                   (refs["integration"], integration_oid, integration_candidate),
+                                   (refs["item"], item_oid, item_candidate),
+                                   (slot_ref, "", item_candidate)])
+    except RuntimeError:
+        if activation_took_no_effect(root, remote, refs["item"], item_oid):
+            discard_pending_writer_receipt(root, delivery_id, story_id, item_candidate)
+        raise
     require_current_activation_target(root, remote, delivery_id, story_id, target_before,
                                       slot, item_candidate, relative_item, props, body)
     receipt = promote_writer_receipt(root, delivery_id, story_id, item_candidate)
@@ -3635,7 +3798,8 @@ def takeover_item(project_root: Path, delivery_id: str, story_id: str,
         raise RuntimeError("takeover requires an active or blocked remote Item")
     require_item_operation_bindings(root, item_props)
     worktree = worktree_paths(root, delivery_id, story_id)["item"]
-    if worktree.exists():
+    removed_worktree = worktree.exists()
+    if removed_worktree:
         worktree_is_clean_and_at(root, worktree, item_oid)
         remove_item_worktree(root, delivery_id, story_id)
     writer = epoch_token()
@@ -3667,14 +3831,23 @@ def takeover_item(project_root: Path, delivery_id: str, story_id: str,
          "Governance-Hash": trailer(fence_message, "Governance-Hash") or "none",
          **carried_fence_barrier(fence_message)},
     )
+    replaced = read_writer_receipt(root, delivery_id, story_id)
     create_writer_receipt(
         root, delivery_id, story_id, slot, writer, refs["item"], slot_ref,
         item_candidate, allow_verified_replace=True, expected_previous_oid=item_oid,
     )
-    atomic_push(root, remote, [(refs["fence"], fence_oid, fence_candidate),
-                               (refs["integration"], integration_oid, integration_candidate),
-                               (refs["item"], item_oid, item_candidate),
-                               (slot_ref, item_oid, item_candidate)])
+    try:
+        atomic_push(root, remote, [(refs["fence"], fence_oid, fence_candidate),
+                                   (refs["integration"], integration_oid, integration_candidate),
+                                   (refs["item"], item_oid, item_candidate),
+                                   (slot_ref, item_oid, item_candidate)])
+    except RuntimeError:
+        # A takeover that changed no ref leaves this host the writer state it had.
+        if activation_took_no_effect(root, remote, refs["item"], item_oid):
+            discard_pending_writer_receipt(root, delivery_id, story_id, item_candidate, replaced)
+            if removed_worktree:
+                materialize_item_worktree(root, delivery_id, story_id, item_oid)
+        raise
     if remote_oid(root, remote, refs["item"]) != item_candidate or remote_oid(root, remote, slot_ref) != item_candidate:
         raise RuntimeError("takeover refs did not converge to the receipt candidate")
     require_current_activation_target(root, remote, delivery_id, story_id, target_before,
@@ -3738,7 +3911,8 @@ def push_item(project_root: Path, delivery_id: str, story_id: str,
     committed_item = subprocess.run(
         ["git", "--no-replace-objects", "show", f"{product_tip}:{relative_item}"],
         cwd=root, capture_output=True, check=True).stdout
-    if item_path.is_symlink() or item_path.read_bytes() != committed_item:
+    committed_oid = run_git(root, "--no-replace-objects", "rev-parse", f"{product_tip}:{relative_item}")
+    if not worktree_holds_blob(worktree, relative_item, committed_oid):
         raise RuntimeError("DELIVERY_WORKTREE_UNSAFE: Item worktree control differs from the committed product tip")
     from ba_compile import parse_frontmatter
     item_text = committed_item.decode("utf-8")

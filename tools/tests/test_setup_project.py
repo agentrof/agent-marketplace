@@ -21,8 +21,15 @@ if str(SCRIPTS) not in sys.path:
     sys.path.insert(0, str(SCRIPTS))
 import vault_check as vault_payload
 import setup_project as setup_module
-from tools.tests.git_fixture import init_repository
+import stage_package
+from tools.tests.git_fixture import init_repository, temporary_directory
 from unittest import mock
+
+ATTRIBUTES_BLOCK = (
+    "# agent-marketplace:software-engineering-team:gitattributes:start\n"
+    "workspace/docs/** -text\n"
+    "# agent-marketplace:software-engineering-team:gitattributes:end\n"
+)
 
 
 class SetupProjectTests(unittest.TestCase):
@@ -940,6 +947,177 @@ class SetupProjectTests(unittest.TestCase):
                 CHECK, "check", "--project-root", str(project), "--json"
             )
             self.assertEqual(checked.returncode, 0, checked.stdout + checked.stderr)
+
+    def git(self, project: Path, *args: str) -> bytes:
+        return subprocess.run(
+            ["git", "-c", "user.name=Fixture",
+             "-c", "user.email=fixture@example.invalid", *args],
+            cwd=project, capture_output=True, check=True,
+        ).stdout
+
+    def test_setup_adds_the_gitattributes_block_once_and_keeps_project_lines(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            fresh = Path(temporary) / "fresh"
+            fresh.mkdir()
+            init_repository(fresh)
+            inspected = self.run_script(
+                SETUP, "inspect", "--project-root", str(fresh), "--json"
+            )
+            self.assertEqual(
+                inspected.returncode, 0, inspected.stdout + inspected.stderr
+            )
+            planned = {
+                item["path"]: item
+                for item in json.loads(inspected.stdout)["operations"]
+            }
+            self.assertIn(".gitattributes", planned)
+            self.assertEqual(planned[".gitattributes"]["action"], "create")
+            self.assertEqual(
+                planned[".gitattributes"]["ownership"], "tracked_managed_block"
+            )
+            self.assertFalse((fresh / ".gitattributes").exists())
+            applied = self.run_script(
+                SETUP, "apply", "--project-root", str(fresh), "--json"
+            )
+            self.assertEqual(applied.returncode, 0, applied.stdout + applied.stderr)
+            self.assertEqual(
+                (fresh / ".gitattributes").read_bytes(),
+                ATTRIBUTES_BLOCK.encode("utf-8"),
+            )
+
+            owned = Path(temporary) / "owned"
+            owned.mkdir()
+            init_repository(owned)
+            attributes = owned / ".gitattributes"
+            before, after = "* text=auto\n*.png binary\n", "*.sh text eol=lf\n"
+            attributes.write_bytes(before.encode("utf-8"))
+            applied = self.run_script(
+                SETUP, "apply", "--project-root", str(owned), "--json"
+            )
+            self.assertEqual(applied.returncode, 0, applied.stdout + applied.stderr)
+            self.assertEqual(
+                attributes.read_bytes(),
+                (before + "\n" + ATTRIBUTES_BLOCK).encode("utf-8"),
+            )
+
+            stale = ATTRIBUTES_BLOCK.replace("** -text", "** text")
+            attributes.write_bytes((before + stale + after).encode("utf-8"))
+            original = attributes.read_bytes()
+            args = argparse.Namespace(
+                project_root=str(owned), workspace="workspace",
+                output_language="English", terminology_language="English",
+                command="apply", json=True,
+            )
+            with mock.patch.object(
+                setup_module.setup_check, "closing",
+                return_value=["forced closing failure"],
+            ):
+                code, result = setup_module.apply_plan(args)
+            self.assertEqual(code, 1)
+            self.assertTrue(result["rolled_back"])
+            self.assertEqual(attributes.read_bytes(), original)
+
+            applied = self.run_script(
+                SETUP, "apply", "--project-root", str(owned), "--json"
+            )
+            self.assertEqual(applied.returncode, 0, applied.stdout + applied.stderr)
+            converged = (before + ATTRIBUTES_BLOCK + after).encode("utf-8")
+            self.assertEqual(attributes.read_bytes(), converged)
+            repeated = self.run_script(
+                SETUP, "apply", "--project-root", str(owned), "--json"
+            )
+            self.assertEqual(repeated.returncode, 0, repeated.stdout + repeated.stderr)
+            self.assertEqual(json.loads(repeated.stdout)["applied_operations"], [])
+            self.assertEqual(attributes.read_bytes(), converged)
+
+    def test_setup_check_reports_a_missing_stale_or_overridden_gitattributes_rule(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            project = Path(temporary)
+            init_repository(project)
+            applied = self.run_script(
+                SETUP, "apply", "--project-root", str(project), "--json"
+            )
+            self.assertEqual(applied.returncode, 0, applied.stdout + applied.stderr)
+            attributes = project / ".gitattributes"
+            local_attributes = project / ".git" / "info" / "attributes"
+            own_lines = "* text=auto\n"
+            cases = (
+                ("missing", own_lines, "",
+                 "managed .gitattributes marker is missing or duplicated", True),
+                ("stale", ATTRIBUTES_BLOCK.replace("** -text", "** text"), "",
+                 "managed .gitattributes block is stale", True),
+                ("later line", ATTRIBUTES_BLOCK + "*.md text\n", "",
+                 "workspace/docs/home.md (text: set)", False),
+                ("local attributes", ATTRIBUTES_BLOCK, "*.json text\n",
+                 "workspace/docs/.obsidian/app.json (text: set)", False),
+            )
+            for name, text, local, expected, drift in cases:
+                with self.subTest(name):
+                    attributes.write_bytes(text.encode("utf-8"))
+                    local_attributes.parent.mkdir(exist_ok=True)
+                    local_attributes.write_bytes(local.encode("utf-8"))
+                    checked = self.run_script(
+                        SETUP, "check", "--project-root", str(project), "--json"
+                    )
+                    self.assertEqual(checked.returncode, 1, checked.stdout)
+                    findings = json.loads(checked.stdout)["findings"]
+                    self.assertTrue(
+                        any(expected in item for item in findings), findings
+                    )
+                    self.assertEqual(
+                        "managed refresh drift: .gitattributes" in findings,
+                        drift, findings,
+                    )
+            local_attributes.write_bytes(b"")
+            attributes.write_bytes(ATTRIBUTES_BLOCK.encode("utf-8"))
+            checked = self.run_script(
+                SETUP, "check", "--project-root", str(project), "--json"
+            )
+            self.assertEqual(checked.returncode, 0, checked.stdout)
+
+    def test_managed_rule_checks_governed_markdown_out_byte_identical_under_autocrlf(self):
+        with temporary_directory() as temporary:
+            project = Path(temporary)
+            init_repository(project)
+            self.git(project, "config", "core.autocrlf", "true")
+            self.git(project, "config", "core.safecrlf", "false")
+            relative = "workspace/docs/backlog/reviews/round-1-backlog-review.md"
+            review = project / relative
+            review.parent.mkdir(parents=True)
+            review.write_bytes(
+                b"---\ntype: backlog-review\nstatus: approved\n---\n\n"
+                b"# Backlog review\n\nApproved.\n"
+            )
+            self.git(project, "add", "--", relative)
+            self.git(project, "commit", "-qm", "Approve the backlog review")
+            committed = self.git(project, "cat-file", "blob", f"HEAD:{relative}")
+            converted = committed.replace(b"\n", b"\r\n")
+
+            review.unlink()
+            self.git(project, "checkout", "--", relative)
+            self.assertEqual(review.read_bytes(), converted)
+            self.assertFalse(stage_package.paths_are_committed([review]))
+
+            applied = self.run_script(
+                SETUP, "apply", "--project-root", str(project), "--json"
+            )
+            self.assertEqual(applied.returncode, 0, applied.stdout + applied.stderr)
+            self.assertTrue((project / ".gitattributes").is_file())
+            self.git(project, "add", "--", ".gitattributes")
+            self.git(project, "commit", "-qm", "Keep governed bytes exact")
+            self.assertEqual(review.read_bytes(), converted)
+
+            self.git(project, "rm", "-r", "--cached", "--quiet", "--",
+                     "workspace/docs")
+            self.git(project, "checkout", "HEAD", "--", "workspace/docs")
+            self.assertEqual(review.read_bytes(), committed)
+            self.assertTrue(stage_package.paths_are_committed([review]))
+            review.unlink()
+            self.git(project, "checkout", "--", relative)
+            self.assertEqual(review.read_bytes(), committed)
+            self.assertEqual(
+                self.git(project, "status", "--porcelain", "--", relative), b""
+            )
 
 
 if __name__ == "__main__":

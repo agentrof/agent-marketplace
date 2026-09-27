@@ -6,9 +6,15 @@ Spawn template: paste `{{constitution}}` into every role prompt.
 evidence. It starts or resumes one Item only when its exact plan, target,
 predecessor, Fence and global slot checks pass. Each Item its
 `execution_after` names must be integrated first: its remote Item tip records
-`integrated` and the Integration contains that tip. Product and test changes
-stay on the Item worktree; Integration accepts only reviewed, verified Item
-handoffs and compiler-owned projections.
+`integrated` and the Integration contains that tip. Each Story its `waits_for`
+names must reach this Integration the same way, which for a Story of another
+Delivery means that Delivery merged into the target and this one refreshed
+onto it; its Item tip's `Agentrof-Delivery` trailer names the package that
+records its status. A Story no Delivery has claimed, or one its Delivery
+cancelled, refuses the start with `DELIVERY_DEPENDENCY_UNMET` and names a
+backlog revision as the way out. Product and test changes stay on the Item
+worktree; Integration accepts only reviewed, verified Item handoffs and
+compiler-owned projections.
 
 Activation writes an ignored pending writer receipt before the atomic Item,
 Slot, Integration and Fence transaction. The receipt is promoted only after

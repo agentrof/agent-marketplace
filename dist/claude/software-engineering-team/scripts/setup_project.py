@@ -24,6 +24,7 @@ from pathlib import Path
 
 import marketplace_paths
 import delivery_governance
+import file_lock
 import operation_compile
 import project_config
 import setup_check
@@ -230,37 +231,26 @@ def refresh_guard(root: Path, timeout_seconds: float = 3.0):
     runtime = create_runtime(root)
     guard_path = runtime / "setup-apply.guard"
     handle = guard_path.open("a+b")
-    windows = os.name == "nt"
     acquired = False
     try:
         deadline = time.monotonic() + timeout_seconds
         while time.monotonic() < deadline:
             try:
-                if windows:
-                    msvcrt = __import__("msvcrt")
-                    if guard_path.stat().st_size == 0:
-                        handle.write(b"\0")
-                        handle.flush()
-                    handle.seek(0)
-                    msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1)
-                else:
-                    fcntl = __import__("fcntl")
-                    fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
-                acquired = True
-                break
+                if os.name == "nt" and guard_path.stat().st_size == 0:
+                    handle.write(b"\0")
+                    handle.flush()
+                acquired = file_lock.try_lock(handle.fileno())
             except OSError:
-                time.sleep(0.05)
+                pass
+            if acquired:
+                break
+            time.sleep(0.05)
         if not acquired:
             raise SetupError("maintenance_busy: setup/projector maintenance lock is busy")
         yield
     finally:
-        if acquired and windows:
-            msvcrt = __import__("msvcrt")
-            handle.seek(0)
-            msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)
-        elif acquired:
-            fcntl = __import__("fcntl")
-            fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+        if acquired:
+            file_lock.unlock(handle.fileno())
         handle.close()
 
 
@@ -285,24 +275,39 @@ def managed_block(workspace: str) -> str:
     ))
 
 
-def proposed_gitignore(root: Path, workspace: str) -> tuple[str, str]:
-    path = root / ".gitignore"
-    assert_not_symlinked(root, path, ".gitignore")
+def proposed_managed_file(root: Path, name: str, start: str, end: str,
+                          block: str) -> tuple[str, str]:
+    """Replace only the marked block; the project's own lines stay as written."""
+    path = root / name
+    assert_not_symlinked(root, path, name)
     current = path.read_text(encoding="utf-8") if path.is_file() else ""
-    block = managed_block(workspace)
-    start_count, end_count = current.count(START), current.count(END)
+    start_count, end_count = current.count(start), current.count(end)
     if start_count > 1 or end_count > 1 or start_count != end_count:
         raise SetupError(
-            "managed .gitignore markers are duplicated or incomplete"
+            f"managed {name} markers are duplicated or incomplete"
         )
     if start_count == 1:
-        left = current.index(START)
-        right = current.index(END, left) + len(END)
+        left = current.index(start)
+        right = current.index(end, left) + len(end)
         updated = current[:left] + block + current[right:]
     else:
         prefix = current.rstrip()
         updated = (prefix + "\n\n" if prefix else "") + block + "\n"
     return current, updated
+
+
+def proposed_gitignore(root: Path, workspace: str) -> tuple[str, str]:
+    return proposed_managed_file(
+        root, ".gitignore", START, END, managed_block(workspace)
+    )
+
+
+def proposed_gitattributes(root: Path, workspace: str) -> tuple[str, str]:
+    return proposed_managed_file(
+        root, ".gitattributes", setup_check.ATTRIBUTES_START,
+        setup_check.ATTRIBUTES_END,
+        setup_check.managed_attributes_block(workspace),
+    )
 
 
 def run_checked(argv: list[str], label: str) -> str:
@@ -740,6 +745,20 @@ def build_plan(args) -> dict:
             "before_hash": bytes_hash(current_ignore.encode("utf-8")),
             "after_hash": bytes_hash(target_ignore.encode("utf-8")),
         })
+    current_attributes, target_attributes = proposed_gitattributes(
+        root, workspace
+    )
+    if current_attributes != target_attributes:
+        operations.append({
+            "action": (
+                "create" if not (root / ".gitattributes").exists()
+                else "update"
+            ),
+            "surface": "gitattributes", "path": ".gitattributes",
+            "ownership": "tracked_managed_block",
+            "before_hash": bytes_hash(current_attributes.encode("utf-8")),
+            "after_hash": bytes_hash(target_attributes.encode("utf-8")),
+        })
 
     gate_path = root / ".github" / "agentrof" / "vault-gate.pyz"
     assert_not_symlinked(root, gate_path, "portable gate")
@@ -778,6 +797,7 @@ def build_plan(args) -> dict:
         "_legacy_contract_updates": {**operation_updates, **governance_updates},
         "_legacy_contract_deletions": operation_deletions,
         "_gitignore_content": target_ignore,
+        "_gitattributes_content": target_attributes,
     }
 
 
@@ -815,7 +835,7 @@ def rollback_targets(root: Path, plan: dict) -> list[Path]:
     mutable_surfaces = {
         "workspace_config", "vault_payload", "generated_relation_report",
         "legacy_contract_migration",
-        "gitignore", "portable_gate",
+        "gitignore", "gitattributes", "portable_gate",
     }
     targets = {
         root / item["path"] for item in plan["operations"]
@@ -1059,6 +1079,13 @@ def _apply_plan_locked(args, plan: dict) -> tuple[int, dict]:
                 root / ".gitignore", plan["_gitignore_content"]
             )
             ignore_changed = True
+        current_attributes, _target_attributes = proposed_gitattributes(
+            root, args.workspace
+        )
+        if current_attributes != plan["_gitattributes_content"]:
+            snapshot.write_text(
+                root / ".gitattributes", plan["_gitattributes_content"]
+            )
         if any(item["surface"] == "portable_gate"
                for item in plan["operations"]):
             snapshot.write_bytes(

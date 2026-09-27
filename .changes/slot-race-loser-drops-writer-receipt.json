@@ -1,0 +1,6 @@
+{
+  "summary": "A rejected Item activation now deletes its pending writer receipt whenever the refetched Item ref is absent or still holds the tip the activation leased, whatever the Slot holds: the activation pushes all its refs atomically, so that proves no ref changed. An activation that lost its Slot to a concurrent start used to keep the receipt, so its retry refused with \"a different active writer receipt already exists\". The receipt contract states the new rule.",
+  "components": {
+    "software-engineering-team": "patch"
+  }
+}

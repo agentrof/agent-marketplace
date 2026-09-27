@@ -1527,7 +1527,7 @@ def item_worktree_head(worktree: Path) -> tuple[str, list[str]]:
     try:
         top = subprocess.run(
             ["git", "-C", str(worktree), "rev-parse", "--show-toplevel"],
-            text=True, capture_output=True, check=False,
+            encoding="utf-8", capture_output=True, check=False,
         )
         if top.returncode:
             raise RuntimeError(top.stderr.strip() or "not a Git worktree")
@@ -1535,13 +1535,13 @@ def item_worktree_head(worktree: Path) -> tuple[str, list[str]]:
             raise RuntimeError("worktree must be the Item worktree root")
         head = subprocess.run(
             ["git", "-C", str(worktree), "rev-parse", "HEAD"],
-            text=True, capture_output=True, check=False,
+            encoding="utf-8", capture_output=True, check=False,
         )
         if head.returncode or not GIT_OID_RE.fullmatch(head.stdout.strip()):
             raise RuntimeError(head.stderr.strip() or "Item worktree has no valid HEAD")
         dirty = subprocess.run(
             ["git", "-C", str(worktree), "status", "--porcelain", "--untracked-files=all"],
-            text=True, capture_output=True, check=False,
+            encoding="utf-8", capture_output=True, check=False,
         )
         if dirty.returncode:
             raise RuntimeError(dirty.stderr.strip() or "cannot inspect Item worktree")
@@ -1555,7 +1555,7 @@ def item_evidence_file_findings(worktree: Path, head: str, paths: tuple[Path, Pa
     for path in paths:
         tracked = subprocess.run(["git", "--no-replace-objects", "-C", str(worktree), "ls-tree", head, "--",
                                   path.relative_to(worktree).as_posix()],
-                                 text=True, capture_output=True, check=False)
+                                 encoding="utf-8", capture_output=True, check=False)
         if (path.is_symlink() or not path.is_file() or path.stat().st_nlink != 1
                 or tracked.returncode or not tracked.stdout.startswith("100644 blob ")
                 or path.stat().st_mode & 0o111):

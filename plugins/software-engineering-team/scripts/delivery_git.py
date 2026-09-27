@@ -582,7 +582,7 @@ def worktree_head(root: Path, path: Path) -> str:
 def is_ancestor(root: Path, ancestor: str, descendant: str) -> bool:
     result = subprocess.run(
         ["git", "merge-base", "--is-ancestor", ancestor, descendant], cwd=root,
-        text=True, capture_output=True, check=False,
+        encoding="utf-8", capture_output=True, check=False,
     )
     if result.returncode == 0:
         return True
@@ -594,7 +594,7 @@ def is_ancestor(root: Path, ancestor: str, descendant: str) -> bool:
 def require_visible_item_index(worktree: Path) -> None:
     """Refuse index flags that can hide different tested bytes from Git status."""
     result = subprocess.run(["git", "-C", str(worktree), "ls-files", "-v", "-z"],
-                            text=True, capture_output=True, check=False)
+                            encoding="utf-8", capture_output=True, check=False)
     if result.returncode:
         raise RuntimeError(result.stderr.strip() or "cannot inspect Item index flags")
     hidden = [entry[2:] for entry in result.stdout.split("\0")
@@ -611,7 +611,7 @@ def worktree_pending_paths(root: Path, path: Path) -> set[str]:
                  ("diff", "--cached", "--name-only", "-z", "HEAD"),
                  ("ls-files", "-z", "--others", "--exclude-standard")):
         result = subprocess.run(["git", "-C", str(path), *args], cwd=root,
-                                capture_output=True, text=True, check=False)
+                                capture_output=True, encoding="utf-8", check=False)
         if result.returncode:
             raise RuntimeError(result.stderr.strip() or "cannot inspect pending Item paths")
         pending.update(value for value in result.stdout.split("\0") if value)
@@ -637,7 +637,7 @@ def advance_worktree_to_candidate(root: Path, path: Path, candidate_oid: str) ->
     if worktree_pending_paths(root, path):
         comparison = subprocess.run(
             ["git", "-C", str(path), "diff", "--quiet", candidate_oid, "--"],
-            text=True, capture_output=True, check=False,
+            encoding="utf-8", capture_output=True, check=False,
         )
         if comparison.returncode == 1:
             raise RuntimeError("DELIVERY_WORKTREE_UNSAFE: published Item candidate does not contain the current worktree bytes")
@@ -677,7 +677,7 @@ def git_paths(root: Path, *args: str, failure: str | None = None) -> list[str]:
 
 
 def run_git(root: Path, *args: str) -> str:
-    result = subprocess.run(["git", *args], cwd=root, text=True,
+    result = subprocess.run(["git", *args], cwd=root, encoding="utf-8",
                             capture_output=True, check=False)
     if result.returncode:
         raise RuntimeError(result.stderr.strip() or f"git {' '.join(args)} failed")
@@ -709,16 +709,16 @@ def commit_tree(root: Path, base: str, paths: list[str], subject: str,
         env = os.environ.copy()
         env["GIT_INDEX_FILE"] = str(index)
         read = subprocess.run(["git", "read-tree", base], cwd=root, env=env,
-                              text=True, capture_output=True, check=False)
+                              encoding="utf-8", capture_output=True, check=False)
         if read.returncode:
             raise RuntimeError(read.stderr.strip() or "cannot materialize candidate index")
         if paths:
             add = subprocess.run(["git", "add", "--", *paths], cwd=root, env=env,
-                                 text=True, capture_output=True, check=False)
+                                 encoding="utf-8", capture_output=True, check=False)
             if add.returncode:
                 raise RuntimeError(add.stderr.strip() or "cannot stage candidate package")
         tree = subprocess.run(["git", "write-tree"], cwd=root, env=env,
-                              text=True, capture_output=True, check=False)
+                              encoding="utf-8", capture_output=True, check=False)
         if tree.returncode:
             raise RuntimeError(tree.stderr.strip() or "cannot write candidate tree")
         if delivery_projections:
@@ -746,7 +746,7 @@ def write_delivery_projection_tree(root: Path, env: dict, tree: str,
                     mode, blob.stdout.decode().strip(), path]
         subprocess.run(args, cwd=root, env=env, capture_output=True, check=True)
     return subprocess.run(["git", "write-tree"], cwd=root, env=env,
-                          text=True, capture_output=True, check=True).stdout.strip()
+                          encoding="utf-8", capture_output=True, check=True).stdout.strip()
 
 
 def delivery_projection_changes(root: Path, tree: str,
@@ -859,7 +859,7 @@ def commit_replacements(root: Path, base: str, replacements: dict[str, str],
         env = os.environ.copy()
         env["GIT_INDEX_FILE"] = str(index)
         read = subprocess.run(["git", "read-tree", base], cwd=root, env=env,
-                              text=True, capture_output=True, check=False)
+                              encoding="utf-8", capture_output=True, check=False)
         if read.returncode:
             raise RuntimeError(read.stderr.strip() or "cannot materialize candidate index")
         for path, text in replacements.items():
@@ -868,11 +868,11 @@ def commit_replacements(root: Path, base: str, replacements: dict[str, str],
                 raise RuntimeError(blob.stderr.strip() or "cannot write candidate blob")
             update = subprocess.run(["git", "update-index", "--add", "--cacheinfo",
                                      "100644", blob.stdout.strip(), path], cwd=root, env=env,
-                                    text=True, capture_output=True, check=False)
+                                    encoding="utf-8", capture_output=True, check=False)
             if update.returncode:
                 raise RuntimeError(update.stderr.strip() or "cannot stage candidate replacement")
         tree = subprocess.run(["git", "write-tree"], cwd=root, env=env,
-                              text=True, capture_output=True, check=False)
+                              encoding="utf-8", capture_output=True, check=False)
         if tree.returncode:
             raise RuntimeError(tree.stderr.strip() or "cannot write candidate tree")
         projected = (write_delivery_projection_tree(root, env, tree.stdout.strip())
@@ -1000,7 +1000,7 @@ def atomic_push(root: Path, remote: str, updates: list[tuple[str, str, str]]) ->
     for ref, expected, candidate in updates:
         args.append(f"--force-with-lease={ref}:{expected}")
         args.append(f"{candidate}:{ref}")
-    result = subprocess.run(["git", *args], cwd=root, text=True,
+    result = subprocess.run(["git", *args], cwd=root, encoding="utf-8",
                             capture_output=True, check=False)
     if result.returncode:
         raise RuntimeError(refused_transaction(root, remote, updates)
@@ -1717,14 +1717,14 @@ def revert_merge_candidate(root: Path, base: str, merge_oid: str,
         env = os.environ.copy()
         env["GIT_INDEX_FILE"] = str(index)
         read = subprocess.run(["git", "read-tree", base], cwd=root, env=env,
-                              text=True, capture_output=True, check=False)
+                              encoding="utf-8", capture_output=True, check=False)
         if read.returncode:
             raise RuntimeError(read.stderr.strip() or "cannot prepare cancellation revert index")
 
         def entry(tree: str, path: str) -> tuple[str, str] | None:
             result = subprocess.run(
                 ["git", "ls-tree", tree, "--", path], cwd=root,
-                text=True, capture_output=True, check=False,
+                encoding="utf-8", capture_output=True, check=False,
             )
             if result.returncode:
                 raise RuntimeError(result.stderr.strip() or "cannot inspect cancellation tree")
@@ -1750,19 +1750,19 @@ def revert_merge_candidate(root: Path, base: str, merge_oid: str,
             if parent_entry is None:
                 update = subprocess.run(
                     ["git", "update-index", "--force-remove", "--", path],
-                    cwd=root, env=env, text=True, capture_output=True, check=False,
+                    cwd=root, env=env, encoding="utf-8", capture_output=True, check=False,
                 )
             else:
                 mode, oid = parent_entry
                 update = subprocess.run(
                     ["git", "update-index", "--add", "--cacheinfo",
                      f"{mode},{oid},{path}"],
-                    cwd=root, env=env, text=True, capture_output=True, check=False,
+                    cwd=root, env=env, encoding="utf-8", capture_output=True, check=False,
                 )
             if update.returncode:
                 raise RuntimeError(update.stderr.strip() or f"cannot apply cancellation revert: {path}")
         tree = subprocess.run(["git", "write-tree"], cwd=root, env=env,
-                              text=True, capture_output=True, check=False)
+                              encoding="utf-8", capture_output=True, check=False)
         if tree.returncode:
             raise RuntimeError(tree.stderr.strip() or "cannot write cancellation revert tree")
         message = subject + "\n\n" + "\n".join(
@@ -4183,7 +4183,7 @@ def integrate_item(project_root: Path, delivery_id: str, story_id: str,
 
 def unique_merge_base(root: Path, first_parent: str, second_parent: str) -> str:
     result = subprocess.run(["git", "merge-base", "--all", first_parent, second_parent],
-                            cwd=root, text=True, capture_output=True, check=False)
+                            cwd=root, encoding="utf-8", capture_output=True, check=False)
     if result.returncode not in {0, 1}:
         raise RuntimeError(result.stderr.strip() or "cannot inspect merge ancestry")
     bases = result.stdout.splitlines()
@@ -4302,7 +4302,7 @@ def resolve_to_second_parent(root: Path, env: dict, second_parent: str, paths: t
     pending = set(unmerged_paths(root, env)) & set(paths)
     for path in sorted(pending):
         entry = subprocess.run(["git", "ls-tree", second_parent, "--", path], cwd=root,
-                               text=True, capture_output=True, check=True).stdout.strip()
+                               encoding="utf-8", capture_output=True, check=True).stdout.strip()
         subprocess.run(["git", "update-index", "--force-remove", "--", path],
                        cwd=root, env=env, capture_output=True, check=True)
         if not entry:
@@ -4328,7 +4328,7 @@ def merge_candidate(root: Path, first_parent: str, second_parent: str,
         # a path one side deleted and the other left untouched, or both sides changed
         # identically. Everything else stays unmerged for the callers below.
         merge = subprocess.run(["git", "read-tree", "-m", "--aggressive", merge_base, first_parent, second_parent],
-                               cwd=root, env=env, text=True, capture_output=True, check=False)
+                               cwd=root, env=env, encoding="utf-8", capture_output=True, check=False)
         if merge.returncode:
             raise RuntimeError(merge.stderr.strip() or "Item and Integration trees conflict")
         if prefer_second:
@@ -4338,7 +4338,7 @@ def merge_candidate(root: Path, first_parent: str, second_parent: str,
         conflicts = unmerged_paths(root, env)
         if conflicts:
             raise RuntimeError("merge left authored paths unmerged: " + ", ".join(conflicts))
-        tree = subprocess.run(["git", "write-tree"], cwd=root, env=env, text=True,
+        tree = subprocess.run(["git", "write-tree"], cwd=root, env=env, encoding="utf-8",
                               capture_output=True, check=False)
         if tree.returncode:
             raise RuntimeError(tree.stderr.strip() or "cannot write integration tree")

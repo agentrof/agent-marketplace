@@ -16,10 +16,10 @@ import json
 import re
 import shlex
 import sys
-import tempfile
 from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
 
+import atomic_file
 from ba_compile import (
     frontmatter_item, frontmatter_scalar, parse_frontmatter, without_generated_relations,
 )
@@ -345,17 +345,7 @@ def ci_environment_job(props: dict) -> str:
     ))
 
 
-def atomic_text(path: Path, text: str) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    descriptor, raw = tempfile.mkstemp(prefix=f".{path.name}.", dir=path.parent)
-    temporary = Path(raw)
-    try:
-        with open(descriptor, "w", encoding="utf-8", newline="\n", closefd=True) as handle:
-            handle.write(text)
-            handle.flush()
-        temporary.replace(path)
-    finally:
-        temporary.unlink(missing_ok=True)
+atomic_text = atomic_file.replace_text
 
 
 def render_ci(args) -> int:

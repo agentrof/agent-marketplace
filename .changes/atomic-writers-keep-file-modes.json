@@ -1,0 +1,6 @@
+{
+  "summary": "Setup, the workspace config writer, the Requirement, Delivery, Operation and Architecture compilers and both host projection writers now give a file they create the mode a plain write gives it, 0666 less the umask (0644 under the usual umask), and keep the mode of a file they replace, instead of leaving every file they write owner-only (0600).",
+  "components": {
+    "software-engineering-team": "patch"
+  }
+}

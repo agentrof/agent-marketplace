@@ -12,13 +12,12 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
-import os
 import re
 import sys
-import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 
+import atomic_file
 from ba_compile import (
     frontmatter_item, frontmatter_scalar, parse_frontmatter, without_generated_relations,
 )
@@ -47,18 +46,7 @@ def kind_for_id(record_id: str) -> tuple[str, str, str, str] | None:
                  if record_id.startswith(entry[0] + "-")), None)
 
 
-def atomic(path: Path, text: str) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    fd, raw = tempfile.mkstemp(prefix=f".{path.name}.", dir=path.parent)
-    temporary = Path(raw)
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as handle:
-            handle.write(text)
-            handle.flush()
-            os.fsync(handle.fileno())
-        os.replace(temporary, path)
-    finally:
-        temporary.unlink(missing_ok=True)
+atomic = atomic_file.replace_text
 
 
 def docs_root(value: str | Path) -> Path:

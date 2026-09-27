@@ -5,11 +5,11 @@ from __future__ import annotations
 
 import hashlib
 import json
-import os
 import re
-import tempfile
 from pathlib import Path
 from typing import Callable
+
+import atomic_file
 
 
 TEAM_RE = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
@@ -427,21 +427,7 @@ def owned_portable_surfaces(
     return result
 
 
-def atomic_write(path: Path, content: str) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    fd, temporary = tempfile.mkstemp(dir=str(path.parent), prefix=f".{path.name}.")
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as handle:
-            handle.write(content)
-            handle.flush()
-            os.fsync(handle.fileno())
-        os.replace(temporary, path)
-    except Exception:
-        try:
-            os.unlink(temporary)
-        except OSError:
-            pass
-        raise
+atomic_write = atomic_file.replace_text
 
 
 def apply_changes(

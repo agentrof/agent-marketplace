@@ -86,7 +86,7 @@ def atomic_text(path: Path, text: str) -> None:
     fd, raw = tempfile.mkstemp(prefix=f".{path.name}.", dir=path.parent)
     tmp = Path(raw)
     try:
-        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+        with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as handle:
             handle.write(text)
             handle.flush()
             os.fsync(handle.fileno())

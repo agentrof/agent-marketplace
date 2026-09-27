@@ -2121,7 +2121,7 @@ def cmd_render_decisions(args, policy: dict) -> int:
         index_rel = index_path_for(tree)
         path = vault.root / index_rel
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(render_decision_index(vault, tree), encoding="utf-8")
+        path.write_bytes(render_decision_index(vault, tree).encode("utf-8"))
         print(f"vault_check: rendered {index_rel} ({len(notes)} records)")
     return 0
 
@@ -2143,7 +2143,7 @@ def cmd_render_relations(args, policy: dict) -> int:
         current = note.path.read_text(encoding="utf-8")
         rendered = replace_relation_block(current, blocks.get(note.rel, ""))
         if rendered != current:
-            note.path.write_text(rendered, encoding="utf-8")
+            note.path.write_bytes(rendered.encode("utf-8"))
             changed += 1
     catalog_rel = str(policy.get("relation_contract", {}).get(
         "catalog_root", "maps/_relations")).rstrip("/")
@@ -2160,14 +2160,14 @@ def cmd_render_relations(args, policy: dict) -> int:
     for rel, content in sorted(catalogs.items()):
         path = root / rel
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(content, encoding="utf-8")
+        path.write_bytes(content.encode("utf-8"))
         changed += 1
     for rel, content in sorted(relation_reports(vault).items()):
         path = root / rel
         path.parent.mkdir(parents=True, exist_ok=True)
         current = path.read_text(encoding="utf-8") if path.is_file() else ""
         if current != content:
-            path.write_text(content, encoding="utf-8")
+            path.write_bytes(content.encode("utf-8"))
             changed += 1
     print(f"vault_check: rendered relations ({len(blocks)} target(s),"
           f" {len(catalogs)} catalog page(s), {changed} write(s))")
@@ -2232,8 +2232,7 @@ def restamp(note_path: Path, stamps: dict[str, str],
             if re.match(r"^tags:\s*$", stripped):
                 in_tags = True
         out.append(line)
-    note_path.write_text("\n".join(out) + ("\n" if text.endswith("\n") else ""),
-                         encoding="utf-8")
+    note_path.write_bytes(("\n".join(out) + ("\n" if text.endswith("\n") else "")).encode("utf-8"))
 
 
 def cmd_stamp_decision(args, policy: dict) -> int:
@@ -2686,7 +2685,7 @@ def standardize_graph_colors(root: Path, policy: dict) -> int:
     if data.get("colorGroups") == groups:
         return 0
     data["colorGroups"] = groups
-    graph_path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+    graph_path.write_bytes((json.dumps(data, indent=2) + "\n").encode("utf-8"))
     return 1
 
 
@@ -2958,10 +2957,10 @@ def reconcile_payload_fragment(root: Path, policy: dict, fragment: str) -> int:
             changed_graph = True
     if changed_types:
         types_doc["types"] = types
-        types_path.write_text(json.dumps(types_doc, indent=2) + "\n", encoding="utf-8")
+        types_path.write_bytes((json.dumps(types_doc, indent=2) + "\n").encode("utf-8"))
     if changed_graph:
         graph_doc["colorGroups"] = groups
-        graph_path.write_text(json.dumps(graph_doc, indent=2) + "\n", encoding="utf-8")
+        graph_path.write_bytes((json.dumps(graph_doc, indent=2) + "\n").encode("utf-8"))
     return int(changed_types) + int(changed_graph)
 
 
@@ -3041,7 +3040,7 @@ def cmd_normalize(args, policy: dict) -> int:
         if rewrites:
             # --dry-run gates EVERY content write, not only --rename.
             if not args.dry_run:
-                note.path.write_text(text, encoding="utf-8")
+                note.path.write_bytes(text.encode("utf-8"))
             touched += 1
             total_rewrites += rewrites
             print(f"vault_check: normalized {note.rel} ({rewrites} rewrites)"
@@ -3234,8 +3233,7 @@ def normalize_rename(args, policy: dict, vault: Vault, skip: set) -> int:
         trailing = note.path.read_text(encoding="utf-8").endswith("\n")
         new_text = pattern.sub(lambda m: f"[[{stem_map[m.group(1)]}", text)
         if new_text != text:
-            note.path.write_text(new_text + ("\n" if trailing else ""),
-                                 encoding="utf-8")
+            note.path.write_bytes((new_text + ("\n" if trailing else "")).encode("utf-8"))
     for old in sorted(renames):
         (vault.root / old).rename(vault.root / renames[old])
         print(f"vault_check: renamed {old} -> {renames[old]}")

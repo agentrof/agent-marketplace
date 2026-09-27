@@ -4002,6 +4002,37 @@ class DeliveryGitTests(unittest.TestCase):
                 self.assertEqual(raw("cat-file", "commit", commit).split(b"\n\n", 1)[1],
                                  (subject + "\n\nAgentrof-Record: fixture-v1\n").encode("utf-8"))
 
+    def test_stamp_check_compares_an_item_record_committed_with_crlf_byte_for_byte(self):
+        """The stamp check keeps every other Item byte. A record whose lines end with CRLF, as a
+        text-mode write on native Windows commits it under setup's workspace/docs/** -text rule,
+        is refused as a change beyond the stamp, and a record without a closing delimiter line
+        as invalid frontmatter, where both used to stop the check with a ValueError (#247)."""
+        project, worktree, item, active = self.prepare_stamped_architecture_item()
+        stamped = delivery_git.run_git(worktree, "rev-parse", "HEAD")
+        relative_delivery, relative_item = (path.relative_to(worktree).as_posix() for path in (item.parents[2], item))
+        record = item.read_text(encoding="utf-8")
+        props, _body = delivery_compile.split_note(item)
+        bare = delivery_compile.frontmatter(dict(props, source_hash=delivery_compile.content_hash(props, "")), "")
+        for label, text, refusal in (
+            ("stamp", record, None),
+            ("stamp with CRLF", record.replace("\n", "\r\n"), "beyond its Architecture stamp"),
+            ("no closing delimiter line", bare.rstrip("\n"), "no closing delimiter line"),
+        ):
+            with self.subTest(label=label):
+                after = delivery_git.commit_replacements(project, stamped, {relative_item: text}, "Commit the record", {})
+                self.assertEqual(subprocess.run(["git", "cat-file", "blob", f"{after}:{relative_item}"], cwd=project,
+                                                capture_output=True, check=True).stdout, text.encode("utf-8"))
+
+                def check():
+                    delivery_git.require_item_publication_controls(project, active["item"], after,
+                                                                   relative_delivery, relative_item)
+
+                if refusal is None:
+                    check()
+                else:
+                    with self.assertRaisesRegex(RuntimeError, refusal):
+                        check()
+
     def test_push_item_refuses_product_paths_outside_the_item_path_claims(self):
         """A claim covers its path and every path below it. The vault keeps its own rules,
         and what the Item's integration base carries is not the Item's change."""

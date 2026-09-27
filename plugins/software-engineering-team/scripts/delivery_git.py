@@ -3359,7 +3359,12 @@ def require_item_publication_controls(root: Path, before: str, after: str,
                 raise RuntimeError("only a required Architecture Item may publish its stamp")
             if tree == after and props.get("source_hash") != content_hash(props, body):
                 raise RuntimeError("Item Architecture stamp source_hash is stale")
-            header, body_text = text.split("\n---\n", 1)
+            # The closing delimiter line may end with CRLF, as a text-mode write on native
+            # Windows commits it under setup's -text rule; the bytes around it compare exactly.
+            parts = re.split(r"\n---\r?\n", text, maxsplit=1)
+            if len(parts) != 2:
+                raise RuntimeError("Item publication frontmatter is invalid: no closing delimiter line")
+            header, body_text = parts
             header = re.sub(r"(?m)^(?:architecture_delta_hash|source_hash):[^\n]*\n?", "", header)
             versions.append((mode, header.rstrip("\n"), body_text))
         if versions[0] != versions[1]:

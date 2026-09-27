@@ -1,6 +1,0 @@
-{
-  "summary": "push-item now compares the Item record in the Item worktree with the committed Item as Git stores it, through Git's clean filter, so an Item whose checkout converted line endings, as Git for Windows does by default, publishes instead of being refused as a changed control; a record whose content differs is still refused.",
-  "components": {
-    "software-engineering-team": "patch"
-  }
-}

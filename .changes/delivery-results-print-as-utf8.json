@@ -1,6 +1,0 @@
-{
-  "summary": "The Delivery coordinator's result envelope and the Delivery compiler's JSON results now reach standard output as UTF-8 bytes on every host. On native Windows a redirected standard output encodes in the ANSI code page, so a result that named a letter it lacks, such as ş, ğ or ı in a path or message, raised UnicodeEncodeError after the command had already run and left its caller without a result.",
-  "components": {
-    "software-engineering-team": "patch"
-  }
-}

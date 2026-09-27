@@ -1,6 +1,0 @@
-{
-  "summary": "A Delivery PR that already exists when open-pr records it now gets the Review at that PR intent as its body, whether open-pr adopts it after the Review is published again, finds it through a new PR intent, or adopts a PR opened by hand. It kept the body it was opened with, so the provider showed the earlier Review while the PR head carried the new one. This extends the body update that a cancellation already gets to every such PR.",
-  "components": {
-    "software-engineering-team": "patch"
-  }
-}

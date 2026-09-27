@@ -1,6 +1,0 @@
-{
-  "summary": "The Delivery coordinator now reads the paths a target refresh, a cancellation revert and an Item push list from Git as NUL-separated bytes decoded as UTF-8, instead of the quoted form Git prints for a name outside ASCII, so a target change to a claimed path such as src/giriş/kayıt.py is refused and a cancelled Item's change to such a path is reverted, where both went through unseen before; the setup check names such force-added local files as they are.",
-  "components": {
-    "software-engineering-team": "patch"
-  }
-}

@@ -1,6 +1,0 @@
-{
-  "summary": "The package's atomic text writer now leaves a file as it is when the file already holds the text with CRLF line endings, as core.autocrlf checks files out on native Windows wherever setup's `workspace/docs/** -text` rule does not reach. Every text writer emits LF, so a rewrite that changed nothing there changed the file's size, and git status reported a modification without a diff, as after a fresh Delivery map render on the merged target branch; a rewrite that changes the text still writes LF.",
-  "components": {
-    "software-engineering-team": "patch"
-  }
-}

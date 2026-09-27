@@ -1,6 +1,0 @@
-{
-  "summary": "start-item and resume-item now delete their pending writer receipt after an activation the remote rejected while the Item ref still holds the tip the activation leased and the Slot stays free, as the receipt contract allows for refs that are absent or unchanged. The receipt used to stay behind, so a retry, for example after a lost Fence lease, refused with \"a different active writer receipt already exists\".",
-  "components": {
-    "software-engineering-team": "patch"
-  }
-}

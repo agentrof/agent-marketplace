@@ -1,6 +1,0 @@
-{
-  "summary": "authorize-target-update now keeps its prepared target update receipt after a Fence push the remote rejected unless the refetched Fence never took the authorizing candidate. A push that landed while its response was lost, and a Fence another coordinator moved on from that candidate, used to lose the receipt, which stranded the handoff: apply, reauthorize and finish refused because the receipt was missing, abort refused past the intent, and a new authorization refused because the intent already existed.",
-  "components": {
-    "software-engineering-team": "patch"
-  }
-}

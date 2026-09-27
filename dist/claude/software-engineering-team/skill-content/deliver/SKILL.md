@@ -61,6 +61,11 @@ in `review`. Coordinator commits, such as the reopen commit, never count; a
 manual merge of the Integration branch into another branch would. A shallow
 clone or a failed Git query makes `status` and `check` fail with an explicit
 finding.
+Once the merge is proven, `merge-pr` or `verify-merge` deletes the Delivery's
+Integration ref and its integrated Item refs; the target's package is the
+record from then on. Only the project Fence and a cancelled Story's Item ref
+stay, and running `verify-merge` again on a Delivery merged earlier removes
+what an older release left.
 Release management is deliberately out of scope. No command may infer a
 status from a branch name alone; the compiler and verified remote evidence are
 the source of semantic truth.

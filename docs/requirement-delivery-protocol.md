@@ -215,7 +215,10 @@ canonical owner of:
 `execution-plan.md` is a compiler-rendered aggregate of those Item records.
 Approval is local. `publish-execution-plan` is the only network writer for the
 approved plan and creates no Item worktree or execution slot. Claims begin only
-after the published plan and target baseline are verified remotely.
+after the published plan and target baseline are verified remotely. A Story is
+claimable only when no Item ref names it and no merged Delivery's package in
+the Integration records it `integrated`; `claim-items` refuses either with
+`DELIVERY_CLAIM_CONFLICT`.
 
 Execution approval pins the approved Verification Contract on every Item. An
 Item marked `runtime_required: true` additionally pins the approved
@@ -253,6 +256,15 @@ one Story. Item branches merge serially into Integration after code review and
 verification. The Fence and Slot refs are control refs; they have no worktree
 and do not authorize product edits.
 
+Integration and Item refs live while their Delivery is open. Once `merge-pr`
+or `verify-merge` proves that the target merged the recorded PR head, it
+deletes the Integration ref and the Item ref of every integrated Story in one
+atomic transaction and reports each as `absent`. The target's copy of the
+package records the Delivery from then on. A cancelled Story keeps its Item
+ref, which keeps any other Delivery from claiming it again, and a ref that no
+longer names what the merge holds stays. Apart from those, only the project
+Fence stays.
+
 ## Fence and execution slots
 
 The project Fence serializes cross-machine changes that must not race:
@@ -282,7 +294,11 @@ predecessors, claims, Fence and one free Slot to pass. Each Item its
 `waits_for` names is met the same way against this Delivery's Integration,
 which for a Story of another Delivery means that Delivery merged into the
 target and this one refreshed onto it. The `Agentrof-Delivery` trailer of the
-Story's Item tip names the package that records its status. A Story no
+Story's Item tip names the package that records its status. Once that
+Delivery merged and dropped the Item ref, its package answers instead: the
+Story is met when the package in this Integration records it `integrated` and
+this Integration holds the merge of that Delivery's recorded PR, and it is
+still on its way when only the target holds them. A Story no
 Delivery has claimed, or one its Delivery cancelled, fails closed with
 `DELIVERY_DEPENDENCY_UNMET`, and the refusal names a backlog revision as the
 way out. Before the atomic remote transaction, the coordinator writes an
@@ -406,8 +422,10 @@ A merged Delivery is closed. Every coordinator verb that would change its refs
 first decides as the compiler does: when the published Review records the PR,
 it asks the same proof of the freshly fetched target tip and refuses with
 `DELIVERY_POST_MERGE_TRANSITION` once the target holds it; a history that
-cannot answer refuses too. `open-pr` still reports the recorded PR,
-`merge-pr` still verifies the merge, and the release of a plan revision or
+cannot answer refuses too. Once the merge dropped the Integration ref, the
+proof alone decides. `open-pr` still reports the recorded PR,
+`merge-pr` still verifies the merge, both reading the PR record from the
+target history when the ref is gone, and the release of a plan revision or
 upgrade barrier still runs, because the project Fence must not stay barred.
 
 ## Target changes, recovery and cancellation

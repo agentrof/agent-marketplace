@@ -39,6 +39,7 @@ RESERVED_FINDING_CODES = {
 # each with why. Every other one refuses with DELIVERY_POST_MERGE_TRANSITION.
 OPEN_AFTER_MERGE = {
     "reserve_delivery": "it writes only while the Delivery refs are absent, which they never are after a merge",
+    "merge_pr": "it deletes the Delivery's refs only once the target holds its merge, which is how a merged Delivery closes",
     **dict.fromkeys(("finish_plan_revision", "abort_plan_revision", "finish_upgrade", "abort_upgrade"),
                     "it releases a barrier on the project Fence, which every other Delivery waits for"),
 }

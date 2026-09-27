@@ -656,7 +656,12 @@ def _git_query(cwd: Path, *args: str) -> str:
 
 
 def recorded_pr_merged(cwd: Path, delivery_id: str, head: str = "HEAD") -> bool:
-    """Prove offline that *head* contains a merge of this Delivery's recorded PR head.
+    """Prove offline that *head* contains a merge of this Delivery's recorded PR head."""
+    return merged_pr_record(cwd, delivery_id, head) is not None
+
+
+def merged_pr_record(cwd: Path, delivery_id: str, head: str = "HEAD") -> str | None:
+    """Return the recorded PR head of this Delivery that *head* holds a merge of, or None.
 
     *head* is the checked-out HEAD unless the caller names a commit, as the
     coordinator names the fetched target tip. The proof is a two-parent merge
@@ -676,7 +681,7 @@ def recorded_pr_merged(cwd: Path, delivery_id: str, head: str = "HEAD") -> bool:
     from delivery_git import trailer
 
     if not DELIVERY_ID_RE.fullmatch(delivery_id):
-        return False
+        return None
     if _git_query(cwd, "rev-parse", "--is-shallow-repository").strip() == "true":
         raise MergeStateUnknown("Delivery merge state cannot be evaluated in a shallow clone; "
                                 "fetch the full history, for example with git fetch --unshallow")
@@ -691,7 +696,7 @@ def recorded_pr_merged(cwd: Path, delivery_id: str, head: str = "HEAD") -> bool:
                 and parents == [trailer(message, "Intent")]):
             heads.add(oid)
     if not heads:
-        return False
+        return None
     # A commit that a recorded head already contains cannot merge it, so the
     # walk stops where the Delivery branched off.
     merges = _git_query(cwd, "rev-list", "--merges", "--parents",
@@ -700,8 +705,8 @@ def recorded_pr_merged(cwd: Path, delivery_id: str, head: str = "HEAD") -> bool:
         if len(fields) == 3 and fields[2] in heads:
             _header, _, message = _git_query(cwd, "cat-file", "commit", fields[0]).partition("\n\n")
             if trailer(message, "Record") is None:
-                return True
-    return False
+                return fields[2]
+    return None
 
 
 def delivery_state(root: Path, props: dict) -> tuple[object, str | None]:

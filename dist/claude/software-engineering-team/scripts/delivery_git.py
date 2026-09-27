@@ -1029,6 +1029,34 @@ def history_holds(root: Path, remote: str, ref: str, oid: str, candidate: str) -
     return is_ancestor(root, candidate, oid)
 
 
+def item_claim(root: Path, remote: str, delivery_id: str, story: str) -> tuple[str, str]:
+    """Return the tip of *story*'s Item ref and the Delivery its trailer names, or ("", "").
+
+    Item refs are named by Story alone, so the ref can hold another Delivery's
+    claim of the same Story.
+    """
+    ref = canonical_refs(delivery_id, story)["item"]
+    tip = remote_ref_oids(root, remote, [ref])[ref]
+    if not tip:
+        return "", ""
+    if subprocess.run(["git", "cat-file", "-e", tip + "^{commit}"], cwd=root,
+                      capture_output=True, check=False).returncode:
+        # Another Delivery's Item advances on its own hosts.
+        run_git(root, "fetch", "--no-tags", remote, ref)
+    return tip, trailer(commit_message(root, tip), "Delivery") or ""
+
+
+def own_item_tip(root: Path, remote: str, delivery_id: str, story: str) -> str:
+    """Return *story*'s Item tip when this Delivery holds the claim, else "".
+
+    A claim another Delivery holds is not this Delivery's Item: its tip holds
+    no package of this Delivery, and re-issuing it would take the Story over.
+    It counts as absent here, and claim-items refuses the Story.
+    """
+    tip, owner = item_claim(root, remote, delivery_id, story)
+    return tip if owner == delivery_id else ""
+
+
 def push_never_landed(root: Path, remote: str, ref: str, candidate: str) -> bool:
     """Whether the refetched *ref* proves that a push of *candidate* to it never landed.
 
@@ -1880,8 +1908,8 @@ def cancel_delivery(project_root: Path, delivery_id: str, reason: str,
         relative_item = rel_posix(root, item_path)
         context = {"path": relative_item, "item_ref": item_ref, "item_oid": None,
                    "slot": None, "props": None, "body": None}
-        if remote_has_ref(root, remote, item_ref):
-            item_oid = remote_oid(root, remote, item_ref)
+        item_oid = own_item_tip(root, remote, delivery_id, story)
+        if item_oid:
             item_props, item_body = split_remote_note(root, item_oid, relative_item, split_note)
             if item_props.get("status") == "cancelled":
                 raise RuntimeError(f"DELIVERY_CANCELLATION_INVALID: Item is already cancelled: {story}")
@@ -2339,9 +2367,9 @@ def refreshed_claim_updates(root: Path, remote: str, delivery_id: str, directory
     for item_path in integration_item_paths(root, directory, integration_oid):
         story = item_path.parent.name.upper()
         item_ref = canonical_refs(delivery_id, story)["item"]
-        if not remote_has_ref(root, remote, item_ref):
+        item_oid = own_item_tip(root, remote, delivery_id, story)
+        if not item_oid:
             continue
-        item_oid = remote_oid(root, remote, item_ref)
         if trailer(commit_message(root, item_oid), "Record") != "item-claim-v1":
             continue
         if is_ancestor(root, target, item_oid):
@@ -2407,10 +2435,9 @@ def refresh_target(project_root: Path, delivery_id: str,
     claimed: dict[str, str] = {}
     for item_path in integration_item_paths(root, directory, integration_oid):
         story = item_path.parent.name.upper()
-        item_ref = canonical_refs(delivery_id, story)["item"]
-        if not remote_has_ref(root, remote, item_ref):
+        item_oid = own_item_tip(root, remote, delivery_id, story)
+        if not item_oid:
             continue
-        item_oid = remote_oid(root, remote, item_ref)
         item_props, _ = split_remote_note(root, item_oid, rel_posix(root, item_path), split_note)
         from delivery_compile import _is_normalized_claim
         for claim in item_props.get("path_claims", []) or []:
@@ -2472,7 +2499,7 @@ def revise_unclaimed_scope(project_root: Path, delivery_id: str,
         raise RuntimeError("DELIVERY_FENCE_MODE: revise-unclaimed-scope requires an open Fence")
     for item_path in sorted(directory.glob("items/*/item.md")):
         story = item_path.parent.name.upper()
-        if remote_has_ref(root, remote, canonical_refs(delivery_id, story)["item"]):
+        if own_item_tip(root, remote, delivery_id, story):
             raise RuntimeError(f"DELIVERY_CLAIM_CONFLICT: scope revision is forbidden after Item claim: {story}")
     occupied = remote_slot_oids(root, remote)
     if occupied:
@@ -3224,8 +3251,9 @@ def claim_items(project_root: Path, delivery_id: str, remote: str = "origin") ->
     for item_path in item_paths:
         story = item_path.parent.name.upper()
         item_ref = canonical_refs(delivery_id, story)["item"]
-        if remote_has_ref(root, remote, item_ref):
-            raise RuntimeError(f"DELIVERY_CLAIM_CONFLICT: story is already claimed: {story}")
+        claimed, holder = item_claim(root, remote, delivery_id, story)
+        if claimed:
+            raise RuntimeError(f"DELIVERY_CLAIM_CONFLICT: story is already claimed by {holder or 'another Delivery'}: {story}")
         if story in delivered:
             raise RuntimeError(f"DELIVERY_CLAIM_CONFLICT: story is already delivered by {delivered[story]}: {story}")
         item_props, item_body = split_note(item_path)

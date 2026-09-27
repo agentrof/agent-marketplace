@@ -4053,11 +4053,17 @@ class DeliveryGitTests(unittest.TestCase):
         started = delivery_git.start_item(project, "DLV-002", "AUTH-02")
         self.assertEqual((started["story"], started["slot"]), ("AUTH-02", "001"))
 
-    def test_claim_refuses_a_story_a_merged_delivery_delivered(self):
-        """A merged Delivery keeps no Item ref, so claim-items finds AUTH-01 integrated in the
-        merged package of DLV-001 and refuses it to a later Delivery instead of claiming it again (#286)."""
-        project = self.claim_waiting_deliveries()
-        self.merge_waited_for_delivery(project)
+    def advance_target(self, project: Path) -> str:
+        """Move the target one commit past its tip without changing a file."""
+        target = delivery_git.remote_oid(project, "origin", "refs/heads/main")
+        advanced = delivery_git.run_git(project, "commit-tree", target + "^{tree}", "-p", target,
+                                        "-m", "Unrelated target change")
+        delivery_git.atomic_push(project, "origin", [("refs/heads/main", target, advanced)])
+        return advanced
+
+    def reserve_overlapping_delivery(self, project: Path, plan: bool = True) -> None:
+        """Reserve DLV-003 for AUTH-01, the Story of DLV-001, on the current target, and publish its
+        plan unless *plan* is false."""
         docs = project / "workspace" / "docs"
         init = type("Args", (), {"docs": str(docs), "id": "DLV-003", "slug": "again", "goal": "Deliver AUTH-01 again",
                                  "outcome": None, "target_branch": "main", "story": ["AUTH-01"]})
@@ -4071,14 +4077,72 @@ class DeliveryGitTests(unittest.TestCase):
                                          "Slug": "again", "Target": target},
             delivery_projections=True)
         delivery_git.atomic_push(project, "origin", [(delivery_git.canonical_refs("DLV-003")["integration"], "", reservation)])
+        if not plan:
+            return
         self.author_execution_topology(docs, "DLV-003")
         self.assertEqual(delivery_compile.approve_execution(type("Args", (), {"docs": str(docs), "delivery": "DLV-003"})), 0)
         delivery_git.publish_execution_plan(project, "DLV-003")
+
+    def test_claim_refuses_a_story_a_merged_delivery_delivered(self):
+        """A merged Delivery keeps no Item ref, so claim-items finds AUTH-01 integrated in the
+        merged package of DLV-001 and refuses it to a later Delivery instead of claiming it again (#286)."""
+        project = self.claim_waiting_deliveries()
+        self.merge_waited_for_delivery(project)
+        self.reserve_overlapping_delivery(project)
         delivery_git.refresh_target(project, "DLV-003")
         before = delivery_git.run_git(project, "ls-remote", "origin")
         self.assertEqual(self.refused_finding(lambda: delivery_git.claim_items(project, "DLV-003")),
                          ("DELIVERY_CLAIM_CONFLICT", "story is already delivered by DLV-001: AUTH-01"))
         self.assertEqual(delivery_git.run_git(project, "ls-remote", "origin"), before)
+
+    def test_refresh_leaves_another_deliverys_claim_of_the_same_story_alone(self):
+        """DLV-003 holds AUTH-01, which DLV-001 claimed. Its refresh of a converged Integration used
+        to re-issue that claim under DLV-003 and take the Story over; it now leaves the claim to
+        DLV-001, and claim-items refuses AUTH-01 naming DLV-001 (#288)."""
+        project = self.claim_waiting_deliveries()
+        claim_ref = delivery_git.canonical_refs("DLV-001", "AUTH-01")["item"]
+        claimed = delivery_git.remote_oid(project, "origin", claim_ref)
+        self.advance_target(project)
+        delivery_git.refresh_target(project, "DLV-002")
+        self.reserve_overlapping_delivery(project)
+        refreshed = delivery_git.refresh_target(project, "DLV-003")
+        self.assertEqual((refreshed["changed"], refreshed["claims_refreshed"]), (False, []))
+        self.assertEqual(delivery_git.remote_oid(project, "origin", claim_ref), claimed)
+        self.assertEqual(self.refused_finding(lambda: delivery_git.claim_items(project, "DLV-003")),
+                         ("DELIVERY_CLAIM_CONFLICT", "story is already claimed by DLV-001: AUTH-01"))
+        self.assertEqual(delivery_git.remote_oid(project, "origin", claim_ref), claimed)
+
+    def test_refresh_after_a_target_advance_passes_over_another_deliverys_claim(self):
+        """After a target advance, the refresh of DLV-003 used to read its own package from the
+        Item tip of DLV-001 and fail with a raw Git error. Only DLV-003's own claims guard its
+        paths now, so the refresh lands and DLV-001's claim stays where it was (#288)."""
+        project = self.claim_waiting_deliveries()
+        claim_ref = delivery_git.canonical_refs("DLV-001", "AUTH-01")["item"]
+        claimed = delivery_git.remote_oid(project, "origin", claim_ref)
+        self.reserve_overlapping_delivery(project)
+        self.advance_target(project)
+        self.assertTrue(delivery_git.refresh_target(project, "DLV-003")["changed"])
+        self.assertEqual(delivery_git.remote_oid(project, "origin", claim_ref), claimed)
+
+    def test_scope_revision_stays_open_beside_another_deliverys_claim(self):
+        """DLV-003 claimed nothing, so revising its scope, the way to hand AUTH-01 back to DLV-001,
+        used to be refused as a revision after an Item claim (#288)."""
+        project = self.claim_waiting_deliveries()
+        self.reserve_overlapping_delivery(project, plan=False)
+        revised = delivery_git.revise_unclaimed_scope(project, "DLV-003")
+        self.assertEqual(delivery_git.trailer(delivery_git.commit_message(project, revised["integration"]), "Record"),
+                         "delivery-scope-revised-v1")
+
+    def test_cancellation_passes_over_another_deliverys_claim(self):
+        """Cancelling DLV-003 used to read its package from the Item tip of DLV-001 and fail with a
+        raw Git error. AUTH-01 is now a Story DLV-003 never started, and DLV-001 keeps its claim (#288)."""
+        project = self.claim_waiting_deliveries()
+        claim_ref = delivery_git.canonical_refs("DLV-001", "AUTH-01")["item"]
+        claimed = delivery_git.remote_oid(project, "origin", claim_ref)
+        self.reserve_overlapping_delivery(project)
+        cancelled = delivery_git.cancel_delivery(project, "DLV-003", "AUTH-01 stays with DLV-001")
+        self.assertEqual(cancelled["status"], "cancelled")
+        self.assertEqual(delivery_git.remote_oid(project, "origin", claim_ref), claimed)
 
     def test_worktree_file_holds_its_blob_as_git_stores_it(self):
         """A worktree file holds a committed blob when Git would store it as that blob. A checkout

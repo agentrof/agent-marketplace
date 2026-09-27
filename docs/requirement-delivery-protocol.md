@@ -218,7 +218,10 @@ approved plan and creates no Item worktree or execution slot. Claims begin only
 after the published plan and target baseline are verified remotely. A Story is
 claimable only when no Item ref names it and no merged Delivery's package in
 the Integration records it `integrated`; `claim-items` refuses either with
-`DELIVERY_CLAIM_CONFLICT`.
+`DELIVERY_CLAIM_CONFLICT`, naming the Delivery that holds the Story. Item refs
+are named by Story alone, so a Delivery reads an Item ref as its own only when
+the tip's `Agentrof-Delivery` trailer names it. Target refresh, scope revision
+and cancellation pass over another Delivery's claim and never re-issue it.
 
 Execution approval pins the approved Verification Contract on every Item. An
 Item marked `runtime_required: true` additionally pins the approved

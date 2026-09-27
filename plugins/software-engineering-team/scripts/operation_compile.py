@@ -270,8 +270,8 @@ def init(args) -> int:
     if not map_path.exists():
         template = Path(__file__).resolve().parents[1] / "templates" / "vault" / "maps" / "operation.md"
         map_path.parent.mkdir(parents=True, exist_ok=True)
-        map_path.write_text(template.read_text(encoding="utf-8"), encoding="utf-8")
-    path.write_text(render(props, body), encoding="utf-8")
+        map_path.write_bytes(template.read_text(encoding="utf-8").encode("utf-8"))
+    path.write_bytes(render(props, body).encode("utf-8"))
     print(json.dumps({"kind": args.kind, "path": str(path), "status": "draft"}, sort_keys=True))
     return 0
 
@@ -287,7 +287,7 @@ def revise(args) -> int:
     props.pop("approved_at_utc", None)
     props.pop("source_hash", None)
     props["tags"] = [f"doc/{TYPE_FOR[args.kind]}", "status/draft"]
-    path.write_text(render(props, body), encoding="utf-8")
+    path.write_bytes(render(props, body).encode("utf-8"))
     print(json.dumps({"kind": args.kind, "path": str(path), "status": "draft", "revision": props["revision"]}, sort_keys=True))
     return 0
 
@@ -307,7 +307,7 @@ def approve(args) -> int:
     value, errors = check_contract(docs, args.kind, text)
     if errors:
         raise ValueError("approval check failed: " + "; ".join(errors))
-    path.write_text(text, encoding="utf-8")
+    path.write_bytes(text.encode("utf-8"))
     print(json.dumps(value, sort_keys=True))
     return 0
 
@@ -350,7 +350,7 @@ def atomic_text(path: Path, text: str) -> None:
     descriptor, raw = tempfile.mkstemp(prefix=f".{path.name}.", dir=path.parent)
     temporary = Path(raw)
     try:
-        with open(descriptor, "w", encoding="utf-8", closefd=True) as handle:
+        with open(descriptor, "w", encoding="utf-8", newline="\n", closefd=True) as handle:
             handle.write(text)
             handle.flush()
         temporary.replace(path)

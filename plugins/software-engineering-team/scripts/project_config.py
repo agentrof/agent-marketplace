@@ -36,7 +36,7 @@ def atomic(path: Path, value: dict) -> None:
     fd, raw = tempfile.mkstemp(prefix="config.", dir=path.parent)
     temporary = Path(raw)
     try:
-        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+        with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as handle:
             json.dump(value, handle, ensure_ascii=False, indent=2)
             handle.write("\n")
             handle.flush()

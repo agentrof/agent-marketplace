@@ -199,7 +199,8 @@ def _write_writer_receipt_locked(receipt_path: Path, receipt: dict) -> None:
     candidate.pop("receipt_digest", None)
     candidate["receipt_digest"] = receipt_digest(candidate)
     data = json.dumps(candidate, ensure_ascii=False, sort_keys=True, indent=2) + "\n"
-    with tempfile.NamedTemporaryFile("w", encoding="utf-8", dir=receipt_path.parent,
+    with tempfile.NamedTemporaryFile("w", encoding="utf-8", newline="\n",
+                                     dir=receipt_path.parent,
                                      prefix=receipt_path.name + ".", delete=False) as temporary:
         temporary.write(data)
         temporary.flush()
@@ -548,7 +549,8 @@ def split_remote_note(root: Path, oid: str, relative_path: str,
                       split_note_fn) -> tuple[dict, str]:
     """Parse a tracked Markdown note from the exact remote Item tree."""
     text = run_git(root, "show", f"{oid}:{relative_path}")
-    with tempfile.NamedTemporaryFile("w", encoding="utf-8", suffix=".md", delete=False) as temporary:
+    with tempfile.NamedTemporaryFile("w", encoding="utf-8", newline="\n", suffix=".md",
+                                     delete=False) as temporary:
         temporary.write(text)
         temporary_path = Path(temporary.name)
     try:

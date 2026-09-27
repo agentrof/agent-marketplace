@@ -2979,8 +2979,11 @@ class DeliveryGitTests(unittest.TestCase):
                 self.assertEqual(verb()["receipt"]["state"], "verified")
 
     @contextlib.contextmanager
-    def lost_push_response(self):
-        """Let the next atomic push land on the remote while its response is lost on the way back."""
+    def lost_push_response(self, after_landing=None):
+        """Let the next atomic push land on the remote while its response is lost on the way back.
+
+        *after_landing* runs once the push landed, before the lost response is reported.
+        """
         run = subprocess.run
         lost = []
 
@@ -2989,6 +2992,8 @@ class DeliveryGitTests(unittest.TestCase):
             if (not lost and isinstance(command, list) and command[:3] == ["git", "push", "--atomic"]
                     and result.returncode == 0):
                 lost.append(command)
+                if after_landing is not None:
+                    after_landing()
                 return subprocess.CompletedProcess(command, 128, "", "fatal: the remote end hung up unexpectedly")
             return result
 
@@ -3733,6 +3738,36 @@ class DeliveryGitTests(unittest.TestCase):
                 self.assertEqual(found, code)
                 self.assertIn(moved, message)
                 self.assertEqual(delivery_git.run_git(root, "ls-remote", "origin"), before)
+
+    def test_atomic_push_that_may_have_landed_is_uncertain(self):
+        """A leased ref that holds the pushed candidate, or moved on from a history that holds it, shows
+        the push may have landed before its response was lost, never a lease that changed no ref."""
+        root, remote, (first, second, third) = self.lease_remote()
+        fence = delivery_git.canonical_refs("DLV-001")["fence"]
+        delivery_git.atomic_push(root, "origin", [(fence, "", first)])
+        uncertain = ("the remote may have taken the atomic push before its response was lost, "
+                     "so read the refs again before any retry: ")
+        with self.lost_push_response():
+            finding = self.refused_finding(lambda: delivery_git.atomic_push(root, "origin", [(fence, first, second)]))
+        self.assertEqual(finding, ("DELIVERY_TRANSACTION_UNCERTAIN", uncertain + f"{fence} holds the pushed {second}"))
+        # Another host moves the Fence on from the landed candidate, to a commit this checkout lacks.
+        other = root.parent / "other"
+        subprocess.run(["git", "clone", "-q", "-c", "gc.auto=0", "-c", "maintenance.auto=false",
+                        str(remote), str(other)], check=True)
+        identity = ["-c", "user.email=test@example.com", "-c", "user.name=Test"]
+        moved = []
+
+        def advance_from_another_host():
+            delivery_git.run_git(other, "fetch", "-q", "origin", fence)
+            moved.append(delivery_git.run_git(other, *identity, "commit-tree", third + "^{tree}", "-p", third,
+                                              "-m", "Another coordinator"))
+            delivery_git.run_git(other, "push", "-q", "origin", f"--force-with-lease={fence}:{third}",
+                                 f"{moved[0]}:{fence}")
+
+        with self.lost_push_response(after_landing=advance_from_another_host):
+            finding = self.refused_finding(lambda: delivery_git.atomic_push(root, "origin", [(fence, second, third)]))
+        self.assertEqual(finding, ("DELIVERY_TRANSACTION_UNCERTAIN",
+                                   uncertain + f"{fence} is {moved[0]}, whose history holds the pushed {third}"))
 
     def test_remote_without_atomic_push_support_is_named_and_other_refusals_keep_their_words(self):
         root, remote, (first, second, _third) = self.lease_remote()

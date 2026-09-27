@@ -412,8 +412,13 @@ Every mutating coordinator operation supports exact refetch classification:
 accepted, rejected, response uncertain or repository incident. A rejected
 atomic push is named from the refetched refs, never from Git's wording: a moved
 Fence lease, any other moved lease, or a remote that takes the same push only
-without atomic support. Recovery never reconstructs semantic state from a local
-receipt alone. Remote records and tracked package hashes remain authoritative.
+without atomic support. A leased ref that holds the pushed candidate, or moved
+on from a history that holds it, is the response uncertain class: the push may
+have landed before its response was lost, so it reports
+`DELIVERY_TRANSACTION_UNCERTAIN`, never a lease that changed no ref, and the
+refs are read again before any retry. Recovery never reconstructs semantic
+state from a local receipt alone. Remote records and tracked package hashes
+remain authoritative.
 A direct target update the remote rejected while the refetched target does not
 contain its carrier head changed nothing: that is the zero-effect proof, so its
 elected call returns to `prepared` in the target update receipt, and the host

@@ -1802,6 +1802,29 @@ class DeliveryGitTests(unittest.TestCase):
         for commit in (cancelled["reverts"][0], cancelled["review"]):
             self.assertEqual(self.product_files(project, commit), {"src/auth.py": original})
 
+    def test_cancellation_removes_an_item_addition_the_main_worktree_holds_untracked(self):
+        """update-index --remove keeps a path whose file the working tree holds and stages that
+        file, so the revert published the main worktree's untracked copy of a path the cancelled
+        Item added (#278)."""
+        original = "def authenticate():\n    return 'v0'"
+
+        def add(worktree: Path) -> None:
+            (worktree / "src/session.py").write_text("SESSION = 'item'\n", encoding="utf-8")
+            delivery_git.run_git(worktree, "add", "src/session.py")
+
+        project, _refreshed, integrated = self.integrate_item_change(
+            {"src/auth.py": original + "\n"}, ["src"], add)
+        self.assertEqual(self.product_files(project, integrated),
+                         {"src/auth.py": original, "src/session.py": "SESSION = 'item'"})
+        local = project / "src/session.py"
+        local.write_text("SESSION = 'local scratch'\n", encoding="utf-8")
+        cancelled = delivery_git.cancel_delivery(project, "DLV-001", "The owner withdrew the request")
+        for commit in (cancelled["reverts"][0], cancelled["review"]):
+            self.assertEqual(self.product_files(project, commit), {"src/auth.py": original})
+        self.assertEqual(local.read_text(encoding="utf-8"), "SESSION = 'local scratch'\n")
+        self.assertEqual(delivery_git.run_git(project, "status", "--porcelain", "--", "src/session.py"),
+                         "?? src/session.py")
+
     def test_cancellation_review_links_stay_posix_on_a_host_with_backslash_separators(self):
         """The cancellation Review links its Delivery with forward slashes on every host (#228)."""
         temporary, project = self.make_project()

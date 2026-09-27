@@ -1739,7 +1739,7 @@ def revert_merge_candidate(root: Path, base: str, merge_oid: str,
                 )
             if parent_entry is None:
                 update = subprocess.run(
-                    ["git", "update-index", "--remove", "--", path],
+                    ["git", "update-index", "--force-remove", "--", path],
                     cwd=root, env=env, text=True, capture_output=True, check=False,
                 )
             else:

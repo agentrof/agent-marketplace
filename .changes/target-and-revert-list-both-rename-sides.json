@@ -1,6 +1,0 @@
-{
-  "summary": "Target refresh and the cancellation revert now list a renamed file by its old and its new path, instead of the new path alone that Git's default rename detection gives, so a target that renames a claimed path away is refused with DELIVERY_TARGET_SOURCE_VIOLATION, a target that renames a pinned input refuses as for a removed one, and cancelling an Item that renamed a file restores the old name and removes the new one, where the refresh merged and the revert left neither name before.",
-  "components": {
-    "software-engineering-team": "patch"
-  }
-}

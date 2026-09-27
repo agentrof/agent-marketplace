@@ -1,6 +1,0 @@
-{
-  "summary": "A rejected atomic push whose refetched leased ref holds the pushed candidate, or moved on from a history that holds it, now reports the new DELIVERY_TRANSACTION_UNCERTAIN: the push may have landed before its response was lost, so the refs are read again before any retry. It used to report DELIVERY_FENCE_LEASE_LOST or DELIVERY_LEASE_LOST saying the push changed no ref, or Git's own words under DELIVERY_INPUT_INVALID. The Delivery result contract declares the code as an addition to its finding codes, naming the response uncertain classification the protocol already defines.",
-  "components": {
-    "software-engineering-team": "patch"
-  }
-}

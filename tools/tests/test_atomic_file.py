@@ -2,13 +2,16 @@
 
 tempfile.mkstemp creates its file owner-only and os.replace keeps that mode,
 so every writer that replaces through a temporary file sets the mode first:
-a new file takes 0666 less the umask and an existing file keeps its own.
+a new file takes 0666 less the umask and an existing file keeps its own. A
+text rewrite that changes nothing leaves a checkout core.autocrlf converted
+as it is.
 """
 
 from __future__ import annotations
 
 import os
 import stat
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -30,6 +33,7 @@ import project_config  # noqa: E402
 import requirement_compile  # noqa: E402
 import setup_project  # noqa: E402
 import vault_check  # noqa: E402
+from tools.tests.git_fixture import init_repository  # noqa: E402
 from tools.tests.test_writer_line_endings import SHARED_TEAM, load  # noqa: E402
 
 PLUGIN_ID = "fixture-plugin"
@@ -118,6 +122,39 @@ class AtomicWriterModeTests(unittest.TestCase):
                 write(path, "after\n")
                 self.assertNotEqual(path.read_bytes(), b"before\n")
                 self.assertEqual(mode(path), 0o664)
+
+
+class AtomicTextLineEndingTests(unittest.TestCase):
+    def git(self, root: Path, *args: str) -> str:
+        return subprocess.run(["git", *args], cwd=root, capture_output=True, check=True,
+                              encoding="utf-8").stdout
+
+    def test_a_rewrite_that_changes_nothing_keeps_a_converted_checkout_as_it_is(self):
+        """core.autocrlf=true, the Git for Windows default, checks an LF blob out with CRLF. A
+        text rewrite that changes nothing leaves such a file's bytes alone, since an LF rewrite
+        changes its size and git status then reports a modification that has no diff. A rewrite
+        that changes the text writes LF, and a new file is written with LF (#247)."""
+        text = "---\ntitle: Note\n---\n\n# Note\n"
+        converted = text.replace("\n", "\r\n").encode("utf-8")
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            init_repository(root)
+            for key, value in (("user.email", "test@example.com"), ("user.name", "Test"),
+                               ("core.autocrlf", "true")):
+                self.git(root, "config", key, value)
+            note = root / "note.md"
+            atomic_file.replace_text(note, text)
+            self.assertEqual(note.read_bytes(), text.encode("utf-8"))
+            self.git(root, "add", "note.md")
+            self.git(root, "commit", "-qm", "Record the note")
+            note.unlink()
+            self.git(root, "checkout", "--", "note.md")
+            self.assertEqual(note.read_bytes(), converted)
+            atomic_file.replace_text(note, text)
+            self.assertEqual(note.read_bytes(), converted)
+            self.assertEqual(self.git(root, "status", "--porcelain"), "")
+            atomic_file.replace_text(note, text + "\nChanged.\n")
+            self.assertEqual(note.read_bytes(), (text + "\nChanged.\n").encode("utf-8"))
 
 
 class AtomicFileFailureTests(unittest.TestCase):

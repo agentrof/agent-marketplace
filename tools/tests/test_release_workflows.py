@@ -351,6 +351,14 @@ class ReleaseWorkflowContracts(unittest.TestCase):
                 self.assertIn(test_name, text)
         self.assertIn("tools.tests.test_experience_compile", text)
         self.assertIn("tools.tests.test_vault_hook", text)
+        self.assertIn(
+            "        if: runner.os == 'Windows'\n"
+            "        run: >-\n"
+            "          python -m unittest\n"
+            "          tools.tests.test_delivery_compile\n"
+            "          tools.tests.test_delivery_git\n",
+            text,
+        )
 
     def test_dependabot_is_not_asked_for_action_bumps_the_gates_refuse(self):
         # PINNED_ACTIONS and the changeset gate refuse every bump Dependabot can raise.
@@ -467,13 +475,13 @@ class ReleaseWorkflowContracts(unittest.TestCase):
             "deterministic-check": "20",
             "check": "5",
             "compatibility": "20",
-            "vault-hook-platforms": "10",
+            "vault-hook-platforms": "${{ matrix.os == 'windows-latest' && 60 || 10 }}",
         }
         for job, minutes in expectations.items():
             with self.subTest(job=job):
                 self.assertRegex(
                     text,
-                    rf"(?ms)^  {re.escape(job)}:\n.*?^    timeout-minutes: {minutes}$",
+                    rf"(?ms)^  {re.escape(job)}:\n.*?^    timeout-minutes: {re.escape(minutes)}$",
                 )
 
     def test_validation_workflows_cancel_superseded_runs(self):

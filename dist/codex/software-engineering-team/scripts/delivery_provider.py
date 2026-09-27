@@ -20,7 +20,7 @@ class ProviderError(RuntimeError):
 
 
 def run_git(root: Path, *args: str) -> str:
-    result = subprocess.run(["git", *args], cwd=root, text=True,
+    result = subprocess.run(["git", *args], cwd=root, encoding="utf-8",
                             capture_output=True, check=False)
     if result.returncode:
         raise ProviderError(result.stderr.strip() or "git command failed")
@@ -28,13 +28,19 @@ def run_git(root: Path, *args: str) -> str:
 
 
 def run_gh(root: Path, *args: str, input_text: str | None = None) -> str:
+    """Run gh with *input_text* on its stdin as UTF-8 bytes and read its reply as UTF-8.
+
+    A text-mode pipe encodes and decodes in the locale's code page, the ANSI
+    code page on native Windows, and writes CRLF for every newline it is handed.
+    """
     if shutil.which("gh") is None:
         raise ProviderError("DELIVERY_PROVIDER_UNSUPPORTED: GitHub provider requires the authenticated gh CLI")
-    result = subprocess.run(["gh", *args], cwd=root, text=True, input=input_text,
+    result = subprocess.run(["gh", *args], cwd=root,
+                            input=None if input_text is None else input_text.encode("utf-8"),
                             capture_output=True, check=False)
     if result.returncode:
-        raise ProviderError(result.stderr.strip() or "GitHub provider command failed")
-    return result.stdout.strip()
+        raise ProviderError(result.stderr.decode("utf-8", "replace").strip() or "GitHub provider command failed")
+    return result.stdout.decode("utf-8").strip()
 
 
 def repository_from_remote(root: Path, remote: str = "origin") -> str:

@@ -102,7 +102,7 @@ jobs:
   vault-hook-platforms:
     name: vault hook (${{ matrix.os }}, Python ${{ matrix.python }})
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 10
+    timeout-minutes: ${{ matrix.os == 'windows-latest' && 60 || 10 }}
     strategy:
       fail-fast: false
       matrix:
@@ -146,6 +146,12 @@ jobs:
           python -m unittest
           tools.tests.test_experience_compile
           tools.tests.test_vault_hook
+      - name: Exercise the Delivery coordinator on native Windows
+        if: runner.os == 'Windows'
+        run: >-
+          python -m unittest
+          tools.tests.test_delivery_compile
+          tools.tests.test_delivery_git
 
   check:
     name: check

@@ -2902,6 +2902,27 @@ def vault_inventory(root: Path) -> dict[str, dict[str, int | str]]:
     return result
 
 
+def owner_only_read_widening(before: object, after: object) -> bool:
+    """Whether *after* only adds group or other read to the owner-only file *before*.
+
+    Package writers before v0.4.0 left files owner-only (0600). Setup's package
+    refresh, or a chmod, returns such a file to the checkout default without
+    touching a byte or its lifecycle state, so that alone is no protected
+    change. Every other mode change still is.
+    """
+    if not isinstance(before, dict) or not isinstance(after, dict) \
+            or before.get("kind") != "file" or after.get("kind") != "file":
+        return False
+    old_mode, new_mode = before.get("mode"), after.get("mode")
+    if type(old_mode) is not int or type(new_mode) is not int:
+        return False
+    if old_mode & 0o077 or new_mode == old_mode or (new_mode & old_mode) != old_mode \
+            or new_mode & ~(old_mode | 0o044):
+        return False
+    return ({key: value for key, value in before.items() if key != "mode"}
+            == {key: value for key, value in after.items() if key != "mode"})
+
+
 def canonical_json(value: dict) -> str:
     return json.dumps(
         value, ensure_ascii=True, sort_keys=True, separators=(",", ":")
@@ -3754,7 +3775,8 @@ def shell_verify(payload: dict) -> int:
         old = before.get("inventory", {})
         new = vault_inventory(root) if root.is_dir() else {}
         changed = sorted(key for key in set(old) | set(new)
-                         if old.get(key) != new.get(key))
+                         if old.get(key) != new.get(key)
+                         and not owner_only_read_widening(old.get(key), new.get(key)))
         attested_recovery_request = (
             attested_recovery_writer_spec(payload, root) is not None
         )

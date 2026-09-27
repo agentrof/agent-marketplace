@@ -112,8 +112,8 @@ def init(args) -> int:
     if not map_path.exists():
         template = Path(__file__).resolve().parents[1] / "templates" / "vault" / "maps" / "delivery.md"
         map_path.parent.mkdir(parents=True, exist_ok=True)
-        map_path.write_text(template.read_text(encoding="utf-8"), encoding="utf-8")
-    path.write_text(render(props, body), encoding="utf-8")
+        map_path.write_bytes(template.read_text(encoding="utf-8").encode("utf-8"))
+    path.write_bytes(render(props, body).encode("utf-8"))
     print(json.dumps({"path": str(path), "status": "draft"}, sort_keys=True))
     return 0
 
@@ -130,7 +130,7 @@ def begin_revision(args) -> int:
     props.pop("source_hash", None)
     props.pop("approved_at_utc", None)
     props["tags"] = ["doc/delivery-governance", "status/draft"]
-    path.write_text(render(props, body), encoding="utf-8")
+    path.write_bytes(render(props, body).encode("utf-8"))
     print(json.dumps({"path": str(path), "status": "draft", "revision": props["revision"]}, sort_keys=True))
     return 0
 
@@ -152,7 +152,7 @@ def approve(args) -> int:
     value, errors = status(docs, text)
     if errors:
         raise ValueError("approval check failed: " + "; ".join(errors))
-    path.write_text(text, encoding="utf-8")
+    path.write_bytes(text.encode("utf-8"))
     print(json.dumps(value, sort_keys=True))
     return 0
 

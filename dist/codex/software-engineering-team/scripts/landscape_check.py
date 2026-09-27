@@ -139,17 +139,17 @@ def render_capability_registry(tree: Path, decisions: list[dict],
                                components: list[dict] | None = None) -> Path:
     target = tree / "_generated" / "capability-registry.json"
     target.parent.mkdir(parents=True, exist_ok=True)
-    target.write_text(capability_registry(tree, decisions), encoding="utf-8")
+    target.write_bytes(capability_registry(tree, decisions).encode("utf-8"))
     catalog = tree / "_generated" / "component-catalog.json"
     topology = tree / "_generated" / "topology.json"
     ordered = sorted(components or [], key=lambda item: item["component_id"])
-    catalog.write_text(json.dumps({"schema_version": 1, "components": ordered}, ensure_ascii=False,
-                                  indent=2, sort_keys=True) + "\n", encoding="utf-8")
-    topology.write_text(json.dumps({"schema_version": 1, "components": [
+    catalog.write_bytes((json.dumps({"schema_version": 1, "components": ordered}, ensure_ascii=False,
+                                    indent=2, sort_keys=True) + "\n").encode("utf-8"))
+    topology.write_bytes((json.dumps({"schema_version": 1, "components": [
         {key: item[key] for key in ("component_id", "component_class", "sourcing", "app_kind", "code_path", "depends_on_component")
          if key in item}
         for item in ordered
-    ]}, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    ]}, ensure_ascii=False, indent=2, sort_keys=True) + "\n").encode("utf-8"))
     map_path = tree.parent / "maps" / "solution-design.md"
     if map_path.is_file():
         text = map_path.read_text(encoding="utf-8")
@@ -157,7 +157,7 @@ def render_capability_registry(tree: Path, decisions: list[dict],
         retained = text.split(marker, 1)[0].rstrip()
         links = ["", marker, "", "- [[solution-design/landscape|Solution landscape]]"]
         links.extend(f"- [[solution-design/components/{row['component_id']}/component|{row['component_id']}]]" for row in ordered)
-        map_path.write_text("\n".join([retained, *links]).rstrip() + "\n", encoding="utf-8")
+        map_path.write_bytes(("\n".join([retained, *links]).rstrip() + "\n").encode("utf-8"))
     return target
 
 
@@ -360,7 +360,7 @@ def rewrite_frontmatter(path: Path, updates: dict, removals: set[str] = set()) -
         if key not in written:
             output.append(f"{key}: {value}")
     output.extend(lines[end:])
-    path.write_text("\n".join(output).rstrip() + "\n", encoding="utf-8")
+    path.write_bytes(("\n".join(output).rstrip() + "\n").encode("utf-8"))
 
 
 def stamp_engagement(tree: Path, slug: str, status: str,
@@ -398,7 +398,7 @@ def stamp_engagement(tree: Path, slug: str, status: str,
               " stamping", file=sys.stderr)
         return 2, None, None
     lines[target_idx] = line
-    doc.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    doc.write_bytes(("\n".join(lines) + "\n").encode("utf-8"))
     print(f"landscape_check: stamped engagements/{doc.name}: {line}")
     return 0, doc, original
 
@@ -627,7 +627,7 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     if findings:
         if stamped_doc is not None and stamped_original is not None:
-            stamped_doc.write_text(stamped_original, encoding="utf-8")
+            stamped_doc.write_bytes(stamped_original.encode("utf-8"))
             print(f"landscape_check: stamp on engagements/{stamped_doc.name}"
                   " rolled back (the tree has findings)", file=sys.stderr)
         print("landscape_check: FAIL", file=sys.stderr)

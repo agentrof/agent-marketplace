@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import importlib.util
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -11,6 +12,10 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 SHARED = ROOT / "platforms/shared/_team/overlay/scripts/project_instructions.py"
 CODEX_PACKAGE = ROOT / "dist/codex/software-engineering-team"
+# A built package holds the team overlay beside the plugin scripts it imports.
+SCRIPTS = ROOT / "plugins/software-engineering-team/scripts"
+if str(SCRIPTS) not in sys.path:
+    sys.path.insert(0, str(SCRIPTS))
 
 
 def load_module():

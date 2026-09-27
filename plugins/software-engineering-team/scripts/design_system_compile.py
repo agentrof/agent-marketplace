@@ -128,7 +128,7 @@ def rewrite_frontmatter(path: Path, updates: dict, removals: set[str]) -> None:
         if key not in written:
             output.append(f"{key}: {value}")
     output.extend(lines[end:])
-    path.write_text("\n".join(output) + "\n", encoding="utf-8")
+    path.write_bytes(("\n".join(output) + "\n").encode("utf-8"))
 
 
 def normalized_master(path: Path) -> bytes:
@@ -537,7 +537,7 @@ def cmd_init_catalog(args) -> int:
     try:
         text = CATALOG_TEMPLATE.read_text(encoding="utf-8")
         catalog.parent.mkdir(parents=True, exist_ok=True)
-        catalog.write_text(text, encoding="utf-8")
+        catalog.write_bytes(text.encode("utf-8"))
         sync_catalog(root)
     except (OSError, ValueError) as exc:
         return fail(str(exc), 2)
@@ -558,7 +558,7 @@ def sync_catalog(root: Path) -> None:
     text = replace_meta(text, "design-system-master-revision", str(fields.get("revision", "")))
     text = replace_meta(text, "design-system-master-source-hash", master_source_hash(master))
     text = replace_marked(text, CATALOG_TOKEN_START, CATALOG_TOKEN_END, catalog_tokens(master))
-    catalog.write_text(text, encoding="utf-8")
+    catalog.write_bytes(text.encode("utf-8"))
 
 
 def cmd_sync_catalog(args) -> int:

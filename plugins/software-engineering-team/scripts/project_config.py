@@ -5,11 +5,10 @@ from __future__ import annotations
 
 import argparse
 import json
-import os
 import sys
-import tempfile
 from pathlib import Path
 
+import atomic_file
 import marketplace_paths
 
 
@@ -32,18 +31,9 @@ def load(path: Path) -> dict:
 
 
 def atomic(path: Path, value: dict) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    fd, raw = tempfile.mkstemp(prefix="config.", dir=path.parent)
-    temporary = Path(raw)
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8") as handle:
-            json.dump(value, handle, ensure_ascii=False, indent=2)
-            handle.write("\n")
-            handle.flush()
-            os.fsync(handle.fileno())
-        os.replace(temporary, path)
-    finally:
-        temporary.unlink(missing_ok=True)
+    atomic_file.replace_text(
+        path, json.dumps(value, ensure_ascii=False, indent=2) + "\n",
+    )
 
 
 def check(config: dict) -> list[str]:

@@ -799,6 +799,82 @@ class DeliveryGitTests(unittest.TestCase):
                 self.assertEqual(self.refused_finding(lambda: verb(project)), ("DELIVERY_TARGET_UPDATE_UNCERTAIN", message))
             self.assertEqual(self.target_update_state(project), "call_started")
 
+    def test_authorization_whose_fence_push_may_have_landed_keeps_its_receipt(self):
+        """A Fence that holds the authorized candidate, or moved on from it, may carry the intent, so the
+        prepared receipt stays and the handoff goes on; a Fence that never took it lets the receipt go."""
+        for case in ("landed", "moved on", "never taken"):
+            with self.subTest(case=case):
+                temporary, project = self.make_project()
+                self.addCleanup(remove_temporary, temporary)
+                delivery_git.begin_source_handoff(project, "sha256:" + "a" * 64)
+                base = delivery_git.run_git(project, "rev-parse", "HEAD")
+                (project / "handoff.txt").write_text("target candidate\n", encoding="utf-8")
+                candidate = delivery_git.commit_tree(project, base, ["handoff.txt"], "Target candidate", {})
+                carrier = "refs/heads/handoff-carrier"
+                delivery_git.atomic_push(project, "origin", [(carrier, "", candidate)])
+
+                def authorize():
+                    return delivery_git.authorize_target_update(
+                        project, "source_handoff", "sha256:" + "b" * 64, "origin",
+                        "direct_target", carrier, "direct", candidate, base, "upstream")
+
+                def advance_fence():
+                    ref, fence, values = delivery_git._fence_context(project, "origin")
+                    child = delivery_git._fence_child(project, fence, values, "Another coordinator")
+                    delivery_git.run_git(project, "push", "-q", "origin", f"--force-with-lease={ref}:{fence}",
+                                         f"{child}:{ref}")
+
+                if case == "never taken":
+                    code, _message = self.refused_under_concurrent_coordinator(authorize)
+                    self.assertEqual(code, "DELIVERY_FENCE_LEASE_LOST")
+                    self.assertEqual(self.target_update_state(project), "absent")
+                    authorize()
+                else:
+                    with self.lost_push_response(advance_fence if case == "moved on" else None):
+                        code, _message = self.refused_finding(authorize)
+                    self.assertEqual(code, "DELIVERY_TRANSACTION_UNCERTAIN")
+                    self.assertEqual(self.target_update_state(project), "prepared")
+                self.assertEqual(delivery_git.apply_target_update(project, "source_handoff")["receipt"]["state"],
+                                 "verified")
+                self.assertEqual(delivery_git.finish_source_handoff(project)["target"], candidate)
+
+    def test_reauthorization_that_landed_reports_the_refetched_uncertain_result(self):
+        """A reauthorization whose Fence and carrier both took their candidates landed; only a pair that
+        disagrees afterwards is mixed."""
+        for case in ("landed", "mixed"):
+            with self.subTest(case=case):
+                temporary, project = self.make_project()
+                self.addCleanup(remove_temporary, temporary)
+                delivery_git.begin_source_handoff(project, "sha256:" + "a" * 64)
+                head = delivery_git.run_git(project, "rev-parse", "HEAD")
+                carrier = "refs/heads/handoff-carrier"
+                delivery_git.atomic_push(project, "origin", [(carrier, "", head)])
+                delivery_git.authorize_target_update(project, "source_handoff", "sha256:" + "b" * 64, "origin",
+                                                     "direct_target", carrier, "direct", head, head, "upstream")
+                (project / "target-drift.txt").write_text("target moved\n", encoding="utf-8")
+                moved = delivery_git.commit_tree(project, head, ["target-drift.txt"], "Advance target", {})
+                delivery_git.atomic_push(project, "origin", [("refs/heads/main", head, moved)])
+
+                def rewind_carrier():
+                    delivery_git.run_git(project, "push", "-q", "--force", "origin", f"{head}:{carrier}")
+
+                with self.lost_push_response(rewind_carrier if case == "mixed" else None):
+                    finding = self.refused_finding(lambda: delivery_git.reauthorize_target_update(project, "source_handoff"))
+                fence = delivery_git.canonical_refs("DLV-000")["fence"]
+                refs = delivery_git.remote_ref_oids(project, "origin", [fence, carrier])
+                if case == "mixed":
+                    self.assertEqual(finding, ("DELIVERY_TARGET_UPDATE_UNCERTAIN", "Fence/carrier pair is mixed"))
+                    self.assertEqual(refs[carrier], head)
+                    continue
+                self.assertEqual(finding, ("DELIVERY_TRANSACTION_UNCERTAIN",
+                                           "the remote may have taken the atomic push before its response was lost, "
+                                           f"so read the refs again before any retry: {fence} holds the pushed "
+                                           f"{refs[fence]}; {carrier} holds the pushed {refs[carrier]}"))
+                self.assertEqual(self.target_update_state(project), "prepared")
+                self.assertEqual(delivery_git.apply_target_update(project, "source_handoff")["receipt"]["state"],
+                                 "verified")
+                self.assertEqual(delivery_git.finish_source_handoff(project)["target"], refs[carrier])
+
     def test_open_and_merge_pr_use_the_exact_reviewed_integration_head(self):
         temporary, project, _docs, product_tip, intent = self.prepare_pr_intent()
         try:
@@ -954,6 +1030,37 @@ class DeliveryGitTests(unittest.TestCase):
             ])
         finally:
             remove_temporary(temporary)
+
+    def test_verify_merge_reports_a_merge_and_never_merges(self):
+        """verify-merge only reports a merge. On an open PR it refuses with
+        DELIVERY_MERGE_PROOF_INVALID, makes no provider call that changes the PR and leaves the
+        target; on the PR merge-pr merged it reports the same merge evidence."""
+        temporary, project, _docs, _product_tip, _intent = self.prepare_pr_intent()
+        self.addCleanup(remove_temporary, temporary)
+        state: dict = {}
+        provider = self.fake_provider_type(state)
+        with mock.patch("delivery_provider.GitHubProvider", provider):
+            delivery_git.open_pr(project, "DLV-001")
+
+        def verify() -> tuple[int, dict]:
+            output = io.StringIO()
+            with mock.patch("delivery_provider.GitHubProvider", provider), contextlib.redirect_stdout(output):
+                exit_code = delivery_git.main(["verify-merge", "--project-root", str(project), "--delivery", "DLV-001"])
+            return exit_code, json.loads(output.getvalue())
+
+        target = delivery_git.remote_oid(project, "origin", "refs/heads/main")
+        exit_code, refused = verify()
+        self.assertEqual((exit_code, [(finding["code"], finding["message"]) for finding in refused["findings"]]),
+                         (1, [("DELIVERY_MERGE_PROOF_INVALID", "provider PR is not merged")]))
+        self.assertEqual((state.get("merged"), state["draft"]), (None, True))
+        self.assertEqual(delivery_git.remote_oid(project, "origin", "refs/heads/main"), target)
+        with mock.patch("delivery_provider.GitHubProvider", provider):
+            merged = delivery_git.merge_pr(project, "DLV-001")
+        target = delivery_git.remote_oid(project, "origin", "refs/heads/main")
+        exit_code, verified = verify()
+        self.assertEqual((exit_code, verified["ok"], verified["operation"]), (0, True, "verify-merge"))
+        self.assertIn({"kind": "ref", "target": "merge_commit", "value": merged["merge_commit"]}, verified["observations"])
+        self.assertEqual(delivery_git.remote_oid(project, "origin", "refs/heads/main"), target)
 
     def test_review_publication_regenerates_the_delivery_projections(self):
         """The published Review is a new note: the Integration's map and relation
@@ -1449,6 +1556,56 @@ class DeliveryGitTests(unittest.TestCase):
         props, body = delivery_compile.split_note(checkout / review)
         self.assertEqual((props["pull_request_url"], body), (url, cancellation))
         self.assertEqual(delivery_compile.delivery_findings(checkout / "workspace/docs", "DLV-001")[1], [])
+
+    def test_a_cancellation_review_cannot_be_invalidated(self):
+        """A cancellation is final. Its Items are cancelled and a second cancellation is refused, so
+        after an invalidation of its Review nothing could publish a Review again and the Delivery
+        could never reach its PR. The invalidation is refused, changes no ref, and the cancellation
+        still goes on to its PR intent."""
+        temporary, project, _docs = self.reserve_scope()
+        self.addCleanup(remove_temporary, temporary)
+        delivery_git.cancel_delivery(project, "DLV-001", "The owner withdrew the request")
+        refs = delivery_git.canonical_refs("DLV-001")
+        before = [delivery_git.remote_oid(project, "origin", refs[name]) for name in ("fence", "integration")]
+        self.assertEqual(self.refused_finding(lambda: delivery_git.invalidate_delivery_review(
+            project, "DLV-001", "REVIEW_FINDING", "sha256:" + "0" * 64)), (
+            "DELIVERY_CANCELLATION_INVALID",
+            "the cancellation Review of a cancelled Delivery is final and cannot be invalidated"))
+        self.assertEqual([delivery_git.remote_oid(project, "origin", refs[name]) for name in ("fence", "integration")],
+                         before)
+        intent = delivery_git.prepare_pr_creation(project, "DLV-001")["intent"]
+        self.assertEqual(delivery_git.trailer(delivery_git.commit_message(project, intent), "Record"),
+                         "pr-creation-intent-v1")
+
+    def test_a_merged_delivery_refuses_every_change(self):
+        """Once the target holds a merge of the recorded PR head, the Delivery is closed: a verb
+        that would change it refuses with DELIVERY_POST_MERGE_TRANSITION and moves no ref, while
+        open-pr and merge-pr still report the PR and its merge."""
+        temporary, project, _docs, _product_tip, _intent = self.prepare_pr_intent()
+        self.addCleanup(remove_temporary, temporary)
+        provider = self.fake_provider_type({})
+        with mock.patch("delivery_provider.GitHubProvider", provider):
+            url = delivery_git.open_pr(project, "DLV-001")["pull_request_url"]
+            merged = delivery_git.merge_pr(project, "DLV-001")
+        refs = delivery_git.canonical_refs("DLV-001", "AUTH-01")
+        names = ("fence", "integration", "item")
+        before = [delivery_git.remote_oid(project, "origin", refs[name]) for name in names]
+        for verb, change in (
+            ("invalidate-delivery-review", lambda: delivery_git.invalidate_delivery_review(
+                project, "DLV-001", "REVIEW_FINDING", "sha256:" + "0" * 64)),
+            ("cancel-delivery", lambda: delivery_git.cancel_delivery(project, "DLV-001", "Withdrawn after the merge")),
+            ("reopen-item", lambda: delivery_git.reopen_item(project, "DLV-001", "AUTH-01")),
+            ("begin-plan-revision", lambda: delivery_git.begin_plan_revision(project, "DLV-001")),
+            ("refresh-target", lambda: delivery_git.refresh_target(project, "DLV-001")),
+        ):
+            with self.subTest(verb=verb):
+                self.assertEqual(self.refused_finding(change), (
+                    "DELIVERY_POST_MERGE_TRANSITION",
+                    "the target has merged the PR of DLV-001, so the Delivery is closed"))
+                self.assertEqual([delivery_git.remote_oid(project, "origin", refs[name]) for name in names], before)
+        with mock.patch("delivery_provider.GitHubProvider", provider):
+            self.assertEqual(delivery_git.open_pr(project, "DLV-001")["pull_request_url"], url)
+            self.assertEqual(delivery_git.merge_pr(project, "DLV-001")["merge_commit"], merged["merge_commit"])
 
     def test_a_published_cancellation_refuses_a_second_cancellation(self):
         """cancel-delivery judges a Delivery by its published status: the local delivery.md keeps
@@ -2978,6 +3135,57 @@ class DeliveryGitTests(unittest.TestCase):
                     self.assertFalse(worktree.exists())
                 self.assertEqual(verb()["receipt"]["state"], "verified")
 
+    @contextlib.contextmanager
+    def lost_push_response(self, after_landing=None):
+        """Let the next atomic push land on the remote while its response is lost on the way back.
+
+        *after_landing* runs once the push landed, before the lost response is reported.
+        """
+        run = subprocess.run
+        lost = []
+
+        def landed_without_response(command, *args, **kwargs):
+            result = run(command, *args, **kwargs)
+            if (not lost and isinstance(command, list) and command[:3] == ["git", "push", "--atomic"]
+                    and result.returncode == 0):
+                lost.append(command)
+                if after_landing is not None:
+                    after_landing()
+                return subprocess.CompletedProcess(command, 128, "", "fatal: the remote end hung up unexpectedly")
+            return result
+
+        with mock.patch.object(subprocess, "run", side_effect=landed_without_response):
+            yield lost
+
+    def test_activation_that_landed_despite_a_lost_response_promotes_its_receipt(self):
+        """The Item and Slot hold the candidate, so the activation took effect: the host keeps a verified
+        receipt, and a takeover can then give it a worktree."""
+        for action in ("start", "reopen", "takeover"):
+            with self.subTest(action=action):
+                project, _docs, _directory, _item, _reserved = self.prepare_execution_with_draft_reserved_contracts(False)
+                delivery_git.publish_execution_plan(project, "DLV-001")
+                delivery_git.claim_items(project, "DLV-001")
+                if action != "start":
+                    active = delivery_git.start_item(project, "DLV-001", "AUTH-01")
+                if action == "reopen":
+                    self.commit_item_product_change(active["worktree"], "def authenticate():\n    return True\n")
+                    self.assertEqual(self.approve_item_evidence(active["worktree"]), 0)
+                    delivery_git.push_item(project, "DLV-001", "AUTH-01")
+                    delivery_git.integrate_item(project, "DLV-001", "AUTH-01")
+                verb = {"start": delivery_git.start_item, "reopen": delivery_git.reopen_item,
+                        "takeover": lambda *args: delivery_git.takeover_item(*args, confirm=True)}[action]
+                with self.lost_push_response() as lost:
+                    with self.assertRaises(RuntimeError):
+                        verb(project, "DLV-001", "AUTH-01")
+                self.assertEqual(len(lost), 1)
+                receipt = delivery_git.read_writer_receipt(project, "DLV-001", "AUTH-01")
+                self.assertEqual(receipt["state"], "verified")
+                item_ref = delivery_git.canonical_refs("DLV-001", "AUTH-01")["item"]
+                self.assertEqual(delivery_git.remote_ref_oids(project, "origin", [item_ref, receipt["slot_ref"]]),
+                                 {item_ref: receipt["candidate_oid"], receipt["slot_ref"]: receipt["candidate_oid"]})
+                taken = delivery_git.takeover_item(project, "DLV-001", "AUTH-01", confirm=True)
+                self.assertEqual(taken["receipt"]["state"], "verified")
+
     def test_merge_candidate_preserves_disjoint_additions_and_rejects_conflicts(self):
         temporary, project = self.make_project()
         self.addCleanup(remove_temporary, temporary)
@@ -3687,6 +3895,36 @@ class DeliveryGitTests(unittest.TestCase):
                 self.assertEqual(found, code)
                 self.assertIn(moved, message)
                 self.assertEqual(delivery_git.run_git(root, "ls-remote", "origin"), before)
+
+    def test_atomic_push_that_may_have_landed_is_uncertain(self):
+        """A leased ref that holds the pushed candidate, or moved on from a history that holds it, shows
+        the push may have landed before its response was lost, never a lease that changed no ref."""
+        root, remote, (first, second, third) = self.lease_remote()
+        fence = delivery_git.canonical_refs("DLV-001")["fence"]
+        delivery_git.atomic_push(root, "origin", [(fence, "", first)])
+        uncertain = ("the remote may have taken the atomic push before its response was lost, "
+                     "so read the refs again before any retry: ")
+        with self.lost_push_response():
+            finding = self.refused_finding(lambda: delivery_git.atomic_push(root, "origin", [(fence, first, second)]))
+        self.assertEqual(finding, ("DELIVERY_TRANSACTION_UNCERTAIN", uncertain + f"{fence} holds the pushed {second}"))
+        # Another host moves the Fence on from the landed candidate, to a commit this checkout lacks.
+        other = root.parent / "other"
+        subprocess.run(["git", "clone", "-q", "-c", "gc.auto=0", "-c", "maintenance.auto=false",
+                        str(remote), str(other)], check=True)
+        identity = ["-c", "user.email=test@example.com", "-c", "user.name=Test"]
+        moved = []
+
+        def advance_from_another_host():
+            delivery_git.run_git(other, "fetch", "-q", "origin", fence)
+            moved.append(delivery_git.run_git(other, *identity, "commit-tree", third + "^{tree}", "-p", third,
+                                              "-m", "Another coordinator"))
+            delivery_git.run_git(other, "push", "-q", "origin", f"--force-with-lease={fence}:{third}",
+                                 f"{moved[0]}:{fence}")
+
+        with self.lost_push_response(after_landing=advance_from_another_host):
+            finding = self.refused_finding(lambda: delivery_git.atomic_push(root, "origin", [(fence, second, third)]))
+        self.assertEqual(finding, ("DELIVERY_TRANSACTION_UNCERTAIN",
+                                   uncertain + f"{fence} is {moved[0]}, whose history holds the pushed {third}"))
 
     def test_remote_without_atomic_push_support_is_named_and_other_refusals_keep_their_words(self):
         root, remote, (first, second, _third) = self.lease_remote()

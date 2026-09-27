@@ -298,7 +298,10 @@ verified remote Item. A missing receipt denies local writer readiness. Explicit
 takeover elects a new epoch on the existing Item and Slot refs; it never
 allocates a second Slot. Reopen and takeover drop their pending receipt on the
 same proof as activation, and a takeover the remote rejects that way gives back
-the receipt and the worktree it replaced.
+the receipt and the worktree it replaced. When the push of a start, reopen or
+takeover reports an error while the refetched Item and Slot refs both hold its
+candidate, the transaction landed and only its response was lost: the verb
+still promotes the receipt, and a later takeover gives the host its worktree.
 
 Product and test changes stay on the Item branch. Before approving evidence,
 the active Item worktree may contain only edits to its initialized Code Review

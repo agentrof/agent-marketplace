@@ -3437,6 +3437,11 @@ def activation_took_no_effect(root: Path, remote: str, item_ref: str, leased_tip
     return remote_ref_oids(root, remote, [item_ref])[item_ref] in ("", leased_tip)
 
 
+def activation_landed(root: Path, remote: str, item_ref: str, slot_ref: str, candidate: str) -> bool:
+    """Whether a rejected activation's push landed anyway: its Item and Slot refs hold its candidate."""
+    return remote_ref_oids(root, remote, [item_ref, slot_ref]) == {item_ref: candidate, slot_ref: candidate}
+
+
 def start_item(project_root: Path, delivery_id: str, story_id: str,
                remote: str = "origin", allowed_statuses: set[str] | None = None) -> dict:
     root = main_worktree(project_root.resolve())
@@ -3539,8 +3544,7 @@ def start_item(project_root: Path, delivery_id: str, story_id: str,
     except RuntimeError:
         if activation_took_no_effect(root, remote, refs["item"], item_oid):
             discard_pending_writer_receipt(root, delivery_id, story_id, item_candidate)
-        elif remote_ref_oids(root, remote, [refs["item"], slot_ref]) == {refs["item"]: item_candidate,
-                                                                        slot_ref: item_candidate}:
+        elif activation_landed(root, remote, refs["item"], slot_ref, item_candidate):
             require_current_activation_target(root, remote, delivery_id, story_id, target_before,
                                               slot, item_candidate, relative_item, item_props, item_body)
             promote_writer_receipt(root, delivery_id, story_id, item_candidate)
@@ -3692,6 +3696,10 @@ def reopen_item(project_root: Path, delivery_id: str, story_id: str,
     except RuntimeError:
         if activation_took_no_effect(root, remote, refs["item"], item_oid):
             discard_pending_writer_receipt(root, delivery_id, story_id, item_candidate)
+        elif activation_landed(root, remote, refs["item"], slot_ref, item_candidate):
+            require_current_activation_target(root, remote, delivery_id, story_id, target_before,
+                                              slot, item_candidate, relative_item, props, body)
+            promote_writer_receipt(root, delivery_id, story_id, item_candidate)
         raise
     require_current_activation_target(root, remote, delivery_id, story_id, target_before,
                                       slot, item_candidate, relative_item, props, body)
@@ -3847,6 +3855,10 @@ def takeover_item(project_root: Path, delivery_id: str, story_id: str,
             discard_pending_writer_receipt(root, delivery_id, story_id, item_candidate, replaced)
             if removed_worktree:
                 materialize_item_worktree(root, delivery_id, story_id, item_oid)
+        elif activation_landed(root, remote, refs["item"], slot_ref, item_candidate):
+            require_current_activation_target(root, remote, delivery_id, story_id, target_before,
+                                              slot, item_candidate, relative_item, item_props, item_body)
+            promote_writer_receipt(root, delivery_id, story_id, item_candidate)
         raise
     if remote_oid(root, remote, refs["item"]) != item_candidate or remote_oid(root, remote, slot_ref) != item_candidate:
         raise RuntimeError("takeover refs did not converge to the receipt candidate")

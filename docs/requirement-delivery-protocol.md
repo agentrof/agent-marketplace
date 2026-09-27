@@ -372,7 +372,9 @@ Closure requires provider-confirmed merge evidence for the exact reviewed
 head, passing provider checks with at least one success, and target ancestry.
 A skipped or neutral check passes but does not count as that success. The
 merge method is a merge commit; squash and rebase results fail closed. Release
-Management is not part of Delivery closure.
+Management is not part of Delivery closure. `verify-merge` checks the same
+evidence without asking the provider to change the PR: it reports a PR that
+is already merged and refuses any other with `DELIVERY_MERGE_PROOF_INVALID`.
 
 The tracked status stays `awaiting_merge` after the merge, because the target
 branch receives the PR head's bytes. The Delivery map shows that tracked

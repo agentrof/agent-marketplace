@@ -1,0 +1,6 @@
+{
+  "summary": "push-item now refuses an Architecture-stamped Item record committed with CRLF line endings as a change beyond its stamp, and a record without a closing frontmatter delimiter line as invalid frontmatter, instead of stopping the check with a ValueError that reached the result envelope as `not enough values to unpack`; the check still keeps every other Item byte.",
+  "components": {
+    "software-engineering-team": "patch"
+  }
+}

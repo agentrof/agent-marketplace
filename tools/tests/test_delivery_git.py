@@ -2978,6 +2978,52 @@ class DeliveryGitTests(unittest.TestCase):
                     self.assertFalse(worktree.exists())
                 self.assertEqual(verb()["receipt"]["state"], "verified")
 
+    @contextlib.contextmanager
+    def lost_push_response(self):
+        """Let the next atomic push land on the remote while its response is lost on the way back."""
+        run = subprocess.run
+        lost = []
+
+        def landed_without_response(command, *args, **kwargs):
+            result = run(command, *args, **kwargs)
+            if (not lost and isinstance(command, list) and command[:3] == ["git", "push", "--atomic"]
+                    and result.returncode == 0):
+                lost.append(command)
+                return subprocess.CompletedProcess(command, 128, "", "fatal: the remote end hung up unexpectedly")
+            return result
+
+        with mock.patch.object(subprocess, "run", side_effect=landed_without_response):
+            yield lost
+
+    def test_activation_that_landed_despite_a_lost_response_promotes_its_receipt(self):
+        """The Item and Slot hold the candidate, so the activation took effect: the host keeps a verified
+        receipt, and a takeover can then give it a worktree."""
+        for action in ("start", "reopen", "takeover"):
+            with self.subTest(action=action):
+                project, _docs, _directory, _item, _reserved = self.prepare_execution_with_draft_reserved_contracts(False)
+                delivery_git.publish_execution_plan(project, "DLV-001")
+                delivery_git.claim_items(project, "DLV-001")
+                if action != "start":
+                    active = delivery_git.start_item(project, "DLV-001", "AUTH-01")
+                if action == "reopen":
+                    self.commit_item_product_change(active["worktree"], "def authenticate():\n    return True\n")
+                    self.assertEqual(self.approve_item_evidence(active["worktree"]), 0)
+                    delivery_git.push_item(project, "DLV-001", "AUTH-01")
+                    delivery_git.integrate_item(project, "DLV-001", "AUTH-01")
+                verb = {"start": delivery_git.start_item, "reopen": delivery_git.reopen_item,
+                        "takeover": lambda *args: delivery_git.takeover_item(*args, confirm=True)}[action]
+                with self.lost_push_response() as lost:
+                    with self.assertRaises(RuntimeError):
+                        verb(project, "DLV-001", "AUTH-01")
+                self.assertEqual(len(lost), 1)
+                receipt = delivery_git.read_writer_receipt(project, "DLV-001", "AUTH-01")
+                self.assertEqual(receipt["state"], "verified")
+                item_ref = delivery_git.canonical_refs("DLV-001", "AUTH-01")["item"]
+                self.assertEqual(delivery_git.remote_ref_oids(project, "origin", [item_ref, receipt["slot_ref"]]),
+                                 {item_ref: receipt["candidate_oid"], receipt["slot_ref"]: receipt["candidate_oid"]})
+                taken = delivery_git.takeover_item(project, "DLV-001", "AUTH-01", confirm=True)
+                self.assertEqual(taken["receipt"]["state"], "verified")
+
     def test_merge_candidate_preserves_disjoint_additions_and_rejects_conflicts(self):
         temporary, project = self.make_project()
         self.addCleanup(remove_temporary, temporary)

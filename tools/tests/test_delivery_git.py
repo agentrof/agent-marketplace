@@ -4030,6 +4030,56 @@ class DeliveryGitTests(unittest.TestCase):
             self.assertFalse(delivery_git.worktree_holds_blob(root, "notes/item.md", oid))
             self.assertNotEqual(stored(), oid)
 
+    def test_delivery_path_readers_keep_a_name_that_holds_a_carriage_return(self):
+        """A text-mode pipe turns a carriage return into a newline, so the pending-path and
+        index-flag readers reported an untracked macOS "Icon\\r" as "Icon\\n". They read Git's
+        NUL-separated bytes instead (#279)."""
+        if os.name == "nt":
+            self.skipTest("POSIX file names: native Windows refuses a carriage return in a file name")
+        with temporary_directory() as temporary:
+            root = Path(temporary)
+            init_repository(root, initial_branch="main")
+            for key, value in (("user.email", "test@example.com"), ("user.name", "Test")):
+                delivery_git.run_git(root, "config", key, value)
+            tracked = "notes/Icon\r"
+            (root / "notes").mkdir()
+            (root / tracked).write_bytes(b"note\n")
+            delivery_git.run_git(root, "add", "--", tracked)
+            delivery_git.run_git(root, "commit", "-qm", "Record the note")
+            (root / "Icon\r").write_bytes(b"")
+            self.assertEqual(delivery_git.worktree_pending_paths(root, root), {"Icon\r"})
+            delivery_git.run_git(root, "update-index", "--skip-worktree", "--", tracked)
+            with self.assertRaises(RuntimeError) as hidden:
+                delivery_git.require_visible_item_index(root)
+            self.assertEqual(str(hidden.exception), "DELIVERY_WORKTREE_UNSAFE: Item index flags hide tracked paths "
+                                                    "from verification: " + json.dumps([tracked]))
+
+    def test_cancellation_revert_restores_a_path_that_starts_with_a_colon(self):
+        """revert_merge_candidate looks each changed path up with git ls-tree, where a leading ":"
+        starts pathspec magic: ":x.py" named "x.py", the lookup found nothing, and the revert
+        deleted the file instead of restoring it. Its lookups take every path literally (#279)."""
+        if os.name == "nt":
+            self.skipTest("POSIX file names: native Windows refuses a colon in a file name")
+        with temporary_directory() as temporary:
+            root = Path(temporary)
+            init_repository(root, initial_branch="main")
+            for key, value in (("user.email", "test@example.com"), ("user.name", "Test")):
+                delivery_git.run_git(root, "config", key, value)
+            commits = []
+            for text in ("X = 'before'\n", "X = 'item'\n"):
+                (root / ":x.py").write_text(text, encoding="utf-8")
+                delivery_git.run_git(root, "--literal-pathspecs", "add", "--", ":x.py")
+                delivery_git.run_git(root, "commit", "-qm", "Change :x.py")
+                commits.append(delivery_git.run_git(root, "rev-parse", "HEAD"))
+            before, item = commits
+            # The coordinator reverts in the main worktree, which need not hold the Item's files.
+            (root / ":x.py").unlink()
+            merge = delivery_git.run_git(root, "commit-tree", item + "^{tree}", "-p", before, "-p", item,
+                                         "-m", "Integrate the Item")
+            reverted = delivery_git.revert_merge_candidate(root, merge, merge, "Revert the Item", {"Record": "fixture-v1"})
+            self.assertEqual(delivery_git.git_paths(root, "ls-tree", "-z", "--name-only", reverted), [":x.py"])
+            self.assertEqual(delivery_git.run_git(root, "cat-file", "blob", reverted + "::x.py"), "X = 'before'")
+
     @windows_text_pipes()
     def test_push_item_publishes_an_item_whose_checkout_converted_line_endings(self):
         """Git for Windows converts line endings on checkout by default (core.autocrlf=true), so
@@ -4198,8 +4248,12 @@ class DeliveryGitTests(unittest.TestCase):
             ("added", lambda: write("src/session.py"), "src/session.py"),
             ("beside the claim", lambda: write("src/auth.py.orig"), "src/auth.py.orig"),
             ("deleted", lambda: (worktree / "README.md").unlink(), "README.md"),
+            # A text-mode pipe read this name back with a newline for its carriage return (#279).
+            ("carriage return", lambda: write("src/Icon\r.txt"), "src/Icon\r.txt"),
         ):
             with self.subTest(label=label):
+                if label == "carriage return" and os.name == "nt":
+                    self.skipTest("POSIX file names: native Windows refuses a carriage return in a file name")
                 delivery_git.run_git(worktree, "reset", "--hard", clean)
                 delivery_git.run_git(worktree, "clean", "-fd")
                 change()

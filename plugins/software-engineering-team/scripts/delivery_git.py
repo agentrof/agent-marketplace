@@ -593,12 +593,8 @@ def is_ancestor(root: Path, ancestor: str, descendant: str) -> bool:
 
 def require_visible_item_index(worktree: Path) -> None:
     """Refuse index flags that can hide different tested bytes from Git status."""
-    result = subprocess.run(["git", "-C", str(worktree), "ls-files", "-v", "-z"],
-                            encoding="utf-8", capture_output=True, check=False)
-    if result.returncode:
-        raise RuntimeError(result.stderr.strip() or "cannot inspect Item index flags")
-    hidden = [entry[2:] for entry in result.stdout.split("\0")
-              if entry and (entry[0] == "S" or entry[0].islower())]
+    entries = git_paths(worktree, "ls-files", "-v", "-z", failure="cannot inspect Item index flags")
+    hidden = [entry[2:] for entry in entries if entry[0] == "S" or entry[0].islower()]
     if hidden:
         raise RuntimeError("DELIVERY_WORKTREE_UNSAFE: Item index flags hide tracked paths from verification: "
                            + json.dumps(sorted(hidden), ensure_ascii=False))
@@ -610,11 +606,7 @@ def worktree_pending_paths(root: Path, path: Path) -> set[str]:
     for args in (("diff", "--name-only", "-z", "HEAD"),
                  ("diff", "--cached", "--name-only", "-z", "HEAD"),
                  ("ls-files", "-z", "--others", "--exclude-standard")):
-        result = subprocess.run(["git", "-C", str(path), *args], cwd=root,
-                                capture_output=True, encoding="utf-8", check=False)
-        if result.returncode:
-            raise RuntimeError(result.stderr.strip() or "cannot inspect pending Item paths")
-        pending.update(value for value in result.stdout.split("\0") if value)
+        pending.update(git_paths(root, "-C", str(path), *args, failure="cannot inspect pending Item paths"))
     return pending
 
 
@@ -1728,8 +1720,9 @@ def revert_merge_candidate(root: Path, base: str, merge_oid: str,
             raise RuntimeError(read.stderr.strip() or "cannot prepare cancellation revert index")
 
         def entry(tree: str, path: str) -> tuple[str, str] | None:
+            # A path is a literal name here: under pathspec magic ":x.py" would name "x.py".
             result = subprocess.run(
-                ["git", "ls-tree", tree, "--", path], cwd=root,
+                ["git", "--literal-pathspecs", "ls-tree", tree, "--", path], cwd=root,
                 encoding="utf-8", capture_output=True, check=False,
             )
             if result.returncode:
@@ -3236,10 +3229,10 @@ def require_item_architecture_binding(worktree: Path, item_props: dict,
         # Read committed blobs: a local edit must never authorize the reviewed tip.
         tree = tree or run_git(worktree, "--no-replace-objects", "rev-parse", "HEAD")
         prefix = "workspace/docs/system-architecture/"
-        listing = run_git(worktree, "--no-replace-objects", "ls-tree", "-rz", tree, "--", prefix)
+        listing = git_paths(worktree, "--no-replace-objects", "ls-tree", "-rz", tree, "--", prefix)
         with tempfile.TemporaryDirectory(prefix="agentrof-item-architecture-") as temporary:
             architecture = Path(temporary)
-            for entry in filter(None, listing.split("\0")):
+            for entry in listing:
                 metadata, path = entry.split("\t", 1)
                 mode, kind, oid = metadata.split()
                 if kind != "blob" or mode not in {"100644", "100755"}:
@@ -3340,8 +3333,7 @@ def require_item_publication_controls(root: Path, before: str, after: str,
     """
     from delivery_compile import content_hash
     prefix = relative_delivery.rstrip("/") + "/"
-    changed = [path for path in run_git(root, "--no-replace-objects", "diff", "--name-only", "-z",
-                                        before, after, "--", prefix).split("\0") if path]
+    changed = git_paths(root, "--no-replace-objects", "diff", "--name-only", "-z", before, after, "--", prefix)
     notes = {}
     converged = None
     if relative_item in changed:
@@ -3406,12 +3398,9 @@ def require_item_path_claims(root: Path, before: str, after: str, relative_item:
               if isinstance(claim, str) and _is_normalized_claim(claim)]
 
     def product_paths(start: str) -> set[str]:
-        listing = subprocess.run(["git", "--no-replace-objects", "diff", "--no-renames", "--name-only", "-z",
-                                  start, after], cwd=root, capture_output=True, encoding="utf-8",
-                                 errors="replace", check=False)
-        if listing.returncode:
-            raise RuntimeError(listing.stderr.strip() or "cannot list the Item's committed paths")
-        return {path for path in listing.stdout.split("\0") if path and not path.startswith("workspace/docs/")}
+        listing = git_paths(root, "--no-replace-objects", "diff", "--no-renames", "--name-only", "-z", start, after,
+                            failure="cannot list the Item's committed paths")
+        return {path for path in listing if not path.startswith("workspace/docs/")}
 
     changed = product_paths(before)
     base = props.get("integration_base_commit")
@@ -3539,8 +3528,7 @@ def unmet_waits_for(root: Path, remote: str, delivery_id: str, integration_oid: 
             # Another Delivery's Item advances on its own hosts, and integration moves no Fence.
             run_git(root, "fetch", "--no-tags", remote, item_refs[story])
         owner = trailer(commit_message(root, tip), "Delivery") or ""
-        packages = [path for path in run_git(root, "ls-tree", "-z", "--name-only", tip, "--",
-                                             deliveries + "/").split("\0")
+        packages = [path for path in git_paths(root, "ls-tree", "-z", "--name-only", tip, "--", deliveries + "/")
                     if owner and path.rsplit("/", 1)[-1].startswith(owner.lower() + "-")]
         if len(packages) != 1:
             raise RuntimeError(f"DELIVERY_COORDINATION_CORRUPT: the Item tip of {story} does not hold "

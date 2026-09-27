@@ -6,10 +6,8 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
-import os
 import re
 import sys
-import tempfile
 from pathlib import Path
 from typing import Callable
 
@@ -17,6 +15,7 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 if str(SCRIPT_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPT_DIR))
 
+import atomic_file
 import project_instructions
 import marketplace_paths
 
@@ -90,19 +89,7 @@ def agent_toml(fields: dict[str, str], body: str, team: str) -> str:
     return "\n".join(lines) + "\n"
 
 
-def atomic_write(path: Path, content: str) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    fd, temporary = tempfile.mkstemp(dir=str(path.parent), prefix=f".{path.name}.")
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8") as handle:
-            handle.write(content)
-        os.replace(temporary, path)
-    except Exception:
-        try:
-            os.unlink(temporary)
-        except OSError:
-            pass
-        raise
+atomic_write = atomic_file.replace_text
 
 
 def render_agents(plugin_root: Path, team: str) -> dict[str, str]:

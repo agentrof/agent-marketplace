@@ -13,14 +13,13 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
-import os
 import re
 import subprocess
 import sys
-import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 
+import atomic_file
 from ba_compile import (
     frontmatter_item, frontmatter_scalar, parse_frontmatter, without_generated_relations,
 )
@@ -91,18 +90,7 @@ def valid_experience_receipt_refs(
     return expected is not None and supplied == sorted(expected)
 
 
-def atomic_text(path: Path, text: str) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    fd, raw = tempfile.mkstemp(prefix=f".{path.name}.", dir=path.parent)
-    temporary = Path(raw)
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8") as handle:
-            handle.write(text)
-            handle.flush()
-            os.fsync(handle.fileno())
-        os.replace(temporary, path)
-    finally:
-        temporary.unlink(missing_ok=True)
+atomic_text = atomic_file.replace_text
 
 
 def docs_root(value: str | Path) -> Path:

@@ -83,4 +83,6 @@ absorbed it, so a target refreshed after integration never strands the Item.
 Failed checks, target drift, review changes and process loss become explicit
 resumable states. A rejected remote transaction changes no ref and names the
 lease it lost, or a remote without atomic push support, from the refetched
-refs. Release Management is intentionally not part of this flow.
+refs. One whose refetched refs hold its candidate, or moved on from it, may
+have landed and reports `DELIVERY_TRANSACTION_UNCERTAIN` instead. Release
+Management is intentionally not part of this flow.

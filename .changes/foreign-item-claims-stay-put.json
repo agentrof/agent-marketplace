@@ -1,6 +1,0 @@
-{
-  "summary": "A Delivery now reads an Item ref as its own only when the tip's Agentrof-Delivery trailer names it: target refresh no longer re-issues another Delivery's claim of the same Story, refresh and cancellation no longer fail with a raw Git error on it, scope revision stays open, and claim-items names the Delivery that holds the Story.",
-  "components": {
-    "software-engineering-team": "patch"
-  }
-}

@@ -1,6 +1,0 @@
-{
-  "summary": "Once merge-pr or verify-merge proves a Delivery's merge, the coordinator deletes its Integration ref and the Item refs of its integrated Stories, so a project keeps only the Fence instead of one branch per delivered Story; claim-items and waits_for read a merged Delivery's package from the target, and verify-merge removes the refs earlier releases left.",
-  "components": {
-    "software-engineering-team": "patch"
-  }
-}

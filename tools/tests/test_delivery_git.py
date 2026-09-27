@@ -1712,7 +1712,10 @@ class DeliveryGitTests(unittest.TestCase):
         )
         self.assertNotEqual(digest, executed_hash)
 
+    @windows_text_pipes()
     def test_active_delivery_cancellation_releases_slot_and_publishes_terminal_item(self):
+        # The published map is read back through the runner's text pipes, whose ANSI
+        # code page would turn the row's em dash into mojibake (#247).
         with temporary_directory() as temporary:
             project = Path(temporary)
             init_repository(project, initial_branch="main")
@@ -4032,6 +4035,53 @@ class DeliveryGitTests(unittest.TestCase):
                 else:
                     with self.assertRaisesRegex(RuntimeError, refusal):
                         check()
+
+    def test_delivery_reads_git_output_as_utf8_through_windows_text_pipes(self):
+        """Git prints paths and blobs in UTF-8. A text-mode pipe without an encoding reads
+        them in the ANSI code page on native Windows, which turned the em dash of a Delivery
+        map row into mojibake there, so every Delivery reader names UTF-8 (#247)."""
+        note = "---\ntitle: Oturum açma, güvenlik\n---\n\nŞifre ve ğ, ı, ö harfleri.\n"
+        with temporary_directory() as temporary:
+            root = Path(temporary)
+            init_repository(root, initial_branch="main")
+            for key, value in (("user.email", "test@example.com"), ("user.name", "Test")):
+                delivery_git.run_git(root, "config", key, value)
+            (root / "notes").mkdir()
+            (root / "notes" / "oturum-açma.md").write_bytes(note.encode("utf-8"))
+            delivery_git.run_git(root, "add", "notes")
+            delivery_git.run_git(root, "commit", "-qm", "Record the note")
+            (root / "notes" / "şifre.md").write_bytes(note.encode("utf-8"))
+            with windows_text_pipes():
+                shown = delivery_git.run_git(root, "show", "HEAD:notes/oturum-açma.md")
+                provider_shown = delivery_provider.run_git(root, "show", "HEAD:notes/oturum-açma.md")
+                props, body = delivery_git.split_remote_note(root, "HEAD", "notes/oturum-açma.md",
+                                                             delivery_compile.split_note)
+                pending = delivery_git.worktree_pending_paths(root, root)
+            self.assertEqual((shown, provider_shown), (note.strip(), note.strip()))
+            self.assertEqual((props["title"], body), ("Oturum açma, güvenlik", "Şifre ve ğ, ı, ö harfleri."))
+            self.assertEqual(pending, {"notes/şifre.md"})
+
+    def test_delivery_scripts_name_utf8_for_every_process_pipe(self):
+        """Every process pipe in the Delivery scripts that carries text names UTF-8, and none takes
+        text on stdin. Without an encoding a pipe reads and writes the locale's code page, the
+        ANSI code page on native Windows, and a text-mode stdin there writes CRLF for every
+        newline, so input goes over as UTF-8 bytes. This covers the pipes no fixture reaches,
+        such as the gh calls (#247)."""
+        import ast
+        scripts = ROOT / "plugins" / "software-engineering-team" / "scripts"
+        unsafe = []
+        for name in ("delivery_compile.py", "delivery_git.py", "delivery_governance.py", "delivery_provider.py"):
+            for call in ast.walk(ast.parse((scripts / name).read_text(encoding="utf-8"))):
+                if not (isinstance(call, ast.Call) and isinstance(call.func, ast.Attribute)
+                        and isinstance(call.func.value, ast.Name) and call.func.value.id == "subprocess"):
+                    continue
+                keywords = {keyword.arg: keyword.value for keyword in call.keywords}
+                if not keywords.keys() & {"text", "universal_newlines", "encoding", "errors"}:
+                    continue
+                encoding = keywords.get("encoding")
+                if "input" in keywords or not (isinstance(encoding, ast.Constant) and encoding.value == "utf-8"):
+                    unsafe.append(f"{name}:{call.lineno}")
+        self.assertEqual(unsafe, [])
 
     def test_push_item_refuses_product_paths_outside_the_item_path_claims(self):
         """A claim covers its path and every path below it. The vault keeps its own rules,

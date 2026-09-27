@@ -85,13 +85,25 @@ placeholder is allowed to reach a consuming repository.
    runtime, host projections, local Obsidian UI state and the community-plugin
    projection. The contract JSON files and CSS snippet remain tracked,
    reviewable project changes.
-8. Run the portable vault gate and relevant Requirement compilers. Delivery
+8. Ensure the managed root `.gitattributes` block holds
+   `workspace/docs/** -text`. Governed files then check out byte-identical to
+   the repository on every OS, which the byte-exact backlog, Experience and
+   stage-package checks need under Git for Windows' default
+   `core.autocrlf=true`. Project lines outside the block stay as written;
+   check fails when a later line, a nested `.gitattributes` or
+   `.git/info/attributes` turns conversion back on for a governed file. A
+   checkout that Git converted before the rule keeps its CRLF copies: commit
+   the block, commit or stash local `workspace/docs/` changes, then run
+   `git rm -r --cached --quiet -- workspace/docs` and
+   `git checkout HEAD -- workspace/docs` once. Never use
+   `git add --renormalize` here; it would stage those CRLF copies.
+9. Run the portable vault gate and relevant Requirement compilers. Delivery
    execution owns its own test and provider gates; setup never emits a
    template with unresolved command placeholders.
    Read [ci-bootstrap](references/ci-bootstrap.md) before a Delivery's
    execution approval, whose pull request check precondition it defines.
-9. Review and commit the exact tracked refresh diff before a workflow handoff.
-   Report `requirement` as the next entry. `/requirement` evaluates the
-   request-specific impact matrix and routes only the required stages and
-   backlog handoff; setup never infers routing from repository history.
-   Start a fresh host session after setup.
+10. Review and commit the exact tracked refresh diff before a workflow handoff.
+    Report `requirement` as the next entry. `/requirement` evaluates the
+    request-specific impact matrix and routes only the required stages and
+    backlog handoff; setup never infers routing from repository history.
+    Start a fresh host session after setup.

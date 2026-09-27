@@ -7,9 +7,10 @@ configuration remain the source of truth.
 1. Build and validate all registered host distributions from the same source snapshot.
 2. Run `setup_project.py inspect --project-root <root> --json`. This is a
    read-only, pre-mutation plan over the workspace contract, policy-owned
-   Obsidian keys, package-local Obsidian plugin projection, managed ignore block
-   and portable gate. JSON changes expose exact key-level before/after values;
-   byte-owned assets expose hashes. Resolve every blocker before applying.
+   Obsidian keys, package-local Obsidian plugin projection, managed ignore and
+   checkout-attribute blocks and portable gate. JSON changes expose exact
+   key-level before/after values; byte-owned assets expose hashes. Resolve
+   every blocker before applying.
 3. Run `setup_project.py apply --project-root <root> --json`, then
    `setup_project.py check --project-root <root> --json`. All three commands use
    the same convergence planner; apply rebuilds its authoritative plan after
@@ -42,7 +43,10 @@ configuration remain the source of truth.
 8. Run the portable vault gate and every compiler for a subtree that exists,
    including the approved-integrity check when the backlog is approved.
 9. Review and commit the exact tracked diff, then start a fresh host session so
-   the refreshed skills and hooks load.
+   the refreshed skills and hooks load. When the refresh first adds the managed
+   `.gitattributes` block, a checkout whose governed files Git already converted
+   runs the one-time re-checkout in the
+   [setup skill](../plugins/software-engineering-team/skill-content/setup/SKILL.md).
 
 Experience prototype interiors are author-owned. Inspect accepts arbitrary
 regular files beneath Experience `artifacts/` directories and does not migrate,
@@ -69,7 +73,10 @@ Stage routing inspects Git only at a completed-stage handoff. The relevant
 config, approved subtree, home note and stage map must be tracked, committed and
 clean. For Experience Design that path set includes the exact prototype artifact
 inventory, process packages and compiler-owned application receipt/ledger state
-selected by the approved transaction. Unrelated product
+selected by the approved transaction. Those Experience paths must match their
+committed blobs byte for byte; setup's managed `.gitattributes` rule checks
+`workspace/docs/` out without line-ending conversion, which keeps that true on
+Windows. Unrelated product
 application code and the current draft stage are outside a different stage's
 path set and do not block active authoring. A request without an approved,
 committed backlog returns to Requirement Flow; an approved backlog proceeds to

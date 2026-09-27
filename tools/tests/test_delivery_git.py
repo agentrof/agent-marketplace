@@ -99,6 +99,39 @@ def git_path_arguments():
         yield arguments
 
 
+@contextlib.contextmanager
+def windows_text_pipes(code_page: str = "cp1252"):
+    """Give every text-mode subprocess pipe the behaviour CPython gives it on native Windows.
+
+    There stdin goes through a TextIOWrapper whose newline=None writes os.linesep,
+    "\\r\\n", for every "\\n" whatever the encoding, and a pipe without an explicit
+    encoding encodes and decodes in the ANSI code page, cp1252 on the runner.
+    Output line endings fold as on every host, and bytes-mode calls pass untouched.
+    """
+    run = subprocess.run
+
+    def windows_run(*args, **kwargs):
+        text, universal = kwargs.pop("text", None), kwargs.pop("universal_newlines", None)
+        encoding, errors = kwargs.pop("encoding", None), kwargs.pop("errors", None)
+        if not (text or universal or encoding or errors):
+            return run(*args, **kwargs)
+        encoding, errors = encoding or code_page, errors or "strict"
+        check = kwargs.pop("check", False)
+        if isinstance(kwargs.get("input"), str):
+            kwargs["input"] = kwargs["input"].replace("\n", "\r\n").encode(encoding, errors)
+        result = run(*args, **kwargs)
+        for stream in ("stdout", "stderr"):
+            value = getattr(result, stream)
+            if isinstance(value, bytes):
+                setattr(result, stream, value.decode(encoding, errors).replace("\r\n", "\n").replace("\r", "\n"))
+        if check:
+            result.check_returncode()
+        return result
+
+    with mock.patch.object(subprocess, "run", windows_run):
+        yield
+
+
 class DeliveryGitTests(unittest.TestCase):
     def symlink_or_skip(self, link: Path, target) -> None:
         """Create a symlink, or skip the current test or subtest on a host that cannot."""
@@ -2202,7 +2235,10 @@ class DeliveryGitTests(unittest.TestCase):
         delivery_git.run_git(worktree, "commit", "-qm", "Implement authentication with sealed Architecture")
         return project, worktree, item, active
 
+    @windows_text_pipes()
     def test_architecture_stamp_authored_evidence_push_and_integration(self):
+        # Under the runner's text pipes the activated Item record must keep the LF the
+        # stamp check splits its frontmatter at (#247).
         project, worktree, item, active = self.prepare_stamped_architecture_item()
         product = delivery_git.run_git(worktree, "rev-parse", "HEAD")
         authored = {}
@@ -2661,7 +2697,10 @@ class DeliveryGitTests(unittest.TestCase):
         self.assertEqual(delivery_git.remote_oid(project, "origin", refs["integration"]), published["integration"])
         self.assertEqual(delivery_git.remote_oid(project, "origin", refs["fence"]), fence)
 
+    @windows_text_pipes()
     def test_refresh_preserves_approved_control_content_and_path_set(self):
+        # The runner's text pipes must leave the Integration's projection-only change
+        # a projection-only change, or the merge cannot reconcile it (#247).
         for control in ("delivery.md", "execution-plan.md", "items/auth-01/item.md", "injected_item", "deleted_item"):
             with self.subTest(control=control):
                 project, _docs, directory, item, _reserved = self.prepare_execution_with_draft_reserved_contracts(False)
@@ -3917,10 +3956,12 @@ class DeliveryGitTests(unittest.TestCase):
             self.symlink_or_skip(note, "twin.md")
             self.assertFalse(delivery_git.worktree_holds_blob(root, "notes/item.md", oid))
 
+    @windows_text_pipes()
     def test_push_item_publishes_an_item_whose_checkout_converted_line_endings(self):
         """Git for Windows converts line endings on checkout by default (core.autocrlf=true), so
         the started Item's record ends its lines with CRLF while the commit holds LF. push-item
-        reads the record as Git stores it and publishes the Item (#257)."""
+        reads the record as Git stores it and publishes the Item (#257). The record is committed
+        through the runner's text pipes, which must not give the commit CRLF of its own (#247)."""
         project, _docs, _directory, item, _reserved = self.prepare_execution_with_draft_reserved_contracts(False)
         delivery_git.run_git(project, "config", "core.autocrlf", "true")
         delivery_git.publish_execution_plan(project, "DLV-001")
@@ -3930,6 +3971,36 @@ class DeliveryGitTests(unittest.TestCase):
         product = self.commit_item_product_change(str(worktree), "def authenticate():\n    return True\n")
         self.assertEqual(self.approve_item_evidence(str(worktree)), 0)
         self.assertEqual(delivery_git.push_item(project, "DLV-001", "AUTH-01")["product_tip"], product)
+
+    def test_delivery_blobs_and_commit_messages_keep_their_bytes_through_windows_text_pipes(self):
+        """Delivery hands Git every blob and commit message as exact UTF-8 bytes. Through a
+        text-mode pipe native Windows would store CRLF for each newline and refuse a character
+        its ANSI code page lacks, so its records would differ from every other host's (#247)."""
+        record = "---\ntitle: Oturum açma, şifre\n---\n\n# Item\n"
+        subject = "Record the Item, şifre"
+        trailers = {"Record": "fixture-v1"}
+        with temporary_directory() as temporary:
+            root = Path(temporary)
+            init_repository(root, initial_branch="main")
+            for key, value in (("user.email", "test@example.com"), ("user.name", "Test")):
+                delivery_git.run_git(root, "config", key, value)
+            (root / "README.md").write_bytes(b"fixture\n")
+            delivery_git.run_git(root, "add", "README.md")
+            delivery_git.run_git(root, "commit", "-qm", "Start")
+            base = delivery_git.run_git(root, "rev-parse", "HEAD")
+            with windows_text_pipes():
+                replaced = delivery_git.commit_replacements(root, base, {"notes/item.md": record}, subject, trailers)
+                empty = delivery_git.commit_tree(root, base, [], subject, trailers)
+                merged = delivery_git.merge_candidate(root, replaced, empty, subject, trailers)
+                reverted = delivery_git.revert_merge_candidate(root, merged, merged, subject, trailers)
+
+            def raw(*args: str) -> bytes:
+                return subprocess.run(["git", *args], cwd=root, capture_output=True, check=True).stdout
+
+            self.assertEqual(raw("cat-file", "blob", replaced + ":notes/item.md"), record.encode("utf-8"))
+            for commit in (replaced, empty, merged, reverted):
+                self.assertEqual(raw("cat-file", "commit", commit).split(b"\n\n", 1)[1],
+                                 (subject + "\n\nAgentrof-Record: fixture-v1\n").encode("utf-8"))
 
     def test_push_item_refuses_product_paths_outside_the_item_path_claims(self):
         """A claim covers its path and every path below it. The vault keeps its own rules,

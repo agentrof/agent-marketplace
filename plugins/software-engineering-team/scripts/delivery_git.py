@@ -684,6 +684,21 @@ def run_git(root: Path, *args: str) -> str:
     return result.stdout.strip()
 
 
+def git_with_input(root: Path, args: list[str], data: str,
+                   env: dict | None = None) -> subprocess.CompletedProcess:
+    """Run Git with *data* on its stdin as exact UTF-8 bytes.
+
+    A text-mode pipe writes os.linesep for every newline and encodes in the
+    locale's code page, so on native Windows a blob or commit message handed to
+    Git that way would hold CRLF and ANSI bytes that no other host writes.
+    """
+    result = subprocess.run(["git", *args], cwd=root, env=env, input=data.encode("utf-8"),
+                            capture_output=True, check=False)
+    return subprocess.CompletedProcess(result.args, result.returncode,
+                                       result.stdout.decode("utf-8"),
+                                       result.stderr.decode("utf-8", "replace"))
+
+
 def commit_tree(root: Path, base: str, paths: list[str], subject: str,
                 trailers: dict[str, str], *, delivery_projections: bool = False,
                 operation_bindings: dict[str, dict] | None = None) -> str:
@@ -713,9 +728,7 @@ def commit_tree(root: Path, base: str, paths: list[str], subject: str,
         message = subject + "\n\n" + "\n".join(
             f"Agentrof-{key}: {value}" for key, value in trailers.items()
         ) + "\n"
-        commit = subprocess.run(["git", "commit-tree", projected, "-p", base],
-                                cwd=root, env=env, input=message, text=True,
-                                capture_output=True, check=False)
+        commit = git_with_input(root, ["commit-tree", projected, "-p", base], message, env)
         if commit.returncode:
             raise RuntimeError(commit.stderr.strip() or "cannot create candidate commit")
         return commit.stdout.strip()
@@ -850,8 +863,7 @@ def commit_replacements(root: Path, base: str, replacements: dict[str, str],
         if read.returncode:
             raise RuntimeError(read.stderr.strip() or "cannot materialize candidate index")
         for path, text in replacements.items():
-            blob = subprocess.run(["git", "hash-object", "-w", "--stdin"], cwd=root,
-                                  env=env, input=text, text=True, capture_output=True, check=False)
+            blob = git_with_input(root, ["hash-object", "-w", "--stdin"], text, env)
             if blob.returncode:
                 raise RuntimeError(blob.stderr.strip() or "cannot write candidate blob")
             update = subprocess.run(["git", "update-index", "--add", "--cacheinfo",
@@ -868,9 +880,7 @@ def commit_replacements(root: Path, base: str, replacements: dict[str, str],
         message = subject + "\n\n" + "\n".join(
             f"Agentrof-{key}: {value}" for key, value in trailers.items()
         ) + "\n"
-        commit = subprocess.run(["git", "commit-tree", projected, *parent_args],
-                                cwd=root, env=env, input=message, text=True,
-                                capture_output=True, check=False)
+        commit = git_with_input(root, ["commit-tree", projected, *parent_args], message, env)
         if commit.returncode:
             raise RuntimeError(commit.stderr.strip() or "cannot create candidate commit")
         return commit.stdout.strip()
@@ -1758,11 +1768,7 @@ def revert_merge_candidate(root: Path, base: str, merge_oid: str,
         message = subject + "\n\n" + "\n".join(
             f"Agentrof-{key}: {value}" for key, value in trailers.items()
         ) + "\n"
-        commit = subprocess.run(
-            ["git", "commit-tree", tree.stdout.strip(), "-p", base],
-            cwd=root, env=env, input=message, text=True,
-            capture_output=True, check=False,
-        )
+        commit = git_with_input(root, ["commit-tree", tree.stdout.strip(), "-p", base], message, env)
         if commit.returncode:
             raise RuntimeError(commit.stderr.strip() or "cannot create cancellation revert")
         return commit.stdout.strip()
@@ -4336,8 +4342,8 @@ def merge_candidate(root: Path, first_parent: str, second_parent: str,
         projected = (write_delivery_projection_tree(root, env, tree.stdout.strip(), operation_bindings)
                      if delivery_projections else tree.stdout.strip())
         message = subject + "\n\n" + "\n".join(f"Agentrof-{key}: {value}" for key, value in trailers.items()) + "\n"
-        commit = subprocess.run(["git", "commit-tree", projected, "-p", first_parent, "-p", second_parent],
-                                cwd=root, env=env, input=message, text=True, capture_output=True, check=False)
+        commit = git_with_input(root, ["commit-tree", projected, "-p", first_parent, "-p", second_parent],
+                                message, env)
         if commit.returncode:
             raise RuntimeError(commit.stderr.strip() or "cannot create integration commit")
         return commit.stdout.strip()

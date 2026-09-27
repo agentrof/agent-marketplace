@@ -140,7 +140,10 @@ those bytes.
    basenames are declared in the schema operating-system metadata policy are
    excluded from new snapshots after safety checks; historical receipts remain
    byte-exact and require explicit recovery when stale. It does not parse,
-   execute, lint, sandbox, normalize or constrain their contents.
+   execute, lint, sandbox, normalize or constrain their contents. Setup's
+   managed `.gitattributes` rule checks `workspace/docs/`, this tree included,
+   out without line-ending conversion, so these bytes and recovery's `HEAD`
+   comparison stay exact on Windows.
 7. Enter application review only when the prototype is ready for human review.
    The compiler captures the current artifact-tree and package-set receipt.
 

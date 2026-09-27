@@ -15,6 +15,8 @@ import vault_check
 
 START = "# agent-marketplace:software-engineering-team:gitignore:start"
 END = "# agent-marketplace:software-engineering-team:gitignore:end"
+ATTRIBUTES_START = "# agent-marketplace:software-engineering-team:gitattributes:start"
+ATTRIBUTES_END = "# agent-marketplace:software-engineering-team:gitattributes:end"
 TEAM = "software-engineering-team"
 WORKSPACE = "workspace"
 RUNTIME_PARTS = ("agent-marketplace", ".runtime")
@@ -111,6 +113,61 @@ def managed_block(workspace: str) -> str:
                       f"{workspace}/docs/.obsidian/workspace.json",
                       f"{workspace}/docs/.obsidian/workspace-mobile.json",
                       f"{workspace}/docs/.trash/", END))
+
+
+def managed_attributes_block(workspace: str) -> str:
+    """Keep every checkout of the governed vault byte-identical to its commits.
+
+    Backlog, Experience and stage-package checks compare working bytes with
+    committed blobs, so the vault opts out of end-of-line conversion such as
+    Git for Windows' default ``core.autocrlf=true``.
+    """
+    return "\n".join((ATTRIBUTES_START, f"{workspace}/docs/** -text",
+                      ATTRIBUTES_END))
+
+
+def attribute_findings(root: Path, workspace: str) -> list[str]:
+    """Read the effective rule back through Git for every governed file.
+
+    A later root line, a nested ``.gitattributes`` or ``.git/info/attributes``
+    outranks the managed block, so its text alone does not prove the effect.
+    """
+    listed = subprocess.run(
+        ["git", "ls-files", "-z", "--cached", "--others", "--exclude-standard",
+         "--", f"{workspace}/docs"],
+        cwd=root, capture_output=True, check=False,
+    )
+    if listed.returncode != 0:
+        return ["governed checkout attribute check failed"]
+    paths = list(dict.fromkeys(
+        item for item in listed.stdout.split(b"\0") if item
+    ))
+    if not paths:
+        return []
+    resolved = subprocess.run(
+        ["git", "check-attr", "-z", "--stdin", "text"],
+        cwd=root, input=b"".join(item + b"\0" for item in paths),
+        capture_output=True, check=False,
+    )
+    fields = resolved.stdout.split(b"\0")
+    if resolved.returncode != 0 or len(fields) != 3 * len(paths) + 1:
+        return ["governed checkout attribute check failed"]
+    converted = [
+        f"{path.decode('utf-8', 'backslashreplace')} (text: "
+        f"{value.decode('utf-8', 'backslashreplace')})"
+        for path, _name, value in (
+            fields[index:index + 3] for index in range(0, len(fields) - 1, 3)
+        )
+        if value != b"unset"
+    ]
+    if not converted:
+        return []
+    more = len(converted) - 5
+    return [
+        "managed .gitattributes rule is overridden; governed files still"
+        " convert line endings: " + ", ".join(converted[:5])
+        + (f" and {more} more" if more > 0 else "")
+    ]
 
 
 def preflight(root: Path, workspace: str) -> list[str]:
@@ -290,6 +347,16 @@ def closing(root: Path, workspace: str) -> list[str]:
         findings.append("managed .gitignore marker is missing or duplicated")
     elif managed_block(workspace) not in text:
         findings.append("managed .gitignore block is stale")
+    attributes_path = root / ".gitattributes"
+    attributes = attributes_path.read_text(encoding="utf-8") \
+        if attributes_path.is_file() else ""
+    if attributes.count(ATTRIBUTES_START) != 1 \
+            or attributes.count(ATTRIBUTES_END) != 1:
+        findings.append("managed .gitattributes marker is missing or duplicated")
+    elif managed_attributes_block(workspace) not in attributes:
+        findings.append("managed .gitattributes block is stale")
+    else:
+        findings.extend(attribute_findings(root, workspace))
     for relative in (f"{value}/probe" for value in local_roots()):
         ignored = subprocess.run(
             ["git", "check-ignore", "--no-index", "-q", relative],

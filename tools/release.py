@@ -368,18 +368,34 @@ def reject_graph_overlays(root: Path, environment: dict[str, str]) -> None:
         raise ReleaseError("release PR verification rejects Git graft overlays")
 
 
-FINALIZE_BRANCH_RE = re.compile(r"^codex/[a-z0-9]+(?:-[a-z0-9]+)*$")
+FINALIZE_BRANCH_NAME_RE = re.compile(r"[a-z0-9]+(?:-[a-z0-9]+)*")
 MAX_FINALIZE_BRANCH_CHARS = 120
+
+
+def finalize_branch_prefixes() -> tuple[str, ...]:
+    """Return the feature-branch prefix each registered host adapter declares."""
+    adapters = build_distributions.load_adapters(
+        Path(__file__).resolve().parent.parent
+    )
+    return tuple(
+        adapter.metadata["feature_branch_prefix"] for adapter in adapters.values()
+    )
 
 
 def validate_finalize_branch(branch: str) -> None:
     if branch == "release/stable":
         return
-    if len(branch) > MAX_FINALIZE_BRANCH_CHARS \
-            or FINALIZE_BRANCH_RE.fullmatch(branch) is None:
+    prefixes = finalize_branch_prefixes()
+    bounded = len(branch) <= MAX_FINALIZE_BRANCH_CHARS and any(
+        branch.startswith(prefix)
+        and FINALIZE_BRANCH_NAME_RE.fullmatch(branch[len(prefix):]) is not None
+        for prefix in prefixes
+    )
+    if not bounded:
+        forms = " or ".join(f"{prefix}<kebab-name>" for prefix in prefixes)
         raise ReleaseError(
             "release cleanup branch must be release/stable or a bounded "
-            f"codex/<kebab-name> branch, got {branch!r}"
+            f"{forms} branch, got {branch!r}"
         )
 
 

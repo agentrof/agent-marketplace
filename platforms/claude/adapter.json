@@ -4,6 +4,7 @@
   "display_name": "Claude Code",
   "artifact_kind": "native_marketplace",
   "projection_root": ".claude",
+  "feature_branch_prefix": "claude/",
   "marketplace_catalog": true,
   "adapter_api_version": 1,
   "supported_surfaces": ["terminal"]

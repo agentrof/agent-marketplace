@@ -2938,18 +2938,26 @@ def reauthorize_target_update(project_root: Path, mode: str = "source_handoff",
                 (_fence_ref, fence_oid, fence_candidate),
                 (carrier_ref, old_head, carrier_candidate),
             ])
-        except Exception:
+        except Exception as exc:
             # Keep the old prepared receipt when the Fence/carrier lease was
             # conclusively rejected; on an ambiguous transport, retain the
             # new receipt and let a fresh clone reconcile the exact pair.
             try:
                 observed_fence = remote_oid(root, remote, _fence_ref)
                 observed_carrier = remote_oid(root, remote, carrier_ref)
+                unchanged = observed_fence == fence_oid and observed_carrier == old_head
+                landed = not unchanged and (
+                    history_holds(root, remote, _fence_ref, observed_fence, fence_candidate)
+                    and history_holds(root, remote, carrier_ref, observed_carrier, carrier_candidate))
             except Exception:
                 raise RuntimeError("DELIVERY_TARGET_UPDATE_UNCERTAIN: reauthorization response is ambiguous")
-            if observed_fence == fence_oid and observed_carrier == old_head:
+            if unchanged:
                 _write_provider_receipt_locked(receipt_path, old_receipt)
                 raise RuntimeError("DELIVERY_TARGET_UPDATE_UNCERTAIN: reauthorization lease was rejected")
+            if landed:
+                # Both refs hold, or moved on from, their candidates, so the push
+                # landed and the refetched result already says so.
+                raise exc
             raise RuntimeError("DELIVERY_TARGET_UPDATE_UNCERTAIN: Fence/carrier pair is mixed")
         if values["Target-Carrier-Kind"] == "github_pr":
             observed = provider.inspect_pull_request(url)

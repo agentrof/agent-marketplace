@@ -838,6 +838,43 @@ class DeliveryGitTests(unittest.TestCase):
                                  "verified")
                 self.assertEqual(delivery_git.finish_source_handoff(project)["target"], candidate)
 
+    def test_reauthorization_that_landed_reports_the_refetched_uncertain_result(self):
+        """A reauthorization whose Fence and carrier both took their candidates landed; only a pair that
+        disagrees afterwards is mixed."""
+        for case in ("landed", "mixed"):
+            with self.subTest(case=case):
+                temporary, project = self.make_project()
+                self.addCleanup(remove_temporary, temporary)
+                delivery_git.begin_source_handoff(project, "sha256:" + "a" * 64)
+                head = delivery_git.run_git(project, "rev-parse", "HEAD")
+                carrier = "refs/heads/handoff-carrier"
+                delivery_git.atomic_push(project, "origin", [(carrier, "", head)])
+                delivery_git.authorize_target_update(project, "source_handoff", "sha256:" + "b" * 64, "origin",
+                                                     "direct_target", carrier, "direct", head, head, "upstream")
+                (project / "target-drift.txt").write_text("target moved\n", encoding="utf-8")
+                moved = delivery_git.commit_tree(project, head, ["target-drift.txt"], "Advance target", {})
+                delivery_git.atomic_push(project, "origin", [("refs/heads/main", head, moved)])
+
+                def rewind_carrier():
+                    delivery_git.run_git(project, "push", "-q", "--force", "origin", f"{head}:{carrier}")
+
+                with self.lost_push_response(rewind_carrier if case == "mixed" else None):
+                    finding = self.refused_finding(lambda: delivery_git.reauthorize_target_update(project, "source_handoff"))
+                fence = delivery_git.canonical_refs("DLV-000")["fence"]
+                refs = delivery_git.remote_ref_oids(project, "origin", [fence, carrier])
+                if case == "mixed":
+                    self.assertEqual(finding, ("DELIVERY_TARGET_UPDATE_UNCERTAIN", "Fence/carrier pair is mixed"))
+                    self.assertEqual(refs[carrier], head)
+                    continue
+                self.assertEqual(finding, ("DELIVERY_TRANSACTION_UNCERTAIN",
+                                           "the remote may have taken the atomic push before its response was lost, "
+                                           f"so read the refs again before any retry: {fence} holds the pushed "
+                                           f"{refs[fence]}; {carrier} holds the pushed {refs[carrier]}"))
+                self.assertEqual(self.target_update_state(project), "prepared")
+                self.assertEqual(delivery_git.apply_target_update(project, "source_handoff")["receipt"]["state"],
+                                 "verified")
+                self.assertEqual(delivery_git.finish_source_handoff(project)["target"], refs[carrier])
+
     def test_open_and_merge_pr_use_the_exact_reviewed_integration_head(self):
         temporary, project, _docs, product_tip, intent = self.prepare_pr_intent()
         try:

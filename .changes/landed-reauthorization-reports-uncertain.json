@@ -1,0 +1,6 @@
+{
+  "summary": "reauthorize-target-update now reports a Fence and carrier push that landed while its response was lost with the refetched DELIVERY_TRANSACTION_UNCERTAIN result, keeping the new attempt's receipt that the Fence carries, so apply and finish continue. It used to call that pair mixed; \"Fence/carrier pair is mixed\" now names only a pair whose refs disagree.",
+  "components": {
+    "software-engineering-team": "patch"
+  }
+}

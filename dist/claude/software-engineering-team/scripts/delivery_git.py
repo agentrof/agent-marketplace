@@ -582,7 +582,7 @@ def worktree_head(root: Path, path: Path) -> str:
 def is_ancestor(root: Path, ancestor: str, descendant: str) -> bool:
     result = subprocess.run(
         ["git", "merge-base", "--is-ancestor", ancestor, descendant], cwd=root,
-        text=True, capture_output=True, check=False,
+        encoding="utf-8", capture_output=True, check=False,
     )
     if result.returncode == 0:
         return True
@@ -593,12 +593,8 @@ def is_ancestor(root: Path, ancestor: str, descendant: str) -> bool:
 
 def require_visible_item_index(worktree: Path) -> None:
     """Refuse index flags that can hide different tested bytes from Git status."""
-    result = subprocess.run(["git", "-C", str(worktree), "ls-files", "-v", "-z"],
-                            text=True, capture_output=True, check=False)
-    if result.returncode:
-        raise RuntimeError(result.stderr.strip() or "cannot inspect Item index flags")
-    hidden = [entry[2:] for entry in result.stdout.split("\0")
-              if entry and (entry[0] == "S" or entry[0].islower())]
+    entries = git_paths(worktree, "ls-files", "-v", "-z", failure="cannot inspect Item index flags")
+    hidden = [entry[2:] for entry in entries if entry[0] == "S" or entry[0].islower()]
     if hidden:
         raise RuntimeError("DELIVERY_WORKTREE_UNSAFE: Item index flags hide tracked paths from verification: "
                            + json.dumps(sorted(hidden), ensure_ascii=False))
@@ -610,11 +606,7 @@ def worktree_pending_paths(root: Path, path: Path) -> set[str]:
     for args in (("diff", "--name-only", "-z", "HEAD"),
                  ("diff", "--cached", "--name-only", "-z", "HEAD"),
                  ("ls-files", "-z", "--others", "--exclude-standard")):
-        result = subprocess.run(["git", "-C", str(path), *args], cwd=root,
-                                capture_output=True, text=True, check=False)
-        if result.returncode:
-            raise RuntimeError(result.stderr.strip() or "cannot inspect pending Item paths")
-        pending.update(value for value in result.stdout.split("\0") if value)
+        pending.update(git_paths(root, "-C", str(path), *args, failure="cannot inspect pending Item paths"))
     return pending
 
 
@@ -623,26 +615,32 @@ def worktree_holds_blob(worktree: Path, relative: str, oid: str) -> bool:
 
     Git hashes the file through its clean filter, as git add does, so a checkout
     that converted line endings, as core.autocrlf does by default on native
-    Windows, still holds the blob it came from. A link or any other file that is
-    not regular holds no blob.
+    Windows, still holds the blob it came from. git add keeps a file whose blob
+    already holds CRLF as it is, where the clean filter alone would store LF, so
+    a file that holds the blob's own bytes holds it as well. A link or any other
+    file that is not regular holds no blob.
     """
     path = worktree / relative
     if path.is_symlink() or not path.is_file():
         return False
-    return run_git(worktree, "hash-object", "--path", relative, "--", str(path)) == oid
+    if run_git(worktree, "hash-object", "--path", relative, "--", str(path)) == oid:
+        return True
+    return run_git(worktree, "hash-object", "--no-filters", "--", str(path)) == oid
+
+
+def require_candidate_holds_worktree(root: Path, path: Path, candidate_oid: str) -> None:
+    """Prove that the candidate already contains the worktree's bytes, so moving there loses none."""
+    if worktree_pending_paths(root, path):
+        differing = sorted(git_paths(path, "diff", "--name-only", "-z", candidate_oid, "--",
+                                     failure="cannot compare Item worktree to candidate"))
+        if differing:
+            raise RuntimeError("DELIVERY_WORKTREE_UNSAFE: the Item candidate does not contain the current worktree "
+                               "bytes of " + ", ".join(differing))
 
 
 def advance_worktree_to_candidate(root: Path, path: Path, candidate_oid: str) -> None:
     """Move a worktree only after proving the candidate already contains its bytes."""
-    if worktree_pending_paths(root, path):
-        comparison = subprocess.run(
-            ["git", "-C", str(path), "diff", "--quiet", candidate_oid, "--"],
-            text=True, capture_output=True, check=False,
-        )
-        if comparison.returncode == 1:
-            raise RuntimeError("DELIVERY_WORKTREE_UNSAFE: published Item candidate does not contain the current worktree bytes")
-        if comparison.returncode:
-            raise RuntimeError(comparison.stderr.strip() or "cannot compare Item worktree to candidate")
+    require_candidate_holds_worktree(root, path, candidate_oid)
     run_git(root, "-C", str(path), "reset", "--hard", candidate_oid)
 
 
@@ -677,11 +675,26 @@ def git_paths(root: Path, *args: str, failure: str | None = None) -> list[str]:
 
 
 def run_git(root: Path, *args: str) -> str:
-    result = subprocess.run(["git", *args], cwd=root, text=True,
+    result = subprocess.run(["git", *args], cwd=root, encoding="utf-8",
                             capture_output=True, check=False)
     if result.returncode:
         raise RuntimeError(result.stderr.strip() or f"git {' '.join(args)} failed")
     return result.stdout.strip()
+
+
+def git_with_input(root: Path, args: list[str], data: str,
+                   env: dict | None = None) -> subprocess.CompletedProcess:
+    """Run Git with *data* on its stdin as exact UTF-8 bytes.
+
+    A text-mode pipe writes os.linesep for every newline and encodes in the
+    locale's code page, so on native Windows a blob or commit message handed to
+    Git that way would hold CRLF and ANSI bytes that no other host writes.
+    """
+    result = subprocess.run(["git", *args], cwd=root, env=env, input=data.encode("utf-8"),
+                            capture_output=True, check=False)
+    return subprocess.CompletedProcess(result.args, result.returncode,
+                                       result.stdout.decode("utf-8"),
+                                       result.stderr.decode("utf-8", "replace"))
 
 
 def commit_tree(root: Path, base: str, paths: list[str], subject: str,
@@ -694,16 +707,16 @@ def commit_tree(root: Path, base: str, paths: list[str], subject: str,
         env = os.environ.copy()
         env["GIT_INDEX_FILE"] = str(index)
         read = subprocess.run(["git", "read-tree", base], cwd=root, env=env,
-                              text=True, capture_output=True, check=False)
+                              encoding="utf-8", capture_output=True, check=False)
         if read.returncode:
             raise RuntimeError(read.stderr.strip() or "cannot materialize candidate index")
         if paths:
             add = subprocess.run(["git", "add", "--", *paths], cwd=root, env=env,
-                                 text=True, capture_output=True, check=False)
+                                 encoding="utf-8", capture_output=True, check=False)
             if add.returncode:
                 raise RuntimeError(add.stderr.strip() or "cannot stage candidate package")
         tree = subprocess.run(["git", "write-tree"], cwd=root, env=env,
-                              text=True, capture_output=True, check=False)
+                              encoding="utf-8", capture_output=True, check=False)
         if tree.returncode:
             raise RuntimeError(tree.stderr.strip() or "cannot write candidate tree")
         if delivery_projections:
@@ -713,9 +726,7 @@ def commit_tree(root: Path, base: str, paths: list[str], subject: str,
         message = subject + "\n\n" + "\n".join(
             f"Agentrof-{key}: {value}" for key, value in trailers.items()
         ) + "\n"
-        commit = subprocess.run(["git", "commit-tree", projected, "-p", base],
-                                cwd=root, env=env, input=message, text=True,
-                                capture_output=True, check=False)
+        commit = git_with_input(root, ["commit-tree", projected, "-p", base], message, env)
         if commit.returncode:
             raise RuntimeError(commit.stderr.strip() or "cannot create candidate commit")
         return commit.stdout.strip()
@@ -733,7 +744,7 @@ def write_delivery_projection_tree(root: Path, env: dict, tree: str,
                     mode, blob.stdout.decode().strip(), path]
         subprocess.run(args, cwd=root, env=env, capture_output=True, check=True)
     return subprocess.run(["git", "write-tree"], cwd=root, env=env,
-                          text=True, capture_output=True, check=True).stdout.strip()
+                          encoding="utf-8", capture_output=True, check=True).stdout.strip()
 
 
 def delivery_projection_changes(root: Path, tree: str,
@@ -846,21 +857,20 @@ def commit_replacements(root: Path, base: str, replacements: dict[str, str],
         env = os.environ.copy()
         env["GIT_INDEX_FILE"] = str(index)
         read = subprocess.run(["git", "read-tree", base], cwd=root, env=env,
-                              text=True, capture_output=True, check=False)
+                              encoding="utf-8", capture_output=True, check=False)
         if read.returncode:
             raise RuntimeError(read.stderr.strip() or "cannot materialize candidate index")
         for path, text in replacements.items():
-            blob = subprocess.run(["git", "hash-object", "-w", "--stdin"], cwd=root,
-                                  env=env, input=text, text=True, capture_output=True, check=False)
+            blob = git_with_input(root, ["hash-object", "-w", "--stdin"], text, env)
             if blob.returncode:
                 raise RuntimeError(blob.stderr.strip() or "cannot write candidate blob")
             update = subprocess.run(["git", "update-index", "--add", "--cacheinfo",
                                      "100644", blob.stdout.strip(), path], cwd=root, env=env,
-                                    text=True, capture_output=True, check=False)
+                                    encoding="utf-8", capture_output=True, check=False)
             if update.returncode:
                 raise RuntimeError(update.stderr.strip() or "cannot stage candidate replacement")
         tree = subprocess.run(["git", "write-tree"], cwd=root, env=env,
-                              text=True, capture_output=True, check=False)
+                              encoding="utf-8", capture_output=True, check=False)
         if tree.returncode:
             raise RuntimeError(tree.stderr.strip() or "cannot write candidate tree")
         projected = (write_delivery_projection_tree(root, env, tree.stdout.strip())
@@ -868,9 +878,7 @@ def commit_replacements(root: Path, base: str, replacements: dict[str, str],
         message = subject + "\n\n" + "\n".join(
             f"Agentrof-{key}: {value}" for key, value in trailers.items()
         ) + "\n"
-        commit = subprocess.run(["git", "commit-tree", projected, *parent_args],
-                                cwd=root, env=env, input=message, text=True,
-                                capture_output=True, check=False)
+        commit = git_with_input(root, ["commit-tree", projected, *parent_args], message, env)
         if commit.returncode:
             raise RuntimeError(commit.stderr.strip() or "cannot create candidate commit")
         return commit.stdout.strip()
@@ -990,7 +998,7 @@ def atomic_push(root: Path, remote: str, updates: list[tuple[str, str, str]]) ->
     for ref, expected, candidate in updates:
         args.append(f"--force-with-lease={ref}:{expected}")
         args.append(f"{candidate}:{ref}")
-    result = subprocess.run(["git", *args], cwd=root, text=True,
+    result = subprocess.run(["git", *args], cwd=root, encoding="utf-8",
                             capture_output=True, check=False)
     if result.returncode:
         raise RuntimeError(refused_transaction(root, remote, updates)
@@ -1707,14 +1715,15 @@ def revert_merge_candidate(root: Path, base: str, merge_oid: str,
         env = os.environ.copy()
         env["GIT_INDEX_FILE"] = str(index)
         read = subprocess.run(["git", "read-tree", base], cwd=root, env=env,
-                              text=True, capture_output=True, check=False)
+                              encoding="utf-8", capture_output=True, check=False)
         if read.returncode:
             raise RuntimeError(read.stderr.strip() or "cannot prepare cancellation revert index")
 
         def entry(tree: str, path: str) -> tuple[str, str] | None:
+            # A path is a literal name here: under pathspec magic ":x.py" would name "x.py".
             result = subprocess.run(
-                ["git", "ls-tree", tree, "--", path], cwd=root,
-                text=True, capture_output=True, check=False,
+                ["git", "--literal-pathspecs", "ls-tree", tree, "--", path], cwd=root,
+                encoding="utf-8", capture_output=True, check=False,
             )
             if result.returncode:
                 raise RuntimeError(result.stderr.strip() or "cannot inspect cancellation tree")
@@ -1740,29 +1749,25 @@ def revert_merge_candidate(root: Path, base: str, merge_oid: str,
             if parent_entry is None:
                 update = subprocess.run(
                     ["git", "update-index", "--force-remove", "--", path],
-                    cwd=root, env=env, text=True, capture_output=True, check=False,
+                    cwd=root, env=env, encoding="utf-8", capture_output=True, check=False,
                 )
             else:
                 mode, oid = parent_entry
                 update = subprocess.run(
                     ["git", "update-index", "--add", "--cacheinfo",
                      f"{mode},{oid},{path}"],
-                    cwd=root, env=env, text=True, capture_output=True, check=False,
+                    cwd=root, env=env, encoding="utf-8", capture_output=True, check=False,
                 )
             if update.returncode:
                 raise RuntimeError(update.stderr.strip() or f"cannot apply cancellation revert: {path}")
         tree = subprocess.run(["git", "write-tree"], cwd=root, env=env,
-                              text=True, capture_output=True, check=False)
+                              encoding="utf-8", capture_output=True, check=False)
         if tree.returncode:
             raise RuntimeError(tree.stderr.strip() or "cannot write cancellation revert tree")
         message = subject + "\n\n" + "\n".join(
             f"Agentrof-{key}: {value}" for key, value in trailers.items()
         ) + "\n"
-        commit = subprocess.run(
-            ["git", "commit-tree", tree.stdout.strip(), "-p", base],
-            cwd=root, env=env, input=message, text=True,
-            capture_output=True, check=False,
-        )
+        commit = git_with_input(root, ["commit-tree", tree.stdout.strip(), "-p", base], message, env)
         if commit.returncode:
             raise RuntimeError(commit.stderr.strip() or "cannot create cancellation revert")
         return commit.stdout.strip()
@@ -3224,10 +3229,10 @@ def require_item_architecture_binding(worktree: Path, item_props: dict,
         # Read committed blobs: a local edit must never authorize the reviewed tip.
         tree = tree or run_git(worktree, "--no-replace-objects", "rev-parse", "HEAD")
         prefix = "workspace/docs/system-architecture/"
-        listing = run_git(worktree, "--no-replace-objects", "ls-tree", "-rz", tree, "--", prefix)
+        listing = git_paths(worktree, "--no-replace-objects", "ls-tree", "-rz", tree, "--", prefix)
         with tempfile.TemporaryDirectory(prefix="agentrof-item-architecture-") as temporary:
             architecture = Path(temporary)
-            for entry in filter(None, listing.split("\0")):
+            for entry in listing:
                 metadata, path = entry.split("\t", 1)
                 mode, kind, oid = metadata.split()
                 if kind != "blob" or mode not in {"100644", "100755"}:
@@ -3328,8 +3333,7 @@ def require_item_publication_controls(root: Path, before: str, after: str,
     """
     from delivery_compile import content_hash
     prefix = relative_delivery.rstrip("/") + "/"
-    changed = [path for path in run_git(root, "--no-replace-objects", "diff", "--name-only", "-z",
-                                        before, after, "--", prefix).split("\0") if path]
+    changed = git_paths(root, "--no-replace-objects", "diff", "--name-only", "-z", before, after, "--", prefix)
     notes = {}
     converged = None
     if relative_item in changed:
@@ -3353,7 +3357,12 @@ def require_item_publication_controls(root: Path, before: str, after: str,
                 raise RuntimeError("only a required Architecture Item may publish its stamp")
             if tree == after and props.get("source_hash") != content_hash(props, body):
                 raise RuntimeError("Item Architecture stamp source_hash is stale")
-            header, body_text = text.split("\n---\n", 1)
+            # The closing delimiter line may end with CRLF, as a text-mode write on native
+            # Windows commits it under setup's -text rule; the bytes around it compare exactly.
+            parts = re.split(r"\n---\r?\n", text, maxsplit=1)
+            if len(parts) != 2:
+                raise RuntimeError("Item publication frontmatter is invalid: no closing delimiter line")
+            header, body_text = parts
             header = re.sub(r"(?m)^(?:architecture_delta_hash|source_hash):[^\n]*\n?", "", header)
             versions.append((mode, header.rstrip("\n"), body_text))
         if versions[0] != versions[1]:
@@ -3389,12 +3398,9 @@ def require_item_path_claims(root: Path, before: str, after: str, relative_item:
               if isinstance(claim, str) and _is_normalized_claim(claim)]
 
     def product_paths(start: str) -> set[str]:
-        listing = subprocess.run(["git", "--no-replace-objects", "diff", "--no-renames", "--name-only", "-z",
-                                  start, after], cwd=root, capture_output=True, encoding="utf-8",
-                                 errors="replace", check=False)
-        if listing.returncode:
-            raise RuntimeError(listing.stderr.strip() or "cannot list the Item's committed paths")
-        return {path for path in listing.stdout.split("\0") if path and not path.startswith("workspace/docs/")}
+        listing = git_paths(root, "--no-replace-objects", "diff", "--no-renames", "--name-only", "-z", start, after,
+                            failure="cannot list the Item's committed paths")
+        return {path for path in listing if not path.startswith("workspace/docs/")}
 
     changed = product_paths(before)
     base = props.get("integration_base_commit")
@@ -3522,8 +3528,7 @@ def unmet_waits_for(root: Path, remote: str, delivery_id: str, integration_oid: 
             # Another Delivery's Item advances on its own hosts, and integration moves no Fence.
             run_git(root, "fetch", "--no-tags", remote, item_refs[story])
         owner = trailer(commit_message(root, tip), "Delivery") or ""
-        packages = [path for path in run_git(root, "ls-tree", "-z", "--name-only", tip, "--",
-                                             deliveries + "/").split("\0")
+        packages = [path for path in git_paths(root, "ls-tree", "-z", "--name-only", tip, "--", deliveries + "/")
                     if owner and path.rsplit("/", 1)[-1].startswith(owner.lower() + "-")]
         if len(packages) != 1:
             raise RuntimeError(f"DELIVERY_COORDINATION_CORRUPT: the Item tip of {story} does not hold "
@@ -4086,6 +4091,9 @@ def push_item(project_root: Path, delivery_id: str, story_id: str,
          "Item-Plan-Hash": str(item_props.get("item_plan_hash", "none")),
          "Writer-Epoch": str(receipt["writer_epoch"]), "Slot": slot},
     )
+    # The worktree moves to the candidate after the push, so prove first that the move keeps
+    # every worktree byte; a refusal after the push would leave the Item ref already published.
+    require_candidate_holds_worktree(root, worktree, candidate)
     atomic_push(root, remote, [(refs["item"], item_oid, candidate), (slot_ref, slot_oid, candidate)])
     if remote_oid(root, remote, refs["item"]) != candidate or remote_oid(root, remote, slot_ref) != candidate:
         raise RuntimeError("Item evidence refs did not converge to the published candidate")
@@ -4172,7 +4180,7 @@ def integrate_item(project_root: Path, delivery_id: str, story_id: str,
 
 def unique_merge_base(root: Path, first_parent: str, second_parent: str) -> str:
     result = subprocess.run(["git", "merge-base", "--all", first_parent, second_parent],
-                            cwd=root, text=True, capture_output=True, check=False)
+                            cwd=root, encoding="utf-8", capture_output=True, check=False)
     if result.returncode not in {0, 1}:
         raise RuntimeError(result.stderr.strip() or "cannot inspect merge ancestry")
     bases = result.stdout.splitlines()
@@ -4291,7 +4299,7 @@ def resolve_to_second_parent(root: Path, env: dict, second_parent: str, paths: t
     pending = set(unmerged_paths(root, env)) & set(paths)
     for path in sorted(pending):
         entry = subprocess.run(["git", "ls-tree", second_parent, "--", path], cwd=root,
-                               text=True, capture_output=True, check=True).stdout.strip()
+                               encoding="utf-8", capture_output=True, check=True).stdout.strip()
         subprocess.run(["git", "update-index", "--force-remove", "--", path],
                        cwd=root, env=env, capture_output=True, check=True)
         if not entry:
@@ -4317,7 +4325,7 @@ def merge_candidate(root: Path, first_parent: str, second_parent: str,
         # a path one side deleted and the other left untouched, or both sides changed
         # identically. Everything else stays unmerged for the callers below.
         merge = subprocess.run(["git", "read-tree", "-m", "--aggressive", merge_base, first_parent, second_parent],
-                               cwd=root, env=env, text=True, capture_output=True, check=False)
+                               cwd=root, env=env, encoding="utf-8", capture_output=True, check=False)
         if merge.returncode:
             raise RuntimeError(merge.stderr.strip() or "Item and Integration trees conflict")
         if prefer_second:
@@ -4327,7 +4335,7 @@ def merge_candidate(root: Path, first_parent: str, second_parent: str,
         conflicts = unmerged_paths(root, env)
         if conflicts:
             raise RuntimeError("merge left authored paths unmerged: " + ", ".join(conflicts))
-        tree = subprocess.run(["git", "write-tree"], cwd=root, env=env, text=True,
+        tree = subprocess.run(["git", "write-tree"], cwd=root, env=env, encoding="utf-8",
                               capture_output=True, check=False)
         if tree.returncode:
             raise RuntimeError(tree.stderr.strip() or "cannot write integration tree")
@@ -4336,8 +4344,8 @@ def merge_candidate(root: Path, first_parent: str, second_parent: str,
         projected = (write_delivery_projection_tree(root, env, tree.stdout.strip(), operation_bindings)
                      if delivery_projections else tree.stdout.strip())
         message = subject + "\n\n" + "\n".join(f"Agentrof-{key}: {value}" for key, value in trailers.items()) + "\n"
-        commit = subprocess.run(["git", "commit-tree", projected, "-p", first_parent, "-p", second_parent],
-                                cwd=root, env=env, input=message, text=True, capture_output=True, check=False)
+        commit = git_with_input(root, ["commit-tree", projected, "-p", first_parent, "-p", second_parent],
+                                message, env)
         if commit.returncode:
             raise RuntimeError(commit.stderr.strip() or "cannot create integration commit")
         return commit.stdout.strip()
@@ -4542,7 +4550,7 @@ def main(argv=None) -> int:
     except (ValueError, RuntimeError) as exc:
         result = {"ok": False, "errors": [str(exc)]}
     envelope = delivery_result.from_raw(args.command, result)
-    print(json.dumps(envelope, indent=2, ensure_ascii=False, sort_keys=True))
+    delivery_result.write_line(json.dumps(envelope, indent=2, ensure_ascii=False, sort_keys=True))
     return 0 if envelope["ok"] else 1
 
 

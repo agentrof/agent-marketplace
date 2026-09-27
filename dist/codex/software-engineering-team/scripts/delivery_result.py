@@ -11,6 +11,7 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+import sys
 from typing import Any
 
 
@@ -242,3 +243,21 @@ def from_raw(operation: str, raw: dict, *, error: str | None = None) -> dict:
     }
     validate_envelope(envelope)
     return envelope
+
+
+def write_line(text: str) -> None:
+    """Write *text* and a newline to standard output as UTF-8 bytes.
+
+    A redirected standard output on native Windows encodes in the ANSI code
+    page, which lacks letters such as ş, ğ and ı, so printing a result that
+    names one raised after the command had already run. A stream without a
+    byte buffer, such as a test's StringIO, takes the text as it is.
+    """
+    stream = sys.stdout
+    buffer = getattr(stream, "buffer", None)
+    if buffer is None:
+        stream.write(text + "\n")
+        return
+    stream.flush()
+    buffer.write((text + "\n").encode("utf-8"))
+    buffer.flush()

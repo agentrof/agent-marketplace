@@ -30,6 +30,7 @@ import delivery_result  # noqa: E402
 import file_lock  # noqa: E402
 import operation_compile  # noqa: E402
 import architecture_compile  # noqa: E402
+import setup_check  # noqa: E402
 import stage_package  # noqa: E402
 import vault_check  # noqa: E402
 from backlog_fixture import make_approved_backlog  # noqa: E402
@@ -97,6 +98,39 @@ def git_path_arguments():
 
     with mock.patch.object(subprocess, "run", recording_run):
         yield arguments
+
+
+@contextlib.contextmanager
+def windows_text_pipes(code_page: str = "cp1252"):
+    """Give every text-mode subprocess pipe the behaviour CPython gives it on native Windows.
+
+    There stdin goes through a TextIOWrapper whose newline=None writes os.linesep,
+    "\\r\\n", for every "\\n" whatever the encoding, and a pipe without an explicit
+    encoding encodes and decodes in the ANSI code page, cp1252 on the runner.
+    Output line endings fold as on every host, and bytes-mode calls pass untouched.
+    """
+    run = subprocess.run
+
+    def windows_run(*args, **kwargs):
+        text, universal = kwargs.pop("text", None), kwargs.pop("universal_newlines", None)
+        encoding, errors = kwargs.pop("encoding", None), kwargs.pop("errors", None)
+        if not (text or universal or encoding or errors):
+            return run(*args, **kwargs)
+        encoding, errors = encoding or code_page, errors or "strict"
+        check = kwargs.pop("check", False)
+        if isinstance(kwargs.get("input"), str):
+            kwargs["input"] = kwargs["input"].replace("\n", "\r\n").encode(encoding, errors)
+        result = run(*args, **kwargs)
+        for stream in ("stdout", "stderr"):
+            value = getattr(result, stream)
+            if isinstance(value, bytes):
+                setattr(result, stream, value.decode(encoding, errors).replace("\r\n", "\n").replace("\r", "\n"))
+        if check:
+            result.check_returncode()
+        return result
+
+    with mock.patch.object(subprocess, "run", windows_run):
+        yield
 
 
 class DeliveryGitTests(unittest.TestCase):
@@ -1679,7 +1713,10 @@ class DeliveryGitTests(unittest.TestCase):
         )
         self.assertNotEqual(digest, executed_hash)
 
+    @windows_text_pipes()
     def test_active_delivery_cancellation_releases_slot_and_publishes_terminal_item(self):
+        # The published map is read back through the runner's text pipes, whose ANSI
+        # code page would turn the row's em dash into mojibake (#247).
         with temporary_directory() as temporary:
             project = Path(temporary)
             init_repository(project, initial_branch="main")
@@ -2202,7 +2239,10 @@ class DeliveryGitTests(unittest.TestCase):
         delivery_git.run_git(worktree, "commit", "-qm", "Implement authentication with sealed Architecture")
         return project, worktree, item, active
 
+    @windows_text_pipes()
     def test_architecture_stamp_authored_evidence_push_and_integration(self):
+        # Under the runner's text pipes the activated Item record must keep the LF the
+        # stamp check splits its frontmatter at (#247).
         project, worktree, item, active = self.prepare_stamped_architecture_item()
         product = delivery_git.run_git(worktree, "rev-parse", "HEAD")
         authored = {}
@@ -2481,7 +2521,9 @@ class DeliveryGitTests(unittest.TestCase):
             converged[key] = mine[key]
         converged["integration_base_commit"] = base or integration
         converged["source_hash"] = delivery_compile.content_hash(converged, body)
-        item.write_text(delivery_compile.frontmatter(converged, body), encoding="utf-8")
+        # LF on every host, as the Delivery writers write a record: under setup's -text rule a
+        # text-mode write on native Windows would commit CRLF, which push-item refuses.
+        item.write_bytes(delivery_compile.frontmatter(converged, body).encode("utf-8"))
         delivery_git.run_git(worktree, "add", "-A", "workspace/docs")
         delivery_git.run_git(worktree, "commit", "-qm", "Take the republished Integration")
         return delivery_git.run_git(worktree, "rev-parse", "HEAD")
@@ -2506,6 +2548,41 @@ class DeliveryGitTests(unittest.TestCase):
         self.assertEqual(props["status"], "integrated")
         self.assertIn("Republished for the revised plan.", body)
         self.assertEqual(props["source_hash"], delivery_compile.content_hash(props, body))
+
+    def test_push_item_refuses_before_any_ref_moves_when_its_candidate_would_change_the_worktree(self):
+        """push-item republishes the Item record with LF and moves the Item worktree to that
+        candidate after the push. A converged record committed with CRLF, as a text-mode write on
+        native Windows commits it under setup's -text rule, differs from the candidate, so
+        push-item refuses before the atomic push: no ref moves, and the worktree keeps its commit
+        and its evidence (#247)."""
+        integration_ref = delivery_git.canonical_refs("DLV-001")["integration"]
+
+        def carry_managed_rule(project):
+            (project / ".gitattributes").write_bytes(
+                (setup_check.managed_attributes_block("workspace") + "\n").encode("utf-8"))
+            base = delivery_git.remote_oid(project, "origin", integration_ref)
+            carried = delivery_git.commit_tree(project, base, [".gitattributes"], "Carry the managed checkout rule", {})
+            delivery_git.atomic_push(project, "origin", [(integration_ref, base, carried)])
+
+        project, worktree, item, _active = self.prepare_stamped_architecture_item(before_publish=carry_managed_rule)
+        integration, relative = self.republish_integration_plan(project, worktree, item)
+        self.converge_on_integration(worktree, item, integration, relative)
+        item.write_bytes(item.read_bytes().replace(b"\n", b"\r\n"))
+        delivery_git.run_git(worktree, "add", relative["item"])
+        delivery_git.run_git(worktree, "commit", "-qm", "Save the converged record with CRLF")
+        self.assertIn(b"\r\n", subprocess.run(["git", "-C", str(worktree), "cat-file", "blob", "HEAD:" + relative["item"]],
+                                              capture_output=True, check=True).stdout)
+        self.assertEqual(self.approve_item_evidence(str(worktree)), 0)
+        head = delivery_git.run_git(worktree, "rev-parse", "HEAD")
+        pending = delivery_git.worktree_pending_paths(project, worktree)
+        before = delivery_git.run_git(project, "ls-remote", "origin")
+        with self.assertRaises(RuntimeError) as refused:
+            delivery_git.push_item(project, "DLV-001", "AUTH-01")
+        self.assertEqual(delivery_git.run_git(project, "ls-remote", "origin"), before)
+        self.assertEqual(delivery_git.run_git(worktree, "rev-parse", "HEAD"), head)
+        self.assertEqual(delivery_git.worktree_pending_paths(project, worktree), pending)
+        self.assertEqual(str(refused.exception), "DELIVERY_WORKTREE_UNSAFE: the Item candidate does not contain the "
+                                                 "current worktree bytes of " + relative["item"])
 
     def test_push_refuses_what_a_converged_item_does_not_carry(self):
         project, worktree, item, active = self.prepare_stamped_architecture_item()
@@ -2661,7 +2738,10 @@ class DeliveryGitTests(unittest.TestCase):
         self.assertEqual(delivery_git.remote_oid(project, "origin", refs["integration"]), published["integration"])
         self.assertEqual(delivery_git.remote_oid(project, "origin", refs["fence"]), fence)
 
+    @windows_text_pipes()
     def test_refresh_preserves_approved_control_content_and_path_set(self):
+        # The runner's text pipes must leave the Integration's projection-only change
+        # a projection-only change, or the merge cannot reconcile it (#247).
         for control in ("delivery.md", "execution-plan.md", "items/auth-01/item.md", "injected_item", "deleted_item"):
             with self.subTest(control=control):
                 project, _docs, directory, item, _reserved = self.prepare_execution_with_draft_reserved_contracts(False)
@@ -3917,10 +3997,95 @@ class DeliveryGitTests(unittest.TestCase):
             self.symlink_or_skip(note, "twin.md")
             self.assertFalse(delivery_git.worktree_holds_blob(root, "notes/item.md", oid))
 
+    def test_worktree_file_holds_a_crlf_blob_that_git_add_keeps(self):
+        """Under core.autocrlf=true a blob committed with CRLF checks out unchanged, and git add
+        keeps the file as it is because its blob already holds CRLF, where the clean filter alone
+        would store LF. The unchanged checkout holds its blob; the same content rewritten with LF
+        does not, since git add then stores an LF blob (#247)."""
+        record = b"---\r\nstatus: active\r\n---\r\n\r\n# Item\r\n"
+        with temporary_directory() as temporary:
+            root = Path(temporary)
+            init_repository(root)
+            for key, value in (("user.email", "test@example.com"), ("user.name", "Test"),
+                               ("core.autocrlf", "false")):
+                delivery_git.run_git(root, "config", key, value)
+            note = root / "notes" / "item.md"
+            note.parent.mkdir()
+            note.write_bytes(record)
+            delivery_git.run_git(root, "add", "notes/item.md")
+            delivery_git.run_git(root, "commit", "-qm", "Item with CRLF")
+            oid = delivery_git.run_git(root, "rev-parse", "HEAD:notes/item.md")
+            delivery_git.run_git(root, "config", "core.autocrlf", "true")
+            note.unlink()
+            delivery_git.run_git(root, "checkout", "--", "notes/item.md")
+            self.assertEqual(note.read_bytes(), record)
+
+            def stored() -> str:
+                delivery_git.run_git(root, "add", "notes/item.md")
+                return delivery_git.run_git(root, "ls-files", "--stage", "--", "notes/item.md").split()[1]
+
+            self.assertTrue(delivery_git.worktree_holds_blob(root, "notes/item.md", oid))
+            self.assertEqual(stored(), oid)
+            note.write_bytes(record.replace(b"\r\n", b"\n"))
+            self.assertFalse(delivery_git.worktree_holds_blob(root, "notes/item.md", oid))
+            self.assertNotEqual(stored(), oid)
+
+    def test_delivery_path_readers_keep_a_name_that_holds_a_carriage_return(self):
+        """A text-mode pipe turns a carriage return into a newline, so the pending-path and
+        index-flag readers reported an untracked macOS "Icon\\r" as "Icon\\n". They read Git's
+        NUL-separated bytes instead (#279)."""
+        if os.name == "nt":
+            self.skipTest("POSIX file names: native Windows refuses a carriage return in a file name")
+        with temporary_directory() as temporary:
+            root = Path(temporary)
+            init_repository(root, initial_branch="main")
+            for key, value in (("user.email", "test@example.com"), ("user.name", "Test")):
+                delivery_git.run_git(root, "config", key, value)
+            tracked = "notes/Icon\r"
+            (root / "notes").mkdir()
+            (root / tracked).write_bytes(b"note\n")
+            delivery_git.run_git(root, "add", "--", tracked)
+            delivery_git.run_git(root, "commit", "-qm", "Record the note")
+            (root / "Icon\r").write_bytes(b"")
+            self.assertEqual(delivery_git.worktree_pending_paths(root, root), {"Icon\r"})
+            delivery_git.run_git(root, "update-index", "--skip-worktree", "--", tracked)
+            with self.assertRaises(RuntimeError) as hidden:
+                delivery_git.require_visible_item_index(root)
+            self.assertEqual(str(hidden.exception), "DELIVERY_WORKTREE_UNSAFE: Item index flags hide tracked paths "
+                                                    "from verification: " + json.dumps([tracked]))
+
+    def test_cancellation_revert_restores_a_path_that_starts_with_a_colon(self):
+        """revert_merge_candidate looks each changed path up with git ls-tree, where a leading ":"
+        starts pathspec magic: ":x.py" named "x.py", the lookup found nothing, and the revert
+        deleted the file instead of restoring it. Its lookups take every path literally (#279)."""
+        if os.name == "nt":
+            self.skipTest("POSIX file names: native Windows refuses a colon in a file name")
+        with temporary_directory() as temporary:
+            root = Path(temporary)
+            init_repository(root, initial_branch="main")
+            for key, value in (("user.email", "test@example.com"), ("user.name", "Test")):
+                delivery_git.run_git(root, "config", key, value)
+            commits = []
+            for text in ("X = 'before'\n", "X = 'item'\n"):
+                (root / ":x.py").write_text(text, encoding="utf-8")
+                delivery_git.run_git(root, "--literal-pathspecs", "add", "--", ":x.py")
+                delivery_git.run_git(root, "commit", "-qm", "Change :x.py")
+                commits.append(delivery_git.run_git(root, "rev-parse", "HEAD"))
+            before, item = commits
+            # The coordinator reverts in the main worktree, which need not hold the Item's files.
+            (root / ":x.py").unlink()
+            merge = delivery_git.run_git(root, "commit-tree", item + "^{tree}", "-p", before, "-p", item,
+                                         "-m", "Integrate the Item")
+            reverted = delivery_git.revert_merge_candidate(root, merge, merge, "Revert the Item", {"Record": "fixture-v1"})
+            self.assertEqual(delivery_git.git_paths(root, "ls-tree", "-z", "--name-only", reverted), [":x.py"])
+            self.assertEqual(delivery_git.run_git(root, "cat-file", "blob", reverted + "::x.py"), "X = 'before'")
+
+    @windows_text_pipes()
     def test_push_item_publishes_an_item_whose_checkout_converted_line_endings(self):
         """Git for Windows converts line endings on checkout by default (core.autocrlf=true), so
         the started Item's record ends its lines with CRLF while the commit holds LF. push-item
-        reads the record as Git stores it and publishes the Item (#257)."""
+        reads the record as Git stores it and publishes the Item (#257). The record is committed
+        through the runner's text pipes, which must not give the commit CRLF of its own (#247)."""
         project, _docs, _directory, item, _reserved = self.prepare_execution_with_draft_reserved_contracts(False)
         delivery_git.run_git(project, "config", "core.autocrlf", "true")
         delivery_git.publish_execution_plan(project, "DLV-001")
@@ -3930,6 +4095,142 @@ class DeliveryGitTests(unittest.TestCase):
         product = self.commit_item_product_change(str(worktree), "def authenticate():\n    return True\n")
         self.assertEqual(self.approve_item_evidence(str(worktree)), 0)
         self.assertEqual(delivery_git.push_item(project, "DLV-001", "AUTH-01")["product_tip"], product)
+
+    def test_delivery_blobs_and_commit_messages_keep_their_bytes_through_windows_text_pipes(self):
+        """Delivery hands Git every blob and commit message as exact UTF-8 bytes. Through a
+        text-mode pipe native Windows would store CRLF for each newline and refuse a character
+        its ANSI code page lacks, so its records would differ from every other host's (#247)."""
+        record = "---\ntitle: Oturum açma, şifre\n---\n\n# Item\n"
+        subject = "Record the Item, şifre"
+        trailers = {"Record": "fixture-v1"}
+        with temporary_directory() as temporary:
+            root = Path(temporary)
+            init_repository(root, initial_branch="main")
+            for key, value in (("user.email", "test@example.com"), ("user.name", "Test")):
+                delivery_git.run_git(root, "config", key, value)
+            (root / "README.md").write_bytes(b"fixture\n")
+            delivery_git.run_git(root, "add", "README.md")
+            delivery_git.run_git(root, "commit", "-qm", "Start")
+            base = delivery_git.run_git(root, "rev-parse", "HEAD")
+            with windows_text_pipes():
+                replaced = delivery_git.commit_replacements(root, base, {"notes/item.md": record}, subject, trailers)
+                empty = delivery_git.commit_tree(root, base, [], subject, trailers)
+                merged = delivery_git.merge_candidate(root, replaced, empty, subject, trailers)
+                reverted = delivery_git.revert_merge_candidate(root, merged, merged, subject, trailers)
+
+            def raw(*args: str) -> bytes:
+                return subprocess.run(["git", *args], cwd=root, capture_output=True, check=True).stdout
+
+            self.assertEqual(raw("cat-file", "blob", replaced + ":notes/item.md"), record.encode("utf-8"))
+            for commit in (replaced, empty, merged, reverted):
+                self.assertEqual(raw("cat-file", "commit", commit).split(b"\n\n", 1)[1],
+                                 (subject + "\n\nAgentrof-Record: fixture-v1\n").encode("utf-8"))
+
+    def test_stamp_check_compares_an_item_record_committed_with_crlf_byte_for_byte(self):
+        """The stamp check keeps every other Item byte. A record whose lines end with CRLF, as a
+        text-mode write on native Windows commits it under setup's workspace/docs/** -text rule,
+        is refused as a change beyond the stamp, and a record without a closing delimiter line
+        as invalid frontmatter, where both used to stop the check with a ValueError (#247)."""
+        project, worktree, item, active = self.prepare_stamped_architecture_item()
+        stamped = delivery_git.run_git(worktree, "rev-parse", "HEAD")
+        relative_delivery, relative_item = (path.relative_to(worktree).as_posix() for path in (item.parents[2], item))
+        record = item.read_text(encoding="utf-8")
+        props, _body = delivery_compile.split_note(item)
+        bare = delivery_compile.frontmatter(dict(props, source_hash=delivery_compile.content_hash(props, "")), "")
+        for label, text, refusal in (
+            ("stamp", record, None),
+            ("stamp with CRLF", record.replace("\n", "\r\n"), "beyond its Architecture stamp"),
+            ("no closing delimiter line", bare.rstrip("\n"), "no closing delimiter line"),
+        ):
+            with self.subTest(label=label):
+                after = delivery_git.commit_replacements(project, stamped, {relative_item: text}, "Commit the record", {})
+                self.assertEqual(subprocess.run(["git", "cat-file", "blob", f"{after}:{relative_item}"], cwd=project,
+                                                capture_output=True, check=True).stdout, text.encode("utf-8"))
+
+                def check():
+                    delivery_git.require_item_publication_controls(project, active["item"], after,
+                                                                   relative_delivery, relative_item)
+
+                if refusal is None:
+                    check()
+                else:
+                    with self.assertRaisesRegex(RuntimeError, refusal):
+                        check()
+
+    def test_delivery_reads_git_output_as_utf8_through_windows_text_pipes(self):
+        """Git prints paths and blobs in UTF-8. A text-mode pipe without an encoding reads
+        them in the ANSI code page on native Windows, which turned the em dash of a Delivery
+        map row into mojibake there, so every Delivery reader names UTF-8 (#247)."""
+        note = "---\ntitle: Oturum açma, güvenlik\n---\n\nŞifre ve ğ, ı, ö harfleri.\n"
+        with temporary_directory() as temporary:
+            root = Path(temporary)
+            init_repository(root, initial_branch="main")
+            for key, value in (("user.email", "test@example.com"), ("user.name", "Test")):
+                delivery_git.run_git(root, "config", key, value)
+            (root / "notes").mkdir()
+            (root / "notes" / "oturum-açma.md").write_bytes(note.encode("utf-8"))
+            delivery_git.run_git(root, "add", "notes")
+            delivery_git.run_git(root, "commit", "-qm", "Record the note")
+            (root / "notes" / "şifre.md").write_bytes(note.encode("utf-8"))
+            with windows_text_pipes():
+                shown = delivery_git.run_git(root, "show", "HEAD:notes/oturum-açma.md")
+                provider_shown = delivery_provider.run_git(root, "show", "HEAD:notes/oturum-açma.md")
+                props, body = delivery_git.split_remote_note(root, "HEAD", "notes/oturum-açma.md",
+                                                             delivery_compile.split_note)
+                pending = delivery_git.worktree_pending_paths(root, root)
+            self.assertEqual((shown, provider_shown), (note.strip(), note.strip()))
+            self.assertEqual((props["title"], body), ("Oturum açma, güvenlik", "Şifre ve ğ, ı, ö harfleri."))
+            self.assertEqual(pending, {"notes/şifre.md"})
+
+    def test_command_results_reach_a_windows_code_page_stdout_as_utf8(self):
+        """A redirected stdout on native Windows encodes in the ANSI code page, cp1252 on the
+        runner, which lacks ş, ğ and ı. The coordinator's result envelope and the compiler's
+        JSON results go out as UTF-8 bytes, so a result that names such a letter reaches its
+        reader instead of raising after the command ran (#247)."""
+        def windows_stdout() -> io.TextIOWrapper:
+            return io.TextIOWrapper(io.BytesIO(), encoding="cp1252", errors="strict")
+
+        with temporary_directory() as temporary:
+            docs = Path(temporary) / "şifre" / "workspace" / "docs"
+            item = docs / "delivery" / "deliveries" / "dlv-001-auth" / "items" / "auth-01" / "item.md"
+            item.parent.mkdir(parents=True)
+            (item.parents[2] / "delivery.md").write_bytes(b"---\ntype: delivery\nid: DLV-001\n---\n\n# Delivery\n")
+            item.write_bytes(b"---\ntype: note\n---\n\n# Item\n")
+            stdout = windows_stdout()
+            with mock.patch.object(sys, "stdout", stdout):
+                code = delivery_compile.check_delivery(type("Args", (), {"docs": str(docs), "delivery": "DLV-001"}))
+            result = json.loads(stdout.buffer.getvalue().decode("utf-8"))
+            self.assertEqual(code, 1)
+            self.assertIn(f"{item.resolve()} type must be delivery-item", result["errors"])
+        stdout = windows_stdout()
+        with mock.patch.object(delivery_git, "preflight",
+                               return_value={"ok": False, "errors": ["DELIVERY_INPUT_INVALID: şifre, ğ, ı"]}), \
+                mock.patch.object(sys, "stdout", stdout):
+            code = delivery_git.main(["preflight", "--delivery", "DLV-001"])
+        envelope = json.loads(stdout.buffer.getvalue().decode("utf-8"))
+        self.assertEqual((code, [finding["message"] for finding in envelope["findings"]]), (1, ["şifre, ğ, ı"]))
+
+    def test_delivery_scripts_name_utf8_for_every_process_pipe(self):
+        """Every process pipe in the Delivery scripts that carries text names UTF-8, and none takes
+        text on stdin. Without an encoding a pipe reads and writes the locale's code page, the
+        ANSI code page on native Windows, and a text-mode stdin there writes CRLF for every
+        newline, so input goes over as UTF-8 bytes. This covers the pipes no fixture reaches,
+        such as the gh calls (#247)."""
+        import ast
+        scripts = ROOT / "plugins" / "software-engineering-team" / "scripts"
+        unsafe = []
+        for name in ("delivery_compile.py", "delivery_git.py", "delivery_governance.py", "delivery_provider.py"):
+            for call in ast.walk(ast.parse((scripts / name).read_text(encoding="utf-8"))):
+                if not (isinstance(call, ast.Call) and isinstance(call.func, ast.Attribute)
+                        and isinstance(call.func.value, ast.Name) and call.func.value.id == "subprocess"):
+                    continue
+                keywords = {keyword.arg: keyword.value for keyword in call.keywords}
+                if not keywords.keys() & {"text", "universal_newlines", "encoding", "errors"}:
+                    continue
+                encoding = keywords.get("encoding")
+                if "input" in keywords or not (isinstance(encoding, ast.Constant) and encoding.value == "utf-8"):
+                    unsafe.append(f"{name}:{call.lineno}")
+        self.assertEqual(unsafe, [])
 
     def test_push_item_refuses_product_paths_outside_the_item_path_claims(self):
         """A claim covers its path and every path below it. The vault keeps its own rules,
@@ -3947,8 +4248,12 @@ class DeliveryGitTests(unittest.TestCase):
             ("added", lambda: write("src/session.py"), "src/session.py"),
             ("beside the claim", lambda: write("src/auth.py.orig"), "src/auth.py.orig"),
             ("deleted", lambda: (worktree / "README.md").unlink(), "README.md"),
+            # A text-mode pipe read this name back with a newline for its carriage return (#279).
+            ("carriage return", lambda: write("src/Icon\r.txt"), "src/Icon\r.txt"),
         ):
             with self.subTest(label=label):
+                if label == "carriage return" and os.name == "nt":
+                    self.skipTest("POSIX file names: native Windows refuses a carriage return in a file name")
                 delivery_git.run_git(worktree, "reset", "--hard", clean)
                 delivery_git.run_git(worktree, "clean", "-fd")
                 change()

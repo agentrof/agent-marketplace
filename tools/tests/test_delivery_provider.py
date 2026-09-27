@@ -97,7 +97,7 @@ class DeliveryProviderTests(unittest.TestCase):
         provider = self.github_provider()
         url = "https://github.com/agentrof/example/pull/17"
         body = "## Verdict\n\nCancellation approved and finalized with exact Item dispositions.\n"
-        answer = subprocess.CompletedProcess([], 0, json.dumps({"html_url": url, "body": body}), "")
+        answer = subprocess.CompletedProcess([], 0, json.dumps({"html_url": url, "body": body}).encode("utf-8"), b"")
         with patch.object(delivery_provider.shutil, "which", return_value="/usr/bin/gh"), \
                 patch.object(delivery_provider.subprocess, "run", return_value=answer) as run:
             self.assertEqual(provider.update_body(url, body), {"url": url})

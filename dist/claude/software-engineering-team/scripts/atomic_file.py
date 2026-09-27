@@ -4,7 +4,8 @@
 tempfile.mkstemp creates its file owner-only and os.replace keeps that mode,
 so a replacement sets the mode before it lands: an existing file keeps its
 own mode, and a new file takes 0666 less the process umask, as open() gives
-it. Text is written as UTF-8 with LF line endings on every OS.
+it. Text is written as UTF-8 with LF line endings on every OS, and a file that
+already holds the same text with CRLF line endings is left as it is.
 """
 
 from __future__ import annotations
@@ -62,5 +63,18 @@ def replace_bytes(path: Path, data: bytes,
 
 def replace_text(path: Path, text: str,
                  before_replace: Callable[[], None] | None = None) -> None:
-    """Replace path with text as UTF-8, keeping its LF line endings."""
-    replace_bytes(path, text.encode("utf-8"), before_replace)
+    """Replace path with text as UTF-8, keeping its LF line endings.
+
+    A regular file that already holds the text with CRLF line endings, as
+    core.autocrlf checks a file out on native Windows, is left as it is: Git
+    stores the same blob from either form, and an LF rewrite would change the
+    file's size, which git status reports as a modification with no diff.
+    """
+    data = text.encode("utf-8")
+    try:
+        current = path.read_bytes() if path.is_file() and not path.is_symlink() else b""
+    except OSError:
+        current = b""
+    if b"\r\n" in current and current.replace(b"\r\n", b"\n") == data:
+        return
+    replace_bytes(path, data, before_replace)

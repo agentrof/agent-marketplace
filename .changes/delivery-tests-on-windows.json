@@ -1,0 +1,4 @@
+{
+  "summary": "The Windows CI job now runs the Delivery compiler and coordinator test modules, with a timeout sized for their Git process count; the POSIX assumptions those modules made about file modes, symlink rights, file names, path separators and line endings now hold on native Windows or skip there with their reason.",
+  "components": {}
+}

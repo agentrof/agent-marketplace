@@ -1725,7 +1725,7 @@ def revert_merge_candidate(root: Path, base: str, merge_oid: str,
             mode, _kind, oid = metadata.split()
             return mode, oid
 
-        changed = git_paths(root, "diff", "--name-only", "-z", first_parent, merge_oid,
+        changed = git_paths(root, "diff", "--no-renames", "--name-only", "-z", first_parent, merge_oid,
                             failure="cannot inspect Item merge")
         for path in changed:
             parent_entry = entry(first_parent, path)
@@ -1739,7 +1739,7 @@ def revert_merge_candidate(root: Path, base: str, merge_oid: str,
                 )
             if parent_entry is None:
                 update = subprocess.run(
-                    ["git", "update-index", "--remove", "--", path],
+                    ["git", "update-index", "--force-remove", "--", path],
                     cwd=root, env=env, text=True, capture_output=True, check=False,
                 )
             else:
@@ -2117,7 +2117,7 @@ def target_impact_hash(delivery_id: str, previous_target: str, target: str,
 
 def _changed_target_paths(root: Path, previous_target: str, target: str) -> list[str]:
     """List normalized target paths, fetching the target objects when needed."""
-    return sorted(git_paths(root, "diff", "--name-only", "-z", previous_target, target,
+    return sorted(git_paths(root, "diff", "--no-renames", "--name-only", "-z", previous_target, target,
                             failure="cannot inspect target drift"))
 
 

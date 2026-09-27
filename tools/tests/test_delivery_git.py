@@ -1546,6 +1546,36 @@ class DeliveryGitTests(unittest.TestCase):
         self.assertEqual(delivery_git.trailer(delivery_git.commit_message(project, intent), "Record"),
                          "pr-creation-intent-v1")
 
+    def test_a_merged_delivery_refuses_every_change(self):
+        """Once the target holds a merge of the recorded PR head, the Delivery is closed: a verb
+        that would change it refuses with DELIVERY_POST_MERGE_TRANSITION and moves no ref, while
+        open-pr and merge-pr still report the PR and its merge."""
+        temporary, project, _docs, _product_tip, _intent = self.prepare_pr_intent()
+        self.addCleanup(remove_temporary, temporary)
+        provider = self.fake_provider_type({})
+        with mock.patch("delivery_provider.GitHubProvider", provider):
+            url = delivery_git.open_pr(project, "DLV-001")["pull_request_url"]
+            merged = delivery_git.merge_pr(project, "DLV-001")
+        refs = delivery_git.canonical_refs("DLV-001", "AUTH-01")
+        names = ("fence", "integration", "item")
+        before = [delivery_git.remote_oid(project, "origin", refs[name]) for name in names]
+        for verb, change in (
+            ("invalidate-delivery-review", lambda: delivery_git.invalidate_delivery_review(
+                project, "DLV-001", "REVIEW_FINDING", "sha256:" + "0" * 64)),
+            ("cancel-delivery", lambda: delivery_git.cancel_delivery(project, "DLV-001", "Withdrawn after the merge")),
+            ("reopen-item", lambda: delivery_git.reopen_item(project, "DLV-001", "AUTH-01")),
+            ("begin-plan-revision", lambda: delivery_git.begin_plan_revision(project, "DLV-001")),
+            ("refresh-target", lambda: delivery_git.refresh_target(project, "DLV-001")),
+        ):
+            with self.subTest(verb=verb):
+                self.assertEqual(self.refused_finding(change), (
+                    "DELIVERY_POST_MERGE_TRANSITION",
+                    "the target has merged the PR of DLV-001, so the Delivery is closed"))
+                self.assertEqual([delivery_git.remote_oid(project, "origin", refs[name]) for name in names], before)
+        with mock.patch("delivery_provider.GitHubProvider", provider):
+            self.assertEqual(delivery_git.open_pr(project, "DLV-001")["pull_request_url"], url)
+            self.assertEqual(delivery_git.merge_pr(project, "DLV-001")["merge_commit"], merged["merge_commit"])
+
     def test_a_published_cancellation_refuses_a_second_cancellation(self):
         """cancel-delivery judges a Delivery by its published status: the local delivery.md keeps
         its scope status after a cancellation, and a Delivery without Item refs has no cancelled

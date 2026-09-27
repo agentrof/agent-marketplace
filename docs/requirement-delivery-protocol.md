@@ -400,6 +400,14 @@ failed Git query, `check` and `status` fail with that finding instead of
 reporting the tracked status as the answer, so a CI job that checks a
 Delivery needs the full history.
 
+A merged Delivery is closed. Every coordinator verb that would change its refs
+first decides as the compiler does: when the published Review records the PR,
+it asks the same proof of the freshly fetched target tip and refuses with
+`DELIVERY_POST_MERGE_TRANSITION` once the target holds it; a history that
+cannot answer refuses too. `open-pr` still reports the recorded PR,
+`merge-pr` still verifies the merge, and the release of a plan revision or
+upgrade barrier still runs, because the project Fence must not stay barred.
+
 ## Target changes, recovery and cancellation
 
 A disjoint target advance may be merged into Integration by the controlled

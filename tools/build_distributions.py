@@ -23,6 +23,7 @@ from types import ModuleType
 
 
 ADAPTER_API_VERSION = 1
+FEATURE_BRANCH_PREFIX_RE = re.compile(r"[a-z0-9]+(?:-[a-z0-9]+)*/")
 CANONICAL_REASONING_LEVELS = {"high", "medium", "low", "inherit"}
 DELIVERY_PROTOCOL_CAPABILITY = {
     "read_min": 1,
@@ -272,6 +273,12 @@ def load_adapters(root: Path) -> dict[str, HostAdapter]:
             raise ValueError(f"{path}: marketplace_catalog and supported_surfaces are invalid")
         if not isinstance(projection_root, str) or not projection_root.startswith("."):
             raise ValueError(f"{path}: projection_root must be a local dot directory")
+        branch_prefix = metadata.get("feature_branch_prefix")
+        if not isinstance(branch_prefix, str) \
+                or FEATURE_BRANCH_PREFIX_RE.fullmatch(branch_prefix) is None:
+            raise ValueError(
+                f"{path}: feature_branch_prefix must be one kebab-case name followed by /"
+            )
         if contract["hosts"].get(host_id) is None:
             raise ValueError(f"{path}: host is absent from product.json")
         if contract["project_environment"]["projection_roots"].get(host_id) != projection_root:

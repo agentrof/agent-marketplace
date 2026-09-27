@@ -4,6 +4,7 @@
   "display_name": "Codex",
   "artifact_kind": "native_marketplace",
   "projection_root": ".codex",
+  "feature_branch_prefix": "codex/",
   "marketplace_catalog": true,
   "adapter_api_version": 1,
   "supported_surfaces": ["terminal"]

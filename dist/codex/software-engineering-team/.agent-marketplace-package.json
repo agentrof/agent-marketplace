@@ -1,5 +1,5 @@
 {
-  "build_id": "snapshot.b1596bf32cc4ef86f3ab7862e93982d9be1a980e3777f31e75d4c2cedf7f2049",
+  "build_id": "snapshot.55d1aeec40bb517045cce52917b262f88071f6b3c7404fc38e7ed3e9f7cfd3ef",
   "component": "software-engineering-team",
   "delivery_protocol": {
     "read_max": 1,
@@ -283,6 +283,6 @@
   "schema_version": 3,
   "source_channel": "snapshot",
   "source_commit": "",
-  "source_ref": "snapshot.b1596bf32cc4ef86f3ab7862e93982d9be1a980e3777f31e75d4c2cedf7f2049",
+  "source_ref": "snapshot.55d1aeec40bb517045cce52917b262f88071f6b3c7404fc38e7ed3e9f7cfd3ef",
   "version": "0.4.0"
 }

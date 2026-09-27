@@ -1,6 +1,0 @@
-{
-  "summary": "The cancellation revert now removes a path the cancelled Item added even when the main worktree holds a file of that name, instead of keeping the path and publishing that local file's bytes in the reverted Integration and its Review; a main worktree checked out at the Integration no longer keeps the cancelled Item's added files either.",
-  "components": {
-    "software-engineering-team": "patch"
-  }
-}

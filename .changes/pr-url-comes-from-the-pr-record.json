@@ -1,6 +1,0 @@
-{
-  "summary": "A Delivery cancelled before it had a local Delivery Review can now take its cancellation to the target through its PR. open-pr and merge-pr read the PR URL from the PR record on the Integration branch, whose published Review names the PR and whose trailers bind it, instead of from the local delivery-review.md, which such a Delivery does not have, and record-pr-remote records such a PR without a local Review. A local Review only mirrors the URL and must still match it when one exists, and record-pr-remote now also refuses a PR other than the one an adoption intent names.",
-  "components": {
-    "software-engineering-team": "patch"
-  }
-}

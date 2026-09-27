@@ -1,6 +1,0 @@
-{
-  "summary": "The Delivery coordinator now reads the paths it takes from Git in its pending-path, index-flag, Architecture, stamp, path-claim and waits-for checks as Git's exact NUL-separated bytes, so a name holding a carriage return, such as a macOS `Icon\\r`, no longer comes back with a newline; and a cancellation revert takes every path literally, so an Item's change to a path starting with `:` is restored instead of deleted.",
-  "components": {
-    "software-engineering-team": "patch"
-  }
-}

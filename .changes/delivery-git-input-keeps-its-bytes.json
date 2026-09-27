@@ -1,6 +1,0 @@
-{
-  "summary": "On native Windows the Delivery coordinator now hands Git the blobs and commit messages it writes as exact UTF-8 bytes, as on every other host. It wrote them through text-mode pipes, which there end every line with CRLF and encode in the ANSI code page, so push-item refused every started Item as a changed control, the Architecture stamp check failed on the activated record, projection-only merges stayed unmerged, and a record or message holding a character the code page lacks, such as ş, ğ or ı, could not be written at all.",
-  "components": {
-    "software-engineering-team": "patch"
-  }
-}

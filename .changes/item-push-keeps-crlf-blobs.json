@@ -1,6 +1,0 @@
-{
-  "summary": "push-item now accepts an Item record whose committed blob holds CRLF and whose checkout still holds those bytes under `core.autocrlf=true`, which git add keeps as it is, instead of refusing it as a changed control because Git's clean filter alone would store the record with LF; the same content rewritten with LF is still refused.",
-  "components": {
-    "software-engineering-team": "patch"
-  }
-}

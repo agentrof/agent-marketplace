@@ -1,6 +1,0 @@
-{
-  "summary": "The Experience compiler's notes, maps, registries and ledgers, the Experience application registry and ledger, and the Obsidian payload files that `vault_check.py normalize` reconciles now give a file they create the mode a plain write gives it, 0666 less the umask, and keep the mode of a file they replace, instead of leaving it owner-only (0600); no recorded Experience hash, inventory or ledger entry changes, since none of them records a file mode.",
-  "components": {
-    "software-engineering-team": "patch"
-  }
-}

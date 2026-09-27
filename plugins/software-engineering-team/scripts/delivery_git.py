@@ -990,24 +990,52 @@ def remote_ref_oids(root: Path, remote: str, refs: list[str]) -> dict[str, str]:
     return values
 
 
+def history_holds(root: Path, remote: str, ref: str, oid: str, candidate: str) -> bool:
+    """Whether commit *oid*, which the remote's *ref* holds, is *candidate* or descends from it.
+
+    Another host may have moved the ref to a commit this checkout lacks, so the
+    ref is fetched before its history is read.
+    """
+    if oid == candidate:
+        return True
+    if subprocess.run(["git", "cat-file", "-e", oid + "^{commit}"], cwd=root,
+                      capture_output=True, check=False).returncode:
+        run_git(root, "fetch", "--no-tags", remote, ref)
+    return is_ancestor(root, candidate, oid)
+
+
 def refused_transaction(root: Path, remote: str, updates: list[tuple[str, str, str]]) -> str | None:
     """Name why the remote refused an atomic transaction, or None when that is unproven.
 
     Git words its refusals in the reader's language, so only exit statuses and
-    refetched object IDs decide. A ref that no longer holds its leased value lost
-    the transaction; the Fence is named apart because it serializes every
-    coordinator. While every lease holds, a remote that takes the same no-op push
-    without --atomic but not with it lacks atomic push support. A remote that
-    holds a new candidate commit, or every ref's candidate, took the transaction,
-    so Git's own report stands.
+    refetched object IDs decide. A leased ref that holds its candidate, or moved
+    on from a history that holds it, shows that the remote may have taken the
+    transaction before its response was lost, so the result is uncertain, as
+    is a transaction whose every ref holds its candidate. Otherwise a ref that
+    no longer holds its leased value lost the transaction; the Fence is named
+    apart because it serializes every coordinator. While every lease holds, a
+    remote that takes the same no-op push without --atomic but not with it
+    lacks atomic push support.
     """
     try:
         observed = remote_ref_oids(root, remote, [ref for ref, _expected, _candidate in updates])
+        landed = sorted((ref, candidate) for ref, expected, candidate in updates
+                        if candidate and observed[ref] not in ("", expected)
+                        and history_holds(root, remote, ref, observed[ref], candidate))
     except RuntimeError:
         return None
-    if (any(candidate and observed[ref] == candidate for ref, _expected, candidate in updates)
-            or all(observed[ref] == candidate for ref, _expected, candidate in updates)):
-        return None
+    if not landed and all(observed[ref] == candidate for ref, _expected, candidate in updates):
+        landed = sorted((ref, candidate) for ref, _expected, candidate in updates)
+    if landed:
+        def evidence(ref: str, candidate: str) -> str:
+            if not candidate:
+                return f"{ref} is absent, as pushed"
+            if observed[ref] == candidate:
+                return f"{ref} holds the pushed {candidate}"
+            return f"{ref} is {observed[ref]}, whose history holds the pushed {candidate}"
+        return ("DELIVERY_TRANSACTION_UNCERTAIN: the remote may have taken the atomic push before its "
+                "response was lost, so read the refs again before any retry: "
+                + "; ".join(evidence(ref, candidate) for ref, candidate in landed))
     moved = sorted((ref, expected) for ref, expected, _candidate in updates if observed[ref] != expected)
     detail = "; ".join(f"{ref} is {observed[ref] or 'absent'}, leased as {expected or 'absent'}"
                        for ref, expected in moved)

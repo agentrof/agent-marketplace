@@ -1729,6 +1729,47 @@ class DeliveryGitTests(unittest.TestCase):
             tree = delivery_git.run_git(project, "rev-parse", integration + "^{tree}")
             self.assertEqual(delivery_git.delivery_projection_changes(project, tree), {})
 
+    def test_cancellation_reverts_integrated_item_paths_outside_ascii(self):
+        """The revert takes the Item merge's paths from a NUL-separated listing. A quoted name
+        matched no tree entry, so the revert kept what the cancelled Item added or changed (#276)."""
+        temporary, project, docs = self.reserve_scope()
+        self.addCleanup(remove_temporary, temporary)
+        changed, added = "src/giriş/kayıt.py", "src/giriş/doğrula.py"
+        (project / changed).parent.mkdir(parents=True)
+        (project / changed).write_text("kayıt = 'önce'\n", encoding="utf-8")
+        delivery_git.run_git(project, "add", changed)
+        delivery_git.run_git(project, "commit", "-qm", "Add the registration module")
+        delivery_git.run_git(project, "push", "-q")
+        self.author_execution_topology(docs)
+        item = delivery_compile.find_delivery(docs, "DLV-001") / "items/auth-01/item.md"
+        props, body = delivery_compile.split_note(item)
+        props["path_claims"] = ["src/giriş"]
+        delivery_compile.atomic_text(item, delivery_compile.frontmatter(props, body))
+        self.assertEqual(delivery_compile.approve_execution(type("Args", (), {"docs": str(docs), "delivery": "DLV-001"})), 0)
+        delivery_git.publish_execution_plan(project, "DLV-001")
+        self.assertEqual(delivery_git.refresh_target(project, "DLV-001")["paths"], [changed])
+        delivery_git.claim_items(project, "DLV-001")
+        worktree = Path(delivery_git.start_item(project, "DLV-001", "AUTH-01")["worktree"])
+        (worktree / changed).write_text("kayıt = 'sonra'\n", encoding="utf-8")
+        (worktree / added).write_text("def doğrula():\n    return 'ş'\n", encoding="utf-8")
+        delivery_git.run_git(worktree, "add", "src")
+        delivery_git.run_git(worktree, "commit", "-qm", "Change the registration module")
+        self.assertEqual(self.approve_item_evidence(str(worktree)), 0)
+        delivery_git.push_item(project, "DLV-001", "AUTH-01")
+        integrated = delivery_git.integrate_item(project, "DLV-001", "AUTH-01")["integration"]
+        cancelled = delivery_git.cancel_delivery(project, "DLV-001", "The owner withdrew the request")
+
+        def product(commit: str) -> dict[str, str]:
+            listing = subprocess.run(["git", "ls-tree", "-r", "-z", "--name-only", commit, "--", "src/"],
+                                     cwd=project, capture_output=True, check=True).stdout
+            return {path: delivery_git.run_git(project, "show", f"{commit}:{path}")
+                    for path in (raw.decode("utf-8") for raw in listing.split(b"\0") if raw)}
+
+        self.assertEqual(product(integrated), {changed: "kayıt = 'sonra'", added: "def doğrula():\n    return 'ş'"})
+        self.assertEqual(len(cancelled["reverts"]), 1)
+        for commit in (cancelled["reverts"][0], cancelled["review"]):
+            self.assertEqual(product(commit), {changed: "kayıt = 'önce'"})
+
     def test_cancellation_review_links_stay_posix_on_a_host_with_backslash_separators(self):
         """The cancellation Review links its Delivery with forward slashes on every host (#228)."""
         temporary, project = self.make_project()
@@ -2812,6 +2853,24 @@ class DeliveryGitTests(unittest.TestCase):
         _target, fence = self.governance_target_handoff(project, docs, ["src/new.py"])
         item.unlink()  # Local cache loss must not hide the authoritative remote claim.
         with self.assertRaisesRegex(RuntimeError, r"^DELIVERY_TARGET_SOURCE_VIOLATION: target changed claimed paths src/new\.py$"):
+            delivery_git.refresh_target(project, "DLV-001")
+        refs = delivery_git.canonical_refs("DLV-001")
+        self.assertEqual(delivery_git.remote_oid(project, "origin", refs["integration"]), claimed["integration"])
+        self.assertEqual(delivery_git.remote_oid(project, "origin", refs["fence"]), fence)
+
+    def test_target_refresh_rejects_a_changed_claimed_path_outside_ascii(self):
+        """A Git listing without -z quotes a name outside ASCII, and the quoted name overlaps no
+        claim, so the refresh merged a target change to a claimed path unseen (#276)."""
+        project, docs, _directory, _item, _reserved = self.prepare_execution_with_draft_reserved_contracts(
+            False, "src/giriş")
+        delivery_git.publish_execution_plan(project, "DLV-001")
+        claimed = delivery_git.claim_items(project, "DLV-001")
+        source = project / "src/giriş/kayıt_doğrula.py"
+        source.parent.mkdir(parents=True)
+        source.write_text("parola = 'şğı'\n", encoding="utf-8")
+        _target, fence = self.governance_target_handoff(project, docs, ["src/giriş/kayıt_doğrula.py"])
+        with self.assertRaisesRegex(
+                RuntimeError, r"^DELIVERY_TARGET_SOURCE_VIOLATION: target changed claimed paths src/giriş/kayıt_doğrula\.py$"):
             delivery_git.refresh_target(project, "DLV-001")
         refs = delivery_git.canonical_refs("DLV-001")
         self.assertEqual(delivery_git.remote_oid(project, "origin", refs["integration"]), claimed["integration"])

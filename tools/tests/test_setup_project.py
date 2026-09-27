@@ -800,6 +800,35 @@ class SetupProjectTests(unittest.TestCase):
             findings = json.loads(checked.stdout)["findings"]
             self.assertTrue(any("only .runtime" in item for item in findings))
 
+    def test_setup_check_names_tracked_local_files_outside_ascii_exactly(self):
+        """The tracked local and plugin file findings name each file from a
+        NUL-separated listing; without -z Git quotes a name outside ASCII
+        (#276)."""
+        with temporary_directory() as temporary:
+            project = Path(temporary)
+            init_repository(project)
+            setup = self.run_script(SETUP, "--project-root", str(project))
+            self.assertEqual(setup.returncode, 0, setup.stdout + setup.stderr)
+            local = ".claude/ayarlar-şğı.json"
+            plugin = ("workspace/docs/.obsidian/plugins/"
+                      "obsidian-front-matter-title-plugin/çeviri-ğı.json")
+            for relative in (local, plugin):
+                (project / relative).parent.mkdir(parents=True, exist_ok=True)
+                (project / relative).write_text("{}\n", encoding="utf-8")
+            subprocess.run(["git", "add", "-f", "--", local, plugin],
+                           cwd=project, check=True)
+            checked = self.run_script(
+                CHECK, "check", "--project-root", str(project), "--json"
+            )
+            self.assertEqual(checked.returncode, 1, checked.stdout)
+            findings = json.loads(checked.stdout)["findings"]
+            self.assertIn(
+                "local runtime or projection files are force-added: " + local,
+                findings)
+            self.assertIn(
+                "package-projected local Obsidian plugin files are tracked: "
+                + plugin, findings)
+
     def test_local_obsidian_plugin_projection_is_recreated_but_not_clone_truth(self):
         with tempfile.TemporaryDirectory() as temporary:
             project = Path(temporary)

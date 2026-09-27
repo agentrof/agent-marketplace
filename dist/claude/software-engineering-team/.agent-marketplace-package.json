@@ -1,5 +1,5 @@
 {
-  "build_id": "snapshot.fb2a24acaa0770c05fb79ef424c66822fe1706970812d988459cc5ae4bd7aa32",
+  "build_id": "snapshot.6275d228f97bbc293e446013a757b92ef04b710aa3c319495c09697eaf05ad2e",
   "component": "software-engineering-team",
   "delivery_protocol": {
     "read_max": 1,
@@ -54,7 +54,7 @@
     "scripts/ba_compile.py": "953bbc848ccf1e698c6e72d4d9985b8387f87e38150e81cee22649de0977d631",
     "scripts/backlog_compile.py": "94c313adcbb6f98a4d3b9ee7486e520caaed4e4a1ebe2400b0658faabdd76678",
     "scripts/delivery_compile.py": "c77282cf2f71bc9d96801938a99b31e79701999c71b43915c65aa56ccef91b26",
-    "scripts/delivery_git.py": "d170b81e674d2270b1de636d393e8962a7b5e4a2b80535d2684be888c1ebcd4f",
+    "scripts/delivery_git.py": "9182038b1a95f46c3e06c754a62e9ec8f16e3f8d53bdada9233527b3dc43d486",
     "scripts/delivery_governance.py": "70939ac67c9ac359f00a5cc7cee25a84e0b724527b34b3f6e22243e5fb66ec27",
     "scripts/delivery_provider.py": "ca54818997ea7fb5cee0111b3f010ae0e62ee10e3d7ef1a55493a222d482b522",
     "scripts/delivery_result.py": "b6ea9c24289ad9d9e999be98130ee214bced7d6db1ad6def3437a193816774ee",
@@ -71,7 +71,7 @@
     "scripts/project_instructions.py": "9a7640c22a23006f748a153bb6c7e68fd5297072166f8f3614178cf985c9309e",
     "scripts/requirement_compile.py": "695c35961327485ba0dcd35401669a8196653c21c1c434a58b2651a17143df72",
     "scripts/requirement_route.py": "df313a76c6d6028ba7ab261dc643f4ac9208e586b71475562dba72824dbfb55c",
-    "scripts/setup_check.py": "4165d094faec63d1b54c21404172879fd006e4955fc02ac232f0822795211e69",
+    "scripts/setup_check.py": "76b0dadc1d4a2e7c12d6233b2cad6bd098ff2dc053a0351aaf2d0a642317a025",
     "scripts/setup_project.py": "04e243527f6176592f513a65c6f597b0700db80852ecd4d981eb35f04e133c9f",
     "scripts/stage_package.py": "01a2f84e5e793715d1ff7e18aa79584690ec1ced820d87c5a226e42c4ce87b1e",
     "scripts/team_guard.py": "b001c78b460ed623523738699882061f37ef73e616c7100af84d1f299d5b45c6",
@@ -285,6 +285,6 @@
   "schema_version": 3,
   "source_channel": "snapshot",
   "source_commit": "",
-  "source_ref": "snapshot.fb2a24acaa0770c05fb79ef424c66822fe1706970812d988459cc5ae4bd7aa32",
+  "source_ref": "snapshot.6275d228f97bbc293e446013a757b92ef04b710aa3c319495c09697eaf05ad2e",
   "version": "0.3.2"
 }

@@ -1575,6 +1575,12 @@ def invalidate_delivery_review(project_root: Path, delivery_id: str,
     review_props, review_body = split_remote_note(root, integration_oid, relative_review, split_note)
     if review_props.get("status") != "approved":
         raise RuntimeError("current Delivery Review is not approved")
+    # A cancellation publishes one final Review: its Items are cancelled and a
+    # second cancellation is refused, so nothing could publish a Review again.
+    delivery_props, _ = split_remote_note(root, integration_oid, rel_posix(root, directory / "delivery.md"), split_note)
+    if delivery_props.get("status") == "cancelled":
+        raise RuntimeError("DELIVERY_CANCELLATION_INVALID: the cancellation Review of a cancelled Delivery is final "
+                           "and cannot be invalidated")
     review_props["status"] = "changes_requested"
     review_props["tags"] = [tag for tag in review_props.get("tags", []) if not str(tag).startswith("status/")] + ["status/changes-requested"]
     review_props["finding_code"] = finding_code

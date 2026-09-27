@@ -1526,6 +1526,26 @@ class DeliveryGitTests(unittest.TestCase):
         self.assertEqual((props["pull_request_url"], body), (url, cancellation))
         self.assertEqual(delivery_compile.delivery_findings(checkout / "workspace/docs", "DLV-001")[1], [])
 
+    def test_a_cancellation_review_cannot_be_invalidated(self):
+        """A cancellation is final. Its Items are cancelled and a second cancellation is refused, so
+        after an invalidation of its Review nothing could publish a Review again and the Delivery
+        could never reach its PR. The invalidation is refused, changes no ref, and the cancellation
+        still goes on to its PR intent."""
+        temporary, project, _docs = self.reserve_scope()
+        self.addCleanup(remove_temporary, temporary)
+        delivery_git.cancel_delivery(project, "DLV-001", "The owner withdrew the request")
+        refs = delivery_git.canonical_refs("DLV-001")
+        before = [delivery_git.remote_oid(project, "origin", refs[name]) for name in ("fence", "integration")]
+        self.assertEqual(self.refused_finding(lambda: delivery_git.invalidate_delivery_review(
+            project, "DLV-001", "REVIEW_FINDING", "sha256:" + "0" * 64)), (
+            "DELIVERY_CANCELLATION_INVALID",
+            "the cancellation Review of a cancelled Delivery is final and cannot be invalidated"))
+        self.assertEqual([delivery_git.remote_oid(project, "origin", refs[name]) for name in ("fence", "integration")],
+                         before)
+        intent = delivery_git.prepare_pr_creation(project, "DLV-001")["intent"]
+        self.assertEqual(delivery_git.trailer(delivery_git.commit_message(project, intent), "Record"),
+                         "pr-creation-intent-v1")
+
     def test_a_published_cancellation_refuses_a_second_cancellation(self):
         """cancel-delivery judges a Delivery by its published status: the local delivery.md keeps
         its scope status after a cancellation, and a Delivery without Item refs has no cancelled

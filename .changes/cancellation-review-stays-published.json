@@ -1,0 +1,6 @@
+{
+  "summary": "invalidate-delivery-review now refuses the cancellation Review of a cancelled Delivery under DELIVERY_CANCELLATION_INVALID. A cancellation is final: its Items are cancelled and a second cancellation is refused, so after such an invalidation nothing could publish a Review again, and the cancelled Delivery could never reach the target through its PR.",
+  "components": {
+    "software-engineering-team": "patch"
+  }
+}

@@ -1,6 +1,0 @@
-{
-  "summary": "Setup manages a root `.gitattributes` block with `workspace/docs/** -text`, so governed documents and Experience artifacts check out byte-identical to the repository on every OS and the byte-exact backlog, Experience and stage-package checks pass under Git for Windows' default `core.autocrlf=true`; setup check reports a missing, stale or overridden rule. Apply the refresh and commit the block; a checkout whose governed files Git already converted then commits or stashes its local changes and runs `git rm -r --cached --quiet -- workspace/docs` and `git checkout HEAD -- workspace/docs` once, never `git add --renormalize`, which would stage the converted CRLF copies.",
-  "components": {
-    "software-engineering-team": "minor"
-  }
-}

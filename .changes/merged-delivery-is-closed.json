@@ -1,6 +1,0 @@
-{
-  "summary": "A Delivery whose PR the target has merged is now closed to the coordinator: every verb that would change its refs, such as invalidate-delivery-review, cancel-delivery, refresh-target, begin-plan-revision, quiesce-upgrade and reopen-item, refuses with DELIVERY_POST_MERGE_TRANSITION, judged by the Delivery compiler's merge proof on the fetched target tip. They used to write to the merged Delivery's Integration branch as if it were open. open-pr and merge-pr still report the recorded PR and its merge, and a plan revision or upgrade barrier can still be released.",
-  "components": {
-    "software-engineering-team": "patch"
-  }
-}

@@ -1,6 +1,0 @@
-{
-  "summary": "apply-target-update now pushes a direct target update through the shared atomic push, so a target that moved after the update call was elected reports DELIVERY_LEASE_LOST with the target ref's current and leased value, read from the refetched ref, instead of Git's own words under DELIVERY_INPUT_INVALID.",
-  "components": {
-    "software-engineering-team": "patch"
-  }
-}

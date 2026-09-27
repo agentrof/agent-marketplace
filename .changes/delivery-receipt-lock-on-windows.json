@@ -1,6 +1,0 @@
-{
-  "summary": "On native Windows the Delivery coordinator now locks its Item writer, pull request and target-update receipts through msvcrt, as setup and Experience transactions already lock there, instead of failing every step that starts an Item or writes a provider or target receipt; the lock still ends with the process that holds it, and all three take it through one shared helper.",
-  "components": {
-    "software-engineering-team": "patch"
-  }
-}

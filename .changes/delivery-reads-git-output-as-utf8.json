@@ -1,6 +1,0 @@
-{
-  "summary": "On native Windows the Delivery coordinator, compiler and GitHub adapter now read what Git and gh print as UTF-8, as on every other host, instead of in the ANSI code page, so notes, map rows, commit trailers and paths that hold characters outside ASCII, such as an em dash or ş, ğ and ı, no longer read back as mojibake from a commit; the GitHub adapter also hands gh its input as UTF-8 bytes.",
-  "components": {
-    "software-engineering-team": "patch"
-  }
-}

@@ -1,6 +1,0 @@
-{
-  "summary": "Every package writer now writes UTF-8 text with LF line endings on every OS, so a governed, generated or runtime file written on native Windows no longer carries CRLF into the repository under the managed `workspace/docs/** -text` rule, where another OS rewriting it would flip every line.",
-  "components": {
-    "software-engineering-team": "patch"
-  }
-}

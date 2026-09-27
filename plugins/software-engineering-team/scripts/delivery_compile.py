@@ -21,6 +21,7 @@ from ba_compile import (
     frontmatter_item, frontmatter_scalar, parse_frontmatter, without_generated_relations,
 )
 import backlog_compile
+import delivery_result
 import operation_compile
 import requirement_compile
 import requirement_route
@@ -571,7 +572,7 @@ def init_delivery(args) -> int:
             errors = handoff_binding_findings(
                 docs, {story: sources[story]["story_path"] for story in stories})
     if errors:
-        print(json.dumps({"ok": False, "errors": errors}, indent=2, ensure_ascii=False))
+        delivery_result.write_line(json.dumps({"ok": False, "errors": errors}, indent=2, ensure_ascii=False))
         return 2
     root.mkdir(parents=True)
     item_links = [link(f"delivery/deliveries/{root.name}/items/{id_slug(story)}/item", f"Implementation work for {story}") for story in stories]
@@ -795,7 +796,7 @@ def check_delivery(args) -> int:
             pass
     status = delivery_state(root, props)[0] if root is not None else props.get("status")
     result = {"ok": not errors, "id": props.get("id"), "status": status, "errors": errors}
-    print(json.dumps(result, indent=2, ensure_ascii=False))
+    delivery_result.write_line(json.dumps(result, indent=2, ensure_ascii=False))
     return 0 if not errors else 1
 
 

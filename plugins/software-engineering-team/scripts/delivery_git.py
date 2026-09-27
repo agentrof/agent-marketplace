@@ -4557,7 +4557,7 @@ def main(argv=None) -> int:
     except (ValueError, RuntimeError) as exc:
         result = {"ok": False, "errors": [str(exc)]}
     envelope = delivery_result.from_raw(args.command, result)
-    print(json.dumps(envelope, indent=2, ensure_ascii=False, sort_keys=True))
+    delivery_result.write_line(json.dumps(envelope, indent=2, ensure_ascii=False, sort_keys=True))
     return 0 if envelope["ok"] else 1
 
 

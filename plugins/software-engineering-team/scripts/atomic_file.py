@@ -17,15 +17,20 @@ from pathlib import Path
 from typing import Callable
 
 
+def new_file_mode() -> int:
+    """The mode open() gives a new file: 0666 less the process umask."""
+    # Reading the umask sets it for an instant; package scripts run one thread.
+    umask = os.umask(0)
+    os.umask(umask)
+    return 0o666 & ~umask
+
+
 def replacement_mode(path: Path) -> int:
     """The existing file's mode, else the mode open() gives a new file."""
     try:
         return stat.S_IMODE(os.stat(path).st_mode)
     except FileNotFoundError:
-        # Reading the umask sets it for an instant; package scripts run one thread.
-        umask = os.umask(0)
-        os.umask(umask)
-        return 0o666 & ~umask
+        return new_file_mode()
 
 
 def discard(temporary: Path) -> None:

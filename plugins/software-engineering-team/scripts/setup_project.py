@@ -15,6 +15,7 @@ import hashlib
 import json
 import os
 import shutil
+import stat
 import subprocess
 import sys
 import tempfile
@@ -505,6 +506,45 @@ def value_deltas(before, after, prefix: str = "") -> list[dict]:
     return []
 
 
+def owner_only_repairs(root: Path, workspace: str) -> dict[Path, int]:
+    """Map tracked files older writers left owner-only to the readable mode they get back.
+
+    Package writers before v0.4.0 replaced files with mkstemp copies and kept
+    their 0600 mode, and writers since then keep an existing file's mode, so
+    those files never widen again. A tracked non-executable file at exactly
+    0600 in the workspace config, the governed vault or setup's managed root
+    files gains the group and other read bits the umask allows, 0644 under a
+    022 or 002 umask, and never a write bit, the only widening the vault guard
+    accepts on Experience state. Windows keeps no POSIX mode, and a umask that
+    allows no read bit changes nothing.
+    """
+    target = 0o600 | (atomic_file.new_file_mode() & 0o044)
+    if os.name == "nt" or target == 0o600:
+        return {}
+    listed = subprocess.run(
+        ["git", "-C", str(root), "ls-files", "--stage", "-z", "--",
+         f"{workspace}/docs", f"{workspace}/config.json",
+         ".gitignore", ".gitattributes"],
+        capture_output=True, check=False,
+    )
+    if listed.returncode:
+        raise SetupError("tracked file listing failed: "
+                         + listed.stderr.decode("utf-8", "replace").strip())
+    repairs: dict[Path, int] = {}
+    for entry in listed.stdout.split(b"\0"):
+        header, _, name = entry.partition(b"\t")
+        if not header.startswith(b"100644 "):
+            continue
+        path = root / name.decode("utf-8")
+        try:
+            identity = path.lstat()
+        except FileNotFoundError:
+            continue
+        if stat.S_ISREG(identity.st_mode) and stat.S_IMODE(identity.st_mode) == 0o600:
+            repairs[path] = target
+    return repairs
+
+
 def bytes_hash(content: bytes) -> str:
     return "sha256:" + hashlib.sha256(content).hexdigest()
 
@@ -763,6 +803,16 @@ def build_plan(args) -> dict:
             "after_hash": bytes_hash(gate_bytes),
         })
 
+    mode_repairs = owner_only_repairs(root, workspace)
+    for target, mode in sorted(mode_repairs.items(), key=lambda item: str(item[0])):
+        assert_not_symlinked(root, target, "file mode repair")
+        operations.append({
+            "action": "update", "surface": "file_mode",
+            "path": target.relative_to(root).as_posix(),
+            "ownership": "tracked_mode",
+            "mode_before": "0600", "mode_after": f"{mode:04o}",
+        })
+
     operations.sort(key=lambda item: (item["path"], item["surface"]))
     return {
         "ok": not blockers,
@@ -785,6 +835,7 @@ def build_plan(args) -> dict:
         "_legacy_contract_deletions": operation_deletions,
         "_gitignore_content": target_ignore,
         "_gitattributes_content": target_attributes,
+        "_mode_repairs": mode_repairs,
     }
 
 
@@ -822,7 +873,7 @@ def rollback_targets(root: Path, plan: dict) -> list[Path]:
     mutable_surfaces = {
         "workspace_config", "vault_payload", "generated_relation_report",
         "legacy_contract_migration",
-        "gitignore", "gitattributes", "portable_gate",
+        "gitignore", "gitattributes", "portable_gate", "file_mode",
     }
     targets = {
         root / item["path"] for item in plan["operations"]
@@ -953,6 +1004,13 @@ class RefreshSnapshot:
         atomic_text(expected, content)
         self.assert_current(owner)
 
+    def chmod(self, path: Path, mode: int) -> None:
+        owner = self.owner(path)
+        self.assert_current(owner)
+        self.written.add(owner)
+        os.chmod(path, mode)
+        self.assert_current(owner)
+
     def delete(self, path: Path) -> None:
         owner = self.owner(path)
         self.assert_current(owner)
@@ -1079,6 +1137,11 @@ def _apply_plan_locked(args, plan: dict) -> tuple[int, dict]:
                 root / ".github" / "agentrof" / "vault-gate.pyz",
                 plan["_gate_bytes"], 0o755,
             )
+        # Writes above keep an existing file's mode, so the repair comes last.
+        for target, mode in sorted(
+            plan["_mode_repairs"].items(), key=lambda item: str(item[0])
+        ):
+            snapshot.chmod(target, mode)
 
         findings = setup_check.closing(root, args.workspace)
         converged = build_plan(args)

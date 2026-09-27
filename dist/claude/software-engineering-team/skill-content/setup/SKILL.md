@@ -97,12 +97,20 @@ placeholder is allowed to reach a consuming repository.
    `git rm -r --cached --quiet -- workspace/docs` and
    `git checkout HEAD -- workspace/docs` once. Never use
    `git add --renormalize` here; it would stage those CRLF copies.
-9. Run the portable vault gate and relevant Requirement compilers. Delivery
-   execution owns its own test and provider gates; setup never emits a
-   template with unresolved command placeholders.
-   Read [ci-bootstrap](references/ci-bootstrap.md) before a Delivery's
-   execution approval, whose pull request check precondition it defines.
-10. Review and commit the exact tracked refresh diff before a workflow handoff.
+9. Return tracked files that package writers before v0.4.0 left owner-only
+   to the mode a checkout gives them. A tracked non-executable file at exactly
+   0600 in `workspace/config.json`, `workspace/docs/`, `.gitignore` or
+   `.gitattributes` gains the group and other read bits the umask allows,
+   0644 under a 022 or 002 umask, and no write bit; `inspect` lists it as a
+   `file_mode` operation and `check` reports it as drift. The vault guard
+   accepts that widening because it changes no byte; every other mode change
+   to compiler-owned Experience state is still restored.
+10. Run the portable vault gate and relevant Requirement compilers. Delivery
+    execution owns its own test and provider gates; setup never emits a
+    template with unresolved command placeholders.
+    Read [ci-bootstrap](references/ci-bootstrap.md) before a Delivery's
+    execution approval, whose pull request check precondition it defines.
+11. Review and commit the exact tracked refresh diff before a workflow handoff.
     Report `requirement` as the next entry. `/requirement` evaluates the
     request-specific impact matrix and routes only the required stages and
     backlog handoff; setup never infers routing from repository history.

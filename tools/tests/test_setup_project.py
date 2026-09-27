@@ -1196,6 +1196,82 @@ class SetupProjectTests(unittest.TestCase):
         finally:
             os.umask(previous)
 
+    @unittest.skipIf(os.name == "nt", "native Windows keeps no POSIX mode")
+    def test_refresh_gives_files_older_writers_left_owner_only_their_read_access_back(self):
+        """Writers before v0.4.0 left files at 0600 and writers since keep an existing mode,
+        so setup check reports a tracked non-executable file at exactly 0600 as drift and
+        apply gives back group and other read. A file narrowed any other way keeps its mode (#285)."""
+        previous = os.umask(0o022)
+        try:
+            with tempfile.TemporaryDirectory() as temporary:
+                project = Path(temporary)
+                init_repository(project)
+                applied = self.run_script(SETUP, "apply", "--project-root", str(project), "--json")
+                self.assertEqual(applied.returncode, 0, applied.stdout + applied.stderr)
+                for command in (["add", "-A"], ["-c", "user.email=test@example.com", "-c", "user.name=Test",
+                                                "commit", "-qm", "setup"]):
+                    subprocess.run(["git", "-C", str(project), *command], check=True)
+                reports = sorted((project / "workspace/docs/maps/_generated").glob("*.md"))
+                owner_only = [project / "workspace/config.json", project / ".gitignore", reports[0]]
+                narrowed = reports[1]
+                for path in owner_only:
+                    path.chmod(0o600)
+                narrowed.chmod(0o640)
+                expected = sorted(path.relative_to(project).as_posix() for path in owner_only)
+
+                checked = self.run_script(SETUP, "check", "--project-root", str(project), "--json")
+                self.assertEqual(checked.returncode, 1, checked.stdout + checked.stderr)
+                self.assertEqual(sorted(finding.removeprefix("managed refresh drift: ")
+                                        for finding in json.loads(checked.stdout)["findings"]), expected)
+                inspected = self.run_script(SETUP, "inspect", "--project-root", str(project), "--json")
+                repairs = [item for item in json.loads(inspected.stdout)["operations"]]
+                self.assertEqual([(item["path"], item["surface"], item["mode_before"], item["mode_after"])
+                                  for item in repairs],
+                                 [(path, "file_mode", "0600", "0644") for path in expected])
+
+                applied = self.run_script(SETUP, "apply", "--project-root", str(project), "--json")
+                self.assertEqual(applied.returncode, 0, applied.stdout + applied.stderr)
+                for path in owner_only:
+                    with self.subTest(repaired=path.name):
+                        self.assertEqual(stat.S_IMODE(path.stat().st_mode), 0o644)
+                self.assertEqual(stat.S_IMODE(narrowed.stat().st_mode), 0o640)
+                checked = self.run_script(SETUP, "check", "--project-root", str(project), "--json")
+                self.assertEqual(checked.returncode, 0, checked.stdout + checked.stderr)
+        finally:
+            os.umask(previous)
+
+    @unittest.skipIf(os.name == "nt", "native Windows keeps no POSIX mode")
+    def test_mode_repair_leaves_untracked_executable_and_outside_files(self):
+        """Only tracked non-executable files in setup's scope at exactly 0600 are repaired. They
+        gain only the read bits the umask allows, never group write, and a umask that allows no
+        read bit repairs nothing (#285)."""
+        previous = os.umask(0o022)
+        try:
+            with tempfile.TemporaryDirectory() as temporary:
+                project = Path(temporary).resolve()
+                init_repository(project)
+                docs = project / "workspace/docs"
+                docs.mkdir(parents=True)
+                note, tool, outside = docs / "note.md", docs / "tool.sh", project / "src.py"
+                for path in (note, tool, outside):
+                    path.write_text("x\n", encoding="utf-8")
+                tool.chmod(0o755)
+                for command in (["add", "-A"], ["-c", "user.email=test@example.com", "-c", "user.name=Test",
+                                                "commit", "-qm", "files"]):
+                    subprocess.run(["git", "-C", str(project), *command], check=True)
+                draft = docs / "draft.md"
+                draft.write_text("x\n", encoding="utf-8")
+                for path in (note, outside, draft):
+                    path.chmod(0o600)
+                tool.chmod(0o700)
+                for umask, repairs in ((0o022, {note: 0o644}), (0o002, {note: 0o644}),
+                                       (0o027, {note: 0o640}), (0o077, {})):
+                    with self.subTest(umask=oct(umask)):
+                        os.umask(umask)
+                        self.assertEqual(setup_module.owner_only_repairs(project, "workspace"), repairs)
+        finally:
+            os.umask(previous)
+
 
 if __name__ == "__main__":
     unittest.main()

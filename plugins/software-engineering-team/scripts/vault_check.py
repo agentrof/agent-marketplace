@@ -30,16 +30,15 @@ import argparse
 import fnmatch
 import hashlib
 import json
-import os
 import re
 import shutil
 import stat
 import sys
-import tempfile
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 
+import atomic_file
 import ba_compile
 from experience_application_check import is_os_metadata_path
 from ba_compile import (
@@ -2890,17 +2889,7 @@ def payload_reconcile(root: Path, policy: dict,
             except OSError:
                 pass
     for path, content in sorted(updates.items(), key=lambda item: str(item[0])):
-        path.parent.mkdir(parents=True, exist_ok=True)
-        fd, raw = tempfile.mkstemp(prefix=f".{path.name}.", dir=path.parent)
-        temporary = Path(raw)
-        try:
-            with os.fdopen(fd, "wb") as handle:
-                handle.write(content)
-                handle.flush()
-                os.fsync(handle.fileno())
-            os.replace(temporary, path)
-        finally:
-            temporary.unlink(missing_ok=True)
+        atomic_file.replace_bytes(path, content)
     return len(updates) + len(deletions)
 
 

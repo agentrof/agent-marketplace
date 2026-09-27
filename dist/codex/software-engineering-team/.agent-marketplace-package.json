@@ -1,5 +1,5 @@
 {
-  "build_id": "snapshot.20ef5bd31dbb0f17ccf5912bbd0232f497413ddf7ab6b18c6d1114657715bd6a",
+  "build_id": "snapshot.fb2a24acaa0770c05fb79ef424c66822fe1706970812d988459cc5ae4bd7aa32",
   "component": "software-engineering-team",
   "delivery_protocol": {
     "read_max": 1,
@@ -50,7 +50,7 @@
     "product.json": "16202a292f9cf80ddbfc1eb1c74a9e7d8f37e96089808d323613405c50d2155c",
     "scripts/architecture_compile.py": "f806085ee543b7371bddd37e04a06687ba8d9a4897fe29ed36d6bd65fd6d3e84",
     "scripts/artifact_check.py": "d95f51158f98e56fab55a083f240a2de612ae5cf5f2b73aeaee848721793e860",
-    "scripts/atomic_file.py": "a7710132bad3598310add0b30dfd0ceb2053af64f653a8cfcf35e1b2d2b50954",
+    "scripts/atomic_file.py": "536487362152319777c32d002785fe49696e043dc24d95e9bb835e920c3b918e",
     "scripts/ba_compile.py": "953bbc848ccf1e698c6e72d4d9985b8387f87e38150e81cee22649de0977d631",
     "scripts/backlog_compile.py": "94c313adcbb6f98a4d3b9ee7486e520caaed4e4a1ebe2400b0658faabdd76678",
     "scripts/delivery_compile.py": "c77282cf2f71bc9d96801938a99b31e79701999c71b43915c65aa56ccef91b26",
@@ -59,8 +59,8 @@
     "scripts/delivery_provider.py": "ca54818997ea7fb5cee0111b3f010ae0e62ee10e3d7ef1a55493a222d482b522",
     "scripts/delivery_result.py": "b6ea9c24289ad9d9e999be98130ee214bced7d6db1ad6def3437a193816774ee",
     "scripts/design_system_compile.py": "531d5bc5da139cc0e5fa614d518d6e66187b336c34b97a031074de862285f613",
-    "scripts/experience_application_check.py": "cf544d5b5ee5713f4b9928bcae6569e67b095ebb1eedeacccce9c151f1802466",
-    "scripts/experience_compile.py": "0ada76a37447f75e7bc0fe99acbadb7616f373c8c3034f309629220743047d1d",
+    "scripts/experience_application_check.py": "ca3f446000c03fd4e87be8591d17845278ef666de4f25bc796e5e136eba5860f",
+    "scripts/experience_compile.py": "1f41f12ce03a47bb73e7a7be662565a8dc21f9c859b5cb9bcf95498136578b2c",
     "scripts/file_issue.py": "9dabf91796c416be8909e517f9a9859faff12c24c868c0c0e037739820bee02e",
     "scripts/file_lock.py": "d7588927231905320708a1ea2e7fc9251dffdf6a66f4a49ff24a3f353b1cc066",
     "scripts/generate_codex_project.py": "ff2c0a8a81c21da2ad416d460276fa50309090d66f5d6b683c86b7ca3679c315",
@@ -75,7 +75,7 @@
     "scripts/setup_project.py": "04e243527f6176592f513a65c6f597b0700db80852ecd4d981eb35f04e133c9f",
     "scripts/stage_package.py": "01a2f84e5e793715d1ff7e18aa79584690ec1ced820d87c5a226e42c4ce87b1e",
     "scripts/team_guard.py": "b001c78b460ed623523738699882061f37ef73e616c7100af84d1f299d5b45c6",
-    "scripts/vault_check.py": "46cc0ab66fae12489bf3731d8dc74abd3a38ceeb92e0a69b6f433a98a5a63ba0",
+    "scripts/vault_check.py": "46887e45af1387fa7cffd5b4b94b14426b0c42e14a351543d6019a706576b171",
     "scripts/vault_gate.py": "2624df7cae40066e1f7ce022dd6f1986841a65c7a28aada0ebfa565aca0832b2",
     "scripts/vault_hook.py": "5c87840006dfec03e0b1a6a5244af72c551e4a9491d5a2d25232a32e76ef0141",
     "skill-content/backlog-plan/SKILL.md": "d063e6cd9a9ab6a5bdfd77fdc6bf77a7b2fef070bc3742cd312a27106c90435a",
@@ -283,6 +283,6 @@
   "schema_version": 3,
   "source_channel": "snapshot",
   "source_commit": "",
-  "source_ref": "snapshot.20ef5bd31dbb0f17ccf5912bbd0232f497413ddf7ab6b18c6d1114657715bd6a",
+  "source_ref": "snapshot.fb2a24acaa0770c05fb79ef424c66822fe1706970812d988459cc5ae4bd7aa32",
   "version": "0.3.2"
 }

@@ -24,6 +24,7 @@ import uuid
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
+import atomic_file
 import file_lock
 import stage_package
 from ba_compile import (
@@ -157,21 +158,8 @@ def fsync_directory(path: Path) -> None:
 
 
 def atomic_write_bytes(path: Path, value: bytes) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    descriptor, raw = tempfile.mkstemp(
-        prefix=f".{path.name}.", suffix=".tmp", dir=path.parent,
-    )
-    temporary = Path(raw)
-    try:
-        with os.fdopen(descriptor, "wb") as stream:
-            stream.write(value)
-            stream.flush()
-            os.fsync(stream.fileno())
-        os.replace(temporary, path)
-        fsync_directory(path.parent)
-    except BaseException:
-        temporary.unlink(missing_ok=True)
-        raise
+    atomic_file.replace_bytes(path, value)
+    fsync_directory(path.parent)
 
 
 def atomic_write_json(path: Path, value: object) -> None:

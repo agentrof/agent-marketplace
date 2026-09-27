@@ -21,6 +21,7 @@ from ba_compile import (
     frontmatter_item, frontmatter_scalar, parse_frontmatter, without_generated_relations,
 )
 import backlog_compile
+import delivery_result
 import operation_compile
 import requirement_compile
 import requirement_route
@@ -571,7 +572,7 @@ def init_delivery(args) -> int:
             errors = handoff_binding_findings(
                 docs, {story: sources[story]["story_path"] for story in stories})
     if errors:
-        print(json.dumps({"ok": False, "errors": errors}, indent=2, ensure_ascii=False))
+        delivery_result.write_line(json.dumps({"ok": False, "errors": errors}, indent=2, ensure_ascii=False))
         return 2
     root.mkdir(parents=True)
     item_links = [link(f"delivery/deliveries/{root.name}/items/{id_slug(story)}/item", f"Implementation work for {story}") for story in stories]
@@ -795,7 +796,7 @@ def check_delivery(args) -> int:
             pass
     status = delivery_state(root, props)[0] if root is not None else props.get("status")
     result = {"ok": not errors, "id": props.get("id"), "status": status, "errors": errors}
-    print(json.dumps(result, indent=2, ensure_ascii=False))
+    delivery_result.write_line(json.dumps(result, indent=2, ensure_ascii=False))
     return 0 if not errors else 1
 
 
@@ -1527,7 +1528,7 @@ def item_worktree_head(worktree: Path) -> tuple[str, list[str]]:
     try:
         top = subprocess.run(
             ["git", "-C", str(worktree), "rev-parse", "--show-toplevel"],
-            text=True, capture_output=True, check=False,
+            encoding="utf-8", capture_output=True, check=False,
         )
         if top.returncode:
             raise RuntimeError(top.stderr.strip() or "not a Git worktree")
@@ -1535,13 +1536,13 @@ def item_worktree_head(worktree: Path) -> tuple[str, list[str]]:
             raise RuntimeError("worktree must be the Item worktree root")
         head = subprocess.run(
             ["git", "-C", str(worktree), "rev-parse", "HEAD"],
-            text=True, capture_output=True, check=False,
+            encoding="utf-8", capture_output=True, check=False,
         )
         if head.returncode or not GIT_OID_RE.fullmatch(head.stdout.strip()):
             raise RuntimeError(head.stderr.strip() or "Item worktree has no valid HEAD")
         dirty = subprocess.run(
             ["git", "-C", str(worktree), "status", "--porcelain", "--untracked-files=all"],
-            text=True, capture_output=True, check=False,
+            encoding="utf-8", capture_output=True, check=False,
         )
         if dirty.returncode:
             raise RuntimeError(dirty.stderr.strip() or "cannot inspect Item worktree")
@@ -1555,7 +1556,7 @@ def item_evidence_file_findings(worktree: Path, head: str, paths: tuple[Path, Pa
     for path in paths:
         tracked = subprocess.run(["git", "--no-replace-objects", "-C", str(worktree), "ls-tree", head, "--",
                                   path.relative_to(worktree).as_posix()],
-                                 text=True, capture_output=True, check=False)
+                                 encoding="utf-8", capture_output=True, check=False)
         if (path.is_symlink() or not path.is_file() or path.stat().st_nlink != 1
                 or tracked.returncode or not tracked.stdout.startswith("100644 blob ")
                 or path.stat().st_mode & 0o111):

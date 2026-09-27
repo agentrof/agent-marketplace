@@ -1176,6 +1176,63 @@ def recorded_pr_url(root: Path, record: str, review_path: Path) -> str:
     return canonical_url
 
 
+def merged_record(root: Path, remote: str, delivery_id: str) -> str | None:
+    """Return the recorded PR head of *delivery_id* that the fetched target merged, or None.
+
+    A merged Delivery drops its Integration ref, so its PR record is then found
+    in the target history by the proof the Delivery compiler uses.
+    """
+    from delivery_compile import merged_pr_record
+    _branch, target = fetch_target(root, remote)
+    return merged_pr_record(root, delivery_id, target)
+
+
+def integration_record(root: Path, remote: str, delivery_id: str) -> str:
+    """Return the Integration tip, or the merged PR record once the merge dropped that ref."""
+    ref = canonical_refs(delivery_id)["integration"]
+    tip = remote_ref_oids(root, remote, [ref])[ref]
+    if tip:
+        return tip
+    record = merged_record(root, remote, delivery_id)
+    if record is None:
+        raise RuntimeError(f"remote ref is absent: {ref}")
+    return record
+
+
+def drop_merged_refs(root: Path, remote: str, delivery_id: str, record: str) -> list[str]:
+    """Delete the refs of a Delivery whose recorded PR head *record* the target merged.
+
+    The target's copy of the package records the closed Delivery, so its
+    Integration ref and the Item refs of its integrated Stories go in one
+    atomic transaction. A cancelled Story keeps its Item ref, the lock that
+    keeps any other Delivery from claiming it again, and a ref that no longer
+    names what the merge holds stays. Returns the deleted branch names.
+    """
+    from delivery_compile import delivery_root, docs_root, split_note
+    deliveries = rel_posix(root, delivery_root(docs_root(root)) / "deliveries")
+    items = {}
+    for path in git_paths(root, "ls-tree", "-r", "-z", "--name-only", record, "--", deliveries + "/"):
+        parts = path[len(deliveries) + 1:].split("/")
+        if (len(parts) == 4 and parts[0].startswith(delivery_id.lower() + "-")
+                and parts[1] == "items" and parts[3] == "item.md"):
+            items[canonical_refs(delivery_id, parts[2].upper())["item"]] = path
+    integration_ref = canonical_refs(delivery_id)["integration"]
+    tips = remote_ref_oids(root, remote, [integration_ref, *items])
+    updates = [(integration_ref, record, "")] if tips[integration_ref] == record else []
+    for ref, path in sorted(items.items()):
+        tip = tips[ref]
+        # A tip this checkout lacks is not in the merge, whose history the target fetch brought.
+        if not tip or subprocess.run(["git", "cat-file", "-e", tip + "^{commit}"], cwd=root,
+                                     capture_output=True, check=False).returncode:
+            continue
+        if (is_ancestor(root, tip, record) and trailer(commit_message(root, tip), "Delivery") == delivery_id
+                and split_remote_note(root, tip, path, split_note)[0].get("status") == "integrated"):
+            updates.append((ref, tip, ""))
+    if updates:
+        atomic_push(root, remote, updates)
+    return [ref.removeprefix("refs/heads/") for ref, _expected, _candidate in updates]
+
+
 def package_paths(root: Path, directory: Path, docs: Path,
                   include_items: bool = True, include_map: bool = True) -> list[str]:
     from experience_application_check import is_os_metadata_path
@@ -1392,7 +1449,7 @@ def open_pr(project_root: Path, delivery_id: str, remote: str = "origin") -> dic
         raise RuntimeError("Delivery package not found")
     review_path = directory / "delivery-review.md"
     refs = canonical_refs(delivery_id)
-    integration_oid = remote_oid(root, remote, refs["integration"])
+    integration_oid = integration_record(root, remote, delivery_id)
     integration_message = commit_message(root, integration_oid)
     record_name = trailer(integration_message, "Record")
     if record_name == "pr-url-recorded-v1":
@@ -1507,6 +1564,9 @@ def merge_pr(project_root: Path, delivery_id: str, remote: str = "origin", *,
     is never interpreted as successful closure. With *verify_only*, as
     verify-merge calls it, no provider call changes the PR: a PR the provider
     does not show as merged is refused, and a merged one gets the same proof.
+    Once the proof holds, the Delivery's refs are dropped, so a later run reads
+    the PR record from the target history and drops whatever an earlier
+    release left behind.
     """
     root = main_worktree(project_root.resolve())
     from delivery_compile import docs_root, find_delivery
@@ -1516,7 +1576,7 @@ def merge_pr(project_root: Path, delivery_id: str, remote: str = "origin", *,
     if directory is None:
         raise RuntimeError("Delivery package not found")
     refs = canonical_refs(delivery_id)
-    integration_oid = remote_oid(root, remote, refs["integration"])
+    integration_oid = integration_record(root, remote, delivery_id)
     integration_message = commit_message(root, integration_oid)
     if trailer(integration_message, "Record") != "pr-url-recorded-v1":
         raise RuntimeError("merge-pr requires the current recorded Delivery PR")
@@ -1573,10 +1633,12 @@ def merge_pr(project_root: Path, delivery_id: str, remote: str = "origin", *,
                if line.startswith("parent ") and " " in line]
     if len(parents) != 2 or parents[1] != integration_oid:
         raise ProviderError("DELIVERY_MERGE_POLICY_INVALID: provider merge is not an exact two-parent merge of the reviewed Integration")
+    dropped = drop_merged_refs(root, remote, delivery_id, integration_oid)
     return {"ok": True, "delivery": delivery_id, "status": "merged",
             "pull_request_url": canonical_url, "merge_commit": merge_oid,
             "target_before": target_before, "target_after": target_after,
-            "reviewed_integration": integration_oid, "refs": short_refs(delivery_id)}
+            "reviewed_integration": integration_oid, "refs": short_refs(delivery_id),
+            "observations": [{"kind": "ref", "target": ref, "value": "absent"} for ref in dropped]}
 
 
 def invalidate_delivery_review(project_root: Path, delivery_id: str,
@@ -2141,24 +2203,29 @@ def refuse_merged_delivery(root: Path, delivery_id: str, remote: str = "origin")
     or a history walk. For one that does, the merge proof decides on the
     freshly fetched target tip: a merge without a coordinator record whose
     second parent is the Delivery's recorded PR head. A merged Delivery is
-    closed, so every verb that would change its refs calls this first. A
-    history that cannot answer the proof, such as a shallow clone, refuses
-    as well.
+    closed, so every verb that would change its refs calls this first. The
+    merge drops the Integration ref, so without one the fetched target alone
+    decides. A history that cannot answer the proof, such as a shallow clone,
+    refuses as well.
     """
     from delivery_compile import docs_root, find_delivery, recorded_pr_merged, split_note
     directory = find_delivery(docs_root(root), delivery_id)
     listed = run_git(root, "ls-remote", remote, canonical_refs(delivery_id)["integration"])
-    if directory is None or not listed:
+    if directory is None:
         return
-    try:
-        review, _ = split_remote_note(root, listed.split()[0], rel_posix(root, directory / "delivery-review.md"),
-                                      split_note)
-    except RuntimeError:
-        return
-    if not review.get("pull_request_url"):
-        return
-    _branch, target = fetch_target(root, remote)
-    if recorded_pr_merged(root, delivery_id, target):
+    if listed:
+        try:
+            review, _ = split_remote_note(root, listed.split()[0], rel_posix(root, directory / "delivery-review.md"),
+                                          split_note)
+        except RuntimeError:
+            return
+        if not review.get("pull_request_url"):
+            return
+        _branch, target = fetch_target(root, remote)
+        merged = recorded_pr_merged(root, delivery_id, target)
+    else:
+        merged = merged_record(root, remote, delivery_id) is not None
+    if merged:
         raise RuntimeError(f"DELIVERY_POST_MERGE_TRANSITION: the target has merged the PR of {delivery_id}, "
                            "so the Delivery is closed")
 
@@ -3150,12 +3217,17 @@ def claim_items(project_root: Path, delivery_id: str, remote: str = "origin") ->
          "Governance-Hash": trailer(fence_message, "Governance-Hash") or "none",
          **carried_fence_barrier(fence_message)})),
                (refs["integration"], integration_oid, marker)]
+    item_paths = sorted(directory.glob("items/*/item.md"))
+    # The Integration holds the current target, so it holds every merged Delivery's package.
+    delivered = merged_story_owners(root, integration_oid, [path.parent.name.upper() for path in item_paths])
     stories = []
-    for item_path in sorted(directory.glob("items/*/item.md")):
+    for item_path in item_paths:
         story = item_path.parent.name.upper()
         item_ref = canonical_refs(delivery_id, story)["item"]
         if remote_has_ref(root, remote, item_ref):
             raise RuntimeError(f"DELIVERY_CLAIM_CONFLICT: story is already claimed: {story}")
+        if story in delivered:
+            raise RuntimeError(f"DELIVERY_CLAIM_CONFLICT: story is already delivered by {delivered[story]}: {story}")
         item_props, item_body = split_note(item_path)
         item_props["integration_base_commit"] = marker
         item_props["source_hash"] = content_hash(item_props, item_body)
@@ -3497,6 +3569,37 @@ def unintegrated_predecessors(root: Path, remote: str, delivery_id: str, directo
     return waiting
 
 
+def merged_story_owners(root: Path, commit: str, stories) -> dict[str, str]:
+    """Map each of *stories* that a merged Delivery delivered to that Delivery.
+
+    A merged Delivery drops its Item refs, and the copy of its package in
+    *commit* records it instead. An Item recorded integrated there counts only
+    when *commit* also holds the merge of that Delivery's recorded PR, so a
+    package that reached the tree any other way proves nothing.
+    """
+    from delivery_compile import delivery_root, docs_root, recorded_pr_merged, split_note
+    wanted = {story_key(story): story for story in stories}
+    if not wanted:
+        return {}
+    deliveries = rel_posix(root, delivery_root(docs_root(root)) / "deliveries")
+    owners: dict[str, str] = {}
+    proven: dict[str, bool] = {}
+    for path in git_paths(root, "ls-tree", "-r", "-z", "--name-only", commit, "--", deliveries + "/"):
+        parts = path[len(deliveries) + 1:].split("/")
+        if len(parts) != 4 or parts[1] != "items" or parts[3] != "item.md" or parts[2] not in wanted:
+            continue
+        owner = "-".join(parts[0].split("-", 2)[:2]).upper()
+        if not DELIVERY_ID_RE.fullmatch(owner):
+            continue
+        if split_remote_note(root, commit, path, split_note)[0].get("status") != "integrated":
+            continue
+        if owner not in proven:
+            proven[owner] = recorded_pr_merged(root, owner, commit)
+        if proven[owner]:
+            owners[wanted[parts[2]]] = owner
+    return owners
+
+
 def unmet_waits_for(root: Path, remote: str, delivery_id: str, integration_oid: str,
                     waits_for) -> tuple[list[str], list[str]]:
     """The Stories one Item waits for that it cannot start after yet.
@@ -3505,10 +3608,12 @@ def unmet_waits_for(root: Path, remote: str, delivery_id: str, integration_oid: 
     and this Delivery's Integration contains that exact tip: the Story's own
     Delivery merged into the target and this Delivery refreshed onto it. The
     tip's Delivery trailer names the package that records the Story's status.
-    The first list names each Story still on its way, with its Delivery. The
-    second names each Story no Delivery is delivering: one never claimed, and
-    one its Delivery cancelled, whose Item ref keeps any other Delivery from
-    claiming it again.
+    A merged Delivery drops its Item refs, so without one the merged package
+    answers: in this Integration the Story is met, only in the target it is on
+    its way. The first list names each Story still on its way, with its
+    Delivery. The second names each Story no Delivery is delivering: one never
+    claimed, and one its Delivery cancelled, whose Item ref keeps any other
+    Delivery from claiming it again.
     """
     from delivery_compile import delivery_root, docs_root, split_note
     stories = sorted(set(waits_for or []))
@@ -3517,11 +3622,20 @@ def unmet_waits_for(root: Path, remote: str, delivery_id: str, integration_oid: 
     deliveries = rel_posix(root, delivery_root(docs_root(root)) / "deliveries")
     item_refs = {story: canonical_refs(delivery_id, story)["item"] for story in stories}
     tips = remote_ref_oids(root, remote, list(item_refs.values()))
+    unclaimed = [story for story in stories if not tips[item_refs[story]]]
+    delivered = merged_story_owners(root, integration_oid, unclaimed)
+    arriving = {}
+    if len(delivered) < len(unclaimed):
+        _branch, target = fetch_target(root, remote)
+        arriving = merged_story_owners(root, target, [story for story in unclaimed if story not in delivered])
     waiting, undeliverable = [], []
     for story in stories:
         tip = tips[item_refs[story]]
         if not tip:
-            undeliverable.append(f"{story} was never claimed")
+            if story in arriving:
+                waiting.append(f"{story} from {arriving[story]}")
+            elif story not in delivered:
+                undeliverable.append(f"{story} was never claimed")
             continue
         if subprocess.run(["git", "cat-file", "-e", tip + "^{commit}"], cwd=root,
                           capture_output=True, check=False).returncode:

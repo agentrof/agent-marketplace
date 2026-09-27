@@ -296,10 +296,9 @@ class DeliveryGitTests(unittest.TestCase):
                 self.repository = "agentrof/example"
 
             def _head(self) -> str:
-                return delivery_git.remote_oid(
-                    self.root, self.remote,
-                    delivery_git.canonical_refs("DLV-001")["integration"],
-                )
+                # GitHub keeps a merged PR's head after the merge drops its branch.
+                ref = delivery_git.canonical_refs("DLV-001")["integration"]
+                return delivery_git.remote_ref_oids(self.root, self.remote, [ref])[ref] or state["head"]
 
             def _record(self, head: str, base: str) -> dict:
                 return {
@@ -355,6 +354,7 @@ class DeliveryGitTests(unittest.TestCase):
                 delivery_git.atomic_push(self.root, self.remote, [(target_ref, target, merge)])
                 state["merged"] = True
                 state["merge"] = merge
+                state["head"] = head_oid
                 return {"url": url, "head": head_oid, "merge_commit": merge}
 
         return FakeProvider
@@ -1483,7 +1483,10 @@ class DeliveryGitTests(unittest.TestCase):
             rerecorded = delivery_git.open_pr(project, "DLV-001")
             self.assertTrue(rerecorded["adopted"])
             self.assertEqual(published_status(), "cancelled")
-            delivery_git.merge_pr(project, "DLV-001")
+            merged = delivery_git.merge_pr(project, "DLV-001")
+        # The merge drops the Integration ref; the cancelled Story keeps its Item ref, its claim lock.
+        self.assertEqual(merged["observations"], [{"kind": "ref", "target": "agentrof/deliveries/dlv-001", "value": "absent"}])
+        self.assertEqual(self.coordination_branches(project), ["agentrof/fence", "agentrof/items/auth-01"])
         # The PR head keeps the cancellation Review and adds only the PR URL. The
         # local Review still holds the approval that the cancellation replaced.
         props, body = delivery_git.split_remote_note(
@@ -1614,16 +1617,17 @@ class DeliveryGitTests(unittest.TestCase):
     def test_a_merged_delivery_refuses_every_change(self):
         """Once the target holds a merge of the recorded PR head, the Delivery is closed: a verb
         that would change it refuses with DELIVERY_POST_MERGE_TRANSITION and moves no ref, while
-        open-pr and merge-pr still report the PR and its merge."""
+        open-pr and merge-pr still report the PR and its merge. The merge dropped the Integration
+        and Item refs, so the target history alone answers."""
         temporary, project, _docs, _product_tip, _intent = self.prepare_pr_intent()
         self.addCleanup(remove_temporary, temporary)
         provider = self.fake_provider_type({})
         with mock.patch("delivery_provider.GitHubProvider", provider):
             url = delivery_git.open_pr(project, "DLV-001")["pull_request_url"]
             merged = delivery_git.merge_pr(project, "DLV-001")
-        refs = delivery_git.canonical_refs("DLV-001", "AUTH-01")
-        names = ("fence", "integration", "item")
-        before = [delivery_git.remote_oid(project, "origin", refs[name]) for name in names]
+        refs = [delivery_git.canonical_refs("DLV-001", "AUTH-01")[name] for name in ("fence", "integration", "item")]
+        before = delivery_git.remote_ref_oids(project, "origin", refs)
+        self.assertEqual([bool(before[ref]) for ref in refs], [True, False, False])
         for verb, change in (
             ("invalidate-delivery-review", lambda: delivery_git.invalidate_delivery_review(
                 project, "DLV-001", "REVIEW_FINDING", "sha256:" + "0" * 64)),
@@ -1636,10 +1640,61 @@ class DeliveryGitTests(unittest.TestCase):
                 self.assertEqual(self.refused_finding(change), (
                     "DELIVERY_POST_MERGE_TRANSITION",
                     "the target has merged the PR of DLV-001, so the Delivery is closed"))
-                self.assertEqual([delivery_git.remote_oid(project, "origin", refs[name]) for name in names], before)
+                self.assertEqual(delivery_git.remote_ref_oids(project, "origin", refs), before)
         with mock.patch("delivery_provider.GitHubProvider", provider):
             self.assertEqual(delivery_git.open_pr(project, "DLV-001")["pull_request_url"], url)
             self.assertEqual(delivery_git.merge_pr(project, "DLV-001")["merge_commit"], merged["merge_commit"])
+
+    @staticmethod
+    def coordination_branches(project: Path) -> list[str]:
+        """The coordinator branches the test remote holds."""
+        listed = delivery_git.run_git(project, "ls-remote", "origin", "refs/heads/agentrof/*")
+        return sorted(line.split("\t")[1].removeprefix("refs/heads/") for line in listed.splitlines())
+
+    def verify_merge_command(self, project: Path, provider) -> tuple[int, dict]:
+        output = io.StringIO()
+        with mock.patch("delivery_provider.GitHubProvider", provider), contextlib.redirect_stdout(output):
+            exit_code = delivery_git.main(["verify-merge", "--project-root", str(project), "--delivery", "DLV-001"])
+        return exit_code, json.loads(output.getvalue())
+
+    def test_merge_leaves_only_the_fence_and_verify_merge_still_proves_it(self):
+        """merge-pr deletes the Integration ref and the integrated Item ref once it proves the
+        merge and reports both absent, so only the Fence stays. verify-merge then finds the PR
+        record in the target history, reports the same merge and has nothing left to drop (#286)."""
+        temporary, project, _docs, _product_tip, _intent = self.prepare_pr_intent()
+        self.addCleanup(remove_temporary, temporary)
+        provider = self.fake_provider_type({})
+        with mock.patch("delivery_provider.GitHubProvider", provider):
+            delivery_git.open_pr(project, "DLV-001")
+            merged = delivery_git.merge_pr(project, "DLV-001")
+        self.assertEqual(merged["observations"], [{"kind": "ref", "target": ref, "value": "absent"}
+                                                  for ref in ("agentrof/deliveries/dlv-001", "agentrof/items/auth-01")])
+        self.assertEqual(self.coordination_branches(project), ["agentrof/fence"])
+        exit_code, verified = self.verify_merge_command(project, provider)
+        self.assertEqual((exit_code, verified["ok"]), (0, True))
+        self.assertIn({"kind": "ref", "target": "merge_commit", "value": merged["merge_commit"]}, verified["observations"])
+        self.assertIn({"kind": "ref", "target": "reviewed_integration", "value": merged["reviewed_integration"]},
+                      verified["observations"])
+        self.assertEqual([item for item in verified["observations"] if item["value"] == "absent"], [])
+        self.assertEqual(self.coordination_branches(project), ["agentrof/fence"])
+
+    def test_verify_merge_drops_the_refs_an_earlier_merge_left(self):
+        """A PR that merged while the coordinator still kept a merged Delivery's refs, as every
+        release before #286 did, loses its Integration and integrated Item refs to verify-merge."""
+        temporary, project, _docs, _product_tip, _intent = self.prepare_pr_intent()
+        self.addCleanup(remove_temporary, temporary)
+        provider = self.fake_provider_type({})
+        with mock.patch("delivery_provider.GitHubProvider", provider):
+            url = delivery_git.open_pr(project, "DLV-001")["pull_request_url"]
+        head = delivery_git.remote_oid(project, "origin", delivery_git.canonical_refs("DLV-001")["integration"])
+        provider(project).merge_commit(url, head)
+        self.assertEqual(self.coordination_branches(project),
+                         ["agentrof/deliveries/dlv-001", "agentrof/fence", "agentrof/items/auth-01"])
+        exit_code, verified = self.verify_merge_command(project, provider)
+        self.assertEqual((exit_code, verified["ok"]), (0, True))
+        self.assertEqual([item["target"] for item in verified["observations"] if item["value"] == "absent"],
+                         ["agentrof/deliveries/dlv-001", "agentrof/items/auth-01"])
+        self.assertEqual(self.coordination_branches(project), ["agentrof/fence"])
 
     def test_a_published_cancellation_refuses_a_second_cancellation(self):
         """cancel-delivery judges a Delivery by its published status: the local delivery.md keeps
@@ -3960,6 +4015,70 @@ class DeliveryGitTests(unittest.TestCase):
         delivery_git.claim_items(project, "DLV-001")
         delivery_git.cancel_delivery(project, "DLV-001", "Authentication moves to a later Delivery")
         self.refuse_waiting_start(project, project, undeliverable("AUTH-01 was cancelled with DLV-001"))
+
+    def merge_waited_for_delivery(self, project: Path) -> dict:
+        """Deliver AUTH-01 of the DLV-001 claim_waiting_deliveries built and merge its PR through merge-pr."""
+        docs = project / "workspace" / "docs"
+        active = delivery_git.start_item(project, "DLV-001", "AUTH-01")
+        self.commit_item_product_change(active["worktree"], "def authenticate():\n    return 'v1'\n")
+        self.assertEqual(self.approve_item_evidence(active["worktree"]), 0)
+        delivery_git.push_item(project, "DLV-001", "AUTH-01")
+        integrated = delivery_git.integrate_item(project, "DLV-001", "AUTH-01")
+        self.assertEqual(delivery_compile.approve_review(type("Args", (), {
+            "docs": str(docs), "delivery": "DLV-001", "reviewed_commit": integrated["integration"],
+            "reviewed_integration_commit": integrated["integration"]})), 0)
+        delivery_git.publish_delivery_review(project, "DLV-001")
+        delivery_git.prepare_pr_creation(project, "DLV-001")
+        with mock.patch("delivery_provider.GitHubProvider", self.fake_provider_type({})):
+            delivery_git.open_pr(project, "DLV-001")
+            return delivery_git.merge_pr(project, "DLV-001")
+
+    def test_a_waits_for_story_whose_delivery_merged_is_met_from_its_package(self):
+        """DLV-001 merged and dropped the Item ref of AUTH-01, so its package answers for AUTH-02
+        of DLV-002: on its way while only the target holds the merge, met once DLV-002 refreshed
+        onto it. The PR head alone holds the package but not the merge, so it proves nothing (#286)."""
+        project = self.claim_waiting_deliveries()
+        merged = self.merge_waited_for_delivery(project)
+        self.assertEqual(self.coordination_branches(project),
+                         ["agentrof/deliveries/dlv-002", "agentrof/fence", "agentrof/items/auth-02"])
+        self.assertEqual(delivery_git.merged_story_owners(project.resolve(), merged["reviewed_integration"], ["AUTH-01"]), {})
+        integration_ref = delivery_git.canonical_refs("DLV-002")["integration"]
+        before_refresh = delivery_git.remote_oid(project, "origin", integration_ref)
+        self.assertEqual(delivery_git.unmet_waits_for(project.resolve(), "origin", "DLV-002", before_refresh, ["AUTH-01"]),
+                         (["AUTH-01 from DLV-001"], []))
+        delivery_git.refresh_target(project, "DLV-002")
+        refreshed = delivery_git.remote_oid(project, "origin", integration_ref)
+        self.assertEqual(delivery_git.unmet_waits_for(project.resolve(), "origin", "DLV-002", refreshed, ["AUTH-01"]),
+                         ([], []))
+        started = delivery_git.start_item(project, "DLV-002", "AUTH-02")
+        self.assertEqual((started["story"], started["slot"]), ("AUTH-02", "001"))
+
+    def test_claim_refuses_a_story_a_merged_delivery_delivered(self):
+        """A merged Delivery keeps no Item ref, so claim-items finds AUTH-01 integrated in the
+        merged package of DLV-001 and refuses it to a later Delivery instead of claiming it again (#286)."""
+        project = self.claim_waiting_deliveries()
+        self.merge_waited_for_delivery(project)
+        docs = project / "workspace" / "docs"
+        init = type("Args", (), {"docs": str(docs), "id": "DLV-003", "slug": "again", "goal": "Deliver AUTH-01 again",
+                                 "outcome": None, "target_branch": "main", "story": ["AUTH-01"]})
+        self.assertEqual(delivery_compile.init_delivery(init), 0)
+        self.assertEqual(delivery_compile.approve_scope(type("Args", (), {"docs": str(docs), "delivery": "DLV-003"})), 0)
+        target = delivery_git.remote_oid(project, "origin", "refs/heads/main")
+        package = delivery_compile.find_delivery(docs, "DLV-003")
+        reservation = delivery_git.commit_tree(
+            project, target, delivery_git.package_paths(project, package, docs, include_map=False),
+            "Reserve Delivery DLV-003", {"Record": "delivery-reservation-v1", "Protocol": "1", "Delivery": "DLV-003",
+                                         "Slug": "again", "Target": target},
+            delivery_projections=True)
+        delivery_git.atomic_push(project, "origin", [(delivery_git.canonical_refs("DLV-003")["integration"], "", reservation)])
+        self.author_execution_topology(docs, "DLV-003")
+        self.assertEqual(delivery_compile.approve_execution(type("Args", (), {"docs": str(docs), "delivery": "DLV-003"})), 0)
+        delivery_git.publish_execution_plan(project, "DLV-003")
+        delivery_git.refresh_target(project, "DLV-003")
+        before = delivery_git.run_git(project, "ls-remote", "origin")
+        self.assertEqual(self.refused_finding(lambda: delivery_git.claim_items(project, "DLV-003")),
+                         ("DELIVERY_CLAIM_CONFLICT", "story is already delivered by DLV-001: AUTH-01"))
+        self.assertEqual(delivery_git.run_git(project, "ls-remote", "origin"), before)
 
     def test_worktree_file_holds_its_blob_as_git_stores_it(self):
         """A worktree file holds a committed blob when Git would store it as that blob. A checkout

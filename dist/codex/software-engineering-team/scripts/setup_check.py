@@ -308,6 +308,17 @@ def legacy_experience_findings(docs: Path) -> list[str]:
     return sorted(set(findings))
 
 
+def listed_paths(listing: bytes) -> list[str]:
+    """Name each path of a NUL-separated Git listing as Git holds it.
+
+    Without -z Git quotes a name holding a control character, a double quote
+    or a backslash, and under its default core.quotePath any byte outside
+    ASCII, so a finding would name the quoted form instead of the file.
+    """
+    return [item.decode("utf-8", "backslashreplace")
+            for item in listing.split(b"\0") if item]
+
+
 def closing(root: Path, workspace: str) -> list[str]:
     work = root / workspace
     config = read(work / "config.json")
@@ -365,30 +376,30 @@ def closing(root: Path, workspace: str) -> list[str]:
         if ignored.returncode != 0:
             findings.append(f"local projection path is not ignored: {relative}")
     tracked_local = subprocess.run(
-        ["git", "ls-files", "--", *local_roots()],
-        cwd=root, capture_output=True, text=True, check=False,
+        ["git", "ls-files", "-z", "--", *local_roots()],
+        cwd=root, capture_output=True, check=False,
     )
     if tracked_local.returncode != 0:
         findings.append("tracked local projection check failed")
-    elif tracked_local.stdout.strip():
+    elif tracked_local.stdout:
         findings.append(
             "local runtime or projection files are force-added: "
-            + ", ".join(tracked_local.stdout.splitlines())
+            + ", ".join(listed_paths(tracked_local.stdout))
         )
     tracked_plugins = subprocess.run(
         [
-            "git", "ls-files", "--",
+            "git", "ls-files", "-z", "--",
             f"{workspace}/docs/.obsidian/community-plugins.json",
             f"{workspace}/docs/.obsidian/plugins",
         ],
-        cwd=root, capture_output=True, text=True, check=False,
+        cwd=root, capture_output=True, check=False,
     )
     if tracked_plugins.returncode != 0:
         findings.append("local Obsidian plugin projection tracking check failed")
-    elif tracked_plugins.stdout.strip():
+    elif tracked_plugins.stdout:
         findings.append(
             "package-projected local Obsidian plugin files are tracked: "
-            + ", ".join(tracked_plugins.stdout.splitlines())
+            + ", ".join(listed_paths(tracked_plugins.stdout))
         )
     for relative in (
         "docs/.obsidian/app.json", "docs/.obsidian/appearance.json",

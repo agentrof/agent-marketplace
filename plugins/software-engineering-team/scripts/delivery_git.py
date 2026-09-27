@@ -661,6 +661,21 @@ def active_writer_receipt(root: Path, delivery_id: str, story_id: str,
     return receipt
 
 
+def git_paths(root: Path, *args: str, failure: str | None = None) -> list[str]:
+    """Run a Git listing that ends each path with NUL and return each path as Git holds it.
+
+    Without -z Git quotes a name holding a control character, a double quote or a
+    backslash, and under its default core.quotePath any byte outside ASCII. A
+    text-mode pipe would also turn a carriage return into a newline. So the paths
+    come from the NUL-separated bytes, decoded as UTF-8.
+    """
+    result = subprocess.run(["git", *args], cwd=root, capture_output=True, check=False)
+    if result.returncode:
+        raise RuntimeError(result.stderr.decode("utf-8", "replace").strip()
+                           or failure or f"git {' '.join(args)} failed")
+    return [path.decode("utf-8") for path in result.stdout.split(b"\0") if path]
+
+
 def run_git(root: Path, *args: str) -> str:
     result = subprocess.run(["git", *args], cwd=root, text=True,
                             capture_output=True, check=False)
@@ -1710,13 +1725,9 @@ def revert_merge_candidate(root: Path, base: str, merge_oid: str,
             mode, _kind, oid = metadata.split()
             return mode, oid
 
-        changed = subprocess.run(
-            ["git", "diff", "--name-only", first_parent, merge_oid], cwd=root,
-            text=True, capture_output=True, check=False,
-        )
-        if changed.returncode:
-            raise RuntimeError(changed.stderr.strip() or "cannot inspect Item merge")
-        for path in (value for value in changed.stdout.splitlines() if value):
+        changed = git_paths(root, "diff", "--no-renames", "--name-only", "-z", first_parent, merge_oid,
+                            failure="cannot inspect Item merge")
+        for path in changed:
             parent_entry = entry(first_parent, path)
             merge_entry = entry(merge_oid, path)
             current_entry = entry(base, path)
@@ -1728,7 +1739,7 @@ def revert_merge_candidate(root: Path, base: str, merge_oid: str,
                 )
             if parent_entry is None:
                 update = subprocess.run(
-                    ["git", "update-index", "--remove", "--", path],
+                    ["git", "update-index", "--force-remove", "--", path],
                     cwd=root, env=env, text=True, capture_output=True, check=False,
                 )
             else:
@@ -2106,13 +2117,8 @@ def target_impact_hash(delivery_id: str, previous_target: str, target: str,
 
 def _changed_target_paths(root: Path, previous_target: str, target: str) -> list[str]:
     """List normalized target paths, fetching the target objects when needed."""
-    result = subprocess.run(
-        ["git", "diff", "--name-only", previous_target, target], cwd=root,
-        text=True, capture_output=True, check=False,
-    )
-    if result.returncode:
-        raise RuntimeError(result.stderr.strip() or "cannot inspect target drift")
-    return sorted(path for path in result.stdout.splitlines() if path)
+    return sorted(git_paths(root, "diff", "--no-renames", "--name-only", "-z", previous_target, target,
+                            failure="cannot inspect target drift"))
 
 
 def fetch_target(root: Path, remote: str) -> tuple[str, str]:
@@ -4012,7 +4018,7 @@ def push_item(project_root: Path, delivery_id: str, story_id: str,
     relative_item = rel_posix(root, directory / "items" / story_key(story_id) / "item.md")
     relative_review = rel_posix(root, directory / "items" / story_key(story_id) / "code-review.md")
     relative_verification = rel_posix(root, directory / "items" / story_key(story_id) / "verification.md")
-    committed_changes = set(run_git(root, "diff", "--name-only", item_oid, product_tip).splitlines())
+    committed_changes = set(git_paths(root, "diff", "--name-only", "-z", item_oid, product_tip))
     if not committed_changes:
         raise RuntimeError("DELIVERY_ITEM_NOT_READY: push-item requires a committed product/test change")
     # A converged Item is checked against the Integration's own line, which

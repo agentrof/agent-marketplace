@@ -2438,6 +2438,38 @@ class VaultHookShellContractTests(unittest.TestCase):
             finally:
                 self.hook.cleanup_guard_state(primary, recovery)
 
+    @unittest.skipIf(os.name == "nt", "native Windows keeps no POSIX read bits")
+    def test_widening_an_owner_only_experience_file_is_no_protected_change(self):
+        """Writers before v0.4.0 left Experience state at 0600. Adding group or other read,
+        as setup's refresh or a chmod does, keeps every byte and is accepted. Any other mode
+        change to the file is still restored (#285)."""
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            docs, _config = self.project(root)
+            ledger = docs / "experience-design" / "_ledger" / "application-revisions.json"
+            ledger.parent.mkdir(parents=True)
+            ledger.write_text("{}\n", encoding="utf-8")
+            payload = self.hook.normalize(self.payload(
+                root, "chmod 644 workspace/docs/experience-design/_ledger/application-revisions.json"))
+            primary = self.hook.inventory_path(payload)
+            recovery = self.hook.recovery_path(payload)
+            for before, after, verdict in (
+                (0o600, 0o644, 0), (0o600, 0o640, 0),
+                (0o600, 0o664, 2), (0o600, 0o700, 2), (0o600, 0o444, 2),
+                (0o644, 0o600, 2), (0o640, 0o644, 2),
+            ):
+                with self.subTest(before=oct(before), after=oct(after)):
+                    ledger.chmod(before)
+                    try:
+                        self.assertEqual(self.hook.shell_snapshot(payload), 0)
+                        ledger.chmod(after)
+                        with redirect_stderr(io.StringIO()):
+                            self.assertEqual(self.hook.shell_verify(payload), verdict)
+                    finally:
+                        self.hook.cleanup_guard_state(primary, recovery)
+                    self.assertEqual(stat.S_IMODE(ledger.stat().st_mode), after if verdict == 0 else before)
+                    self.assertEqual(ledger.read_text(encoding="utf-8"), "{}\n")
+
     def test_missing_recovery_capsule_revokes_primary_writer_grant(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)

@@ -1,5 +1,5 @@
 {
-  "build_id": "snapshot.d6fee9696e450cc5d308ec08e69363559527a26cf778ef8cb479ff4870fc8267",
+  "build_id": "snapshot.13bb6865085240dc8b20c2ceae965486eab6a9c9b28bd432fe96f2cf1f175036",
   "component": "software-engineering-team",
   "delivery_protocol": {
     "read_max": 1,
@@ -50,7 +50,7 @@
     "product.json": "16202a292f9cf80ddbfc1eb1c74a9e7d8f37e96089808d323613405c50d2155c",
     "scripts/architecture_compile.py": "f806085ee543b7371bddd37e04a06687ba8d9a4897fe29ed36d6bd65fd6d3e84",
     "scripts/artifact_check.py": "d95f51158f98e56fab55a083f240a2de612ae5cf5f2b73aeaee848721793e860",
-    "scripts/atomic_file.py": "e344f194df592cf648b406f9f7b10b4a11a8ca2a49a1e604c90d27ad84765446",
+    "scripts/atomic_file.py": "91ff2cafb430fcf3e174f7310fb8eff2442fac334e27c3b2fbfc92b5b9f90c0c",
     "scripts/ba_compile.py": "953bbc848ccf1e698c6e72d4d9985b8387f87e38150e81cee22649de0977d631",
     "scripts/backlog_compile.py": "94c313adcbb6f98a4d3b9ee7486e520caaed4e4a1ebe2400b0658faabdd76678",
     "scripts/delivery_compile.py": "19c349851ce59275f88ec6e0e2c3d5e7152c8d4a111246e533bc176e5401cc79",
@@ -72,12 +72,12 @@
     "scripts/requirement_compile.py": "695c35961327485ba0dcd35401669a8196653c21c1c434a58b2651a17143df72",
     "scripts/requirement_route.py": "df313a76c6d6028ba7ab261dc643f4ac9208e586b71475562dba72824dbfb55c",
     "scripts/setup_check.py": "76b0dadc1d4a2e7c12d6233b2cad6bd098ff2dc053a0351aaf2d0a642317a025",
-    "scripts/setup_project.py": "04e243527f6176592f513a65c6f597b0700db80852ecd4d981eb35f04e133c9f",
+    "scripts/setup_project.py": "b3c8da81a64ec8658a13724bb5e26790f20f186da30e2757aaba3986e64636d0",
     "scripts/stage_package.py": "01a2f84e5e793715d1ff7e18aa79584690ec1ced820d87c5a226e42c4ce87b1e",
     "scripts/team_guard.py": "b001c78b460ed623523738699882061f37ef73e616c7100af84d1f299d5b45c6",
     "scripts/vault_check.py": "46887e45af1387fa7cffd5b4b94b14426b0c42e14a351543d6019a706576b171",
     "scripts/vault_gate.py": "2624df7cae40066e1f7ce022dd6f1986841a65c7a28aada0ebfa565aca0832b2",
-    "scripts/vault_hook.py": "5c87840006dfec03e0b1a6a5244af72c551e4a9491d5a2d25232a32e76ef0141",
+    "scripts/vault_hook.py": "0d068d49930bc85f59d47d74884ea16e35b3c15e0e89f79eb12a6ed736e0d0b6",
     "skill-content/backlog-plan/SKILL.md": "d063e6cd9a9ab6a5bdfd77fdc6bf77a7b2fef070bc3742cd312a27106c90435a",
     "skill-content/business-analysis/SKILL.md": "a2e836689bfafa46817564bc1744215d190e54adb54ebcef989513676969d76d",
     "skill-content/business-analysis/data/space-schema.json": "8bec0bb3025459143f52a8255d542ee52fcf99217e8c61fb770b407f1caa0936",
@@ -166,7 +166,7 @@
     "skill-content/requirements-analysis/references/nfr-elicitation.md": "154730b8b546e3e0e538e6eb3dab21b1304d5a2657148352cda02e19e0c2ecb8",
     "skill-content/requirements-analysis/references/research-methods.md": "fa08b909a2863a7162a9199f21c234c3c58da40afb3cb31e5ad05a109fdc172f",
     "skill-content/requirements-analysis/references/space-standard.md": "cc8eab275082721a22c16d4d0d545e62faefdab626e7cdfefffc899f8abb28c8",
-    "skill-content/setup/SKILL.md": "1b5cb853865f7559203b82b0c5b94b5b09c7a1b596439a066ed8947a0a780704",
+    "skill-content/setup/SKILL.md": "50efd950924a1afc53bf8537fed01f6723d9600a3c00e664b666fb665ed92863",
     "skill-content/setup/references/ci-bootstrap.md": "315956adbe1f396a7886d4fa2125a9fffc03259a3d3897bf4db435caa73bdb1e",
     "skill-content/sketch/SKILL.md": "998f77390ae24f85ff6cff4b22fedf4d0cbaf7ae581a2a089261b1a52abed606",
     "skill-content/software-architecture/SKILL.md": "5944f0a6c14b43a82ae5c9e212b8b2db9ca5607522533c3e6cddfbc947158564",
@@ -283,6 +283,6 @@
   "schema_version": 3,
   "source_channel": "snapshot",
   "source_commit": "",
-  "source_ref": "snapshot.d6fee9696e450cc5d308ec08e69363559527a26cf778ef8cb479ff4870fc8267",
+  "source_ref": "snapshot.13bb6865085240dc8b20c2ceae965486eab6a9c9b28bd432fe96f2cf1f175036",
   "version": "0.4.0"
 }

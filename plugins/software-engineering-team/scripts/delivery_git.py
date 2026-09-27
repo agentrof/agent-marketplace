@@ -636,17 +636,19 @@ def worktree_holds_blob(worktree: Path, relative: str, oid: str) -> bool:
     return run_git(worktree, "hash-object", "--no-filters", "--", str(path)) == oid
 
 
+def require_candidate_holds_worktree(root: Path, path: Path, candidate_oid: str) -> None:
+    """Prove that the candidate already contains the worktree's bytes, so moving there loses none."""
+    if worktree_pending_paths(root, path):
+        differing = sorted(git_paths(path, "diff", "--name-only", "-z", candidate_oid, "--",
+                                     failure="cannot compare Item worktree to candidate"))
+        if differing:
+            raise RuntimeError("DELIVERY_WORKTREE_UNSAFE: the Item candidate does not contain the current worktree "
+                               "bytes of " + ", ".join(differing))
+
+
 def advance_worktree_to_candidate(root: Path, path: Path, candidate_oid: str) -> None:
     """Move a worktree only after proving the candidate already contains its bytes."""
-    if worktree_pending_paths(root, path):
-        comparison = subprocess.run(
-            ["git", "-C", str(path), "diff", "--quiet", candidate_oid, "--"],
-            encoding="utf-8", capture_output=True, check=False,
-        )
-        if comparison.returncode == 1:
-            raise RuntimeError("DELIVERY_WORKTREE_UNSAFE: published Item candidate does not contain the current worktree bytes")
-        if comparison.returncode:
-            raise RuntimeError(comparison.stderr.strip() or "cannot compare Item worktree to candidate")
+    require_candidate_holds_worktree(root, path, candidate_oid)
     run_git(root, "-C", str(path), "reset", "--hard", candidate_oid)
 
 
@@ -4101,6 +4103,9 @@ def push_item(project_root: Path, delivery_id: str, story_id: str,
          "Item-Plan-Hash": str(item_props.get("item_plan_hash", "none")),
          "Writer-Epoch": str(receipt["writer_epoch"]), "Slot": slot},
     )
+    # The worktree moves to the candidate after the push, so prove first that the move keeps
+    # every worktree byte; a refusal after the push would leave the Item ref already published.
+    require_candidate_holds_worktree(root, worktree, candidate)
     atomic_push(root, remote, [(refs["item"], item_oid, candidate), (slot_ref, slot_oid, candidate)])
     if remote_oid(root, remote, refs["item"]) != candidate or remote_oid(root, remote, slot_ref) != candidate:
         raise RuntimeError("Item evidence refs did not converge to the published candidate")

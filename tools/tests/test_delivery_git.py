@@ -4094,6 +4094,34 @@ class DeliveryGitTests(unittest.TestCase):
             self.assertEqual((props["title"], body), ("Oturum açma, güvenlik", "Şifre ve ğ, ı, ö harfleri."))
             self.assertEqual(pending, {"notes/şifre.md"})
 
+    def test_command_results_reach_a_windows_code_page_stdout_as_utf8(self):
+        """A redirected stdout on native Windows encodes in the ANSI code page, cp1252 on the
+        runner, which lacks ş, ğ and ı. The coordinator's result envelope and the compiler's
+        JSON results go out as UTF-8 bytes, so a result that names such a letter reaches its
+        reader instead of raising after the command ran (#247)."""
+        def windows_stdout() -> io.TextIOWrapper:
+            return io.TextIOWrapper(io.BytesIO(), encoding="cp1252", errors="strict")
+
+        with temporary_directory() as temporary:
+            docs = Path(temporary) / "şifre" / "workspace" / "docs"
+            item = docs / "delivery" / "deliveries" / "dlv-001-auth" / "items" / "auth-01" / "item.md"
+            item.parent.mkdir(parents=True)
+            (item.parents[2] / "delivery.md").write_bytes(b"---\ntype: delivery\nid: DLV-001\n---\n\n# Delivery\n")
+            item.write_bytes(b"---\ntype: note\n---\n\n# Item\n")
+            stdout = windows_stdout()
+            with mock.patch.object(sys, "stdout", stdout):
+                code = delivery_compile.check_delivery(type("Args", (), {"docs": str(docs), "delivery": "DLV-001"}))
+            result = json.loads(stdout.buffer.getvalue().decode("utf-8"))
+            self.assertEqual(code, 1)
+            self.assertIn(f"{item.resolve()} type must be delivery-item", result["errors"])
+        stdout = windows_stdout()
+        with mock.patch.object(delivery_git, "preflight",
+                               return_value={"ok": False, "errors": ["DELIVERY_INPUT_INVALID: şifre, ğ, ı"]}), \
+                mock.patch.object(sys, "stdout", stdout):
+            code = delivery_git.main(["preflight", "--delivery", "DLV-001"])
+        envelope = json.loads(stdout.buffer.getvalue().decode("utf-8"))
+        self.assertEqual((code, [finding["message"] for finding in envelope["findings"]]), (1, ["şifre, ğ, ı"]))
+
     def test_delivery_scripts_name_utf8_for_every_process_pipe(self):
         """Every process pipe in the Delivery scripts that carries text names UTF-8, and none takes
         text on stdin. Without an encoding a pipe reads and writes the locale's code page, the

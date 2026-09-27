@@ -2047,7 +2047,7 @@ def append_nav(path: Path, nav_links: list[str]) -> None:
     updated = body + "\n\n" + NAV_MARKER + "\n" + "\n".join(
         f"- {link}" for link in nav_links) + "\n"
     if updated != text:
-        path.write_text(updated, encoding="utf-8")
+        path.write_bytes(updated.encode("utf-8"))
 
 
 def ensure_home_map(docs: Path) -> None:
@@ -2057,7 +2057,7 @@ def ensure_home_map(docs: Path) -> None:
     text = home.read_text(encoding="utf-8")
     link = "[[maps/backlog|Backlog map]]"
     if not re.search(r"\[\[maps/backlog(?:\|[^\]\n]+)?\]\]", text):
-        home.write_text(text.rstrip() + "\n\n- " + link + "\n", encoding="utf-8")
+        home.write_bytes((text.rstrip() + "\n\n- " + link + "\n").encode("utf-8"))
 
 
 def normalize_backlog_map_aliases(path: Path, backlog_title: str) -> None:
@@ -2081,7 +2081,7 @@ def normalize_backlog_map_aliases(path: Path, backlog_title: str) -> None:
     )
     updated = front_matter(props, body)
     if updated != path.read_text(encoding="utf-8"):
-        path.write_text(updated, encoding="utf-8")
+        path.write_bytes(updated.encode("utf-8"))
 
 
 def render_backlog_navigation(record: dict, docs: Path, *, preserved: set[Path] | None = None) -> None:
@@ -2102,9 +2102,9 @@ def render_backlog_navigation(record: dict, docs: Path, *, preserved: set[Path] 
     map_path = docs / "maps" / "backlog.md"
     map_path.parent.mkdir(parents=True, exist_ok=True)
     if not map_path.is_file():
-        map_path.write_text(front_matter(
+        map_path.write_bytes(front_matter(
             {"type": "moc", "title": "Backlog map", "tags": ["doc/moc"]},
-            "# Backlog map\n"), encoding="utf-8")
+            "# Backlog map\n").encode("utf-8"))
     normalize_backlog_map_aliases(map_path, backlog_title)
     map_lines = [GENERATED_MAP_MARKER, "", "# Backlog index", "",
                  f"- {wikilink(record['backlog']['path'], backlog_title)}"]
@@ -2119,8 +2119,7 @@ def render_backlog_navigation(record: dict, docs: Path, *, preserved: set[Path] 
             map_lines.append(f"- {wikilink(story['test_plan'], story['test_props'].get('title', story['id'] + ' test plan'))}")
     existing = map_path.read_text(encoding="utf-8")
     prefix = existing.split(GENERATED_MAP_MARKER, 1)[0].rstrip()
-    map_path.write_text(prefix + "\n\n" + "\n".join(map_lines) + "\n",
-                        encoding="utf-8")
+    map_path.write_bytes((prefix + "\n\n" + "\n".join(map_lines) + "\n").encode("utf-8"))
 
     append_current_nav(docs / record["backlog"]["path"],
                ["[[maps/backlog|Backlog map]]"])
@@ -2240,9 +2239,8 @@ def render(record: dict, docs: Path) -> None:
             "epic": [review["path"] for review in record["epic_reviews"]],
         },
     }
-    (out / "registry.json").write_text(
-        json.dumps(payload, indent=2, ensure_ascii=False, sort_keys=True) + "\n",
-        encoding="utf-8")
+    (out / "registry.json").write_bytes(
+        (json.dumps(payload, indent=2, ensure_ascii=False, sort_keys=True) + "\n").encode("utf-8"))
     board = [GENERATED_MAP_MARKER, "# Backlog board", "",
              "| Story | Epic | Status | Owner | Priority | Test plan |",
              "|---|---|---|---|---|---|"]
@@ -2252,14 +2250,13 @@ def render(record: dict, docs: Path) -> None:
             f"{story['props'].get('status', '')} | {story['props'].get('owner_role', '')} | "
             f"{story['props'].get('priority', '')} | "
             f"[[{story['test_plan'][:-3]}|scenarios]] |")
-    (out / "board.md").write_text("\n".join(board) + "\n", encoding="utf-8")
+    (out / "board.md").write_bytes(("\n".join(board) + "\n").encode("utf-8"))
     dependency = [GENERATED_MAP_MARKER, "# Dependency map", ""]
     for story in record["stories"]:
         dependencies = values(story["props"], "depends_on")
         dependency.append(f"- **{story['id']}** depends on "
                           + (", ".join(dependencies) if dependencies else "none"))
-    (out / "dependency-map.md").write_text(
-        "\n".join(dependency) + "\n", encoding="utf-8")
+    (out / "dependency-map.md").write_bytes(("\n".join(dependency) + "\n").encode("utf-8"))
     coverage = [GENERATED_MAP_MARKER, "# Test coverage design", "",
                 "| Story | Criteria | Scenarios | Automation required |",
                 "|---|---:|---:|---:|"]
@@ -2270,8 +2267,7 @@ def render(record: dict, docs: Path) -> None:
         )
         coverage.append(f"| {story['id']} | {len(story['criteria'])} | "
                         f"{len(story['scenario_ids'])} | {required} |")
-    (out / "test-coverage.md").write_text(
-        "\n".join(coverage) + "\n", encoding="utf-8")
+    (out / "test-coverage.md").write_bytes(("\n".join(coverage) + "\n").encode("utf-8"))
     if (record["backlog"].get("planning_mode") == "manual"
             or values(record["backlog"]["props"], "input_bindings")):
         rows = [GENERATED_MAP_MARKER, "# Input Package Coverage", "",
@@ -2283,8 +2279,7 @@ def render(record: dict, docs: Path) -> None:
             status = input_package_status(docs, stage, reference, digest).replace("|", "\\|")
             rows.append(f"| {reference} | {stage or 'unknown'} | {digest or 'none'} | "
                         f"{status} | {linked} |")
-        (out / "input-package-coverage.md").write_text(
-            "\n".join(rows) + "\n", encoding="utf-8")
+        (out / "input-package-coverage.md").write_bytes(("\n".join(rows) + "\n").encode("utf-8"))
 
 
 def review_body(title: str, sections: list[str]) -> str:
@@ -2398,7 +2393,7 @@ def init(args) -> int:
     }
     for path, text in files.items():
         if not path.exists():
-            path.write_text(text, encoding="utf-8")
+            path.write_bytes(text.encode("utf-8"))
     root_note = root / "backlog.md"
     props, body = parse_front_matter(root_note)
     if planning_mode:
@@ -2411,13 +2406,13 @@ def init(args) -> int:
         props["requirement_ref"] = requirement_ref
     if input_bindings:
         props["input_bindings"] = input_bindings
-    root_note.write_text(front_matter(props, body), encoding="utf-8")
+    root_note.write_bytes(front_matter(props, body).encode("utf-8"))
     map_path = docs / "maps" / "backlog.md"
     map_path.parent.mkdir(parents=True, exist_ok=True)
     if not map_path.is_file():
-        map_path.write_text(front_matter(
+        map_path.write_bytes(front_matter(
             {"type": "moc", "title": "Backlog map", "tags": ["doc/moc"]},
-            "# Backlog map\n"), encoding="utf-8")
+            "# Backlog map\n").encode("utf-8"))
     normalize_backlog_map_aliases(map_path, backlog_title)
     ensure_home_map(docs)
     append_nav(root / "backlog.md", ["[[maps/backlog|Backlog map]]"])
@@ -2559,7 +2554,7 @@ def approve(args) -> int:
             props["approved_at_utc"] = now
             props.pop("source_hash", None)
             props.pop("package_hash", None)
-            path.write_text(front_matter(props, body), encoding="utf-8")
+            path.write_bytes(front_matter(props, body).encode("utf-8"))
 
         with stage_package.candidate_session(), experience_validation_session():
             refreshed, close_errors = collect(docs)
@@ -2579,17 +2574,17 @@ def approve(args) -> int:
             props["approved_at_utc"] = now
             props.pop("source_hash", None)
             props.pop("package_hash", None)
-            path.write_text(front_matter(props, body), encoding="utf-8")
+            path.write_bytes(front_matter(props, body).encode("utf-8"))
         for path in paths:
             if path in preserved:
                 continue
             props, body = parse_front_matter(path)
             props["source_hash"] = digest(path)
-            path.write_text(front_matter(props, body), encoding="utf-8")
+            path.write_bytes(front_matter(props, body).encode("utf-8"))
         root_path = docs / refreshed["backlog"]["path"]
         props, body = parse_front_matter(root_path)
         props["package_hash"] = package_digest(docs, paths)
-        root_path.write_text(front_matter(props, body), encoding="utf-8")
+        root_path.write_bytes(front_matter(props, body).encode("utf-8"))
 
         with stage_package.candidate_session(), experience_validation_session():
             refreshed, close_errors = collect(docs)
@@ -2706,7 +2701,7 @@ def begin_revision(args) -> int:
     root_props["input_bindings"] = input_bindings
     for key in ("approved_at_utc", "source_hash", "package_hash"):
         root_props.pop(key, None)
-    backlog_path.write_text(front_matter(root_props, root_body), encoding="utf-8")
+    backlog_path.write_bytes(front_matter(root_props, root_body).encode("utf-8"))
 
     latest_review = latest(record["backlog_reviews"])
     next_round = int(latest_review["props"].get("round", 0) or 0) + 1
@@ -2741,7 +2736,7 @@ def begin_revision(args) -> int:
         flags=re.MULTILINE | re.DOTALL,
     )
     review_path = docs / "backlog" / "reviews" / f"round-{next_round}-backlog-review.md"
-    review_path.write_text(front_matter(review_props, review_body_text), encoding="utf-8")
+    review_path.write_bytes(front_matter(review_props, review_body_text).encode("utf-8"))
     refreshed, render_errors = collect(docs)
     if render_errors:
         print(json.dumps({"ok": False, "errors": sorted(set(render_errors))}, indent=2,
@@ -2798,23 +2793,22 @@ def stub_epic(args) -> int:
     if not path.exists():
         title = base_title.strip()
         goal = args.goal or "Define the customer outcome and boundary."
-        path.write_text(front_matter(
+        path.write_bytes(front_matter(
             {"type": "epic", "title": title, "status": "draft",
              "id": epic_id, "owner_role": "product_owner", "goal": goal,
              "tags": ["doc/epic", "status/draft"], "aliases": [epic_id]},
-            f"# {title}\n\n{goal}\n"), encoding="utf-8")
+            f"# {title}\n\n{goal}\n").encode("utf-8"))
     review = root / "reviews" / "round-1-epic-review.md"
     if not review.exists():
         review_title = f"Review round 1 for {base_title.strip()}"
-        review.write_text(front_matter(
+        review.write_bytes(front_matter(
             {"type": "epic-review", "title": review_title, "status": "draft",
              "round": 1, "owner_role": "product_owner",
              "derives_from": [f"[[backlog/epics/{args.slug}/epic|{epic_id}]]"],
              "tags": ["doc/epic-review", "status/draft"],
              "aliases": [f"{epic_id}-REVIEW-001"]},
             review_body(review_title,
-                        backlog_contract()["required_epic_review_sections"])),
-            encoding="utf-8")
+                        backlog_contract()["required_epic_review_sections"])).encode("utf-8"))
     append_nav(path, [
         "[[maps/backlog|Backlog map]]",
         f"[[backlog/backlog|{backlog_title}]]",
@@ -2892,9 +2886,9 @@ def stub_story(args) -> int:
             story_props["implements"] = implements
         if evidence:
             story_props["related_to"] = evidence
-        story.write_text(front_matter(
+        story.write_bytes(front_matter(
             story_props,
-            body), encoding="utf-8")
+            body).encode("utf-8"))
     test = root / "test-plan.md"
     if not test.exists():
         scenario = f"{story_id}-TS-001"
@@ -2904,7 +2898,7 @@ def stub_story(args) -> int:
         source_refs = "\n".join(f"  - {value}" for value in planning_sources)
         source_block = (f"- source_refs:\n{source_refs}\n"
                         if source_refs else "")
-        test.write_text(front_matter(
+        test.write_bytes(front_matter(
             {"type": "test-plan", "title": test_title, "status": "draft",
              "revision": 1, "owner_role": "qa_engineer",
              "derives_from": [story_link], "verifies": [story_link],
@@ -2918,8 +2912,7 @@ def stub_story(args) -> int:
             f"{source_block}"
             "- Given: the preconditions are satisfied\n"
             "- When: the user performs the story action\n"
-            "- Then: the expected outcome is observable\n"),
-            encoding="utf-8")
+            "- Then: the expected outcome is observable\n").encode("utf-8"))
     epic_link = f"[[backlog/epics/{args.epic}/epic|{args.epic.upper()}]]"
     story_link = (
         f"[[backlog/epics/{args.epic}/stories/{args.slug}/story|{story_id}]]"

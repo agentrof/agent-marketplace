@@ -1219,8 +1219,7 @@ def virtual_overlay_check(payload: dict) -> int:
                     operation = target.get("operation")
                     if operation == "add":
                         path.parent.mkdir(parents=True, exist_ok=True)
-                        path.write_text(str(target.get("content", "")) + "\n",
-                                        encoding="utf-8")
+                        path.write_bytes((str(target.get("content", "")) + "\n").encode("utf-8"))
                     elif operation == "delete":
                         path.unlink(missing_ok=True)
                     elif operation == "move-target":
@@ -1237,11 +1236,11 @@ def virtual_overlay_check(payload: dict) -> int:
                             dest_rel = destination.relative_to(root)
                             dest_path = overlay / dest_rel
                             dest_path.parent.mkdir(parents=True, exist_ok=True)
-                            dest_path.write_text(rendered, encoding="utf-8")
+                            dest_path.write_bytes(rendered.encode("utf-8"))
                             path.unlink(missing_ok=True)
                             touched.add(dest_rel.as_posix())
                         else:
-                            path.write_text(rendered, encoding="utf-8")
+                            path.write_bytes(rendered.encode("utf-8"))
             except (OSError, ValueError) as exc:
                 return deny(f"multi-file patch virtual overlay failed: {exc}")
             overlay_policy = vault_check.effective_policy(
@@ -2648,7 +2647,7 @@ def restore_config(snapshot: dict, expected_path: Path) -> str | None:
                 prefix=f".{path.name}.restore-", dir=str(path.parent)
             )
             try:
-                with os.fdopen(fd, "w", encoding="utf-8") as handle:
+                with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as handle:
                     handle.write(str(snapshot.get("text") or ""))
                     handle.flush()
                     os.fsync(handle.fileno())
@@ -3099,7 +3098,7 @@ def atomic_replace_text(path: Path, text: str) -> None:
     fd, temporary = tempfile.mkstemp(prefix=f".{path.name}.",
                                       dir=str(path.parent))
     try:
-        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+        with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as handle:
             handle.write(text)
             handle.flush()
             os.fsync(handle.fileno())
@@ -3114,7 +3113,7 @@ def atomic_create_text(path: Path, text: str) -> None:
     """Publish a fully-written capsule only when this event has no owner."""
     fd, temporary = tempfile.mkstemp(prefix=".recovery-", dir=str(path.parent))
     try:
-        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+        with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as handle:
             handle.write(text)
             handle.flush()
             os.fsync(handle.fileno())
@@ -3131,7 +3130,7 @@ def exclusive_create_text(path: Path, text: str) -> None:
         path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600,
     )
     try:
-        with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
+        with os.fdopen(descriptor, "w", encoding="utf-8", newline="\n") as handle:
             handle.write(text)
             handle.flush()
             os.fsync(handle.fileno())

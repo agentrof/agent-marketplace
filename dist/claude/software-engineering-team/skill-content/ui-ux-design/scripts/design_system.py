@@ -1210,18 +1210,19 @@ def persist_design_system(design_system: dict, page: str = None, output_dir: str
     pages_dir.mkdir(parents=True, exist_ok=True)
 
     created_files = []
-    master_file.write_text(format_master_md(design_system), encoding="utf-8")
+    master_file.write_bytes(format_master_md(design_system).encode("utf-8"))
     created_files.append(str(master_file))
     catalog_file = base_dir / "artifacts" / "standalone.html"
     if not catalog_file.exists():
         template = Path(__file__).resolve().parents[3] / "skill-content" / "design-system" / "data" / "standalone-template.html"
         catalog_file.parent.mkdir(parents=True, exist_ok=True)
-        catalog_file.write_text(template.read_text(encoding="utf-8"), encoding="utf-8")
+        catalog_file.write_bytes(template.read_text(encoding="utf-8").encode("utf-8"))
         created_files.append(str(catalog_file))
 
     if page:
         page_file = pages_dir / f"{page.lower().replace(' ', '-')}.md"
-        page_file.write_text(format_page_override_md(design_system, page, page_query), encoding="utf-8")
+        page_file.write_bytes(
+            format_page_override_md(design_system, page, page_query).encode("utf-8"))
         created_files.append(str(page_file))
 
     return {"status": "success", "design_system_dir": str(base_dir), "created_files": created_files}

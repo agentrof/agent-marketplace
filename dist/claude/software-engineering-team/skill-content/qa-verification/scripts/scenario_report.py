@@ -175,10 +175,8 @@ def main(argv: list[str] | None = None) -> int:
             ],
             "summary": summary,
         }
-        args.json_out.write_text(
-            json.dumps(document, indent=2, sort_keys=True) + "\n",
-            encoding="utf-8",
-        )
+        args.json_out.write_bytes(
+            (json.dumps(document, indent=2, sort_keys=True) + "\n").encode("utf-8"))
     return 0 if verdict == "PASS" else 1
 
 

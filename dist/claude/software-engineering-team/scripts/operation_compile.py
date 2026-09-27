@@ -16,10 +16,10 @@ import json
 import re
 import shlex
 import sys
-import tempfile
 from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
 
+import atomic_file
 from ba_compile import (
     frontmatter_item, frontmatter_scalar, parse_frontmatter, without_generated_relations,
 )
@@ -270,8 +270,8 @@ def init(args) -> int:
     if not map_path.exists():
         template = Path(__file__).resolve().parents[1] / "templates" / "vault" / "maps" / "operation.md"
         map_path.parent.mkdir(parents=True, exist_ok=True)
-        map_path.write_text(template.read_text(encoding="utf-8"), encoding="utf-8")
-    path.write_text(render(props, body), encoding="utf-8")
+        map_path.write_bytes(template.read_text(encoding="utf-8").encode("utf-8"))
+    path.write_bytes(render(props, body).encode("utf-8"))
     print(json.dumps({"kind": args.kind, "path": str(path), "status": "draft"}, sort_keys=True))
     return 0
 
@@ -287,7 +287,7 @@ def revise(args) -> int:
     props.pop("approved_at_utc", None)
     props.pop("source_hash", None)
     props["tags"] = [f"doc/{TYPE_FOR[args.kind]}", "status/draft"]
-    path.write_text(render(props, body), encoding="utf-8")
+    path.write_bytes(render(props, body).encode("utf-8"))
     print(json.dumps({"kind": args.kind, "path": str(path), "status": "draft", "revision": props["revision"]}, sort_keys=True))
     return 0
 
@@ -307,7 +307,7 @@ def approve(args) -> int:
     value, errors = check_contract(docs, args.kind, text)
     if errors:
         raise ValueError("approval check failed: " + "; ".join(errors))
-    path.write_text(text, encoding="utf-8")
+    path.write_bytes(text.encode("utf-8"))
     print(json.dumps(value, sort_keys=True))
     return 0
 
@@ -345,17 +345,7 @@ def ci_environment_job(props: dict) -> str:
     ))
 
 
-def atomic_text(path: Path, text: str) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    descriptor, raw = tempfile.mkstemp(prefix=f".{path.name}.", dir=path.parent)
-    temporary = Path(raw)
-    try:
-        with open(descriptor, "w", encoding="utf-8", closefd=True) as handle:
-            handle.write(text)
-            handle.flush()
-        temporary.replace(path)
-    finally:
-        temporary.unlink(missing_ok=True)
+atomic_text = atomic_file.replace_text
 
 
 def render_ci(args) -> int:

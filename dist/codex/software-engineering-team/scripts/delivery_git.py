@@ -199,7 +199,8 @@ def _write_writer_receipt_locked(receipt_path: Path, receipt: dict) -> None:
     candidate.pop("receipt_digest", None)
     candidate["receipt_digest"] = receipt_digest(candidate)
     data = json.dumps(candidate, ensure_ascii=False, sort_keys=True, indent=2) + "\n"
-    with tempfile.NamedTemporaryFile("w", encoding="utf-8", dir=receipt_path.parent,
+    with tempfile.NamedTemporaryFile("w", encoding="utf-8", newline="\n",
+                                     dir=receipt_path.parent,
                                      prefix=receipt_path.name + ".", delete=False) as temporary:
         temporary.write(data)
         temporary.flush()
@@ -548,7 +549,8 @@ def split_remote_note(root: Path, oid: str, relative_path: str,
                       split_note_fn) -> tuple[dict, str]:
     """Parse a tracked Markdown note from the exact remote Item tree."""
     text = run_git(root, "show", f"{oid}:{relative_path}")
-    with tempfile.NamedTemporaryFile("w", encoding="utf-8", suffix=".md", delete=False) as temporary:
+    with tempfile.NamedTemporaryFile("w", encoding="utf-8", newline="\n", suffix=".md",
+                                     delete=False) as temporary:
         temporary.write(text)
         temporary_path = Path(temporary.name)
     try:
@@ -990,24 +992,65 @@ def remote_ref_oids(root: Path, remote: str, refs: list[str]) -> dict[str, str]:
     return values
 
 
+def history_holds(root: Path, remote: str, ref: str, oid: str, candidate: str) -> bool:
+    """Whether commit *oid*, which the remote's *ref* holds, is *candidate* or descends from it.
+
+    Another host may have moved the ref to a commit this checkout lacks, so the
+    ref is fetched before its history is read.
+    """
+    if oid == candidate:
+        return True
+    if subprocess.run(["git", "cat-file", "-e", oid + "^{commit}"], cwd=root,
+                      capture_output=True, check=False).returncode:
+        run_git(root, "fetch", "--no-tags", remote, ref)
+    return is_ancestor(root, candidate, oid)
+
+
+def push_never_landed(root: Path, remote: str, ref: str, candidate: str) -> bool:
+    """Whether the refetched *ref* proves that a push of *candidate* to it never landed.
+
+    A ref whose history holds the candidate may have taken it, and a ref that
+    cannot be read proves nothing.
+    """
+    try:
+        oid = remote_ref_oids(root, remote, [ref])[ref]
+        return not oid or not history_holds(root, remote, ref, oid, candidate)
+    except RuntimeError:
+        return False
+
+
 def refused_transaction(root: Path, remote: str, updates: list[tuple[str, str, str]]) -> str | None:
     """Name why the remote refused an atomic transaction, or None when that is unproven.
 
     Git words its refusals in the reader's language, so only exit statuses and
-    refetched object IDs decide. A ref that no longer holds its leased value lost
-    the transaction; the Fence is named apart because it serializes every
-    coordinator. While every lease holds, a remote that takes the same no-op push
-    without --atomic but not with it lacks atomic push support. A remote that
-    holds a new candidate commit, or every ref's candidate, took the transaction,
-    so Git's own report stands.
+    refetched object IDs decide. A leased ref that holds its candidate, or moved
+    on from a history that holds it, shows that the remote may have taken the
+    transaction before its response was lost, so the result is uncertain, as
+    is a transaction whose every ref holds its candidate. Otherwise a ref that
+    no longer holds its leased value lost the transaction; the Fence is named
+    apart because it serializes every coordinator. While every lease holds, a
+    remote that takes the same no-op push without --atomic but not with it
+    lacks atomic push support.
     """
     try:
         observed = remote_ref_oids(root, remote, [ref for ref, _expected, _candidate in updates])
+        landed = sorted((ref, candidate) for ref, expected, candidate in updates
+                        if candidate and observed[ref] not in ("", expected)
+                        and history_holds(root, remote, ref, observed[ref], candidate))
     except RuntimeError:
         return None
-    if (any(candidate and observed[ref] == candidate for ref, _expected, candidate in updates)
-            or all(observed[ref] == candidate for ref, _expected, candidate in updates)):
-        return None
+    if not landed and all(observed[ref] == candidate for ref, _expected, candidate in updates):
+        landed = sorted((ref, candidate) for ref, _expected, candidate in updates)
+    if landed:
+        def evidence(ref: str, candidate: str) -> str:
+            if not candidate:
+                return f"{ref} is absent, as pushed"
+            if observed[ref] == candidate:
+                return f"{ref} holds the pushed {candidate}"
+            return f"{ref} is {observed[ref]}, whose history holds the pushed {candidate}"
+        return ("DELIVERY_TRANSACTION_UNCERTAIN: the remote may have taken the atomic push before its "
+                "response was lost, so read the refs again before any retry: "
+                + "; ".join(evidence(ref, candidate) for ref, candidate in landed))
     moved = sorted((ref, expected) for ref, expected, _candidate in updates if observed[ref] != expected)
     detail = "; ".join(f"{ref} is {observed[ref] or 'absent'}, leased as {expected or 'absent'}"
                        for ref, expected in moved)
@@ -1158,6 +1201,7 @@ def publish_delivery_review(project_root: Path, delivery_id: str,
                             remote: str = "origin") -> dict:
     """Publish one approved Delivery Review as a real Integration child."""
     root = main_worktree(project_root.resolve())
+    refuse_merged_delivery(root, delivery_id, remote)
     from delivery_compile import docs_root, delivery_findings, split_note
     docs = docs_root(root)
     directory, findings = delivery_findings(docs, delivery_id)
@@ -1206,6 +1250,7 @@ def prepare_pr_creation(project_root: Path, delivery_id: str,
                         remote: str = "origin") -> dict:
     """Publish the durable PR-create intent; this function never calls a provider."""
     root = main_worktree(project_root.resolve())
+    refuse_merged_delivery(root, delivery_id, remote)
     refs = canonical_refs(delivery_id)
     fence_oid = remote_oid(root, remote, refs["fence"])
     integration_oid = remote_oid(root, remote, refs["integration"])
@@ -1248,6 +1293,7 @@ def record_pr_remote(project_root: Path, delivery_id: str, url: str,
     mirror it.
     """
     root = main_worktree(project_root.resolve())
+    refuse_merged_delivery(root, delivery_id, remote)
     from delivery_compile import docs_root, find_delivery, split_note, frontmatter, content_hash, pr_recorded_props
     canonical_url, number = canonical_github_pr(url)
     docs = docs_root(root)
@@ -1330,6 +1376,7 @@ def open_pr(project_root: Path, delivery_id: str, remote: str = "origin") -> dic
         return {"ok": True, "delivery": delivery_id,
                 "pull_request_url": recorded_pr_url(root, integration_oid, review_path),
                 "reused": True, "provider_call": False}
+    refuse_merged_delivery(root, delivery_id, remote)
     provider = GitHubProvider(root, remote)
     target_branch, _ = resolve_target(root, remote)
     head = short_refs(delivery_id)["integration"]
@@ -1428,12 +1475,15 @@ def open_pr(project_root: Path, delivery_id: str, remote: str = "origin") -> dic
             "fence": recorded["fence"], "refs": short_refs(delivery_id)}
 
 
-def merge_pr(project_root: Path, delivery_id: str, remote: str = "origin") -> dict:
+def merge_pr(project_root: Path, delivery_id: str, remote: str = "origin", *,
+             verify_only: bool = False) -> dict:
     """Merge the one reviewed PR with exact head/base evidence.
 
     Provider mutation is followed by a fresh all-state query and target
     ancestry proof. A ready/squash/rebase/admin result or missing merge object
-    is never interpreted as successful closure.
+    is never interpreted as successful closure. With *verify_only*, as
+    verify-merge calls it, no provider call changes the PR: a PR the provider
+    does not show as merged is refused, and a merged one gets the same proof.
     """
     root = main_worktree(project_root.resolve())
     from delivery_compile import docs_root, find_delivery
@@ -1455,7 +1505,7 @@ def merge_pr(project_root: Path, delivery_id: str, remote: str = "origin") -> di
     if len(candidates) != 1:
         raise ProviderError("DELIVERY_PR_HEAD_BASE_MISMATCH: exactly one lifecycle PR is required")
     pr = candidates[0]
-    if str(pr.get("state", "")).upper() == "MERGED":
+    if str(pr.get("state", "")).upper() == "MERGED" or verify_only:
         merged = pr
     else:
         if str(pr.get("state", "")).upper() != "OPEN":
@@ -1515,6 +1565,7 @@ def invalidate_delivery_review(project_root: Path, delivery_id: str,
     if not re.fullmatch(r"sha256:[0-9a-f]{64}", finding_hash):
         raise ValueError("finding hash must be a canonical sha256 digest")
     root = main_worktree(project_root.resolve())
+    refuse_merged_delivery(root, delivery_id, remote)
     from delivery_compile import docs_root, find_delivery, split_note, frontmatter, content_hash
     docs = docs_root(root)
     directory = find_delivery(docs, delivery_id)
@@ -1534,6 +1585,12 @@ def invalidate_delivery_review(project_root: Path, delivery_id: str,
     review_props, review_body = split_remote_note(root, integration_oid, relative_review, split_note)
     if review_props.get("status") != "approved":
         raise RuntimeError("current Delivery Review is not approved")
+    # A cancellation publishes one final Review: its Items are cancelled and a
+    # second cancellation is refused, so nothing could publish a Review again.
+    delivery_props, _ = split_remote_note(root, integration_oid, rel_posix(root, directory / "delivery.md"), split_note)
+    if delivery_props.get("status") == "cancelled":
+        raise RuntimeError("DELIVERY_CANCELLATION_INVALID: the cancellation Review of a cancelled Delivery is final "
+                           "and cannot be invalidated")
     review_props["status"] = "changes_requested"
     review_props["tags"] = [tag for tag in review_props.get("tags", []) if not str(tag).startswith("status/")] + ["status/changes-requested"]
     review_props["finding_code"] = finding_code
@@ -1710,6 +1767,7 @@ def cancel_delivery(project_root: Path, delivery_id: str, reason: str,
     are published. No remote partial cancellation is accepted.
     """
     root = main_worktree(project_root.resolve())
+    refuse_merged_delivery(root, delivery_id, remote)
     from delivery_compile import docs_root, find_delivery, split_note, frontmatter, body_for, content_hash
     docs = docs_root(root)
     directory = find_delivery(docs, delivery_id)
@@ -1989,6 +2047,7 @@ def execution_operation_inputs(root: Path, directory: Path, docs: Path) -> tuple
 def publish_execution_plan(project_root: Path, delivery_id: str,
                            remote: str = "origin") -> dict:
     root = main_worktree(project_root.resolve())
+    refuse_merged_delivery(root, delivery_id, remote)
     from delivery_compile import delivery_findings, docs_root
     docs = docs_root(root)
     directory, findings = delivery_findings(docs, delivery_id)
@@ -2061,6 +2120,36 @@ def fetch_target(root: Path, remote: str) -> tuple[str, str]:
     tracking = f"refs/remotes/{remote}/{branch}"
     run_git(root, "fetch", "--no-tags", remote, f"refs/heads/{branch}:{tracking}")
     return branch, run_git(root, "rev-parse", tracking)
+
+
+def refuse_merged_delivery(root: Path, delivery_id: str, remote: str = "origin") -> None:
+    """Refuse to change a Delivery whose PR the target has merged.
+
+    It decides as the Delivery compiler does. Only a Delivery whose published
+    Review records its PR can be merged, so any other passes without a fetch
+    or a history walk. For one that does, the merge proof decides on the
+    freshly fetched target tip: a merge without a coordinator record whose
+    second parent is the Delivery's recorded PR head. A merged Delivery is
+    closed, so every verb that would change its refs calls this first. A
+    history that cannot answer the proof, such as a shallow clone, refuses
+    as well.
+    """
+    from delivery_compile import docs_root, find_delivery, recorded_pr_merged, split_note
+    directory = find_delivery(docs_root(root), delivery_id)
+    listed = run_git(root, "ls-remote", remote, canonical_refs(delivery_id)["integration"])
+    if directory is None or not listed:
+        return
+    try:
+        review, _ = split_remote_note(root, listed.split()[0], rel_posix(root, directory / "delivery-review.md"),
+                                      split_note)
+    except RuntimeError:
+        return
+    if not review.get("pull_request_url"):
+        return
+    _branch, target = fetch_target(root, remote)
+    if recorded_pr_merged(root, delivery_id, target):
+        raise RuntimeError(f"DELIVERY_POST_MERGE_TRANSITION: the target has merged the PR of {delivery_id}, "
+                           "so the Delivery is closed")
 
 
 def direct_update_took_no_effect(root: Path, remote: str, head: str) -> bool:
@@ -2206,6 +2295,7 @@ def refresh_target(project_root: Path, delivery_id: str,
     projections are regenerated from the merged candidate without revising approvals.
     """
     root = main_worktree(project_root.resolve())
+    refuse_merged_delivery(root, delivery_id, remote)
     from delivery_compile import docs_root, find_delivery, split_note
     docs = docs_root(root)
     directory = find_delivery(docs, delivery_id)
@@ -2287,6 +2377,7 @@ def revise_unclaimed_scope(project_root: Path, delivery_id: str,
                            remote: str = "origin") -> dict:
     """Publish a revised pre-claim scope after a fresh local approval."""
     root = main_worktree(project_root.resolve())
+    refuse_merged_delivery(root, delivery_id, remote)
     from delivery_compile import docs_root, find_delivery, split_note
     docs = docs_root(root)
     directory = find_delivery(docs, delivery_id)
@@ -2477,13 +2568,14 @@ def authorize_target_update(project_root: Path, mode: str = "source_handoff",
     try:
         atomic_push(root, remote, [(ref, fence_oid, candidate)])
     except Exception:
-        # A conclusive Fence lease rejection leaves no target mutation; the
-        # pending local candidate may be discarded and retried by a fresh
-        # authorizing observation. Ambiguous transport remains conservative.
-        try:
-            discard_target_update_receipt(root, mode, values["Target-Update-Attempt"])
-        except Exception:
-            pass
+        # Only a Fence that provably never took the candidate lets the prepared
+        # receipt go, so a fresh authorization can retry; a Fence that may carry
+        # the intent keeps the receipt its handoff needs.
+        if push_never_landed(root, remote, ref, candidate):
+            try:
+                discard_target_update_receipt(root, mode, values["Target-Update-Attempt"])
+            except Exception:
+                pass
         raise
     return {"ok": True, "mode": mode, "fence": candidate,
             "target_update_intent": candidate_hash, "attempt": values["Target-Update-Attempt"],
@@ -2638,6 +2730,7 @@ def _barrier_transition(project_root: Path, kind: str, action: str,
 
 
 def begin_plan_revision(project_root: Path, delivery_id: str, remote: str = "origin") -> dict:
+    refuse_merged_delivery(main_worktree(project_root.resolve()), delivery_id, remote)
     return _barrier_transition(project_root, "plan-revision", "begin", delivery_id, remote)
 
 
@@ -2650,6 +2743,7 @@ def abort_plan_revision(project_root: Path, delivery_id: str, remote: str = "ori
 
 
 def begin_upgrade(project_root: Path, delivery_id: str, remote: str = "origin") -> dict:
+    refuse_merged_delivery(main_worktree(project_root.resolve()), delivery_id, remote)
     return _barrier_transition(project_root, "upgrade", "begin", delivery_id, remote)
 
 
@@ -2665,6 +2759,7 @@ def upgrade_target_merge(project_root: Path, delivery_id: str,
                          remote: str = "origin") -> dict:
     """Merge the current target into one Delivery during an acquired upgrade."""
     root = main_worktree(project_root.resolve())
+    refuse_merged_delivery(root, delivery_id, remote)
     validate_delivery_id(delivery_id)
     from delivery_compile import docs_root, find_delivery, split_note
     directory = find_delivery(docs_root(root), delivery_id)
@@ -2896,18 +2991,26 @@ def reauthorize_target_update(project_root: Path, mode: str = "source_handoff",
                 (_fence_ref, fence_oid, fence_candidate),
                 (carrier_ref, old_head, carrier_candidate),
             ])
-        except Exception:
+        except Exception as exc:
             # Keep the old prepared receipt when the Fence/carrier lease was
             # conclusively rejected; on an ambiguous transport, retain the
             # new receipt and let a fresh clone reconcile the exact pair.
             try:
                 observed_fence = remote_oid(root, remote, _fence_ref)
                 observed_carrier = remote_oid(root, remote, carrier_ref)
+                unchanged = observed_fence == fence_oid and observed_carrier == old_head
+                landed = not unchanged and (
+                    history_holds(root, remote, _fence_ref, observed_fence, fence_candidate)
+                    and history_holds(root, remote, carrier_ref, observed_carrier, carrier_candidate))
             except Exception:
                 raise RuntimeError("DELIVERY_TARGET_UPDATE_UNCERTAIN: reauthorization response is ambiguous")
-            if observed_fence == fence_oid and observed_carrier == old_head:
+            if unchanged:
                 _write_provider_receipt_locked(receipt_path, old_receipt)
                 raise RuntimeError("DELIVERY_TARGET_UPDATE_UNCERTAIN: reauthorization lease was rejected")
+            if landed:
+                # Both refs hold, or moved on from, their candidates, so the push
+                # landed and the refetched result already says so.
+                raise exc
             raise RuntimeError("DELIVERY_TARGET_UPDATE_UNCERTAIN: Fence/carrier pair is mixed")
         if values["Target-Carrier-Kind"] == "github_pr":
             observed = provider.inspect_pull_request(url)
@@ -3008,6 +3111,7 @@ def apply_target_update(project_root: Path, mode: str = "source_handoff",
 
 def claim_items(project_root: Path, delivery_id: str, remote: str = "origin") -> dict:
     root = main_worktree(project_root.resolve())
+    refuse_merged_delivery(root, delivery_id, remote)
     from delivery_compile import delivery_findings, docs_root, split_note, frontmatter, content_hash
     docs = docs_root(root)
     directory, findings = delivery_findings(docs, delivery_id)
@@ -3437,9 +3541,15 @@ def activation_took_no_effect(root: Path, remote: str, item_ref: str, leased_tip
     return remote_ref_oids(root, remote, [item_ref])[item_ref] in ("", leased_tip)
 
 
+def activation_landed(root: Path, remote: str, item_ref: str, slot_ref: str, candidate: str) -> bool:
+    """Whether a rejected activation's push landed anyway: its Item and Slot refs hold its candidate."""
+    return remote_ref_oids(root, remote, [item_ref, slot_ref]) == {item_ref: candidate, slot_ref: candidate}
+
+
 def start_item(project_root: Path, delivery_id: str, story_id: str,
                remote: str = "origin", allowed_statuses: set[str] | None = None) -> dict:
     root = main_worktree(project_root.resolve())
+    refuse_merged_delivery(root, delivery_id, remote)
     from delivery_compile import docs_root, split_note, frontmatter, content_hash
     directory = find_delivery_dir_from_remote(root, remote, delivery_id)
     if directory is None:
@@ -3539,8 +3649,7 @@ def start_item(project_root: Path, delivery_id: str, story_id: str,
     except RuntimeError:
         if activation_took_no_effect(root, remote, refs["item"], item_oid):
             discard_pending_writer_receipt(root, delivery_id, story_id, item_candidate)
-        elif remote_ref_oids(root, remote, [refs["item"], slot_ref]) == {refs["item"]: item_candidate,
-                                                                        slot_ref: item_candidate}:
+        elif activation_landed(root, remote, refs["item"], slot_ref, item_candidate):
             require_current_activation_target(root, remote, delivery_id, story_id, target_before,
                                               slot, item_candidate, relative_item, item_props, item_body)
             promote_writer_receipt(root, delivery_id, story_id, item_candidate)
@@ -3563,6 +3672,7 @@ def _set_active_item_status(project_root: Path, delivery_id: str, story_id: str,
     if status not in {"active", "blocked"}:
         raise ValueError("active Item status transition must be active or blocked")
     root = main_worktree(project_root.resolve())
+    refuse_merged_delivery(root, delivery_id, remote)
     from delivery_compile import docs_root, split_note, frontmatter, content_hash
     directory = find_delivery_dir_from_remote(root, remote, delivery_id)
     if directory is None:
@@ -3623,6 +3733,7 @@ def reopen_item(project_root: Path, delivery_id: str, story_id: str,
     push.
     """
     root = main_worktree(project_root.resolve())
+    refuse_merged_delivery(root, delivery_id, remote)
     from delivery_compile import docs_root, split_note, frontmatter, content_hash
     directory = find_delivery_dir_from_remote(root, remote, delivery_id)
     if directory is None:
@@ -3692,6 +3803,10 @@ def reopen_item(project_root: Path, delivery_id: str, story_id: str,
     except RuntimeError:
         if activation_took_no_effect(root, remote, refs["item"], item_oid):
             discard_pending_writer_receipt(root, delivery_id, story_id, item_candidate)
+        elif activation_landed(root, remote, refs["item"], slot_ref, item_candidate):
+            require_current_activation_target(root, remote, delivery_id, story_id, target_before,
+                                              slot, item_candidate, relative_item, props, body)
+            promote_writer_receipt(root, delivery_id, story_id, item_candidate)
         raise
     require_current_activation_target(root, remote, delivery_id, story_id, target_before,
                                       slot, item_candidate, relative_item, props, body)
@@ -3707,6 +3822,7 @@ def pause_item(project_root: Path, delivery_id: str, story_id: str,
                remote: str = "origin") -> dict:
     """Pause an active Item only after proving its local worktree is flushable."""
     root = main_worktree(project_root.resolve())
+    refuse_merged_delivery(root, delivery_id, remote)
     from delivery_compile import split_note, frontmatter, content_hash
     directory = find_delivery_dir_from_remote(root, remote, delivery_id)
     if directory is None:
@@ -3778,6 +3894,7 @@ def takeover_item(project_root: Path, delivery_id: str, story_id: str,
     if not confirm:
         raise RuntimeError("takeover requires explicit host-loss confirmation")
     root = main_worktree(project_root.resolve())
+    refuse_merged_delivery(root, delivery_id, remote)
     from delivery_compile import split_note, frontmatter, content_hash
     directory = find_delivery_dir_from_remote(root, remote, delivery_id)
     if directory is None:
@@ -3847,6 +3964,10 @@ def takeover_item(project_root: Path, delivery_id: str, story_id: str,
             discard_pending_writer_receipt(root, delivery_id, story_id, item_candidate, replaced)
             if removed_worktree:
                 materialize_item_worktree(root, delivery_id, story_id, item_oid)
+        elif activation_landed(root, remote, refs["item"], slot_ref, item_candidate):
+            require_current_activation_target(root, remote, delivery_id, story_id, target_before,
+                                              slot, item_candidate, relative_item, item_props, item_body)
+            promote_writer_receipt(root, delivery_id, story_id, item_candidate)
         raise
     if remote_oid(root, remote, refs["item"]) != item_candidate or remote_oid(root, remote, slot_ref) != item_candidate:
         raise RuntimeError("takeover refs did not converge to the receipt candidate")
@@ -3869,6 +3990,7 @@ def push_item(project_root: Path, delivery_id: str, story_id: str,
     then attached to the remote Item ref as a single fast-forward child.
     """
     root = main_worktree(project_root.resolve())
+    refuse_merged_delivery(root, delivery_id, remote)
     from delivery_compile import split_note, frontmatter, content_hash
     directory = find_delivery_dir_from_remote(root, remote, delivery_id)
     if directory is None:
@@ -3970,6 +4092,7 @@ def integrate_item(project_root: Path, delivery_id: str, story_id: str,
                   remote: str = "origin") -> dict:
     """Seal and merge only evidence that is already on the remote Item branch."""
     root = main_worktree(project_root.resolve())
+    refuse_merged_delivery(root, delivery_id, remote)
     from delivery_compile import split_note, frontmatter, content_hash
     directory = find_delivery_dir_from_remote(root, remote, delivery_id)
     if directory is None:
@@ -4316,7 +4439,7 @@ def main(argv=None) -> int:
     merge_pr_parser = sub.add_parser("merge-pr"); merge_pr_parser.add_argument("--project-root", default="."); merge_pr_parser.add_argument("--delivery", required=True); merge_pr_parser.add_argument("--remote", default="origin"); merge_pr_parser.set_defaults(func="merge-pr")
     invalidate_review = sub.add_parser("invalidate-delivery-review"); invalidate_review.add_argument("--project-root", default="."); invalidate_review.add_argument("--delivery", required=True); invalidate_review.add_argument("--finding-code", required=True); invalidate_review.add_argument("--finding-hash", required=True); invalidate_review.add_argument("--remote", default="origin"); invalidate_review.set_defaults(func="invalidate-review")
     cancel = sub.add_parser("cancel-delivery"); cancel.add_argument("--project-root", default="."); cancel.add_argument("--delivery", required=True); cancel.add_argument("--reason", required=True); cancel.add_argument("--remote", default="origin"); cancel.set_defaults(func="cancel")
-    verify = sub.add_parser("verify-merge"); verify.add_argument("--project-root", default="."); verify.add_argument("--delivery", required=True); verify.add_argument("--remote", default="origin"); verify.set_defaults(func="merge-pr")
+    verify = sub.add_parser("verify-merge"); verify.add_argument("--project-root", default="."); verify.add_argument("--delivery", required=True); verify.add_argument("--remote", default="origin"); verify.set_defaults(func="verify-merge")
     reconcile = sub.add_parser("reconcile"); reconcile.add_argument("--project-root", default="."); reconcile.add_argument("--delivery", required=True); reconcile.add_argument("--remote", default="origin"); reconcile.set_defaults(func="reconcile")
     board = sub.add_parser("board"); board.add_argument("--project-root", default="."); board.add_argument("--delivery", required=True); board.add_argument("--remote", default="origin"); board.set_defaults(func="board")
     locate = sub.add_parser("locate"); locate.add_argument("--delivery", required=True); locate.add_argument("--story"); locate.add_argument("--slot"); locate.set_defaults(func="names")
@@ -4398,6 +4521,8 @@ def main(argv=None) -> int:
                 result = open_pr(Path(args.project_root), args.delivery, args.remote)
             elif args.func == "merge-pr":
                 result = merge_pr(Path(args.project_root), args.delivery, args.remote)
+            elif args.func == "verify-merge":
+                result = merge_pr(Path(args.project_root), args.delivery, args.remote, verify_only=True)
             elif args.func == "invalidate-review":
                 result = invalidate_delivery_review(Path(args.project_root), args.delivery, args.finding_code, args.finding_hash, args.remote)
             elif args.func == "cancel":

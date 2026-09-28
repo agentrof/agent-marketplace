@@ -27,7 +27,9 @@ Rules:
   maintain counters, or preserve reviewer transcripts.
 - Re-run a fresh, targeted reviewer after a blocking fix. A compiler-green
   document alone proves structure; the fresh reader confirms the evidence gap
-  is actually closed.
+  is actually closed. Read the fix and its affected dependencies; new blocking
+  evidence still requires resolution. Do not restart unaffected lenses or add
+  a clean round after the gap is closed.
 
 ## Completion
 

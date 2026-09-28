@@ -44,7 +44,10 @@ approved. This entry prepares delivery, but it does not start delivery.
    `implements: REQ-###` on stories. For each stage the Requirement marks
    `not_applicable`, pass that stage's exact approved package with
    `--input-ref`, or let `begin-revision` carry the previous revision's binding
-   forward; both modes pin all four input families.
+   forward; both modes pin all four input families by default. For a genuinely
+   headless technical/defect Requirement only, use the explicit `headless-v1`
+   `--absent-input` exception described in the flow. Never infer absence from
+   `not_applicable`, delete an existing package, or suppress a required receipt.
 4. Create one folder per epic. Each epic contains `epic.md`, `reviews/` and
    `stories/<story-slug>/story.md` plus `test-plan.md` for every story. Authored
    titles and H1s are direct, natural labels in the configured output language;
@@ -71,9 +74,12 @@ approved. This entry prepares delivery, but it does not start delivery.
    cites existing scenarios; an inapplicable class cites none and explains why.
    Covered rows classify the exact scenario set. Give every
    automation-required scenario an automation target.
-7. Run the packaged `backlog_compile.py check --render` and the scoped
-   Obsidian vault check;
-   initialization reconciles the backlog property/graph fragment and renders
+7. Follow the flow's source-validation, epic-review and root-review order.
+   The read-only manifest validates candidate inputs before dispatch; pending
+   review placeholders do not block their own first reader. Once reviews are
+   authored, require the full `backlog_compile.py check --render` and scoped
+   Obsidian vault check before approval. Initialization reconciles the backlog
+   property/graph fragment and renders
    the map and backlog navigation. Outgoing wikilinks provide graph and
    backlink relations without rewriting approved upstream notes. Challenge the
    whole package through fresh read-only backlog reviewers. Only the exact
@@ -84,13 +90,16 @@ approved. This entry prepares delivery, but it does not start delivery.
    inverse-relation blocks may change for the new root review, with the full
    vault gate proving the exact projection and unchanged authored relation,
    dependency, coverage and scenario sets.
-   Give each reviewer
-   an exact named input set and expected relation sets; wait for all epic
-   reviewers before the Product Owner writes any epic review or fix. The
-   Product Owner is the only backlog writer. After epic packages are green,
-   invoke and wait for the root reviewer, then let the Product Owner write the
-   root review. The epic review covers the exact story and test-plan set; the
-   root review covers the exact epic set, global scope, dependencies, delivery
+   Derive each reviewer's input with `backlog_review_inputs.py` as specified
+   in the flow. Epic input includes the root backlog, its exact child story
+   and test-plan set, dependency closure and shared contract/source context.
+   Root input includes the complete backlog package. Pass the manifest's
+   expected relation sets and verify its `source_hash` again before accepting
+   findings. Wait for all epic reviewers before the Product Owner writes any
+   epic review or fix. The Product Owner is the only backlog writer. After epic
+   packages are green, derive a fresh root manifest, invoke and wait for the
+   root reviewer, then let the Product Owner write the root review. The root
+   review covers the exact epic set, global scope, dependencies, delivery
    sequencing and coverage. Its structured `Deferred Criteria` table carries
    an escaped-table vault wikilink `criterion_ref`, `owner_role`, `reason` and
    `revisit_trigger`. Every selected AC/BR is either story-covered or deferred,

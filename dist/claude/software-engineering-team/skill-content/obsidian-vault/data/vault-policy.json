@@ -311,6 +311,8 @@
     "requirement_ref": "text",
     "input_package_refs": "multitext",
     "input_bindings": "multitext",
+    "input_contract": "text",
+    "absent_input_stages": "multitext",
     "introduced_in_revision": "number",
     "stamped_at": "datetime",
     "id": "text",
@@ -460,7 +462,7 @@
     "manifest_hash"
   ],
   "lazy_fragments": {
-    "base": ["type", "title", "status", "tags", "aliases", "derives_from", "satisfies", "constrained_by", "implements", "uses_design", "related_to", "origin_mode", "record_state", "stage_results_hash", "upstream_stage_receipts_hash", "planning_mode", "requirement_ref", "input_package_refs", "input_bindings"],
+    "base": ["type", "title", "status", "tags", "aliases", "derives_from", "satisfies", "constrained_by", "implements", "uses_design", "related_to", "origin_mode", "record_state", "stage_results_hash", "upstream_stage_receipts_hash", "planning_mode", "requirement_ref", "input_package_refs", "input_bindings", "input_contract", "absent_input_stages"],
     "business_analysis": ["code", "scope", "round", "package_status", "package_hash", "package_approved_at_utc", "package_contract_version"],
     "solution_design": ["engagement", "territory", "revisit_trigger", "decision_kind", "applies_to", "selected_technology", "method_skills", "component_id", "component_class", "sourcing", "app_kind", "code_path", "depends_on_component", "technology_bindings", "owned_ba_refs", "not_technical_allocations", "data_store_disposition", "topology_selected", "topology_contract_version", "topology_confirmation_hash"],
     "system_architecture": ["story", "governs", "verifies", "component_ref", "record_id", "revision", "record_state", "revision_state", "introduced_by", "supersedes", "connects", "affected_scopes"],
@@ -637,6 +639,13 @@
     "delivery_governance": ["draft", "approved"]
   },
   "backlog_contract": {
+    "applicable_inputs": {
+      "contract": "headless-v1",
+      "absent_stages": ["design-system", "experience-design"],
+      "required_stages": ["business-analysis", "solution-design"],
+      "request_kinds": ["technical", "defect"],
+      "app_kinds": ["cli", "worker", "scheduler"]
+    },
     "story_owner_roles": [
       "backend_developer",
       "frontend_developer",

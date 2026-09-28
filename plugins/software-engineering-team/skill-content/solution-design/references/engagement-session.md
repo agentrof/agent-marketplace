@@ -24,9 +24,12 @@ studies one topic; accepted decisions are written back to the landscape.
    requirements, constraints, options and a verdict.
 2. Link the landscape, analysis criteria and decisions in front matter. Every
    decision records its accepted alternative and the reason for rejection.
-3. Ask fresh read-only challengers for structured findings. Resolve accepted
-   findings in the engagement or decision documents and keep the reviewer
-   replies transient.
+3. Use the one review plan in
+   `solution-architecture/references/challenge-lenses.md`: the named primary
+   reviewer covers every required lens, with independent specialists only for
+   its risk triggers. Wait for all selected readers, resolve accepted findings
+   in the engagement or decision documents and keep replies transient. This
+   session adds no separate default challenge panel.
 4. Run the artifact, landscape and vault checks after each milestone.
 
 ## Solution gate

@@ -31,6 +31,21 @@ decides `required`, `reuse` or `not_applicable`; each applicable stage binds a
 current approved committed receipt. Without `REQ-###`, the user explicitly
 selects approved/current upstream packages and no Requirement state is created.
 
+An identical Requirement receipt retry verifies the current committed package
+and retained receipts before preserving all bytes and downstream links. A
+changed predecessor still invalidates downstream receipts. Backlog generated
+views likewise avoid rewriting identical bytes without caching validation.
+
+Backlog defaults to four pinned input families. The explicit `headless-v1`
+contract may omit genuinely absent Design System/Experience families only for
+an approved technical/defect Requirement with those stages `not_applicable`,
+current BA/Solution bindings, a CLI/worker/scheduler Solution topology, no
+authored links into the omitted family and complete Git history proving no
+previous visual package. Each new revision repeats and revalidates
+`--absent-input`; current or historical packages cannot be discarded to qualify.
+Historical Delivery consumption verifies the original approved committed
+backlog boundary, so later visual work does not invalidate that snapshot.
+
 Experience Design produces the globally current `application@rN` receipt and
 the exact current zero-or-more process receipt set. A later approved prototype
 or package-set delta makes that application receipt non-current, so consuming

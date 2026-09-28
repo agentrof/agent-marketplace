@@ -92,6 +92,55 @@ class CITestPlannerTests(unittest.TestCase):
         with self.assertRaises(ci_tests.CIError):
             ci_tests.balanced_shards(ids, 2, {"a": float("nan")}, self.policy)
 
+    def test_selected_vault_hook_requires_exactly_one_apple_worker(self):
+        (self.root / "tools/tests/test_vault_hook.py").write_text(
+            "import unittest\nclass Tests(unittest.TestCase):\n    def test_native(self): pass\n",
+            encoding="utf-8")
+        with self.assertRaisesRegex(ci_tests.CIError, "require an Apple launcher lane"):
+            self.plan()
+        self.policy["apple_launcher_lane"] = "local"
+        self.policy["lanes"]["local"]["os"] = "macos-latest"
+        self.save_policy()
+        plan = self.plan()
+        owner = [row for row in plan["matrix"]["include"] if row["apple_launcher"]]
+        self.assertEqual([(row["lane"], row["shard"]) for row in owner], [("local", 0)])
+        self.assertTrue(plan["apple_launcher"])
+        for mutation in ("missing", "duplicate", "wrong-lane", "disabled", "nonboolean"):
+            with self.subTest(mutation=mutation):
+                altered = copy.deepcopy(plan)
+                if mutation == "missing":
+                    altered["matrix"]["include"][0]["apple_launcher"] = False
+                elif mutation == "duplicate":
+                    altered["matrix"]["include"][1]["apple_launcher"] = True
+                elif mutation == "wrong-lane":
+                    altered["apple_launcher_lane"] = "unselected"
+                elif mutation == "nonboolean":
+                    altered["matrix"]["include"][0]["apple_launcher"] = 1
+                else:
+                    altered["apple_launcher"] = False
+                    altered["apple_launcher_lane"] = None
+                    for row in altered["matrix"]["include"]:
+                        row["apple_launcher"] = False
+                self.rehash(altered)
+                with self.assertRaises(ci_tests.CIError):
+                    ci_tests.validate_plan(altered, self.root)
+        self.policy["lanes"]["local"]["os"] = "ubuntu-latest"
+        self.save_policy()
+        with self.assertRaisesRegex(ci_tests.CIError, "require an Apple launcher lane"):
+            self.plan()
+
+    def test_unselected_apple_lane_cannot_drop_native_check(self):
+        (self.root / "tools/tests/test_vault_hook.py").write_text(
+            "import unittest\nclass Tests(unittest.TestCase):\n    def test_native(self): pass\n",
+            encoding="utf-8")
+        self.policy["apple_launcher_lane"] = "support"
+        self.policy["groups"]["empty"] = {"tests": []}
+        self.policy["lanes"]["support"] = {"os": "macos-latest", "python": "3.9", "shards": 1,
+                                               "groups": ["empty"]}
+        self.save_policy()
+        with self.assertRaisesRegex(ci_tests.CIError, "exactly one selected shard"):
+            self.plan()
+
     def test_partition_rejects_missing_duplicate_and_unknown_ids_even_after_rehash(self):
         original = self.plan()
         for change in ("missing", "duplicate", "unknown"):
@@ -359,7 +408,7 @@ class CITestPlannerTests(unittest.TestCase):
                     "tools.tests.test_delivery_git.DeliveryGitTests.test_receipt_lock_is_released_when_its_holder_dies"}
         for name in ("windows-current", "windows-minimum"):
             lane = policy["lanes"][name]
-            self.assertEqual(lane["shards"], 6)
+            self.assertEqual(lane["shards"], 8)
             self.assertTrue(required <= set(ci_tests.group_ids(lane["groups"], policy, ids)))
 
 

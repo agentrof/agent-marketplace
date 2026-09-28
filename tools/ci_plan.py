@@ -105,7 +105,7 @@ def main() -> int:
         command += ["--base", base]
     subprocess.run(command, cwd=ROOT, check=True)
     plan = json.loads((directory / "ci-plan.json").read_text(encoding="utf-8"))
-    apple = any("test_vault_hook." in item for item in plan["selected_ids"])
+    apple = plan["apple_launcher"]
     with args.github_output.open("a", encoding="utf-8") as output:
         output.write("matrix=" + json.dumps(plan["matrix"], separators=(",", ":")) + "\n")
         output.write("has_tests=" + str(plan["has_tests"]).lower() + "\n")

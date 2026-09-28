@@ -242,10 +242,10 @@ def validate_plan(plan: object, expected_tree: str) -> dict:
 
 
 def validate_run(run: dict, repository: str, event: str, head_sha: str,
-                 now: dt.datetime, current_run: int = 0) -> None:
+                 now: dt.datetime, current_run: int = 0, *, workflow: str = WORKFLOW) -> None:
     require(positive(run.get("id")) and run["id"] != current_run, "invalid source run")
     require(positive(run.get("run_attempt")), "source attempt is missing")
-    require(run.get("path") == WORKFLOW, "source workflow differs")
+    require(run.get("path") == workflow, "source workflow differs")
     require(run.get("repository", {}).get("full_name") == repository,
             "source repository differs")
     require(run.get("head_repository", {}).get("full_name") == repository,

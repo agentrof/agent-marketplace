@@ -230,6 +230,25 @@ def balanced_shards(ids, count, durations, policy):
     return [sorted(shard) for shard in shards]
 
 
+def apple_launcher_lane(selected_ids, policy):
+    if not any(test_id.startswith("tools.tests.test_vault_hook.") for test_id in selected_ids):
+        return None
+    name = policy.get("apple_launcher_lane")
+    lane = policy["lanes"].get(name)
+    if lane is None or lane["os"] != "macos-latest":
+        raise CIError("selected vault-hook tests require an Apple launcher lane")
+    return name
+
+
+def matrix_rows(lanes, apple_lane):
+    rows = [{"lane": name, "os": lane["os"], "python": lane["python"], "shard": index,
+             "shards": len(lane["shards"]), "apple_launcher": name == apple_lane and index == 0}
+            for name, lane in lanes.items() for index in range(len(lane["shards"]))]
+    if apple_lane is not None and sum(row["apple_launcher"] for row in rows) != 1:
+        raise CIError("Apple launcher check must belong to exactly one selected shard")
+    return rows
+
+
 def make_plan(root, mode="full", base=None, head="HEAD", timings=None):
     policy = policy_at(root)
     ids, inventory_hash = inventory(root)
@@ -243,7 +262,6 @@ def make_plan(root, mode="full", base=None, head="HEAD", timings=None):
     if timings.get("schema_version") != 1 or not isinstance(timings.get("durations"), dict):
         raise CIError("invalid timing history")
     lanes = {}
-    rows = []
     for name, lane in sorted(policy["lanes"].items()):
         permitted = ids if lane.get("groups") == ["all"] else group_ids(lane["groups"], policy, ids)
         lane_ids = sorted(set(selected) & set(permitted))
@@ -252,15 +270,17 @@ def make_plan(root, mode="full", base=None, head="HEAD", timings=None):
         shards = balanced_shards(lane_ids, lane["shards"], timings["durations"].get(name, {}), policy)
         lanes[name] = {"os": lane["os"], "python": lane["python"], "selected_ids": lane_ids, "shards": shards,
                        "must_run_ids": sorted(set(lane_ids) & set(lane.get("required_tests", [])))}
-        rows.extend({"lane": name, "os": lane["os"], "python": lane["python"], "shard": index, "shards": len(shards)}
-                    for index in range(len(shards)))
+    apple_lane = apple_launcher_lane(selected, policy)
+    rows = matrix_rows(lanes, apple_lane)
     plan = {"schema_version": 1, "source_sha": source_sha,
             "source_tree": git(root, "rev-parse", source_sha + "^{tree}").decode().strip(),
             "policy_hash": digest(policy), "inventory_hash": inventory_hash,
             "requested_mode": mode, "mode": actual_mode, "base_sha": base,
             "changed_paths": paths, "selection_reason": reason, "selected_ids": selected, "lanes": lanes,
-            "has_tests": bool(rows), "matrix": {"include": rows or [{"lane": "noop", "os": "ubuntu-latest",
-            "python": "3.14", "shard": 0, "shards": 0}]}}
+            "has_tests": bool(rows), "apple_launcher": apple_lane is not None,
+            "apple_launcher_lane": apple_lane,
+            "matrix": {"include": rows or [{"lane": "noop", "os": "ubuntu-latest",
+            "python": "3.14", "shard": 0, "shards": 0, "apple_launcher": False}]}}
     plan["plan_hash"] = digest(plan)
     validate_plan(plan, root)
     return plan
@@ -274,7 +294,9 @@ def validate_plan(plan, root=None):
         raise CIError("plan selection contains duplicate or unsorted IDs")
     if bool(plan.get("lanes")) != plan.get("has_tests"):
         raise CIError("plan matrix disagrees with selected lanes")
-    rows = []
+    apple_lane = plan.get("apple_launcher_lane")
+    if plan.get("apple_launcher") is not (apple_lane is not None):
+        raise CIError("Apple launcher selection differs from its lane")
     for name, lane in plan["lanes"].items():
         expected = lane["selected_ids"]
         flattened = [test_id for shard in lane["shards"] for test_id in shard]
@@ -285,8 +307,9 @@ def validate_plan(plan, root=None):
             raise CIError(f"shards are not a complete disjoint partition: {name}")
         if not set(expected) <= set(all_selected):
             raise CIError(f"lane contains an unselected test: {name}")
-        rows.extend({"lane": name, "os": lane["os"], "python": lane["python"], "shard": index,
-                     "shards": len(lane["shards"])} for index in range(len(lane["shards"])))
+    rows = matrix_rows(plan["lanes"], apple_lane)
+    if any(not isinstance(row.get("apple_launcher"), bool) for row in plan["matrix"]["include"]):
+        raise CIError("matrix Apple launcher flags must be boolean")
     if rows and sorted(rows, key=lambda row: (row["lane"], row["shard"])) != sorted(plan["matrix"]["include"], key=lambda row: (row["lane"], row["shard"])):
         raise CIError("matrix does not match the lane partitions")
     if root is not None:
@@ -302,6 +325,8 @@ def validate_plan(plan, root=None):
         expected, mode, reason = select_ids(plan["requested_mode"], paths, policy, ids, root)
         if expected != all_selected or mode != plan["mode"] or paths != plan["changed_paths"] or reason != plan["selection_reason"]:
             raise CIError("plan selection does not match the declared inputs")
+        if apple_lane != apple_launcher_lane(all_selected, policy):
+            raise CIError("Apple launcher lane differs from policy")
         for name, config in policy["lanes"].items():
             permitted = ids if config["groups"] == ["all"] else group_ids(config["groups"], policy, ids)
             expected = sorted(set(all_selected) & set(permitted))

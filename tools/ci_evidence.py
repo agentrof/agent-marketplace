@@ -298,6 +298,7 @@ def validate_timings(payload: dict, policy: dict, known_ids: list[str]) -> dict:
     require(isinstance(durations, dict) and isinstance(runtimes, dict)
             and set(durations) == set(runtimes), "timing runtime coverage differs")
     tools = test_tools()
+    normalized = {}
     for lane, values in durations.items():
         require(lane in policy["lanes"] and isinstance(values, dict), "unknown timing lane")
         lane_policy = policy["lanes"][lane]
@@ -305,10 +306,14 @@ def validate_timings(payload: dict, policy: dict, known_ids: list[str]) -> dict:
         permitted = set(known_ids if lane_policy.get("groups") == ["all"] else
                         tools.group_ids(lane_policy["groups"], policy, known_ids))
         require(set(values) <= permitted, "timings name tests outside the current lane")
-        for seconds in values.values():
+        normalized[lane] = {}
+        for test_id, seconds in values.items():
             require(type(seconds) in {int, float} and math.isfinite(seconds)
-                    and 0 < seconds <= 600, "timing duration is outside the accepted range")
-    return durations
+                    and 0 <= seconds <= 600, "timing duration is outside the accepted range")
+            # Six-decimal reports can round an instant skip to zero. Match the
+            # sharder floor without discarding the run's other measured tests.
+            normalized[lane][test_id] = max(float(seconds), 0.001)
+    return normalized
 
 
 def restore_timings(root: Path, api: GitHub, now: dt.datetime | None = None) -> dict:

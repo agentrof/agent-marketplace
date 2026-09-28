@@ -38,8 +38,11 @@ behavior is host-neutral; Claude Code and Codex are packaging adapters.
     supporting implementation roles with concrete body responsibilities.
     Runtime identities are not backlog properties.
 14. Backlog approval checks structural coverage, exact relation sets and
-    review approval. Test execution, JUnit evidence and release readiness are
-    delivery concerns.
+    review approval. A review requests changes only for an open critical or
+    major finding; an accepted minor finding is recorded in the review note's
+    optional, compiler-validated `Accepted Minor Findings` table with an owner
+    role and revisit trigger. Test execution, JUnit evidence and release
+    readiness are delivery concerns.
 15. File names are stable slugs; membership is path-derived. A story does not
     duplicate its epic relationship in front matter.
 16. Authored titles are direct, natural phrases in the configured output

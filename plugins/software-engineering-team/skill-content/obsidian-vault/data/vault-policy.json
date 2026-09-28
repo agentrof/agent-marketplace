@@ -688,6 +688,11 @@
       "Findings",
       "Verdict"
     ],
+    "minor_finding_owner_roles": [
+      "product_owner",
+      "qa_engineer",
+      "business_analyst"
+    ],
     "experience_ref_types": [
       "experience",
       "journey",

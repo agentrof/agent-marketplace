@@ -215,3 +215,71 @@ lens-specific result. Long generic prose, `approved`, `pass`, `looks good`,
 Authored titles and matching H1s are direct, natural graph labels in the
 configured output language. Stable type keys, paths, IDs, registry JSON and
 disposable generated-view labels remain English machine vocabulary.
+
+## Review findings
+
+Severity rates what a reviewer finding would cause if Delivery built and
+tested the package exactly as written. The independent reviewer assigns it
+from evidence and never inflates it to look thorough or deflates it to reach
+a verdict. The Product Owner chooses each disposition but never changes a
+returned severity. Compiler and vault-gate errors are not rated; every one
+blocks until it is fixed.
+
+| severity | blocks approval | the package as written would |
+|---|---|---|
+| `critical` | yes | contradict an approved source, or drop or weaken approved scope or protection |
+| `major` | yes | be unverifiable, unexecutable or unowned, order work wrongly, or let careful readers build or test different behavior |
+| `minor` | no | still yield the same behavior, verification, ownership and sequencing |
+
+Critical findings include a criterion, scenario or scope statement that
+contradicts its approved BA criterion or rule, accepted Solution decision,
+Design System, Experience record, operation contract or Requirement impact
+matrix; an approved criterion or rule dropped or narrowed without a recorded
+deferral; and a missing or weakened authorization, privacy, data-integrity or
+irreversible-action obligation.
+
+Major findings include an unverifiable or unproven criterion or rule, where no
+scenario can fail it, a Then observes nothing or a coverage-class disposition
+is wrong; a Given/When/Then that cannot be arranged in its target, or an
+automation target that cannot exercise it; a broken, missing, reversed or
+unjustified relation or dependency; an obligation with no owner or a listed
+role without a concrete responsibility; and a story that cannot be delivered
+and demonstrated as one vertical slice.
+
+Minor findings are wording, clarity, redundancy, formatting and title style,
+and imprecision that cannot mislead. Imprecision that could lead a careful
+reader to build or test different behavior is major, never minor. Findings
+that share one root cause are one finding at the severity of that cause.
+
+Only an open critical or major finding keeps a review at `changes_requested`.
+The Product Owner closes each one with a fix or with cited evidence that
+disproves it, and the re-review confirms either. A minor finding never blocks
+approval and never starts another review round. Fix it only in a writer pass
+that already carries a blocking fix, whose re-review reads all changed text;
+otherwise leave the reviewed text unchanged and record the finding in the
+review note's optional `Accepted Minor Findings` section, placed before
+`Verdict`:
+
+```markdown
+## Accepted Minor Findings
+
+| finding | owner_role | reason | revisit_trigger |
+|---|---|---|---|
+| [[backlog/epics/identity/stories/sign-in/story\|ST-002]] Scope states the lockout rule twice in different words. | product_owner | Both sentences state one rule, so behavior and verification are unchanged. | Revisit at the next revision of ST-002. |
+```
+
+`finding` states the minor finding and cites the affected vault note with an
+escaped-table wikilink. `owner_role` is `product_owner`, `qa_engineer` or
+`business_analyst`, the backlog authoring role that follows it up. `reason`
+says why the text is safe to accept as written, and `revisit_trigger` names
+the event that reopens it. The compiler validates every row whenever the
+section is present; a review without accepted minor findings omits it. The
+section never holds a critical or major finding, which closes only through a
+confirmed fix or disproof.
+
+A re-review after a blocking fix or disproof reads the regenerated manifest
+together with those findings, any cited evidence and the changed paths. It
+confirms that each finding is closed and reviews the changed text with its
+dependency context. It does not re-audit unchanged text that an earlier pass
+for the same review note already reviewed. A new critical or major finding
+continues the loop; a new minor finding follows the record rule above.

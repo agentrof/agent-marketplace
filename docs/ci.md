@@ -17,6 +17,21 @@ duplicate, failed, cancelled or mismatched results fail validation. Explicit
 platform skips remain visible; mandatory native Windows regressions cannot
 skip.
 
+The small macOS minimum-version suite uses one worker. That worker first
+executes the seven Apple system-Python launcher cases with the original system
+environment, before installing the policy-selected Python. The validated plan
+structure assigns exactly one Apple owner whenever vault-hook tests are
+selected; missing, duplicate or disabled ownership fails plan validation.
+This avoids a separate macOS job competing with the full-suite workers.
+
+Delivery PR-intent fixtures may copy an immutable, process-local starting
+repository prepared before the first Item starts. Every test gets independent
+files, Git objects and a bare remote; the origin is rebound to that copy and
+transient fetch metadata is removed. The seed contains no linked Item worktree
+or active writer receipt. Construction and isolation have dedicated coverage;
+changed setup functions or environment use fresh preparation. Git operations
+under test, including concurrent ref and lease observations, remain real.
+
 | Profile | Selection |
 | --- | --- |
 | `full` | All tests on the primary Linux and macOS lanes, plus the complete native compatibility policy on macOS minimum Python and both Windows interpreters |
@@ -66,9 +81,22 @@ requires every report to match the exact plan hash and source tree; mixed
 plans fail. Final evidence remains immutable and names the current run attempt,
 so a prior attempt's receipt never authorizes a retry.
 
-Evidence covers repository test execution. It does not replace current Git
-topology, release policy, ref-transaction checks, CodeQL or real host installs.
-The read-only validation workflow never publishes refs or releases.
+Unit-test evidence covers repository test execution. It does not grant host
+installation coverage. A separate checkout-lifecycle receipt binds successful
+real Claude Code and Codex installs to the tested tree, smoke harness, pinned
+CLI versions and host runtime policy in `tools/data/ci-host-policy.json`.
+The host reader verifies the trusted source workflow, merged PR, latest run and
+attempt, age, artifact provenance and digest. Only the explicitly supplied
+prepare/publish candidate may reuse it. PR, standalone manual and scheduled
+host checks remain fresh; fork and scheduled runs do not emit reusable proof.
+The required host aggregate rechecks the exact source before accepting reuse,
+and rejects changed or expired proof. Missing proof at planning runs fresh
+host installs. Failed-job retries retain the logical planning artifact while
+final receipts remain attempt-specific.
+
+Neither evidence type replaces current Git topology, release policy,
+ref-transaction checks, CodeQL or newly published public-channel installs.
+The read-only validation workflows never publish refs or releases.
 
 ## Release transitions
 
@@ -76,8 +104,9 @@ The read-only validation workflow never publishes refs or releases.
 2. After merge, main runs fresh static gates and either verifies equivalent
    PR evidence or executes full tests. CodeQL continues to run on main.
 3. Explicit release preparation consumes exact-main validation (or runs full
-   validation), exercises both hosts, builds the release and checks all static
-   contracts before publishing the candidate branch.
+   validation), verifies matching checkout-host evidence or exercises both
+   hosts, builds the release on Linux and checks all static contracts before
+   publishing the candidate branch.
 4. The release PR always proves its one-commit deterministic replay from
    trusted main. A separate classifier compares complete Git bytes and modes,
    allowing only closed version/provenance/catalog/changelog/changeset
@@ -85,8 +114,9 @@ The read-only validation workflow never publishes refs or releases.
    the release profile. Any unrecognized transformation or missing evidence
    selects full tests. Both real host lifecycles still exercise the candidate.
 5. Publication verifies the exact two-parent merge and its tree, consumes the
-   successful release PR validation or executes full tests, and exercises both
-   hosts. Only then may the existing trusted transaction stage stable/tag refs.
+   successful release PR validation or executes full tests, and verifies
+   matching checkout-host evidence or exercises both hosts. Only then may the
+   existing trusted transaction stage stable/tag refs.
 6. Fresh public-channel installs verify the newly staged exact SHA on both
    hosts. The public smoke CI target does not repeat unit tests; its required
    predecessors already verified candidate coverage. Rollback, immutable

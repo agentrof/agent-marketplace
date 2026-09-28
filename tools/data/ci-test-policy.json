@@ -2,6 +2,7 @@
   "schema_version": 1,
   "description": "Impact groups are conservative dependency closures. Unmapped/shared inputs run the complete suite. Durations are initial estimates, replaced by measured per-test reports.",
   "default_seconds": 1.0,
+  "apple_launcher_lane": "macos-minimum",
   "module_seconds": {
     "tools.tests.test_delivery_git": 20.0,
     "tools.tests.test_delivery_compile": 3.0,
@@ -305,7 +306,7 @@
     "linux-minimum": {
       "os": "ubuntu-latest",
       "python": "3.9",
-      "shards": 2,
+      "shards": 3,
       "groups": [
         "all"
       ]
@@ -313,7 +314,7 @@
     "macos-current": {
       "os": "macos-latest",
       "python": "3.14",
-      "shards": 3,
+      "shards": 4,
       "groups": [
         "all"
       ]
@@ -321,7 +322,7 @@
     "macos-minimum": {
       "os": "macos-latest",
       "python": "3.9",
-      "shards": 2,
+      "shards": 1,
       "groups": [
         "platform"
       ]
@@ -329,7 +330,7 @@
     "windows-current": {
       "os": "windows-latest",
       "python": "3.14",
-      "shards": 6,
+      "shards": 8,
       "groups": [
         "windows"
       ],
@@ -341,7 +342,7 @@
     "windows-minimum": {
       "os": "windows-latest",
       "python": "3.9",
-      "shards": 6,
+      "shards": 8,
       "groups": [
         "windows"
       ],

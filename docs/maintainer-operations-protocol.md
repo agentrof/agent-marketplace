@@ -213,6 +213,10 @@ approval unless scope becomes ambiguous or a gate fails:
 3. Dispatch `Prepare stable release` on that verified `main`. Wait for its
    source validation, exact-SHA host gates and preparation job. Source
    validation verifies trusted exact-main evidence or runs fresh full tests.
+   Host gates independently verify successful checkout-lifecycle evidence for
+   the exact tree and pinned host runtime, or run fresh real installs. Unit
+   evidence never grants host coverage. A reused host result is rechecked
+   before the gate completes.
    Preparation consumes pending changesets, generates distributions, runs
    `make static-check`, and publishes
    `release/stable`. Branch publication re-observes `main` after the
@@ -238,7 +242,8 @@ approval unless scope becomes ambiguous or a gate fails:
    instruction authorizes this release PR merge.
 6. Wait for `Publish stable release`. It verifies the exact two-parent merge
    topology and release tree, verifies successful candidate test evidence or
-   runs fresh full tests, and exercises both real host lifecycles. It then
+   runs fresh full tests, and independently verifies matching checkout-host
+   evidence or exercises both real host lifecycles. It then
    uses only the transaction helper from the
    attested main parent while write credentials are present. The workflow
    stages `stable` and the annotated version tag atomically with exact leases,

@@ -1,0 +1,6 @@
+{
+  "schema_version": 1,
+  "runner_os": "macos-latest",
+  "python": "3.14",
+  "node": "24"
+}

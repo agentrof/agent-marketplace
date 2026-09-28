@@ -146,6 +146,23 @@ jobs:
           ref: ${{ inputs.candidate_sha || github.sha }}
           fetch-depth: 0
           persist-credentials: false
+      - name: Exercise the Apple system Python launcher
+        if: matrix.apple_launcher == true
+        env:
+          AGENT_MARKETPLACE_REQUIRE_APPLE_PYTHON3: "1"
+          DEVELOPER_DIR: ""
+          PATH: /usr/bin:/bin:/usr/sbin:/sbin
+          SDKROOT: ""
+          TOOLCHAINS: ""
+        run: >-
+          /usr/bin/python3 -m unittest
+          tools.tests.test_vault_hook.VaultHookShellContractTests.test_system_macos_python3_launcher_is_accepted
+          tools.tests.test_vault_hook.VaultHookShellContractTests.test_issue_77_bare_python_cmd_preserves_attested_codex_result
+          tools.tests.test_vault_hook.VaultHookShellContractTests.test_bare_python_candidate_with_invalid_result_is_restored
+          tools.tests.test_vault_hook.VaultHookShellContractTests.test_bare_render_cannot_publish_a_different_valid_transition
+          tools.tests.test_vault_hook.VaultHookShellContractTests.test_bare_render_with_forged_registry_is_restored
+          tools.tests.test_vault_hook.VaultHookShellContractTests.test_issue_77_bare_init_has_an_exact_attested_delta
+          tools.tests.test_vault_hook.VaultHookShellContractTests.test_issue_77_bare_init_preserves_real_codex_draft
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: ${{ matrix.python }}
@@ -201,35 +218,6 @@ jobs:
             test "$TEST_RESULT" = skipped
           fi
 
-  vault-hook-platforms:
-    name: Apple system Python launcher
-    needs: plan
-    if: needs.plan.outputs.apple_launcher == 'true'
-    runs-on: macos-latest
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
-        with:
-          ref: ${{ inputs.candidate_sha || github.sha }}
-          fetch-depth: 0
-          persist-credentials: false
-      - name: Exercise the Apple system Python launcher
-        env:
-          AGENT_MARKETPLACE_REQUIRE_APPLE_PYTHON3: "1"
-          DEVELOPER_DIR: ""
-          PATH: /usr/bin:/bin:/usr/sbin:/sbin
-          SDKROOT: ""
-          TOOLCHAINS: ""
-        run: >-
-          /usr/bin/python3 -m unittest
-          tools.tests.test_vault_hook.VaultHookShellContractTests.test_system_macos_python3_launcher_is_accepted
-          tools.tests.test_vault_hook.VaultHookShellContractTests.test_issue_77_bare_python_cmd_preserves_attested_codex_result
-          tools.tests.test_vault_hook.VaultHookShellContractTests.test_bare_python_candidate_with_invalid_result_is_restored
-          tools.tests.test_vault_hook.VaultHookShellContractTests.test_bare_render_cannot_publish_a_different_valid_transition
-          tools.tests.test_vault_hook.VaultHookShellContractTests.test_bare_render_with_forged_registry_is_restored
-          tools.tests.test_vault_hook.VaultHookShellContractTests.test_issue_77_bare_init_has_an_exact_attested_delta
-          tools.tests.test_vault_hook.VaultHookShellContractTests.test_issue_77_bare_init_preserves_real_codex_draft
-
   check:
     name: check
     if: always()
@@ -240,7 +228,6 @@ jobs:
       - test-shards
       - deterministic-check
       - compatibility
-      - vault-hook-platforms
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -255,11 +242,9 @@ jobs:
           RELEASE_POLICY_RESULT: ${{ needs.release-pr-policy.result }}
           PLAN_RESULT: ${{ needs.plan.result }}
           HAS_TESTS: ${{ needs.plan.outputs.has_tests }}
-          APPLE_LAUNCHER: ${{ needs.plan.outputs.apple_launcher }}
           TEST_RESULT: ${{ needs.test-shards.result }}
           DETERMINISTIC_RESULT: ${{ needs.deterministic-check.result }}
           COMPATIBILITY_RESULT: ${{ needs.compatibility.result }}
-          VAULT_RESULT: ${{ needs.vault-hook-platforms.result }}
         run: |
           set -euo pipefail
           test "$PLAN_RESULT" = success
@@ -271,13 +256,6 @@ jobs:
             test "$HAS_TESTS" = false
             test "$TEST_RESULT" = skipped
           fi
-          if [ "$APPLE_LAUNCHER" = true ]; then
-            test "$VAULT_RESULT" = success
-          else
-            test "$APPLE_LAUNCHER" = false
-            test "$VAULT_RESULT" = skipped
-          fi
-
           expected_changeset=skipped
           expected_release_policy=skipped
           if [ "$EVENT_NAME" = pull_request ]; then

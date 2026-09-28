@@ -33,7 +33,7 @@ jobs:
     needs: [source-validation, exact-sha-host-gates]
     permissions:
       contents: write
-    runs-on: macos-latest
+    runs-on: ubuntu-latest
     timeout-minutes: 35
     outputs:
       mode: ${{ steps.prepare.outputs.mode }}

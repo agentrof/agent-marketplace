@@ -113,8 +113,10 @@ behavior is host-neutral; Claude Code and Codex are packaging adapters.
     aggregate and two-host lifecycle contexts. Test partitions must account
     for every selected case; shared or unknown impact selects full coverage.
     Reused validation binds successful trusted workflow evidence to the exact
-    tested tree and current coverage contract. Missing evidence runs full
-    tests, while topology, release replay and public installs remain fresh.
+    tested tree and current coverage contract. Checkout-host reuse requires
+    separate successful host evidence with matching runtime and install
+    contracts. Missing evidence runs fresh tests or host installs, while
+    topology, release replay and public installs remain fresh.
     Release branches are accepted
     only when their sole commit tree is the deterministic replay of the
     attested main source. Replay ignores ambient Git attributes, excludes,

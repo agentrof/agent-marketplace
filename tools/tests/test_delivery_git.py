@@ -122,7 +122,9 @@ def windows_text_pipes(code_page: str = "cp1252"):
         encoding, errors = kwargs.pop("encoding", None), kwargs.pop("errors", None)
         if not (text or universal or encoding or errors):
             return run(*args, **kwargs)
-        encoding, errors = encoding or code_page, errors or "strict"
+        # TextIOWrapper's "locale" token selects the host code page, not a codec.
+        encoding = code_page if not encoding or encoding == "locale" else encoding
+        errors = errors or "strict"
         check = kwargs.pop("check", False)
         if isinstance(kwargs.get("input"), str):
             kwargs["input"] = kwargs["input"].replace("\n", "\r\n").encode(encoding, errors)
@@ -4597,7 +4599,8 @@ class DeliveryGitTests(unittest.TestCase):
 
     def test_fixture_command_pipes_preserve_text_aliases_and_host_version_probes(self):
         import platform
-        aliases = ({"text": True}, {"universal_newlines": True}, {"encoding": "utf-8"}, {"errors": "replace"})
+        aliases = ({"text": True}, {"universal_newlines": True}, {"encoding": "utf-8"},
+                   {"encoding": "locale"}, {"errors": "replace"})
         command = "fixture-test-command"
         with windows_text_pipes(), approved_fixture_shell_commands({command}):
             for options in aliases:
@@ -4609,6 +4612,24 @@ class DeliveryGitTests(unittest.TestCase):
                     self.assertEqual(actual.strip(), "Actual host probe")
             self.assertEqual(subprocess.check_output(command, shell=True), b"Fixture command passed\n")
 
+        for code_page, content in (("cp1252", "café €\n"), ("cp1254", "şifre ı\n")):
+            with self.subTest(code_page=code_page):
+                encoded = content.replace("\n", "\r\n").encode(code_page)
+
+                def locale_probe(command, *args, **kwargs):
+                    self.assertEqual(command, ["fixture-locale-probe"])
+                    self.assertFalse(any(kwargs.get(key) for key in ("text", "universal_newlines", "encoding", "errors")))
+                    self.assertEqual(kwargs["input"], encoded)
+                    return subprocess.CompletedProcess(command, 0, encoded, "é\r\n".encode(code_page))
+
+                with mock.patch.object(subprocess, "run", side_effect=locale_probe), windows_text_pipes(code_page):
+                    result = subprocess.run(["fixture-locale-probe"], input=content,
+                                            capture_output=True, encoding="locale")
+                    self.assertEqual((result.stdout, result.stderr), (content, "é\n"))
+                    with self.assertRaises(LookupError):
+                        subprocess.run(["fixture-locale-probe"], input=content,
+                                       capture_output=True, encoding="fixture-unknown-codec")
+
         def version_probe(command, *args, **kwargs):
             self.assertEqual(command, "ver")
             self.assertTrue(kwargs["shell"])
@@ -4617,8 +4638,8 @@ class DeliveryGitTests(unittest.TestCase):
             return subprocess.CompletedProcess(command, 0, b"Microsoft Windows [Version 10.0.20348]\r\n")
         with mock.patch.object(subprocess, "run", side_effect=version_probe), windows_text_pipes(), \
                 approved_fixture_shell_commands({command}):
-            # Python 3.9 uses universal_newlines=True here; newer versions use
-            # text=True. Both must reach the real platform parser as strings.
+            # Platform probes use universal_newlines, text, or encoding="locale"
+            # across supported Python versions and must receive strings.
             self.assertEqual(platform._syscmd_ver(supported_platforms=(sys.platform,)),
                              ("Microsoft", "Windows", "10.0.20348"))
 

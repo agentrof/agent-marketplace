@@ -15,8 +15,8 @@ project-global Governance contract.
   `max_parallel` value is read only from the approved contract, never config.
 - A Fence handoff is authoritative: start, resume, reopen and takeover are
   blocked while a Governance transition is held or its hash drifts.
-- A reduction may proceed only after every Slot above the proposed capacity is
-  demonstrably free; no active Item is silently displaced.
+- A Governance change may proceed only after all remote Slots are free, as
+  the coordinator compiler requires; no active Item is silently displaced.
 
 ## Boundaries
 - Does: Governance lifecycle, Fence handoff and Delivery coordination evidence.

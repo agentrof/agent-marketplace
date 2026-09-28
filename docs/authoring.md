@@ -142,8 +142,17 @@ Generate distributions and verify before committing:
 
 ```text
 python3 tools/build_distributions.py
-make check
+git add <complete-change-paths>
+make check-local
+python3 tools/ci_local.py verify --staged --target origin/main
 ```
 
 Use `make counts` only to refresh derived README counts. Never edit `dist/`
 directly.
+
+`check-local` requires complete staging and exact worktree/index equality.
+It always runs static checks, then the complete affected selection or valid
+local evidence for exactly that candidate. Unknown/shared inputs select full
+coverage. Verify again immediately before commit. `make check` remains the
+exhaustive sequential oracle; local receipts never replace required remote
+platform, installation or release checks.

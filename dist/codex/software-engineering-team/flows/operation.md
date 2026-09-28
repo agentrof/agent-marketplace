@@ -24,3 +24,19 @@ Requirement stage and it does not alter product-stage package hashes.
    references, command safety lens and `SELF-CHECK`.
 4. Approve with `operation_compile.py approve --kind <kind>`. Return the exact
    contract receipt. Do not run a downstream product stage automatically.
+
+Verification may declare an optional `diagnostic_test_command` adapter for
+failed or affected tests, with `diagnostic_test_workdir` defaulting to `.` only
+at execution. Add it through the normal revision and approval lifecycle.
+Neither field is inserted into an older contract. Without the adapter, no
+focused diagnostic command is authorized; the approved full test command
+retains its existing meaning.
+
+The adapter reads the compiler-owned selection file named by
+`AGENTROF_DIAGNOSTIC_TESTS`. Its JSON contains `schema_version: 1`, the exact
+`candidate_hash`, `failed_test_ids` and `affected_test_ids`. Treat test IDs as
+data and pass them to the test runner through an argument array, never shell
+interpolation. The approved adapter provisions dependencies in its private
+candidate checkout or uses the approved fixed environment; it cannot borrow
+ignored dependencies from the writer's checkout. Diagnostic output cannot
+satisfy final full-suite evidence.

@@ -167,9 +167,13 @@ class ReleaseWorkflowContracts(unittest.TestCase):
         self.assertIn("if: always()", validate)
         for dependency in (
             "changeset", "release-pr-policy", "deterministic-check",
-            "compatibility", "test-shards",
+            "test-shards",
         ):
             self.assertIn(f"      - {dependency}", validate)
+        jobs = workflow_jobs(validate)
+        self.assertEqual(jobs["compatibility"]["needs"], ["plan", "test-shards"])
+        self.assertNotIn("compatibility", jobs["check"]["needs"])
+        self.assertIn("name: compatibility (${{ matrix.os }}, Python ${{ matrix.python }})", validate)
 
     def test_bootstrap_requires_empty_tag_space_and_uses_atomic_refs(self):
         text = self.text("prepare-stable-release.yml")
@@ -291,7 +295,7 @@ class ReleaseWorkflowContracts(unittest.TestCase):
         self.assertEqual(validate["check"]["if"], "always()")
         self.assertEqual(validate["check"]["needs"], [
             "changeset", "release-pr-policy", "plan", "test-shards",
-            "deterministic-check", "compatibility",
+            "deterministic-check",
         ])
         self.assertIn("github.event_name == 'pull_request' &&",
                       validate["changeset"]["if"])
@@ -607,12 +611,12 @@ class ReleaseWorkflowContracts(unittest.TestCase):
         baseline = dict(os.environ, EVENT_NAME="pull_request", BASE_REF="main",
                         HEAD_REF="feature", HEAD_REPOSITORY="owner/repo", REPOSITORY="owner/repo",
                         CHANGESET_RESULT="success", RELEASE_POLICY_RESULT="skipped",
-                        PLAN_RESULT="success", DETERMINISTIC_RESULT="success", COMPATIBILITY_RESULT="success",
+                        PLAN_RESULT="success", DETERMINISTIC_RESULT="success",
                         HAS_TESTS="true", TEST_RESULT="success")
         def execute(values):
             return subprocess.run(["bash", "-c", script], env=values, capture_output=True).returncode
         self.assertEqual(execute(baseline), 0)
-        for key in ("PLAN_RESULT", "DETERMINISTIC_RESULT", "COMPATIBILITY_RESULT", "TEST_RESULT", "CHANGESET_RESULT"):
+        for key in ("PLAN_RESULT", "DETERMINISTIC_RESULT", "TEST_RESULT", "CHANGESET_RESULT"):
             for status in ("failure", "cancelled", "skipped", ""):
                 with self.subTest(key=key, status=status):
                     self.assertNotEqual(execute(dict(baseline, **{key: status})), 0)

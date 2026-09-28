@@ -64,6 +64,108 @@ class VaultHookPrototypeTests(unittest.TestCase):
     def setUp(self):
         self.hook = load_hook()
 
+    def test_snapshot_inventory_reuses_exact_protected_bytes_and_fresh_postimage(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            docs = Path(temporary).resolve()
+            protected = docs / "experience-design/_generated/state.json"
+            protected.parent.mkdir(parents=True)
+            protected.write_bytes(b"before\r\n")
+            metadata = protected.parent / ".DS_Store"
+            metadata.write_bytes(b"metadata")
+            expected = self.hook.vault_inventory(docs)
+            reads = []
+            read_bytes = Path.read_bytes
+            def tracked(path):
+                reads.append(path)
+                return read_bytes(path)
+            with mock.patch.object(Path, "read_bytes", tracked):
+                snapshot = self.hook.experience_tree_snapshot(docs)
+                actual = self.hook.vault_inventory(docs, experience_snapshot=snapshot)
+            self.assertEqual(actual, expected)
+            self.assertEqual(reads.count(protected), 1)
+            self.assertEqual(reads.count(metadata), 1)
+            protected.write_bytes(b"after\r\n")
+            self.assertNotEqual(self.hook.vault_inventory(docs), actual)
+
+    def test_post_batches_checks_and_preserves_first_target_error(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            project = Path(temporary).resolve()
+            docs = project / "workspace/docs"
+            docs.mkdir(parents=True)
+            first, second = docs / "solution-design/a.md", docs / "solution-design/b.md"
+            first.parent.mkdir()
+            first.write_text("[[missing-first|First]]\n", encoding="utf-8")
+            second.write_text("[[missing-second|Second]]\n", encoding="utf-8")
+            expected = io.StringIO()
+            with redirect_stderr(expected):
+                self.assertEqual(self.hook.post_target(str(second)), 2)
+            output = io.StringIO()
+            with mock.patch.object(self.hook.vault_check, "build_vault", wraps=self.hook.vault_check.build_vault) as build:
+                with redirect_stderr(output):
+                    code = self.hook.post({"cwd": str(project), "file_targets": [
+                        {"file_path": str(second)}, {"file_path": str(first)}]})
+            self.assertEqual(code, 2)
+            self.assertEqual(build.call_count, 1)
+            self.assertEqual(output.getvalue(), expected.getvalue())
+
+    def test_patch_overlay_resolves_added_notes_and_rejects_deleted_inbound_without_copy(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            project = Path(temporary).resolve()
+            docs = project / "workspace/docs"
+            docs.mkdir(parents=True)
+            first, second = docs / "maps/a.md", docs / "maps/b.md"
+            def content(name, target):
+                return f"---\ntype: moc\ntitle: {name}\ntags:\n  - doc/moc\n---\n\n# {name}\n\n[[maps/{target}|Target]]"
+            targets = [{"file_path": str(first), "operation": "add", "content": content("Alpha", "b")},
+                       {"file_path": str(second), "operation": "add", "content": content("Beta", "a")}]
+            with mock.patch.object(self.hook.shutil, "copytree", side_effect=AssertionError("overlay copied the vault")):
+                self.assertEqual(self.hook.virtual_overlay_check({"cwd": str(project), "file_targets": targets}), 0)
+            self.assertFalse(first.exists())
+            first.parent.mkdir()
+            first.write_text(content("Alpha", "b"), encoding="utf-8")
+            second.write_text(content("Beta", "a"), encoding="utf-8")
+            output = io.StringIO()
+            with redirect_stderr(output):
+                self.assertEqual(self.hook.virtual_overlay_check({"cwd": str(project), "file_targets": [
+                    {"file_path": str(first), "operation": "delete"}]}), 2)
+            self.assertIn("unresolved wikilink", output.getvalue())
+            self.assertTrue(first.exists())
+
+    def test_delivery_reader_barrier_only_permits_scratch_and_exact_coordinator(self):
+        import delivery_verification
+        with tempfile.TemporaryDirectory() as temporary:
+            project = Path(temporary).resolve()
+            (project / ".git").mkdir()
+            delivery_verification.write_session(project, {"schema_version": 1, "workers": {
+                "code_reviewer": {"state": "running"}, "qa_engineer": {"state": "running"}}})
+            scratch = delivery_verification.session_path(project).parent / "scratch/result.json"
+            for path, expected in ((project / "product.py", 2), (project / "workspace/docs/report.md", 2),
+                                   (delivery_verification.session_path(project), 2), (scratch, 0)):
+                with self.subTest(path=path), redirect_stderr(io.StringIO()):
+                    self.assertEqual(self.hook.delivery_reader_barrier({"cwd": str(project), "tool_name": "Write",
+                                                                      "file_targets": [{"file_path": str(path)}]}), expected)
+            command = [sys.executable, "-B", str(SCRIPTS / "delivery_verification.py"), "--worktree", str(project), "status"]
+            for verb in ("status", "inspect", "diff", "environment"):
+                routed = [*command[:-1], verb]
+                routed_text = subprocess.list2cmdline(routed) if os.name == "nt" else shlex.join(routed)
+                self.assertEqual(self.hook.delivery_reader_barrier({"cwd": str(project), "tool_name": "Bash",
+                                                                  "tool_input": {"command": routed_text}}), 0)
+            command_text = subprocess.list2cmdline(command) if os.name == "nt" else shlex.join(command)
+            diagnostic = [*command[:-1], "run", "--kind", "diagnostic_test", "--selection-file", str(scratch.parent / "selection.json")]
+            diagnostic_text = subprocess.list2cmdline(diagnostic) if os.name == "nt" else shlex.join(diagnostic)
+            for value, expected in ((command_text, 0), (command_text + " && echo unsafe", 2),
+                                    (diagnostic_text, 0), (diagnostic_text + " && echo unsafe", 2),
+                                    ("git status", 2)):
+                with self.subTest(command=value), redirect_stderr(io.StringIO()):
+                    self.assertEqual(self.hook.delivery_reader_barrier({"cwd": str(project), "tool_name": "Bash",
+                                                                      "tool_input": {"command": value}}), expected)
+            other = project / "another-checkout"
+            (other / ".git").mkdir(parents=True)
+            for tool in ("Write", "Edit", "apply_patch"):
+                with self.subTest(tool=tool), redirect_stderr(io.StringIO()):
+                    self.assertEqual(self.hook.delivery_reader_barrier({"cwd": str(other), "tool_name": tool,
+                                                                      "file_targets": [{"file_path": str(project / "product.py") }]}), 2)
+
     def test_safe_os_metadata_never_changes_the_guard_inventory(self):
         with tempfile.TemporaryDirectory() as temporary:
             docs = Path(temporary)

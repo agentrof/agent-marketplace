@@ -8,6 +8,19 @@ aggregate. It validates dependencies, cycles, path and contract claims, role
 sequence, verification strategy and current source hashes before the user
 approves the plan.
 
+New Items explicitly declare `verification_schedule: parallel_snapshot_v1`.
+Implementation roles retain their approved order; independent Code Review
+and QA then run against one frozen candidate before the owner write barrier.
+`role_sequence` keeps the complete role inventory. An absent schedule in an
+older approved Item means `sequential_v1` without rewriting or rehashing it.
+Changing a schedule uses the normal execution revision, approval and publication
+path; unknown schedules are rejected.
+For parallel verification, approved test and environment commands must work
+from an independent checkout containing tracked files. Confirm dependency
+provisioning in those commands or an explicitly supplied fixed environment;
+the runner does not copy the writer's ignored dependency directories. Revise
+and approve an unsuitable Operation Contract before starting the Item.
+
 Approval is offline. `publish-execution-plan` is the only later network writer;
 it creates no Item worktree, slot or product-code branch. Item claims begin only
 after the published plan is verified remotely.

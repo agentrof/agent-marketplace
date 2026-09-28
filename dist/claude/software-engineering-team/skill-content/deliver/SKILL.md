@@ -6,6 +6,10 @@ exposure: entry
 
 # Deliver
 
+Before delegating a role, follow the packaged `templates/task-input-contract.md`
+and derive its inputs with `scripts/task_inputs.py --entry deliver`.
+Use the owning compiler's exact scope and source bindings.
+
 ## When to Use
 
 - Use with an exact `DLV-###` after its Execution Plan and Item claims are

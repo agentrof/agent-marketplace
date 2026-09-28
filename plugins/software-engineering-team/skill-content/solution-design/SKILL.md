@@ -11,6 +11,10 @@ Maintain one project-level solution landscape under
 integration, method and sustainability verdict becomes a linked Markdown
 decision. Nothing decided remains only in conversation.
 
+Before delegating a role, follow the packaged `templates/task-input-contract.md`
+and derive its inputs with `scripts/task_inputs.py --entry solution-design`.
+Use the owning compiler's exact scope and source bindings.
+
 ## When to Use
 
 - Business Analysis has an approved scope and the project needs landscape or

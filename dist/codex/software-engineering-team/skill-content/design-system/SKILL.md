@@ -8,6 +8,10 @@ exposure: entry
 
 The only place the design master is born or changed.
 
+Before delegating a role, follow the packaged `templates/task-input-contract.md`
+and derive its inputs with `scripts/task_inputs.py --entry design-system`.
+Use the owning compiler's exact scope and source bindings.
+
 ## When to Use
 - No design system exists yet and design work is about to start.
 - The existing system needs a change: palette, type, tokens, a page

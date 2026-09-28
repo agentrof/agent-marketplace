@@ -1,0 +1,422 @@
+{
+  "schema_version": 1,
+  "modes": [
+    "create",
+    "revise",
+    "consume",
+    "review",
+    "repair"
+  ],
+  "role_skills": {
+    "analysis_challenger": [
+      "challenge-review",
+      "requirements-analysis"
+    ],
+    "backend_developer": [
+      "python-fastapi",
+      "sql-database-design",
+      "nosql-database-design"
+    ],
+    "backlog_reviewer": [
+      "product-planning",
+      "challenge-review"
+    ],
+    "business_analyst": [
+      "requirements-analysis"
+    ],
+    "code_reviewer": [
+      "code-review"
+    ],
+    "delivery_coordinator": [
+      "obsidian-vault"
+    ],
+    "design_system_reviewer": [
+      "ui-ux-design",
+      "challenge-review"
+    ],
+    "devops_engineer": [
+      "docker-compose"
+    ],
+    "domain_expert": [
+      "requirements-analysis"
+    ],
+    "experience_reviewer": [
+      "experience-modeling",
+      "ui-ux-design",
+      "challenge-review"
+    ],
+    "frontend_developer": [
+      "react-typescript",
+      "ui-ux-design"
+    ],
+    "product_owner": [
+      "product-planning"
+    ],
+    "qa_engineer": [
+      "qa-verification"
+    ],
+    "software_architect": [
+      "software-architecture"
+    ],
+    "solution_architect": [
+      "solution-architecture"
+    ],
+    "solution_reviewer": [
+      "solution-architecture",
+      "challenge-review"
+    ],
+    "ux_designer": [
+      "ui-ux-design",
+      "experience-modeling"
+    ]
+  },
+  "entries": {
+    "requirement": {
+      "flows": [
+        "requirement"
+      ],
+      "roles": [
+        "business-analyst"
+      ],
+      "scope_kind": "requirement",
+      "project_state": true,
+      "write_scope": {
+        "resolver": "unresolved",
+        "roles": []
+      },
+      "next_transition": "Requirement approval and current required Stage Results must satisfy requirement_compile.py and the router before a stage or backlog handoff."
+    },
+    "business_analysis": {
+      "flows": [
+        "business-analysis"
+      ],
+      "roles": [
+        "business-analyst",
+        "analysis-challenger",
+        "domain-expert"
+      ],
+      "scope_kind": "business-analysis",
+      "project_state": true,
+      "write_scope": {
+        "resolver": "ba_documents",
+        "roles": [
+          "business-analyst"
+        ]
+      },
+      "next_transition": "Use ba_compile.py enter-review, approve, and approve-package; hand off only the committed approved package receipt, after any required begin-revision."
+    },
+    "solution_design": {
+      "flows": [
+        "solution-design"
+      ],
+      "roles": [
+        "solution-architect",
+        "solution-reviewer",
+        "domain-expert"
+      ],
+      "scope_kind": "solution-design",
+      "project_state": true,
+      "write_scope": {
+        "resolver": "unresolved",
+        "roles": []
+      },
+      "next_transition": "The selected Solution package must pass its compiler review and approval gates; commit its current receipt before downstream handoff."
+    },
+    "design_system": {
+      "flows": [
+        "design-system"
+      ],
+      "roles": [
+        "ux-designer",
+        "design-system-reviewer"
+      ],
+      "scope_kind": "design-system",
+      "project_state": true,
+      "write_scope": {
+        "resolver": "unresolved",
+        "roles": []
+      },
+      "next_transition": "The selected Design System package must pass its compiler review and approval gates; commit its current receipt before downstream handoff."
+    },
+    "experience_design": {
+      "flows": [
+        "experience-design"
+      ],
+      "roles": [
+        "ux-designer",
+        "experience-reviewer"
+      ],
+      "scope_kind": "experience-design",
+      "project_state": true,
+      "write_scope": {
+        "resolver": "unresolved",
+        "roles": []
+      },
+      "next_transition": "The Experience compiler must approve the globally current application and selected process package set before binding its receipt."
+    },
+    "backlog_plan": {
+      "flows": [
+        "backlog-planning"
+      ],
+      "roles": [
+        "product-owner",
+        "backlog-reviewer",
+        "business-analyst",
+        "qa-engineer"
+      ],
+      "scope_kind": "backlog",
+      "project_state": true,
+      "write_scope": {
+        "resolver": "backlog_documents",
+        "roles": [
+          "product-owner"
+        ]
+      },
+      "next_transition": "The Product Owner persists contributions only after every reviewer finishes; backlog_compile.py must validate the selected reviews and approve the exact backlog revision before committed handoff."
+    },
+    "delivery_plan": {
+      "flows": [
+        "delivery-planning"
+      ],
+      "roles": [
+        "product-owner",
+        "delivery-coordinator"
+      ],
+      "scope_kind": "delivery",
+      "project_state": true,
+      "write_scope": {
+        "resolver": "unresolved",
+        "roles": []
+      },
+      "next_transition": "The selected Delivery scope must pass delivery_compile.py scope approval before Execution Planning."
+    },
+    "execution_plan": {
+      "flows": [
+        "execution-planning"
+      ],
+      "roles": [
+        "software-architect",
+        "delivery-coordinator",
+        "qa-engineer",
+        "devops-engineer"
+      ],
+      "scope_kind": "delivery",
+      "project_state": true,
+      "write_scope": {
+        "resolver": "unresolved",
+        "roles": []
+      },
+      "next_transition": "The selected Item topology and contracts must pass delivery_compile.py execution approval and normal publication before activation."
+    },
+    "deliver": {
+      "flows": [
+        "delivery-execution"
+      ],
+      "roles": [
+        "software-architect",
+        "backend-developer",
+        "frontend-developer",
+        "devops-engineer",
+        "code-reviewer",
+        "qa-engineer",
+        "delivery-coordinator"
+      ],
+      "scope_kind": "delivery",
+      "project_state": true,
+      "write_scope": {
+        "resolver": "item_claims",
+        "roles": [
+          "software-architect",
+          "backend-developer",
+          "frontend-developer",
+          "devops-engineer"
+        ]
+      },
+      "next_transition": "Implementation requires the approved Item plan and active writer receipt. Review and QA require the same frozen candidate; delivery_verification.py controls reader barriers and final evidence, and Delivery Git validates integration."
+    },
+    "configure": {
+      "flows": [
+        "operation",
+        "delivery-governance"
+      ],
+      "roles": [
+        "delivery-coordinator",
+        "qa-engineer",
+        "devops-engineer"
+      ],
+      "scope_kind": "operation",
+      "project_state": true,
+      "write_scope": {
+        "resolver": "unresolved",
+        "roles": []
+      },
+      "next_transition": "The selected Operation or Governance compiler must validate and approve the exact changed contract; publication and slot transitions retain their existing gates."
+    },
+    "setup": {
+      "flows": [],
+      "roles": [
+        "delivery-coordinator"
+      ],
+      "scope_kind": "setup",
+      "project_state": true,
+      "allow_unborn_head": true,
+      "write_scope": {
+        "resolver": "unresolved",
+        "roles": []
+      },
+      "next_transition": "Complete the setup preflight and selected scaffold checks before presenting the configured project."
+    },
+    "organize_docs": {
+      "flows": [],
+      "roles": [
+        "business-analyst"
+      ],
+      "scope_kind": "vault",
+      "project_state": true,
+      "write_scope": {
+        "resolver": "unresolved",
+        "roles": []
+      },
+      "next_transition": "The vault checker must validate each authorized write and the final selected vault structure."
+    },
+    "sketch": {
+      "flows": [
+        "design"
+      ],
+      "roles": [
+        "ux-designer"
+      ],
+      "scope_kind": "design",
+      "project_state": true,
+      "write_scope": {
+        "resolver": "unresolved",
+        "roles": []
+      },
+      "next_transition": "Return the selected exploratory design artifact under its existing artifact boundary; it cannot approve or replace canonical Experience sources."
+    },
+    "demo": {
+      "flows": [
+        "design"
+      ],
+      "roles": [
+        "ux-designer"
+      ],
+      "scope_kind": "design",
+      "project_state": true,
+      "write_scope": {
+        "resolver": "unresolved",
+        "roles": []
+      },
+      "next_transition": "Return the selected demo artifact under its existing artifact boundary; it cannot approve or replace canonical Experience sources."
+    },
+    "issue_report": {
+      "flows": [],
+      "roles": [],
+      "scope_kind": "external",
+      "project_state": false,
+      "write_scope": {
+        "resolver": "unresolved",
+        "roles": []
+      },
+      "next_transition": "Return the external issue-report result from conversation evidence; no project transition is authorized."
+    }
+  },
+  "read_only_roles": [
+    "analysis-challenger",
+    "backlog-reviewer",
+    "code-reviewer",
+    "design-system-reviewer",
+    "domain-expert",
+    "experience-reviewer",
+    "solution-reviewer"
+  ],
+  "required_references": {
+    "code_review": [
+      "references/passes.md"
+    ]
+  },
+  "stack_reference_by_role": {
+    "code_reviewer": "review-checklist.md",
+    "qa_engineer": "qa-checklist.md"
+  },
+  "repair_policy": "Open findings, the new delta and affected consumers; widen when impact is uncertain. Never drop mandatory review passes.",
+  "barrier": "Wait for all readers to finish or confirm cancellation before the named owner writes canonical sources.",
+  "output_contract": {
+    "findings": "Stable IDs, severity, source anchor, impact, repair and verification condition.",
+    "self_check": "Required inputs, mode, ownership and output elements present or missing."
+  },
+  "required_role_skills": {
+    "analysis_challenger": [
+      "challenge-review",
+      "requirements-analysis"
+    ],
+    "backlog_reviewer": [
+      "product-planning",
+      "challenge-review"
+    ],
+    "business_analyst": [
+      "requirements-analysis"
+    ],
+    "code_reviewer": [
+      "code-review"
+    ],
+    "delivery_coordinator": [
+      "obsidian-vault"
+    ],
+    "design_system_reviewer": [
+      "ui-ux-design",
+      "challenge-review"
+    ],
+    "domain_expert": [
+      "requirements-analysis"
+    ],
+    "experience_reviewer": [
+      "experience-modeling",
+      "ui-ux-design",
+      "challenge-review"
+    ],
+    "product_owner": [
+      "product-planning"
+    ],
+    "qa_engineer": [
+      "qa-verification"
+    ],
+    "software_architect": [
+      "software-architecture"
+    ],
+    "solution_architect": [
+      "solution-architecture"
+    ],
+    "solution_reviewer": [
+      "solution-architecture",
+      "challenge-review"
+    ],
+    "ux_designer": [
+      "ui-ux-design",
+      "experience-modeling"
+    ],
+    "backend_developer": [],
+    "frontend_developer": [
+      "ui-ux-design"
+    ],
+    "devops_engineer": []
+  },
+  "read_only_entry_roles": {
+    "deliver": [
+      "code-reviewer",
+      "qa-engineer"
+    ],
+    "backlog_plan": [
+      "backlog-reviewer",
+      "business-analyst",
+      "qa-engineer"
+    ]
+  },
+  "technology_method_skills": [
+    "python-fastapi",
+    "react-typescript",
+    "docker-compose",
+    "sql-database-design",
+    "nosql-database-design"
+  ]
+}

@@ -1,0 +1,100 @@
+{
+  "schema_version": 1,
+  "raw_evidence_max_age_seconds": 86400,
+  "schedules": [
+    "sequential_v1",
+    "parallel_snapshot_v1"
+  ],
+  "legacy_schedule": "sequential_v1",
+  "new_schedule": "parallel_snapshot_v1",
+  "blocking_severities": [
+    "critical",
+    "major",
+    "high",
+    "medium",
+    "P0",
+    "P1",
+    "P2"
+  ],
+  "review_checks": [
+    "correctness",
+    "conformance",
+    "security"
+  ],
+  "qa_checks": [
+    "full_test_suite",
+    "coverage",
+    "right_reason"
+  ],
+  "role_modes": {
+    "code_reviewer": [
+      "review_initial",
+      "review_repair"
+    ],
+    "qa_engineer": [
+      "qa_diagnostic",
+      "qa_final"
+    ]
+  },
+  "final_modes": {
+    "code_reviewer": [
+      "review_initial",
+      "review_repair"
+    ],
+    "qa_engineer": [
+      "qa_final"
+    ]
+  },
+  "mutation_scope": {
+    "excluded_prefixes": [
+      "workspace/docs/",
+      "workspace/environment/",
+      ".agentrof/"
+    ],
+    "non_code_suffixes": [
+      ".md",
+      ".rst",
+      ".txt",
+      ".json",
+      ".yaml",
+      ".yml",
+      ".toml",
+      ".ini",
+      ".cfg",
+      ".lock",
+      ".csv",
+      ".xml",
+      ".svg",
+      ".png",
+      ".jpg",
+      ".jpeg",
+      ".gif",
+      ".webp",
+      ".ico",
+      ".woff",
+      ".woff2",
+      ".ttf",
+      ".pdf"
+    ],
+    "test_path_segments": [
+      "test",
+      "tests",
+      "__tests__"
+    ],
+    "test_name_patterns": [
+      "test_*",
+      "*_test.*",
+      "*.test.*",
+      "*.spec.*",
+      "conftest.py"
+    ],
+    "unknown_file_policy": "include",
+    "additional_include_property": "mutation_include_paths"
+  },
+  "nonblocking_severities": [
+    "minor",
+    "low",
+    "info",
+    "P3"
+  ]
+}

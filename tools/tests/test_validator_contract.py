@@ -153,6 +153,20 @@ class ValidatorContractTests(unittest.TestCase):
             )
             self.assertIn("delivery_contract_shape", self.checks(root))
 
+    def test_delivery_verification_policy_rejects_diagnostic_seal_and_weakened_scope(self):
+        for mutate in (
+                lambda value: value["final_modes"].update(qa_engineer=["qa_diagnostic", "qa_final"]),
+                lambda value: value["mutation_scope"].update(unknown_file_policy="skip"),
+                lambda value: value.update(raw_evidence_max_age_seconds=86401),
+                lambda value: value.update(undeclared_field=True)):
+            with self.subTest(mutate=mutate), tempfile.TemporaryDirectory() as temporary:
+                root = self.fixture(temporary)
+                path = root / "plugins/software-engineering-team/skill-content/deliver/data/delivery-verification-policy.json"
+                value = json.loads(path.read_text())
+                mutate(value)
+                path.write_text(json.dumps(value))
+                self.assertIn("delivery_contract_shape", self.checks(root))
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -52,7 +52,7 @@ Classify every planned check into exactly one category. A plan missing any categ
   only project entry points.
 - DO record the exact commands executed in the report, so the run is reproducible.
 - The suite is hermetic: the test and mutation commands never depend on a standing environment; a suite found depending on one is a blocking finding (waiver semantics in the environment stack skill's Hermetic Suite Rule).
-- The mutation gate is mandatory on code stories: run the mutation command scoped to the story's changed code-owned files (environment-owned paths are verified by the live protocol, not by mutants); a surviving mutant in changed lines is a finding, a missing mutation_command on a code story is a blocking finding. Method: [mutation](references/mutation.md). Read when running the mutation gate or judging a survivor.
+- The mutation gate is mandatory on code stories: run the mutation command scoped to the story's changed code-owned files (environment-owned paths are verified by the live protocol, not by mutants); a surviving mutant anywhere in a changed file is a finding, a missing mutation_command on a code story is a blocking finding. Method: [mutation](references/mutation.md). Read when running the mutation gate or judging a survivor.
 
 ## Severity Classification
 
@@ -77,13 +77,13 @@ A check is green only when it would fail for the right reason. Before trusting a
 
 ## Live Runtime Verification
 
-Automated green is necessary, not sufficient. After the suite passes, stand the environment up fresh with the approved Environment Contract, seed a named scenario, and walk every navigable surface: console audit, network audit, render audit, interaction audit, service-log audit, each with explicit FAIL conditions and per-surface PASS/FAIL records. Tear the environment down when the protocol (and the design verification that reuses it) is done.
+When the approved Item has `runtime_required: true`, automated green is necessary, not sufficient. After the suite passes, stand the environment up fresh with the approved Environment Contract, seed a named scenario, and walk every navigable surface: console audit, network audit, render audit, interaction audit, service-log audit, each with explicit FAIL conditions and per-surface PASS/FAIL records. Tear the environment down when the protocol (and the design verification that reuses it) is done.
 
 - [runtime-protocol](references/runtime-protocol.md): the step-by-step live protocol with FAIL conditions per audit. Read when starting the live runtime pass.
 
 ## Report
 
-Maintain ONE evolving verification record per increment: coverage matrix, suite results, live results, findings by severity, verdict. Its canonical copy is the orchestrator's tracked project documents: the spawn prompt hands you the currently open findings, your reply returns the full record (the orchestrator persists findings, coverage rows and budget verdicts from it). Update the same finding ids across iterations; never fork parallel reports.
+Return ONE evolving record per increment: coverage, suite and live results, findings, verdict. The owner persists the returned record. Preserve finding ids across iterations; never fork reports.
 
 - [report-format](references/report-format.md): the record skeleton and per-section update rules. Read when creating or updating the verification record.
 
@@ -97,7 +97,8 @@ PASS requires ALL of:
 
 - Coverage matrix has zero NO-TEST rows and zero FAIL rows (scenario_report exit code 0).
 - Full suite passes via the approved Verification Contract command.
-- Runtime protocol completed with zero Critical and zero High findings.
+- When `runtime_required: true`, runtime protocol completed with zero Critical
+  and zero High findings; otherwise record the approved not-required disposition.
 - Every finding above Low is resolved or explicitly waived by a human.
 
 FAIL if ANY of:

@@ -148,6 +148,25 @@ def windows_text_pipes(code_page: str = "cp1252"):
                 cache.close()
 
 
+@contextlib.contextmanager
+def approved_fixture_shell_commands(commands: set[str]):
+    """Stub only the fixture's declared commands, preserving native host probes."""
+    original_run = subprocess.run
+
+    def fixture_command(command, *args, **kwargs):
+        if not (isinstance(command, str) and command in commands and kwargs.get("shell")):
+            return original_run(command, *args, **kwargs)
+        text_mode = any(kwargs.get(key) for key in ("text", "universal_newlines", "encoding", "errors"))
+        output = "Fixture command passed\n" if text_mode else b"Fixture command passed\n"
+        empty = "" if text_mode else b""
+        stdout = output if kwargs.get("capture_output") or kwargs.get("stdout") == subprocess.PIPE else None
+        stderr = empty if kwargs.get("capture_output") or kwargs.get("stderr") == subprocess.PIPE else None
+        return subprocess.CompletedProcess(command, 0, stdout, stderr)
+
+    with mock.patch.object(subprocess, "run", side_effect=fixture_command):
+        yield
+
+
 class PreStartFixtureCache(RepositorySeedCache):
     """Delivery fixtures share the same pre-runtime isolation boundary."""
 
@@ -232,22 +251,23 @@ class DeliveryGitTests(unittest.TestCase):
         })
         try:
             frozen = delivery_verification.freeze(Path(worktree), delivery, story, fresh=True)
-            original_run = subprocess.run
-            def fixture_command(command, *args, **kwargs):
-                if isinstance(command, str) and kwargs.get("shell"):
-                    return subprocess.CompletedProcess(command, 0, b"Fixture command passed\n")
-                return original_run(command, *args, **kwargs)
             raw = {}
             contract, _ = delivery_compile.split_note(Path(worktree) / "workspace/docs/operation/verification-contract.md")
-            with mock.patch.object(delivery_verification.subprocess, "run", side_effect=fixture_command):
+            commands = {contract[kind + "_command"] for kind in ("test", "mutation", "dependency_audit")
+                        if isinstance(contract.get(kind + "_command"), str)}
+            runtime_commands = []
+            if frozen["candidate"]["runtime_required"]:
+                environment, _ = delivery_compile.split_note(Path(worktree) / "workspace/docs/operation/environment-contract.md")
+                runtime_commands = [("down", None), ("up", None), ("seed", environment["scenarios"][0]), ("logs", None), ("down", None)]
+                commands.update(environment["env_command"] + " " + verb + (" " + argument if argument else "")
+                                for verb, argument in runtime_commands)
+            with approved_fixture_shell_commands(commands):
                 for kind in ("test", "mutation", "dependency_audit"):
                     if kind == "test" or contract.get(kind + "_disposition") == "required":
                         raw[kind] = delivery_verification.run_check(Path(worktree), kind)
                 runtime_events = []
-                if frozen["candidate"]["runtime_required"]:
-                    environment, _ = delivery_compile.split_note(Path(worktree) / "workspace/docs/operation/environment-contract.md")
-                    for verb, argument in (("down", None), ("up", None), ("seed", environment["scenarios"][0]), ("logs", None), ("down", None)):
-                        runtime_events.append(delivery_verification.run_environment(Path(worktree), verb, argument)["evidence_hash"])
+                for verb, argument in runtime_commands:
+                    runtime_events.append(delivery_verification.run_environment(Path(worktree), verb, argument)["evidence_hash"])
             for role, mode in (("code_reviewer", "review_initial"), ("qa_engineer", "qa_final")):
                 candidate = frozen["candidate"]
                 checks = {key: {"passed": True, "evidence": "Explicit fixture gate result"}
@@ -4574,6 +4594,33 @@ class DeliveryGitTests(unittest.TestCase):
             self.assertEqual((shown, provider_shown), (note.strip(), note.strip()))
             self.assertEqual((props["title"], body), ("Oturum açma, güvenlik", "Şifre ve ğ, ı, ö harfleri."))
             self.assertEqual(pending, {"notes/şifre.md"})
+
+    def test_fixture_command_pipes_preserve_text_aliases_and_host_version_probes(self):
+        import platform
+        aliases = ({"text": True}, {"universal_newlines": True}, {"encoding": "utf-8"}, {"errors": "replace"})
+        command = "fixture-test-command"
+        with windows_text_pipes(), approved_fixture_shell_commands({command}):
+            for options in aliases:
+                with self.subTest(options=options):
+                    result = subprocess.run(command, shell=True, capture_output=True, **options)
+                    self.assertEqual((result.stdout, result.stderr), ("Fixture command passed\n", ""))
+                    self.assertEqual(subprocess.check_output(command, shell=True, **options), "Fixture command passed\n")
+                    actual = subprocess.check_output("echo Actual host probe", shell=True, **options)
+                    self.assertEqual(actual.strip(), "Actual host probe")
+            self.assertEqual(subprocess.check_output(command, shell=True), b"Fixture command passed\n")
+
+        def version_probe(command, *args, **kwargs):
+            self.assertEqual(command, "ver")
+            self.assertTrue(kwargs["shell"])
+            # The pipe emulator delegates a binary call to its native backend.
+            self.assertFalse(any(kwargs.get(key) for key in ("text", "universal_newlines", "encoding", "errors")))
+            return subprocess.CompletedProcess(command, 0, b"Microsoft Windows [Version 10.0.20348]\r\n")
+        with mock.patch.object(subprocess, "run", side_effect=version_probe), windows_text_pipes(), \
+                approved_fixture_shell_commands({command}):
+            # Python 3.9 uses universal_newlines=True here; newer versions use
+            # text=True. Both must reach the real platform parser as strings.
+            self.assertEqual(platform._syscmd_ver(supported_platforms=(sys.platform,)),
+                             ("Microsoft", "Windows", "10.0.20348"))
 
     def test_command_results_reach_a_windows_code_page_stdout_as_utf8(self):
         """A redirected stdout on native Windows encodes in the ANSI code page, cp1252 on the

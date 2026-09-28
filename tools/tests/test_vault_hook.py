@@ -145,11 +145,13 @@ class VaultHookPrototypeTests(unittest.TestCase):
                     self.assertEqual(self.hook.delivery_reader_barrier({"cwd": str(project), "tool_name": "Write",
                                                                       "file_targets": [{"file_path": str(path)}]}), expected)
             command = [sys.executable, "-B", str(SCRIPTS / "delivery_verification.py"), "--worktree", str(project), "status"]
+            def shell_payload(value):
+                return {"cwd": str(project), "tool_name": "Bash", "shell_family": "cmd" if os.name == "nt" else "posix",
+                        "tool_input": {"command": value}}
             for verb in ("status", "inspect", "diff", "environment"):
                 routed = [*command[:-1], verb]
                 routed_text = subprocess.list2cmdline(routed) if os.name == "nt" else shlex.join(routed)
-                self.assertEqual(self.hook.delivery_reader_barrier({"cwd": str(project), "tool_name": "Bash",
-                                                                  "tool_input": {"command": routed_text}}), 0)
+                self.assertEqual(self.hook.delivery_reader_barrier(shell_payload(routed_text)), 0)
             command_text = subprocess.list2cmdline(command) if os.name == "nt" else shlex.join(command)
             diagnostic = [*command[:-1], "run", "--kind", "diagnostic_test", "--selection-file", str(scratch.parent / "selection.json")]
             diagnostic_text = subprocess.list2cmdline(diagnostic) if os.name == "nt" else shlex.join(diagnostic)
@@ -157,8 +159,14 @@ class VaultHookPrototypeTests(unittest.TestCase):
                                     (diagnostic_text, 0), (diagnostic_text + " && echo unsafe", 2),
                                     ("git status", 2)):
                 with self.subTest(command=value), redirect_stderr(io.StringIO()):
-                    self.assertEqual(self.hook.delivery_reader_barrier({"cwd": str(project), "tool_name": "Bash",
-                                                                      "tool_input": {"command": value}}), expected)
+                    self.assertEqual(self.hook.delivery_reader_barrier(shell_payload(value)), expected)
+            unknown_shell = shell_payload(command_text)
+            unknown_shell["shell_family"] = "unknown"
+            with redirect_stderr(io.StringIO()):
+                self.assertEqual(self.hook.delivery_reader_barrier(unknown_shell), 2)
+                if os.name == "nt":
+                    unknown_shell.pop("shell_family")
+                    self.assertEqual(self.hook.delivery_reader_barrier(unknown_shell), 2)
             other = project / "another-checkout"
             (other / ".git").mkdir(parents=True)
             for tool in ("Write", "Edit", "apply_patch"):

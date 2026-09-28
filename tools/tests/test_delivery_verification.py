@@ -90,6 +90,17 @@ class VerificationTests(unittest.TestCase):
         verification.register_result(self.root, self.result())
         verification.register_result(self.root, self.result("qa_engineer", "qa_final"))
 
+    def platform_subprocess_probe(self):
+        # Python 3.9 on Windows queries its platform through a string subprocess.
+        # Exercise that nested call even on hosts where platform() uses no shell.
+        identity = verification.platform.platform()
+        executable = subprocess.list2cmdline([sys.executable]) if os.name == "nt" else shlex.quote(sys.executable)
+        command = executable + ' -c "print(456)"'
+        def probe():
+            self.assertEqual(subprocess.check_output(command, shell=True, text=True).strip(), "456")
+            return identity
+        return mock.patch.object(verification.platform, "platform", side_effect=probe)
+
     def prepare_diagnostic(self):
         self.write("focused_tests.py", """import unittest
 class Focused(unittest.TestCase):
@@ -147,12 +158,12 @@ sys.exit(not unittest.TextTestRunner(verbosity=2).run(suite).wasSuccessful())
         original = subprocess.run
         observed = []
         def full_suite(command, *args, **kwargs):
-            if isinstance(command, str):
+            if command == self.command:
                 observed.append(command)
-                self.assertEqual(command, self.command)
                 self.assertNotIn("AGENTROF_DIAGNOSTIC_TESTS", kwargs["env"])
             return original(command, *args, **kwargs)
-        with mock.patch.dict(os.environ, {"AGENTROF_DIAGNOSTIC_TESTS": "inherited-selection.json"}), \
+        with self.platform_subprocess_probe(), \
+                mock.patch.dict(os.environ, {"AGENTROF_DIAGNOSTIC_TESTS": "inherited-selection.json"}), \
                 mock.patch.object(verification.subprocess, "run", side_effect=full_suite):
             self.settle()
         self.assertEqual(observed, [self.command])
@@ -183,16 +194,17 @@ sys.exit(not unittest.TextTestRunner(verbosity=2).run(suite).wasSuccessful())
 
     def test_diagnostic_selector_edit_and_restore_invalidates_command_evidence(self):
         selector, _ = self.prepare_diagnostic()
+        contract, _ = delivery.split_note(self.root / "workspace/docs/operation/verification-contract.md")
         original = subprocess.run
         def mutate(command, *args, **kwargs):
-            if isinstance(command, str):
+            if command == contract["diagnostic_test_command"]:
                 for target in (selector, Path(kwargs["env"]["AGENTROF_DIAGNOSTIC_TESTS"])):
                     before = target.read_bytes()
                     target.write_bytes(b"temporary selection")
                     target.write_bytes(before)
                 return subprocess.CompletedProcess(command, 0, b"selected tests passed")
             return original(command, *args, **kwargs)
-        with mock.patch.object(verification.subprocess, "run", side_effect=mutate):
+        with self.platform_subprocess_probe(), mock.patch.object(verification.subprocess, "run", side_effect=mutate):
             raw = verification.run_check(self.root, "diagnostic_test", selection_file=selector)
         self.assertFalse(raw["selection_intact"])
         self.assertFalse(raw["candidate_intact"])
@@ -348,8 +360,8 @@ sys.exit(not unittest.TextTestRunner(verbosity=2).run(suite).wasSuccessful())
         self.assertFalse(verification.run_check(self.root, "test")["reused"])
         original = subprocess.run
         def fail_shell(command, *args, **kwargs):
-            return subprocess.CompletedProcess(command, 1, b"failed") if isinstance(command, str) else original(command, *args, **kwargs)
-        with mock.patch.object(verification.subprocess, "run", side_effect=fail_shell):
+            return subprocess.CompletedProcess(command, 1, b"failed") if command == self.command else original(command, *args, **kwargs)
+        with self.platform_subprocess_probe(), mock.patch.object(verification.subprocess, "run", side_effect=fail_shell):
             failed = verification.run_check(self.root, "test", fresh=True)
         self.assertEqual(failed["exit_code"], 1)
         self.assertEqual(verification.read_session(self.root)["raw_evidence"]["test"]["exit_code"], 1)
@@ -466,14 +478,14 @@ sys.exit(not unittest.TextTestRunner(verbosity=2).run(suite).wasSuccessful())
         original = subprocess.run
         observed = []
         def mutant(command, *args, **kwargs):
-            if isinstance(command, str):
+            if command == self.command:
                 working = Path(kwargs["cwd"])
                 observed.append(working)
                 self.assertNotEqual(working, self.root)
                 (working / "src/product.py").write_text("mutant")
                 return subprocess.CompletedProcess(command, 0, b"mutated")
             return original(command, *args, **kwargs)
-        with mock.patch.object(verification.subprocess, "run", side_effect=mutant):
+        with self.platform_subprocess_probe(), mock.patch.object(verification.subprocess, "run", side_effect=mutant):
             raw = verification.run_check(self.root, "test")
         self.assertTrue(observed)
         self.assertFalse(raw["candidate_intact"])

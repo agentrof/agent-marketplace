@@ -99,7 +99,7 @@ and BR selected by the Requirement impact matrix occurs in story
 `criterion_refs` or that table, never both. An explicit root
 `analysis_scopes` declaration expands the same equality to a complete named
 scope. Unknown, overlapping and uncovered identities fail. Generic review
-placeholders are not review evidence.
+placeholders are not review evidence. Only critical and major findings block.
 
 Run `backlog_compile.py check --render` as the mechanical gate; atomic approval
 keeps stories `planned` and hash-stamps the package. Its input bindings include
@@ -114,7 +114,7 @@ labels remain stable English machine vocabulary.
 ## References
 
 - [slicing-patterns](references/slicing-patterns.md). Read when a story fails a size test or resists vertical slicing.
-- [structured-records](references/structured-records.md). Read when authoring role ownership, dependency edges, references or scenarios.
+- [structured-records](references/structured-records.md). Read when authoring role ownership, dependency edges, references or scenarios, or when rating, recording or re-reviewing review findings.
 - [prioritization](references/prioritization.md). Read when ordering stories.
 - [living-experience-contract](references/living-experience-contract.md). Read when attaching approved Experience Design references.
 - [flow-metrics](references/flow-metrics.md). Read when forecasting cadence; never use it as a scope gate.

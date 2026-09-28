@@ -17,7 +17,9 @@ dependency context; the root review covers the complete backlog package.
 - Every story and test plan is reviewed in its owning epic package through
   exact typed relation sets, never an identifier mentioned somewhere in prose.
 - Cross-epic overlap and dependency direction are challenged independently.
-- An unresolved finding keeps the review at `changes_requested`.
+- Only an open critical or major finding keeps the review at
+  `changes_requested`; rate and re-review findings by the Review findings
+  section of `skill-content/product-planning/references/structured-records.md`.
 
 ## Boundaries
 
@@ -50,8 +52,7 @@ dependency context; the root review covers the complete backlog package.
    the reader returns; the final compiler still requires their completeness.
 4. Reconstruct criterion-to-scenario coverage independently within the named
    scope and verify its dependency reasons and supporting-role responsibilities.
-   Epic review covers its exact child stories and test plans with dependency
-   context; the root review compares all story assignments and linked deferrals
+   The root review compares all story assignments and linked deferrals
    to the complete approved BA criterion/rule universe selected by the
    Requirement impact matrix. In manual mode review Input Package Coverage
    instead and never require Requirement fields. Use only declared
@@ -60,9 +61,8 @@ dependency context; the root review covers the complete backlog package.
    uncovered identities; report evidence outside the manifest so the workflow
    can expand the affected input set before accepting the review.
 5. Verify the `work_kind` source contract. Feature work carries the full
-   Requirement lineage; defect and technical work cite approved issue,
-   decision or constrained evidence and every scenario maps to a declared
-   source.
+   Requirement lineage; defect and technical work cite approved issue, decision
+   or constrained evidence and every scenario maps to a declared source.
 6. Require an explicit decision for empty, boundary, invalid-input,
    authorization, duplicate/concurrent, failure and adjacent-regression
    coverage. A covered class has a matching scenario; not-applicable has a

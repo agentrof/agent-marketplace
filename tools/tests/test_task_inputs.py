@@ -42,6 +42,7 @@ class TaskInputTests(unittest.TestCase):
 
     def make_project(self, root):
         init_repository(root)
+        subprocess.run(["git", "-C", str(root), "config", "core.autocrlf", "false"], check=True, capture_output=True)
         (root / "brief.md").write_text("Accepted intent.\n", encoding="utf-8")
         self.commit(root)
 
@@ -227,6 +228,26 @@ class TaskInputTests(unittest.TestCase):
             self.assertEqual(result["method_bindings"]["python-fastapi"], [path.relative_to(root).as_posix()])
             with self.assertRaisesRegex(ValueError, "internal skills"):
                 task_inputs.manifest(entry="deliver", role="code-reviewer", mode="review", skills=["setup"])
+
+    def test_technology_binding_rejects_git_clean_crlf_bytes_that_differ_from_head(self):
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw).resolve()
+            self.make_project(root)
+            subprocess.run(["git", "-C", str(root), "config", "core.autocrlf", "true"], check=True, capture_output=True)
+            relative = "workspace/docs/solution-design/decisions/api-decision.md"
+            path = root / relative
+            path.parent.mkdir(parents=True)
+            committed = b"---\ntype: decision\nstatus: accepted\nmethod_skills:\n  - python-fastapi\n---\n\n# API\n"
+            path.write_bytes(committed.replace(b"\n", b"\r\n"))
+            self.commit(root)
+            self.assertEqual(subprocess.check_output(["git", "-C", str(root), "show", "HEAD:" + relative]), committed)
+            self.assertEqual(subprocess.check_output(["git", "-C", str(root), "status", "--porcelain", "--", relative]), b"")
+            kwargs = dict(entry="deliver", role="code-reviewer", mode="review", project=root,
+                          skills=["python-fastapi"], inputs=[relative])
+            with self.assertRaisesRegex(ValueError, "committed accepted"):
+                task_inputs.manifest(**kwargs)
+            path.write_bytes(committed)
+            self.assertEqual(task_inputs.manifest(**kwargs)["method_bindings"], {"python-fastapi": [relative]})
 
     def test_catalog_covers_current_roles_skills_and_flows(self):
         policy = task_inputs.catalog()

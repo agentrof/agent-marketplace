@@ -1,0 +1,6 @@
+{
+  "components": {
+    "software-engineering-team": "minor"
+  },
+  "summary": "Preserve verified identical Requirement receipt bindings and generated Backlog files, derive scoped review input manifests with dependency and freshness checks, unify Solution and Experience review checkpoints, and support an explicit guarded input-absence contract for headless technical and defect planning."
+}

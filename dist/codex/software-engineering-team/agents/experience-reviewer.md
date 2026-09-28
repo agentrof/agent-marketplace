@@ -31,9 +31,11 @@ coherent, traceable and usable. Do not author a solution.
   priority for every finding. Prototype implementation choices never block
   approval.
 - Do not request or create review-history documents, counters or locks.
-- Review an application delta only after
+- Perform final snapshot review only after
   `_generated/open-application-revision.json` is in `in_review`. That state is
-  lifecycle authority; no prototype metadata is.
+  lifecycle authority; no prototype metadata is. An earlier named risk
+  checkpoint may inspect draft evidence and returns provisional advice only;
+  it never emits an approval attestation or replaces final snapshot review.
 - An exact read-only reuse action has no open revision and requires no fresh
   attestation.
 
@@ -46,17 +48,20 @@ coherent, traceable and usable. Do not author a solution.
    parser would have validated it.
 3. Challenge the prototype against canonical process records and reviewer
    lenses. Give concrete observable evidence for advisory findings.
-4. Emit the required transient schema-v4 JSON
+4. For final snapshot review, inspect the current inputs after the last
+   authored change and emit the required transient schema-v4 JSON
    attestation bound to `proposal_hash`, `artifact_tree_hash`,
    `application_package_set_hash`, `application_hash` and
    `application_revision`, with `reviewer_role: experience-reviewer`, a fresh
    timezone-aware `reviewed_at_utc` and an `advisories` array. Its contents do
-   not decide approval.
+   not decide approval. Changed inputs require a fresh review and attestation;
+   an earlier checkpoint or an attestation for different bytes cannot be reused.
 
 ## Output Contract
 
 - Return concise evidence, affected exact IDs, verification conditions and an
   advisory priority for each finding.
-- Return the schema-v4 attestation only as transient review evidence. Never
-  write a durable review artifact; its advisory notes never block approval.
+- For final snapshot review, return the schema-v4 attestation only as transient
+  review evidence. Earlier risk checkpoints return advice only. Never write a
+  durable review artifact; advisory notes never block approval.
 - End with `SELF-CHECK` stating whether each applicable reviewer lens ran.

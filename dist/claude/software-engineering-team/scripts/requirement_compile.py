@@ -256,7 +256,8 @@ def bind_stage(path: Path, stage: str, result_refs: list[str] | str,
 
     A result is never accepted merely because a note at a similar path is
     approved.  The shared resolver owns the stage/type/path/hash contract.
-    Rebinding a predecessor invalidates every downstream receipt.
+    A changed predecessor invalidates every downstream receipt. A verified
+    identical binding keeps the existing Requirement and downstream receipts.
     """
     if stage not in STAGES:
         raise ValueError(f"unknown stage: {stage}")
@@ -297,8 +298,49 @@ def bind_stage(path: Path, stage: str, result_refs: list[str] | str,
             raise ValueError("; ".join(errors or ["invalid stage package"]))
         receipts.append(receipt)
     results = stage_results(body)
-    results[stage] = [(str(receipt["result_ref"]), str(receipt["package_hash"]))
-                      for receipt in receipts]
+    findings = requirement_findings(path, require_approved=True)
+    if results and not props.get("stage_results_hash"):
+        findings.append("bound Stage Results require stage_results_hash")
+    sections = re.findall(r"(?ms)^## Stage Results(?:\s+<!--.*?-->)?\s*\n(.*?)(?=^## |\Z)", body)
+    rendered = stage_results_body(body, results)
+    expected_sections = re.findall(r"(?ms)^## Stage Results(?:\s+<!--.*?-->)?\s*\n(.*?)(?=^## |\Z)", rendered)
+    # The tolerant reader omits incomplete rows. They must not disappear from
+    # the integrity check or make a retry appear to preserve valid evidence.
+    table_rows = lambda section: [split_cells(line) for line in section.splitlines()
+                                  if line.lstrip().startswith("|")]
+    if (len(sections) != 1 or len(expected_sections) != 1
+            or table_rows(sections[0]) != table_rows(expected_sections[0])):
+        findings.append("Stage Results must contain complete compiler-owned receipt rows")
+    for bound_stage, bindings in results.items():
+        row = rows.get(bound_stage)
+        if (row is None or row[1] == "not_applicable"
+                or (row[1] == "reuse" and {reference for reference, _digest in bindings} != set(row[2]))
+                or len({reference for reference, _digest in bindings}) != len(bindings)
+                or (bound_stage != "experience-design" and len(bindings) != 1)
+                or any(not re.fullmatch(r"sha256:[0-9a-f]{64}", digest)
+                       for _reference, digest in bindings)):
+            findings.append(f"{bound_stage} Stage Results receipt set is invalid")
+    if findings:
+        raise ValueError("; ".join(sorted(set(findings))))
+    resolved = [(str(receipt["result_ref"]), str(receipt["package_hash"]))
+                for receipt in receipts]
+    if set(results.get(stage, [])) == set(resolved):
+        # Preserving a receipt is not permission to treat stale or uncommitted
+        # downstream state as current. Recheck retained evidence before no-op.
+        for bound_stage, bindings in results.items():
+            if bound_stage == stage:
+                continue
+            if bound_stage == "experience-design" and not valid_experience_receipt_refs(
+                    [reference for reference, _digest in bindings], docs):
+                raise ValueError("retained experience-design Stage Results receipt set is invalid")
+            for reference, digest in bindings:
+                _receipt, errors = stage_package.verify(
+                    docs, bound_stage, reference, digest, require_committed=True,
+                )
+                if errors or _receipt is None:
+                    raise ValueError("; ".join(errors or ["invalid retained stage package"]))
+        return
+    results[stage] = resolved
     # A changed predecessor invalidates every dependent receipt, even where
     # their old hash happened to match coincidentally.
     for downstream in STAGES[STAGES.index(stage) + 1:]:

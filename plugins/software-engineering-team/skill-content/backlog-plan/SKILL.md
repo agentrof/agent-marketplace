@@ -9,6 +9,8 @@ exposure: entry
 Create the durable delivery-ready plan after upstream product decisions are
 approved. This entry prepares delivery, but it does not start delivery.
 
+Before delegation, follow `templates/task-input-contract.md` using `scripts/task_inputs.py --entry backlog-plan` and the compiler's exact scope and bindings.
+
 ## When to Use
 
 - Requirement Flow has approved the request impact matrix and every stage
@@ -103,8 +105,7 @@ approved. This entry prepares delivery, but it does not start delivery.
    sequencing and coverage. Its structured `Deferred Criteria` table carries
    an escaped-table vault wikilink `criterion_ref`, `owner_role`, `reason` and
    `revisit_trigger`. Every selected AC/BR is either story-covered or deferred,
-   never both. Replace all review
-   placeholders and generic approvals with concrete evidence and conclusions.
+   never both. Replace review placeholders with concrete evidence and conclusions.
 8. Only after the user approves the exact Markdown changes, use the packaged
    compiler's atomic `approve` verb. It stamps the package, backlog, epics,
    reviews and test plans, preserves stories as `planned`, renders

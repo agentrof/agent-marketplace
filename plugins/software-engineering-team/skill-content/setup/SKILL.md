@@ -13,6 +13,8 @@ and `{{environment_smoke_job}}` in its private CI template, while setup alone
 replaces `{{project_local_ignores}}` in its managed gitignore block. No
 placeholder is allowed to reach a consuming repository.
 
+Before delegation, follow `templates/task-input-contract.md` using `scripts/task_inputs.py --entry setup` and the compiler's exact scope and bindings.
+
 ## When to Use
 
 - First run after installing the team in a repository.

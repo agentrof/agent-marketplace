@@ -1169,7 +1169,7 @@ def check_choice_gate(tree: Tree, findings: list[Finding]) -> None:
 # Fallback for runtimes that predate sys.stdlib_module_names.
 FALLBACK_STDLIB = frozenset(
     "__future__ abc argparse ast asyncio base64 bisect calendar collections "
-    "configparser contextlib copy csv dataclasses datetime decimal difflib "
+    "configparser contextlib copy csv ctypes dataclasses datetime decimal difflib "
     "enum errno fcntl fnmatch functools getpass glob gzip hashlib heapq hmac html "
     "http importlib inspect io itertools json logging math mimetypes "
     "msvcrt multiprocessing operator os pathlib pickle platform pprint queue random "
@@ -2234,6 +2234,7 @@ DELIVERY_CONTRACT_ROOT = Path(
 DELIVERY_CONTRACT_FILES = {
     "delivery-control-record-contract.json",
     "delivery-document-contract.json",
+    "delivery-verification-policy.json",
     "delivery-protocol-1.json",
     "delivery-provider-contract.json",
     "delivery-receipt-contract.json",
@@ -2309,6 +2310,30 @@ def check_delivery_contract_shape(
     if records.get("unknown_record_policy") != "fail_closed" \
             or record_names != set(records.get("subjects", {})):
         problems.append("control-record and subject registries differ")
+    verification = contracts["delivery-verification-policy.json"]
+    expected_keys = {"schema_version", "raw_evidence_max_age_seconds", "schedules", "legacy_schedule", "new_schedule",
+                     "blocking_severities", "nonblocking_severities", "review_checks", "qa_checks", "role_modes", "final_modes", "mutation_scope"}
+    if set(verification) != expected_keys or verification.get("schema_version") != 1:
+        problems.append("verification policy has an unsupported schema or field set")
+    if (verification.get("schedules") != ["sequential_v1", "parallel_snapshot_v1"]
+            or verification.get("legacy_schedule") != "sequential_v1"
+            or verification.get("new_schedule") != "parallel_snapshot_v1"):
+        problems.append("verification schedule compatibility is invalid")
+    if (verification.get("review_checks") != ["correctness", "conformance", "security"]
+            or verification.get("qa_checks") != ["full_test_suite", "coverage", "right_reason"]
+            or verification.get("role_modes") != {"code_reviewer": ["review_initial", "review_repair"], "qa_engineer": ["qa_diagnostic", "qa_final"]}
+            or verification.get("final_modes") != {"code_reviewer": ["review_initial", "review_repair"], "qa_engineer": ["qa_final"]}):
+        problems.append("verification final gates or independent role modes are invalid")
+    age = verification.get("raw_evidence_max_age_seconds")
+    if not isinstance(age, int) or isinstance(age, bool) or not 0 < age <= 86400:
+        problems.append("verification evidence age must be positive and at most 24 hours")
+    scope = verification.get("mutation_scope", {})
+    if (not isinstance(scope, dict) or set(scope) != {"excluded_prefixes", "non_code_suffixes", "test_path_segments", "test_name_patterns", "unknown_file_policy", "additional_include_property"}
+            or scope.get("unknown_file_policy") != "include" or scope.get("additional_include_property") != "mutation_include_paths"
+            or scope.get("excluded_prefixes") != ["workspace/docs/", "workspace/environment/", ".agentrof/"]
+            or any(not isinstance(scope.get(key), list) or any(not isinstance(item, str) or not item for item in scope[key])
+                   for key in ("non_code_suffixes", "test_path_segments", "test_name_patterns"))):
+        problems.append("verification mutation scope must exclude environment and docs, include unknown code and support approved expansion")
     codes = result.get("finding_codes", [])
     if not isinstance(codes, list) or len(codes) != len(set(codes)):
         problems.append("result finding-code registry is not a unique list")
@@ -2360,6 +2385,23 @@ def check_product_namespace(tree: Tree, findings: list[Finding]) -> None:
                 "regenerate it from the canonical product contract",
             ))
 
+def check_task_input_catalog(tree: Tree, findings: list[Finding]) -> None:
+    """Every shipped team role, skill and flow has one declared task route."""
+    import importlib.util
+    for plugin in plugin_dirs(tree):
+        path = plugin / "scripts" / "task_inputs.py"
+        if not path.is_file():
+            continue
+        try:
+            spec = importlib.util.spec_from_file_location("validated_task_inputs", path)
+            module = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(module)
+            module.catalog(plugin)
+        except (OSError, ValueError, KeyError, TypeError) as exc:
+            findings.append(Finding("error", rel(tree, path), 1, "task_input_catalog",
+                                    str(exc), "align canonical task routes with the shipped catalog"))
+
+
 CHECKS = {
     "frontmatter_shape": check_frontmatter_shape,
     "agent_name": check_agent_name,
@@ -2394,6 +2436,7 @@ CHECKS = {
     "limits_config_shape": check_limits_config_shape,
     "delivery_contract_shape": check_delivery_contract_shape,
     "product_namespace": check_product_namespace,
+    "task_input_catalog": check_task_input_catalog,
 }
 
 

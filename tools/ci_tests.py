@@ -14,6 +14,7 @@ import platform
 import signal
 import subprocess
 import sys
+import tempfile
 import time
 import unittest
 from pathlib import Path
@@ -41,13 +42,18 @@ def read_json(path):
 def write_json(path, value):
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
-    temporary = path.with_name(path.name + ".tmp")
-    temporary.write_text(json.dumps(value, indent=2, sort_keys=True) + "\n", encoding="utf-8")
-    os.replace(temporary, path)
+    descriptor, name = tempfile.mkstemp(prefix=path.name + ".", suffix=".tmp", dir=path.parent)
+    temporary = Path(name)
+    try:
+        with os.fdopen(descriptor, "w", encoding="utf-8", newline="\n") as stream:
+            stream.write(json.dumps(value, indent=2, sort_keys=True) + "\n")
+        os.replace(temporary, path)
+    finally:
+        temporary.unlink(missing_ok=True)
 
 
 def git(root, *arguments):
-    result = subprocess.run(["git", "-C", str(root), *arguments], capture_output=True, check=False)
+    result = subprocess.run(["git", "--no-replace-objects", "-C", str(root), *arguments], capture_output=True, check=False)
     if result.returncode:
         raise CIError(result.stderr.decode("utf-8", "replace").strip() or "Git operation failed")
     return result.stdout
@@ -185,6 +191,10 @@ def select_ids(mode, paths, policy, all_ids, root=None):
         return group_ids(policy["release_groups"], policy, all_ids), "release", "caller must prove trusted deterministic release replay"
     if mode == "full":
         return list(all_ids), "full", "full coverage requested"
+    if "known_test_modules" in policy:
+        missing = sorted({module_of(test_id) for test_id in all_ids} - set(policy["known_test_modules"]))
+        if missing:
+            return list(all_ids), "full", "test inventory mapping is incomplete: " + ", ".join(missing)
     if any(matches(path, policy.get("generated_paths", [])) for path in paths) and not any(
             matches(path, policy.get("generated_sources", [])) for path in paths):
         return list(all_ids), "full", "generated distribution changed without its canonical source"
@@ -215,18 +225,38 @@ def select_ids(mode, paths, policy, all_ids, root=None):
     return sorted(set(group_ids(groups, policy, all_ids)) | direct), "impact", "explicit impact groups and Python dependency closure: " + ", ".join(sorted(groups))
 
 
+def test_weight(test_id, durations, policy):
+    value = durations.get(test_id, policy["module_seconds"].get(module_of(test_id), policy.get("default_seconds", 1.0)))
+    if isinstance(value, bool) or not isinstance(value, (float, int)) or not math.isfinite(value) or value < 0:
+        raise CIError(f"invalid test duration for {test_id}")
+    return max(float(value), 0.001)
+
+
+def fixture_startup(module, policy):
+    value = policy.get("fixture_startup_seconds", {}).get(module, 0.0)
+    if type(value) not in {int, float} or not math.isfinite(value) or value < 0:
+        raise CIError(f"invalid fixture startup estimate: {module}")
+    return float(value)
+
+
+def estimated_seconds(ids, durations, policy):
+    return round(sum(test_weight(test_id, durations, policy) for test_id in ids) +
+                 sum(fixture_startup(module, policy) for module in {module_of(test_id) for test_id in ids}), 6)
+
+
 def balanced_shards(ids, count, durations, policy):
     shards = [[] for _ in range(min(count, len(ids)))]
     totals = [0.0] * len(shards)
-    def weight(test_id):
-        value = durations.get(test_id, policy["module_seconds"].get(module_of(test_id), policy.get("default_seconds", 1.0)))
-        if isinstance(value, bool) or not isinstance(value, (float, int)) or not math.isfinite(value) or value < 0:
-            raise CIError(f"invalid test duration for {test_id}")
-        return max(float(value), 0.001)
-    for test_id in sorted(ids, key=lambda value: (-weight(value), value)):
-        index = min(range(len(shards)), key=lambda value: (totals[value], value))
+    modules = [set() for _ in shards]
+    for position, test_id in enumerate(sorted(ids, key=lambda value: (-test_weight(value, durations, policy), value))):
+        module = module_of(test_id)
+        startup = fixture_startup(module, policy)
+        # Seed every worker before considering fixture affinity; never create an empty shard.
+        index = position if position < len(shards) else min(range(len(shards)), key=lambda value:
+            (totals[value] + (0 if module in modules[value] else startup), value))
         shards[index].append(test_id)
-        totals[index] += weight(test_id)
+        totals[index] += test_weight(test_id, durations, policy) + (0 if module in modules[index] else startup)
+        modules[index].add(module)
     return [sorted(shard) for shard in shards]
 
 
@@ -269,7 +299,10 @@ def make_plan(root, mode="full", base=None, head="HEAD", timings=None):
             continue
         shards = balanced_shards(lane_ids, lane["shards"], timings["durations"].get(name, {}), policy)
         lanes[name] = {"os": lane["os"], "python": lane["python"], "selected_ids": lane_ids, "shards": shards,
-                       "must_run_ids": sorted(set(lane_ids) & set(lane.get("required_tests", [])))}
+                       "must_run_ids": sorted(set(lane_ids) & set(lane.get("required_tests", []))),
+                       "estimated_shard_seconds": [estimated_seconds(shard, timings["durations"].get(name, {}), policy)
+                                                   for shard in shards],
+                       "measured_weights": len(set(lane_ids) & set(timings["durations"].get(name, {})))}
     apple_lane = apple_launcher_lane(selected, policy)
     rows = matrix_rows(lanes, apple_lane)
     plan = {"schema_version": 1, "source_sha": source_sha,
@@ -277,6 +310,8 @@ def make_plan(root, mode="full", base=None, head="HEAD", timings=None):
             "policy_hash": digest(policy), "inventory_hash": inventory_hash,
             "requested_mode": mode, "mode": actual_mode, "base_sha": base,
             "changed_paths": paths, "selection_reason": reason, "selected_ids": selected, "lanes": lanes,
+            "timing_provenance": {"sources": timings.get("sources", []),
+                                  "fallback_reasons": timings.get("fallback_reasons", ["no history supplied"])},
             "has_tests": bool(rows), "apple_launcher": apple_lane is not None,
             "apple_launcher_lane": apple_lane,
             "matrix": {"include": rows or [{"lane": "noop", "os": "ubuntu-latest",
@@ -381,6 +416,19 @@ def load_selected(root, selected, all_ids):
     return suite
 
 
+def fixture_totals():
+    totals = {}
+    seen = set()
+    for name in ("tools.tests.fixture_cache", "fixture_cache"):
+        module = sys.modules.get(name)
+        if module is None or id(module) in seen or not hasattr(module, "phase_totals"):
+            continue
+        seen.add(id(module))
+        for phase, value in module.phase_totals().items():
+            totals[phase] = totals.get(phase, 0.0) + value
+    return totals
+
+
 class TimedResult(unittest.TextTestResult):
     def __init__(self, *args, **kwargs):
         self.report = kwargs.pop("report")
@@ -390,15 +438,20 @@ class TimedResult(unittest.TextTestResult):
         self.outcomes = {}
         self.details = {}
         self.skipped_subtests = {}
+        self.fixture_starts = {}
 
     def startTest(self, test):
         self.starts[test.id()] = time.monotonic()
+        self.fixture_starts[test.id()] = fixture_totals()
         self.outcomes[test.id()] = "success"
         super().startTest(test)
 
     def stopTest(self, test):
         row = {"id": test.id(), "outcome": self.outcomes[test.id()],
                "seconds": round(time.monotonic() - self.starts[test.id()], 6)}
+        phases = fixture_totals()
+        row["fixture_seconds"] = {key: round(max(0.0, value - self.fixture_starts[test.id()].get(key, 0.0)), 6)
+                                  for key, value in phases.items()}
         if test.id() in self.details:
             row["detail"] = self.details[test.id()]
         if test.id() in self.skipped_subtests:
@@ -455,6 +508,7 @@ def run_shard(root, plan, lane_name, shard, report_path):
     report = {"schema_version": 1, "plan_hash": plan["plan_hash"], "source_tree": plan["source_tree"],
               "lane": lane_name, "shard": shard, "status": "running", "runtime": runtime, "tests": []}
     write_json(report_path, report)
+    started = time.monotonic()
     try:
         ids, _hash = inventory(root)
         suite = load_selected(root, expected, ids)
@@ -477,8 +531,21 @@ def run_shard(root, plan, lane_name, shard, report_path):
         report["error"] = str(error)
         write_json(report_path, report)
         raise
+    report["wall_seconds"] = round(time.monotonic() - started, 6)
     write_json(report_path, report)
     return 0 if report["status"] == "complete" else 1
+
+
+def validate_measurements(report):
+    wall = report.get("wall_seconds")
+    if wall is not None and (type(wall) not in {float, int} or not math.isfinite(wall) or wall < 0):
+        raise CIError("invalid worker wall duration")
+    for test in report.get("tests", []):
+        phases = test.get("fixture_seconds", {})
+        if not isinstance(phases, dict) or any(
+                not isinstance(name, str) or type(value) not in {int, float}
+                or not math.isfinite(value) or value < 0 for name, value in phases.items()):
+            raise CIError("invalid fixture phase duration")
 
 
 def verify_reports(plan, reports):
@@ -489,16 +556,22 @@ def verify_reports(plan, reports):
     seen = set()
     durations = {}
     runtimes = {}
+    measurements = []
     for report in reports:
+        if not isinstance(report, dict):
+            raise CIError("invalid shard report shape")
         key = (report.get("lane"), report.get("shard"))
         if key not in expected or key in seen:
             raise CIError(f"unexpected or duplicate shard report: {key}")
         seen.add(key)
         if report.get("schema_version") != 1 or report.get("plan_hash") != plan["plan_hash"] \
-                or report.get("source_tree") != plan["source_tree"] or report.get("status") != "complete" or report.get("errors"):
+                or report.get("source_tree") != plan["source_tree"] or report.get("status") != "complete" \
+                or report.get("errors") or report.get("error"):
             raise CIError(f"incomplete or mismatched shard report: {key}")
         validate_runtime(report.get("runtime", {}), plan["lanes"][key[0]])
         tests = report.get("tests", [])
+        if not isinstance(tests, list) or any(not isinstance(test, dict) for test in tests):
+            raise CIError("invalid shard test accounting shape")
         if sorted(test.get("id", "") for test in tests) != sorted(expected[key]):
             raise CIError(f"test IDs do not exactly cover the shard: {key}")
         for test in tests:
@@ -509,13 +582,20 @@ def verify_reports(plan, reports):
             if test["id"] in plan["lanes"][key[0]].get("must_run_ids", []) and test["outcome"] != "success":
                 raise CIError(f"mandatory native regression did not pass: {test['id']}")
             durations.setdefault(key[0], {})[test["id"]] = seconds
+        validate_measurements(report)
+        measurements.append({"lane": key[0], "shard": key[1],
+            "wall_seconds": report.get("wall_seconds"),
+            "test_seconds": round(sum(test["seconds"] for test in tests), 6),
+            "fixture_seconds": {phase: round(sum(test.get("fixture_seconds", {}).get(phase, 0.0) for test in tests), 6)
+                for phase in {phase for test in tests for phase in test.get("fixture_seconds", {})}},
+            "estimated_seconds": plan["lanes"][key[0]].get("estimated_shard_seconds", [None] * len(expected))[key[1]]})
         identity = report["runtime"]
         if key[0] in runtimes and runtimes[key[0]] != identity:
             raise CIError(f"runtime changed between shards: {key[0]}")
         runtimes[key[0]] = identity
     if seen != set(expected):
         raise CIError("missing shard reports: " + str(sorted(set(expected) - seen)))
-    return {"schema_version": 1, "policy_hash": plan["policy_hash"], "durations": durations, "runtimes": runtimes}
+    return {"schema_version": 1, "policy_hash": plan["policy_hash"], "durations": durations, "runtimes": runtimes, "measurements": measurements}
 
 
 def main(argv=None):

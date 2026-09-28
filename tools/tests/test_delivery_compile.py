@@ -32,6 +32,7 @@ import stage_package  # noqa: E402
 import vault_check  # noqa: E402
 from backlog_fixture import CRITERION, make_approved_backlog  # noqa: E402
 from git_fixture import init_repository, remove_temporary  # noqa: E402
+from fixture_cache import RepositorySeedCache, context_snapshot, context_unchanged  # noqa: E402
 
 
 WORKFLOW_JOBS = "jobs:\n  test:\n    runs-on: ubuntu-latest\n    steps:\n      - run: make test\n"
@@ -39,27 +40,47 @@ GIT_IDENTITY = {"GIT_AUTHOR_NAME": "Test", "GIT_AUTHOR_EMAIL": "test@example.com
                 "GIT_COMMITTER_NAME": "Test", "GIT_COMMITTER_EMAIL": "test@example.com"}
 
 
+_COMPILER_FIXTURE_CACHE = RepositorySeedCache()
+
+
 class DeliveryCompilerTests(unittest.TestCase):
+    @classmethod
+    def tearDownClass(cls):
+        _COMPILER_FIXTURE_CACHE.close()
+
     def setUp(self):
+        if context_unchanged(_COMPILER_FIXTURE_CONTEXT) and all(
+                getattr(getattr(self, name), "__func__", None) is getattr(DeliveryCompilerTests, name)
+                for name in ("build_fixture", "git", "commit_workflows")):
+            self.temporary, self.root, self.docs = _COMPILER_FIXTURE_CACHE.copy(self.build_fixture)
+        else:
+            self.temporary, self.root, self.docs = self.build_fixture()
+
+    def build_fixture(self):
         self.temporary = tempfile.TemporaryDirectory()
-        self.root = Path(self.temporary.name)
-        self.docs = self.root / "workspace" / "docs"
-        (self.docs / "maps").mkdir(parents=True)
-        (self.root / "workspace" / "config.json").write_text(
-            json.dumps({
-                "schema_version": 2,
-                "team_id": "software-engineering-team",
-                "output_language": "English",
-                "terminology_language": "English",
-            }), encoding="utf-8"
-        )
-        make_approved_backlog(self.docs)
-        workflows = self.root / ".github" / "workflows"
-        workflows.mkdir(parents=True)
-        (workflows / "tests.yml").write_text("on:\n  pull_request:\n" + WORKFLOW_JOBS, encoding="utf-8")
-        # A checkout of its own keeps the workflow lookup inside this fixture.
-        init_repository(self.root, initial_branch="main")
-        self.commit_workflows()
+        try:
+            self.root = Path(self.temporary.name)
+            self.docs = self.root / "workspace" / "docs"
+            (self.docs / "maps").mkdir(parents=True)
+            (self.root / "workspace" / "config.json").write_text(
+                json.dumps({
+                    "schema_version": 2,
+                    "team_id": "software-engineering-team",
+                    "output_language": "English",
+                    "terminology_language": "English",
+                }), encoding="utf-8"
+            )
+            make_approved_backlog(self.docs)
+            workflows = self.root / ".github" / "workflows"
+            workflows.mkdir(parents=True)
+            (workflows / "tests.yml").write_text("on:\n  pull_request:\n" + WORKFLOW_JOBS, encoding="utf-8")
+            # A checkout of its own keeps the workflow lookup inside this fixture.
+            init_repository(self.root, initial_branch="main")
+            self.commit_workflows()
+            return self.temporary, self.root, self.docs
+        except BaseException:
+            remove_temporary(self.temporary)
+            raise
 
     def tearDown(self):
         remove_temporary(self.temporary)
@@ -1543,6 +1564,18 @@ class ScopeHandoffBindingTests(unittest.TestCase):
                               implements=[f"[[requirements/{root.stem}|REQ-002]]"], **self.TECHNICAL)
         self.propose()
         self.assertEqual(self.approve_scope(), (0, []))
+
+
+_COMPILER_FIXTURE_CONTEXT = context_snapshot(
+    [delivery_compile, delivery_governance, architecture_compile, backlog_compile,
+     design_system_compile, experience_application_check, operation_compile,
+     requirement_compile, requirement_route, stage_package, vault_check],
+    [(sys.modules[__name__], "make_approved_backlog", make_approved_backlog),
+     (sys.modules[__name__], "init_repository", init_repository),
+     (subprocess, "run", subprocess.run),
+     *[(DeliveryCompilerTests, name, getattr(DeliveryCompilerTests, name))
+       for name in ("build_fixture", "git", "commit_workflows")]],
+)
 
 
 if __name__ == "__main__":

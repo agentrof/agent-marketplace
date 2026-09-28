@@ -9,6 +9,10 @@ exposure: entry
 Restore the tracked `workspace/docs/` vault to the Obsidian policy. This entry
 repairs documentation only.
 
+Before delegating a role, follow the packaged `templates/task-input-contract.md`
+and derive its inputs with `scripts/task_inputs.py --entry organize-docs`.
+Use the owning compiler's exact scope and source bindings.
+
 ## When to Use
 
 - The owner asks for a full naming, link, map, graph, or payload repair pass.

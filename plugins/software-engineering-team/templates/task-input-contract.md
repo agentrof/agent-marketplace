@@ -1,0 +1,66 @@
+# Derived task inputs
+
+Before delegating a project role, the entry derives its input manifest with
+the packaged `scripts/task_inputs.py`. Use `--entry <entry> --role <agent>
+--mode create|revise|consume|review|repair --project-root <root>`, repeated
+`--input <project-relative-file>` for the complete selected source set, and
+repeated `--skill <method-skill>` from accepted Solution or Item bindings.
+Technology skills are selected from those bindings, never from a role name;
+include the committed, accepted Solution decision in `--input` when selecting
+a technology method for a project. Delivery's specialized manifest retains
+the Item's historical approved bindings.
+`--findings <record>` binds the existing finding set. `--base <commit>` binds
+the complete committed and working change inventory; it does not infer a baseline.
+Initial Setup may bind an initialized repository before its first commit;
+its initial files are still hashed, and the first commit invalidates that input.
+
+Use the owning compiler's resolved source set. For Backlog review,
+`--epic <exact-epic>` derives the existing scoped dependency and source
+closure; bare `--epic` retains the full root package. Other stage compilers'
+approved receipts, selected scope and named project input files remain the
+authority. A manifest never decides applicability or creates an approval.
+
+The manifest lists full required reads, conditional references with their
+original read conditions, source identities, write boundaries and the output
+contract. Read every required file completely. Read each conditional reference
+when its condition applies. The manifest is an index, never a substitute for
+those reads. Give the same manifest and its source hash to the delegated role.
+Immediately before persisting a result, rerun the same invocation with
+`--expected-hash <source_hash>`; stale inputs require refreshed work.
+The identity also includes the canonical Markdown/JSON source inventory, so
+new or removed sources invalidate an older input. Prototype and exploratory
+artifact interiors remain opaque and are excluded from that inventory.
+
+`write_scope.allowed_write_area` is the bounded authoring area, never a writer
+grant. Read-only roles and modes have an empty area. BA derives exact selected
+owned documents in one analysis space. The Product Owner derives exact selected
+backlog source and review paths from the existing `--epic` closure (bare `--epic`
+selects the root package); an epic closure excludes dependency context and
+the global backlog record. Story implementation ownership and QA contribution
+ownership do not transfer canonical backlog writing authority. Delivery
+implementation derives literal path-and-descendant claims from one selected
+Item and its role sequence; vault, Git, and runtime authority paths remain
+excluded and the active writer receipt is still mandatory.
+
+Missing, ambiguous, new-document, or unsupported write scopes are explicitly
+`unresolved`, with an empty area. Resolve them through the existing owning
+compiler before writing; do not infer permission from the read set or expand a
+selected file into its containing directory. Compiler-owned fields, lifecycle
+transitions, and generated projections retain their existing commands.
+`next_transition_conditions` records required entry gates and reader/source
+barriers. A condition marked `required` is not a claim that the gate passed.
+
+On repair, preserve finding IDs and pass the new delta, unresolved verification
+conditions and affected consumers. Correctness, conformance and security still
+run. Architectural findings go to the architecture owner. A shared or unclear
+impact widens the read set instead of assuming a local fix.
+
+Independent readers return separate results. Wait for every reader to finish
+or confirm cancellation before the owning role writes canonical sources.
+Delivery additionally uses `scripts/delivery_verification.py` to enforce its
+frozen candidate and terminal evidence barriers. Generic task inputs alone
+never authorize Delivery evidence or replace a compiler gate.
+
+The manifest is stdout-only and disposable. It creates no cache, project
+document or runtime truth. Issue reporting remains external and stateless;
+it uses conversation evidence and never creates a project task manifest.

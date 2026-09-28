@@ -20,3 +20,18 @@ ordinary Git changes in the project workspace.
 Host adapters preserve semantics: Claude uses namespaced agents and
 `AskUserQuestion`; Codex uses project-local agents and `request_user_input`.
 Neither host requires another plugin.
+
+`task_inputs.py` derives the delegated task's full read list, conditional
+references, source identities, role boundary and repair obligations from the
+canonical task-input policy and the owning compiler's selected project inputs.
+The entry checks its source hash again before persisting results. The manifest
+is disposable stdout, not project state or approval authority; required full
+reads remain mandatory. External issue reporting never creates a project
+manifest. Catalog validation requires every role, skill and flow to be mapped.
+
+An approved Delivery Item may select `parallel_snapshot_v1`: implementation
+finishes before Code Review and QA read the same frozen candidate concurrently.
+Both must settle before the owner writes. The verification compiler binds
+independent final results and raw command evidence to that candidate; diagnostic
+QA cannot approve it. Missing schedule preserves the legacy sequential behavior.
+The evidence child commit preserves the existing exact product-parent proof.

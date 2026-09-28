@@ -23,6 +23,18 @@ can answer.
 Decision rule: if the change alters how a feature looks, feels, moves, or is
 interacted with, use this skill.
 
+## Work mode
+
+- **Create:** the Design System flow generates divergent candidates, then the
+  approved selection is persisted by its owner.
+- **Revise:** begin the existing Design System revision before changing MASTER
+  or page overrides; use the existing review and approval gates.
+- **Consume:** implementation reads the approved MASTER and applicable page
+  override. It preserves them and searches the corpus only for an unresolved
+  implementation question consistent with their decisions.
+- **Review:** inspect fidelity, accessibility and the supplied evidence; return
+  findings without regenerating or persisting the design system.
+
 ## Workflow
 
 Run commands from the consuming project's git root: the scripts resolve
@@ -32,7 +44,8 @@ project root. Pass `--output-dir` for any other target; never persist
 while sitting inside the plugin directory.
 
 1. **Analyze product context.** Purpose, users, dominant content (data/text/media/forms), emotional goal (trust/energy/calm), interaction pattern (scan/keyboard/input/navigate). Method: the design-rationale-method reference below.
-2. **Generate the design system** (required first step) with the packaged
+2. **Create or revise the design system** only in the owning Design System
+   flow. Generate candidates with the packaged
    `skill-content/ui-ux-design/scripts/search.py "<product> <industry> <tone>
    <density>" --design-system -p "Project Name"`.
 3. **Persist Master + overrides** once a candidate is chosen with the packaged

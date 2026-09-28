@@ -6,6 +6,10 @@ exposure: entry
 
 # Execution Planning
 
+Before delegating a role, follow the packaged `templates/task-input-contract.md`
+and derive its inputs with `scripts/task_inputs.py --entry execution-plan`.
+Use the owning compiler's exact scope and source bindings.
+
 ## When to Use
 
 - Use after one exact Delivery has an approved scope.

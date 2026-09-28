@@ -318,7 +318,7 @@ def validate_timings(payload: dict, policy: dict, known_ids: list[str]) -> dict:
 
 def restore_timings(root: Path, api: GitHub, now: dt.datetime | None = None) -> dict:
     """Restore bounded performance hints; these never grant test coverage."""
-    result: dict = {"schema_version": 1, "durations": {}}
+    result: dict = {"schema_version": 1, "durations": {}, "sources": [], "fallback_reasons": []}
     now = now or dt.datetime.now(dt.timezone.utc)
     try:
         tools = test_tools()
@@ -339,21 +339,31 @@ def restore_timings(root: Path, api: GitHub, now: dt.datetime | None = None) -> 
                     "push", "pull_request", "workflow_dispatch", "schedule",
                 }, "timing source event is invalid")
                 validate_run(run, api.repository, run["event"], run["head_sha"], now)
-                payload, _ = read_run_artifact(api, run, "ci-durations", "ci-durations.json")
+                payload, artifact_digest = read_run_artifact(api, run, "ci-durations", "ci-durations.json")
                 durations = validate_timings(payload, policy, known_ids)
                 observed = api.get(f"actions/runs/{run['id']}")
                 require(isinstance(observed, dict) and observed.get("run_attempt") == run["run_attempt"],
                         "timing source was rerun during verification")
                 validate_run(observed, api.repository, run["event"], run["head_sha"], now)
+                restored = 0
                 for lane, values in durations.items():
                     for test_id, seconds in values.items():
-                        result["durations"].setdefault(lane, {}).setdefault(test_id, seconds)
+                        lane_values = result["durations"].setdefault(lane, {})
+                        if test_id not in lane_values:
+                            lane_values[test_id] = seconds
+                            restored += 1
+                result["sources"].append({"run_id": run["id"], "run_attempt": run["run_attempt"],
+                    "created_at": run["created_at"], "age_seconds": max(0, int((now - timestamp(run["created_at"])).total_seconds())),
+                    "artifact_digest": artifact_digest, "restored_tests": restored})
             except (EvidenceError, OSError, subprocess.SubprocessError, ValueError,
-                    KeyError, TypeError, AttributeError):
+                    KeyError, TypeError, AttributeError) as error:
+                result["fallback_reasons"].append(str(error))
                 continue
     except (EvidenceError, OSError, subprocess.SubprocessError, ValueError,
-            KeyError, TypeError, AttributeError):
-        pass
+            KeyError, TypeError, AttributeError) as error:
+        result["fallback_reasons"].append(str(error))
+    if not result["durations"]:
+        result["fallback_reasons"].append("no valid measured history; policy estimates used")
     return result
 
 
@@ -616,7 +626,8 @@ def main() -> int:
             try:
                 value = restore_timings(args.root, GitHub(args.repository))
             except EvidenceError:
-                value = {"schema_version": 1, "durations": {}}
+                value = {"schema_version": 1, "durations": {}, "sources": [],
+                         "fallback_reasons": ["timing service unavailable; policy estimates used"]}
         else:
             try:
                 value = find_evidence(args.root, GitHub(args.repository), args.expected_sha, args.mode,

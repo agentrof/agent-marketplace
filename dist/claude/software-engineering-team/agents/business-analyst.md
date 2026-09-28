@@ -82,5 +82,5 @@ questioning, and refuses to let ambiguity pass silently.
 - Analysis mode: one typed space with the required summary, stable IDs,
   quantified budgets, resolved live challenge and explicit blocking open
   questions.
-- Backlog-planning mode: criterion/story/scenario coverage findings and
-  co-authored test-plan scenarios, with no rewrite of approved analysis.
+- Backlog-planning mode: coverage findings and proposed test-plan scenarios
+  for the Product Owner to persist, without rewriting approved analysis.

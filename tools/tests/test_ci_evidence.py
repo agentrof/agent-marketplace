@@ -435,7 +435,10 @@ class TimingHistoryTests(unittest.TestCase):
 
     def test_matching_successful_timing_artifact_restores_only_duration_hints(self):
         result = self.restore(self.source())
-        self.assertEqual(result, {"schema_version": 1, "durations": self.payload["durations"]})
+        self.assertEqual(result["durations"], self.payload["durations"])
+        self.assertEqual(result["sources"][0]["run_id"], 123)
+        self.assertEqual(result["sources"][0]["restored_tests"], 1)
+        self.assertEqual(result["fallback_reasons"], [])
         self.assertNotIn("reused", result)
 
     def test_policy_runtime_or_unknown_tests_invalidate_timing_history(self):
@@ -475,7 +478,9 @@ class TimingHistoryTests(unittest.TestCase):
                     api.run["updated_at"] = "2026-09-25T12:00:00Z"
                 else:
                     api.get = mock.Mock(side_effect=evidence.EvidenceError("no API"))
-                self.assertEqual(self.restore(api), {"schema_version": 1, "durations": {}})
+                result = self.restore(api)
+                self.assertEqual(result["durations"], {})
+                self.assertTrue(result["fallback_reasons"])
 
     def test_history_lookup_is_bounded_to_five_sources(self):
         api = self.source()

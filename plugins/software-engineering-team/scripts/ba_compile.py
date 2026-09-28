@@ -1513,8 +1513,10 @@ def render_views(space: Space, warnings: list[Finding]) -> dict[str, str]:
             "status.md": status_md, "open-questions.md": questions_md}
 
 
-def freshness_findings(space: Space, warnings: list[Finding]) -> list[Finding]:
-    rendered = render_views(space, warnings)
+def freshness_findings(space: Space, warnings: list[Finding],
+                       rendered: dict[str, str] | None = None) -> list[Finding]:
+    if rendered is None:
+        rendered = render_views(space, warnings)
     findings: list[Finding] = []
     gen_dir = space.root / GENERATED_DIR
     for name, content in rendered.items():
@@ -2306,7 +2308,7 @@ def cmd_render(args, schema: dict) -> int:
     rendered = render_views(space, warnings)
     gen_dir = space.root / GENERATED_DIR
     if args.check_only:
-        stale = freshness_findings(space, warnings)
+        stale = freshness_findings(space, warnings, rendered)
         if stale:
             return emit(stale, args.json)
         print("ba_compile: generated views are fresh")

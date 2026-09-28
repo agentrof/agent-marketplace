@@ -336,6 +336,16 @@ Product and test changes stay on the Item branch. Before approving evidence,
 the active Item worktree may contain only edits to its initialized Code Review
 and Verification reports; its real `HEAD` becomes both the
 reviewed and verified commit; callers cannot supply an arbitrary commit ID.
+New Items approve an explicit `parallel_snapshot_v1` verification schedule.
+An absent schedule preserves `sequential_v1` for legacy approved Items without
+altering their bytes or hashes. Parallel Code Review and QA bind one committed
+candidate and its exact plan, source and instruction identities. Both readers
+must settle or confirm cancellation before the owner can write. The compiler
+requires independent final results, including source-bound raw command evidence;
+diagnostic QA can return findings but cannot approve. A changed candidate or
+contract invalidates the result. A schedule change follows normal execution
+revision, approval and publication. The evidence child described below does
+not itself create a new product candidate or require another verification run.
 The subsequent Item push accepts only a committed change after the active
 remote Item, refuses Delivery control-file changes except the current required
 Architecture Item's exact compiler stamp (delta hash and refreshed source hash), and

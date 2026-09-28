@@ -110,7 +110,12 @@ behavior is host-neutral; Claude Code and Codex are packaging adapters.
     protocol may prepare a pull request but never merge one without explicit
     approval. Stable release authority comes only from an explicit user request
     bound to an unambiguous PR set. Every pull request emits the required
-    aggregate and two-host lifecycle contexts. Release branches are accepted
+    aggregate and two-host lifecycle contexts. Test partitions must account
+    for every selected case; shared or unknown impact selects full coverage.
+    Reused validation binds successful trusted workflow evidence to the exact
+    tested tree and current coverage contract. Missing evidence runs full
+    tests, while topology, release replay and public installs remain fresh.
+    Release branches are accepted
     only when their sole commit tree is the deterministic replay of the
     attested main source. Replay ignores ambient Git attributes, excludes,
     replacement refs and graph overlays. Snapshot records are prefix-free;

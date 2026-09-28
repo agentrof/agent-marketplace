@@ -61,9 +61,11 @@ user-journey, screen, flow, state, transition or prototype work.
    artifact paths and bytes, then binds the snapshot to its process receipt
    set. It does not validate UI structure, CSS, scripts, network behavior,
    tokens, framework choices, routes or accessibility claims.
-9. Run the fresh read-only reviewer challenge loop. Review actual usability,
-   coherence, accessibility, responsive behavior and risks as judgment, not
-   as a substitute parser contract.
+9. Follow the flow's named risk checkpoints and final snapshot review. Review
+   actual usability, coherence, accessibility, responsive behavior and risks
+   as judgment, not as a substitute parser contract. Routine cosmetic edits
+   do not each trigger a reviewer; the final attestation must still bind the
+   exact inputs after the last authored change.
 10. Atomically approve the complete action set. The result is `application@rN`
    plus the exact current process receipts. Requirement mode binds that set;
    manual mode hands it to backlog planning.

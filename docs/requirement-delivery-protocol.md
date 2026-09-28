@@ -196,6 +196,16 @@ root Requirement's Experience Stage Results, and binds none when that
 Requirement marks Experience `not_applicable`. A backlog without a planning
 mode predates application receipts and is not held to that rule.
 
+A technical or defect Requirement may explicitly declare genuinely absent
+visual input families through Backlog's `headless-v1` contract. This requires
+`not_applicable` impact rows, current BA/Solution receipts, a headless
+CLI/worker/scheduler topology, no relevant authored dependencies and complete
+Git history without previous visual package content. The `--absent-input`
+flags must be repeated and validated for every new revision. An existing
+binding cannot be removed through this exception. Historical Delivery checks
+retain the original approved, hash-verified committed backlog boundary even
+when later work adds visual packages; new handoffs evaluate current inputs.
+
 A Delivery is one reviewable outcome. It has no duration, estimate, cadence,
 capacity or release field. Before reservation, declining or stopping leaves no
 tracked file, ID, ref or provider object. After reservation, its ID,

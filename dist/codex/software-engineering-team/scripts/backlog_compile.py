@@ -25,6 +25,7 @@ except ImportError:  # direct library use outside the packaged scripts dir
 import requirement_compile
 import requirement_route
 import stage_package
+import backlog_input_policy
 from ba_compile import (
     frontmatter_item, frontmatter_scalar, frontmatter_value, without_generated_relations,
 )
@@ -457,6 +458,10 @@ def planning_package_findings(
     """
     mode = str(props.get("planning_mode", "")).strip().casefold()
     errors: list[str] = []
+    absent = values(props, "absent_input_stages")
+    absence_declared = bool({"input_contract", "absent_input_stages"}.intersection(props))
+    if absence_declared and mode != "requirement":
+        errors.append(f"{path} absent inputs are supported only in Requirement mode")
     refs = values(props, "input_package_refs")
     if mode not in {"", "manual", "requirement"}:
         errors.append(f"{path} planning_mode must be manual or requirement")
@@ -501,6 +506,7 @@ def planning_package_findings(
         errors.extend(input_family_findings(
             expected, docs, path, "manual", allow_historical=allow_historical))
     elif mode == "requirement":
+        requirement_path = None
         requirement_receipts: dict[str, list[tuple[str, str]]] = {}
         requirement = str(props.get("requirement_ref", "")).strip()
         if not requirement:
@@ -513,6 +519,7 @@ def planning_package_findings(
             if len(requirement_paths) != 1:
                 errors.append(f"{path} requirement_ref is not uniquely resolvable: {requirement}")
             else:
+                requirement_path = requirement_paths[0]
                 status, type_name = note_status_and_type(requirement_paths[0])
                 if type_name != "requirement" or status != "approved":
                     errors.append(f"{path} requirement_ref is not an approved Requirement: {requirement}")
@@ -557,7 +564,14 @@ def planning_package_findings(
             refs = [reference for _stage, reference, _digest in rows]
             errors.extend(input_family_findings(
                 grouped_input_references(rows), docs, path, "requirement",
-                allow_historical=allow_historical))
+                allow_historical=allow_historical, absent_stages=absent))
+            if absence_declared:
+                try:
+                    errors.extend(f"{path} {error}" for error in backlog_input_policy.absence_findings(
+                        docs, props, requirement_path, {stage for stage, _ref, _hash in rows},
+                        backlog_contract()["applicable_inputs"], allow_historical=allow_historical))
+                except (OSError, ValueError) as exc:
+                    errors.append(f"{path} absent input evidence is unreadable: {exc}")
             for stage, receipts in requirement_receipts.items():
                 bound = sorted((reference, digest) for bound_stage, reference, digest in rows
                                if bound_stage == stage)
@@ -565,6 +579,8 @@ def planning_package_findings(
                     errors.append(f"{path} {stage} input binding must equal {requirement} Stage Results")
         elif not (props.get("status") == "approved" or props.get("legacy_contract")):
             errors.append(f"{path} requirement planning needs compiler-owned input_bindings")
+        if absence_declared and not bindings:
+            errors.append(f"{path} absent inputs still require approved BA and Solution bindings")
     return mode, refs, errors
 
 
@@ -603,7 +619,8 @@ def grouped_input_references(rows: list[tuple[str, str, str]]) -> dict[str, list
 
 
 def input_family_findings(expected: dict[str, list[str]], docs: Path, path: str,
-                          mode: str, *, allow_historical: bool = False) -> list[str]:
+                          mode: str, *, allow_historical: bool = False,
+                          absent_stages: list[str] | tuple[str, ...] = ()) -> list[str]:
     """Require one BA, Solution and Design package plus one complete Experience set."""
     errors = []
     for stage, references in expected.items():
@@ -616,7 +633,7 @@ def input_family_findings(expected: dict[str, list[str]], docs: Path, path: str,
                 f"{path} {mode} planning needs one Experience application plus its exact process packages, "
                 "or only the application when it is verified empty"
             )
-    missing = sorted(set(INPUT_STAGES) - set(expected))
+    missing = sorted(set(INPUT_STAGES) - set(expected) - set(absent_stages))
     if missing:
         errors.append(f"{path} {mode} planning is missing input packages: {', '.join(missing)}")
     return errors
@@ -672,7 +689,8 @@ def resolve_manual_input_bindings(docs: Path, raw_refs: list[str],
 
 
 def requirement_input_bindings(docs: Path, requirement_ref: str, carried: list[str],
-                               declared: list[str], label: str) -> tuple[list[str], list[str]]:
+                               declared: list[str], label: str, *,
+                               absent_stages: list[str] | tuple[str, ...] = ()) -> tuple[list[str], list[str]]:
     """Pin all four input families for a Requirement-mode backlog.
 
     Stages the Requirement changes or reuses bind its Stage Results receipts.
@@ -719,6 +737,12 @@ def requirement_input_bindings(docs: Path, requirement_ref: str, carried: list[s
         carried_rows.append((stage, reference, digest))
     rows: list[tuple[str, str, str]] = []
     for stage in INPUT_STAGES:
+        if stage in absent_stages:
+            if dispositions.get(stage) != "not_applicable":
+                errors.append(f"{label} {stage} cannot be absent unless not_applicable")
+            if any(row[0] == stage for row in [*carried_rows, *declared_rows]) or results.get(stage):
+                errors.append(f"{label} {stage} has an existing binding and cannot become absent")
+            continue
         if dispositions.get(stage, "not_applicable") != "not_applicable":
             rows.extend((stage, str(reference), str(digest))
                         for reference, digest in results.get(stage, []))
@@ -1404,7 +1428,9 @@ def round_number(path: Path, props: dict, suffix: str, errors: list[str]) -> int
 
 @stage_package.candidate_session()
 @experience_validation_session()
-def collect(docs: Path, *, historical_inputs: bool = False) -> tuple[dict, list[str]]:
+def collect(docs: Path, *, historical_inputs: bool = False,
+            review_inputs: bool = False) -> tuple[dict, list[str]]:
+    """Validate sources; input discovery may precede authored review findings."""
     contract = backlog_contract()
     root = docs / "backlog"
     errors: list[str] = []
@@ -1447,8 +1473,9 @@ def collect(docs: Path, *, historical_inputs: bool = False) -> tuple[dict, list[
         if review_round in rounds:
             errors.append(f"backlog review round {review_round} is duplicated")
         rounds.add(review_round)
-        errors.extend(review_section_findings(
-            body, contract["required_backlog_review_sections"], rel, docs))
+        if not review_inputs:
+            errors.extend(review_section_findings(
+                body, contract["required_backlog_review_sections"], rel, docs))
         record["backlog_reviews"].append({"path": rel, "props": review_props,
                                           "body": body,
                                           "id": note_id(review_props, path.stem),
@@ -1501,9 +1528,10 @@ def collect(docs: Path, *, historical_inputs: bool = False) -> tuple[dict, list[
             if review_round in epic_rounds:
                 errors.append(f"{epic_id} review round {review_round} is duplicated")
             epic_rounds.add(review_round)
-            errors.extend(review_section_findings(
-                review_body_text, contract["required_epic_review_sections"],
-                review_rel, docs))
+            if not review_inputs:
+                errors.extend(review_section_findings(
+                    review_body_text, contract["required_epic_review_sections"],
+                    review_rel, docs))
             item = {"path": review_rel, "props": review_props,
                     "body": review_body_text,
                     "id": note_id(review_props, review.stem),
@@ -1746,8 +1774,11 @@ def collect(docs: Path, *, historical_inputs: bool = False) -> tuple[dict, list[
     if has_cycle(graph):
         errors.append("story dependency graph contains a cycle")
 
-    errors.extend(review_coverage_findings(record, docs))
+    if not review_inputs:
+        errors.extend(review_coverage_findings(record, docs))
     errors.extend(global_criterion_coverage_findings(record, docs))
+    if historical_inputs and {"input_contract", "absent_input_stages"}.intersection(record["backlog"]["props"]):
+        errors.extend(backlog_input_policy.historical_absence_findings(docs, record))
     return record, sorted(set(errors))
 
 
@@ -2084,6 +2115,12 @@ def normalize_backlog_map_aliases(path: Path, backlog_title: str) -> None:
         path.write_bytes(updated.encode("utf-8"))
 
 
+def write_generated(path: Path, content: bytes) -> None:
+    """Avoid filesystem churn without caching any validation result."""
+    if not path.is_file() or path.read_bytes() != content:
+        path.write_bytes(content)
+
+
 def render_backlog_navigation(record: dict, docs: Path, *, preserved: set[Path] | None = None) -> None:
     if preserved is None:
         preserved = {
@@ -2119,7 +2156,7 @@ def render_backlog_navigation(record: dict, docs: Path, *, preserved: set[Path] 
             map_lines.append(f"- {wikilink(story['test_plan'], story['test_props'].get('title', story['id'] + ' test plan'))}")
     existing = map_path.read_text(encoding="utf-8")
     prefix = existing.split(GENERATED_MAP_MARKER, 1)[0].rstrip()
-    map_path.write_bytes((prefix + "\n\n" + "\n".join(map_lines) + "\n").encode("utf-8"))
+    write_generated(map_path, (prefix + "\n\n" + "\n".join(map_lines) + "\n").encode("utf-8"))
 
     append_current_nav(docs / record["backlog"]["path"],
                ["[[maps/backlog|Backlog map]]"])
@@ -2239,7 +2276,11 @@ def render(record: dict, docs: Path) -> None:
             "epic": [review["path"] for review in record["epic_reviews"]],
         },
     }
-    (out / "registry.json").write_bytes(
+    absent = values(record["backlog"]["props"], "absent_input_stages")
+    if absent:
+        payload["input_contract"] = record["backlog"]["props"].get("input_contract", "")
+        payload["absent_input_stages"] = absent
+    write_generated(out / "registry.json",
         (json.dumps(payload, indent=2, ensure_ascii=False, sort_keys=True) + "\n").encode("utf-8"))
     board = [GENERATED_MAP_MARKER, "# Backlog board", "",
              "| Story | Epic | Status | Owner | Priority | Test plan |",
@@ -2250,13 +2291,13 @@ def render(record: dict, docs: Path) -> None:
             f"{story['props'].get('status', '')} | {story['props'].get('owner_role', '')} | "
             f"{story['props'].get('priority', '')} | "
             f"[[{story['test_plan'][:-3]}|scenarios]] |")
-    (out / "board.md").write_bytes(("\n".join(board) + "\n").encode("utf-8"))
+    write_generated(out / "board.md", ("\n".join(board) + "\n").encode("utf-8"))
     dependency = [GENERATED_MAP_MARKER, "# Dependency map", ""]
     for story in record["stories"]:
         dependencies = values(story["props"], "depends_on")
         dependency.append(f"- **{story['id']}** depends on "
                           + (", ".join(dependencies) if dependencies else "none"))
-    (out / "dependency-map.md").write_bytes(("\n".join(dependency) + "\n").encode("utf-8"))
+    write_generated(out / "dependency-map.md", ("\n".join(dependency) + "\n").encode("utf-8"))
     coverage = [GENERATED_MAP_MARKER, "# Test coverage design", "",
                 "| Story | Criteria | Scenarios | Automation required |",
                 "|---|---:|---:|---:|"]
@@ -2267,7 +2308,7 @@ def render(record: dict, docs: Path) -> None:
         )
         coverage.append(f"| {story['id']} | {len(story['criteria'])} | "
                         f"{len(story['scenario_ids'])} | {required} |")
-    (out / "test-coverage.md").write_bytes(("\n".join(coverage) + "\n").encode("utf-8"))
+    write_generated(out / "test-coverage.md", ("\n".join(coverage) + "\n").encode("utf-8"))
     if (record["backlog"].get("planning_mode") == "manual"
             or values(record["backlog"]["props"], "input_bindings")):
         rows = [GENERATED_MAP_MARKER, "# Input Package Coverage", "",
@@ -2279,7 +2320,9 @@ def render(record: dict, docs: Path) -> None:
             status = input_package_status(docs, stage, reference, digest).replace("|", "\\|")
             rows.append(f"| {reference} | {stage or 'unknown'} | {digest or 'none'} | "
                         f"{status} | {linked} |")
-        (out / "input-package-coverage.md").write_bytes(("\n".join(rows) + "\n").encode("utf-8"))
+        for stage in sorted(absent):
+            rows.append(f"| none | {stage} | none | explicitly absent ({payload['input_contract']}) | 0 |")
+        write_generated(out / "input-package-coverage.md", ("\n".join(rows) + "\n").encode("utf-8"))
 
 
 def review_body(title: str, sections: list[str]) -> str:
@@ -2319,6 +2362,19 @@ def init(args) -> int:
     planning_mode = getattr(args, "planning_mode", "")
     requirement_ref = getattr(args, "requirement_ref", "")
     input_ref = list(getattr(args, "input_ref", []) or [])
+    absent = list(getattr(args, "absent_input", []) or [])
+    existing_root = docs / "backlog" / "backlog.md"
+    if existing_root.is_file():
+        existing_props, _existing_body = parse_front_matter(existing_root)
+        if absent or existing_props.get("input_contract") or existing_props.get("absent_input_stages"):
+            if (existing_props.get("status") == "approved"
+                    or set(values(existing_props, "absent_input_stages")) != set(absent)):
+                print("backlog_compile: init cannot change an existing absence contract; "
+                      "approve the current draft and use begin-revision", file=sys.stderr)
+                return 1
+    if absent and planning_mode != "requirement":
+        print("backlog_compile: --absent-input requires Requirement mode", file=sys.stderr)
+        return 2
     if planning_mode == "manual" and (requirement_ref or len(input_ref) < 4):
         print(
             "backlog_compile: manual init needs BA, Solution, Design, one "
@@ -2349,7 +2405,7 @@ def init(args) -> int:
                 return 1
         elif planning_mode == "requirement":
             input_bindings, binding_errors = requirement_input_bindings(
-                docs, requirement_ref, [], input_ref, "backlog/backlog.md")
+                docs, requirement_ref, [], input_ref, "backlog/backlog.md", absent_stages=absent)
             if binding_errors:
                 print(json.dumps({"ok": False, "errors": binding_errors},
                                  indent=2, ensure_ascii=False), file=sys.stderr)
@@ -2358,6 +2414,9 @@ def init(args) -> int:
         # selection must not leave a half-created manual or Requirement package.
         if planning_mode:
             candidate_props = {"planning_mode": planning_mode}
+            if absent:
+                candidate_props.update(input_contract=backlog_contract()["applicable_inputs"]["contract"],
+                                       absent_input_stages=absent)
             if requirement_ref:
                 candidate_props["requirement_ref"] = requirement_ref
             if input_bindings:
@@ -2406,6 +2465,9 @@ def init(args) -> int:
         props["requirement_ref"] = requirement_ref
     if input_bindings:
         props["input_bindings"] = input_bindings
+    if absent:
+        props["input_contract"] = backlog_contract()["applicable_inputs"]["contract"]
+        props["absent_input_stages"] = absent
     root_note.write_bytes(front_matter(props, body).encode("utf-8"))
     map_path = docs / "maps" / "backlog.md"
     map_path.parent.mkdir(parents=True, exist_ok=True)
@@ -2644,6 +2706,10 @@ def begin_revision(args) -> int:
                 return 1
     backlog_path = docs / record["backlog"]["path"]
     root_props, root_body = parse_front_matter(backlog_path)
+    absent = list(getattr(args, "absent_input", []) or [])
+    if absent and args.planning_mode != "requirement":
+        print("backlog_compile: --absent-input requires Requirement mode", file=sys.stderr)
+        return 2
     if args.planning_mode == "manual" and (args.requirement_ref or len(args.input_ref) < 4):
         print(json.dumps({
             "ok": False,
@@ -2678,12 +2744,17 @@ def begin_revision(args) -> int:
         # Untouched stages carry this backlog's previous bindings forward.
         input_bindings, binding_errors = requirement_input_bindings(
             docs, args.requirement_ref, values(root_props, "input_bindings"),
-            list(args.input_ref), "backlog/backlog.md")
+            list(args.input_ref), "backlog/backlog.md", absent_stages=absent)
         if not binding_errors:
-            _mode, _refs, binding_errors = planning_package_findings(docs, {
+            candidate_props = {
                 "planning_mode": "requirement", "requirement_ref": args.requirement_ref,
                 "input_bindings": input_bindings,
-            }, "backlog/backlog.md")
+            }
+            if absent:
+                candidate_props.update(input_contract=backlog_contract()["applicable_inputs"]["contract"],
+                                       absent_input_stages=absent)
+            _mode, _refs, binding_errors = planning_package_findings(
+                docs, candidate_props, "backlog/backlog.md")
         if binding_errors:
             print(json.dumps({"ok": False, "errors": sorted(set(binding_errors))},
                              indent=2, ensure_ascii=False), file=sys.stderr)
@@ -2696,12 +2767,16 @@ def begin_revision(args) -> int:
     root_props.pop("requirement_ref", None)
     root_props.pop("input_package_refs", None)
     root_props.pop("input_bindings", None)
+    root_props.pop("input_contract", None)
+    root_props.pop("absent_input_stages", None)
+    if absent:
+        root_props["input_contract"] = backlog_contract()["applicable_inputs"]["contract"]
+        root_props["absent_input_stages"] = absent
     if args.planning_mode == "requirement":
         root_props["requirement_ref"] = args.requirement_ref
     root_props["input_bindings"] = input_bindings
     for key in ("approved_at_utc", "source_hash", "package_hash"):
         root_props.pop(key, None)
-    backlog_path.write_bytes(front_matter(root_props, root_body).encode("utf-8"))
 
     latest_review = latest(record["backlog_reviews"])
     next_round = int(latest_review["props"].get("round", 0) or 0) + 1
@@ -2736,13 +2811,48 @@ def begin_revision(args) -> int:
         flags=re.MULTILINE | re.DOTALL,
     )
     review_path = docs / "backlog" / "reviews" / f"round-{next_round}-backlog-review.md"
-    review_path.write_bytes(front_matter(review_props, review_body_text).encode("utf-8"))
-    refreshed, render_errors = collect(docs)
-    if render_errors:
-        print(json.dumps({"ok": False, "errors": sorted(set(render_errors))}, indent=2,
+    # Navigation may touch every package note, home and the map. Snapshot only
+    # those owned paths so rollback cannot erase unrelated concurrent work.
+    touched = set(package_paths(record, docs)) | {
+        review_path, docs / "home.md", docs / "maps" / "backlog.md",
+    }
+    try:
+        originals = {path: path.read_bytes() if path.exists() else None
+                     for path in touched}
+        missing_dirs = {parent for path in touched for parent in path.parents
+                        if parent != docs and docs in parent.parents and not parent.exists()}
+    except OSError as exc:
+        print(json.dumps({"ok": False, "errors": [f"revision snapshot failed: {exc}"]},
+                         indent=2, ensure_ascii=False, sort_keys=True))
+        return 1
+    try:
+        backlog_path.write_bytes(front_matter(root_props, root_body).encode("utf-8"))
+        review_path.write_bytes(front_matter(review_props, review_body_text).encode("utf-8"))
+        refreshed, render_errors = collect(docs)
+        if render_errors:
+            raise RuntimeError("; ".join(sorted(set(render_errors))))
+        render_backlog_navigation(refreshed, docs)
+    except (OSError, ValueError, RuntimeError) as exc:
+        restore_errors = []
+        for path, original in originals.items():
+            try:
+                if original is None:
+                    if path.exists():
+                        path.unlink()
+                elif not path.is_file() or path.read_bytes() != original:
+                    path.parent.mkdir(parents=True, exist_ok=True)
+                    path.write_bytes(original)
+            except OSError as restore_exc:
+                restore_errors.append(f"could not restore {path.relative_to(docs)}: {restore_exc}")
+        for directory in sorted(missing_dirs, key=lambda path: len(path.parts), reverse=True):
+            try:
+                directory.rmdir()
+            except OSError:
+                pass
+        label = "revision rollback incomplete" if restore_errors else "revision rolled back"
+        print(json.dumps({"ok": False, "errors": [f"{label}: {exc}", *restore_errors]}, indent=2,
                          ensure_ascii=False, sort_keys=True))
         return 1
-    render_backlog_navigation(refreshed, docs)
     print(json.dumps({
         "ok": True, "revision": revision, "review_round": next_round,
         "frozen_story_ids": sorted(set(snapshot.get("active_story_ids", []))
@@ -2934,6 +3044,8 @@ def main(argv=None) -> int:
     command.add_argument("--planning-mode", choices=("manual", "requirement"), required=True)
     command.add_argument("--requirement-ref", default="")
     command.add_argument("--input-ref", action="append", default=[])
+    command.add_argument("--absent-input", choices=("design-system", "experience-design"),
+                         action="append", default=[], help="Explicit headless Requirement input absence")
     command.set_defaults(func=init)
     command = sub.add_parser("stub-epic")
     command.add_argument("slug")
@@ -2977,6 +3089,8 @@ def main(argv=None) -> int:
     command.add_argument("--planning-mode", choices=("manual", "requirement"), required=True)
     command.add_argument("--requirement-ref", default="")
     command.add_argument("--input-ref", action="append", default=[])
+    command.add_argument("--absent-input", choices=("design-system", "experience-design"),
+                         action="append", default=[], help="Revalidate an explicit headless Requirement input absence")
     command.set_defaults(func=begin_revision)
     command = sub.add_parser("revision-status")
     command.add_argument("--docs", default=None)

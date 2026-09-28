@@ -60,7 +60,7 @@ Every evaluation scores its options against all six dimensions; a skipped dimens
 
 - [evaluation-method](references/evaluation-method.md): the options matrix shape, dimension scoring, the ungrounded-engagement rule, worked example. Read when starting or reviewing an evaluation.
 - [landscape-docs](references/landscape-docs.md): the solution tree's doc contract (files, mandated sections, fold-in rules). Read when creating or updating any solution-design document.
-- [challenge-lenses](references/challenge-lenses.md): the four adversarial lenses and exact read-only challenge input/output shape. Read when approaching the final solution approval gate.
+- [challenge-lenses](references/challenge-lenses.md): the single Solution review plan, four required primary lenses and risk-triggered specialists. Read when approaching the final solution approval gate.
 - [worked-engagement](references/worked-engagement.md): a complete miniature engagement, framing through fold-in; the calibration bar for depth and format. Read when writing a project's first engagement or judging whether a study is deep enough.
 
 ## Related Skills

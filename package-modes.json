@@ -3,7 +3,8 @@
   "packages": {
     "software-engineering-team": {
       "executables": [
-        "scripts/backlog_compile.py"
+        "scripts/backlog_compile.py",
+        "scripts/backlog_review_inputs.py"
       ]
     }
   }

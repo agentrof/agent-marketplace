@@ -121,6 +121,8 @@
     "requirement_ref": "text",
     "input_package_refs": "multitext",
     "input_bindings": "multitext",
+    "input_contract": "text",
+    "absent_input_stages": "multitext",
     "introduced_in_revision": "number",
     "test_command": "text",
     "test_workdir": "text",

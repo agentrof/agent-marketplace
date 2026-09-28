@@ -149,8 +149,14 @@ those bytes.
 
 ## Challenge loop
 
-1. Invoke a fresh, read-only `experience-reviewer` after each meaningful
-   authoring milestone.
+1. Invoke a fresh, read-only `experience-reviewer` for the final snapshot
+   after authoring is complete. An earlier checkpoint is required only when
+   an authoring decision changes authorization or privacy, cross-process
+   ownership, primary navigation, or irreversible user actions. Name the
+   changed decision and affected records in that checkpoint's prompt. Revisit
+   it only when its evidence changes; layout-only variants and cosmetic edits
+   do not create a checkpoint by themselves. Early advice never replaces the
+   final snapshot review.
 2. Challenge process and criterion coverage, journeys and state closure,
    failures and recovery, solution constraints, accessibility, responsive and
    localization behavior, cross-Experience ownership, and prototype fidelity.
@@ -160,15 +166,21 @@ those bytes.
 4. Reviewers write no review tree, history note, counter or lock. Their
    findings are advisory and never prevent a prototype receipt from being
    approved.
-5. The final reviewer emits a transient schema-v4 JSON attestation bound to
-   proposal hash, artifact-tree hash, package-set hash, application hash and
-   revision. Its `advisories` are informational and may be empty or non-empty.
+5. After the last authored package or artifact change, move the affected
+   packages and application lifecycle to `in_review`, then obtain a fresh final
+   review. The final reviewer emits a transient
+   schema-v4 JSON attestation bound to proposal hash, artifact-tree hash,
+   package-set hash, application hash and revision. Its `advisories` are
+   informational and may be empty or non-empty. Any later change to those
+   inputs requires re-entering review and a fresh attestation; even a cosmetic
+   edit cannot reuse evidence for different bytes.
 
 ## Approval and handoff
 
-1. Move affected packages and the application lifecycle to `in_review`, then
-   run one `experience_compile.py approve-set` invocation with the approved
-   proposal and reviewer attestation.
+1. With the affected packages and application still in `in_review` and the
+   final attestation matching their current inputs, run one
+   `experience_compile.py approve-set` invocation with the approved proposal
+   and reviewer attestation.
 2. Approval is atomic across process records, artifact snapshot receipt,
    `_generated/open-application-revision.json`, registry and ledger. It never
    alters the author-owned artifact files.

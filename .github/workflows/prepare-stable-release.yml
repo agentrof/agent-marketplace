@@ -5,12 +5,20 @@ on:
 
 permissions:
   contents: read
+  actions: read
+  pull-requests: read
 
 concurrency:
   group: stable-release
   cancel-in-progress: false
 
 jobs:
+  source-validation:
+    if: github.ref == 'refs/heads/main'
+    uses: ./.github/workflows/validate.yml
+    with:
+      candidate_sha: ${{ github.sha }}
+
   exact-sha-host-gates:
     if: github.ref == 'refs/heads/main'
     uses: ./.github/workflows/release-hosts.yml
@@ -18,11 +26,14 @@ jobs:
       candidate_sha: ${{ github.sha }}
 
   prepare:
-    if: github.ref == 'refs/heads/main'
-    needs: exact-sha-host-gates
+    if: >-
+      !cancelled() && github.ref == 'refs/heads/main' &&
+      needs.source-validation.result == 'success' &&
+      needs.exact-sha-host-gates.result == 'success'
+    needs: [source-validation, exact-sha-host-gates]
     permissions:
       contents: write
-    runs-on: macos-latest
+    runs-on: ubuntu-latest
     timeout-minutes: 35
     outputs:
       mode: ${{ steps.prepare.outputs.mode }}
@@ -76,7 +87,7 @@ jobs:
           fi
 
           if [ "$bootstrap" = true ]; then
-            make release-check
+            make static-check
             stage_json=""
             phase=""
 
@@ -161,7 +172,7 @@ jobs:
           main_sha="$candidate_sha"
           python3 tools/release.py prepare --stable-sha "$stable_sha" --main-sha "$main_sha"
           python3 tools/build_distributions.py
-          make release-check
+          make static-check
           version="$(python3 -c 'import json; print(json.load(open("versions.json"))["marketplace"])')"
           git switch -c release/stable
           git add --all
@@ -188,6 +199,7 @@ jobs:
 
   bootstrap-public-smoke:
     if: >-
+      !cancelled() && needs.prepare.result == 'success' &&
       needs.prepare.outputs.mode == 'bootstrap' &&
       needs.prepare.outputs.phase == 'staged'
     needs: prepare

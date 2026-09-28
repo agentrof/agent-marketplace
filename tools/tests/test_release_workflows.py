@@ -3,6 +3,9 @@
 from __future__ import annotations
 
 import json
+import os
+import shutil
+import subprocess
 import re
 import unittest
 from pathlib import Path
@@ -10,6 +13,8 @@ from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[2]
 PINNED_ACTIONS = {
+    "actions/upload-artifact": ("043fb46d1a93c77aae656e7c1c64a875d1fc6a0a", "v7.0.1"),
+    "actions/download-artifact": ("3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c", "v8.0.1"),
     "actions/checkout": ("fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09", "v5"),
     "actions/setup-python": ("5fda3b95a4ea91299a34e894583c3862153e4b97", "v7.0.0"),
     "actions/setup-node": ("820762786026740c76f36085b0efc47a31fe5020", "v7.0.0"),
@@ -23,7 +28,7 @@ ACTION_USE_RE = re.compile(
 STATUS_CHECK_RE = re.compile(r"\b(?:always|cancelled|failure)\(\)")
 
 
-def workflow_action_findings(name: str, text: str) -> list[str]:
+def workflow_action_findings(name: str, text: str, host_policy: dict | None = None) -> list[str]:
     findings: list[str] = []
     for action, commit, label in ACTION_USE_RE.findall(text):
         if action not in PINNED_ACTIONS:
@@ -38,11 +43,18 @@ def workflow_action_findings(name: str, text: str) -> list[str]:
     if 'node-version: "20"' in text:
         findings.append(f"{name}: job Node.js must not use 20")
     lines = text.splitlines()
+    host_policy_output = name == "release-hosts.yml" and host_policy == {
+        "schema_version": 1, "runner_os": "macos-latest", "python": "3.14", "node": "24",
+    } and all(marker in text for marker in (
+        "node: ${{ steps.proof.outputs.node }}", "python3 tools/ci_host_evidence.py find",
+        '--github-output "$GITHUB_OUTPUT"',
+    ))
     for index, line in enumerate(lines):
         if "uses: actions/setup-node@" not in line:
             continue
         inputs = "\n".join(lines[index + 1:index + 5])
-        if 'node-version: "24"' not in inputs:
+        if 'node-version: "24"' not in inputs and not (
+                host_policy_output and 'node-version: ${{ needs.host-plan.outputs.node }}' in inputs):
             findings.append(f"{name}: setup-node must select Node.js 24")
         if "package-manager-cache: false" not in inputs:
             findings.append(f"{name}: setup-node must disable package caching")
@@ -92,7 +104,12 @@ def workflow_skip_inheritance_findings(name: str, text: str) -> list[str]:
                     f"{name}: {job} inherits every skip {need} tolerates; gate "
                     f"it with !cancelled() && needs.{need}.result == 'success'"
                 )
-            elif f"needs.{need}.result == 'success'" not in spec["if"]:
+            elif not any(f"needs.{need}.result {operator} 'success'" in spec["if"]
+                         for operator in ("==", "!=")):
+                block = re.split(r"(?m)^  [\w-]+:", text.split(f"\n  {job}:\n", 1)[1], maxsplit=1)[0]
+                result = re.search(r"(?m)^          (\w+): \$\{\{ needs\." + re.escape(need) + r"\.result \}\}$", block)
+                if spec["if"] == "always()" and result and f'test "${result.group(1)}" = success' in block:
+                    continue
                 findings.append(
                     f"{name}: {job} runs past {need} without requiring "
                     f"needs.{need}.result == 'success'"
@@ -137,7 +154,8 @@ class ReleaseWorkflowContracts(unittest.TestCase):
         codeql = self.text("codeql.yml")
         hosts = self.text("release-hosts.yml")
         self.assertIn("pull_request:", validate)
-        self.assertIn("--base origin/${{ github.base_ref }}", validate)
+        self.assertIn('BASE_SHA: ${{ github.event.pull_request.base.sha }}', validate)
+        self.assertIn('--base "$BASE_SHA"', validate)
         self.assertNotIn("--allow-bootstrap", validate)
         self.assertIn("pull_request:", codeql)
         self.assertIn("pull_request:\n", hosts)
@@ -149,7 +167,7 @@ class ReleaseWorkflowContracts(unittest.TestCase):
         self.assertIn("if: always()", validate)
         for dependency in (
             "changeset", "release-pr-policy", "deterministic-check",
-            "compatibility", "vault-hook-platforms",
+            "compatibility", "test-shards",
         ):
             self.assertIn(f"      - {dependency}", validate)
 
@@ -258,30 +276,27 @@ class ReleaseWorkflowContracts(unittest.TestCase):
         self.assertNotIn("python3 tools/", stage)
         self.assertIn("contents: read", public)
         self.assertIn("persist-credentials: false", public)
-        self.assertIn("make public-release-check", public)
+        self.assertIn("make public-release-smoke", public)
 
     def test_validation_is_read_only_and_pins_setup_python(self):
         text = self.text("validate.yml")
-        self.assertIn("permissions:\n  contents: read", text)
-        self.assertEqual(
-            text.count(
-                "actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0"
-            ),
-            5,
-        )
-        self.assertGreaterEqual(text.count('python-version: "3.9"'), 2)
+        self.assertIn("permissions:\n  contents: read\n  actions: read\n  pull-requests: read", text)
+        self.assertNotIn("contents: write", text)
+        self.assertIn('python-version: "3.14"', text)
+        self.assertIn('python-version: ${{ matrix.python }}', text)
+        self.assertIn('persist-credentials: false', text)
 
     def test_no_job_inherits_a_skip_its_need_tolerates(self):
         validate = workflow_jobs(self.text("validate.yml"))
         self.assertEqual(validate["check"]["if"], "always()")
         self.assertEqual(validate["check"]["needs"], [
-            "changeset", "release-pr-policy", "deterministic-check",
-            "compatibility", "vault-hook-platforms",
+            "changeset", "release-pr-policy", "plan", "test-shards",
+            "deterministic-check", "compatibility",
         ])
         self.assertIn("github.event_name == 'pull_request' &&",
                       validate["changeset"]["if"])
         prepare = workflow_jobs(self.text("prepare-stable-release.yml"))
-        self.assertEqual(prepare["prepare"]["needs"], ["exact-sha-host-gates"])
+        self.assertEqual(prepare["prepare"]["needs"], ["source-validation", "exact-sha-host-gates"])
         publish = workflow_jobs(self.text("publish-stable-release.yml"))
         self.assertEqual(publish["finalize-publication"]["needs"],
                          ["stage-publication", "public-stable-smoke"])
@@ -330,15 +345,27 @@ class ReleaseWorkflowContracts(unittest.TestCase):
 
     def test_vault_hook_matrix_gates_platforms_and_apple_launcher(self):
         text = self.text("validate.yml")
-        self.assertIn("VAULT_RESULT: ${{ needs.vault-hook-platforms.result }}", text)
-        self.assertIn('test "$VAULT_RESULT" = success', text)
-        for runner in ("ubuntu-latest", "macos-latest", "windows-latest"):
-            with self.subTest(runner=runner):
-                self.assertGreaterEqual(text.count(f"os: {runner}"), 2)
-        self.assertIn('python: "3.9"', text)
-        self.assertIn('python: "3.x"', text)
-        self.assertIn("AGENT_MARKETPLACE_REQUIRE_APPLE_PYTHON3", text)
-        for test_name in (
+        policy = json.loads((REPO / "tools/data/ci-test-policy.json").read_text())
+        environments = {(item["os"], item["python"]) for item in policy["lanes"].values()}
+        self.assertEqual(environments, {
+            (runner, version) for runner in ("ubuntu-latest", "macos-latest", "windows-latest")
+            for version in ("3.9", "3.14")
+        })
+        self.assertNotIn("vault-hook-platforms:", text)
+        self.assertEqual(policy["apple_launcher_lane"], "macos-minimum")
+        self.assertEqual(policy["lanes"]["macos-minimum"]["shards"], 1)
+        shard_job = text.split("\n  test-shards:\n", 1)[1].split("\n  compatibility:\n", 1)[0]
+        self.assertIn("if: matrix.apple_launcher == true", shard_job)
+        self.assertLess(shard_job.index("Exercise the Apple system Python launcher"),
+                        shard_job.index("uses: actions/setup-python@"))
+        self.assertNotIn("continue-on-error", shard_job)
+        self.assertIn("TEST_RESULT: ${{ needs.test-shards.result }}", text)
+        self.assertIn('test "$TEST_RESULT" = success', text)
+        for setting in ('AGENT_MARKETPLACE_REQUIRE_APPLE_PYTHON3: "1"', 'DEVELOPER_DIR: ""',
+                        'PATH: /usr/bin:/bin:/usr/sbin:/sbin', 'SDKROOT: ""', 'TOOLCHAINS: ""'):
+            self.assertIn(setting, shard_job)
+        self.assertEqual(text.count("AGENT_MARKETPLACE_REQUIRE_APPLE_PYTHON3"), 1)
+        for name in (
             "test_system_macos_python3_launcher_is_accepted",
             "test_issue_77_bare_python_cmd_preserves_attested_codex_result",
             "test_bare_python_candidate_with_invalid_result_is_restored",
@@ -347,18 +374,9 @@ class ReleaseWorkflowContracts(unittest.TestCase):
             "test_issue_77_bare_init_has_an_exact_attested_delta",
             "test_issue_77_bare_init_preserves_real_codex_draft",
         ):
-            with self.subTest(test_name=test_name):
-                self.assertIn(test_name, text)
-        self.assertIn("tools.tests.test_experience_compile", text)
-        self.assertIn("tools.tests.test_vault_hook", text)
-        self.assertIn(
-            "        if: runner.os == 'Windows'\n"
-            "        run: >-\n"
-            "          python -m unittest\n"
-            "          tools.tests.test_delivery_compile\n"
-            "          tools.tests.test_delivery_git\n",
-            text,
-        )
+            self.assertIn(name, text)
+        self.assertIn("tools.tests.test_delivery_compile.*", policy["groups"]["windows"]["tests"])
+        self.assertIn("tools.tests.test_delivery_git.*", policy["groups"]["windows"]["tests"])
 
     def test_dependabot_is_not_asked_for_action_bumps_the_gates_refuse(self):
         # PINNED_ACTIONS and the changeset gate refuse every bump Dependabot can raise.
@@ -418,9 +436,11 @@ class ReleaseWorkflowContracts(unittest.TestCase):
         self.assertIn("claude --version", workflow)
         self.assertIn("codex --version", workflow)
         self.assertIn("tools/smoke_plugin_installs.py --channel checkout", workflow)
-        self.assertIn("make release-check", workflow)
+        self.assertNotIn("make release-check", workflow)
         self.assertNotIn("make public-release-check", workflow)
-        self.assertIn("runs-on: macos-latest", workflow)
+        self.assertIn("runs-on: ${{ needs.host-plan.outputs.runner_os }}", workflow)
+        policy = json.loads((REPO / "tools/data/ci-host-policy.json").read_text(encoding="utf-8"))
+        self.assertEqual(policy, {"schema_version": 1, "runner_os": "macos-latest", "python": "3.14", "node": "24"})
         self.assertIn("workflow_call", workflow)
 
         for release_workflow in ("prepare-stable-release.yml", "publish-stable-release.yml"):
@@ -430,7 +450,7 @@ class ReleaseWorkflowContracts(unittest.TestCase):
                 self.assertIn("uses: ./.github/workflows/release-hosts.yml", text)
                 self.assertIn("exact-sha-host-gates", text)
         self.assertIn(
-            "needs: [verify-release-candidate, exact-sha-host-gates]",
+            "needs: [verify-release-candidate, candidate-validation, exact-sha-host-gates]",
             self.text("publish-stable-release.yml"),
         )
 
@@ -444,22 +464,19 @@ class ReleaseWorkflowContracts(unittest.TestCase):
         self.assertIn("python3 trusted/tools/smoke_plugin_installs.py", prepare)
         self.assertIn("path: trusted", prepare)
         self.assertIn("path: candidate", prepare)
-        self.assertIn("make public-release-check", publish)
+        self.assertIn("make public-release-smoke", publish)
         for text in (prepare, publish):
             self.assertIn("EXPECTED_RELEASE_SHA", text)
 
     def test_release_check_requires_deterministic_gates(self):
         makefile = (REPO / "Makefile").read_text(encoding="utf-8")
+        self.assertRegex(makefile, r"(?m)^check: static-check test$")
+        self.assertRegex(makefile, r"(?m)^static-check: validate release-validate counts-check dist-check$")
         self.assertRegex(makefile, r"(?m)^release-check: check$")
-        self.assertRegex(makefile, r"(?m)^public-release-check: release-check$")
-        self.assertRegex(
-            makefile,
-            r"(?m)^\s*PYTHONDONTWRITEBYTECODE=1 \$\(PY\) -m unittest",
-        )
-        self.assertIn(
-            'tools/smoke_plugin_installs.py --channel public --expected-sha',
-            makefile,
-        )
+        self.assertRegex(makefile, r"(?m)^public-release-check: release-check public-release-smoke$")
+        self.assertRegex(makefile, r"(?m)^public-release-smoke:$")
+        self.assertRegex(makefile, r"(?m)^\s*PYTHONDONTWRITEBYTECODE=1 \$\(PY\) -m unittest")
+        self.assertIn("tools/smoke_plugin_installs.py --channel public --expected-sha", makefile)
 
     def test_required_host_smoke_has_no_event_level_path_filter(self):
         workflow = self.text("release-hosts.yml")
@@ -469,30 +486,22 @@ class ReleaseWorkflowContracts(unittest.TestCase):
 
     def test_validate_jobs_are_time_bounded(self):
         text = self.text("validate.yml")
-        expectations = {
-            "changeset": "10",
-            "release-pr-policy": "10",
-            "deterministic-check": "20",
-            "check": "5",
-            "compatibility": "20",
-            "vault-hook-platforms": "${{ matrix.os == 'windows-latest' && 60 || 10 }}",
-        }
-        for job, minutes in expectations.items():
-            with self.subTest(job=job):
-                self.assertRegex(
-                    text,
-                    rf"(?ms)^  {re.escape(job)}:\n.*?^    timeout-minutes: {re.escape(minutes)}$",
-                )
+        for name, block in re.findall(r"(?ms)^  ([\w-]+):\n(.*?)(?=^  [\w-]+:|\Z)", text.split("\njobs:\n", 1)[1]):
+            with self.subTest(job=name):
+                match = re.search(r"(?m)^    timeout-minutes: (\d+)$", block)
+                self.assertIsNotNone(match)
+                self.assertLessEqual(int(match.group(1)), 25)
 
     def test_validation_workflows_cancel_superseded_runs(self):
-        expected = (
-            "concurrency:\n"
-            "  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}\n"
-            "  cancel-in-progress: true"
-        )
         for workflow in ("validate.yml", "codeql.yml", "release-hosts.yml"):
             with self.subTest(workflow=workflow):
-                self.assertIn(expected, self.text(workflow))
+                text = self.text(workflow)
+                self.assertIn("cancel-in-progress: true", text)
+                self.assertIn("github.event.pull_request.number || github.ref", text)
+        self.assertIn("}}-validation", self.text("validate.yml"))
+        for workflow in ("prepare-stable-release.yml", "publish-stable-release.yml"):
+            self.assertIn("group: stable-release", self.text(workflow))
+            self.assertIn("cancel-in-progress: false", self.text(workflow))
 
     def test_workflow_actions_are_allowlisted_and_sha_pinned(self):
         workflow_root = REPO / ".github" / "workflows"
@@ -503,7 +512,9 @@ class ReleaseWorkflowContracts(unittest.TestCase):
         self.assertTrue(workflows)
         for workflow in workflows:
             text = workflow.read_text(encoding="utf-8")
-            self.assertEqual([], workflow_action_findings(workflow.name, text))
+            policy = json.loads((REPO / "tools/data/ci-host-policy.json").read_text(encoding="utf-8")) \
+                if workflow.name == "release-hosts.yml" else None
+            self.assertEqual([], workflow_action_findings(workflow.name, text, policy))
 
     def test_codeql_scans_python_and_javascript_on_pr_main_and_schedule(self):
         text = self.text("codeql.yml")
@@ -533,6 +544,109 @@ class ReleaseWorkflowContracts(unittest.TestCase):
         for name, text in cases.items():
             with self.subTest(name=name):
                 self.assertTrue(workflow_action_findings(name, text))
+
+    def test_host_node_policy_output_is_not_a_general_expression_exemption(self):
+        text = self.text("release-hosts.yml")
+        policy = json.loads((REPO / "tools/data/ci-host-policy.json").read_text(encoding="utf-8"))
+        self.assertEqual([], workflow_action_findings("release-hosts.yml", text, policy))
+        for name, content, contract in (
+            ("other.yml", text, policy),
+            ("release-hosts.yml", text, dict(policy, node="20")),
+            ("release-hosts.yml", text.replace("needs.host-plan.outputs.node", "github.event.inputs.node"), policy),
+            ("release-hosts.yml", text.replace("steps.proof.outputs.node", "steps.other.outputs.node"), policy),
+            ("release-hosts.yml", text.replace("tools/ci_host_evidence.py find", "tools/other.py find"), policy),
+        ):
+            with self.subTest(name=name, content=content, contract=contract):
+                self.assertTrue(workflow_action_findings(name, content, contract))
+
+    def test_required_host_context_accepts_only_fresh_success_or_rechecked_evidence(self):
+        text = self.text("release-hosts.yml")
+        jobs = workflow_jobs(text)
+        self.assertEqual(jobs["native-host-lifecycle"]["if"], "always()")
+        self.assertEqual(jobs["native-host-lifecycle"]["needs"], ["host-plan", "fresh-host-lifecycle"])
+        fresh = text.split("\n  fresh-host-lifecycle:\n", 1)[1].split("\n  native-host-lifecycle:\n", 1)[0]
+        required = text.split("\n  native-host-lifecycle:\n", 1)[1]
+        self.assertIn("name: Claude Code and Codex lifecycle", required)
+        self.assertEqual(jobs["fresh-host-lifecycle"]["if"], "needs.host-plan.outputs.reused == 'false'")
+        self.assertIn("run: python3 tools/smoke_plugin_installs.py --channel checkout", fresh)
+        self.assertNotIn("continue-on-error", fresh + required)
+        self.assertIn("tools/ci_host_evidence.py recheck", required)
+        self.assertIn('--proof "$RUNNER_TEMP/ci-host-plan/ci-host-reuse.json"', required)
+        self.assertIn("if: needs.host-plan.outputs.reused == 'true'", required)
+        self.assertEqual(fresh.count("github.event.pull_request.head.repo.full_name == github.repository"), 2)
+        self.assertEqual(fresh.count("github.event.pull_request.base.ref == 'main'"), 2)
+        self.assertEqual(fresh.count("github.ref == 'refs/heads/main' && inputs.candidate_sha == ''"), 2)
+        self.assertLess(fresh.index("smoke_plugin_installs.py --channel checkout"),
+                        fresh.index("tools/ci_host_evidence.py create"))
+        self.assertEqual(text.count("name: ci-host-plan-${{ github.run_id }}\n"), 2)
+        self.assertEqual(text.count("overwrite: true"), 1)
+        self.assertIn("name: ci-host-evidence-${{ github.run_id }}-${{ github.run_attempt }}", fresh)
+
+    @unittest.skipUnless(shutil.which("bash"), "Bash workflow executor")
+    def test_host_aggregate_executes_fail_closed_for_every_path(self):
+        text = self.text("release-hosts.yml").split("\n  native-host-lifecycle:\n", 1)[1]
+        block = re.search(r"        run: \|\n((?:          [^\n]*\n|\n)+)", text).group(1)
+        script = "\n".join(line[10:] for line in block.splitlines())
+        for plan in ("success", "failure", "cancelled", "skipped", ""):
+            for reused in ("true", "false", "", "invalid"):
+                for fresh in ("success", "failure", "cancelled", "skipped", ""):
+                    with self.subTest(plan=plan, reused=reused, fresh=fresh):
+                        result = subprocess.run(["bash", "-c", script], capture_output=True,
+                                                env=dict(os.environ, PLAN_RESULT=plan, REUSED=reused,
+                                                         FRESH_RESULT=fresh))
+                        valid = plan == "success" and ((reused == "true" and fresh == "skipped")
+                                                       or (reused == "false" and fresh == "success"))
+                        self.assertEqual(result.returncode == 0, valid)
+
+
+    @unittest.skipUnless(shutil.which("bash"), "Bash workflow executor")
+    def test_aggregate_executes_fail_closed_for_missing_failed_and_cancelled_work(self):
+        text = self.text("validate.yml").split("\n  check:\n", 1)[1]
+        block = re.search(r"        run: \|\n((?:          [^\n]*\n|\n)+)", text).group(1)
+        script = "\n".join(line[10:] for line in block.splitlines())
+        baseline = dict(os.environ, EVENT_NAME="pull_request", BASE_REF="main",
+                        HEAD_REF="feature", HEAD_REPOSITORY="owner/repo", REPOSITORY="owner/repo",
+                        CHANGESET_RESULT="success", RELEASE_POLICY_RESULT="skipped",
+                        PLAN_RESULT="success", DETERMINISTIC_RESULT="success", COMPATIBILITY_RESULT="success",
+                        HAS_TESTS="true", TEST_RESULT="success")
+        def execute(values):
+            return subprocess.run(["bash", "-c", script], env=values, capture_output=True).returncode
+        self.assertEqual(execute(baseline), 0)
+        for key in ("PLAN_RESULT", "DETERMINISTIC_RESULT", "COMPATIBILITY_RESULT", "TEST_RESULT", "CHANGESET_RESULT"):
+            for status in ("failure", "cancelled", "skipped", ""):
+                with self.subTest(key=key, status=status):
+                    self.assertNotEqual(execute(dict(baseline, **{key: status})), 0)
+        self.assertEqual(execute(dict(baseline, HAS_TESTS="false", TEST_RESULT="skipped")), 0)
+        self.assertNotEqual(execute(dict(baseline, HAS_TESTS="", TEST_RESULT="skipped")), 0)
+        self.assertEqual(execute(dict(baseline, HEAD_REF="release/stable", CHANGESET_RESULT="skipped",
+                                      RELEASE_POLICY_RESULT="success")), 0)
+        self.assertNotEqual(execute(dict(baseline, HEAD_REF="release/stable", CHANGESET_RESULT="skipped",
+                                         RELEASE_POLICY_RESULT="skipped")), 0)
+
+    def test_receipts_require_verified_reports_and_are_not_emitted_for_forks_or_schedule(self):
+        text = self.text("validate.yml")
+        self.assertLess(text.index("tools/ci_tests.py verify-reports"), text.index("tools/ci_evidence.py create"))
+        self.assertIn("ci-evidence-${{ github.run_id }}-${{ github.run_attempt }}", text)
+        self.assertIn("github.event_name != 'schedule'", text)
+        self.assertIn("github.event.pull_request.head.repo.full_name == github.repository", text)
+        self.assertIn('args+=(--inherited "$RUNNER_TEMP/ci-plan/ci-reuse.json")', text)
+        self.assertIn("if-no-files-found: error", text)
+        prepare = self.text("prepare-stable-release.yml")
+        publish = self.text("publish-stable-release.yml")
+        self.assertIn("uses: ./.github/workflows/validate.yml", prepare)
+        self.assertIn("uses: ./.github/workflows/validate.yml", publish)
+        self.assertNotIn("make release-check", prepare)
+        self.assertNotIn("make public-release-check", publish)
+
+    def test_failed_job_retries_keep_plan_and_report_identity_but_replace_evidence_attempt(self):
+        text = self.text("validate.yml")
+        self.assertEqual(text.count("name: ci-plan-${{ github.run_id }}\n"), 3)
+        self.assertIn("name: ci-report-${{ github.run_id }}-${{ matrix.lane }}-${{ matrix.shard }}", text)
+        self.assertIn("pattern: ci-report-${{ github.run_id }}-*", text)
+        self.assertEqual(text.count("overwrite: true"), 2)
+        evidence = text.split("name: ci-evidence-", 1)[1]
+        self.assertTrue(evidence.startswith("${{ github.run_id }}-${{ github.run_attempt }}\n"))
+        self.assertNotIn("overwrite: true", evidence)
 
 
 if __name__ == "__main__":

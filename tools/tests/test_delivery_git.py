@@ -11,6 +11,7 @@ import json
 import pathlib
 import hashlib
 import shutil
+import stat
 import subprocess
 import tempfile
 import time
@@ -133,7 +134,88 @@ def windows_text_pipes(code_page: str = "cp1252"):
         yield
 
 
+class PreStartFixtureCache:
+    """Copy a process-local seed before it has worktrees or machine-local receipts."""
+
+    def __init__(self):
+        self.temporary = None
+        self.root = None
+        self.fingerprint = None
+
+    @staticmethod
+    def snapshot(root: Path) -> str:
+        records = []
+        for path in sorted(root.rglob("*")):
+            mode = path.lstat()
+            if path.is_symlink() or getattr(mode, "st_file_attributes", 0) & getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0):
+                raise AssertionError("fixture seed cannot contain links or junctions")
+            relative = path.relative_to(root).as_posix()
+            if path.is_file():
+                records.append((relative, "file", stat.S_IMODE(mode.st_mode), hashlib.sha256(path.read_bytes()).hexdigest()))
+            elif path.is_dir():
+                records.append((relative, "directory", stat.S_IMODE(mode.st_mode)))
+            else:
+                raise AssertionError("fixture seed cannot contain special files")
+        return hashlib.sha256(json.dumps(records, separators=(",", ":")).encode()).hexdigest()
+
+    @staticmethod
+    def require_pre_start(root: Path) -> None:
+        if (root / ".git" / "worktrees").exists():
+            raise AssertionError("fixture seed cannot contain linked worktrees")
+        runtime = delivery_git.runtime_root(root)
+        if runtime.exists() and any(runtime.rglob("*")):
+            raise AssertionError("fixture seed cannot contain machine-local runtime state")
+        for object_store in (root / ".git" / "objects", root / "remote.git" / "objects"):
+            if (object_store / "info" / "alternates").exists():
+                raise AssertionError("fixture seed cannot share another object store")
+
+    def copy(self, builder):
+        if self.temporary is None:
+            temporary, root, _docs = builder()
+            try:
+                self.require_pre_start(root)
+                fingerprint = self.snapshot(root)
+            except BaseException:
+                remove_temporary(temporary)
+                raise
+            self.temporary, self.root, self.fingerprint = temporary, root, fingerprint
+        if self.snapshot(self.root) != self.fingerprint:
+            raise AssertionError("immutable fixture seed changed between tests")
+        temporary = tempfile.TemporaryDirectory()
+        root = Path(temporary.name)
+        try:
+            shutil.copytree(self.root, root, dirs_exist_ok=True, copy_function=shutil.copy2)
+            subprocess.run(["git", "-C", str(root), "remote", "set-url", "origin", str(root / "remote.git")],
+                           check=True, capture_output=True)
+            (root / ".git" / "FETCH_HEAD").unlink(missing_ok=True)
+            return temporary, root, root / "workspace" / "docs"
+        except BaseException:
+            remove_temporary(temporary)
+            raise
+
+    def close(self):
+        if self.temporary is not None:
+            remove_temporary(self.temporary)
+            self.temporary, self.root, self.fingerprint = None, None, None
+
+
+_PR_FIXTURE_CACHE = PreStartFixtureCache()
+
+
 class DeliveryGitTests(unittest.TestCase):
+    @classmethod
+    def tearDownClass(cls):
+        _PR_FIXTURE_CACHE.close()
+
+    def fixture_cache_context_unchanged(self):
+        if dict(os.environ) != _PR_FIXTURE_ENVIRONMENT or os.getcwd() != _PR_FIXTURE_CWD:
+            return False
+        for owner, name, original in _PR_FIXTURE_BINDINGS:
+            if getattr(owner, name, None) is not original:
+                return False
+        return all(getattr(getattr(self, name), "__func__", None) is original
+                   for name, original in _PR_FIXTURE_METHODS.items())
+
     def symlink_or_skip(self, link: Path, target) -> None:
         """Create a symlink, or skip the current test or subtest on a host that cannot."""
         try:
@@ -216,6 +298,85 @@ class DeliveryGitTests(unittest.TestCase):
         subprocess.run(["git", "--git-dir", str(remote), "symbolic-ref", "HEAD", "refs/heads/main"], check=True)
         return temporary, project
 
+    def test_pre_start_fixture_copies_isolate_files_objects_and_remote_refs(self):
+        cache = PreStartFixtureCache()
+        self.addCleanup(cache.close)
+        built = []
+
+        def builder():
+            built.append(True)
+            return self.build_pre_start_fixture()
+
+        first_temporary, first, _docs = cache.copy(builder)
+        self.addCleanup(remove_temporary, first_temporary)
+        second_temporary, second, _docs = cache.copy(builder)
+        self.addCleanup(remove_temporary, second_temporary)
+        self.assertEqual(len(built), 1)
+        self.assertEqual(cache.snapshot(cache.root), cache.fingerprint)
+        expected = delivery_git.run_git(second / "remote.git", "rev-parse", "refs/heads/main")
+        for project in (first, second):
+            self.assertEqual(delivery_git.run_git(project, "remote", "get-url", "origin"), str(project / "remote.git"))
+            self.assertFalse((project / ".git" / "FETCH_HEAD").exists())
+            cache.require_pre_start(project)
+        object_path = next(path.relative_to(cache.root) for path in (cache.root / ".git" / "objects").rglob("*")
+                           if path.is_file() and path.parent.name not in {"info", "pack"})
+        for relative in (Path("README.md"), object_path):
+            self.assertFalse(os.path.samefile(first / relative, second / relative))
+            self.assertFalse(os.path.samefile(first / relative, cache.root / relative))
+        (first / "README.md").write_text("Only the first test changes this file.\n", encoding="utf-8")
+        delivery_git.run_git(first, "commit", "-qam", "Advance isolated fixture")
+        delivery_git.run_git(first, "push", "-q", "origin", "main")
+        self.assertNotEqual(delivery_git.run_git(first / "remote.git", "rev-parse", "refs/heads/main"), expected)
+        self.assertEqual(delivery_git.run_git(second / "remote.git", "rev-parse", "refs/heads/main"), expected)
+        self.assertEqual((second / "README.md").read_text(encoding="utf-8"), "fixture\n")
+        self.assertEqual(cache.snapshot(cache.root), cache.fingerprint)
+
+    def test_pre_start_fixture_rejects_seed_mutation(self):
+        cache = PreStartFixtureCache()
+        self.addCleanup(cache.close)
+
+        def builder():
+            temporary, project = self.make_project()
+            return temporary, project, project / "workspace" / "docs"
+
+        temporary, _root, _docs = cache.copy(builder)
+        self.addCleanup(remove_temporary, temporary)
+        (cache.root / "README.md").write_text("accidental seed mutation\n", encoding="utf-8")
+        with self.assertRaisesRegex(AssertionError, "immutable fixture seed changed"):
+            cache.copy(builder)
+
+    def test_pre_start_fixture_rejects_worktrees_receipts_and_shared_object_stores(self):
+        for relative, message in (
+            (".git/worktrees/active/gitdir", "linked worktrees"),
+            (".agentrof/agent-marketplace/.runtime/receipts/item.json", "machine-local runtime state"),
+            (".git/objects/info/alternates", "share another object store"),
+            ("remote.git/objects/info/alternates", "share another object store"),
+        ):
+            with self.subTest(relative=relative), tempfile.TemporaryDirectory() as raw:
+                project = Path(raw)
+                path = project / relative
+                path.parent.mkdir(parents=True)
+                path.write_text("unexpected state\n", encoding="utf-8")
+                with self.assertRaisesRegex(AssertionError, message):
+                    PreStartFixtureCache.require_pre_start(project)
+
+    def test_pre_start_fixture_bypasses_changed_environment_and_setup_callables(self):
+        self.assertTrue(self.fixture_cache_context_unchanged())
+        with mock.patch.dict(os.environ, {"AGENTROF_FIXTURE_CONTEXT": "changed"}):
+            self.assertFalse(self.fixture_cache_context_unchanged())
+        with mock.patch.object(subprocess, "run", wraps=subprocess.run):
+            self.assertFalse(self.fixture_cache_context_unchanged())
+        with windows_checkout_paths():
+            self.assertFalse(self.fixture_cache_context_unchanged())
+        with mock.patch.object(delivery_compile, "approve_execution", wraps=delivery_compile.approve_execution):
+            self.assertFalse(self.fixture_cache_context_unchanged())
+        with mock.patch.object(self, "build_pre_start_fixture", side_effect=RuntimeError("uncached builder called")), \
+                mock.patch.object(_PR_FIXTURE_CACHE, "copy", side_effect=AssertionError("cache was used")):
+            with self.assertRaisesRegex(RuntimeError, "uncached builder called"):
+                self.prepare_pr_intent()
+            with self.assertRaisesRegex(RuntimeError, "uncached builder called"):
+                self.prepare_pr_intent(use_cache=False)
+
     def test_project_fixture_disables_automatic_git_maintenance(self):
         temporary, project = self.make_project()
         self.addCleanup(remove_temporary, temporary)
@@ -258,33 +419,49 @@ class DeliveryGitTests(unittest.TestCase):
         delivery_git.reserve_delivery(project, "DLV-001")
         return temporary, project, docs
 
-    def prepare_pr_intent(self, author_review=None):
-        """Build one real remote Delivery through its durable PR intent."""
+    def build_pre_start_fixture(self):
+        """Exercise real scope, execution publication and claiming before any writer exists."""
         temporary, project, docs = self.reserve_scope()
-        scope = type("Args", (), {"docs": str(docs), "delivery": "DLV-001"})
-        self.author_execution_topology(docs)
-        self.assertEqual(delivery_compile.approve_execution(scope), 0)
-        delivery_git.publish_execution_plan(project, "DLV-001")
-        delivery_git.refresh_target(project, "DLV-001")
-        delivery_git.claim_items(project, "DLV-001")
-        active = delivery_git.start_item(project, "DLV-001", "AUTH-01")
-        product_tip = self.commit_item_product_change(
-            active["worktree"], "def authenticate():\n    return 'v1'\n",
-        )
-        self.assertEqual(self.approve_item_evidence(active["worktree"]), 0)
-        delivery_git.push_item(project, "DLV-001", "AUTH-01")
-        integrated = delivery_git.integrate_item(project, "DLV-001", "AUTH-01")
-        if author_review is not None:
-            author_review(docs)
-        review = type("Args", (), {
-            "docs": str(docs), "delivery": "DLV-001",
-            "reviewed_commit": integrated["integration"],
-            "reviewed_integration_commit": integrated["integration"],
-        })
-        self.assertEqual(delivery_compile.approve_review(review), 0)
-        delivery_git.publish_delivery_review(project, "DLV-001")
-        intent = delivery_git.prepare_pr_creation(project, "DLV-001")
-        return temporary, project, docs, product_tip, intent
+        try:
+            scope = type("Args", (), {"docs": str(docs), "delivery": "DLV-001"})
+            self.author_execution_topology(docs)
+            self.assertEqual(delivery_compile.approve_execution(scope), 0)
+            delivery_git.publish_execution_plan(project, "DLV-001")
+            delivery_git.refresh_target(project, "DLV-001")
+            delivery_git.claim_items(project, "DLV-001")
+            return temporary, project, docs
+        except BaseException:
+            remove_temporary(temporary)
+            raise
+
+    def prepare_pr_intent(self, author_review=None, *, use_cache=True):
+        """Keep each mutable repository isolated; altered setup contexts use the real builder."""
+        if use_cache and self.fixture_cache_context_unchanged():
+            temporary, project, docs = _PR_FIXTURE_CACHE.copy(self.build_pre_start_fixture)
+        else:
+            temporary, project, docs = self.build_pre_start_fixture()
+        try:
+            active = delivery_git.start_item(project, "DLV-001", "AUTH-01")
+            product_tip = self.commit_item_product_change(
+                active["worktree"], "def authenticate():\n    return 'v1'\n",
+            )
+            self.assertEqual(self.approve_item_evidence(active["worktree"]), 0)
+            delivery_git.push_item(project, "DLV-001", "AUTH-01")
+            integrated = delivery_git.integrate_item(project, "DLV-001", "AUTH-01")
+            if author_review is not None:
+                author_review(docs)
+            review = type("Args", (), {
+                "docs": str(docs), "delivery": "DLV-001",
+                "reviewed_commit": integrated["integration"],
+                "reviewed_integration_commit": integrated["integration"],
+            })
+            self.assertEqual(delivery_compile.approve_review(review), 0)
+            delivery_git.publish_delivery_review(project, "DLV-001")
+            intent = delivery_git.prepare_pr_creation(project, "DLV-001")
+            return temporary, project, docs, product_tip, intent
+        except BaseException:
+            remove_temporary(temporary)
+            raise
 
     @staticmethod
     def fake_provider_type(state: dict):
@@ -910,7 +1087,7 @@ class DeliveryGitTests(unittest.TestCase):
                 self.assertEqual(delivery_git.finish_source_handoff(project)["target"], refs[carrier])
 
     def test_open_and_merge_pr_use_the_exact_reviewed_integration_head(self):
-        temporary, project, _docs, product_tip, intent = self.prepare_pr_intent()
+        temporary, project, _docs, product_tip, intent = self.prepare_pr_intent(use_cache=False)
         try:
             state: dict = {}
             with mock.patch("delivery_provider.GitHubProvider", self.fake_provider_type(state)):
@@ -4560,6 +4737,29 @@ class DeliveryGitTests(unittest.TestCase):
         code, _message = self.refused_finding(lambda: delivery_git.atomic_push(root, "origin", [(fence, first, second)]))
         self.assertEqual(code, "DELIVERY_INPUT_INVALID")
         self.assertEqual(delivery_git.run_git(root, "ls-remote", "origin"), before)
+
+
+# Changing an environment or any setup callable cannot silently reuse a seed
+# produced outside that context. Tests can also request use_cache=False.
+_PR_FIXTURE_ENVIRONMENT = dict(os.environ)
+_PR_FIXTURE_CWD = os.getcwd()
+_PR_FIXTURE_BINDINGS = [
+    (module, name, value)
+    for module in (delivery_git, delivery_compile, delivery_governance, backlog_compile,
+                   operation_compile, architecture_compile, setup_check, stage_package, vault_check)
+    for name, value in vars(module).items() if callable(value)
+]
+_PR_FIXTURE_BINDINGS.extend([
+    (subprocess, "run", subprocess.run),
+    (pathlib.PurePath, "relative_to", pathlib.PurePath.relative_to),
+    (sys.modules[__name__], "make_approved_backlog", make_approved_backlog),
+    (sys.modules[__name__], "write_pull_request_workflow", write_pull_request_workflow),
+    (sys.modules[__name__], "init_repository", init_repository),
+])
+_PR_FIXTURE_METHODS = {name: getattr(DeliveryGitTests, name) for name in (
+    "build_pre_start_fixture", "make_project", "reserve_scope", "author_execution_topology",
+    "approve_verification_contract", "approve_governance",
+)}
 
 
 if __name__ == "__main__":

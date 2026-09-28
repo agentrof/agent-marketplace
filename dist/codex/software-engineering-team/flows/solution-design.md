@@ -22,9 +22,14 @@ bound as an explicit Requirement reuse, never used to author a new Solution revi
    data-store, environment and integration decisions. A component may use a
    different accepted stack than another component. Proposed, in-review,
    rejected and superseded decisions never constrain an approved topology.
-4. Spawn `solution-reviewer` read-only with BA allocation, topology, naming,
-   sourcing, decision-status and `SELF-CHECK` lenses. Resolve blockers in the
-   canonical landscape/components/decisions; reviewer responses are transient.
+4. Follow the single review plan in
+   `skill-content/solution-architecture/references/challenge-lenses.md`.
+   Spawn one independent primary `solution-reviewer` for all four required
+   lenses plus BA allocation, topology, naming, sourcing and decision status.
+   Add only the plan's risk-triggered specialist invocations; they do not form
+   a second default panel. Wait for every selected reader before the writer
+   resolves blockers in canonical landscape/components/decisions. Replies are
+   transient; repeat only affected review when blocking evidence changes.
 5. After the owner confirms the exact topology and naming set, run
    `landscape_check.py confirm-topology`, then `check`, render
    capability/component/topology catalogs and package `approve`. Approval

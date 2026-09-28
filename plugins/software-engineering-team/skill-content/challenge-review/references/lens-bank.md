@@ -36,5 +36,7 @@ lenses is expected and handled at triage, never pre-coordinated.
   topics add industry-variant.
 - Space-level round: the two cross-domain lenses, plus feasibility-signal
   over the whole registry.
-- Round 2 and 3 re-run ONLY the lenses whose findings were blocking,
-  plus one lens that was silent (fresh eyes on the fixes).
+- After a blocking fix, re-run only the affected lenses and any additional
+  lens whose evidence or risk changed because of the fix. A previously silent
+  lens is not a mandatory extra reader. No fixed round count or additional
+  clean round is required once blocking gaps are closed.

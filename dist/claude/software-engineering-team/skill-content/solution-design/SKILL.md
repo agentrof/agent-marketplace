@@ -51,11 +51,14 @@ decision. Nothing decided remains only in conversation.
    accepted technology/data-store/environment/integration decisions and exact
    traceability links in `engagements/` and `decisions/`. Component stacks may
    differ; no config-derived global stack is assumed.
-6. Run the named read-only `solution-reviewer` before the project decision gate.
-   Apply accepted resolutions to the canonical documents, then re-run only
-   affected readers until no blocking evidence gap remains. Reviewer replies
-   are transient input, not files. Render the decision index, relations and
-   navigation after each accepted change.
+6. Before the project decision gate, use the single review plan in
+   `solution-architecture/references/challenge-lenses.md`: one independent
+   primary `solution-reviewer` covers all four required lenses and the role's
+   package checks, with additional specialists only for the stated risks.
+   Wait for all selected readers, apply accepted resolutions to canonical
+   documents, then re-run only affected readers until no blocking evidence
+   gap remains. Reviewer replies are transient input, not files. Render the
+   decision index, relations and navigation after each accepted change.
 7. Ask the owner to Approve, Request changes or Pause through the host choice
    gate. On approval, close the engagement, run
    `landscape_check.py confirm-topology --tree workspace/docs/solution-design`,

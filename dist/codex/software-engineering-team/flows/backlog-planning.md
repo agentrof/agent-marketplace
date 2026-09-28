@@ -55,7 +55,7 @@ mode instead records `requirement_ref: REQ-###`; stories carry
 `implements: REQ-###`, and the complete Requirement Stage Results receipt set
 is required before approval.
 
-Both modes pin the same four input families in compiler-owned
+By default both modes pin the same four input families in compiler-owned
 `input_bindings`, and the compiler rejects any binding that is no longer
 strict-current. In Requirement mode, a stage the Requirement changes or reuses
 binds exactly its Stage Results receipt. A stage the Requirement marks
@@ -64,6 +64,21 @@ binds exactly its Stage Results receipt. A stage the Requirement marks
 revision's binding, carried forward. A carried binding whose package has since
 advanced fails preflight until it is rebound with `--input-ref`, so a package
 the Requirement does not touch can never drift unnoticed.
+
+An explicit `headless-v1` exception is available only for a technical or defect
+Requirement whose visual stages are `not_applicable`. Pass
+`--absent-input design-system` and/or `--absent-input experience-design` to
+`init` or `begin-revision` for each genuinely absent family. The compiler still
+requires current approved BA and Solution receipts, an explicit Solution
+topology containing only CLI, worker or scheduler build components, no authored
+Backlog links into the omitted family, and complete Git history proving that
+the family never contained package files. An existing or previously bound
+package cannot become absent by deleting it. Manual and feature planning keep
+the complete input contract. Every new revision must explicitly repeat and
+revalidate its absence flags; the compiler records `input_contract` and
+`absent_input_stages` and shows the omission in Input Package Coverage. Existing
+approved Delivery snapshots retain their original verified boundary when the
+project later gains visual packages.
 
 The root contains `backlog.md` and `reviews/`. Each epic is a folder with an
 `epic.md`, `reviews/`, and `stories/`. Each story folder contains exactly
@@ -181,38 +196,66 @@ do not create new epic approval claims. Any missing proof or meaningful delta
 returns to the normal review flow below. This exception does not apply to
 other application-only revisions or general artifact loss.
 
-The Product Owner finishes the candidate package, then the active orchestrator
-runs the packaged compiler before spawning any reviewer:
+The Product Owner finishes the candidate source documents. Review notes may
+still contain their initialized placeholders: requiring completed reviews
+before their readers run would prevent the first review. For each epic, run
+the packaged read-only manifest helper; it validates source, coverage and
+dependency inputs while leaving review-completion checks to the final gate:
 
 ```text
-backlog_compile.py check --docs <workspace>/docs --render --json
+backlog_review_inputs.py --docs <workspace>/docs --epic <EP-ID>
 ```
 
-For each epic, build an explicit reviewer input containing the exact epic,
-story and test-plan paths plus the expected `derives_from` and `verifies`
-target sets. Invoke one fresh `backlog-reviewer` per epic. Independent epic
-reviewers may run in parallel because they are read-only. Wait for every epic
-reviewer to return before any writer action.
+Give one fresh `backlog-reviewer` the returned manifest and every named path:
+the root backlog, that epic, its child stories and test plans, and the incoming
+and outgoing dependency closure with shared contract/source context. Include
+the expected `derives_from` and `verifies` sets. The manifest is disposable
+review input, never a second backlog or approval record. Unresolved closure
+fails before dispatch; evidence outside the manifest requires an expanded
+input set. Independent epic reviewers may run in parallel against unchanged
+inputs. Wait for every epic reviewer to return before any writer action.
+Recompute each manifest with `--expected-hash <source_hash>` before accepting
+its findings for the writer. Changed inputs require a fresh affected review;
+never use a stale manifest to justify omitting a dependency.
+
+Readers audit source membership against the manifest's expected relation sets.
+Empty draft review fields and placeholder prose await the writer and do not
+by themselves request source changes. Malformed or incorrect nonempty review
+declarations and stale completed evidence offered for the current candidate
+remain findings. The final compiler requires the exact written relation sets
+and complete review prose before approval.
 
 The Product Owner is the single writer: it triages the returned findings,
 repairs source documents, and writes each designated epic review note. An epic
 review uses `derives_from` for its owning epic and `verifies` for the exact
 child story and test-plan set. Its body covers scope, slicing, criteria, test
-design, intra-epic dependencies, role ownership, findings and verdict. Re-run
-the compiler after these serialized writes.
+design, intra-epic dependencies, role ownership, findings and verdict. Run
+`backlog_compile.py check --docs <workspace>/docs --json` after these serialized
+writes and resolve all source and completed epic-review findings. Only the
+still-unwritten root review's completion findings remain pending until its
+reader returns; they do not authorize ignoring any source finding.
 
-Only after every epic package and review is green, invoke one fresh
-`backlog-reviewer` with the root backlog, every epic and the exact expected
-`derives_from` and `related_to` sets. Wait for its return. The Product Owner
-then writes the root review note and any source fixes. The root review covers
+Only after every epic package and review is green, run
+`backlog_review_inputs.py --docs <workspace>/docs --root`. Invoke one fresh
+`backlog-reviewer` with that manifest: the root backlog, every epic, every
+story and every test plan, its declared context, and the exact expected
+`derives_from` and `related_to` sets. Wait for its return. Recompute the root
+manifest with `--expected-hash <source_hash>` before accepting its findings;
+a changed input requires a fresh affected review. The Product Owner then
+writes the root review note and any source fixes. The root review covers
 cross-epic overlap, dependency direction, cycles, delivery sequencing, shared
-contracts, deferred criteria, global test coverage, findings and verdict.
+contracts, deferred criteria, global test coverage, findings and verdict. After
+the root review is authored, run the full
+`backlog_compile.py check --docs <workspace>/docs --render --json` and scoped
+vault gate. Both must pass before the package can be offered for approval.
 
 Use the current host's agent invocation and wait mechanism; no host-specific
-command is canonical. Reviewer responses are input, never durable state. If a
-blocking finding remains, rerun only the affected reviewer after the Product
-Owner's fix, then re-run the compiler. Continue until both review layers are
-approved.
+command is canonical. Reviewer responses are input, never durable state. After
+a blocking fix, regenerate the affected manifest and rerun only the affected
+reviewer against the changed source and dependency context, then re-run the
+compiler. A writer's assertion that the fix is complete does not replace that
+recheck. Continue until both review layers are approved; no extra clean round
+is required when no blocking finding remains.
 
 `Deferred Criteria` is a structured table with `criterion_ref`, `owner_role`,
 `reason` and `revisit_trigger`; `owner_role` is exactly `product_owner`.

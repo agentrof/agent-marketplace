@@ -28,7 +28,10 @@ behavior is host-neutral; Claude Code and Codex are packaging adapters.
 11. An epic review derives from its epic and verifies the exact child story
     and test-plan set, including intra-epic dependencies. A root review derives
     from the backlog, relates to the exact epic set and covers cross-epic
-    overlap, cycles, ordering and coverage.
+    overlap, cycles, ordering and coverage. The read-only
+    `backlog_review_inputs.py` manifest narrows epic reading to that scope plus
+    dependency and source closure; root review retains the complete package.
+    Its hash must be rechecked before persisting a review.
 12. Every story has a sibling `test-plan.md`. Criteria and rules map to stable
     scenarios; automation-required scenarios name an executable-test target.
 13. Every story has exactly one accountable implementation owner and may name

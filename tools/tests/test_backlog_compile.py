@@ -1,3 +1,4 @@
+import json
 import subprocess
 import sys
 import tempfile
@@ -14,8 +15,10 @@ COMPILER = ROOT / "plugins/software-engineering-team/scripts/backlog_compile.py"
 sys.path.insert(0, str(COMPILER.parent))
 
 import backlog_compile
+import backlog_review_inputs
 import landscape_check
 import stage_package
+from tools.tests.backlog_fixture import make_approved_backlog
 from tools.tests.git_fixture import init_repository, remove_temporary
 
 
@@ -593,6 +596,98 @@ class BacklogUpstreamApprovalTests(unittest.TestCase):
         landscape_check.rewrite_frontmatter(self.landscape, {"package_hash": digest})
         errors = self.manual_binding_findings(digest)
         self.assertIn("backlog/backlog.md input binding: solution-design/landscape is legacy-readonly; begin a revision before using it as a new solution-design handoff", errors)
+
+
+class AcceptedMinorFindingsTests(unittest.TestCase):
+    """Minor review findings left unfixed need a complete, traceable record."""
+
+    STORY = "[[backlog/epics/delivery-fixture/stories/auth-01/story\\|AUTH-01]]"
+    HEADER = "| finding | owner_role | reason | revisit_trigger |"
+    VALID = (f"| {STORY} Scope states the lockout rule twice in different words. "
+             "| product_owner | Both sentences state one rule, so behavior and "
+             "verification are unchanged. | Revisit at the next revision of this story. |")
+
+    def setUp(self):
+        self.temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temporary.cleanup)
+        self.docs = Path(self.temporary.name) / "workspace" / "docs"
+        (self.docs / "maps").mkdir(parents=True)
+        (self.docs.parent / "config.json").write_text(json.dumps({
+            "schema_version": 2, "team_id": "software-engineering-team",
+            "output_language": "English", "terminology_language": "English",
+        }), encoding="utf-8")
+        make_approved_backlog(self.docs)
+        self.epic_review = (self.docs / "backlog/epics/delivery-fixture/reviews"
+                            / "round-1-epic-review.md")
+        self.root_review = self.docs / "backlog/reviews/round-1-backlog-review.md"
+        self.originals = {path: path.read_text(encoding="utf-8")
+                          for path in (self.epic_review, self.root_review)}
+
+    def accept(self, review: Path, *rows: str, header: str = HEADER) -> None:
+        review.write_text(self.originals[review], encoding="utf-8")
+        props, body = backlog_compile.parse_front_matter(review)
+        separator = "|" + "---|" * (header.count("|") - 1)
+        section = "\n".join(["## Accepted Minor Findings", "", header, separator,
+                             *rows, "", ""])
+        review.write_text(backlog_compile.front_matter(
+            props, body.replace("## Verdict", section + "## Verdict", 1)),
+            encoding="utf-8")
+
+    def errors(self) -> list[str]:
+        _record, errors = backlog_compile.collect(self.docs)
+        return errors
+
+    def test_reviews_without_the_section_stay_valid(self):
+        self.assertEqual(self.errors(), [])
+
+    def test_complete_rows_pass_in_epic_and_root_reviews(self):
+        other = self.VALID.replace("product_owner", "qa_engineer").replace(
+            "Scope states", "Delivery Notes state")
+        self.accept(self.epic_review, self.VALID, other)
+        self.accept(self.root_review, self.VALID)
+        self.assertEqual(self.errors(), [])
+
+    def test_incomplete_rows_fail_with_the_missing_follow_up(self):
+        cases = {
+            "must cite the affected vault note": self.VALID.replace(self.STORY + " ", ""),
+            "targets missing note": self.VALID.replace("auth-01/story", "missing/story"),
+            "needs a concrete finding": self.VALID.replace(
+                "Scope states the lockout rule twice in different words.", "typo"),
+            "owner_role must be one of: product_owner, qa_engineer, business_analyst":
+                self.VALID.replace("product_owner", "backend_developer"),
+            "needs a concrete reason": self.VALID.replace(
+                "Both sentences state one rule, so behavior and verification are unchanged.",
+                "TODO"),
+            "needs a concrete revisit_trigger": self.VALID.replace(
+                "Revisit at the next revision of this story.", "later"),
+        }
+        for review in (self.epic_review, self.root_review):
+            label = review.relative_to(self.docs).as_posix()
+            for expected, row in cases.items():
+                with self.subTest(review=label, expected=expected):
+                    self.accept(review, row)
+                    errors = self.errors()
+                    self.assertTrue(any(error.startswith(label) and expected in error
+                                        for error in errors), errors)
+                    self.assertTrue(all("accepted minor finding" in error
+                                        for error in errors), errors)
+            review.write_text(self.originals[review], encoding="utf-8")
+
+    def test_duplicate_rows_and_other_columns_fail(self):
+        self.accept(self.epic_review, self.VALID, self.VALID)
+        self.assertIn("backlog/epics/delivery-fixture/reviews/round-1-epic-review.md "
+                      "repeats accepted minor finding 2", self.errors())
+        self.accept(self.epic_review, self.VALID.replace("| product_owner |",
+                                                         "| minor | product_owner |"),
+                    header="| finding | severity | owner_role | reason | revisit_trigger |")
+        self.assertIn("backlog/epics/delivery-fixture/reviews/round-1-epic-review.md "
+                      "Accepted Minor Findings columns must be: finding, owner_role, "
+                      "reason, revisit_trigger", self.errors())
+
+    def test_review_input_discovery_leaves_the_record_to_the_final_gate(self):
+        self.accept(self.epic_review, self.VALID.replace("product_owner", "backend_developer"))
+        self.assertTrue(backlog_review_inputs.manifest(self.docs, epic="EP-001")["ok"])
+        self.assertTrue(any("owner_role must be one of" in error for error in self.errors()))
 
 
 if __name__ == "__main__":

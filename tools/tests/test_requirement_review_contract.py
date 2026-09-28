@@ -174,6 +174,67 @@ class RequirementReviewContracts(unittest.TestCase):
         self.assertIn("Fixed order, all three on every cycle", code)
         self.assertIn("re-check what changed plus anything a fix could have touched", code)
 
+    def test_backlog_review_blocks_only_on_critical_or_major_findings(self):
+        agent = " ".join(read("agents/backlog-reviewer.md").split())
+        flow = " ".join(read("flows/backlog-planning.md").split())
+        skill = " ".join(read("skill-content/product-planning/SKILL.md").split())
+        records = " ".join(
+            read("skill-content/product-planning/references/structured-records.md").split()
+        )
+        self.assertIn("## Review findings", records)
+        findings = records.split("## Review findings", 1)[1]
+        self.assertNotIn("An unresolved finding keeps the review at", agent)
+        self.assertIn(
+            "Only an open critical or major finding keeps the review at `changes_requested`",
+            agent,
+        )
+        self.assertIn(
+            "Review findings section of "
+            "`skill-content/product-planning/references/structured-records.md`",
+            agent,
+        )
+        for row in ("| `critical` | yes |", "| `major` | yes |", "| `minor` | no |"):
+            with self.subTest(row=row):
+                self.assertIn(row, findings)
+        for rule in (
+            "never changes a returned severity",
+            "Compiler and vault-gate errors are not rated",
+            "is major, never minor",
+            "never blocks approval and never starts another review round",
+            "Fix it only in a writer pass that already carries a blocking fix",
+            "| finding | owner_role | reason | revisit_trigger |",
+            "It does not re-audit unchanged text",
+            "closes only through a confirmed fix or disproof",
+        ):
+            with self.subTest(rule=rule):
+                self.assertIn(rule, findings)
+        self.assertIn("only a critical or major finding blocks", flow)
+        self.assertIn("the Product Owner preserves every returned severity", flow)
+        self.assertIn("the manifest files whose `sha256` changed", flow)
+        self.assertIn("A minor finding never blocks or starts another round", flow)
+        self.assertIn("`Accepted Minor Findings` is optional in any review note", flow)
+        self.assertIn("Only critical and major findings block.", skill)
+        self.assertIn("rating, recording or re-reviewing review findings", skill)
+
+    def test_solution_review_blocks_only_on_critical_or_major_findings(self):
+        plan = " ".join(
+            read("skill-content/solution-architecture/references/challenge-lenses.md").split()
+        )
+        reviewer = " ".join(read("agents/solution-reviewer.md").split())
+        self.assertIn("## Severity", plan)
+        severity = plan.split("## Severity", 1)[1].split("## Return and disposition", 1)[0]
+        for row in ("| `critical` | yes |", "| `major` | yes |", "| `minor` | no |"):
+            with self.subTest(row=row):
+                self.assertIn(row, severity)
+        self.assertIn("is major, never minor", severity)
+        self.assertIn("never changes a returned severity", severity)
+        self.assertIn("requests changes only while a critical or major finding is open", plan)
+        self.assertIn("A minor finding never blocks and never starts another review", plan)
+        self.assertIn("meaning a fix for a critical or major finding", plan)
+        self.assertNotIn("verdict and blockers", reviewer)
+        self.assertIn("severity (`critical`, `major` or `minor`)", reviewer)
+        self.assertIn("requests changes only while a critical or major finding is open", reviewer)
+
 
 if __name__ == "__main__":
     unittest.main()

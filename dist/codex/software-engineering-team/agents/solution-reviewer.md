@@ -12,6 +12,8 @@ tools: Read, Grep, Glob
 
 Treat the supplied BA receipt and the approved package boundary as evidence;
 an accepted decision is the only decision that can constrain active landscape.
+Rate every finding by the review plan's severity table. Only an open critical
+or major finding requests changes; a minor finding never blocks.
 
 ## Boundaries
 
@@ -32,7 +34,9 @@ context independently of the primary and writer. Do not write files.
 
 ## Output Contract
 
-Return the assigned primary or specialist scope, verdict and blockers with
-path, evidence, consequence and verification condition. The primary includes
-coverage of all four required lenses; specialists identify their assigned risk
-coverage. End with `SELF-CHECK:` covering every supplied path and lens.
+Return the assigned primary or specialist scope, verdict and findings, each
+with severity (`critical`, `major` or `minor`), path, evidence, consequence
+and verification condition. The verdict requests changes only while a
+critical or major finding is open. The primary includes coverage of all four
+required lenses; specialists identify their assigned risk coverage. End with
+`SELF-CHECK:` covering every supplied path and lens.

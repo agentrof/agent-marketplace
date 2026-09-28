@@ -451,10 +451,17 @@ class TimingHistoryTests(unittest.TestCase):
                 self.assertEqual(self.restore(self.source(payload))["durations"], {})
 
     def test_invalid_or_excessive_durations_cannot_influence_shards(self):
-        for seconds in (-1, 0, float("inf"), float("nan"), 601, True, "30"):
+        for seconds in (-1, float("inf"), float("nan"), 601, True, "30"):
             with self.subTest(seconds=seconds):
                 payload = dict(self.payload, durations={"linux": {self.ids[0]: seconds}})
                 self.assertEqual(self.restore(self.source(payload))["durations"], {})
+
+    def test_rounded_zero_duration_preserves_the_rest_of_verified_history(self):
+        self.ids.append("tools.tests.test_example.Example.test_instant_skip")
+        payload = copy.deepcopy(self.payload)
+        payload["durations"]["linux"][self.ids[1]] = 0.0
+        result = self.restore(self.source(payload))
+        self.assertEqual(result["durations"]["linux"], {self.ids[0]: 32.5, self.ids[1]: 0.001})
 
     def test_expired_fork_stale_or_unavailable_history_uses_defaults(self):
         for kind in ("expired", "fork", "stale", "api"):

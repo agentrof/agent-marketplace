@@ -118,6 +118,8 @@ GENERIC_REVIEW_RE = re.compile(
     r"looks good|all good|no findings)\.?$",
     re.IGNORECASE,
 )
+ACCEPTED_MINOR_FINDINGS = "Accepted Minor Findings"
+ACCEPTED_MINOR_COLUMNS = ("finding", "owner_role", "reason", "revisit_trigger")
 EPIC_GOAL_STUB = "Define the customer outcome and boundary."
 STORY_STUBS = {
     "scope": "Describe the smallest valuable behavior.",
@@ -172,6 +174,7 @@ def backlog_contract() -> dict:
         "story_owner_roles", "story_supporting_roles",
         "required_story_sections", "required_epic_review_sections",
         "required_backlog_review_sections", "experience_ref_types",
+        "minor_finding_owner_roles",
     }
     missing = sorted(required - set(contract))
     if missing:
@@ -1151,6 +1154,43 @@ def deferred_criteria(docs: Path, body: str,
     return result, errors
 
 
+def accepted_minor_findings(docs: Path, body: str, path: str,
+                            contract: dict) -> list[str]:
+    """Validate the optional record of minor review findings left unfixed."""
+    if ACCEPTED_MINOR_FINDINGS not in headings(body):
+        return []
+    rows, errors = structured_table(
+        section(body, ACCEPTED_MINOR_FINDINGS), ACCEPTED_MINOR_COLUMNS,
+        path, ACCEPTED_MINOR_FINDINGS,
+    )
+    owners = list(contract["minor_finding_owner_roles"])
+    seen: set[str] = set()
+    for number, row in enumerate(rows, 1):
+        label = f"{path} accepted minor finding {number}"
+        links = re.findall(r"\[\[[^\[\]\n]+\]\]", row["finding"])
+        if not links:
+            errors.append(f"{label} must cite the affected vault note")
+        for value in links:
+            read_link(docs, value, label, errors)
+        # Link targets add path words; only the stated finding counts as text.
+        description = re.sub(r"\[\[[^\[\]\n]+\]\]", " ", row["finding"])
+        if not meaningful_text(description):
+            errors.append(f"{label} needs a concrete finding")
+        key = normalized_text(row["finding"])
+        if key in seen:
+            errors.append(f"{path} repeats accepted minor finding {number}")
+        seen.add(key)
+        if row["owner_role"] not in owners:
+            errors.append(
+                f"{label} owner_role must be one of: {', '.join(owners)}"
+            )
+        if not meaningful_text(row["reason"]):
+            errors.append(f"{label} needs a concrete reason")
+        if not meaningful_text(row["revisit_trigger"]):
+            errors.append(f"{label} needs a concrete revisit_trigger")
+    return errors
+
+
 def status_tag_name(status: str) -> str:
     return f"status/{status.replace('_', '-')}"
 
@@ -1476,6 +1516,7 @@ def collect(docs: Path, *, historical_inputs: bool = False,
         if not review_inputs:
             errors.extend(review_section_findings(
                 body, contract["required_backlog_review_sections"], rel, docs))
+            errors.extend(accepted_minor_findings(docs, body, rel, contract))
         record["backlog_reviews"].append({"path": rel, "props": review_props,
                                           "body": body,
                                           "id": note_id(review_props, path.stem),
@@ -1532,6 +1573,8 @@ def collect(docs: Path, *, historical_inputs: bool = False,
                 errors.extend(review_section_findings(
                     review_body_text, contract["required_epic_review_sections"],
                     review_rel, docs))
+                errors.extend(accepted_minor_findings(
+                    docs, review_body_text, review_rel, contract))
             item = {"path": review_rel, "props": review_props,
                     "body": review_body_text,
                     "id": note_id(review_props, review.stem),

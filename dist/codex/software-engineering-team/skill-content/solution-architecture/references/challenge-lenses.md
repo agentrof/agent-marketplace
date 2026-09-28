@@ -44,19 +44,42 @@ where needed, never silently declare it outside scope. The primary retains
 all four lenses even when a specialist is selected. Do not add a second full
 panel merely because both the entry skill and this reference were loaded.
 
+## Severity
+
+Rate each finding by what approving the package as written would cause.
+Severity is evidence-based, never inflated to look thorough or deflated to
+reach a verdict, and the Solution Architect never changes a returned severity.
+
+| severity | blocks approval | the package as written would |
+|---|---|---|
+| `critical` | yes | commit to a topology, technology, data placement or trust boundary that contradicts an approved requirement, budget or accepted decision, or leave an authorization, privacy, regulatory, data-loss or irreversible-migration obligation unaddressed |
+| `major` | yes | leave a decision untraceable or unverifiable, a BA process, app or component misallocated or unowned, a binding to a non-accepted decision, a dependency direction undeclared, or a failure, ownership, cost or exit path missing at the stated scale |
+| `minor` | no | still yield the same decisions, verification and ownership |
+
+Minor findings are wording, clarity, redundancy and formatting, and
+imprecision that cannot mislead. Imprecision that could lead a careful reader
+to a different decision is major, never minor. Findings that share one root
+cause are one finding at the severity of that cause.
+
 ## Return and disposition
 
-The primary returns a verdict, findings with evidence, impact and required
-resolution, and a coverage statement for every required lens. Each specialist
-returns its assigned scope, lens coverage, verdict and findings. Reviewers
-never edit project files and their replies are not durable audit records.
-Independent readers may run in parallel against unchanged inputs; wait for
-every selected reader before the Solution Architect writes.
+The primary returns a verdict, findings with severity, evidence, impact and
+required resolution, and a coverage statement for every required lens. Each
+specialist returns its assigned scope, lens coverage, verdict and findings
+with severity. A verdict requests changes only while a critical or major
+finding is open. Reviewers never edit project files and their replies are not
+durable audit records. Independent readers may run in parallel against
+unchanged inputs; wait for every selected reader before the Solution Architect
+writes.
 
-The Solution Architect fixes each finding in the final landscape, engagement
-or decision documents, rejects it with a concrete reason shown at the approval
-gate, or records a genuine product risk with a named revisit trigger. Run the
-mechanical compilers after serialized writes. Re-run only readers affected by
-a blocking fix and any newly exposed dependency or risk. A first review with no
+The Solution Architect resolves each critical or major finding: it fixes the
+finding in the final landscape, engagement or decision documents, rejects it
+with a concrete reason shown at the approval gate, or records a genuine
+product risk with a named revisit trigger. A minor finding never blocks and
+never starts another review. Fix it only in a writer pass that already carries
+a blocking fix, otherwise show it with its acceptance reason at the approval
+gate. Run the mechanical compilers after serialized writes. Re-run only
+readers affected by a blocking fix, meaning a fix for a critical or major
+finding, and any newly exposed dependency or risk. A first review with no
 blocking findings needs no extra clean round. No fixed retry count, reviewer
 artifact, digest or lock is part of the project contract.

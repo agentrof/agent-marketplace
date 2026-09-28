@@ -250,12 +250,20 @@ the root review is authored, run the full
 vault gate. Both must pass before the package can be offered for approval.
 
 Use the current host's agent invocation and wait mechanism; no host-specific
-command is canonical. Reviewer responses are input, never durable state. After
-a blocking fix, regenerate the affected manifest and rerun only the affected
-reviewer against the changed source and dependency context, then re-run the
-compiler. A writer's assertion that the fix is complete does not replace that
-recheck. Continue until both review layers are approved; no extra clean round
-is required when no blocking finding remains.
+command is canonical. Reviewer responses are input, never durable state.
+Severity, dispositions and re-review scope follow the Review findings section
+of `skill-content/product-planning/references/structured-records.md`: only a
+critical or major finding blocks, and the Product Owner preserves every
+returned severity. After a blocking fix or disproof, regenerate the affected
+manifest and rerun only the affected reviewer with those findings, any cited
+evidence and the changed paths, which are the manifest files whose `sha256`
+changed. It confirms each finding is closed and reviews the changed text with
+its dependency context. Then re-run the compiler. A writer's assertion that
+the fix is complete does not replace that recheck. A minor finding never
+blocks or starts another round: fix it only in a pass that already carries a
+blocking fix, otherwise record it in the review note's
+`Accepted Minor Findings` section. Continue until both review layers are
+approved; no extra clean round is required when no blocking finding remains.
 
 `Deferred Criteria` is a structured table with `criterion_ref`, `owner_role`,
 `reason` and `revisit_trigger`; `owner_role` is exactly `product_owner`.
@@ -274,6 +282,13 @@ values fail. Every non-deferral review lens uses an
 `Conclusion [<section>]:` line. Long
 generic approvals such as `the package was reviewed`, `looks good` or
 `no findings` fail.
+
+`Accepted Minor Findings` is optional in any review note. When present it is a
+structured table with `finding`, `owner_role`, `reason` and `revisit_trigger`;
+`finding` cites the affected vault note with an escaped-table wikilink and
+`owner_role` is `product_owner`, `qa_engineer` or `business_analyst`. The
+compiler validates every row. A critical or major finding never enters this
+section; it closes only through a fix or disproof that the re-review confirms.
 
 ## 5. User approval and handoff
 

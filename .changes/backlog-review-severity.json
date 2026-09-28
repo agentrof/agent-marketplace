@@ -1,0 +1,6 @@
+{
+  "components": {
+    "software-engineering-team": "minor"
+  },
+  "summary": "Block Backlog and Solution review approval only on critical or major findings, scope re-reviews to fixed findings and changed text, and record accepted minor Backlog findings in an optional compiler-validated review table with an owner role and revisit trigger."
+}

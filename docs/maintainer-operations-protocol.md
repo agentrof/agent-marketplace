@@ -211,8 +211,14 @@ approval unless scope becomes ambiguous or a gate fails:
    for its required validation. Confirm only the linked issues expected to
    close actually closed.
 3. Dispatch `Prepare stable release` on that verified `main`. Wait for its
-   exact-SHA host gates and preparation job. It consumes pending changesets,
-   generates distributions, runs `make release-check`, and publishes
+   source validation, exact-SHA host gates and preparation job. Source
+   validation verifies trusted exact-main evidence or runs fresh full tests.
+   Host gates independently verify successful checkout-lifecycle evidence for
+   the exact tree and pinned host runtime, or run fresh real installs. Unit
+   evidence never grants host coverage. A reused host result is rechecked
+   before the gate completes.
+   Preparation consumes pending changesets, generates distributions, runs
+   `make static-check`, and publishes
    `release/stable`. Branch publication re-observes `main` after the
    exact-absence push and exact-lease removes only the just-created branch if
    `main` raced. For the first stable baseline, it instead stages the bootstrap
@@ -229,10 +235,16 @@ approval unless scope becomes ambiguous or a gate fails:
    and that its complete tree equals a deterministic replay of release
    preparation. That replay disables ambient Git attributes, excludes and
    replacement refs, fixes checkout text/mode policy, and compares the complete
-   byte-and-mode tree without following links. Merge it with a merge commit only when green; the explicit release
+   byte-and-mode tree without following links. The narrower release test
+   profile additionally requires successful main evidence and a closed proof
+   that runtime bytes and modes are unchanged; otherwise full tests run.
+   Merge it with a merge commit only when green; the explicit release
    instruction authorizes this release PR merge.
 6. Wait for `Publish stable release`. It verifies the exact two-parent merge
-   topology and release tree, then uses only the transaction helper from the
+   topology and release tree, verifies successful candidate test evidence or
+   runs fresh full tests, and independently verifies matching checkout-host
+   evidence or exercises both real host lifecycles. It then
+   uses only the transaction helper from the
    attested main parent while write credentials are present. The workflow
    stages `stable` and the annotated version tag atomically with exact leases,
    exercises fresh Claude Code and Codex installs from the real public
@@ -280,8 +292,8 @@ exact gate. Never repair a release by moving an existing tag, force-pushing
 | --- | --- | --- |
 | Issue intake | No background consumption or model/API invocation | Maintainer must explicitly select each issue; live issue evidence prevents stale assumptions |
 | Agent behavior | One short instruction expands to a repository-defined procedure | Scope and irreversible transitions remain bound to explicit user authority |
-| CI | One stable-name aggregate requires changeset/release policy, deterministic, compatibility and every vault matrix result | Every PR emits the aggregate and lifecycle contexts; skipped or cancelled dependencies fail closed |
-| Hosts and operating systems | Every PR runs the required Claude Code and Codex lifecycle, while Linux, macOS and Windows vault evidence is aggregated | Runner or host regressions block readiness instead of being hidden by path filters |
+| CI | One stable-name aggregate requires changeset/release policy, fresh static gates and complete selected test coverage or verified equivalent evidence | Every expected report and test ID is checked; missing, failed, cancelled or unjustified skipped work fails closed |
+| Hosts and operating systems | Every PR runs the required Claude Code and Codex lifecycle; policy selects complete Linux, macOS and native Windows partitions | Unknown/shared changes run full coverage; native Windows regressions cannot be replaced by emulation or unexpected skips |
 | Releases | One explicit command can perform several related mutations | Selected-set rule, deterministic release replay, public-host smoke, exact leases, resumable reconciliation and no force repair |
 | Branch cleanup | Deletes merged refs after a published release | Only named, bounded branches proven merged are eligible; ambiguity or drift stops cleanup |
 
@@ -289,3 +301,8 @@ Manual invocation is deliberate. It removes unattended API cost and public
 issue prompt-injection exposure while preserving a short command, repeatable
 engineering quality, exact evidence, and explicit control over merge and
 release transitions.
+
+The executable scope, evidence and timing contracts are described in
+[CI and release validation](ci.md). Equivalent evidence does not change merge
+or release authority, and never replaces fresh topology or public-channel
+checks.

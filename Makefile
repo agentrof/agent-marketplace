@@ -1,4 +1,4 @@
-.PHONY: validate release-validate counts counts-check dist-check test eval check scaffold release-check public-release-check
+.PHONY: validate release-validate counts counts-check dist-check test eval static-check check scaffold release-check public-release-check public-release-smoke
 
 PY := python3
 
@@ -24,13 +24,17 @@ eval:
 	PYTHONDONTWRITEBYTECODE=1 $(PY) -m unittest tools.tests.test_scenario_report tools.tests.test_runtime_scripts tools.tests.test_ba_compile -v
 	@echo "eval: deterministic behavior assertions green"
 
-check: validate release-validate counts-check dist-check test
+static-check: validate release-validate counts-check dist-check
+
+check: static-check test
 	@echo "check: all gates green"
 
 release-check: check
 	@echo "release-check: deterministic gates green"
 
-public-release-check: release-check
+public-release-check: release-check public-release-smoke
+
+public-release-smoke:
 	@test -n "$(EXPECTED_RELEASE_SHA)" || (echo "EXPECTED_RELEASE_SHA is required" >&2; exit 1)
 	$(PY) tools/smoke_plugin_installs.py --channel public --expected-sha "$(EXPECTED_RELEASE_SHA)"
 	@echo "public-release-check: stable channel gates green"

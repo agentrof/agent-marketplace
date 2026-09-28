@@ -1,17 +1,31 @@
 name: validate
 
 on:
+  workflow_call:
+    inputs:
+      candidate_sha:
+        description: Exact trusted candidate to validate or match to prior evidence
+        type: string
+        required: true
   workflow_dispatch:
   push:
     branches: [main]
   pull_request:
+  schedule:
+    - cron: "17 4 * * 1"
 
 permissions:
   contents: read
+  actions: read
+  pull-requests: read
 
 concurrency:
-  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}-validation
   cancel-in-progress: true
+
+defaults:
+  run:
+    shell: bash
 
 jobs:
   changeset:
@@ -32,9 +46,9 @@ jobs:
         with:
           python-version: "3.9"
       - name: Require a release-impact declaration
-        run: >-
-          python3 tools/release.py check-pr
-          --base origin/${{ github.base_ref }}
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: python3 tools/release.py check-pr --base "$BASE_SHA"
 
   release-pr-policy:
     if: >-
@@ -68,61 +82,138 @@ jobs:
             --head-sha "$HEAD_SHA" \
             --stable-sha "$(git rev-parse refs/remotes/origin/stable)"
 
-  deterministic-check:
+  plan:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 10
+    outputs:
+      matrix: ${{ steps.plan.outputs.matrix }}
+      has_tests: ${{ steps.plan.outputs.has_tests }}
+      apple_launcher: ${{ steps.plan.outputs.apple_launcher }}
+      mode: ${{ steps.plan.outputs.mode }}
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          ref: ${{ inputs.candidate_sha || github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
-          python-version: "3.x"
-      - name: Run all gates
-        run: make check
+          python-version: "3.14"
+      - name: Select coverage and verify prior validation evidence
+        id: plan
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CI_CANDIDATE_SHA: ${{ inputs.candidate_sha }}
+        run: >-
+          python3 tools/ci_plan.py
+          --output-directory "$RUNNER_TEMP/ci-plan"
+          --github-output "$GITHUB_OUTPUT"
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: ci-plan-${{ github.run_id }}
+          path: ${{ runner.temp }}/ci-plan/*.json
+          overwrite: true
+          if-no-files-found: error
+          retention-days: 7
 
-  compatibility:
-    name: compatibility (${{ matrix.os }}, Python ${{ matrix.python }})
-    runs-on: ${{ matrix.os }}
-    timeout-minutes: 20
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - os: ubuntu-latest
-            python: "3.9"
-          - os: macos-latest
-            python: "3.x"
+  deterministic-check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          ref: ${{ inputs.candidate_sha || github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.14"
+      - name: Validate contracts, release metadata, counts and generated distributions
+        run: make static-check
+
+  test-shards:
+    name: tests (${{ matrix.lane }}, ${{ matrix.shard }})
+    needs: plan
+    if: needs.plan.outputs.has_tests == 'true'
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          ref: ${{ inputs.candidate_sha || github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: ${{ matrix.python }}
-      - name: Run all gates
-        run: make check
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: ci-plan-${{ github.run_id }}
+          path: ${{ runner.temp }}/ci-plan
+      - name: Run the exact selected test partition
+        env:
+          CI_LANE: ${{ matrix.lane }}
+          CI_SHARD: ${{ matrix.shard }}
+          PYTHONDONTWRITEBYTECODE: "1"
+        run: >-
+          python tools/ci_tests.py run
+          --plan "$RUNNER_TEMP/ci-plan/ci-plan.json"
+          --lane "$CI_LANE" --shard "$CI_SHARD"
+          --report "$RUNNER_TEMP/test-report.json"
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: ${{ !cancelled() }}
+        with:
+          name: ci-report-${{ github.run_id }}-${{ matrix.lane }}-${{ matrix.shard }}
+          path: ${{ runner.temp }}/test-report.json
+          overwrite: true
+          if-no-files-found: error
+          retention-days: 7
 
-  vault-hook-platforms:
-    name: vault hook (${{ matrix.os }}, Python ${{ matrix.python }})
-    runs-on: ${{ matrix.os }}
-    timeout-minutes: ${{ matrix.os == 'windows-latest' && 60 || 10 }}
+  compatibility:
+    name: compatibility (${{ matrix.os }}, Python ${{ matrix.python }})
+    if: always()
+    needs: [plan, test-shards]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
     strategy:
-      fail-fast: false
       matrix:
         include:
           - os: ubuntu-latest
             python: "3.9"
-          - os: ubuntu-latest
-            python: "3.x"
           - os: macos-latest
-            python: "3.9"
-          - os: macos-latest
-            python: "3.x"
-          - os: windows-latest
-            python: "3.9"
-          - os: windows-latest
             python: "3.x"
     steps:
+      - name: Require the selected platform test jobs
+        env:
+          PLAN_RESULT: ${{ needs.plan.result }}
+          HAS_TESTS: ${{ needs.plan.outputs.has_tests }}
+          TEST_RESULT: ${{ needs.test-shards.result }}
+        run: |
+          set -euo pipefail
+          test "$PLAN_RESULT" = success
+          if [ "$HAS_TESTS" = true ]; then
+            test "$TEST_RESULT" = success
+          else
+            test "$HAS_TESTS" = false
+            test "$TEST_RESULT" = skipped
+          fi
+
+  vault-hook-platforms:
+    name: Apple system Python launcher
+    needs: plan
+    if: needs.plan.outputs.apple_launcher == 'true'
+    runs-on: macos-latest
+    timeout-minutes: 10
+    steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          ref: ${{ inputs.candidate_sha || github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
       - name: Exercise the Apple system Python launcher
-        if: runner.os == 'macOS'
         env:
           AGENT_MARKETPLACE_REQUIRE_APPLE_PYTHON3: "1"
           DEVELOPER_DIR: ""
@@ -138,20 +229,6 @@ jobs:
           tools.tests.test_vault_hook.VaultHookShellContractTests.test_bare_render_with_forged_registry_is_restored
           tools.tests.test_vault_hook.VaultHookShellContractTests.test_issue_77_bare_init_has_an_exact_attested_delta
           tools.tests.test_vault_hook.VaultHookShellContractTests.test_issue_77_bare_init_preserves_real_codex_draft
-      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
-        with:
-          python-version: ${{ matrix.python }}
-      - name: Exercise the shared shell-hook and recovery contracts
-        run: >-
-          python -m unittest
-          tools.tests.test_experience_compile
-          tools.tests.test_vault_hook
-      - name: Exercise the Delivery coordinator on native Windows
-        if: runner.os == 'Windows'
-        run: >-
-          python -m unittest
-          tools.tests.test_delivery_compile
-          tools.tests.test_delivery_git
 
   check:
     name: check
@@ -159,11 +236,13 @@ jobs:
     needs:
       - changeset
       - release-pr-policy
+      - plan
+      - test-shards
       - deterministic-check
       - compatibility
       - vault-hook-platforms
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 10
     steps:
       - name: Require every validation result
         env:
@@ -174,14 +253,30 @@ jobs:
           REPOSITORY: ${{ github.repository }}
           CHANGESET_RESULT: ${{ needs.changeset.result }}
           RELEASE_POLICY_RESULT: ${{ needs.release-pr-policy.result }}
+          PLAN_RESULT: ${{ needs.plan.result }}
+          HAS_TESTS: ${{ needs.plan.outputs.has_tests }}
+          APPLE_LAUNCHER: ${{ needs.plan.outputs.apple_launcher }}
+          TEST_RESULT: ${{ needs.test-shards.result }}
           DETERMINISTIC_RESULT: ${{ needs.deterministic-check.result }}
           COMPATIBILITY_RESULT: ${{ needs.compatibility.result }}
           VAULT_RESULT: ${{ needs.vault-hook-platforms.result }}
         run: |
           set -euo pipefail
+          test "$PLAN_RESULT" = success
           test "$DETERMINISTIC_RESULT" = success
           test "$COMPATIBILITY_RESULT" = success
-          test "$VAULT_RESULT" = success
+          if [ "$HAS_TESTS" = true ]; then
+            test "$TEST_RESULT" = success
+          else
+            test "$HAS_TESTS" = false
+            test "$TEST_RESULT" = skipped
+          fi
+          if [ "$APPLE_LAUNCHER" = true ]; then
+            test "$VAULT_RESULT" = success
+          else
+            test "$APPLE_LAUNCHER" = false
+            test "$VAULT_RESULT" = skipped
+          fi
 
           expected_changeset=skipped
           expected_release_policy=skipped
@@ -196,3 +291,66 @@ jobs:
           fi
           test "$CHANGESET_RESULT" = "$expected_changeset"
           test "$RELEASE_POLICY_RESULT" = "$expected_release_policy"
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          ref: ${{ inputs.candidate_sha || github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.14"
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: ci-plan-${{ github.run_id }}
+          path: ${{ runner.temp }}/ci-plan
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        if: needs.plan.outputs.has_tests == 'true'
+        with:
+          pattern: ci-report-${{ github.run_id }}-*
+          path: ${{ runner.temp }}/ci-reports
+      - name: Verify complete test coverage
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/ci-reports"
+          python3 tools/ci_tests.py verify-reports \
+            --plan "$RUNNER_TEMP/ci-plan/ci-plan.json" \
+            --reports "$RUNNER_TEMP/ci-reports" \
+            --output "$RUNNER_TEMP/ci-durations.json"
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: ci-durations-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/ci-durations.json
+          if-no-files-found: error
+          retention-days: 7
+      - name: Record reusable validation evidence
+        if: >-
+          github.event_name != 'schedule' &&
+          (github.event_name != 'pull_request' ||
+           (github.event.pull_request.base.ref == 'main' &&
+            github.event.pull_request.head.repo.full_name == github.repository))
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CI_MODE: ${{ needs.plan.outputs.mode }}
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/ci-reports"
+          args=()
+          if [ "$CI_MODE" = reuse ] || [ "$CI_MODE" = release ]; then
+            args+=(--inherited "$RUNNER_TEMP/ci-plan/ci-reuse.json")
+          fi
+          python3 tools/ci_evidence.py create \
+            --candidate-sha "$(git rev-parse HEAD)" \
+            --plan "$RUNNER_TEMP/ci-plan/ci-plan.json" \
+            --reports "$RUNNER_TEMP/ci-reports" \
+            --output "$RUNNER_TEMP/ci-evidence.json" "${args[@]}"
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: >-
+          github.event_name != 'schedule' &&
+          (github.event_name != 'pull_request' ||
+           (github.event.pull_request.base.ref == 'main' &&
+            github.event.pull_request.head.repo.full_name == github.repository))
+        with:
+          name: ci-evidence-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/ci-evidence.json
+          if-no-files-found: error
+          retention-days: 7

@@ -48,7 +48,5 @@ jobs:
         run: |
           claude --version
           codex --version
-      - name: Run deterministic and checkout lifecycle gates
-        run: |
-          make release-check
-          python3 tools/smoke_plugin_installs.py --channel checkout
+      - name: Exercise both hosts against the exact checkout
+        run: python3 tools/smoke_plugin_installs.py --channel checkout

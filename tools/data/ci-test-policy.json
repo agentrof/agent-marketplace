@@ -1,0 +1,416 @@
+{
+  "schema_version": 1,
+  "description": "Impact groups are conservative dependency closures. Unmapped/shared inputs run the complete suite. Durations are initial estimates, replaced by measured per-test reports.",
+  "default_seconds": 1.0,
+  "module_seconds": {
+    "tools.tests.test_delivery_git": 20.0,
+    "tools.tests.test_delivery_compile": 3.0,
+    "tools.tests.test_vault_hook": 2.0,
+    "tools.tests.test_release": 1.5,
+    "tools.tests.test_experience_compile": 1.2
+  },
+  "always_groups": [
+    "contracts"
+  ],
+  "release_groups": [
+    "release"
+  ],
+  "generated_paths": [
+    "dist/*"
+  ],
+  "generated_sources": [
+    "plugins/*",
+    "platforms/*",
+    "product.json",
+    "package-modes.json",
+    "versions.json",
+    "tools/build_distributions.py"
+  ],
+  "full_paths": [
+    ".github/workflows/*",
+    "Makefile",
+    "tools/ci_*.py",
+    "tools/data/ci-*.json",
+    "tools/data/*",
+    "platforms/*",
+    "package-modes.json",
+    "product.json",
+    ".gitattributes",
+    ".claude-plugin/*",
+    ".agents/*",
+    "plugins/*/*.md",
+    "plugins/*/scripts/atomic_file.py",
+    "plugins/*/scripts/file_lock.py",
+    "plugins/*/scripts/semantic_markdown.py",
+    "plugins/*/scripts/project_config.py",
+    "plugins/*/scripts/stage_package.py",
+    "plugins/*/scripts/vault_check.py",
+    "plugins/*/scripts/setup*.py",
+    "plugins/*/scripts/marketplace_paths.py",
+    "plugins/*/templates/*",
+    "plugins/*/skill-content/*",
+    ".gitignore",
+    "tools/tests/test_ci_*.py",
+    "tools/tests/fixtures.py",
+    "tools/tests/git_fixture.py",
+    "tools/tests/backlog_fixture.py"
+  ],
+  "rules": [
+    {
+      "paths": [
+        "README.md",
+        "CHANGELOG.md",
+        "AGENTS.md",
+        "CLAUDE.md",
+        "docs/*",
+        "memory/*",
+        "LICENSE"
+      ],
+      "groups": [
+        "documentation"
+      ]
+    },
+    {
+      "paths": [
+        "versions.json",
+        ".release/*"
+      ],
+      "groups": [
+        "release"
+      ]
+    },
+    {
+      "paths": [
+        "dist/*"
+      ],
+      "groups": [
+        "contracts"
+      ]
+    },
+    {
+      "paths": [
+        "tools/counts.py"
+      ],
+      "groups": [
+        "documentation"
+      ]
+    },
+    {
+      "paths": [
+        "plugins/software-engineering-team/scripts/delivery_compile.py",
+        "plugins/software-engineering-team/scripts/delivery_git.py",
+        "plugins/software-engineering-team/scripts/delivery_governance.py",
+        "plugins/software-engineering-team/scripts/delivery_provider.py",
+        "plugins/software-engineering-team/scripts/delivery_result.py"
+      ],
+      "groups": [
+        "delivery"
+      ]
+    },
+    {
+      "paths": [
+        "plugins/software-engineering-team/scripts/operation_compile.py",
+        "plugins/software-engineering-team/scripts/architecture_compile.py"
+      ],
+      "groups": [
+        "delivery"
+      ]
+    },
+    {
+      "paths": [
+        "plugins/software-engineering-team/scripts/ba_compile.py"
+      ],
+      "groups": [
+        "business_analysis"
+      ]
+    },
+    {
+      "paths": [
+        "plugins/software-engineering-team/scripts/experience_compile.py",
+        "plugins/software-engineering-team/scripts/experience_application_check.py"
+      ],
+      "groups": [
+        "experience"
+      ]
+    },
+    {
+      "paths": [
+        "plugins/software-engineering-team/scripts/requirement_compile.py",
+        "plugins/software-engineering-team/scripts/requirement_route.py"
+      ],
+      "groups": [
+        "requirements"
+      ]
+    },
+    {
+      "paths": [
+        "plugins/software-engineering-team/scripts/backlog_compile.py"
+      ],
+      "groups": [
+        "backlog"
+      ]
+    },
+    {
+      "paths": [
+        ".changes/*"
+      ],
+      "groups": [
+        "release_metadata"
+      ]
+    }
+  ],
+  "groups": {
+    "contracts": {
+      "tests": [
+        "tools.tests.test_adapter_registry.*",
+        "tools.tests.test_single_team_distribution.*",
+        "tools.tests.test_packaged_state_contract.*",
+        "tools.tests.test_validator_contract.*",
+        "tools.tests.test_counts.*",
+        "tools.tests.test_ci_*.*"
+      ]
+    },
+    "documentation": {
+      "tests": [
+        "tools.tests.test_maintainer_protocol.*",
+        "tools.tests.test_release_workflows.*",
+        "tools.tests.test_requirement_flow.*",
+        "tools.tests.test_requirement_review_contract.*",
+        "tools.tests.test_solution_topology.*",
+        "tools.tests.test_delivery_protocol.*",
+        "tools.tests.test_living_experience_flow.*"
+      ],
+      "depends_on": [
+        "contracts"
+      ]
+    },
+    "release": {
+      "tests": [
+        "tools.tests.test_release.*",
+        "tools.tests.test_release_publish.*",
+        "tools.tests.test_release_workflows.*",
+        "tools.tests.test_maintainer_protocol.*",
+        "tools.tests.test_artifact_snapshot_metadata.*",
+        "tools.tests.test_package_refresh.*",
+        "tools.tests.test_setup_project.*",
+        "tools.tests.test_smoke_plugin_installs.*",
+        "tools.tests.test_ci_*.*"
+      ],
+      "depends_on": [
+        "contracts"
+      ]
+    },
+    "delivery": {
+      "tests": [
+        "tools.tests.test_delivery_compile.*",
+        "tools.tests.test_delivery_git.*",
+        "tools.tests.test_delivery_provider.*",
+        "tools.tests.test_delivery_result.*",
+        "tools.tests.test_delivery_protocol.*",
+        "tools.tests.test_operation_governance.*",
+        "tools.tests.test_architecture_compile.*",
+        "tools.tests.test_vault_hook.*",
+        "tools.tests.test_frontmatter_round_trip.*",
+        "tools.tests.test_writer_line_endings.*"
+      ],
+      "depends_on": [
+        "contracts"
+      ]
+    },
+    "backlog": {
+      "tests": [
+        "tools.tests.test_backlog_compile.*",
+        "tools.tests.test_backlog_approval_preservation.*",
+        "tools.tests.test_backlog_input_coverage.*",
+        "tools.tests.test_backlog_requirement_bindings.*",
+        "tools.tests.test_requirement_flow.*",
+        "tools.tests.test_requirement_compile.*",
+        "tools.tests.test_requirement_review_contract.*"
+      ],
+      "depends_on": [
+        "delivery"
+      ]
+    },
+    "requirements": {
+      "tests": [
+        "tools.tests.test_requirement_compile.*",
+        "tools.tests.test_requirement_flow.*",
+        "tools.tests.test_requirement_review_contract.*"
+      ],
+      "depends_on": [
+        "backlog"
+      ]
+    },
+    "experience": {
+      "tests": [
+        "tools.tests.test_experience_compile.*",
+        "tools.tests.test_experience_record_revision.*",
+        "tools.tests.test_experience_artifact_recovery.*",
+        "tools.tests.test_experience_application_runtime.*",
+        "tools.tests.test_living_experience_flow.*",
+        "tools.tests.test_artifact_snapshot_metadata.*"
+      ],
+      "depends_on": [
+        "backlog"
+      ]
+    },
+    "business_analysis": {
+      "tests": [
+        "tools.tests.test_ba_compile.*",
+        "tools.tests.test_frontmatter_round_trip.*",
+        "tools.tests.test_writer_line_endings.*"
+      ],
+      "depends_on": [
+        "experience",
+        "requirements"
+      ]
+    },
+    "platform": {
+      "tests": [
+        "tools.tests.test_experience_compile.*",
+        "tools.tests.test_vault_hook.*",
+        "tools.tests.test_atomic_file.*",
+        "tools.tests.test_writer_line_endings.*",
+        "tools.tests.test_ci_tests.*"
+      ]
+    },
+    "windows": {
+      "tests": [
+        "tools.tests.test_delivery_compile.*",
+        "tools.tests.test_delivery_git.*",
+        "tools.tests.test_ba_compile.EnterReviewTests.test_windows_junction_space_ancestor_is_rejected"
+      ],
+      "depends_on": [
+        "platform"
+      ]
+    },
+    "release_metadata": {
+      "tests": [
+        "tools.tests.test_release.*"
+      ],
+      "depends_on": [
+        "contracts"
+      ]
+    }
+  },
+  "lanes": {
+    "linux-current": {
+      "os": "ubuntu-latest",
+      "python": "3.14",
+      "shards": 2,
+      "groups": [
+        "all"
+      ]
+    },
+    "linux-minimum": {
+      "os": "ubuntu-latest",
+      "python": "3.9",
+      "shards": 2,
+      "groups": [
+        "all"
+      ]
+    },
+    "macos-current": {
+      "os": "macos-latest",
+      "python": "3.14",
+      "shards": 3,
+      "groups": [
+        "all"
+      ]
+    },
+    "macos-minimum": {
+      "os": "macos-latest",
+      "python": "3.9",
+      "shards": 2,
+      "groups": [
+        "platform"
+      ]
+    },
+    "windows-current": {
+      "os": "windows-latest",
+      "python": "3.14",
+      "shards": 6,
+      "groups": [
+        "windows"
+      ],
+      "required_tests": [
+        "tools.tests.test_ba_compile.EnterReviewTests.test_windows_junction_space_ancestor_is_rejected",
+        "tools.tests.test_delivery_git.DeliveryGitTests.test_receipt_lock_is_released_when_its_holder_dies"
+      ]
+    },
+    "windows-minimum": {
+      "os": "windows-latest",
+      "python": "3.9",
+      "shards": 6,
+      "groups": [
+        "windows"
+      ],
+      "required_tests": [
+        "tools.tests.test_ba_compile.EnterReviewTests.test_windows_junction_space_ancestor_is_rejected",
+        "tools.tests.test_delivery_git.DeliveryGitTests.test_receipt_lock_is_released_when_its_holder_dies"
+      ]
+    }
+  },
+  "known_test_modules": [
+    "tools.tests.test_adapter_registry",
+    "tools.tests.test_architecture_compile",
+    "tools.tests.test_artifact_snapshot_metadata",
+    "tools.tests.test_atomic_file",
+    "tools.tests.test_ba_compile",
+    "tools.tests.test_backlog_approval_preservation",
+    "tools.tests.test_backlog_compile",
+    "tools.tests.test_backlog_input_coverage",
+    "tools.tests.test_backlog_requirement_bindings",
+    "tools.tests.test_counts",
+    "tools.tests.test_delivery_compile",
+    "tools.tests.test_delivery_git",
+    "tools.tests.test_delivery_protocol",
+    "tools.tests.test_delivery_provider",
+    "tools.tests.test_delivery_result",
+    "tools.tests.test_experience_application_runtime",
+    "tools.tests.test_experience_artifact_recovery",
+    "tools.tests.test_experience_compile",
+    "tools.tests.test_experience_record_revision",
+    "tools.tests.test_frontmatter_round_trip",
+    "tools.tests.test_git_fixture",
+    "tools.tests.test_issue_report",
+    "tools.tests.test_living_experience_flow",
+    "tools.tests.test_maintainer_protocol",
+    "tools.tests.test_operation_governance",
+    "tools.tests.test_package_refresh",
+    "tools.tests.test_packaged_state_contract",
+    "tools.tests.test_project_config",
+    "tools.tests.test_project_instructions",
+    "tools.tests.test_project_vault_contract",
+    "tools.tests.test_release",
+    "tools.tests.test_release_publish",
+    "tools.tests.test_release_workflows",
+    "tools.tests.test_requirement_compile",
+    "tools.tests.test_requirement_flow",
+    "tools.tests.test_requirement_review_contract",
+    "tools.tests.test_runtime_scripts",
+    "tools.tests.test_scaffold",
+    "tools.tests.test_scenario_report",
+    "tools.tests.test_semantic_markdown",
+    "tools.tests.test_setup_project",
+    "tools.tests.test_single_team_distribution",
+    "tools.tests.test_smoke_plugin_installs",
+    "tools.tests.test_solution_topology",
+    "tools.tests.test_validator_contract",
+    "tools.tests.test_vault_check",
+    "tools.tests.test_vault_gate",
+    "tools.tests.test_vault_hook",
+    "tools.tests.test_writer_line_endings"
+  ],
+  "impact_groups": [
+    "contracts",
+    "documentation",
+    "release",
+    "delivery",
+    "backlog",
+    "requirements",
+    "experience",
+    "business_analysis",
+    "release_metadata"
+  ]
+}

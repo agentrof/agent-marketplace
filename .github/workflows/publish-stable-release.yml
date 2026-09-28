@@ -7,6 +7,7 @@ on:
 permissions:
   contents: read
   pull-requests: read
+  actions: read
 
 concurrency:
   group: stable-release
@@ -56,6 +57,18 @@ jobs:
           test "$(git rev-parse "$EXPECTED_MERGE_SHA^{tree}")" = \
             "$(git rev-parse "$RELEASE_HEAD_SHA^{tree}")"
 
+  candidate-validation:
+    if: >-
+      !cancelled() && needs.verify-release-candidate.result == 'success' &&
+      github.event.pull_request.merged == true &&
+      github.event.pull_request.base.ref == 'main' &&
+      github.event.pull_request.head.ref == 'release/stable' &&
+      github.event.pull_request.head.repo.full_name == github.repository
+    needs: verify-release-candidate
+    uses: ./.github/workflows/validate.yml
+    with:
+      candidate_sha: ${{ github.event.pull_request.merge_commit_sha }}
+
   exact-sha-host-gates:
     if: >-
       github.event.pull_request.merged == true &&
@@ -68,11 +81,15 @@ jobs:
 
   stage-publication:
     if: >-
+      !cancelled() &&
+      needs.verify-release-candidate.result == 'success' &&
+      needs.candidate-validation.result == 'success' &&
+      needs.exact-sha-host-gates.result == 'success' &&
       github.event.pull_request.merged == true &&
       github.event.pull_request.base.ref == 'main' &&
       github.event.pull_request.head.ref == 'release/stable' &&
       github.event.pull_request.head.repo.full_name == github.repository
-    needs: [verify-release-candidate, exact-sha-host-gates]
+    needs: [verify-release-candidate, candidate-validation, exact-sha-host-gates]
     permissions:
       contents: write
       pull-requests: read
@@ -133,7 +150,9 @@ jobs:
           echo "main_source=$main_source" >> "$GITHUB_OUTPUT"
 
   public-stable-smoke:
-    if: needs.stage-publication.outputs.phase == 'staged'
+    if: >-
+      !cancelled() && needs.stage-publication.result == 'success' &&
+      needs.stage-publication.outputs.phase == 'staged'
     needs: stage-publication
     permissions:
       contents: read
@@ -162,7 +181,7 @@ jobs:
       - name: Exercise the real public stable channel
         env:
           EXPECTED_RELEASE_SHA: ${{ github.event.pull_request.merge_commit_sha }}
-        run: make public-release-check EXPECTED_RELEASE_SHA="$EXPECTED_RELEASE_SHA"
+        run: make public-release-smoke EXPECTED_RELEASE_SHA="$EXPECTED_RELEASE_SHA"
 
   rollback-publication:
     if: >-

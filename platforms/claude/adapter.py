@@ -7,7 +7,7 @@ from pathlib import Path
 
 # Documented subagent frontmatter values; per-tier choices are data in
 # execution-profiles.json beside this module.
-MODEL_ALIASES = ("opus", "sonnet", "haiku", "inherit")
+MODEL_ALIASES = ("opus", "sonnet", "haiku", "fable", "inherit")
 EFFORT_LEVELS = ("low", "medium", "high", "xhigh", "max")
 
 

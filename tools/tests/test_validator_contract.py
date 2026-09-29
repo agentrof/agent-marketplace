@@ -176,6 +176,18 @@ class ValidatorContractTests(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as temporary:
             root = self.fixture(temporary)
+            path = root / "tools/data/models.json"
+            value = json.loads(path.read_text(encoding="utf-8"))
+            value["reasoning_levels"].remove("low")
+            path.write_text(json.dumps(value, indent=2) + "\n", encoding="utf-8")
+            findings = validate.run(root)
+            self.assertIn(
+                ("tools/data/models.json", "model_config_shape"),
+                {(finding.path, finding.check) for finding in findings},
+            )
+
+        with tempfile.TemporaryDirectory() as temporary:
+            root = self.fixture(temporary)
             (root / "platforms/codex/execution-profiles.json").unlink()
             findings = validate.run(root)
             self.assertIn(

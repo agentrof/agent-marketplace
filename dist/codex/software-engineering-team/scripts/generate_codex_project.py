@@ -139,7 +139,10 @@ def recorded_profile(agents_dir: Path, team: str) -> str | None:
     for target in sorted(agents_dir.glob("*.toml")):
         if target.is_symlink():
             continue
-        lines = target.read_text(encoding="utf-8", errors="replace").splitlines()
+        try:
+            lines = target.read_text(encoding="utf-8", errors="replace").splitlines()
+        except OSError:
+            continue  # preview reports unreadable or colliding targets
         if not lines or lines[0] != current_owner:
             continue
         match = PROFILE_RE.fullmatch(lines[1]) if len(lines) > 1 else None

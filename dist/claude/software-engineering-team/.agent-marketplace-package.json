@@ -1,5 +1,5 @@
 {
-  "build_id": "snapshot.22a952db8458a31a183b1c386d750a7cd8165a844e6434cb96e6b502fbd509a4",
+  "build_id": "snapshot.3e4907b72d5f867bcf53c60d936fc96a5c52b95babad3973bc788b0fdfa400c8",
   "component": "software-engineering-team",
   "delivery_protocol": {
     "read_max": 1,
@@ -47,7 +47,7 @@
     "flows/requirement.md": "fc7930f17daf899ed2375d4c67bf0fefcc86be7894f0f8d02b276527e67a3c04",
     "flows/solution-design.md": "4e4507da3b15f7765b5d2dc0548d676c81ec621e0918d7595d65c121b1fc3124",
     "hooks/hooks.json": "3350a1f6a64e7582a7b08f6ad9c3e7a933ca51b7f67859bd05971c4cc2fd261c",
-    "host-contract.md": "167d3d3b70802f5fa9f0a7d196360eb9a9c477abe59df961e48edac765b574da",
+    "host-contract.md": "bbd619fbbeaf8e940478377032494c385ac9d3b8a5b2c9e59235d73bc84c7503",
     "product.json": "16202a292f9cf80ddbfc1eb1c74a9e7d8f37e96089808d323613405c50d2155c",
     "scripts/architecture_compile.py": "f806085ee543b7371bddd37e04a06687ba8d9a4897fe29ed36d6bd65fd6d3e84",
     "scripts/artifact_check.py": "d95f51158f98e56fab55a083f240a2de612ae5cf5f2b73aeaee848721793e860",
@@ -293,6 +293,6 @@
   "schema_version": 3,
   "source_channel": "snapshot",
   "source_commit": "",
-  "source_ref": "snapshot.22a952db8458a31a183b1c386d750a7cd8165a844e6434cb96e6b502fbd509a4",
+  "source_ref": "snapshot.3e4907b72d5f867bcf53c60d936fc96a5c52b95babad3973bc788b0fdfa400c8",
   "version": "0.5.0"
 }

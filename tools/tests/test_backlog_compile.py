@@ -88,6 +88,38 @@ class BacklogCompilerTests(unittest.TestCase):
             self.assertEqual(props["implements"], ["[[requirements/req-002-tiered-verification-gates|REQ-002]]"])
             self.assertEqual(backlog_compile.implements_findings(props, "story.md", "REQ-002"), [])
 
+    def test_stub_story_passes_the_per_write_vault_check(self):
+        import vault_check
+        with tempfile.TemporaryDirectory() as raw:
+            docs = Path(raw) / "workspace" / "docs"
+            (docs / "maps").mkdir(parents=True)
+            (docs.parent / "config.json").write_text(json.dumps({
+                "schema_version": 2, "team_id": "software-engineering-team",
+                "output_language": "English", "terminology_language": "English",
+            }), encoding="utf-8")
+            make_approved_backlog(docs)
+            # Without a planning mode the legacy fixture stubs an empty origin_mode.
+            backlog = docs / "backlog" / "backlog.md"
+            props, body = backlog_compile.parse_front_matter(backlog)
+            props["planning_mode"] = "manual"
+            backlog.write_text(backlog_compile.front_matter(props, body), encoding="utf-8")
+            constraint = "[[solution-design/landscape|Solution Landscape]]"
+            for slug, identity, constrained_by in (("job-worker", "AUTH-02", []),
+                                                   ("job-api", "AUTH-03", [constraint])):
+                args = SimpleNamespace(
+                    docs=docs, epic="delivery-fixture", slug=slug, id=identity, title=slug,
+                    scope="Run the job.", work_kind="technical", criterion_ref=[], experience_ref=[],
+                    evidence_ref=[], uses_design=[], constrained_by=constrained_by, implements=[],
+                )
+                with redirect_stdout(StringIO()):
+                    self.assertEqual(backlog_compile.stub_story(args), 0)
+                story = f"backlog/epics/delivery-fixture/stories/{slug}/story.md"
+                props, _body = backlog_compile.parse_front_matter(docs / story)
+                self.assertNotIn("uses_design", props)
+                self.assertEqual(props.get("constrained_by"), constrained_by or None)
+                vault = vault_check.build_vault(docs, vault_check.load_policy(vault_check.DEFAULT_POLICY))
+                self.assertEqual(vault_check.changed_findings(vault, [story])[story], [])
+
     def test_changes_requested_status_tag_uses_kebab_case(self):
         props = {
             "status": "changes_requested",

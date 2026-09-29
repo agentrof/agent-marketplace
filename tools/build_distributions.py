@@ -25,6 +25,9 @@ from types import ModuleType
 ADAPTER_API_VERSION = 1
 FEATURE_BRANCH_PREFIX_RE = re.compile(r"[a-z0-9]+(?:-[a-z0-9]+)*/")
 CANONICAL_REASONING_LEVELS = {"high", "medium", "low", "inherit"}
+EXECUTION_PROFILE_FILE = "execution-profiles.json"
+AUTO_EXECUTION_PROFILE = "auto"
+EXECUTION_SETTING_KEYS = {"model", "effort"}
 DELIVERY_PROTOCOL_CAPABILITY = {
     "read_min": 1,
     "read_max": 1,
@@ -288,7 +291,8 @@ def load_adapters(root: Path) -> dict[str, HostAdapter]:
             raise ValueError(f"{path}: adapter.py is missing")
         module = _load_adapter_module(module_path, host_id)
         required = ("skill_artifacts", "agent_artifacts", "native_manifest_directory",
-                    "instruction_surface", "runtime_contracts")
+                    "instruction_surface", "runtime_contracts",
+                    "execution_setting_problems")
         missing = [name for name in required if not callable(getattr(module, name, None))]
         if missing:
             raise ValueError(f"{module_path}: missing adapter functions: {', '.join(missing)}")
@@ -425,11 +429,80 @@ def generate_skills(source: Path, target: Path, adapter: HostAdapter) -> list[tu
     return records
 
 
-def generate_agents(source: Path, target: Path, adapter: HostAdapter) -> None:
+def execution_profile_path(root: Path, host_id: str) -> Path:
+    return root / "platforms" / host_id / EXECUTION_PROFILE_FILE
+
+
+def execution_profile_problems(
+    table: object, adapter: HostAdapter, tiers: set[str],
+) -> list[str]:
+    """Return the shape and host-vocabulary problems of one profile table."""
+    if not isinstance(table, dict) or set(table) != {"schema_version", "profiles"} \
+            or table.get("schema_version") != 1:
+        return ["table must hold exactly schema_version 1 and profiles"]
+    profiles = table["profiles"]
+    if not isinstance(profiles, dict) or set(profiles) != {AUTO_EXECUTION_PROFILE}:
+        return [
+            f"profiles must define exactly {AUTO_EXECUTION_PROFILE!r}; inherit"
+            " is a host override, not a table profile"
+        ]
+    settings = profiles[AUTO_EXECUTION_PROFILE]
+    if not isinstance(settings, dict) or set(settings) != tiers:
+        return [
+            f"{AUTO_EXECUTION_PROFILE} must map exactly the reasoning tiers"
+            f" {sorted(tiers)}"
+        ]
+    problems: list[str] = []
+    for tier in sorted(tiers):
+        setting = settings[tier]
+        where = f"{AUTO_EXECUTION_PROFILE}.{tier}"
+        if not isinstance(setting, dict) \
+                or not set(setting) <= EXECUTION_SETTING_KEYS \
+                or not all(isinstance(value, str) and value
+                           for value in setting.values()):
+            problems.append(
+                f"{where} may hold only non-empty string model and effort values"
+            )
+            continue
+        problems.extend(
+            f"{where}: {problem}"
+            for problem in adapter.module.execution_setting_problems(
+                tier, dict(setting)
+            )
+        )
+    return problems
+
+
+def load_execution_profile(
+    root: Path, adapter: HostAdapter,
+    tiers: set[str] = CANONICAL_REASONING_LEVELS,
+) -> dict[str, dict[str, str]]:
+    """Load one host's validated tier settings for the default profile."""
+    path = execution_profile_path(root, adapter.host_id)
+    try:
+        table = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise ValueError(f"{path}: missing or invalid execution profile table") from exc
+    problems = execution_profile_problems(table, adapter, set(tiers))
+    if problems:
+        raise ValueError("\n".join(f"{path}: {problem}" for problem in problems))
+    return {
+        tier: dict(setting)
+        for tier, setting in table["profiles"][AUTO_EXECUTION_PROFILE].items()
+    }
+
+
+def generate_agents(
+    source: Path, target: Path, adapter: HostAdapter,
+    execution_profile: dict[str, dict[str, str]],
+) -> None:
     agents = source / "agents"
     if not agents.is_dir():
         return
-    context = {"parse_frontmatter": parse_frontmatter}
+    context = {
+        "parse_frontmatter": parse_frontmatter,
+        "execution_profile": execution_profile,
+    }
     for path in sorted(agents.glob("*.md")):
         write_artifacts(target, adapter.module.agent_artifacts(context, path))
 
@@ -720,6 +793,7 @@ def build_plugin(
     provenance_name: str,
     snapshot: dict[str, str],
     adapters: dict[str, HostAdapter],
+    execution_profile: dict[str, dict[str, str]],
 ) -> None:
     host = adapter.host_id
     platform = root / "platforms" / host / source.name
@@ -762,7 +836,7 @@ def build_plugin(
             (json.dumps(manifest_data, indent=2) + "\n").encode("utf-8")
         )
     generate_skills(source, target, adapter)
-    generate_agents(source, target, adapter)
+    generate_agents(source, target, adapter, execution_profile)
     compose_project_instructions(root, source, target, adapters)
     (target / marker_name).write_bytes(
         b"Generated by tools/build_distributions.py; do not edit.\n"
@@ -848,13 +922,17 @@ def build(
     marker_name, provenance_name = packaging_names(root)
     versions = load_plugin_versions(root)
     snapshot = marketplace_snapshot(root)
+    profiles = {
+        host: load_execution_profile(root, adapter)
+        for host, adapter in adapters.items()
+    }
     for host, adapter in adapters.items():
         host_root = output / host
         host_root.mkdir(parents=True)
         for source in sorted(path for path in (root / "plugins").iterdir() if path.is_dir()):
             build_plugin(
                 root, source, adapter, host_root / source.name, versions[source.name],
-                marker_name, provenance_name, snapshot, adapters,
+                marker_name, provenance_name, snapshot, adapters, profiles[host],
             )
 
 

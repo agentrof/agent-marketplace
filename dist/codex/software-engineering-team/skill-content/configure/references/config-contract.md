@@ -17,6 +17,7 @@ The other configuration targets are documents with their own lifecycle:
 | Test, mutation and dependency-audit commands and the source of Delivery PR checks | `workspace/docs/operation/verification-contract.md` | QA Engineer |
 | Runtime environment command and scenarios | `workspace/docs/operation/environment-contract.md` | DevOps Engineer |
 | Maximum active Delivery Items | `workspace/docs/delivery/governance/governance.md` | Delivery Governance compiler |
+| Role model and reasoning effort | the installed package's execution profile; a user override follows the host contract | User |
 
 No `scale`, `limits`, stack, source-directory or command field is accepted in
 config. Product capacity and performance are concrete BA/Solution requirements,

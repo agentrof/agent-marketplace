@@ -1,7 +1,7 @@
 ---
 name: solution-reviewer
 description: Read-only challenger for the approved Solution Design package.
-reasoning: high
+model_reasoning_effort: high
 output_contract: prose
 tools: Read, Grep, Glob
 ---

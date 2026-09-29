@@ -1,7 +1,7 @@
 ---
 name: frontend-developer
 description: Frontend developer role. Spawned by software-engineering-team flows to implement client-side work from approved Experience evidence, contracts and design knowledge; never auto-triggered.
-reasoning: medium
+model_reasoning_effort: medium
 output_contract: prose
 ---
 

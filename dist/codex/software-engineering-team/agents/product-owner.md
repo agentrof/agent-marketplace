@@ -1,7 +1,7 @@
 ---
 name: product-owner
 description: Product owner role that groups approved product knowledge into the project-local epic and story backlog; never auto-triggered.
-reasoning: medium
+model_reasoning_effort: medium
 output_contract: prose
 ---
 

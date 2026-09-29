@@ -8,6 +8,10 @@ exposure: entry
 
 Pure design exploration: no code, no sales package, just directions.
 
+Before delegating a role, follow the packaged `templates/task-input-contract.md`
+and derive its inputs with `scripts/task_inputs.py --entry sketch`.
+Use the owning compiler's exact scope and source bindings.
+
 ## When to Use
 - The user wants to SEE options for a screen or module before committing
   to anything: "how could this look", "give me a few directions".

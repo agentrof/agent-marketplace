@@ -128,7 +128,9 @@ Dependency links target stories, and every dependency has a reason in the
 
 ## 3. Author test plans
 
-The QA Engineer and Business Analyst co-author the sibling `test-plan.md`.
+The QA Engineer and Business Analyst contribute scenario proposals for the
+sibling `test-plan.md`. The Product Owner remains the sole canonical backlog
+writer and persists their reviewed contributions after both readers finish.
 Every scenario has a stable `<story-id>-TS-###` heading and this shape:
 
 ```markdown

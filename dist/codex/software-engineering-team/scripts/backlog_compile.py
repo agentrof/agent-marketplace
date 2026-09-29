@@ -2017,6 +2017,55 @@ def approval_stamp_findings(path: Path, docs: Path) -> list[str]:
     return errors
 
 
+def committed_approval_sources(project: Path, docs: Path) -> dict[Path, bytes]:
+    """Read the backlog at one pinned HEAD, with object IDs as batch input."""
+    head = subprocess.run(
+        ["git", "--no-replace-objects", "rev-parse", "--verify", "HEAD"],
+        cwd=project, capture_output=True, check=False,
+    )
+    if head.returncode:
+        return {}
+    prefix = (docs / "backlog").relative_to(project).as_posix()
+    listing = subprocess.run(
+        ["git", "--no-replace-objects", "--literal-pathspecs", "ls-tree", "-r", "-z",
+         head.stdout.decode("ascii").strip(), "--", prefix],
+        cwd=project, capture_output=True, check=False,
+    )
+    if listing.returncode:
+        raise ValueError("committed backlog approval inventory is unreadable")
+    selected = {}
+    for row in listing.stdout.split(b"\0"):
+        if not row:
+            continue
+        fields, raw = row.split(b"\t", 1)
+        _mode, kind, oid = fields.split(b" ")
+        if kind == b"blob":
+            selected[project / raw.decode("utf-8", errors="surrogateescape")] = oid
+    if not selected:
+        return {}
+    objects = subprocess.run(
+        ["git", "--no-replace-objects", "cat-file", "--batch"],
+        cwd=project, capture_output=True, check=False,
+        input=b"".join(oid + b"\n" for oid in selected.values()),
+    )
+    if objects.returncode:
+        raise ValueError("committed backlog approval objects are unreadable")
+    offset = 0
+    sources = {}
+    for path, oid in selected.items():
+        end = objects.stdout.index(b"\n", offset)
+        actual, kind, size_text = objects.stdout[offset:end].split(b" ")
+        size = int(size_text)
+        start = end + 1
+        offset = start + size + 1
+        if actual != oid or kind != b"blob" or size < 0 or objects.stdout[start + size:offset] != b"\n":
+            raise ValueError("committed backlog approval batch response is invalid")
+        sources[path] = objects.stdout[start:start + size]
+    if offset != len(objects.stdout):
+        raise ValueError("committed backlog approval batch has trailing data")
+    return sources
+
+
 def preserved_approval_sources(
     record: dict, docs: Path, *, allow_new_approvals: bool = False,
 ) -> tuple[dict[Path, bytes], list[str]]:
@@ -2025,28 +2074,21 @@ def preserved_approval_sources(
     reviews.update(docs / review["path"] for epic in record["epics"] for review in epic["reviews"])
     project = next((parent for parent in (docs, *docs.parents) if (parent / ".git").exists()), None)
     preserved, errors = {}, []
+    committed = {}
     if project is not None:
-        prefix = (docs / "backlog").relative_to(project).as_posix()
-        listing = subprocess.run(
-            ["git", "--no-replace-objects", "ls-tree", "-r", "--name-only", "-z", "HEAD", "--", prefix],
-            cwd=project, capture_output=True, check=False,
-        )
-        for raw in listing.stdout.split(b"\0"):
-            if not raw:
-                continue
-            relative = raw.decode("utf-8", errors="surrogateescape")
-            path = project / relative
+        try:
+            committed = committed_approval_sources(project, docs)
+        except (OSError, ValueError) as exc:
+            errors.append(str(exc))
+        for path, original in committed.items():
+            relative = path.relative_to(project).as_posix()
             if path in reviews or not re.fullmatch(
                 r"(?:reviews/round-[0-9]+-backlog-review|epics/[^/]+/reviews/round-[0-9]+-epic-review)\.md",
                 path.relative_to(docs / "backlog").as_posix(),
             ):
                 continue
-            original = subprocess.run(
-                ["git", "--no-replace-objects", "show", f"HEAD:{relative}"],
-                cwd=project, capture_output=True, check=False,
-            )
             try:
-                head_props, _body = parse_front_matter_text(original.stdout.decode("utf-8"))
+                head_props, _body = parse_front_matter_text(original.decode("utf-8"))
             except UnicodeError:
                 errors.append(f"{relative} committed review approval is unreadable")
                 continue
@@ -2055,14 +2097,7 @@ def preserved_approval_sources(
     for path in package_paths(record, docs):
         props, _body = parse_front_matter(path)
         stamped = bool(props.get("source_hash") or props.get("approved_at_utc"))
-        head = None
-        if project is not None:
-            result = subprocess.run(
-                ["git", "--no-replace-objects", "show", f"HEAD:{path.relative_to(project).as_posix()}"],
-                cwd=project, capture_output=True, check=False,
-            )
-            if result.returncode == 0:
-                head = result.stdout
+        head = committed.get(path)
         try:
             head_props = parse_front_matter_text(head.decode("utf-8"))[0] if head is not None else {}
         except UnicodeError:

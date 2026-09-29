@@ -36,6 +36,7 @@ import stage_package  # noqa: E402
 import vault_check  # noqa: E402
 from backlog_fixture import make_approved_backlog  # noqa: E402
 from git_fixture import init_repository, remove_temporary, temporary_directory  # noqa: E402
+from fixture_cache import RepositorySeedCache  # noqa: E402
 
 
 def write_pull_request_workflow(project: Path) -> None:
@@ -101,6 +102,10 @@ def git_path_arguments():
         yield arguments
 
 
+_NATIVE_SUBPROCESS_RUN = subprocess.run
+_WINDOWS_PIPE_FIXTURE_CONTEXT = None
+
+
 @contextlib.contextmanager
 def windows_text_pipes(code_page: str = "cp1252"):
     """Give every text-mode subprocess pipe the behaviour CPython gives it on native Windows.
@@ -117,7 +122,9 @@ def windows_text_pipes(code_page: str = "cp1252"):
         encoding, errors = kwargs.pop("encoding", None), kwargs.pop("errors", None)
         if not (text or universal or encoding or errors):
             return run(*args, **kwargs)
-        encoding, errors = encoding or code_page, errors or "strict"
+        # TextIOWrapper's "locale" token selects the host code page, not a codec.
+        encoding = code_page if not encoding or encoding == "locale" else encoding
+        errors = errors or "strict"
         check = kwargs.pop("check", False)
         if isinstance(kwargs.get("input"), str):
             kwargs["input"] = kwargs["input"].replace("\n", "\r\n").encode(encoding, errors)
@@ -130,88 +137,62 @@ def windows_text_pipes(code_page: str = "cp1252"):
             result.check_returncode()
         return result
 
+    global _WINDOWS_PIPE_FIXTURE_CONTEXT
+    previous = _WINDOWS_PIPE_FIXTURE_CONTEXT
+    context = {"base_run": run, "runner": windows_run, "caches": {}, "receipts": {}}
     with mock.patch.object(subprocess, "run", windows_run):
+        _WINDOWS_PIPE_FIXTURE_CONTEXT = context
+        try:
+            yield
+        finally:
+            _WINDOWS_PIPE_FIXTURE_CONTEXT = previous
+            for cache in context["caches"].values():
+                cache.close()
+
+
+@contextlib.contextmanager
+def approved_fixture_shell_commands(commands: set[str]):
+    """Stub only the fixture's declared commands, preserving native host probes."""
+    original_run = subprocess.run
+
+    def fixture_command(command, *args, **kwargs):
+        if not (isinstance(command, str) and command in commands and kwargs.get("shell")):
+            return original_run(command, *args, **kwargs)
+        text_mode = any(kwargs.get(key) for key in ("text", "universal_newlines", "encoding", "errors"))
+        output = "Fixture command passed\n" if text_mode else b"Fixture command passed\n"
+        empty = "" if text_mode else b""
+        stdout = output if kwargs.get("capture_output") or kwargs.get("stdout") == subprocess.PIPE else None
+        stderr = empty if kwargs.get("capture_output") or kwargs.get("stderr") == subprocess.PIPE else None
+        return subprocess.CompletedProcess(command, 0, stdout, stderr)
+
+    with mock.patch.object(subprocess, "run", side_effect=fixture_command):
         yield
 
 
-class PreStartFixtureCache:
-    """Copy a process-local seed before it has worktrees or machine-local receipts."""
-
-    def __init__(self):
-        self.temporary = None
-        self.root = None
-        self.fingerprint = None
-
-    @staticmethod
-    def snapshot(root: Path) -> str:
-        records = []
-        for path in sorted(root.rglob("*")):
-            mode = path.lstat()
-            if path.is_symlink() or getattr(mode, "st_file_attributes", 0) & getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0):
-                raise AssertionError("fixture seed cannot contain links or junctions")
-            relative = path.relative_to(root).as_posix()
-            if path.is_file():
-                records.append((relative, "file", stat.S_IMODE(mode.st_mode), hashlib.sha256(path.read_bytes()).hexdigest()))
-            elif path.is_dir():
-                records.append((relative, "directory", stat.S_IMODE(mode.st_mode)))
-            else:
-                raise AssertionError("fixture seed cannot contain special files")
-        return hashlib.sha256(json.dumps(records, separators=(",", ":")).encode()).hexdigest()
-
-    @staticmethod
-    def require_pre_start(root: Path) -> None:
-        if (root / ".git" / "worktrees").exists():
-            raise AssertionError("fixture seed cannot contain linked worktrees")
-        runtime = delivery_git.runtime_root(root)
-        if runtime.exists() and any(runtime.rglob("*")):
-            raise AssertionError("fixture seed cannot contain machine-local runtime state")
-        for object_store in (root / ".git" / "objects", root / "remote.git" / "objects"):
-            if (object_store / "info" / "alternates").exists():
-                raise AssertionError("fixture seed cannot share another object store")
-
-    def copy(self, builder):
-        if self.temporary is None:
-            temporary, root, _docs = builder()
-            try:
-                self.require_pre_start(root)
-                fingerprint = self.snapshot(root)
-            except BaseException:
-                remove_temporary(temporary)
-                raise
-            self.temporary, self.root, self.fingerprint = temporary, root, fingerprint
-        if self.snapshot(self.root) != self.fingerprint:
-            raise AssertionError("immutable fixture seed changed between tests")
-        temporary = tempfile.TemporaryDirectory()
-        root = Path(temporary.name)
-        try:
-            shutil.copytree(self.root, root, dirs_exist_ok=True, copy_function=shutil.copy2)
-            subprocess.run(["git", "-C", str(root), "remote", "set-url", "origin", str(root / "remote.git")],
-                           check=True, capture_output=True)
-            (root / ".git" / "FETCH_HEAD").unlink(missing_ok=True)
-            return temporary, root, root / "workspace" / "docs"
-        except BaseException:
-            remove_temporary(temporary)
-            raise
-
-    def close(self):
-        if self.temporary is not None:
-            remove_temporary(self.temporary)
-            self.temporary, self.root, self.fingerprint = None, None, None
+class PreStartFixtureCache(RepositorySeedCache):
+    """Delivery fixtures share the same pre-runtime isolation boundary."""
 
 
 _PR_FIXTURE_CACHE = PreStartFixtureCache()
+_EXECUTION_FIXTURE_CACHES = {}
+_EXECUTION_FIXTURE_RECEIPTS = {}
 
 
 class DeliveryGitTests(unittest.TestCase):
     @classmethod
     def tearDownClass(cls):
         _PR_FIXTURE_CACHE.close()
+        for cache in _EXECUTION_FIXTURE_CACHES.values():
+            cache.close()
+        _EXECUTION_FIXTURE_CACHES.clear()
+        _EXECUTION_FIXTURE_RECEIPTS.clear()
 
-    def fixture_cache_context_unchanged(self):
+    def fixture_cache_context_unchanged(self, subprocess_run=None):
         if dict(os.environ) != _PR_FIXTURE_ENVIRONMENT or os.getcwd() != _PR_FIXTURE_CWD:
             return False
         for owner, name, original in _PR_FIXTURE_BINDINGS:
-            if getattr(owner, name, None) is not original:
+            expected = subprocess_run if owner is subprocess and name == "run" and subprocess_run is not None else original
+            if getattr(owner, name, None) is not expected:
                 return False
         return all(getattr(getattr(self, name), "__func__", None) is original
                    for name, original in _PR_FIXTURE_METHODS.items())
@@ -266,12 +247,50 @@ class DeliveryGitTests(unittest.TestCase):
 
     def approve_item_evidence(self, worktree: str, delivery: str = "DLV-001",
                               story: str = "AUTH-01") -> int:
+        import delivery_verification
         args = type("Args", (), {
-            "docs": ".",
-            "worktree": worktree,
-            "delivery": delivery,
-            "story": story,
+            "docs": ".", "worktree": worktree, "delivery": delivery, "story": story,
         })
+        try:
+            frozen = delivery_verification.freeze(Path(worktree), delivery, story, fresh=True)
+            raw = {}
+            contract, _ = delivery_compile.split_note(Path(worktree) / "workspace/docs/operation/verification-contract.md")
+            commands = {contract[kind + "_command"] for kind in ("test", "mutation", "dependency_audit")
+                        if isinstance(contract.get(kind + "_command"), str)}
+            runtime_commands = []
+            if frozen["candidate"]["runtime_required"]:
+                environment, _ = delivery_compile.split_note(Path(worktree) / "workspace/docs/operation/environment-contract.md")
+                runtime_commands = [("down", None), ("up", None), ("seed", environment["scenarios"][0]), ("logs", None), ("down", None)]
+                commands.update(environment["env_command"] + " " + verb + (" " + argument if argument else "")
+                                for verb, argument in runtime_commands)
+            with approved_fixture_shell_commands(commands):
+                for kind in ("test", "mutation", "dependency_audit"):
+                    if kind == "test" or contract.get(kind + "_disposition") == "required":
+                        raw[kind] = delivery_verification.run_check(Path(worktree), kind)
+                runtime_events = []
+                for verb, argument in runtime_commands:
+                    runtime_events.append(delivery_verification.run_environment(Path(worktree), verb, argument)["evidence_hash"])
+            for role, mode in (("code_reviewer", "review_initial"), ("qa_engineer", "qa_final")):
+                candidate = frozen["candidate"]
+                checks = {key: {"passed": True, "evidence": "Explicit fixture gate result"}
+                          for key in delivery_verification.required_checks(Path(worktree), candidate, role)}
+                if role == "qa_engineer":
+                    contract, _ = delivery_compile.split_note(Path(worktree) / "workspace/docs/operation/verification-contract.md")
+                    checks["full_test_suite"].update(command=contract["test_command"], exit_code=0, environment=raw["test"]["identity"]["environment_hash"], raw_evidence_hash=raw["test"]["evidence_hash"])
+                    if "mutation_whole_changed_files" in checks:
+                        checks["mutation_whole_changed_files"].update(files=candidate["mutation_files"], raw_evidence_hash=raw["mutation"]["evidence_hash"])
+                    if "fresh_runtime" in checks:
+                        checks["fresh_runtime"]["event_hashes"] = runtime_events
+                    if "dependency_audit" in checks:
+                        checks["dependency_audit"]["raw_evidence_hash"] = raw["dependency_audit"]["evidence_hash"]
+                delivery_verification.register_result(Path(worktree), {
+                    "role": role, "mode": mode, "verdict": "passed",
+                    "candidate_hash": candidate["candidate_hash"], "session_id": frozen["session_id"],
+                    "report": delivery_compile.split_note(Path(worktree) / candidate["report_paths"][0 if role == "code_reviewer" else 1])[1], "checks": checks,
+                })
+        except (RuntimeError, ValueError, KeyError):
+            # Invalid candidates are exercised by approval rejection tests.
+            pass
         return delivery_compile.approve_item_evidence(args)
 
     def make_project(self):
@@ -2362,83 +2381,113 @@ class DeliveryGitTests(unittest.TestCase):
                 self.assertEqual(delivery_git.run_git(project, "rev-parse", "HEAD"), target)
 
     def prepare_execution_with_draft_reserved_contracts(self, runtime=True, path_claim="src/auth.py", architecture=False, legacy_operation_receipts=False,
-                                                        extra_path_claims=()):
-        temporary, project = self.make_project()
+                                                        extra_path_claims=(), *, use_cache=True):
+        key = (runtime, path_claim, architecture, legacy_operation_receipts, tuple(extra_path_claims))
+        caches = receipts = None
+        if use_cache and self.fixture_cache_context_unchanged():
+            caches, receipts = _EXECUTION_FIXTURE_CACHES, _EXECUTION_FIXTURE_RECEIPTS
+        elif use_cache and _WINDOWS_PIPE_FIXTURE_CONTEXT is not None:
+            context = _WINDOWS_PIPE_FIXTURE_CONTEXT
+            if context["base_run"] is _NATIVE_SUBPROCESS_RUN and self.fixture_cache_context_unchanged(context["runner"]):
+                caches, receipts = context["caches"], context["receipts"]
+        if caches is not None:
+            cache = caches.setdefault(key, PreStartFixtureCache())
+
+            def builder():
+                temporary, project, docs, _directory, _item, reserved = self.build_execution_fixture(*key)
+                receipts[key] = json.dumps(reserved)
+                return temporary, project, docs
+
+            temporary, project, docs = cache.copy(builder)
+            directory = delivery_compile.find_delivery(docs, "DLV-001")
+            item = directory / "items/auth-01/item.md"
+            reserved = json.loads(receipts[key])
+        else:
+            temporary, project, docs, directory, item, reserved = self.build_execution_fixture(*key)
         self.addCleanup(remove_temporary, temporary)
-        docs = project / "workspace/docs"
-        make_approved_backlog(docs)
-        if architecture:
-            catalog = docs / "solution-design/_generated/component-catalog.json"
-            catalog.parent.mkdir(parents=True, exist_ok=True)
-            catalog.write_text(json.dumps({"components": [
-                {"component_id": "api", "sourcing": "build", "code_path": "src/auth.py"},
-                {"component_id": "other", "sourcing": "build", "code_path": "src/other.py"},
-            ]}), encoding="utf-8")
-            # The architecture stub derives from these components by canonical alias;
-            # the relation contract can only resolve an alias that a solution-component
-            # note owns, and integration now regenerates the projections that check it.
-            for component_id in ("api", "other"):
-                note = docs / "solution-design/components" / component_id / "component.md"
-                note.parent.mkdir(parents=True, exist_ok=True)
-                note.write_text(delivery_compile.frontmatter(
-                    {"type": "solution-component", "title": component_id.title() + " component",
-                     "component_id": component_id, "component_class": "application", "sourcing": "build",
-                     "derives_from": ["[[solution-design/landscape|Solution Landscape]]"],
-                     "tags": ["doc/solution-component"]},
-                    f"# {component_id.title()} component\n\nFixture component.\n"), encoding="utf-8")
-            import landscape_check
-            landscape = docs / "solution-design/landscape.md"
-            props, body = delivery_compile.split_note(landscape)
-            landscape.write_text(delivery_compile.frontmatter(props, body), encoding="utf-8")
-            props["package_hash"] = landscape_check.package_hash(landscape.parent)
-            landscape.write_text(delivery_compile.frontmatter(props, body), encoding="utf-8")
-        dod = type("Args", (), {"docs": str(docs), "title": "Project", "file": None})
-        self.assertEqual(delivery_compile.init_dod(dod), 0)
-        self.assertEqual(delivery_compile.approve_dod(dod), 0)
-        for kind in ("verification", "environment"):
-            args = type("Args", (), {"docs": str(docs), "kind": kind,
-                                    "constrained_by": ["[[solution-design/decisions/fixture-api|Fixture API]]"]})
-            self.assertEqual(operation_compile.init(args), 0)
-        delivery_git.run_git(project, "add", "workspace")
-        delivery_git.run_git(project, "commit", "-qm", "Approve sources with draft Operation contracts")
-        delivery_git.run_git(project, "push", "-q")
-        init = type("Args", (), {"docs": str(docs), "id": None, "slug": "auth", "goal": "Authenticate",
-                                 "outcome": None, "target_branch": "main", "story": ["AUTH-01"]})
-        self.assertEqual(delivery_compile.init_delivery(init), 0)
-        args = type("Args", (), {"docs": str(docs), "delivery": "DLV-001"})
-        self.assertEqual(delivery_compile.approve_scope(args), 0)
-        reserved = delivery_git.reserve_delivery(project, "DLV-001")
-        for kind, command in (("verification", "test_command"), ("environment", "env_command")):
-            path = operation_compile.contract_path(docs, kind)
-            props, body = operation_compile.parse(path)
-            props[command] = "make test" if kind == "verification" else "make env"
-            operation_compile.atomic_text(path, operation_compile.render(props, body))
-            self.assertEqual(operation_compile.approve(type("Args", (), {"docs": str(docs), "kind": kind})), 0)
-            if legacy_operation_receipts:
-                props, authored = operation_compile.parse(path)
-                view = {key: value for key, value in props.items()
-                        if key not in {"source_hash", "approved_at_utc"}}
-                props["source_hash"] = "sha256:" + hashlib.sha256(json.dumps(
-                    {"frontmatter": view, "body": authored + "\n"}, ensure_ascii=False,
-                    sort_keys=True, separators=(",", ":")).encode("utf-8")).hexdigest()
-                block = vault_check.RELATION_START + "\n\nHistorical generated inverse\n\n" + vault_check.RELATION_END
-                path.write_text(vault_check.replace_relation_block(operation_compile.render(props, authored), block), encoding="utf-8")
-        self.author_execution_topology(docs)
-        directory = delivery_compile.find_delivery(docs, "DLV-001")
-        item = directory / "items/auth-01/item.md"
-        props, body = delivery_compile.split_note(item)
-        props["runtime_required"] = runtime
-        props["path_claims"] = [path_claim, *extra_path_claims]
-        if architecture:
-            props.update({"architecture_impact": "required", "architecture_components": ["api"],
-                          "architecture_record_kinds": ["system-architecture", "architecture-component", "interface-contract"],
-                          "architecture_reason": "Define the authentication interface."})
-            sources, _snapshot, errors = delivery_compile.approved_backlog_sources(docs, ["AUTH-01"])
-            self.assertEqual(errors, [])
-            props["role_sequence"] = delivery_compile.execution_roles(sources["AUTH-01"], True)
-        delivery_compile.atomic_text(item, delivery_compile.frontmatter(props, body))
-        self.assertEqual(delivery_compile.approve_execution(args), 0)
         return project, docs, directory, item, reserved
+
+    def build_execution_fixture(self, runtime=True, path_claim="src/auth.py", architecture=False, legacy_operation_receipts=False,
+                                extra_path_claims=()):
+        temporary, project = self.make_project()
+        try:
+            docs = project / "workspace/docs"
+            make_approved_backlog(docs)
+            if architecture:
+                catalog = docs / "solution-design/_generated/component-catalog.json"
+                catalog.parent.mkdir(parents=True, exist_ok=True)
+                catalog.write_text(json.dumps({"components": [
+                    {"component_id": "api", "sourcing": "build", "code_path": "src/auth.py"},
+                    {"component_id": "other", "sourcing": "build", "code_path": "src/other.py"},
+                ]}), encoding="utf-8")
+                # The architecture stub derives from these components by canonical alias;
+                # the relation contract can only resolve an alias that a solution-component
+                # note owns, and integration now regenerates the projections that check it.
+                for component_id in ("api", "other"):
+                    note = docs / "solution-design/components" / component_id / "component.md"
+                    note.parent.mkdir(parents=True, exist_ok=True)
+                    note.write_text(delivery_compile.frontmatter(
+                        {"type": "solution-component", "title": component_id.title() + " component",
+                         "component_id": component_id, "component_class": "application", "sourcing": "build",
+                         "derives_from": ["[[solution-design/landscape|Solution Landscape]]"],
+                         "tags": ["doc/solution-component"]},
+                        f"# {component_id.title()} component\n\nFixture component.\n"), encoding="utf-8")
+                import landscape_check
+                landscape = docs / "solution-design/landscape.md"
+                props, body = delivery_compile.split_note(landscape)
+                landscape.write_text(delivery_compile.frontmatter(props, body), encoding="utf-8")
+                props["package_hash"] = landscape_check.package_hash(landscape.parent)
+                landscape.write_text(delivery_compile.frontmatter(props, body), encoding="utf-8")
+            dod = type("Args", (), {"docs": str(docs), "title": "Project", "file": None})
+            self.assertEqual(delivery_compile.init_dod(dod), 0)
+            self.assertEqual(delivery_compile.approve_dod(dod), 0)
+            for kind in ("verification", "environment"):
+                args = type("Args", (), {"docs": str(docs), "kind": kind,
+                                        "constrained_by": ["[[solution-design/decisions/fixture-api|Fixture API]]"]})
+                self.assertEqual(operation_compile.init(args), 0)
+            delivery_git.run_git(project, "add", "workspace")
+            delivery_git.run_git(project, "commit", "-qm", "Approve sources with draft Operation contracts")
+            delivery_git.run_git(project, "push", "-q")
+            init = type("Args", (), {"docs": str(docs), "id": None, "slug": "auth", "goal": "Authenticate",
+                                     "outcome": None, "target_branch": "main", "story": ["AUTH-01"]})
+            self.assertEqual(delivery_compile.init_delivery(init), 0)
+            args = type("Args", (), {"docs": str(docs), "delivery": "DLV-001"})
+            self.assertEqual(delivery_compile.approve_scope(args), 0)
+            reserved = delivery_git.reserve_delivery(project, "DLV-001")
+            for kind, command in (("verification", "test_command"), ("environment", "env_command")):
+                path = operation_compile.contract_path(docs, kind)
+                props, body = operation_compile.parse(path)
+                props[command] = "make test" if kind == "verification" else "make env"
+                operation_compile.atomic_text(path, operation_compile.render(props, body))
+                self.assertEqual(operation_compile.approve(type("Args", (), {"docs": str(docs), "kind": kind})), 0)
+                if legacy_operation_receipts:
+                    props, authored = operation_compile.parse(path)
+                    view = {key: value for key, value in props.items()
+                            if key not in {"source_hash", "approved_at_utc"}}
+                    props["source_hash"] = "sha256:" + hashlib.sha256(json.dumps(
+                        {"frontmatter": view, "body": authored + "\n"}, ensure_ascii=False,
+                        sort_keys=True, separators=(",", ":")).encode("utf-8")).hexdigest()
+                    block = vault_check.RELATION_START + "\n\nHistorical generated inverse\n\n" + vault_check.RELATION_END
+                    path.write_text(vault_check.replace_relation_block(operation_compile.render(props, authored), block), encoding="utf-8")
+            self.author_execution_topology(docs)
+            directory = delivery_compile.find_delivery(docs, "DLV-001")
+            item = directory / "items/auth-01/item.md"
+            props, body = delivery_compile.split_note(item)
+            props["runtime_required"] = runtime
+            props["path_claims"] = [path_claim, *extra_path_claims]
+            if architecture:
+                props.update({"architecture_impact": "required", "architecture_components": ["api"],
+                              "architecture_record_kinds": ["system-architecture", "architecture-component", "interface-contract"],
+                              "architecture_reason": "Define the authentication interface."})
+                sources, _snapshot, errors = delivery_compile.approved_backlog_sources(docs, ["AUTH-01"])
+                self.assertEqual(errors, [])
+                props["role_sequence"] = delivery_compile.execution_roles(sources["AUTH-01"], True)
+            delivery_compile.atomic_text(item, delivery_compile.frontmatter(props, body))
+            self.assertEqual(delivery_compile.approve_execution(args), 0)
+            return temporary, project, docs, directory, item, reserved
+        except BaseException:
+            remove_temporary(temporary)
+            raise
 
     def prepare_stamped_architecture_item(self, before_publish=None, extra_path_claims=()):
         project, docs, directory, _item, _reserved = self.prepare_execution_with_draft_reserved_contracts(
@@ -2715,9 +2764,15 @@ class DeliveryGitTests(unittest.TestCase):
                     item.write_text(delivery_compile.frontmatter(props, body))
                 delivery_git.run_git(worktree, "add", "workspace/docs")
                 delivery_git.run_git(worktree, "commit", "-qm", "Tamper with Architecture receipt")
-                self.assertEqual(self.approve_item_evidence(str(worktree)), 0)
-                with self.assertRaisesRegex(RuntimeError, "[Aa]rchitecture"):
-                    delivery_git.push_item(project, "DLV-001", "AUTH-01")
+                if label == "symlink_record":
+                    before_reports = {name: (item.parent / name).read_bytes()
+                                      for name in ("code-review.md", "verification.md")}
+                    self.assertNotEqual(self.approve_item_evidence(str(worktree)), 0)
+                    self.assertEqual({name: (item.parent / name).read_bytes() for name in before_reports}, before_reports)
+                else:
+                    self.assertEqual(self.approve_item_evidence(str(worktree)), 0)
+                    with self.assertRaisesRegex(RuntimeError, "[Aa]rchitecture"):
+                        delivery_git.push_item(project, "DLV-001", "AUTH-01")
                 self.assertEqual(delivery_git.run_git(project, "ls-remote", "origin"), baseline)
 
     def republish_integration_plan(self, project, worktree, item):
@@ -4542,6 +4597,52 @@ class DeliveryGitTests(unittest.TestCase):
             self.assertEqual((props["title"], body), ("Oturum açma, güvenlik", "Şifre ve ğ, ı, ö harfleri."))
             self.assertEqual(pending, {"notes/şifre.md"})
 
+    def test_fixture_command_pipes_preserve_text_aliases_and_host_version_probes(self):
+        import platform
+        aliases = ({"text": True}, {"universal_newlines": True}, {"encoding": "utf-8"},
+                   {"encoding": "locale"}, {"errors": "replace"})
+        command = "fixture-test-command"
+        with windows_text_pipes(), approved_fixture_shell_commands({command}):
+            for options in aliases:
+                with self.subTest(options=options):
+                    result = subprocess.run(command, shell=True, capture_output=True, **options)
+                    self.assertEqual((result.stdout, result.stderr), ("Fixture command passed\n", ""))
+                    self.assertEqual(subprocess.check_output(command, shell=True, **options), "Fixture command passed\n")
+                    actual = subprocess.check_output("echo Actual host probe", shell=True, **options)
+                    self.assertEqual(actual.strip(), "Actual host probe")
+            self.assertEqual(subprocess.check_output(command, shell=True), b"Fixture command passed\n")
+
+        for code_page, content in (("cp1252", "café €\n"), ("cp1254", "şifre ı\n")):
+            with self.subTest(code_page=code_page):
+                encoded = content.replace("\n", "\r\n").encode(code_page)
+
+                def locale_probe(command, *args, **kwargs):
+                    self.assertEqual(command, ["fixture-locale-probe"])
+                    self.assertFalse(any(kwargs.get(key) for key in ("text", "universal_newlines", "encoding", "errors")))
+                    self.assertEqual(kwargs["input"], encoded)
+                    return subprocess.CompletedProcess(command, 0, encoded, "é\r\n".encode(code_page))
+
+                with mock.patch.object(subprocess, "run", side_effect=locale_probe), windows_text_pipes(code_page):
+                    result = subprocess.run(["fixture-locale-probe"], input=content,
+                                            capture_output=True, encoding="locale")
+                    self.assertEqual((result.stdout, result.stderr), (content, "é\n"))
+                    with self.assertRaises(LookupError):
+                        subprocess.run(["fixture-locale-probe"], input=content,
+                                       capture_output=True, encoding="fixture-unknown-codec")
+
+        def version_probe(command, *args, **kwargs):
+            self.assertEqual(command, "ver")
+            self.assertTrue(kwargs["shell"])
+            # The pipe emulator delegates a binary call to its native backend.
+            self.assertFalse(any(kwargs.get(key) for key in ("text", "universal_newlines", "encoding", "errors")))
+            return subprocess.CompletedProcess(command, 0, b"Microsoft Windows [Version 10.0.20348]\r\n")
+        with mock.patch.object(subprocess, "run", side_effect=version_probe), windows_text_pipes(), \
+                approved_fixture_shell_commands({command}):
+            # Platform probes use universal_newlines, text, or encoding="locale"
+            # across supported Python versions and must receive strings.
+            self.assertEqual(platform._syscmd_ver(supported_platforms=(sys.platform,)),
+                             ("Microsoft", "Windows", "10.0.20348"))
+
     def test_command_results_reach_a_windows_code_page_stdout_as_utf8(self):
         """A redirected stdout on native Windows encodes in the ANSI code page, cp1252 on the
         runner, which lacks ş, ğ and ı. The coordinator's result envelope and the compiler's
@@ -4759,6 +4860,7 @@ _PR_FIXTURE_BINDINGS.extend([
 _PR_FIXTURE_METHODS = {name: getattr(DeliveryGitTests, name) for name in (
     "build_pre_start_fixture", "make_project", "reserve_scope", "author_execution_topology",
     "approve_verification_contract", "approve_governance",
+    "build_execution_fixture", "prepare_execution_with_draft_reserved_contracts",
 )}
 
 

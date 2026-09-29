@@ -30,6 +30,7 @@ import argparse
 import fnmatch
 import hashlib
 import json
+import os
 import re
 import shutil
 import stat
@@ -158,6 +159,141 @@ class Vault:
     index: set = field(default_factory=set)   # every file, posix rel
     notes: dict = field(default_factory=dict)  # rel -> Note
     inbound: dict = field(default_factory=dict)  # rel -> set of citing rels
+    files: VaultFileView | None = None
+
+    def __post_init__(self) -> None:
+        if self.files is None:
+            self.files = VaultFileView(self.root)
+
+
+class VaultFileView:
+    """Read-only filesystem view with exact, invocation-local patch overrides.
+
+    Opaque files are never decoded unless an existing check reads them. Reads
+    outside the vault retain their real path semantics. Overrides cannot write
+    through an alias or replace directories; patch targets are ordinary files.
+    """
+
+    def __init__(self, root: Path) -> None:
+        self.root = root if root.is_absolute() else Path(os.path.abspath(root))
+        self.resolved_root = self.root.resolve()
+        self.overrides: dict[Path, bytes | None] = {}
+        self.directories: set[Path] = set()
+        self._paths: list[Path] | None = None
+
+    def path(self, path: Path) -> Path:
+        return Path(os.path.abspath(path))
+
+    def resolve(self, path: Path) -> Path:
+        resolved = path.resolve()
+        try:
+            return self.root / resolved.relative_to(self.resolved_root)
+        except ValueError:
+            return resolved
+
+    def put(self, path: Path, content: bytes | None) -> None:
+        path = self.path(path)
+        path.relative_to(self.root)
+        for ancestor in (path, *path.parents):
+            if ancestor == self.root:
+                break
+            try:
+                metadata = ancestor.lstat()
+            except FileNotFoundError:
+                metadata = None
+            if metadata is not None and (stat.S_ISLNK(metadata.st_mode)
+                    or getattr(metadata, "st_file_attributes", 0)
+                    & getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0x400)):
+                raise ValueError(f"patch path is an alias: {path}")
+            if ancestor != path and self.exists(ancestor) and not self.is_dir(ancestor):
+                raise ValueError(f"patch parent is not a directory: {ancestor}")
+        if self.is_dir(path):
+            raise ValueError(f"patch target is a directory: {path}")
+        self.overrides[path] = content
+        self._paths = None
+        if content is not None:
+            self.directories.update(parent for parent in path.parents
+                                    if parent == self.root or self.root in parent.parents)
+
+    def read_bytes(self, path: Path) -> bytes:
+        path = self.path(path)
+        if path in self.overrides:
+            content = self.overrides[path]
+            if content is None:
+                raise FileNotFoundError(path)
+            return content
+        resolved = self.resolve(path) if self.overrides and path.is_symlink() else path
+        if resolved != path and resolved in self.overrides:
+            return self.read_bytes(resolved)
+        return path.read_bytes()
+
+    def read_text(self, path: Path, encoding: str = "utf-8",
+                  errors: str = "strict") -> str:
+        # Match Path.read_text's universal newline conversion.
+        return self.read_bytes(path).decode(encoding, errors).replace("\r\n", "\n").replace("\r", "\n")
+
+    def exists(self, path: Path) -> bool:
+        path = self.path(path)
+        if path in self.overrides:
+            return self.overrides[path] is not None
+        resolved = self.resolve(path) if self.overrides and path.is_symlink() else path
+        if resolved != path and resolved in self.overrides:
+            return self.overrides[resolved] is not None
+        return path in self.directories or path.exists()
+
+    def is_file(self, path: Path) -> bool:
+        path = self.path(path)
+        if path in self.overrides:
+            return self.overrides[path] is not None
+        resolved = self.resolve(path) if self.overrides and path.is_symlink() else path
+        if resolved != path and resolved in self.overrides:
+            return self.overrides[resolved] is not None
+        return path.is_file()
+
+    def is_dir(self, path: Path) -> bool:
+        path = self.path(path)
+        if path in self.overrides:
+            return False
+        return path in self.directories or path.is_dir()
+
+    def is_symlink(self, path: Path) -> bool:
+        path = self.path(path)
+        return path not in self.overrides and path.is_symlink()
+
+    def lstat(self, path: Path):
+        path = self.path(path)
+        if path not in self.overrides:
+            return path.lstat()
+        if self.overrides[path] is None:
+            raise FileNotFoundError(path)
+        if path.exists():
+            return path.lstat()
+        return os.stat_result((stat.S_IFREG | 0o644, 0, 0, 1, 0, 0,
+                               len(self.overrides[path]), 0, 0, 0))
+
+    def paths(self) -> list[Path]:
+        if self._paths is not None:
+            return self._paths
+        paths = set(self.root.rglob("*")) | set(self.overrides) | self.directories
+        self._paths = sorted(path for path in paths if path != self.root
+                             and (path not in self.overrides or self.overrides[path] is not None))
+        return self._paths
+
+    def glob(self, root: Path, pattern: str) -> list[Path]:
+        if not self.overrides:
+            return sorted(root.glob(pattern))
+        # Component matching keeps '*' from crossing a directory separator.
+        parts = Path(pattern).parts
+        matches = []
+        for path in self.paths():
+            try:
+                relative = path.relative_to(root).parts
+            except ValueError:
+                continue
+            if len(parts) == len(relative) and all(
+                    fnmatch.fnmatchcase(value, match) for value, match in zip(relative, parts)):
+                matches.append(path)
+        return matches
 
 
 @dataclass(frozen=True)
@@ -378,8 +514,9 @@ def is_table_row(line: str) -> bool:
     return line.lstrip().startswith("|")
 
 
-def scan_note(root: Path, path: Path, marker_prefix: str) -> Note:
-    text = path.read_text(encoding="utf-8", errors="replace")
+def scan_note(root: Path, path: Path, marker_prefix: str,
+              files: VaultFileView | None = None) -> Note:
+    text = (files or VaultFileView(root)).read_text(path, errors="replace")
     lines = text.splitlines()
     generated = bool(lines) and lines[0].startswith(marker_prefix)
     fm, fm_end, fm_error = parse_frontmatter(text)
@@ -423,12 +560,14 @@ def scan_note(root: Path, path: Path, marker_prefix: str) -> Note:
     return note
 
 
-def build_vault(root: Path, policy: dict) -> Vault:
-    vault = Vault(root=root, policy=policy)
+def build_vault(root: Path, policy: dict, files: VaultFileView | None = None) -> Vault:
+    root = root.absolute()
+    files = files or VaultFileView(root)
+    vault = Vault(root=root, policy=policy, files=files)
     marker_prefix = policy.get("generated_marker_prefix", "<!-- generated by")
-    for path in sorted(root.rglob("*")):
-        if not path.is_file():
-            if not is_os_metadata_path(path) or (path.is_dir() and not path.is_symlink()):
+    for path in files.paths():
+        if not files.is_file(path):
+            if not is_os_metadata_path(path) or (files.is_dir(path) and not files.is_symlink(path)):
                 continue
         rel = rel_posix(root, path)
         if rel.split("/")[0] == ".trash":
@@ -436,7 +575,7 @@ def build_vault(root: Path, policy: dict) -> Vault:
         vault.index.add(rel)
         if (path.suffix == ".md" and rel.split("/")[0] != ".obsidian"
                 and not is_artifact_location(policy, rel)):
-            vault.notes[rel] = scan_note(root, path, marker_prefix)
+            vault.notes[rel] = scan_note(root, path, marker_prefix, files)
     for note in vault.notes.values():
         targets = [t for (_, _, t, _, _, _) in note.wikilinks if t]
         targets.extend(t for (_, t) in note.fm_targets if t)
@@ -493,7 +632,7 @@ def check_vault_layout(vault: Vault, findings: list[Finding]) -> None:
             "materialize the vault payload (setup, or the stewardship copy"
             " rule) so navigation has a root"))
     for subtree in policy["subtrees"]:
-        if not (vault.root / subtree).is_dir():
+        if not vault.files.is_dir((vault.root / subtree)):
             continue
         if not subtree_has_notes(vault, subtree):
             continue  # a map is born with its tree's first note
@@ -528,7 +667,7 @@ def check_vault_layout(vault: Vault, findings: list[Finding]) -> None:
         top = rel.split("/")[0]
         if is_os_metadata_path(rel):
             try:
-                metadata = (vault.root / rel).lstat()
+                metadata = vault.files.lstat((vault.root / rel))
                 safe = stat.S_ISREG(metadata.st_mode) and metadata.st_nlink == 1
             except OSError:
                 safe = False
@@ -550,7 +689,7 @@ def check_vault_layout(vault: Vault, findings: list[Finding]) -> None:
         if in_machine_dir(policy, rel):
             continue  # compiler-owned directories manage their own files
         if is_artifact_path(policy, rel):
-            if (vault.root / rel).is_symlink():
+            if vault.files.is_symlink((vault.root / rel)):
                 findings.append(Finding(
                     "error", rel, 1, "vault_layout",
                     "artifact files must not be symlinks",
@@ -661,13 +800,13 @@ def check_link_policy(vault: Vault, findings: list[Finding]) -> None:
             clean = target.split("#", 1)[0]
             if not clean:
                 continue
-            resolved = (note.path.parent / clean).resolve()
+            resolved = vault.files.resolve(note.path.parent / clean)
             try:
                 resolved.relative_to(vault.root)
                 inside = True
             except ValueError:
                 inside = False
-            artifact_link = (inside and resolved.is_file()
+            artifact_link = (inside and vault.files.is_file(resolved)
                              and is_artifact_path(
                                  vault.policy, rel_posix(vault.root, resolved)))
             if inside and not artifact_link:
@@ -676,7 +815,7 @@ def check_link_policy(vault: Vault, findings: list[Finding]) -> None:
                     f"vault-internal citation uses a markdown link: {target}",
                     "cite vault content as a vault-absolute wikilink with an"
                     " alias; the normalize verb rewrites this class"))
-            elif not resolved.exists():
+            elif not vault.files.exists(resolved):
                 findings.append(Finding(
                     "warning", note.rel, lineno, "link_policy",
                     f"out-of-vault link target does not exist: {target}",
@@ -890,7 +1029,7 @@ def check_alias_ownership(vault: Vault, findings: list[Finding]) -> None:
             if root not in registries:
                 try:
                     registries[root] = json.loads(
-                        (vault.root / reg_rel).read_text(encoding="utf-8"))
+                        vault.files.read_text((vault.root / reg_rel), encoding="utf-8"))
                 except (OSError, json.JSONDecodeError):
                     registries[root] = None
             data = registries[root]
@@ -1212,10 +1351,10 @@ def relation_identity_owners(vault: Vault) -> dict[str, str]:
         if note.rel == "design-system/MASTER.md":
             owners.setdefault("design-system/MASTER", note.rel)
     ba_root = vault.root / "business-analysis"
-    if ba_root.is_dir():
-        for registry_path in sorted(ba_root.glob("*/_generated/registry.json")):
+    if vault.files.is_dir(ba_root):
+        for registry_path in sorted(vault.files.glob(ba_root, "*/_generated/registry.json")):
             try:
-                registry = json.loads(registry_path.read_text(encoding="utf-8"))
+                registry = json.loads(vault.files.read_text(registry_path, encoding="utf-8"))
             except (OSError, json.JSONDecodeError):
                 continue
             space = registry_path.parents[1].name
@@ -1499,7 +1638,7 @@ def check_relation_projections(vault: Vault,
     expected_blocks, expected_catalogs = relation_projection(vault)
     for note in authored(vault):
         expected = expected_blocks.get(note.rel, "")
-        actual = relation_block(note.path.read_text(encoding="utf-8"))
+        actual = relation_block(vault.files.read_text(note.path, encoding="utf-8"))
         if actual != expected:
             findings.append(Finding(
                 "error", note.rel, 1, "generated_views",
@@ -1515,8 +1654,8 @@ def check_relation_projections(vault: Vault,
     for rel in sorted(actual_catalogs | set(expected_catalogs)):
         actual = ""
         path = vault.root / rel
-        if path.is_file():
-            actual = path.read_text(encoding="utf-8")
+        if vault.files.is_file(path):
+            actual = vault.files.read_text(path, encoding="utf-8")
         if actual != expected_catalogs.get(rel, ""):
             findings.append(Finding(
                 "error", rel, 1, "generated_views",
@@ -1525,7 +1664,7 @@ def check_relation_projections(vault: Vault,
                 " compiler-owned and bounded to the policy page size"))
     for rel, expected in relation_reports(vault).items():
         path = vault.root / rel
-        actual = path.read_text(encoding="utf-8") if path.is_file() else ""
+        actual = vault.files.read_text(path, encoding="utf-8") if vault.files.is_file(path) else ""
         if actual != expected:
             findings.append(Finding(
                 "error", rel, 1, "generated_views",
@@ -1675,8 +1814,8 @@ def check_decision_records(vault: Vault, findings: list[Finding]) -> None:
         index_rel = index_path_for(tree)
         expected = render_decision_index(vault, tree)
         actual_path = vault.root / index_rel
-        actual = (actual_path.read_text(encoding="utf-8", errors="replace")
-                  if actual_path.is_file() else "")
+        actual = (vault.files.read_text(actual_path, encoding="utf-8", errors="replace")
+                  if vault.files.is_file(actual_path) else "")
         if notes and actual != expected:
             findings.append(Finding(
                 "error", index_rel, 1, "decision_records",
@@ -1693,7 +1832,7 @@ def check_generated_views(vault: Vault, findings: list[Finding]) -> None:
                         if tree.get("render_index", True)}
     for view in policy.get("generated_views", []):
         path = vault.root / view
-        if not path.is_file():
+        if not vault.files.is_file(path):
             if view in decision_indexes:
                 owners = [t for t in policy["decision_trees"].values()
                           if index_path_for(t) == view]
@@ -1704,7 +1843,7 @@ def check_generated_views(vault: Vault, findings: list[Finding]) -> None:
                 "policy-listed generated view is missing",
                 "render it with its owning verb (render-decisions)"))
             continue
-        first = path.read_text(encoding="utf-8",
+        first = vault.files.read_text(path, encoding="utf-8",
                                errors="replace").splitlines()
         if not first or not first[0].startswith(marker_prefix):
             findings.append(Finding(
@@ -1790,7 +1929,7 @@ def check_obsidian_payload(vault: Vault, findings: list[Finding],
             "assign every active document type to exactly one policy graph group"))
     obsidian = vault.root / ".obsidian"
     for name in PAYLOAD_FILES:
-        if not (obsidian / name).is_file():
+        if not vault.files.is_file((obsidian / name)):
             findings.append(Finding(
                 "error", f".obsidian/{name}", 1, "obsidian_payload",
                 "tracked managed payload file is missing",
@@ -1799,8 +1938,8 @@ def check_obsidian_payload(vault: Vault, findings: list[Finding],
         if payload_dir is not None else None
     brand_target = obsidian / "snippets" / "brand.css"
     if (brand_source is not None and brand_source.is_file()
-            and brand_target.is_file()
-            and brand_target.read_bytes() != brand_source.read_bytes()):
+            and vault.files.is_file(brand_target)
+            and vault.files.read_bytes(brand_target) != brand_source.read_bytes()):
         findings.append(Finding(
             "error", ".obsidian/snippets/brand.css", 1,
             "obsidian_payload",
@@ -1809,10 +1948,10 @@ def check_obsidian_payload(vault: Vault, findings: list[Finding],
             "refresh while appearance.json remains project-owned",
         ))
     appearance_path = obsidian / "appearance.json"
-    if appearance_path.is_file():
+    if vault.files.is_file(appearance_path):
         try:
             appearance = json.loads(
-                appearance_path.read_text(encoding="utf-8")
+                vault.files.read_text(appearance_path, encoding="utf-8")
             )
         except json.JSONDecodeError:
             appearance = None
@@ -1833,9 +1972,9 @@ def check_obsidian_payload(vault: Vault, findings: list[Finding],
                 "and snippets remain project-owned",
             ))
     app_path = obsidian / "app.json"
-    if app_path.is_file():
+    if vault.files.is_file(app_path):
         try:
-            app = json.loads(app_path.read_text(encoding="utf-8"))
+            app = json.loads(vault.files.read_text(app_path, encoding="utf-8"))
         except json.JSONDecodeError:
             app = None
             findings.append(Finding(
@@ -1853,9 +1992,9 @@ def check_obsidian_payload(vault: Vault, findings: list[Finding],
                         "these keys control what the vault app writes;"
                         " drift makes the app author against the law"))
     core_path = obsidian / "core-plugins.json"
-    if core_path.is_file():
+    if vault.files.is_file(core_path):
         try:
-            core = json.loads(core_path.read_text(encoding="utf-8"))
+            core = json.loads(vault.files.read_text(core_path, encoding="utf-8"))
         except json.JSONDecodeError:
             core = None
             findings.append(Finding(
@@ -1871,9 +2010,9 @@ def check_obsidian_payload(vault: Vault, findings: list[Finding],
                 "the bases plugin is off in this vault generation",
                 "views are markdown maps and generated indexes; disable it"))
     types_path = obsidian / "types.json"
-    if types_path.is_file():
+    if vault.files.is_file(types_path):
         try:
-            types = json.loads(types_path.read_text(encoding="utf-8"))
+            types = json.loads(vault.files.read_text(types_path, encoding="utf-8"))
         except json.JSONDecodeError:
             types = {}
             findings.append(Finding(
@@ -1897,9 +2036,9 @@ def check_obsidian_payload(vault: Vault, findings: list[Finding],
                     " that no active document contract consumes"))
     graph_path = obsidian / "graph.json"
     expected_queries = graph_group_queries(policy)
-    if graph_path.is_file() and expected_queries:
+    if vault.files.is_file(graph_path) and expected_queries:
         try:
-            graph = json.loads(graph_path.read_text(encoding="utf-8"))
+            graph = json.loads(vault.files.read_text(graph_path, encoding="utf-8"))
         except json.JSONDecodeError:
             graph = None
             findings.append(Finding(
@@ -1922,14 +2061,14 @@ def check_obsidian_payload(vault: Vault, findings: list[Finding],
                     " reconcile it"))
     community = policy.get("community_plugins", [])
     local_projection_present = (
-        (obsidian / "community-plugins.json").exists()
-        or any((obsidian / "plugins" / plugin_id).exists()
+        vault.files.exists((obsidian / "community-plugins.json"))
+        or any(vault.files.exists((obsidian / "plugins" / plugin_id))
                for plugin_id in community)
     )
     if community and (require_local_projection or local_projection_present):
         cp_path = obsidian / "community-plugins.json"
         cp_data = None
-        if not cp_path.is_file():
+        if not vault.files.is_file(cp_path):
             findings.append(Finding(
                 "error", ".obsidian/community-plugins.json", 1,
                 "obsidian_payload",
@@ -1938,7 +2077,7 @@ def check_obsidian_payload(vault: Vault, findings: list[Finding],
                 " community-plugin projection"))
         else:
             try:
-                cp_data = json.loads(cp_path.read_text(encoding="utf-8"))
+                cp_data = json.loads(vault.files.read_text(cp_path, encoding="utf-8"))
             except json.JSONDecodeError:
                 findings.append(Finding(
                     "error", ".obsidian/community-plugins.json", 1,
@@ -1956,7 +2095,7 @@ def check_obsidian_payload(vault: Vault, findings: list[Finding],
         for plugin_id in community:
             plugin_dir = obsidian / "plugins" / plugin_id
             for fname in ("manifest.json", "main.js", "data.json"):
-                if not (plugin_dir / fname).is_file():
+                if not vault.files.is_file((plugin_dir / fname)):
                     findings.append(Finding(
                         "error", f".obsidian/plugins/{plugin_id}/{fname}",
                         1, "obsidian_payload",
@@ -1964,10 +2103,10 @@ def check_obsidian_payload(vault: Vault, findings: list[Finding],
                         "rerun project refresh to restore the package-local"
                         " plugin projection"))
             manifest_path = plugin_dir / "manifest.json"
-            if manifest_path.is_file():
+            if vault.files.is_file(manifest_path):
                 try:
                     manifest = json.loads(
-                        manifest_path.read_text(encoding="utf-8"))
+                        vault.files.read_text(manifest_path, encoding="utf-8"))
                 except json.JSONDecodeError:
                     manifest = {}
                 if isinstance(manifest, dict) \
@@ -1981,18 +2120,20 @@ def check_obsidian_payload(vault: Vault, findings: list[Finding],
                         "the enable list, the directory and the manifest"
                         " name one plugin"))
             if plugin_id == TITLE_PLUGIN_ID:
-                check_title_plugin_data(plugin_dir / "data.json", findings)
+                check_title_plugin_data(plugin_dir / "data.json", findings, vault.files)
 
 
 def check_title_plugin_data(data_path: Path,
-                            findings: list[Finding]) -> None:
+                            findings: list[Finding],
+                            files: VaultFileView | None = None) -> None:
     """The title plugin's settings contract, asserted key by key so a
     drifted key can never silently no-op."""
+    files = files or VaultFileView(data_path.parent)
     rel = f".obsidian/plugins/{TITLE_PLUGIN_ID}/data.json"
-    if not data_path.is_file():
+    if not files.is_file(data_path):
         return  # the missing-file finding is already emitted
     try:
-        data = json.loads(data_path.read_text(encoding="utf-8"))
+        data = json.loads(files.read_text(data_path, encoding="utf-8"))
     except json.JSONDecodeError:
         findings.append(Finding(
             "error", rel, 1, "obsidian_payload",
@@ -3264,6 +3405,35 @@ def excluded(findings: list[Finding], excludes: list[str]) -> list[Finding]:
     return out
 
 
+def changed_findings(vault: Vault, targets: list[str]) -> dict[str, list[Finding]]:
+    """Evaluate one postimage once, retaining independent target results."""
+    selected = {rel for rel in targets if rel in vault.notes
+                and not vault.notes[rel].generated}
+    result: dict[str, list[Finding]] = {rel: [] for rel in targets}
+    if selected:
+        for check_id in CHANGED_CHECKS:
+            findings: list[Finding] = []
+            CHECKS[check_id](vault, findings)
+            for finding in findings:
+                if finding.path in selected:
+                    result[finding.path].append(finding)
+    return result
+
+
+def emit_findings(findings: list[Finding], as_json: bool = False) -> int:
+    findings = sorted(findings, key=lambda f: (f.path, f.line, f.check, f.message))
+    errors = [f for f in findings if f.severity == "error"]
+    warnings = [f for f in findings if f.severity == "warning"]
+    for f in findings:
+        if as_json:
+            print(json.dumps(f.__dict__, sort_keys=True))
+        else:
+            print(f"{f.severity.upper():7} {f.path}:{f.line} [{f.check}]"
+                  f" {f.message} | Fix: {f.remediation}")
+    print(f"vault_check: {len(errors)} error(s), {len(warnings)} warning(s)")
+    return 1 if errors else 0
+
+
 def cmd_check(args, policy: dict) -> int:
     root = args.vault.resolve()
     if not root.is_dir():
@@ -3280,28 +3450,14 @@ def cmd_check(args, policy: dict) -> int:
             if changed_rel.startswith(prefix):
                 changed_rel = changed_rel[len(prefix):]
                 break
-        if changed_rel in vault.notes and not vault.notes[changed_rel].generated:
-            for check_id in CHANGED_CHECKS:
-                sub: list[Finding] = []
-                CHECKS[check_id](vault, sub)
-                findings.extend(f for f in sub if f.path == changed_rel)
+        findings = changed_findings(vault, [changed_rel])[changed_rel]
     else:
         for check_id, check in CHECKS.items():
             check(vault, findings)
         check_obsidian_payload(vault, findings, args.payload)
         findings = scoped(findings, policy, args.scope)
     findings = excluded(findings, args.exclude or [])
-    findings.sort(key=lambda f: (f.path, f.line, f.check, f.message))
-    errors = [f for f in findings if f.severity == "error"]
-    warnings = [f for f in findings if f.severity == "warning"]
-    for f in findings:
-        if args.json:
-            print(json.dumps(f.__dict__, sort_keys=True))
-        else:
-            print(f"{f.severity.upper():7} {f.path}:{f.line} [{f.check}]"
-                  f" {f.message} | Fix: {f.remediation}")
-    print(f"vault_check: {len(errors)} error(s), {len(warnings)} warning(s)")
-    return 1 if errors else 0
+    return emit_findings(findings, args.json)
 
 
 def main(argv: list[str] | None = None) -> int:

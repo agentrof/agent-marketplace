@@ -149,7 +149,10 @@ reaches them.
    may be release-free only when the deterministic distribution gate proves
    every non-provenance package byte and executable mode is unchanged. Every
    other generated distribution change requires its component impact.
-6. Run focused tests while iterating, then run `make check` before commit.
+6. Run focused tests while iterating. Stage the complete candidate, run
+   `make check-local`, and run `make verify-local` immediately before commit.
+   Partial staging is unsupported. `make check` remains the exhaustive gate;
+   local receipts never replace independent required remote checks.
 7. Review the final diff for unrelated changes, generated drift, secrets,
    unsafe permissions, and stale documentation.
 

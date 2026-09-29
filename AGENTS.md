@@ -10,7 +10,7 @@ Read `memory/me.md` and follow it before editing this repository.
 - Never edit `dist/` by hand.
 - Create components with `tools/scaffold.py`; do not hand-copy them.
 - Derived README counts are maintained by `make counts`, never by hand.
-- Run `make check` before committing; one validation error fails CI.
+- Stage the complete candidate, run `make check-local`, then `make verify-local` before committing. `make check` remains the exhaustive gate; one validation error fails CI.
 
 ## Maintainer operations
 

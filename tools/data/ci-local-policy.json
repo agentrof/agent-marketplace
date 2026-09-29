@@ -1,0 +1,35 @@
+{
+  "schema_version": 1,
+  "max_age_seconds": 86400,
+  "default_workers": 2,
+  "max_workers": 4,
+  "static_commands": [
+    [
+      "tools/validate.py"
+    ],
+    [
+      "tools/release.py",
+      "validate"
+    ],
+    [
+      "tools/counts.py",
+      "--check"
+    ],
+    [
+      "tools/build_distributions.py",
+      "--check"
+    ]
+  ],
+  "ignored_cache_paths": [
+    ".agentrof/*",
+    ".codex/*",
+    ".claude/*",
+    "**/__pycache__/*",
+    "__pycache__/*",
+    "*.pyc",
+    "*.pyo",
+    ".DS_Store",
+    "**/.DS_Store",
+    "*.log"
+  ]
+}

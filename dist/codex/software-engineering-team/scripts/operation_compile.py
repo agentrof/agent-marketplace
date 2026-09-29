@@ -37,7 +37,7 @@ FILE_FOR = {
 }
 COMMAND_FIELDS = {
     "verification": (
-        "test_command", "mutation_command", "dependency_audit_command",
+        "test_command", "mutation_command", "dependency_audit_command", "diagnostic_test_command",
     ),
     "environment": ("env_command",),
 }
@@ -187,6 +187,18 @@ def check_contract(docs: Path, kind: str, text: str | None = None) -> tuple[dict
         if not valid_workdir(props.get(field, "")):
             errors.append(f"{field} must be a normalized repository-relative path")
     if kind == "verification":
+        if "diagnostic_test_command" in props:
+            diagnostic = props["diagnostic_test_command"]
+            if not isinstance(diagnostic, str) or not diagnostic.strip():
+                errors.append("diagnostic_test_command must be a non-empty approved adapter command when declared")
+            # The optional workdir defaults only at execution; do not insert it
+            # into an existing contract or change an older approved receipt.
+            directory = props.get("diagnostic_test_workdir", ".")
+            if (not valid_workdir(directory) or ":" in directory
+                    or any(part.rstrip(". ") != part for part in PurePosixPath(directory).parts if part != ".")):
+                errors.append("diagnostic_test_workdir must be a normalized repository-relative path")
+        elif "diagnostic_test_workdir" in props:
+            errors.append("diagnostic_test_workdir requires diagnostic_test_command")
         if props.get("status") == "approved" and (not isinstance(refs, list) or not refs):
             errors.append("approved contract must cite at least one accepted Solution decision in constrained_by")
         if props.get("status") == "approved" and (not isinstance(props.get("test_command"), str) or not props["test_command"].strip()):
@@ -201,6 +213,10 @@ def check_contract(docs: Path, kind: str, text: str | None = None) -> tuple[dict
                 errors.append(f"{prefix}_command is required when disposition is required")
             if disposition == "not_applicable" and (not isinstance(rationale, str) or not rationale.strip()):
                 errors.append(f"{prefix}_rationale is required when disposition is not_applicable")
+        include = props.get("mutation_include_paths", [])
+        if (not isinstance(include, list) or any(not isinstance(path, str) or path == "." or not valid_workdir(path)
+                                              for path in include)):
+            errors.append("mutation_include_paths must be normalized repository-relative paths")
         source, provider = pull_request_checks(props)
         if source not in PULL_REQUEST_CHECK_SOURCES:
             errors.append("pull_request_check_source must be repository_workflow or external")

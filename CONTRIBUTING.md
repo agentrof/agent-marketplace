@@ -10,24 +10,38 @@ here.
 
 Every rule in this repository is machine-enforced or it is not a rule.
 `tools/validate.py` is the rulebook; `make check` runs it together with
-the count-drift gate and the test suite. CI runs `make check` on every
-push and pull request, and one finding is red. There are no exception
+the count-drift gate and the complete test suite. CI runs fresh static gates
+and independently selects and verifies the required platform test matrix on
+push and pull request. One finding is red. There are no exception
 files, no allowlists, no temporary waivers. If you believe a rule is
 wrong, change the rule in `tools/validate.py` in your PR and update its
 fixture; do not work around it.
 
-Before opening a PR:
+Before committing and opening a PR:
 
+```text
+python3 tools/build_distributions.py
+git add <complete-change-paths>
+make check-local
+make verify-local
 ```
-make check
-```
+
+`check-local` always runs static gates, selects tests from the full branch
+base-to-staged-candidate diff and uses two isolated workers by default.
+Unknown/shared inputs run the full suite. Partial staging and worktree/index
+mismatches are rejected. Identical successful local results can be reused for
+at most 24 hours; a changed or failed candidate invalidates them. Verify the
+exact staged candidate again immediately before commit. `make check` remains
+the exhaustive local gate. Independent remote platform checks and release
+validation remain required; no Git hooks are installed. See
+[CI validation](docs/ci.md) for the commands and evidence boundaries.
 
 Before running the gate, add `.changes/<short-kebab-summary>.json`. It must contain
 a non-empty `summary` and a `components` object. Use `patch`, `minor`, or
 `major` for every affected plugin or `agent-marketplace`; use an empty object
 for documentation, test, and CI changes with no stable release effect. Do not
-edit `versions.json` in a normal pull request. If the check is green locally,
-it is green in CI.
+edit `versions.json` in a normal pull request. A local pass establishes the
+local candidate result; CI independently verifies its platform and host coverage.
 
 Security findings do not belong in public issues, pull requests or commit
 messages. Use the repository's [private vulnerability reporting form](https://github.com/agentrof/agent-marketplace/security/advisories/new)
@@ -68,8 +82,9 @@ release authority.
 4. Scripts under `scripts/` must be stdlib-only and runnable from any
    working directory. Outputs are anchored at the consuming project's
    git root, never at user or system level.
-5. Run `make check`, then `make counts` if the README counter table is
-   now stale. Never edit counted numbers by hand.
+5. Run `make counts` if the README counter table is stale, regenerate
+   distributions, stage the complete change and run `make check-local` followed
+   by `make verify-local`. Never edit counted numbers by hand.
 
 The scaffolder creates one host-neutral
 `templates/project-instructions/team.md`, creates platform source for every
@@ -77,7 +92,7 @@ registered adapter, updates native marketplace registries, and rebuilds all
 distributions. Host-specific project instruction behavior belongs only in the
 relevant platform adapter fragments.
 After a manual canonical edit, run
-`python3 tools/build_distributions.py` before `make check`.
+`python3 tools/build_distributions.py` before staging and `make check-local`.
 
 New stacks for the software team (a config enum value plus a skills
 folder plus tests) are maintainer releases: the team ships tested stacks

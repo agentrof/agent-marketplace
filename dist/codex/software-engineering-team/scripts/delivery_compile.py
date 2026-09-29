@@ -609,6 +609,7 @@ def init_delivery(args) -> int:
                       "architecture_impact": "not_applicable", "architecture_components": [],
                       "architecture_record_kinds": [], "architecture_reason": "No architecture delta is currently required.",
                       "role_sequence": execution_roles(source),
+                      "verification_schedule": verification_policy()["new_schedule"],
                       "tags": ["doc/delivery-item", "status/in-scope"]}
         atomic_text(item, frontmatter(item_props, body_for("item", item_props["title"], {
             "Delivery Scope": identifier, "Navigation": link(f"delivery/deliveries/{root.name}/delivery", identifier),
@@ -759,6 +760,10 @@ def delivery_findings(docs: Path, identifier: str, *,
         item_props, item_body = split_note(item_path)
         if item_props.get("type") != "delivery-item": errors.append(f"{item_path} type must be delivery-item")
         if item_props.get("status") not in ITEM_STATUSES: errors.append(f"{item_path} invalid Item status")
+        try:
+            verification_schedule(item_props)
+        except ValueError as exc:
+            errors.append(f"{item_path}: {exc}")
         errors.extend(f"{item_path} missing section: {name}" for name in sorted(set(SECTIONS["item"]) - sections(item_body)))
     plan = root / "execution-plan.md"
     if plan.exists():
@@ -1006,6 +1011,27 @@ def execution_roles(source: dict, architecture_required: bool = False) -> list[s
     return [*implementation, "code_reviewer", "qa_engineer"]
 
 
+def verification_policy() -> dict:
+    path = Path(__file__).resolve().parents[1] / "skill-content/deliver/data/delivery-verification-policy.json"
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
+def verification_schedule(props: dict) -> str:
+    contract = verification_policy()
+    value = props.get("verification_schedule", contract["legacy_schedule"])
+    if value not in contract["schedules"]:
+        raise ValueError("unsupported verification_schedule")
+    return value
+
+
+def execution_phases(props: dict) -> list[list[str]]:
+    """Derive phase grouping without rewriting legacy plan inputs."""
+    roles = list(props.get("role_sequence", []))
+    if verification_schedule(props) == "parallel_snapshot_v1":
+        return [[role] for role in roles if role not in {"code_reviewer", "qa_engineer"}] + [["code_reviewer", "qa_engineer"]]
+    return [[role] for role in roles]
+
+
 def _claims_overlap(first: str, second: str) -> bool:
     left, right = PurePosixPath(first), PurePosixPath(second)
     return left == right or left in right.parents or right in left.parents
@@ -1035,6 +1061,10 @@ def execution_plan_findings(root: Path, sources: dict[str, dict], docs: Path) ->
         paths = _string_list(props.get("path_claims"), f"{story_id} path_claims", errors)
         contracts = _string_list(props.get("contract_claims"), f"{story_id} contract_claims", errors)
         roles = _string_list(props.get("role_sequence"), f"{story_id} role_sequence", errors)
+        try:
+            verification_schedule(props)
+        except ValueError as exc:
+            errors.append(f"{story_id} {exc}")
         architecture_impact = str(props.get("architecture_impact", ""))
         architecture_components = _string_list(props.get("architecture_components"), f"{story_id} architecture_components", errors)
         architecture_kinds = _string_list(props.get("architecture_record_kinds"), f"{story_id} architecture_record_kinds", errors)
@@ -1415,7 +1445,8 @@ def approve_execution(args) -> int:
         item_graph.append(
             f"{story} after " + (", ".join(item_props["execution_after"]) or "none")
         )
-        role_sequences.append(f"{story}: " + " -> ".join(item_props["role_sequence"]))
+        role_sequences.append(f"{story}: " + " -> ".join(
+            " + ".join(phase) for phase in execution_phases(item_props)))
         path_claims.extend(f"{story}: {claim}" for claim in item_props["path_claims"])
         contract_claims.extend(f"{story}: {claim}" for claim in item_props["contract_claims"])
         operation_hashes.append(
@@ -1503,6 +1534,11 @@ def prepare_item_transition(args) -> int:
         print(json.dumps({"ok": False, "errors": ["Delivery Item not found"]}, indent=2)); return 1
     if args.to not in ITEM_STATUSES:
         print(json.dumps({"ok": False, "errors": ["invalid Item transition status"]}, indent=2)); return 2
+    import delivery_verification
+    try:
+        delivery_verification.guard_write(docs.parent.parent, [item])
+    except RuntimeError as exc:
+        print(json.dumps({"ok": False, "errors": [str(exc)]}, indent=2)); return 2
     props, body = split_note(item)
     previous = props.get("status")
     props["status"] = args.to
@@ -1525,6 +1561,12 @@ def check_item_ready(args) -> int:
         if not review.exists() or split_note(review)[0].get("status") != "approved": errors.append("code review is not approved")
         if not verification.exists() or split_note(verification)[0].get("status") != "passed": errors.append("verification is not passed")
         if not props.get("item_plan_hash"): errors.append("Item has no item_plan_hash")
+        if not errors:
+            from delivery_verification import validate_evidence
+            try:
+                validate_evidence(props, split_note(review)[0], split_note(verification)[0])
+            except (RuntimeError, ValueError) as exc:
+                errors.append(str(exc))
     print(json.dumps({"ok": not errors, "errors": errors}, indent=2)); return 0 if not errors else 1
 
 
@@ -1570,6 +1612,24 @@ def item_evidence_file_findings(worktree: Path, head: str, paths: tuple[Path, Pa
 
 
 def approve_item_evidence(args) -> int:
+    value = getattr(args, "worktree", None)
+    if isinstance(value, str) and value.strip():
+        worktree = Path(value).resolve()
+        root = find_delivery(docs_root(worktree), args.delivery)
+        item = root / "items" / id_slug(args.story) / "item.md" if root else None
+        if item and item.is_file():
+            try:
+                props, _ = split_note(item)
+                if verification_schedule(props) == "parallel_snapshot_v1":
+                    import delivery_verification
+                    with delivery_verification.locked(worktree):
+                        return _approve_item_evidence(args)
+            except (RuntimeError, ValueError) as exc:
+                print(json.dumps({"ok": False, "errors": [str(exc)]}, indent=2)); return 2
+    return _approve_item_evidence(args)
+
+
+def _approve_item_evidence(args) -> int:
     worktree_value = getattr(args, "worktree", None)
     if not isinstance(worktree_value, str) or not worktree_value.strip():
         print(json.dumps({"ok": False, "errors": ["an Item worktree is required"]}, indent=2)); return 2
@@ -1606,6 +1666,34 @@ def approve_item_evidence(args) -> int:
     verification_props, verification_body = split_note(verification)
     if item_props.get("status") != "active":
         print(json.dumps({"ok": False, "errors": ["Item evidence requires an active Item worktree"]}, indent=2)); return 2
+    review_result = verification_result = None
+    try:
+        schedule = verification_schedule(item_props)
+        if schedule == "parallel_snapshot_v1":
+            import delivery_verification
+            session = delivery_verification.validate(worktree, args.delivery, args.story)
+            review_result = session["workers"]["code_reviewer"]["result"]
+            verification_result = session["workers"]["qa_engineer"]["result"]
+            # The owner persists each independent report only after the read barrier.
+            review_body = body_for("item", review_props["title"], {
+                "Implementation Evidence": review_result["report"],
+                "Navigation": link(item.relative_to(docs).as_posix(), item_props["title"]),
+            })
+            verification_body = body_for("item", verification_props["title"], {
+                "Implementation Evidence": verification_result["report"],
+                "Definition of Done Evidence": json.dumps(verification_result["checks"], sort_keys=True, ensure_ascii=False),
+                "Navigation": link(item.relative_to(docs).as_posix(), item_props["title"]),
+            })
+            if set(SECTIONS["item"]).issubset(sections(review_result["report"])):
+                review_body = review_result["report"]
+            if set(SECTIONS["item"]).issubset(sections(verification_result["report"])):
+                verification_body = verification_result["report"]
+            for target, result in ((review_props, review_result), (verification_props, verification_result)):
+                target["verification_candidate_hash"] = session["candidate"]["candidate_hash"]
+                target["verification_mode"] = result["mode"]
+                target["verification_result_hash"] = result["result_hash"]
+    except (RuntimeError, ValueError) as exc:
+        print(json.dumps({"ok": False, "errors": [str(exc)]}, indent=2)); return 2
     reviewed = head
     verified = head
     review_props["status"] = "approved"; review_props["reviewed_commit"] = reviewed

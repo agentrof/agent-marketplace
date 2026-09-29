@@ -562,6 +562,18 @@ class ValidSpaceTests(unittest.TestCase):
                   for p in (self.space / "_generated").iterdir()}
         self.assertEqual(first, second)
 
+    def test_check_only_renders_once_and_reports_stale_bytes(self):
+        with mock.patch.object(ba, "render_views", wraps=ba.render_views) as render:
+            code, out, err = run(["render", "--space", str(self.space), "--check-only"])
+            self.assertEqual(code, 0, out + err)
+            self.assertEqual(render.call_count, 1)
+        (self.space / "_generated/index.md").write_bytes(b"stale\n")
+        with mock.patch.object(ba, "render_views", wraps=ba.render_views) as render:
+            code, out, err = run(["render", "--space", str(self.space), "--check-only"])
+            self.assertEqual(code, 1, out + err)
+            self.assertEqual(render.call_count, 1)
+            self.assertEqual((self.space / "_generated/index.md").read_bytes(), b"stale\n")
+
     def test_staleness_round_trip(self):
         edit(self.space / "domains" / "inventory" / "rules"
              / "stock-item-lifecycle-rules.md",

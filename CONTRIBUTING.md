@@ -114,8 +114,9 @@ validator.
   into a lottery.
 - Version pins and vendor bias in content. Pinned versions rot; content
   is written in principle language and stays valid across releases.
-- Model names in authored content. Model choice belongs to frontmatter
-  configuration, never to prose.
+- Model names in authored content. Agents declare a reasoning tier; each
+  host's `platforms/<host>/execution-profiles.json` maps it to a model and
+  effort, never prose.
 - Absolute or user-level paths. All outputs are project-relative;
   writing outside the consuming project's tree is a structural leak.
 - Technology nouns in agent bodies. The moment a role names a framework,

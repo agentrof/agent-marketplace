@@ -2182,6 +2182,36 @@ def check_model_config_shape(tree: Tree, findings: list[Finding]) -> None:
         ))
 
 
+def check_execution_profiles(tree: Tree, findings: list[Finding]) -> None:
+    """Every host maps exactly the canonical reasoning tiers to its own
+    documented model and effort values; model names stay under platforms/."""
+    try:
+        adapters = build_distributions.load_adapters(tree.root)
+    except ValueError:
+        return  # registration and product_namespace report adapter failures
+    tiers = set((tree.config or {}).get("reasoning_levels")
+                or AGENT_REASONING_ENUM)
+    for host, adapter in adapters.items():
+        path = build_distributions.execution_profile_path(tree.root, host)
+        try:
+            table = json.loads(read_text(path))
+        except (OSError, json.JSONDecodeError):
+            findings.append(Finding(
+                "error", rel(tree, path), 1, "execution_profiles",
+                "execution profile table is missing or not valid JSON",
+                "restore the host table that maps each reasoning tier to"
+                " model and effort",
+            ))
+            continue
+        for problem in build_distributions.execution_profile_problems(
+                table, adapter, tiers):
+            findings.append(Finding(
+                "error", rel(tree, path), 1, "execution_profiles", problem,
+                "map every reasoning tier in tools/data/models.json to the"
+                " host's documented model and effort values",
+            ))
+
+
 def _limits_shape_errors(config: dict) -> list[str]:
     problems: list[str] = []
     if not isinstance(config.get("schema_version"), int):
@@ -2433,6 +2463,7 @@ CHECKS = {
     "vault_policy_shape": check_vault_policy_shape,
     "vault_wiring": check_vault_wiring,
     "model_config_shape": check_model_config_shape,
+    "execution_profiles": check_execution_profiles,
     "limits_config_shape": check_limits_config_shape,
     "delivery_contract_shape": check_delivery_contract_shape,
     "product_namespace": check_product_namespace,

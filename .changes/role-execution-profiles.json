@@ -1,0 +1,6 @@
+{
+  "summary": "Role agents take their model and reasoning effort from per-host execution profile tables (`platforms/<host>/execution-profiles.json`, profile `auto`) whose defaults keep today's settings, and Codex setup accepts `--execution-profile inherit` so every role follows the parent session; the Claude Code host contract documents the equivalent session setting.",
+  "components": {
+    "software-engineering-team": "patch"
+  }
+}

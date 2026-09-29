@@ -2,7 +2,29 @@
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
+
+
+# Documented custom-agent values; per-tier choices are data in
+# execution-profiles.json beside this module.
+EFFORT_LEVELS = ("low", "medium", "high", "xhigh", "max", "ultra")
+MODEL_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:/-]*")
+
+
+def execution_setting_problems(tier: str, setting: dict[str, str]) -> list[str]:
+    model = setting.get("model")
+    effort = setting.get("effort")
+    problems = []
+    if model is not None and MODEL_RE.fullmatch(model) is None:
+        problems.append("model must be one model name without spaces or quotes")
+    if effort is not None and effort not in EFFORT_LEVELS:
+        problems.append(
+            f"effort must be one of {', '.join(EFFORT_LEVELS)} or absent"
+        )
+    if tier == "inherit" and setting:
+        problems.append("the inherit tier must set neither model nor effort")
+    return problems
 
 
 def skill_artifacts(context: dict, source_name: str, metadata: tuple[str, str, str, str]) -> list[tuple[str, str]]:
@@ -45,7 +67,23 @@ def skill_artifacts(context: dict, source_name: str, metadata: tuple[str, str, s
 
 
 def agent_artifacts(context: dict, source) -> list[tuple[str, str]]:
-    return [(f"agents/{source.name}", source.read_text(encoding="utf-8"))]
+    fields, body = context["parse_frontmatter"](source)
+    reasoning = fields.pop("reasoning", "")
+    setting = context["execution_profile"].get(reasoning)
+    if setting is None:
+        raise ValueError(f"{source}: invalid reasoning level {reasoning!r}")
+    lines = ["---"]
+    for key in ("name", "description"):
+        if not fields.get(key):
+            raise ValueError(f"{source}: missing {key}")
+        lines.append(f"{key}: {fields.pop(key)}")
+    if "model" in setting:
+        lines.append(f"model: {setting['model']}")
+    if "effort" in setting:
+        lines.append(f"model_reasoning_effort: {setting['effort']}")
+    lines.extend(f"{key}: {value}" for key, value in fields.items())
+    lines.extend(("---", "", body.lstrip("\n")))
+    return [(f"agents/{source.name}", "\n".join(lines))]
 
 
 def native_manifest_directory(host_id: str) -> str:

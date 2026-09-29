@@ -34,5 +34,10 @@
 - During setup or a package refresh, regenerate the host projection, run the
   generated project check and preserve authored vault files. The generator owns
   only portable instruction roots and local project memory.
+- Role agents use the package's `auto` execution profile, a model and
+  reasoning effort per role tier. When the user wants every role to follow the
+  parent session, run `generate_codex_project.py apply --execution-profile
+  inherit`; `--execution-profile auto` restores the default. The managed agent
+  files record the choice and later refreshes keep it.
 - Delivery execution is available only through the exact public entries
   `/delivery-plan`, `/execution-plan DLV-###` and `/deliver DLV-###`.

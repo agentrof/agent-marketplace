@@ -5,12 +5,25 @@ from __future__ import annotations
 from pathlib import Path
 
 
-MODELS = {
-    "high": "opus",
-    "medium": "sonnet",
-    "low": "haiku",
-    "inherit": "inherit",
-}
+# Documented subagent frontmatter values; per-tier choices are data in
+# execution-profiles.json beside this module.
+MODEL_ALIASES = ("opus", "sonnet", "haiku", "inherit")
+EFFORT_LEVELS = ("low", "medium", "high", "xhigh", "max")
+
+
+def execution_setting_problems(tier: str, setting: dict[str, str]) -> list[str]:
+    model = setting.get("model")
+    effort = setting.get("effort")
+    problems = []
+    if model not in MODEL_ALIASES:
+        problems.append(f"model must be one of {', '.join(MODEL_ALIASES)}")
+    if effort is not None and effort not in EFFORT_LEVELS:
+        problems.append(
+            f"effort must be one of {', '.join(EFFORT_LEVELS)} or absent"
+        )
+    if tier == "inherit" and (model != "inherit" or effort is not None):
+        problems.append("the inherit tier must use model inherit and no effort")
+    return problems
 
 
 def skill_artifacts(context: dict, source_name: str, metadata: tuple[str, str, str, str]) -> list[tuple[str, str]]:
@@ -40,14 +53,17 @@ def skill_artifacts(context: dict, source_name: str, metadata: tuple[str, str, s
 def agent_artifacts(context: dict, source) -> list[tuple[str, str]]:
     fields, body = context["parse_frontmatter"](source)
     reasoning = fields.pop("reasoning", "")
-    if reasoning not in MODELS:
+    setting = context["execution_profile"].get(reasoning)
+    if setting is None:
         raise ValueError(f"{source}: invalid reasoning level {reasoning!r}")
     lines = ["---"]
     for key in ("name", "description"):
         if not fields.get(key):
             raise ValueError(f"{source}: missing {key}")
         lines.append(f"{key}: {fields.pop(key)}")
-    lines.append(f"model: {MODELS[reasoning]}")
+    lines.append(f"model: {setting['model']}")
+    if "effort" in setting:
+        lines.append(f"effort: {setting['effort']}")
     lines.extend(f"{key}: {value}" for key, value in fields.items())
     lines.extend(("---", "", body.lstrip("\n")))
     return [(f"agents/{source.name}", "\n".join(lines))]

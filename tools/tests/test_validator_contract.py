@@ -153,6 +153,36 @@ class ValidatorContractTests(unittest.TestCase):
             )
             self.assertIn("delivery_contract_shape", self.checks(root))
 
+    def test_execution_profile_tables_are_validated(self):
+        for relative, mutate in (
+                ("platforms/claude/execution-profiles.json",
+                 lambda value: value["profiles"]["auto"]["high"].update(model="gpt-5")),
+                ("platforms/claude/execution-profiles.json",
+                 lambda value: value["profiles"]["auto"]["low"].update(effort="extreme")),
+                ("platforms/codex/execution-profiles.json",
+                 lambda value: value["profiles"]["auto"]["inherit"].update(effort="low")),
+                ("platforms/codex/execution-profiles.json",
+                 lambda value: value["profiles"].update(fast={})),
+                ("tools/data/models.json",
+                 lambda value: value["reasoning_levels"].append("extreme"))):
+            with self.subTest(path=relative), \
+                    tempfile.TemporaryDirectory() as temporary:
+                root = self.fixture(temporary)
+                path = root / relative
+                value = json.loads(path.read_text(encoding="utf-8"))
+                mutate(value)
+                path.write_text(json.dumps(value, indent=2) + "\n", encoding="utf-8")
+                self.assertIn("execution_profiles", self.checks(root))
+
+        with tempfile.TemporaryDirectory() as temporary:
+            root = self.fixture(temporary)
+            (root / "platforms/codex/execution-profiles.json").unlink()
+            findings = validate.run(root)
+            self.assertIn(
+                ("platforms/codex/execution-profiles.json", "execution_profiles"),
+                {(finding.path, finding.check) for finding in findings},
+            )
+
     def test_delivery_verification_policy_rejects_diagnostic_seal_and_weakened_scope(self):
         for mutate in (
                 lambda value: value["final_modes"].update(qa_engineer=["qa_diagnostic", "qa_final"]),

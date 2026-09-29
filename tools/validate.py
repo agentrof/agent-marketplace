@@ -671,7 +671,8 @@ def check_content_bans(tree: Tree, findings: list[Finding]) -> None:
                     findings.append(Finding(
                         "error", rel(tree, path), lineno, "content_bans",
                         "model name outside agent frontmatter",
-                        "host model names belong only in generated distributions",
+                        "host model names belong only in platforms/<host>/"
+                        "execution-profiles.json and generated distributions",
                     ))
             if ABSOLUTE_PATH_RE.search(line):
                 findings.append(Finding(
@@ -2180,6 +2181,18 @@ def check_model_config_shape(tree: Tree, findings: list[Finding]) -> None:
             "fix the config block; the enum feeds the frontmatter_shape"
             " reasoning check",
         ))
+    levels = tree.config.get("reasoning_levels")
+    builder_levels = build_distributions.CANONICAL_REASONING_LEVELS
+    if isinstance(levels, list) \
+            and all(isinstance(level, str) for level in levels) \
+            and set(levels) != builder_levels:
+        findings.append(Finding(
+            "error", MODEL_CONFIG_RELPATH, 1, "model_config_shape",
+            f"reasoning_levels {sorted(set(levels))} differ from the"
+            f" distribution builder's tiers {sorted(builder_levels)}",
+            "change reasoning_levels and CANONICAL_REASONING_LEVELS in"
+            " tools/build_distributions.py together",
+        ))
 
 
 def check_execution_profiles(tree: Tree, findings: list[Finding]) -> None:
@@ -2189,8 +2202,10 @@ def check_execution_profiles(tree: Tree, findings: list[Finding]) -> None:
         adapters = build_distributions.load_adapters(tree.root)
     except ValueError:
         return  # registration and product_namespace report adapter failures
-    tiers = set((tree.config or {}).get("reasoning_levels")
-                or AGENT_REASONING_ENUM)
+    levels = (tree.config or {}).get("reasoning_levels")
+    tiers = set(levels) if isinstance(levels, list) and levels and all(
+        isinstance(level, str) for level in levels
+    ) else set(AGENT_REASONING_ENUM)  # model_config_shape reports bad shapes
     for host, adapter in adapters.items():
         path = build_distributions.execution_profile_path(tree.root, host)
         try:

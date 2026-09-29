@@ -1,5 +1,5 @@
 {
-  "build_id": "snapshot.22a952db8458a31a183b1c386d750a7cd8165a844e6434cb96e6b502fbd509a4",
+  "build_id": "snapshot.3e4907b72d5f867bcf53c60d936fc96a5c52b95babad3973bc788b0fdfa400c8",
   "component": "software-engineering-team",
   "delivery_protocol": {
     "read_max": 1,
@@ -47,7 +47,7 @@
     "flows/requirement.md": "fc7930f17daf899ed2375d4c67bf0fefcc86be7894f0f8d02b276527e67a3c04",
     "flows/solution-design.md": "4e4507da3b15f7765b5d2dc0548d676c81ec621e0918d7595d65c121b1fc3124",
     "hooks/hooks.json": "2b8065a160260ad8fb772dd5b1b8aef5aadbf9b40afc0e62dcdd61e1ef3876d5",
-    "host-contract.md": "e444a2ce4ba848a7d14e7ce0820082570862a5c5d7d0766063e61891360a56e4",
+    "host-contract.md": "8a161bbda8af6de6a2b9fe06b5f2a8849b8f49fcb3655ec43dcd798189481c42",
     "product.json": "16202a292f9cf80ddbfc1eb1c74a9e7d8f37e96089808d323613405c50d2155c",
     "scripts/architecture_compile.py": "f806085ee543b7371bddd37e04a06687ba8d9a4897fe29ed36d6bd65fd6d3e84",
     "scripts/artifact_check.py": "d95f51158f98e56fab55a083f240a2de612ae5cf5f2b73aeaee848721793e860",
@@ -67,7 +67,7 @@
     "scripts/experience_compile.py": "1f41f12ce03a47bb73e7a7be662565a8dc21f9c859b5cb9bcf95498136578b2c",
     "scripts/file_issue.py": "9dabf91796c416be8909e517f9a9859faff12c24c868c0c0e037739820bee02e",
     "scripts/file_lock.py": "d7588927231905320708a1ea2e7fc9251dffdf6a66f4a49ff24a3f353b1cc066",
-    "scripts/generate_codex_project.py": "b043e8e0a8bc396d573609689ff58b818ac406183da54b20e7ad196061fbb3bb",
+    "scripts/generate_codex_project.py": "0f7a8687f7f396aa4e02e3c80f2a6c26d8859bf2b7c98fe01970a277181166fc",
     "scripts/landscape_check.py": "9a499822a336b6c10566f9fcc1b3e4fbfcd4403934ab45e788a4844bea66a357",
     "scripts/marketplace_paths.py": "612e835bb2c91fab9509282dd4ecbce55c9b62a35ff59b3f22e7e6c05e2fbd79",
     "scripts/operation_compile.py": "f446d7d9f1dd1fbe0cbee5992055c3aabd52057736db26b73330852fae95f8c9",
@@ -291,6 +291,6 @@
   "schema_version": 3,
   "source_channel": "snapshot",
   "source_commit": "",
-  "source_ref": "snapshot.22a952db8458a31a183b1c386d750a7cd8165a844e6434cb96e6b502fbd509a4",
+  "source_ref": "snapshot.3e4907b72d5f867bcf53c60d936fc96a5c52b95babad3973bc788b0fdfa400c8",
   "version": "0.5.0"
 }

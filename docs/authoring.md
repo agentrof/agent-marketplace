@@ -171,16 +171,16 @@ setup renders into `.codex/agents/`.
 `inherit` is the user override that makes every role follow the parent
 session's model and effort:
 
-- Codex: `generate_codex_project.py apply --execution-profile inherit` omits
-  both keys from every role file. The managed files record the choice, later
+- Codex: `generate_codex_project.py apply --project-root <root> --scope local
+  --execution-profile inherit` omits both keys from every role file. The managed files record the choice, later
   refreshes keep it, and `--execution-profile auto` restores the default. It
   is a local setup flag, not a `workspace/config.json` field: the closed
   config refuses performance knobs, and the profile is a personal host choice
   that changes only the ignored projection.
 - Claude Code: a plugin cannot switch frontmatter per user, and
   `${user_config.*}` is substituted only in the agent body. The documented
-  session setting `CLAUDE_CODE_SUBAGENT_MODEL_FORCE=1` runs every role on the
-  main conversation's model. A frontmatter `effort` overrides the session
+  session setting `CLAUDE_CODE_SUBAGENT_MODEL_FORCE=1` (Claude Code 2.1.257 or
+  later) runs every role on the main conversation's model. A frontmatter `effort` overrides the session
   level but not `CLAUDE_CODE_EFFORT_LEVEL`, which pins one level for the
   session. Both reach every subagent in the session, not only this team.
   Claude Code's permission modes do not select a model or effort.

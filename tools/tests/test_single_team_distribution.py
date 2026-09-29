@@ -784,6 +784,13 @@ class ExecutionProfileTests(unittest.TestCase):
         self.assertNotEqual(stale.returncode, 0)
         self.assertIn("unresolved reasoning tier", stale.stderr)
 
+    def test_unreadable_role_target_reports_a_collision_not_a_traceback(self):
+        (self.project / ".codex/agents/analysis-challenger.toml").mkdir(parents=True)
+        result = self.codex("check", "--scope", "local")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("unmanaged Codex agent collision", result.stderr)
+        self.assertNotIn("Traceback", result.stderr)
+
     def test_tables_are_build_inputs_and_invalid_tables_fail_the_build(self):
         before = build_distributions.marketplace_snapshot(self.root)["build_id"]
         self.set_tier("claude", "medium", {"model": "sonnet", "effort": "medium"})

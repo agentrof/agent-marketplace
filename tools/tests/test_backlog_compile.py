@@ -684,6 +684,21 @@ class AcceptedMinorFindingsTests(unittest.TestCase):
                       "Accepted Minor Findings columns must be: finding, owner_role, "
                       "reason, revisit_trigger", self.errors())
 
+    def test_code_spans_in_review_citations_are_not_links(self):
+        code = "`pages/api/v1/health-checks/[[...resource]].ts`"
+        props, body = backlog_compile.parse_front_matter(self.root_review)
+        evidence = next(line for line in body.splitlines() if line.startswith("Evidence ["))
+        self.root_review.write_text(backlog_compile.front_matter(
+            props, body.replace(evidence, f"{evidence} It routes {code}.", 1)), encoding="utf-8")
+        self.accept(self.epic_review, self.VALID.replace("twice", f"for {code} twice"))
+        self.assertEqual(self.errors(), [])
+        self.accept(self.epic_review, self.VALID.replace(self.STORY, code))
+        self.assertTrue(any("must cite the affected vault note" in error for error in self.errors()))
+        self.root_review.write_text(backlog_compile.front_matter(
+            props, body.replace(evidence, evidence.split("[[", 1)[0] + f"{code} records the inputs.", 1)),
+            encoding="utf-8")
+        self.assertTrue(any("review Evidence must cite a vault note" in error for error in self.errors()))
+
     def test_review_input_discovery_leaves_the_record_to_the_final_gate(self):
         self.accept(self.epic_review, self.VALID.replace("product_owner", "backend_developer"))
         self.assertTrue(backlog_review_inputs.manifest(self.docs, epic="EP-001")["ok"])

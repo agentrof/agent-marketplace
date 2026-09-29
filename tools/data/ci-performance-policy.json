@@ -1,0 +1,65 @@
+{
+  "schema_version": 1,
+  "window_days": 30,
+  "minimum_samples_per_cohort": 5,
+  "targets": {
+    "local_validation_seconds": {
+      "minimum_reduction": 0.4
+    },
+    "delivery_test_seconds": {
+      "minimum_reduction": 0.3
+    },
+    "review_to_acceptance_seconds": {
+      "minimum_reduction": 0.3
+    },
+    "duplicate_same_candidate_checks": {
+      "maximum_value": 0
+    },
+    "required_gate_omissions": {
+      "maximum_value": 0
+    },
+    "platform_coverage_omissions": {
+      "maximum_value": 0
+    }
+  },
+  "job_dependencies": [
+    {
+      "pattern": "tests (*)",
+      "depends_on": [
+        "plan"
+      ]
+    },
+    {
+      "pattern": "compatibility (*)",
+      "depends_on": [
+        "plan",
+        "tests (*)"
+      ]
+    },
+    {
+      "pattern": "check",
+      "depends_on": [
+        "plan",
+        "tests (*)",
+        "deterministic-check",
+        "changeset",
+        "release-pr-policy"
+      ]
+    }
+  ],
+  "test_steps": [
+    "Run the exact selected test partition",
+    "Exercise the Apple system Python launcher"
+  ],
+  "observed_metrics": [
+    "work_to_acceptance_seconds",
+    "agent_preparation_seconds",
+    "model_seconds",
+    "command_seconds",
+    "ci_queue_seconds",
+    "fix_rounds",
+    "token_count",
+    "escaped_defects",
+    "reopened_findings"
+  ]
+}

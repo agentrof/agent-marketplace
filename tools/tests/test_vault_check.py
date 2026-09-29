@@ -13,11 +13,13 @@ import contextlib
 import io
 import json
 import shutil
+import stat
 import subprocess
 import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 ROOT = Path(__file__).resolve().parents[2]
 SCRIPTS = ROOT / "plugins" / "software-engineering-team" / "scripts"
@@ -266,6 +268,136 @@ class VaultBuilderTests(unittest.TestCase):
                 found = findings(docs)
                 self.assertEqual({finding["check"] for finding in found},
                                  {check, *COMPANIONS.get(check, ())}, found)
+
+
+class VaultFileViewTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.temporary = tempfile.TemporaryDirectory()
+        cls.docs = make_valid_vault(Path(cls.temporary.name) / "project")
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.temporary.cleanup()
+
+    def all_findings(self, vault):
+        found = []
+        for check in vault_check.CHECKS.values():
+            check(vault, found)
+        vault_check.check_obsidian_payload(vault, found, vault_check.DEFAULT_PAYLOAD)
+        return sorted(found, key=lambda item: (item.path, item.line, item.check, item.message))
+
+    def test_every_check_matches_materialized_postimage(self):
+        policy = vault_check.load_policy(vault_check.DEFAULT_POLICY)
+        before = {path.relative_to(self.docs): path.read_bytes()
+                  for path in self.docs.rglob("*") if path.is_file()}
+        for name, builder in sorted(VAULT_BUILDERS.items()):
+            with self.subTest(check=name), tempfile.TemporaryDirectory() as temporary:
+                materialized = Path(temporary) / "docs"
+                shutil.copytree(self.docs, materialized)
+                builder(materialized)
+                after = {path.relative_to(materialized): path.read_bytes()
+                         for path in materialized.rglob("*") if path.is_file()}
+                view = vault_check.VaultFileView(self.docs)
+                for relative in set(before) | set(after):
+                    if before.get(relative) != after.get(relative):
+                        view.put(self.docs / relative, after.get(relative))
+                actual = vault_check.build_vault(self.docs, policy, view)
+                expected = vault_check.build_vault(materialized, policy)
+                self.assertEqual(self.all_findings(actual), self.all_findings(expected))
+        self.assertEqual(before, {path.relative_to(self.docs): path.read_bytes()
+                                 for path in self.docs.rglob("*") if path.is_file()})
+
+    def test_registry_artifact_and_deleted_target_are_read_from_view(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary) / "docs"
+            root.mkdir()
+            write(root / "solution-design/landscape.md", "[Preview](artifacts/a.bin)\n[[solution-design/old|Old]]\n")
+            write(root / "solution-design/old.md", "Old\n")
+            view = vault_check.VaultFileView(root)
+            view.put(root / "solution-design/artifacts/a.bin", b"\xff\x00opaque")
+            view.put(root / "solution-design/old.md", None)
+            registry = root / "business-analysis/shop/_generated/registry.json"
+            view.put(registry, b'{"ids":{"BR-001":{"doc":"rule.md"}}}')
+            vault = vault_check.build_vault(root, vault_check.load_policy(vault_check.DEFAULT_POLICY), view)
+            self.assertIn("solution-design/artifacts/a.bin", vault.index)
+            self.assertNotIn("solution-design/old.md", vault.index)
+            self.assertEqual(vault_check.relation_identity_owners(vault)["shop:BR-001"], "business-analysis/shop/rule.md")
+            found = []
+            vault_check.check_link_policy(vault, found)
+            self.assertEqual(found, [])
+            vault_check.check_wikilink_resolution(vault, found)
+            self.assertEqual(len(found), 1)
+            self.assertIn("old", found[0].message)
+            self.assertFalse(registry.exists())
+
+    def test_batch_results_equal_separate_changed_checks(self):
+        policy = vault_check.load_policy(vault_check.DEFAULT_POLICY)
+        vault = vault_check.build_vault(self.docs, policy)
+        targets = [DECISION, LANDSCAPE, "missing.md", "solution-design/_generated/decision-index.md"]
+        with mock.patch.dict(vault_check.CHECKS, {key: mock.Mock(wraps=value)
+                                                for key, value in vault_check.CHECKS.items()}):
+            combined = vault_check.changed_findings(vault, targets)
+            for name in vault_check.CHANGED_CHECKS:
+                self.assertEqual(vault_check.CHECKS[name].call_count, 1)
+        for target in targets:
+            self.assertEqual(combined[target], vault_check.changed_findings(vault, [target])[target])
+
+    def test_aliases_cannot_be_overridden_or_used_as_patch_parents(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            write(root / "actual.md", "old")
+            try:
+                (root / "alias.md").symlink_to(root / "actual.md")
+                (root / "directory-alias").symlink_to(root, target_is_directory=True)
+            except OSError as exc:
+                self.skipTest(str(exc))
+            view = vault_check.VaultFileView(root)
+            view.put(root / "actual.md", b"new")
+            self.assertEqual(view.read_bytes(root / "alias.md"), b"new")
+            for path in (root / "alias.md", root / "directory-alias/child.md"):
+                with self.assertRaisesRegex(ValueError, "alias"):
+                    view.put(path, b"unsafe")
+            view.put(root / "new-file", b"x")
+            with self.assertRaisesRegex(ValueError, "not a directory"):
+                view.put(root / "new-file/child", b"x")
+
+    def test_lexical_root_alias_remains_consistent(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            base = Path(temporary).resolve()
+            (base / "real").mkdir()
+            write(base / "real/home.md", "Home\n")
+            try:
+                (base / "alias").symlink_to(base / "real", target_is_directory=True)
+            except OSError as exc:
+                self.skipTest(str(exc))
+            root = base / "alias"
+            vault = vault_check.build_vault(root, vault_check.load_policy(vault_check.DEFAULT_POLICY))
+            self.assertEqual(vault.root, root)
+            self.assertEqual(vault.index, {"home.md"})
+
+    def test_native_reparse_metadata_rejects_patch_aliases_without_junction_api(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            parent = root / "junction"
+            parent.mkdir()
+            leaf = root / "reparse.md"
+            write(leaf, "original")
+            original_lstat = Path.lstat
+            def metadata(path, *args, **kwargs):
+                if path in {parent, leaf}:
+                    return type("Metadata", (), {"st_mode": stat.S_IFDIR if path == parent else stat.S_IFREG,
+                                                  "st_file_attributes": 0x400})()
+                return original_lstat(path, *args, **kwargs)
+            view = vault_check.VaultFileView(root)
+            with mock.patch.object(Path, "lstat", metadata), \
+                    mock.patch.object(Path, "is_junction", return_value=False, create=True):
+                for path in (parent / "child.md", leaf):
+                    with self.subTest(path=path), self.assertRaisesRegex(ValueError, "alias"):
+                        view.put(path, b"unsafe")
+            self.assertEqual(view.overrides, {})
+            self.assertEqual(leaf.read_text(), "original")
+            self.assertFalse((parent / "child.md").exists())
 
 
 if __name__ == "__main__":

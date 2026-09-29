@@ -10,6 +10,10 @@ Turn an idea into one approved analysis space. The space is tracked Markdown
 under `workspace/docs/business-analysis/`; its compiler and the Obsidian vault
 checker are the only mechanical authorities.
 
+Before delegating a role, follow the packaged `templates/task-input-contract.md`
+and derive its inputs with `scripts/task_inputs.py --entry business-analysis`.
+Use the owning compiler's exact scope and source bindings.
+
 ## When to Use
 
 - A product idea, problem or change needs goals, actors, rules, acceptance

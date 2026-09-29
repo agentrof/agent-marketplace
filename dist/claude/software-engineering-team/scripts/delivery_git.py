@@ -542,6 +542,8 @@ def remove_item_worktree(main_worktree: Path, delivery_id: str, story_id: str) -
     path = worktree_paths(main_worktree, delivery_id, story_id)["item"]
     if not path.exists():
         return
+    from delivery_verification import guard_write
+    guard_write(path)
     run_git(main_worktree, "worktree", "remove", str(path))
 
 
@@ -560,6 +562,8 @@ def split_remote_note(root: Path, oid: str, relative_path: str,
 
 
 def worktree_is_clean_and_at(root: Path, path: Path, expected_oid: str) -> None:
+    from delivery_verification import guard_write
+    guard_write(path)
     if not path.is_dir():
         raise RuntimeError(f"DELIVERY_WORKTREE_UNSAFE: Item worktree is missing: {path}")
     head = run_git(root, "-C", str(path), "rev-parse", "HEAD")
@@ -640,6 +644,8 @@ def require_candidate_holds_worktree(root: Path, path: Path, candidate_oid: str)
 
 def advance_worktree_to_candidate(root: Path, path: Path, candidate_oid: str) -> None:
     """Move a worktree only after proving the candidate already contains its bytes."""
+    from delivery_verification import guard_write
+    guard_write(path)
     require_candidate_holds_worktree(root, path, candidate_oid)
     run_git(root, "-C", str(path), "reset", "--hard", candidate_oid)
 
@@ -732,17 +738,41 @@ def commit_tree(root: Path, base: str, paths: list[str], subject: str,
         return commit.stdout.strip()
 
 
+def update_candidate_index(root: Path, env: dict, entries: list[tuple[str, str, str]]) -> None:
+    """Apply exact blob entries in one process without quoting Git path names."""
+    if not entries:
+        return
+    index = env.get("GIT_INDEX_FILE", "")
+    if not index or not Path(index).is_absolute() or Path(index).resolve() == (root / ".git/index").resolve():
+        raise RuntimeError("candidate updates require an isolated temporary index")
+    if len({path for _mode, _oid, path in entries}) != len(entries) or any(
+            mode not in {"0", "100644", "100755"} or not isinstance(oid, str)
+            or len(oid) not in {40, 64} or not OID_RE.fullmatch(oid)
+            or (mode == "0" and set(oid) != {"0"}) or not isinstance(path, str) or not path or "\0" in path
+            or any(part in {"", ".", ".."} for part in path.split("/"))
+            for mode, oid, path in entries):
+        raise RuntimeError("invalid candidate index entry")
+    records = b"".join(mode.encode("ascii") + b" " + oid.encode("ascii")
+                       + b"\t" + path.encode("utf-8") + b"\0"
+                       for mode, oid, path in entries)
+    result = subprocess.run(["git", "update-index", "-z", "--index-info"],
+                            cwd=root, env=env, input=records, capture_output=True, check=False)
+    if result.returncode:
+        raise RuntimeError(result.stderr.decode("utf-8", "replace").strip()
+                           or "cannot stage candidate replacements")
+
+
 def write_delivery_projection_tree(root: Path, env: dict, tree: str,
                                    operation_bindings: dict[str, dict] | None = None) -> str:
+    entries = []
     for path, (mode, content) in delivery_projection_changes(root, tree, operation_bindings).items():
         if content is None:
-            args = ["git", "update-index", "--force-remove", "--", path]
+            entries.append(("0", "0" * len(tree), path))
         else:
             blob = subprocess.run(["git", "hash-object", "-w", "--stdin"], cwd=root,
                                   input=content, capture_output=True, check=True)
-            args = ["git", "update-index", "--add", "--cacheinfo",
-                    mode, blob.stdout.decode().strip(), path]
-        subprocess.run(args, cwd=root, env=env, capture_output=True, check=True)
+            entries.append((mode, blob.stdout.decode("ascii").strip(), path))
+    update_candidate_index(root, env, entries)
     return subprocess.run(["git", "write-tree"], cwd=root, env=env,
                           encoding="utf-8", capture_output=True, check=True).stdout.strip()
 
@@ -753,7 +783,7 @@ def delivery_projection_changes(root: Path, tree: str,
     import vault_check
     from delivery_compile import render_map
 
-    listing = subprocess.run(["git", "ls-tree", "-rz", tree, "--", "workspace/docs/"],
+    listing = subprocess.run(["git", "--no-replace-objects", "ls-tree", "-rz", tree, "--", "workspace/docs/"],
                              cwd=root, capture_output=True, check=True).stdout
     entries = []
     for row in listing.split(b"\0"):
@@ -764,7 +794,7 @@ def delivery_projection_changes(root: Path, tree: str,
         if kind != "blob" or mode not in {"100644", "100755"}:
             raise RuntimeError("Delivery publication requires regular vault files")
         entries.append((path.decode("utf-8"), mode, oid))
-    objects = subprocess.run(["git", "cat-file", "--batch"], cwd=root,
+    objects = subprocess.run(["git", "--no-replace-objects", "cat-file", "--batch"], cwd=root,
                              input="".join(oid + "\n" for _, _, oid in entries).encode(),
                              capture_output=True, check=True).stdout
     originals: dict[str, tuple[str, bytes]] = {}
@@ -774,15 +804,21 @@ def delivery_projection_changes(root: Path, tree: str,
         for path, mode, oid in entries:
             end = objects.index(b"\n", offset)
             actual_oid, kind, size = objects[offset:end].decode().split()
-            if actual_oid != oid or kind != "blob":
+            length = int(size)
+            if actual_oid != oid or kind != "blob" or length < 0:
                 raise RuntimeError("cannot read exact Delivery candidate blob")
             offset = end + 1
-            content = objects[offset:offset + int(size)]
-            offset += int(size) + 1
+            content = objects[offset:offset + length]
+            offset += length
+            if len(content) != length or objects[offset:offset + 1] != b"\n":
+                raise RuntimeError("truncated Delivery candidate blob")
+            offset += 1
             originals[path] = (mode, content)
             target = candidate / path
             target.parent.mkdir(parents=True, exist_ok=True)
             target.write_bytes(content)
+        if offset != len(objects):
+            raise RuntimeError("unexpected trailing Delivery candidate objects")
         docs = candidate / "workspace" / "docs"
         render_map(docs)
         policy = vault_check.load_policy(vault_check.DEFAULT_POLICY)
@@ -860,15 +896,13 @@ def commit_replacements(root: Path, base: str, replacements: dict[str, str],
                               encoding="utf-8", capture_output=True, check=False)
         if read.returncode:
             raise RuntimeError(read.stderr.strip() or "cannot materialize candidate index")
+        entries = []
         for path, text in replacements.items():
             blob = git_with_input(root, ["hash-object", "-w", "--stdin"], text, env)
             if blob.returncode:
                 raise RuntimeError(blob.stderr.strip() or "cannot write candidate blob")
-            update = subprocess.run(["git", "update-index", "--add", "--cacheinfo",
-                                     "100644", blob.stdout.strip(), path], cwd=root, env=env,
-                                    encoding="utf-8", capture_output=True, check=False)
-            if update.returncode:
-                raise RuntimeError(update.stderr.strip() or "cannot stage candidate replacement")
+            entries.append(("100644", blob.stdout.strip(), path))
+        update_candidate_index(root, env, entries)
         tree = subprocess.run(["git", "write-tree"], cwd=root, env=env,
                               encoding="utf-8", capture_output=True, check=False)
         if tree.returncode:
@@ -4215,6 +4249,14 @@ def push_item(project_root: Path, delivery_id: str, story_id: str,
     if review_props.get("item_plan_hash") != item_props.get("item_plan_hash") or verification_props.get("item_plan_hash") != item_props.get("item_plan_hash"):
         raise RuntimeError("DELIVERY_ITEM_NOT_READY: Item evidence does not bind the active Item plan hash")
     require_item_architecture_binding(worktree, item_props, story_id, tree=product_tip)
+    from delivery_compile import verification_schedule
+    from delivery_verification import guard_write, validate as validate_verification, validate_evidence
+    guard_write(worktree)
+    validate_evidence(item_props, review_props, verification_props)
+    if verification_schedule(item_props) == "parallel_snapshot_v1":
+        session = validate_verification(worktree, delivery_id, story_id)
+        if review_props.get("verification_candidate_hash") != session["candidate"]["candidate_hash"]:
+            raise RuntimeError("DELIVERY_ITEM_NOT_READY: reports do not bind the current verification candidate")
     if review_props.get("source_hash") != content_hash(review_props, review_body):
         raise RuntimeError("DELIVERY_ITEM_NOT_READY: code review source_hash is stale")
     if verification_props.get("source_hash") != content_hash(verification_props, verification_body):
@@ -4283,6 +4325,8 @@ def integrate_item(project_root: Path, delivery_id: str, story_id: str,
     if review_props.get("item_plan_hash") != item_props.get("item_plan_hash") or verification_props.get("item_plan_hash") != item_props.get("item_plan_hash"):
         raise RuntimeError("DELIVERY_ITEM_NOT_READY: integrate-item evidence does not bind the Item plan hash")
     require_item_architecture_binding(worktree, item_props, story_id, tree=item_oid)
+    from delivery_verification import validate_evidence
+    validate_evidence(item_props, review_props, verification_props)
     if review_props.get("source_hash") != content_hash(review_props, review_body):
         raise RuntimeError("DELIVERY_ITEM_NOT_READY: integrate-item code review source_hash is stale")
     if verification_props.get("source_hash") != content_hash(verification_props, verification_body):

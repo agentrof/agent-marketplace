@@ -18,6 +18,85 @@ claimed, or one its Delivery cancelled, refuses the start with
 Product and test changes stay on the Item worktree; Integration accepts only
 reviewed, verified Item handoffs and compiler-owned projections.
 
+## Parallel verification
+
+Follow the approved Item's `verification_schedule`. An older Item with no
+field retains the sequential protocol. For `parallel_snapshot_v1`, commit
+the complete product/test candidate and use the packaged
+`scripts/delivery_verification.py --worktree <item-root> freeze --delivery
+DLV-### --story <story>` before invoking the two readers. The resulting
+candidate and session identities bind all source and instruction inputs.
+Generate each role's `manifest` with `--role code_reviewer|qa_engineer` and
+`--mode review_initial|review_repair|qa_diagnostic|qa_final`.
+While readers are active, use the same CLI's `inspect --path <file>` and
+`diff [--path <file>]` to read the frozen Git candidate. `inspect --base`
+selects its exact integration base. These interfaces permit source inspection
+without opening a general shell writer through the barrier.
+Use `inspect --instruction <package-relative-file>` for bound package instructions.
+
+Invoke Code Review and QA independently through the host's native agent
+mechanism. Keep the implementation writer idle until both readers finish or
+their cancellation is confirmed. Readers return separate JSON results through
+`result --file <result.json>`; the existing owner alone persists canonical
+reports after the barrier. A cancelled or diagnostic result cannot approve an
+Item. Code, test, contract or instruction drift invalidates the candidate.
+
+QA uses `run --kind test|mutation|dependency_audit` for the approved commands.
+For failed or affected tests first, an optional approved
+`diagnostic_test_command` enables `run --kind diagnostic_test --selection-file
+<scratch-selection.json>`. Copy the selector schema from the QA manifest,
+fill literal `failed_test_ids` and `affected_test_ids`, and write it under the
+manifest's scratch directory. The runner validates the candidate binding and
+passes normalized selection data through `AGENTROF_DIAGNOSTIC_TESTS`; it never
+appends those identifiers to shell text. The compiler-owned JSON adds
+`selected_test_ids`, the sorted union of the failed and affected identifiers.
+Only diagnostic commands receive this environment variable; final checks and
+runtime commands remove it, including any inherited value.
+A changed selection cannot reuse an
+older diagnostic run. Without this approved adapter, use the full approved
+test command or revise the Operation Contract through its normal approval.
+Diagnostic command evidence never satisfies the final full-suite gate.
+Commands run in an independent scratch checkout of the frozen product commit,
+with no shared Git objects or mutable working files. The runner exposes an
+output directory through `AGENTROF_VERIFICATION_SCRATCH`. Provision dependencies through
+approved commands and environment, never by borrowing the writer's ignored
+files. Tests and mutation cannot temporarily edit the reviewer's source.
+The runner stores raw output under ignored runtime, binds it to the candidate,
+command and environment, and reuses only identical successful evidence.
+`--fresh` explicitly reruns a command. The mutation command reads the exact
+JSON file scope through `AGENTROF_MUTATION_FILES`; no shell path interpolation
+is permitted. The QA result names the raw evidence identities and records
+coverage, right-reason and all applicable final checks. A diagnostic returns
+quick findings without terminal eligibility; `resume-qa` allows final QA on
+the same unchanged candidate while preserving its independent review.
+After a failed final QA, finish any required runtime teardown, then use
+`resume-qa` on that unchanged candidate. The runner archives the failed result
+and runtime attempt, starts a fresh runtime attempt, and retains the completed
+review. Failed runtime events cannot supply the new attempt's final evidence.
+
+Combine blocking findings into one owner repair queue while retaining each
+role's verdict, severity and stable finding IDs. Repair the product only after
+both readers settle, commit it, then freeze the new candidate. Initial review
+covers the full Item diff; re-review covers the new delta, open findings and
+affected consumers. Correctness, conformance and security remain mandatory.
+An unchanged candidate with unchanged source bindings and instructions reuses
+its existing independent role results without another dispatch.
+
+`validate --delivery DLV-### --story <story>` must accept both final results
+before evidence approval. The existing compiler derives actual product HEAD
+and persists the two reports. Its subsequent evidence child commit does not
+change the verified product candidate; integration continues to prove the
+exact direct-parent binding. Runtime verification is mandatory exactly when
+the approved Item declares `runtime_required: true`.
+For that Item, run the approved Environment Contract through
+`environment --verb down|up|seed|logs|url [--value <approved-identifier>]`.
+Its persistent private checkout supports the existing fresh-runtime protocol;
+return the recorded event hashes with the full per-surface runtime findings.
+Successful down, up, seed, logs and final down are required, alongside the
+independent runtime assessment. A non-runtime Item starts no environment.
+
+## Activation and publication
+
 Activation writes an ignored pending writer receipt before the atomic Item,
 Slot, Integration and Fence transaction. The receipt is promoted only after
 both Item and Slot refs equal the candidate OID, then the coordinator

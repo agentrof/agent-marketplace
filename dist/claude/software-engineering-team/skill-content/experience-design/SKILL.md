@@ -8,6 +8,10 @@ exposure: entry
 
 Model and revise living user experiences without implementing delivery code.
 
+Before delegating a role, follow the packaged `templates/task-input-contract.md`
+and derive its inputs with `scripts/task_inputs.py --entry experience-design`.
+Use the owning compiler's exact scope and source bindings.
+
 ## When to Use
 
 Use after approved BA, Solution Design and Design System inputs need

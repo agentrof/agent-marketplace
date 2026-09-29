@@ -14,19 +14,20 @@ asserts nothing about that behavior.
   Never hardcode a tool.
 - Scope: the code-owned files this story changed, never the whole tree.
   Environment-owned paths (the workspace/environment/ prefix) are
-  excluded; the live protocol verifies them, not mutants. The command
-  carries a `{{changed_files}}` placeholder QA substitutes with the
-  space-joined list (git diff --name-only against the main line, the
-  environment prefix filtered out); a runner that scopes only through
-  its config file gets the scope
-  written there for the run, and the record states the effective scope
-  either way. A whole-tree run on a mature project is a budget
-  violation, not extra rigor.
+  excluded; the live protocol verifies them, not mutants. For parallel
+  verification, the compiler derives the complete Item integration-base to
+  frozen-candidate file set. The approved command reads the JSON file named
+  by `AGENTROF_MUTATION_FILES`; it receives that path through the environment.
+  Never substitute file paths into shell command text. Configure the project's
+  runner to consume this file before approving its Operation Contract.
+  A legacy sequential Item derives the same complete Item scope and passes it
+  through a file accepted by its approved command. Unresolved command templates
+  are invalid. A whole-tree run on a mature project is a budget violation.
 - The gate signal is the RUN invocation's own exit code. Never chain a
   report command after the run inside mutation_command (the chain's
   exit code masks the gate); collect the report with a second
   invocation and record both.
-- Record in the verification record: the exact composed command, the
+- Record in the verification record: the exact approved command, the
   scope, the mutant totals (generated, killed, survived, timed out) and
   every survivor with its file, line and mutation description.
 

@@ -2,6 +2,30 @@
 
 ONE markdown file per verified increment. It evolves in place across QA iterations; never fork a second report. Each iteration updates the affected sections and appends to the iteration log.
 
+For a parallel Item, `qa_diagnostic` runs failed or affected checks first and
+returns findings without a terminal PASS. `qa_final` requires every QA gate.
+The packaged `scripts/delivery_verification.py` binds independent results and
+raw command evidence to the frozen candidate and rejects diagnostic approval.
+A finished diagnostic releases its reader barrier but grants no approval.
+Return the full record to the owner, who alone persists the canonical copy
+after every reader has finished or confirmed cancellation.
+
+Use the role manifest's `diagnostic_interface` for the optional approved
+focused runner. Its selection file names literal failed and affected test IDs
+for this candidate. `run --kind diagnostic_test --selection-file <file>`
+executes the approved adapter; the adapter reads `AGENTROF_DIAGNOSTIC_TESTS`
+as JSON and passes identifiers through its test runner's argument-list API.
+The final suite still requires separate `run --kind test` evidence.
+
+The manifest's `result_interface` provides the exact JSON fields to return.
+Every final check needs `passed: true` and an independent `evidence` assessment.
+The full-suite check also needs the approved command, zero exit code,
+`identity.environment_hash` and `evidence_hash` from its raw test run.
+Mutation and dependency audit name their own raw `evidence_hash`; mutation
+also returns the complete compiler-selected file list. Fresh runtime returns
+every recorded event hash in order. Diagnostic results cannot substitute any
+of these final proofs.
+
 ## Skeleton
 
 ```markdown

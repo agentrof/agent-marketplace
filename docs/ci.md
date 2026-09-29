@@ -1,7 +1,9 @@
 # CI and release validation
 
 The required `check` aggregate proves the selected test inventory completed.
-Every PR also emits the existing compatibility, CodeQL and two-host lifecycle
+The aggregate depends directly on the shard results, so it does not wait for
+compatibility summary runners. Those unchanged required contexts independently
+check the same shard outcomes. Every PR also emits compatibility, CodeQL and two-host lifecycle
 contexts. Branch protection names remain stable. The compatibility context
 label `Python 3.x` represents the current interpreter pinned in the CI policy.
 
@@ -24,12 +26,17 @@ structure assigns exactly one Apple owner whenever vault-hook tests are
 selected; missing, duplicate or disabled ownership fails plan validation.
 This avoids a separate macOS job competing with the full-suite workers.
 
-Delivery PR-intent fixtures may copy an immutable, process-local starting
-repository prepared before the first Item starts. Every test gets independent
+Delivery compiler, execution and PR-intent fixtures may copy an immutable,
+process-local starting repository prepared before the first Item starts.
+Every test gets independent
 files, Git objects and a bare remote; the origin is rebound to that copy and
 transient fetch metadata is removed. The seed contains no linked Item worktree
 or active writer receipt. Construction and isolation have dedicated coverage;
-changed setup functions or environment use fresh preparation. Git operations
+changed setup functions or environment use fresh preparation. The named Windows
+text-pipe emulator may build a separate seed under its exact wrapper and reuse
+it only within that wrapper's lifetime. Its underlying runner must be the native
+runner and every other setup binding and environment value must remain unchanged;
+seeds are discarded on context exit. Arbitrary mocks never qualify. Git operations
 under test, including concurrent ref and lease observations, remain real.
 
 | Profile | Selection |
@@ -48,11 +55,97 @@ impact analysis.
 
 Fresh reports contain per-test duration, outcome and actual Python, Git and
 operating-system identities. Successful runs publish bounded timing history
-for later plans. Timing data changes partition balance only; missing or
-invalid history uses policy weights without changing coverage. Weekly and
+for later plans. Plans report each history source run, attempt, age and
+artifact digest, restored weight counts and fallback reasons. Fixture startup
+estimates favor reusing a process-local seed without creating empty partitions.
+Reports distinguish test time, fixture build/validation/copy time and shard wall
+time. Timing data changes partition balance only; missing or invalid history
+uses policy weights without changing coverage. Weekly and
 manually dispatched validation run full coverage. `make check` remains an
 exhaustive local gate; `make static-check` provides the cheap always-fresh
 contract, version, count and deterministic distribution checks.
+
+## Exact local validation
+
+After generating distributions, stage the complete candidate and run:
+
+```text
+make check-local
+make verify-local
+```
+
+The direct interfaces are `python3 tools/ci_local.py check --staged --target
+origin/main` and `python3 tools/ci_local.py verify --staged --target origin/main`.
+`check --fresh` ignores saved test results. `--jobs` selects one to four separate
+processes, bounded by CPU count; policy defaults to two. Every worker receives
+its own `TMPDIR`, `TMP` and `TEMP`, exact test IDs and an independent result file.
+Worker scratch directories live outside the candidate checkout and any Git
+worktree ancestry, so a non-Git fixture cannot discover an enclosing repository.
+A configured temporary root inside a checkout or Git repository is rejected;
+choose an external `TMPDIR`/`TMP`/`TEMP`. Receipts remain in the ignored project
+runtime cache.
+Before starting workers, isolated Python with site initialization disabled
+warms a fresh external bytecode cache from an explicit standard-library import
+list. Workers share that cache with bytecode writes disabled; project and
+fixture bytecode are never populated there. Cache contents are checked after
+workers finish, and a prewarm failure or changed cache invalidates the run.
+`make check` still runs all tests without requiring staging or producing a local
+receipt. No Git hooks are installed.
+
+The local driver compares every tracked worktree byte and executable mode with
+the index, using NUL-safe Git records. Partial staging, unresolved merges,
+assume-unchanged/skip-worktree flags, unsupported index entries (including
+tracked symlinks whose external targets cannot be bound) and untracked
+source files fail before tests. Ignored runtime caches are explicitly allowed
+by `ci-local-policy.json`; other ignored untracked sources fail. On Windows,
+executable bits remain the index's identity because the filesystem does not
+provide POSIX executable modes. Checkouts transformed by text filters must
+first match their staged bytes. Impact includes the entire merge-base to index
+candidate, including earlier branch commits, deletion and both sides of a
+rename. Missing base, unknown/shared inputs or incomplete inventory mappings
+select the full suite. The command never fetches refs.
+
+Every `check` executes static validation afresh. A successful local receipt
+binds HEAD/base/index bytes and modes, inventory, selected IDs, command and
+policy hashes, Python/Git/OS, Git configuration and environment digests. Secret
+environment values are never written. Make's orchestration variables are removed
+before checks so direct and Make entry points use the same effective environment.
+Results expire after at most 24 hours; reuse does not extend that deadline.
+The latest failed, interrupted, changed or corrupt attempt invalidates prior
+success. The source is rechecked after statics and workers. Missing, duplicate,
+partial or failed worker reports and skipped mandatory native regressions fail.
+`verify` checks this identity immediately before commit. A process-scoped OS lock
+prevents simultaneous validators in one checkout and releases on process exit.
+
+Receipts live only in ignored `.agentrof/agent-marketplace/.runtime/ci-local/`.
+They are disposable local feedback, never remote CI or release authority.
+
+## Performance evidence
+
+`ci-performance` artifacts and the job summary separate runner scheduling after
+known dependency completion from test steps, whole-job time and fixture costs.
+Unfinished jobs or unknown dependency times stay unknown. The reporter reads
+one exact run attempt and has no gate or receipt authority. Its absence cannot
+turn a failed validation into success; the normal coverage gates remain required.
+
+`tools/data/ci-performance-policy.json` owns comparison windows, sample minima,
+change classifications supplied by observations, observational metrics and target
+reductions. `python3 tools/ci_performance.py compare --samples <json> --output
+<json>` compares each change class separately. The input is an array of records:
+
+```json
+[{"cohort": "baseline", "change_class": "runtime", "metric": "local_validation_seconds", "value": 120, "observed_at": "2026-09-28T10:00:00Z"}]
+```
+
+Use actual measured values and baseline/candidate cohorts. The default window is
+30 days with at least five observations per cohort. Too few samples and missing
+quality/platform measurements remain explicit; they never establish improvement.
+Local validation targets 40% lower median, Delivery test and review-to-acceptance
+30%, with zero omitted required gates or platform checks. Work duration, model,
+agent preparation, commands, queue time, tokens, repair rounds and escaped or
+reopened defects are observations without invented targets. Model/role telemetry
+must be supplied by its actual host; no token or quality measurements are inferred
+from test timings.
 
 ## Reusing validation evidence
 

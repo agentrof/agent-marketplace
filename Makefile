@@ -1,4 +1,4 @@
-.PHONY: validate release-validate counts counts-check dist-check test eval static-check check scaffold release-check public-release-check public-release-smoke
+.PHONY: validate release-validate counts counts-check dist-check test eval static-check check check-local verify-local scaffold release-check public-release-check public-release-smoke
 
 PY := python3
 
@@ -25,6 +25,12 @@ eval:
 	@echo "eval: deterministic behavior assertions green"
 
 static-check: validate release-validate counts-check dist-check
+
+check-local:
+	$(PY) tools/ci_local.py check --staged --target origin/main
+
+verify-local:
+	$(PY) tools/ci_local.py verify --staged --target origin/main
 
 check: static-check test
 	@echo "check: all gates green"

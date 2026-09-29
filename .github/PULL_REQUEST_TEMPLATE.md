@@ -4,7 +4,7 @@ Describe the user-visible or operational outcome and the non-goals.
 
 ## Verification
 
-- [ ] `make check` passed locally.
+- [ ] The staged candidate passed `make check-local` and `make verify-local`.
 - [ ] Generated host distributions were checked or regenerated through the
   canonical builder.
 - [ ] Relevant failure, recovery or regression tests were added.

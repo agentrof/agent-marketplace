@@ -111,6 +111,10 @@ behavior is host-neutral; Claude Code and Codex are packaging adapters.
     an immediately legal per-write Vault result. After deterministic generated
     views are rendered, the same tree passes both its scoped Vault gate and its
     owning compiler gate; producer and consumer contracts are tested together.
+    A tool event may share an immutable Vault model across its changed paths;
+    separate writes retain their immediate pre/post validation boundaries.
+    Virtual patch checks read the complete candidate file view, including
+    generated registries and artifacts, without modifying source files.
 28. Maintainer issue work starts only from an explicit user instruction in an
     active maintainer session; GitHub issue events never start an agent. The
     protocol may prepare a pull request but never merge one without explicit

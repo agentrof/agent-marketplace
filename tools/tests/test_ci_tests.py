@@ -411,6 +411,62 @@ class CITestPlannerTests(unittest.TestCase):
             self.assertEqual(lane["shards"], 8)
             self.assertTrue(required <= set(ci_tests.group_ids(lane["groups"], policy, ids)))
 
+    def test_fixture_weights_keep_every_test_and_expose_estimates(self):
+        ids = ["tools.tests.a.Tests.test_one", "tools.tests.a.Tests.test_two",
+               "tools.tests.b.Tests.test_one", "tools.tests.b.Tests.test_two"]
+        policy = dict(self.policy, fixture_startup_seconds={"tools.tests.a": 50, "tools.tests.b": 30})
+        shards = ci_tests.balanced_shards(ids, 2, {}, policy)
+        self.assertEqual(sorted(item for shard in shards for item in shard), ids)
+        self.assertTrue(all(shards))
+        self.assertGreater(ci_tests.estimated_seconds(shards[0], {}, policy), len(shards[0]))
+        with self.assertRaises(ci_tests.CIError):
+            ci_tests.fixture_startup("tools.tests.a", dict(policy, fixture_startup_seconds={"tools.tests.a": -1}))
+
+    def test_unmapped_inventory_expands_impact_and_repository_mapping_is_complete(self):
+        policy = ci_tests.policy_at(ci_tests.ROOT)
+        ids, _ = ci_tests.inventory(ci_tests.ROOT)
+        self.assertEqual(set(policy["known_test_modules"]), {ci_tests.module_of(test_id) for test_id in ids})
+        incomplete = copy.deepcopy(policy)
+        incomplete["known_test_modules"].pop()
+        selected, mode, reason = ci_tests.select_ids("impact", ["README.md"], incomplete, ids)
+        self.assertEqual(mode, "full")
+        self.assertEqual(selected, ids)
+        self.assertIn("mapping is incomplete", reason)
+
+    def test_acceleration_contracts_have_impact_and_native_windows_coverage(self):
+        policy = ci_tests.policy_at(ci_tests.ROOT)
+        ids, _ = ci_tests.inventory(ci_tests.ROOT)
+        modules = {"tools.tests.test_delivery_verification", "tools.tests.test_performance_contracts",
+                   "tools.tests.test_task_inputs", "tools.tests.test_ci_local"}
+        native = ci_tests.group_ids(["windows"], policy, ids)
+        self.assertTrue({test_id for test_id in ids if ci_tests.module_of(test_id) in modules}.issubset(native))
+        selected, _mode, _reason = ci_tests.select_ids("impact",
+            ["plugins/software-engineering-team/scripts/delivery_git.py"], policy, ids, root=ci_tests.ROOT)
+        self.assertTrue({test_id for test_id in ids if ci_tests.module_of(test_id) in modules}.issubset(selected))
+
+    def test_fixture_measurement_is_a_delta_for_each_test(self):
+        fixture = mock.Mock()
+        fixture.phase_totals.side_effect = [{"seed_build": 3.0}, {"seed_build": 4.5, "seed_copy": .2}]
+        report = {"tests": []}
+        runner = ci_tests.TimedResult(unittest.runner._WritelnDecorator(io.StringIO()), True, 2,
+                                     report=report, report_path=self.root / "fixture-report.json")
+        test = unittest.FunctionTestCase(lambda: None)
+        with mock.patch.dict(sys.modules, {"tools.tests.fixture_cache": fixture, "fixture_cache": fixture}):
+            runner.startTest(test)
+            runner.stopTest(test)
+        self.assertEqual(report["tests"][0]["fixture_seconds"], {"seed_build": 1.5, "seed_copy": .2})
+        self.assertEqual(fixture.phase_totals.call_count, 2)
+
+    def test_fixture_measurement_sums_distinct_module_stores_once_each(self):
+        qualified, flat = mock.Mock(), mock.Mock()
+        qualified.phase_totals.return_value = {"seed_build": 1.5, "seed_copy": .2}
+        flat.phase_totals.return_value = {"seed_build": 2.0, "seed_validate": .1}
+        with mock.patch.dict(sys.modules, {"tools.tests.fixture_cache": qualified, "fixture_cache": flat}):
+            self.assertEqual(ci_tests.fixture_totals(),
+                             {"seed_build": 3.5, "seed_copy": .2, "seed_validate": .1})
+        qualified.phase_totals.assert_called_once_with()
+        flat.phase_totals.assert_called_once_with()
+
 
 if __name__ == "__main__":
     unittest.main()

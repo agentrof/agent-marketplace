@@ -9,6 +9,10 @@ exposure: entry
 A product story the customer can click through: one self-contained file,
 zero code.
 
+Before delegating a role, follow the packaged `templates/task-input-contract.md`
+and derive its inputs with `scripts/task_inputs.py --entry demo`.
+Use the owning compiler's exact scope and source bindings.
+
 ## When to Use
 - The user needs to SHOW a product to a customer or buyer before building
   it: pre-sales, concept approval, stakeholder pitch.

@@ -1121,6 +1121,9 @@ def edit_overlaps_spans(text: str, old: str,
 def pre(payload: dict) -> int:
     if "file_targets" not in payload:
         payload = normalize(payload)
+    barrier = delivery_reader_barrier(payload)
+    if barrier:
+        return barrier
     project_vault = shell_project(payload) / "workspace" / "docs"
     topology_problem = experience_topology_problem(project_vault)
     if topology_problem:
@@ -1186,11 +1189,13 @@ def virtual_overlay_check(payload: dict) -> int:
     for target in payload.get("file_targets", []):
         path = Path(str(target.get("file_path", "")))
         path = path if path.is_absolute() else cwd / path
-        path = path.resolve()
+        path = Path(os.path.abspath(path))
         root = vault_root(str(path))
         if root is not None:
-            groups.setdefault(root.resolve(), []).append({**target,
-                                                          "resolved": path})
+            canonical_root = root.resolve()
+            groups.setdefault(canonical_root, []).append({
+                **target, "resolved": canonical_root / path.relative_to(root),
+            })
     for root, targets in groups.items():
         policy = vault_check.effective_policy(
             vault_check.load_policy(vault_check.DEFAULT_POLICY), root)
@@ -1203,62 +1208,48 @@ def virtual_overlay_check(payload: dict) -> int:
             (item.path, item.line, item.check, item.message)
             for item in baseline_findings
         }
-        with tempfile.TemporaryDirectory(prefix="vault-overlay-") as temporary:
-            overlay = Path(temporary) / "docs"
-            if root.is_dir():
-                shutil.copytree(root, overlay)
-            else:
-                overlay.mkdir(parents=True)
-            touched = set()
-            try:
-                for target in targets:
-                    actual = target["resolved"]
-                    rel = actual.relative_to(root)
-                    path = overlay / rel
-                    touched.add(rel.as_posix())
-                    operation = target.get("operation")
-                    if operation == "add":
-                        path.parent.mkdir(parents=True, exist_ok=True)
-                        path.write_bytes((str(target.get("content", "")) + "\n").encode("utf-8"))
-                    elif operation == "delete":
-                        path.unlink(missing_ok=True)
-                    elif operation == "move-target":
-                        continue
+        files = vault_check.VaultFileView(root)
+        try:
+            for target in targets:
+                path = target["resolved"]
+                operation = target.get("operation")
+                if operation == "add":
+                    files.put(path, (str(target.get("content", "")) + "\n").encode("utf-8"))
+                elif operation == "delete":
+                    files.put(path, None)
+                elif operation == "move-target":
+                    continue
+                else:
+                    original = files.read_text(path)
+                    rendered = apply_patch_body(original, list(target.get("patch_body", [])))
+                    move_to = str(target.get("move_to", ""))
+                    if move_to:
+                        destination = Path(move_to)
+                        destination = destination if destination.is_absolute() else cwd / destination
+                        destination = Path(os.path.abspath(destination))
+                        destination_root = vault_root(str(destination))
+                        if destination_root is None or destination_root.resolve() != root:
+                            raise ValueError("patch move destination leaves the vault")
+                        destination = root / destination.relative_to(destination_root)
+                        files.put(destination, rendered.encode("utf-8"))
+                        files.put(path, None)
                     else:
-                        original = path.read_text(encoding="utf-8")
-                        rendered = apply_patch_body(
-                            original, list(target.get("patch_body", [])))
-                        move_to = str(target.get("move_to", ""))
-                        if move_to:
-                            destination = Path(move_to)
-                            destination = (destination if destination.is_absolute()
-                                           else cwd / destination)
-                            dest_rel = destination.relative_to(root)
-                            dest_path = overlay / dest_rel
-                            dest_path.parent.mkdir(parents=True, exist_ok=True)
-                            dest_path.write_bytes(rendered.encode("utf-8"))
-                            path.unlink(missing_ok=True)
-                            touched.add(dest_rel.as_posix())
-                        else:
-                            path.write_bytes(rendered.encode("utf-8"))
-            except (OSError, ValueError) as exc:
-                return deny(f"multi-file patch virtual overlay failed: {exc}")
-            overlay_policy = vault_check.effective_policy(
-                vault_check.load_policy(vault_check.DEFAULT_POLICY), overlay)
-            vault = vault_check.build_vault(overlay, overlay_policy)
+                        files.put(path, rendered.encode("utf-8"))
+            vault = vault_check.build_vault(root, policy, files)
             findings = []
-            for name in ("wikilink_resolution", "link_policy",
-                         "frontmatter_props"):
+            for name in ("wikilink_resolution", "link_policy", "frontmatter_props"):
                 vault_check.CHECKS[name](vault, findings)
-            relevant = [finding for finding in findings
-                        if (finding.path, finding.line, finding.check,
-                            finding.message) not in baseline_keys]
-            if relevant:
-                finding = sorted(relevant, key=lambda item: (
-                    item.path, item.line, item.check, item.message))[0]
-                return deny(
-                    "multi-file patch virtual overlay failed "
-                    f"[{finding.check}] {finding.path}: {finding.message}")
+        except (OSError, ValueError) as exc:
+            return deny(f"multi-file patch virtual overlay failed: {exc}")
+        relevant = [finding for finding in findings
+                    if (finding.path, finding.line, finding.check,
+                        finding.message) not in baseline_keys]
+        if relevant:
+            finding = sorted(relevant, key=lambda item: (
+                item.path, item.line, item.check, item.message))[0]
+            return deny(
+                "multi-file patch virtual overlay failed "
+                f"[{finding.check}] {finding.path}: {finding.message}")
     return 0
 
 
@@ -1436,18 +1427,38 @@ def post(payload: dict) -> int:
             "this write left hard-linked Experience Design state: "
             + ", ".join(hardlinks)
         )
+    paths = []
     for written in payload.get("file_targets", []):
         file_path = str(written.get("file_path", ""))
         cwd = str(payload.get("cwd") or "")
         if file_path and cwd and not Path(file_path).is_absolute():
             file_path = os.path.join(cwd, file_path)
-        code = post_target(file_path)
+        paths.append(file_path)
+    batches = changed_target_findings(paths)
+    for file_path in paths:
+        code = post_target(file_path, batches)
         if code:
             return code
     return 0
 
 
-def post_target(file_path: str) -> int:
+def changed_target_findings(paths: list[str]) -> dict[tuple[Path, str], list]:
+    groups: dict[Path, list[str]] = {}
+    for path in paths:
+        root, rel = vault_root(path), vault_relative(path)
+        if root is not None and rel is not None and rel.endswith(".md") and root.is_dir():
+            groups.setdefault(root, []).append(rel)
+    results = {}
+    for root, targets in groups.items():
+        policy = vault_check.effective_policy(
+            vault_check.load_policy(vault_check.DEFAULT_POLICY), root)
+        vault = vault_check.build_vault(root, policy)
+        for rel, findings in vault_check.changed_findings(vault, targets).items():
+            results[root, rel] = findings
+    return results
+
+
+def post_target(file_path: str, batches: dict | None = None) -> int:
     rel = vault_relative(file_path)
     if rel is None:
         return 0
@@ -1458,9 +1469,12 @@ def post_target(file_path: str) -> int:
         return 0
     buffer = io.StringIO()
     with contextlib.redirect_stdout(buffer):
-        code = vault_check.main([
-            "check", "--vault", str(root), "--impact", rel,
-        ])
+        if batches is not None and (root, rel) in batches:
+            code = vault_check.emit_findings(batches[root, rel])
+        else:
+            code = vault_check.main([
+                "check", "--vault", str(root), "--impact", rel,
+            ])
     if code == 1:
         sys.stderr.write(buffer.getvalue())
         print(
@@ -1875,6 +1889,43 @@ def parsed_options(
         result[option] = args[index + 1]
         index += 2
     return result
+
+
+def delivery_reader_barrier(payload: dict) -> int:
+    """Only the bound verification CLI may coordinate active readers."""
+    from delivery_verification import guard_write
+    project = shell_project(payload).resolve()
+    if payload.get("tool_name") == "Bash":
+        parsed = trusted_python_script_tokens(payload)
+        if parsed is not None:
+            script, args, cwd = parsed
+            if (_installed_script_path(script, cwd, "delivery_verification.py") is not None
+                    and len(args) >= 3 and args[0] == "--worktree"
+                    and args.count("--worktree") == 1
+                    and _cli_path(args[1], cwd) == project
+                    and args[2] in {"freeze", "result", "status", "manifest", "validate", "run", "resume-qa", "inspect", "diff", "environment"}):
+                return 0
+        paths = None
+    else:
+        cwd = Path(str(payload.get("cwd") or project))
+        paths = [Path(str(target.get("file_path", "")))
+                 for target in payload.get("file_targets", [])]
+        paths = [path if path.is_absolute() else cwd / path for path in paths]
+    try:
+        guard_write(project, paths)
+        # File tools may address another Item by an absolute path while their
+        # caller remains in the main checkout. Its readers own that target too.
+        if paths:
+            by_project: dict[Path, list[Path]] = {}
+            for path in paths:
+                target_project = shell_project({"cwd": str(path.parent)}).resolve()
+                if target_project != project:
+                    by_project.setdefault(target_project, []).append(path)
+            for target_project, target_paths in by_project.items():
+                guard_write(target_project, target_paths)
+    except (OSError, RuntimeError, ValueError) as exc:
+        return deny(str(exc))
+    return 0
 
 
 def sanctioned_config_writer(payload: dict, config_path: Path) -> bool:
@@ -2848,8 +2899,18 @@ def registration_guard(payload: dict) -> int:
     return 0
 
 
-def vault_inventory(root: Path) -> dict[str, dict[str, int | str]]:
+def vault_inventory(root: Path, *, experience_snapshot: dict | None = None
+                    ) -> dict[str, dict[str, int | str]]:
     result = {}
+    if experience_snapshot is not None:
+        for rel, entry in experience_snapshot.items():
+            if (entry.get("kind") == "file"
+                    and experience_application_check is not None
+                    and experience_application_check.is_os_metadata_path(rel)
+                    and entry.get("nlink") == 1):
+                continue
+            result[rel] = {key: value for key, value in entry.items()
+                           if key != "content_base64"}
     pending = [root]
     while pending:
         directory = pending.pop()
@@ -2861,6 +2922,8 @@ def vault_inventory(root: Path) -> dict[str, dict[str, int | str]]:
         for entry in children:
             path = Path(entry.path)
             rel = path.relative_to(root).as_posix()
+            if experience_snapshot is not None and rel == EXPERIENCE_ROOT_RELATIVE:
+                continue
             if author_owned_artifact_path(rel):
                 continue
             # App session files, trash and the ignored policy-owned community
@@ -3400,6 +3463,9 @@ def cleanup_guard_state(primary: Path, recovery: Path) -> None:
 
 
 def shell_snapshot(payload: dict) -> int:
+    barrier = delivery_reader_barrier(payload)
+    if barrier:
+        return barrier
     if not guard_event_id(payload):
         return deny(
             "the shell hook payload has no stable tool-call id; refusing a"
@@ -3476,7 +3542,7 @@ def shell_snapshot(payload: dict) -> int:
         )
     value = {
         "vault": str(root) if root else "",
-        "inventory": vault_inventory(root) if root else {},
+        "inventory": vault_inventory(root, experience_snapshot=experience_tree) if root else {},
         "config": config,
         "config_writer_allowed": sanctioned_config_writer(
             payload, config_path
@@ -3944,13 +4010,16 @@ def shell_verify(payload: dict) -> int:
         checks = [None] if deleted or experience_non_notes else [
             key for key in changed if key.endswith(".md")
         ]
+        batches = changed_target_findings([
+            str(root / impacted) for impacted in checks if impacted is not None
+        ])
         for impacted in checks:
-            argv = ["check", "--vault", str(root)]
-            if impacted is not None:
-                argv.extend(("--impact", impacted))
             buffer = io.StringIO()
             with contextlib.redirect_stdout(buffer):
-                code = vault_check.main(argv)
+                if impacted is None:
+                    code = vault_check.main(["check", "--vault", str(root)])
+                else:
+                    code = vault_check.emit_findings(batches.get((root, impacted), []))
             if code:
                 sys.stderr.write(buffer.getvalue())
                 return deny(protected_message(

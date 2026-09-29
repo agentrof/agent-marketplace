@@ -118,6 +118,16 @@ def main() -> int:
             output.write(f"{plan['selection_reason']}\n\n")
             output.write(f"Selected test cases: {len(plan['selected_ids'])}. ")
             output.write(f"Parallel groups: {sum(len(lane['shards']) for lane in plan['lanes'].values())}.\n")
+            output.write("\n| Lane | Measured weights | Total tests | Longest estimated shard (seconds) |\n")
+            output.write("| --- | ---: | ---: | ---: |\n")
+            for name, lane in plan['lanes'].items():
+                output.write(f"| {name} | {lane['measured_weights']} | {len(lane['selected_ids'])} | "
+                             f"{max(lane['estimated_shard_seconds']):.1f} |\n")
+            for source in plan['timing_provenance']['sources']:
+                output.write(f"\nTiming source: run {source['run_id']}, attempt {source['run_attempt']}, "
+                             f"age {source['age_seconds']} seconds, {source['restored_tests']} weights.\n")
+            for reason in plan['timing_provenance']['fallback_reasons']:
+                output.write(f"\nTiming fallback: {reason}.\n")
     return 0
 
 

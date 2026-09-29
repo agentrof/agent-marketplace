@@ -3,6 +3,7 @@
 import contextlib
 import io
 import json
+import os
 import subprocess
 import tempfile
 import unittest
@@ -48,6 +49,32 @@ class BacklogApprovalPreservationTests(unittest.TestCase):
     def commit(self):
         self.git("add", "-A")
         self.git("commit", "-m", "Approved backlog fixture")
+
+    def test_committed_sources_batch_is_byte_exact_with_unusual_paths(self):
+        name = "unicode-ç-space.md" if os.name == "nt" else "unicode-ç-tab\tline\n.md"
+        path = self.docs / "backlog" / name
+        path.write_bytes(b"\x00\xff\r\n")
+        self.commit()
+        with mock.patch.object(compiler.subprocess, "run", wraps=subprocess.run) as run:
+            committed = compiler.committed_approval_sources(self.project, self.docs)
+        self.assertEqual(committed[path], b"\x00\xff\r\n")
+        self.assertEqual(len(run.call_args_list), 3)
+        self.assertEqual(run.call_args_list[1].args[0][6], self.git("rev-parse", "HEAD").strip())
+        self.assertFalse(any("show" in call.args[0] for call in run.call_args_list))
+        self.assertEqual(sum("cat-file" in call.args[0] for call in run.call_args_list), 1)
+        path.write_bytes(b"working edit")
+        self.assertEqual(compiler.committed_approval_sources(self.project, self.docs)[path], b"\x00\xff\r\n")
+
+    def test_committed_sources_rejects_truncated_batch(self):
+        actual_run = subprocess.run
+        def damaged(argv, **kwargs):
+            result = actual_run(argv, **kwargs)
+            if "cat-file" in argv:
+                result.stdout = result.stdout[:-1]
+            return result
+        with mock.patch.object(compiler.subprocess, "run", side_effect=damaged):
+            with self.assertRaises(ValueError):
+                compiler.committed_approval_sources(self.project, self.docs)
 
     def source_bytes(self):
         record, errors = compiler.collect(self.docs)

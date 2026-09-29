@@ -1,6 +1,6 @@
 ---
 name: sql-database-design
-description: Relational database schema design expertise. Practical normalization, key and null rules, index architecture, constraint engineering, and zero-downtime schema evolution. Loaded by the database role agent when the project stack is relational.
+description: Relational database schema design expertise. Practical normalization, key and null rules, index architecture, constraint engineering, and zero-downtime schema evolution. Loaded by the implementation owner and independent reviewers when accepted Solution decisions select a relational datastore.
 exposure: internal
 ---
 

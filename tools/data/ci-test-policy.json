@@ -54,7 +54,9 @@
     "tools/tests/test_ci_*.py",
     "tools/tests/fixtures.py",
     "tools/tests/git_fixture.py",
-    "tools/tests/backlog_fixture.py"
+    "tools/tests/backlog_fixture.py",
+    "tools/tests/fixture_cache.py",
+    "plugins/*/scripts/task_inputs.py"
   ],
   "rules": [
     {
@@ -102,7 +104,8 @@
         "plugins/software-engineering-team/scripts/delivery_git.py",
         "plugins/software-engineering-team/scripts/delivery_governance.py",
         "plugins/software-engineering-team/scripts/delivery_provider.py",
-        "plugins/software-engineering-team/scripts/delivery_result.py"
+        "plugins/software-engineering-team/scripts/delivery_result.py",
+        "plugins/software-engineering-team/scripts/delivery_verification.py"
       ],
       "groups": [
         "delivery"
@@ -158,6 +161,14 @@
       "groups": [
         "release_metadata"
       ]
+    },
+    {
+      "paths": [
+        "plugins/software-engineering-team/scripts/backlog_review_inputs.py"
+      ],
+      "groups": [
+        "backlog"
+      ]
     }
   ],
   "groups": {
@@ -168,6 +179,7 @@
         "tools.tests.test_packaged_state_contract.*",
         "tools.tests.test_validator_contract.*",
         "tools.tests.test_counts.*",
+        "tools.tests.test_task_inputs.*",
         "tools.tests.test_ci_*.*"
       ]
     },
@@ -212,7 +224,9 @@
         "tools.tests.test_architecture_compile.*",
         "tools.tests.test_vault_hook.*",
         "tools.tests.test_frontmatter_round_trip.*",
-        "tools.tests.test_writer_line_endings.*"
+        "tools.tests.test_writer_line_endings.*",
+        "tools.tests.test_delivery_verification.*",
+        "tools.tests.test_performance_contracts.*"
       ],
       "depends_on": [
         "contracts"
@@ -226,7 +240,13 @@
         "tools.tests.test_backlog_requirement_bindings.*",
         "tools.tests.test_requirement_flow.*",
         "tools.tests.test_requirement_compile.*",
-        "tools.tests.test_requirement_review_contract.*"
+        "tools.tests.test_requirement_review_contract.*",
+        "tools.tests.test_backlog_absence_history.*",
+        "tools.tests.test_backlog_absent_inputs.*",
+        "tools.tests.test_backlog_headless_handoff.*",
+        "tools.tests.test_backlog_render_noop.*",
+        "tools.tests.test_backlog_review_inputs.*",
+        "tools.tests.test_backlog_revision_atomicity.*"
       ],
       "depends_on": [
         "delivery"
@@ -236,7 +256,8 @@
       "tests": [
         "tools.tests.test_requirement_compile.*",
         "tools.tests.test_requirement_flow.*",
-        "tools.tests.test_requirement_review_contract.*"
+        "tools.tests.test_requirement_review_contract.*",
+        "tools.tests.test_requirement_binding_retry.*"
       ],
       "depends_on": [
         "backlog"
@@ -272,13 +293,17 @@
         "tools.tests.test_vault_hook.*",
         "tools.tests.test_atomic_file.*",
         "tools.tests.test_writer_line_endings.*",
-        "tools.tests.test_ci_tests.*"
+        "tools.tests.test_ci_tests.*",
+        "tools.tests.test_ci_local.*"
       ]
     },
     "windows": {
       "tests": [
         "tools.tests.test_delivery_compile.*",
         "tools.tests.test_delivery_git.*",
+        "tools.tests.test_delivery_verification.*",
+        "tools.tests.test_performance_contracts.*",
+        "tools.tests.test_task_inputs.*",
         "tools.tests.test_ba_compile.EnterReviewTests.test_windows_junction_space_ancestor_is_rejected"
       ],
       "depends_on": [
@@ -358,16 +383,30 @@
     "tools.tests.test_artifact_snapshot_metadata",
     "tools.tests.test_atomic_file",
     "tools.tests.test_ba_compile",
+    "tools.tests.test_backlog_absence_history",
+    "tools.tests.test_backlog_absent_inputs",
     "tools.tests.test_backlog_approval_preservation",
     "tools.tests.test_backlog_compile",
+    "tools.tests.test_backlog_headless_handoff",
     "tools.tests.test_backlog_input_coverage",
+    "tools.tests.test_backlog_render_noop",
     "tools.tests.test_backlog_requirement_bindings",
+    "tools.tests.test_backlog_review_inputs",
+    "tools.tests.test_backlog_revision_atomicity",
+    "tools.tests.test_ci_evidence",
+    "tools.tests.test_ci_host_evidence",
+    "tools.tests.test_ci_local",
+    "tools.tests.test_ci_performance",
+    "tools.tests.test_ci_plan",
+    "tools.tests.test_ci_release",
+    "tools.tests.test_ci_tests",
     "tools.tests.test_counts",
     "tools.tests.test_delivery_compile",
     "tools.tests.test_delivery_git",
     "tools.tests.test_delivery_protocol",
     "tools.tests.test_delivery_provider",
     "tools.tests.test_delivery_result",
+    "tools.tests.test_delivery_verification",
     "tools.tests.test_experience_application_runtime",
     "tools.tests.test_experience_artifact_recovery",
     "tools.tests.test_experience_compile",
@@ -380,12 +419,14 @@
     "tools.tests.test_operation_governance",
     "tools.tests.test_package_refresh",
     "tools.tests.test_packaged_state_contract",
+    "tools.tests.test_performance_contracts",
     "tools.tests.test_project_config",
     "tools.tests.test_project_instructions",
     "tools.tests.test_project_vault_contract",
     "tools.tests.test_release",
     "tools.tests.test_release_publish",
     "tools.tests.test_release_workflows",
+    "tools.tests.test_requirement_binding_retry",
     "tools.tests.test_requirement_compile",
     "tools.tests.test_requirement_flow",
     "tools.tests.test_requirement_review_contract",
@@ -397,6 +438,7 @@
     "tools.tests.test_single_team_distribution",
     "tools.tests.test_smoke_plugin_installs",
     "tools.tests.test_solution_topology",
+    "tools.tests.test_task_inputs",
     "tools.tests.test_validator_contract",
     "tools.tests.test_vault_check",
     "tools.tests.test_vault_gate",
@@ -413,5 +455,9 @@
     "experience",
     "business_analysis",
     "release_metadata"
-  ]
+  ],
+  "fixture_startup_seconds": {
+    "tools.tests.test_delivery_git": 1.0,
+    "tools.tests.test_delivery_compile": 0.5
+  }
 }

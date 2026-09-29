@@ -156,6 +156,59 @@ class OperationGovernanceTests(unittest.TestCase):
                         self.assertEqual(approved.returncode, 2, approved.stdout + approved.stderr)
                         self.assertIn(error, approved.stdout)
 
+    def test_optional_diagnostic_adapter_is_validated_without_legacy_defaults(self):
+        sys.path.insert(0, str(SCRIPTS))
+        import operation_compile
+        with tempfile.TemporaryDirectory() as temporary:
+            docs = Path(temporary) / "workspace/docs"
+            ref = self.approved_solution(docs)
+            args = ("--docs", str(docs), "--kind", "verification")
+            initialized = self.invoke(OPERATION, "init", *args, "--constrained-by", f"[[{ref}|SD-001]]")
+            self.assertEqual(initialized.returncode, 0, initialized.stdout + initialized.stderr)
+            path = operation_compile.contract_path(docs, "verification")
+            draft, body = operation_compile.parse(path)
+            self.assertNotIn("diagnostic_test_command", draft)
+            self.assertNotIn("diagnostic_test_workdir", draft)
+            draft["test_command"] = "make test"
+            path.write_text(operation_compile.render(draft, body), encoding="utf-8")
+            approved = self.invoke(OPERATION, "approve", *args)
+            self.assertEqual(approved.returncode, 0, approved.stdout + approved.stderr)
+            original = path.read_bytes()
+            original_props, _ = operation_compile.parse(path)
+            receipt, errors = operation_compile.check_contract(docs, "verification")
+            self.assertEqual(errors, [])
+            self.assertEqual(receipt["source_hash"], original_props["source_hash"])
+            self.assertEqual(path.read_bytes(), original)
+            self.assertNotIn("diagnostic_test_workdir", original_props)
+            command = {"diagnostic_test_command": "python3 tools/diagnostic_tests.py"}
+            cases = [({}, None), (command, None),
+                     ({**command, "diagnostic_test_workdir": "tools/diagnostics"}, None),
+                     ({"diagnostic_test_command": ""}, "diagnostic_test_command"),
+                     ({"diagnostic_test_command": "   "}, "diagnostic_test_command"),
+                     ({"diagnostic_test_command": []}, "diagnostic_test_command"),
+                     ({"diagnostic_test_command": False}, "diagnostic_test_command"),
+                     ({"diagnostic_test_command": "runner token=literal"}, "credential literal"),
+                     ({"diagnostic_test_command": "runner {{selection}}"}, "unresolved token"),
+                     ({"diagnostic_test_workdir": "."}, "requires diagnostic_test_command")]
+            cases.extend(({**command, "diagnostic_test_workdir": directory}, "normalized repository-relative")
+                         for directory in ("", "../tools", "./tools", "/tools", "tools//tests", "C:/tools", "tools/child.", ["tools"]))
+            for fields, error in cases:
+                with self.subTest(fields=fields):
+                    text = operation_compile.render({**draft, **fields}, body)
+                    _receipt, errors = operation_compile.check_contract(docs, "verification", text=text)
+                    if error is None:
+                        self.assertEqual(errors, [])
+                    else:
+                        self.assertTrue(any(error in finding for finding in errors), errors)
+                    self.assertEqual(path.read_bytes(), original)
+            path.write_text(operation_compile.render({**draft, **command}, body), encoding="utf-8")
+            approved = self.invoke(OPERATION, "approve", *args)
+            self.assertEqual(approved.returncode, 0, approved.stdout + approved.stderr)
+            props, _ = operation_compile.parse(path)
+            self.assertEqual(props["diagnostic_test_command"], command["diagnostic_test_command"])
+            self.assertNotIn("diagnostic_test_workdir", props)
+            self.assertEqual(operation_findings(docs), [])
+
     def test_render_ci_refuses_an_external_pull_request_check_source(self):
         sys.path.insert(0, str(SCRIPTS))
         import operation_compile

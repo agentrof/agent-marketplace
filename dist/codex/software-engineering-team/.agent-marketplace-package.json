@@ -1,5 +1,5 @@
 {
-  "build_id": "snapshot.3eb005fc545f9d4f6115d1ab13f8721bf16a1177c7bc2267f7717abd22d1a7ca",
+  "build_id": "snapshot.bdfdf4ff5a048df02d2e819d2c45588ceb4e089368e386b4ffb41ef55d5e1167",
   "component": "software-engineering-team",
   "delivery_protocol": {
     "read_max": 1,
@@ -34,7 +34,7 @@
     "agents/solution-reviewer.md": "a700af0b863512a406f0602e733f00ae7d1a70872ed1579c19b041b06ad2074d",
     "agents/ux-designer.md": "1d990eb8f773a941b6b7df31c0aa75b6cdd992fedd872f185500d77d4e04e6bc",
     "constitution.md": "61d151abb2ffc3a73fb444b1edb945adb9aff345f66515450b272e34082c4034",
-    "flows/backlog-planning.md": "02408abe749b2e1a71cd7fc77c46e1ee08eadb26144051e3a527d209e7268191",
+    "flows/backlog-planning.md": "26f78db315eaafc582fe84194baf35f46eb231afa7c4bfb63ca38deb604c7e56",
     "flows/business-analysis.md": "67b69348c59746263ded358459f51ab9653914ba1a4d597c3fb31d7b2557e2c3",
     "flows/delivery-execution.md": "e9ec8fbdbd84522874f78bf2f43447c9f30ec9ecf3b458346abe7f480fae3d3a",
     "flows/delivery-governance.md": "35bb00cea1ad2a11cde0f522c3fcca117db74dc4dff3a314cd4bba45b8c37f2d",
@@ -52,10 +52,10 @@
     "scripts/architecture_compile.py": "f806085ee543b7371bddd37e04a06687ba8d9a4897fe29ed36d6bd65fd6d3e84",
     "scripts/artifact_check.py": "d95f51158f98e56fab55a083f240a2de612ae5cf5f2b73aeaee848721793e860",
     "scripts/atomic_file.py": "91ff2cafb430fcf3e174f7310fb8eff2442fac334e27c3b2fbfc92b5b9f90c0c",
-    "scripts/ba_compile.py": "458438507effebbb42d48900bedb7bbe57b534558d1902500ede50bab0cad424",
-    "scripts/backlog_compile.py": "7bc4832b2d801f122376e2a5fbc5171edd82269a0c43c17f478aeed40e541a79",
-    "scripts/backlog_input_policy.py": "6bd5b0e8a6940dcd49fc9437cb73349784210e0237d8e099434d9ae3edfc259e",
-    "scripts/backlog_review_inputs.py": "f6c4b4704ad423eb10bbd154d738364a726f4017771cb516eb8401c352ff8342",
+    "scripts/ba_compile.py": "6097b5a504ee3c8e98a414cb7a81961069d7435f92ce15882803b7cbec6a9899",
+    "scripts/backlog_compile.py": "11073d2e0f487097851f2cb0b2ba3f1e153de45189f34bfc8ad14ca7c4557986",
+    "scripts/backlog_input_policy.py": "2da777e916bd53440dd74b8dc1e5d666f291a84812677649a58628623f67ebcb",
+    "scripts/backlog_review_inputs.py": "64cf22f37686c3b91cd91c97e7b24d66907a656c109e27289f7b3b05de5db62f",
     "scripts/delivery_compile.py": "f68f9101cda662e8da33b7c0bdfdf4263e947ed95adb7894499a2d146f596b0e",
     "scripts/delivery_git.py": "47a3f6e5d69cc9318359fd795761d6294bac8e865c449caf3bff2125d14fcb38",
     "scripts/delivery_governance.py": "70939ac67c9ac359f00a5cc7cee25a84e0b724527b34b3f6e22243e5fb66ec27",
@@ -291,6 +291,6 @@
   "schema_version": 3,
   "source_channel": "snapshot",
   "source_commit": "",
-  "source_ref": "snapshot.3eb005fc545f9d4f6115d1ab13f8721bf16a1177c7bc2267f7717abd22d1a7ca",
+  "source_ref": "snapshot.bdfdf4ff5a048df02d2e819d2c45588ceb4e089368e386b4ffb41ef55d5e1167",
   "version": "0.5.0"
 }

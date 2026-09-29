@@ -1,4 +1,0 @@
-{
-  "components": {},
-  "summary": "Partition CI tests with complete coverage verification and isolated reusable fixtures, select affected suites conservatively, reuse matching trusted test and checkout-host evidence across merge and release transitions, and keep release replay and public installation checks fresh."
-}

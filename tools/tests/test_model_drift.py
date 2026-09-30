@@ -227,9 +227,35 @@ class ModelDriftTests(unittest.TestCase):
                     self.assertEqual((item["listed"], item["newer"], item["drift"]),
                                      (True, [], False))
                     self.assertEqual(item["pinned"], pins[host][name]["id"])
-        code, out, err = self.run_drift("--catalog", f"codex={codex}", "--issue-body", *CODEX_CLI)
+        code, out, err = self.run_drift("--catalog", f"codex={codex}",
+                                        "--catalog", f"claude={claude}", "--issue-body", *CODEX_CLI)
         self.assertEqual((code, out), (model_drift.EXIT_CLEAN, ""))
-        self.assertIn("every pinned class matches", err)
+        self.assertEqual(err, "model-drift: every pinned class matches its host catalog\n")
+
+    def test_an_omitted_host_fails_the_run_unless_a_subset_is_asked(self):
+        # A run without a registered host's catalog never reads as "every pin is current".
+        codex = ("--catalog", f"codex={self.listed_pins('codex')}", *CODEX_CLI)
+        code, out, err = self.run_drift(*codex)
+        self.assertEqual(code, model_drift.EXIT_UNCHECKED)
+        self.assertEqual(json.loads(out)["unchecked"], ["claude"])
+        self.assertIn("model-drift: not checked: claude; pass its catalog, or --subset", err)
+        code, out, err = self.run_drift(*codex, "--issue-body")
+        self.assertEqual((code, out), (model_drift.EXIT_UNCHECKED, ""))
+        self.assertIn("not checked: claude", err)
+        self.assertNotIn("every pinned class matches its host catalog", err)
+        code, out, err = self.run_drift(*codex, "--issue-body", "--subset")
+        self.assertEqual((code, out), (model_drift.EXIT_CLEAN, ""))
+        self.assertIn("model-drift: not checked: claude\n", err)
+        self.assertIn("every pinned class of codex matches its host catalog", err)
+        code, report = self.report(*codex, "--subset")
+        self.assertEqual((code, report["unchecked"]), (model_drift.EXIT_CLEAN, ["claude"]))
+        # Drift still wins, and the issue names the host it did not compare.
+        self.pin_scenario()
+        code, out, err = self.run_drift("--catalog", f"codex={self.codex_host()}", *CODEX_CLI,
+                                        "--issue-body")
+        self.assertEqual(code, model_drift.EXIT_DRIFT)
+        self.assertIn("Not checked in this run: claude.", out)
+        self.assertIn("not checked: claude", err)
 
     def test_invalid_input_fails_closed(self):
         codex = self.codex_host()
@@ -282,7 +308,7 @@ class ModelDriftTests(unittest.TestCase):
                 code, out, err = self.run_drift(*codex, *cli)
                 self.assertEqual((code, out), (model_drift.EXIT_INVALID, ""))
                 self.assertIn(message, err)
-        code, report = self.report(*codex, "--cli-version", "codex=codex-cli 0.160.0")
+        code, report = self.report(*codex, "--cli-version", "codex=codex-cli 0.160.0", "--subset")
         self.assertEqual(report["hosts"]["codex"]["catalog"]["cli_version"], "0.160.0")
         # The floor follows the newest release a pinned source names.
         sources = self.catalog("codex")["classes"]["fast"]["sources"]

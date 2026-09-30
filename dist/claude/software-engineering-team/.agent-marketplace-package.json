@@ -1,5 +1,5 @@
 {
-  "build_id": "snapshot.19910cf4940465b32d04e60adbb6e6b52b148efdfe5206ff0518b223f04f118c",
+  "build_id": "snapshot.2c97a32f9573684ea7fce9aa9165a140b7c95df1a75a9ac02b2152e8cf95dba7",
   "component": "software-engineering-team",
   "delivery_protocol": {
     "read_max": 1,
@@ -57,10 +57,10 @@
     "scripts/backlog_input_policy.py": "2da777e916bd53440dd74b8dc1e5d666f291a84812677649a58628623f67ebcb",
     "scripts/backlog_review_inputs.py": "64cf22f37686c3b91cd91c97e7b24d66907a656c109e27289f7b3b05de5db62f",
     "scripts/delivery_compile.py": "f68f9101cda662e8da33b7c0bdfdf4263e947ed95adb7894499a2d146f596b0e",
-    "scripts/delivery_git.py": "47a3f6e5d69cc9318359fd795761d6294bac8e865c449caf3bff2125d14fcb38",
+    "scripts/delivery_git.py": "d188824bdf62be382d7f432019724492b3884edcd407ecf1fe3836de84bd436d",
     "scripts/delivery_governance.py": "70939ac67c9ac359f00a5cc7cee25a84e0b724527b34b3f6e22243e5fb66ec27",
     "scripts/delivery_provider.py": "ff5d20f83641ebd8aed44c106c00012326a7d210f1c30a64633fac169e23e37d",
-    "scripts/delivery_result.py": "529b545eb019eec046d143dbd874a6b2b408e01c854660b9eca8cb7a4e3ebc4e",
+    "scripts/delivery_result.py": "86f22b6de610b3cdd25da7bd1c45c3e0183fd13893f99e7be0bc34d19c7f6c29",
     "scripts/delivery_verification.py": "0a0df687b5b0d90e943ef222f2337e7f03a38f78911c08b3bd65852151a20e36",
     "scripts/design_system_compile.py": "531d5bc5da139cc0e5fa614d518d6e66187b336c34b97a031074de862285f613",
     "scripts/experience_application_check.py": "ca3f446000c03fd4e87be8591d17845278ef666de4f25bc796e5e136eba5860f",
@@ -102,7 +102,7 @@
     "skill-content/deliver/data/delivery-protocol-1.json": "448c7a970a9ae38bb9348b96a2cfa2f2833b895e28bc84c5a3c87e622ce5b0d9",
     "skill-content/deliver/data/delivery-provider-contract.json": "c2bd8bf6db8515aee2dc3b857a644484c6b0f1eed0954f55884c466ee08a3035",
     "skill-content/deliver/data/delivery-receipt-contract.json": "4b47d51cd4c24d0aa448c2ccd5aef23c48da807c226543b2868f8b0c86e6e731",
-    "skill-content/deliver/data/delivery-result-contract.json": "b314ceaae587bb4006a75db6c5a44a437a5e4d344f38029495eeaff13ca79e61",
+    "skill-content/deliver/data/delivery-result-contract.json": "e3d9b9847ef59e22637f9c44b6b1d319560d1d7c3c8aead465a81496c054a273",
     "skill-content/deliver/data/delivery-verification-policy.json": "838a04fc434cbab3063b0721237dbbcc25712f2ece4b345654cc248aee740f7c",
     "skill-content/delivery-plan/SKILL.md": "bd1020b0afede9f2e7f28c47e49f9d28548ecc51d2ec84158c98a5dc360702fa",
     "skill-content/demo/SKILL.md": "8cd155dfb8f548ae0716fba785f8df7733645a7c808d8b781dfd2f5fe2567e0d",
@@ -293,6 +293,6 @@
   "schema_version": 3,
   "source_channel": "snapshot",
   "source_commit": "",
-  "source_ref": "snapshot.19910cf4940465b32d04e60adbb6e6b52b148efdfe5206ff0518b223f04f118c",
+  "source_ref": "snapshot.2c97a32f9573684ea7fce9aa9165a140b7c95df1a75a9ac02b2152e8cf95dba7",
   "version": "0.6.0"
 }

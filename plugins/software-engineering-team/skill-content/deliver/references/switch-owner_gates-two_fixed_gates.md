@@ -35,8 +35,9 @@ approval and Requirement-flow gates keep their own gates.
    would refuse is refused with what the approval finds. `check-plan` also
    lists the `pending` rows of the decision log under `pending_decisions`, and
    gate A asks each of them.
-3. Group the questions in calls of at most four, with the recommended option
-   first and the tradeoffs in the option descriptions.
+3. Group the questions in host calls no larger than the per-call bound the
+   host contract names, with the recommended option first and the tradeoffs
+   in the option descriptions.
 4. Record every answer, then carry out what gate A approved without asking
    again, in this order: run `approve-scope`, which refuses while a row of the
    decision log is `pending`; approve the Governance change and apply it with

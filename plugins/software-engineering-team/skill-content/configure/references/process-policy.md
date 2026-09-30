@@ -20,7 +20,8 @@ parameter the table leaves unset.
    with parameters their declaration and the values set. Under `undeclared`
    it lists each policy row for a switch or parameter this package no longer
    declares. Report any errors it returns; the revision below repairs them.
-2. Ask one choice-gate question per switch, at most four per host call. The
+2. Ask one choice-gate question per switch, in host calls no larger than the
+   per-call bound the host contract names. The
    package default is the recommended option and comes first: it is today's
    measured behaviour, and every other value is an experiment that its
    promotion rule measures. Each option's description carries that value's

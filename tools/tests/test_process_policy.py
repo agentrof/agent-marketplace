@@ -523,7 +523,8 @@ class ConfigureProcessContractTests(unittest.TestCase):
     def test_one_choice_gate_per_switch_with_the_default_recommended_first(self):
         reference = flat("skill-content/configure/references/process-policy.md")
         for rule in (
-                "Ask one choice-gate question per switch, at most four per host call",
+                "Ask one choice-gate question per switch, in host calls no larger than the"
+                " per-call bound the host contract names",
                 "The package default is the recommended option and comes first",
                 "Each option's description carries that value's registry tradeoffs",
                 "the question names the switch's metric and promotion unit",

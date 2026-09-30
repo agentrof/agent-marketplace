@@ -198,8 +198,9 @@ class OwnerGatesReferenceTests(unittest.TestCase):
             "present gate A as one choice gate: the Delivery scope, the execution plan with its"
             " topology, claims, role sequence and schedules, every Operation revision and"
             " Governance change the plan needs, the decision log so far and every queued question",
-            "Group the questions in calls of at most four, with the recommended option first and"
-            " the tradeoffs in the option descriptions",
+            "Group the questions in host calls no larger than the per-call bound the host"
+            " contract names, with the recommended option first and the tradeoffs in the option"
+            " descriptions",
             "Gate A's approval is the go for Item start",
             "apply it with `delivery_git.py apply-governance` before any Item starts",
             "present gate B as one choice gate: the Delivery Review, its follow-ups, the decision"
@@ -229,15 +230,20 @@ class OwnerGatesReferenceTests(unittest.TestCase):
                 self.assertNotIn("owner_gates", read(relative))
 
     def test_host_contracts_group_the_gate_questions(self):
-        for host, surface in (("claude", "AskUserQuestion"), ("codex", "request_user_input")):
+        # AskUserQuestion takes one to four questions; request_user_input takes
+        # one to three (openai/codex request_user_input_spec.rs).
+        for host, surface, bound in (("claude", "AskUserQuestion", "four"),
+                                     ("codex", "request_user_input", "three")):
             text = " ".join((ROOT / "platforms" / host / "software-engineering-team"
                              / "host-contract.md").read_text(encoding="utf-8").split())
             with self.subTest(host=host):
                 self.assertIn("Under switch `owner_gates` at `two_fixed_gates`, ask the owner inside"
                               " a Delivery only at gate A, gate B, an early gate or for an at-once"
                               " class", text)
-                self.assertIn(f"through `{surface}` in calls of at most four questions, with the"
+                self.assertIn(f"through `{surface}` in calls of at most {bound} questions, with the"
                               " recommended option first", text)
+                self.assertIn(f"`{surface}` takes at most {bound} questions per call", text)
+                self.assertEqual(text.count("at most four") + text.count("at most three"), 2)
 
     def test_docs_describe_both_values(self):
         for doc in ("docs/orchestration.md", "docs/requirement-delivery-protocol.md"):

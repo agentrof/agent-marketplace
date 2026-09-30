@@ -3071,6 +3071,10 @@ def stub_story(args) -> int:
             "derives_from": [epic_link],
             "tags": ["doc/story", "status/planned"], "aliases": [story_id],
         }
+        # The vault relation contract refuses an empty typed relation list.
+        for key in ("uses_design", "constrained_by"):
+            if not story_props[key]:
+                del story_props[key]
         if implements:
             story_props["implements"] = implements
         if evidence:

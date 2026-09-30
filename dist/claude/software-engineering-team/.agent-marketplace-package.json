@@ -1,5 +1,5 @@
 {
-  "build_id": "snapshot.bdfdf4ff5a048df02d2e819d2c45588ceb4e089368e386b4ffb41ef55d5e1167",
+  "build_id": "snapshot.805c161ead4e8f7fcc15d4cdcbca5394c4894d1389a9fd21d571704628cd144f",
   "component": "software-engineering-team",
   "delivery_protocol": {
     "read_max": 1,
@@ -53,7 +53,7 @@
     "scripts/artifact_check.py": "d95f51158f98e56fab55a083f240a2de612ae5cf5f2b73aeaee848721793e860",
     "scripts/atomic_file.py": "91ff2cafb430fcf3e174f7310fb8eff2442fac334e27c3b2fbfc92b5b9f90c0c",
     "scripts/ba_compile.py": "6097b5a504ee3c8e98a414cb7a81961069d7435f92ce15882803b7cbec6a9899",
-    "scripts/backlog_compile.py": "11073d2e0f487097851f2cb0b2ba3f1e153de45189f34bfc8ad14ca7c4557986",
+    "scripts/backlog_compile.py": "3613c1f82912e51e256a98d8716f50fa11c0b282f6387e99511a1ca0304a6545",
     "scripts/backlog_input_policy.py": "2da777e916bd53440dd74b8dc1e5d666f291a84812677649a58628623f67ebcb",
     "scripts/backlog_review_inputs.py": "64cf22f37686c3b91cd91c97e7b24d66907a656c109e27289f7b3b05de5db62f",
     "scripts/delivery_compile.py": "f68f9101cda662e8da33b7c0bdfdf4263e947ed95adb7894499a2d146f596b0e",
@@ -293,6 +293,6 @@
   "schema_version": 3,
   "source_channel": "snapshot",
   "source_commit": "",
-  "source_ref": "snapshot.bdfdf4ff5a048df02d2e819d2c45588ceb4e089368e386b4ffb41ef55d5e1167",
+  "source_ref": "snapshot.805c161ead4e8f7fcc15d4cdcbca5394c4894d1389a9fd21d571704628cd144f",
   "version": "0.5.0"
 }

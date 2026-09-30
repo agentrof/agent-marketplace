@@ -2016,6 +2016,42 @@ class DeliveryGitTests(unittest.TestCase):
         self.assertEqual([delivery_git.remote_oid(project, "origin", refs[name]) for name in ("fence", "integration")],
                          before)
 
+    def cancelled_refusal(self, verb: str) -> tuple[str, str]:
+        return ("DELIVERY_CANCELLATION_INVALID",
+                f"the published Delivery is cancelled and a cancellation is final, so {verb} cannot continue it; "
+                "its cancellation Review reaches the target through its PR")
+
+    def test_a_cancelled_delivery_is_not_published_or_claimed_again(self):
+        """A checkout whose delivery.md never learned of the cancellation cannot undo it: publication
+        from it or from a second checkout and a claim refuse, and the cancellation keeps its PR route."""
+        project, _docs, directory, _item, _reserved = self.prepare_execution_with_draft_reserved_contracts(False)
+        first = delivery_git.publish_execution_plan(project, "DLV-001")
+        second = self.second_checkout(project, directory, first["integration"])
+        cancelled = delivery_git.cancel_delivery(project, "DLV-001", "The owner withdrew the request")
+        self.assertEqual(delivery_compile.split_note(directory / "delivery.md")[0]["status"], "execution_approved")
+        delivery_git.run_git(second, "fetch", "-q", "origin")
+        before = delivery_git.run_git(project, "ls-remote", "origin")
+        for label, verb, refusal in (
+            ("same checkout", "publish-execution-plan", lambda: delivery_git.publish_execution_plan(project, "DLV-001")),
+            ("second checkout", "publish-execution-plan", lambda: delivery_git.publish_execution_plan(second, "DLV-001")),
+            ("same checkout", "claim-items", lambda: delivery_git.claim_items(project, "DLV-001")),
+        ):
+            with self.subTest(verb=verb, checkout=label):
+                self.assertEqual(self.refused_finding(refusal), self.cancelled_refusal(verb))
+                self.assertEqual(delivery_git.run_git(project, "ls-remote", "origin"), before)
+        intent = delivery_git.prepare_pr_creation(project, "DLV-001")
+        self.assertEqual(delivery_git.run_git(project, "rev-parse", intent["intent"] + "^"), cancelled["review"])
+
+    def test_a_delivery_cancelled_at_its_scope_is_not_revised_again(self):
+        """revise-unclaimed-scope reads the published status too: the local delivery.md still says scope_approved."""
+        temporary, project, _docs = self.reserve_scope()
+        self.addCleanup(remove_temporary, temporary)
+        delivery_git.cancel_delivery(project, "DLV-001", "The owner withdrew the request")
+        before = delivery_git.run_git(project, "ls-remote", "origin")
+        self.assertEqual(self.refused_finding(lambda: delivery_git.revise_unclaimed_scope(project, "DLV-001")),
+                         self.cancelled_refusal("revise-unclaimed-scope"))
+        self.assertEqual(delivery_git.run_git(project, "ls-remote", "origin"), before)
+
     def test_record_pr_remote_checks_the_local_mirror_and_the_adoption_intent(self):
         """record-pr-remote refuses a URL that an existing local Review does not mirror, as it did
         before the PR record became the only source of the URL, and a PR other than the one an

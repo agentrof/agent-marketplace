@@ -14,6 +14,9 @@ EFFORT_LEVELS = ("low", "medium", "high", "xhigh", "max", "ultra")
 MODEL_ID_RE = re.compile(
     r"gpt-(?P<major>[0-9]+)(?:\.(?P<minor>[0-9]+))?-(?P<family>[a-z]+(?:-[a-z]+)*)"
 )
+# This host's CLI in tools/data/host-cli-versions.json, the exact version CI
+# installs; no model class's min_cli_version may be newer.
+HOST_CLI_KEY = "codex"
 # How a frozen-task A/B runs every role on one candidate model.
 MODEL_TRIAL = (
     "Codex: in a scratch copy of the project, run `generate_codex_project.py"

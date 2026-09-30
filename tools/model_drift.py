@@ -310,10 +310,12 @@ def issue_body(root: Path, report: dict, today: str) -> str:
     if lines[-1]:
         lines.append("")
     lines += [(
-        "The pull request confirms each new ID and its efforts on the model's official"
-        " pages, sets `sources` to them, regenerates `dist/` with"
-        " `python3 tools/build_distributions.py` and adds a `.changes/<name>.json` at"
-        " `minor` for `software-engineering-team`, because default role models change."
+        "The pull request confirms each new ID, its efforts and its `min_cli_version`, the"
+        " oldest host CLI that runs it, on the model's official pages, sets `sources` to"
+        " them, raises `tools/data/host-cli-versions.json` to any newer minimum,"
+        " regenerates `dist/` with `python3 tools/build_distributions.py` and adds a"
+        " `.changes/<name>.json` at `minor` for `software-engineering-team`, because"
+        " default role models change."
     ) if changed else (
         "No drifting class has a newer model to move to, so the owner's decision above"
         " comes before any pull request."

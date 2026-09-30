@@ -2254,6 +2254,35 @@ def check_execution_profiles(tree: Tree, findings: list[Finding]) -> None:
                 value, catalog, adapter, tiers))
 
 
+def check_host_cli_versions(tree: Tree, findings: list[Finding]) -> None:
+    """The host CLIs CI installs are no older than any model class's
+    min_cli_version: the host gates start no role, so a lower pin would pass
+    on a version whose roles cannot run their pinned model."""
+    try:
+        adapters = build_distributions.load_adapters(tree.root)
+    except ValueError:
+        return  # registration and product_namespace report adapter failures
+    path = tree.root / build_distributions.HOST_CLI_VERSIONS_RELPATH
+    hint = ("pin in tools/data/host-cli-versions.json a host CLI no older than every"
+            " model class's min_cli_version")
+    try:
+        pins = json.loads(read_text(path))
+    except (OSError, json.JSONDecodeError):
+        findings.append(Finding("error", rel(tree, path), 1, "host_cli_versions",
+                                "host CLI versions are missing or not valid JSON", hint))
+        return
+    catalogs = {}
+    for host in adapters:
+        try:
+            catalogs[host] = json.loads(read_text(
+                build_distributions.model_catalog_path(tree.root, host)))
+        except (OSError, json.JSONDecodeError):
+            continue  # execution_profiles reports a missing or broken catalog
+    findings.extend(
+        Finding("error", rel(tree, path), 1, "host_cli_versions", problem, hint)
+        for problem in build_distributions.host_cli_problems(pins, catalogs, adapters))
+
+
 REVIEW_PANELS_RELPATH = "skill-content/challenge-review/data/review-panels.json"
 VAULT_POLICY_RELPATH = "skill-content/obsidian-vault/data/vault-policy.json"
 REVIEW_PANEL_ANCHOR_RE = re.compile(r"\breview\s+panel\s+`([a-z][a-z0-9_]*)`")
@@ -3577,6 +3606,7 @@ CHECKS = {
     "vault_wiring": check_vault_wiring,
     "model_config_shape": check_model_config_shape,
     "execution_profiles": check_execution_profiles,
+    "host_cli_versions": check_host_cli_versions,
     "review_panels": check_review_panels,
     "process_switches": check_process_switches,
     "story_size_measures": check_story_size_measures,

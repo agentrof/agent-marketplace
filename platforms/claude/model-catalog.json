@@ -11,6 +11,7 @@
         "xhigh",
         "max"
       ],
+      "min_cli_version": "2.1.280",
       "sources": [
         "https://platform.claude.com/docs/en/models/opus-5-5/overview",
         "https://code.claude.com/docs/en/model-config#adjust-effort-level"
@@ -27,6 +28,7 @@
         "xhigh",
         "max"
       ],
+      "min_cli_version": "2.1.284",
       "sources": [
         "https://platform.claude.com/docs/en/models/sonnet-5-5/overview",
         "https://code.claude.com/docs/en/model-config#adjust-effort-level"
@@ -37,9 +39,11 @@
       "family": "haiku",
       "id": "claude-haiku-4-5-20251001",
       "efforts": [],
+      "min_cli_version": "2.1.74",
       "sources": [
         "https://platform.claude.com/docs/en/models/haiku-4-5/overview",
-        "https://code.claude.com/docs/en/model-config#adjust-effort-level"
+        "https://code.claude.com/docs/en/model-config#adjust-effort-level",
+        "https://code.claude.com/docs/en/changelog"
       ],
       "verified": "2026-10-01"
     }

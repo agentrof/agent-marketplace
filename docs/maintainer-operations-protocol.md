@@ -337,7 +337,8 @@ DRIFT_REPORT
    The maintainer files it. A pinned model that is gone without a successor
    waits for the owner's decision instead of a bump.
 4. Flow A turns the issue into the pull request: the catalog change with each
-   new ID's efforts and sources confirmed on the official pages, the
+   new ID's efforts, `min_cli_version` and sources confirmed on the official
+   pages, `tools/data/host-cli-versions.json` raised to any newer minimum, the
    regenerated `dist/`, a `minor` changeset and the A/B results. Quality on
    the frozen tasks decides the bump; speed is reported beside it.
 5. The owner approves the merge in `AWAIT_MERGE_APPROVAL`, and the release

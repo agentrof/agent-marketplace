@@ -60,7 +60,10 @@
   variants of the read-only document reviewers on the `lens` tier, the
   `strong` class (Sonnet) at effort `high`; only review panels under switch
   `review_panels` at `lens_panel` spawn them, and the reviewers themselves
-  keep their own tier. The package cannot switch the profile per user. To run
+  keep their own tier. The package cannot switch the profile per user.
+  The pinned models need Claude Code 2.1.284 or later: Sonnet 5.5 from
+  2.1.284, Opus 5.5 from 2.1.280 and Haiku 4.5 from 2.1.74, the first version
+  that honours a full model ID in agent frontmatter. To run
   every role on the main conversation's model, for example when this Claude
   Code version, the provider or the organization's model allowlist does not
   offer a pinned model, the user sets `CLAUDE_CODE_SUBAGENT_MODEL_FORCE=1` in

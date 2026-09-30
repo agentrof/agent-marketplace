@@ -51,5 +51,11 @@
   `CLAUDE_CODE_EFFORT_LEVEL`, which pins one level for the session and every
   subagent. Both settings reach every subagent in the session, not only this
   team.
+- Every build also ships the `-mechanical` variants of the document writers
+  `product-owner`, `qa-engineer`, `devops-engineer` and `solution-architect`
+  on the `mechanical` tier, `sonnet` at effort `high`. Only switch
+  `mechanical_pass_tier` at `mechanical` spawns them, for a pass that applies
+  the fixes a review names; the writers themselves keep their own tier, and no
+  review, re-check or calibration runs on a variant.
 - Delivery execution is available only through the exact public entries
   `/delivery-plan`, `/execution-plan DLV-###` and `/deliver DLV-###`.

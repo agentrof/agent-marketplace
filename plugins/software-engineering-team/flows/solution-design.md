@@ -33,6 +33,10 @@ bound as an explicit Requirement reuse, never used to author a new Solution revi
    Switch `review_panels`: at `lens_panel`, review panel `solution_design`
    replaces the primary reviewer, as
    `skill-content/challenge-review/references/switch-review_panels-lens_panel.md`
+   defines. Switch `mechanical_pass_tier`: at `mechanical`, a writer pass that
+   only applies the fixes returned findings name, and step 5's compiler
+   commands, run as
+   `skill-content/challenge-review/references/switch-mechanical_pass_tier-mechanical.md`
    defines.
 5. After the owner confirms the exact topology and naming set, run
    `landscape_check.py confirm-topology`, then `check`, render

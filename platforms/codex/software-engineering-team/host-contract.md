@@ -48,5 +48,14 @@
   --project-root <root> --scope local --execution-profile inherit`;
   `--execution-profile auto` restores the default. The managed agent files
   record the choice and later refreshes keep it.
+- Every build also ships the `-mechanical` variants of the document writers
+  `product-owner`, `qa-engineer`, `devops-engineer` and `solution-architect`
+  on the `mechanical` tier, effort `medium` and no model. Only switch
+  `mechanical_pass_tier` at `mechanical` starts them, for a pass that applies
+  the fixes a review names; the writers themselves keep their own tier, and no
+  review, re-check or calibration runs on a variant. For the tier's
+  frozen-task A/B, apply `--execution-profile inherit` in a scratch copy of the
+  project and set the candidate effort as the session's
+  `model_reasoning_effort`.
 - Delivery execution is available only through the exact public entries
   `/delivery-plan`, `/execution-plan DLV-###` and `/deliver DLV-###`.

@@ -1,0 +1,6 @@
+{
+  "summary": "Process switch `mechanical_pass_tier` lets a project run the writer passes of backlog, Operation contract and Solution Design reviews that only apply the fixes a review verdict names on a lower tier. The default, `role_tier`, keeps today's behaviour. At `mechanical`, such a pass runs on the owning writer's generated `-mechanical` variant and render, stamp and check steps run as direct entry commands with no role pass, while triage, authoring, design, code repairs and every review, re-check and calibration keep their roles and tiers. Every build ships `product-owner-mechanical`, `qa-engineer-mechanical`, `devops-engineer-mechanical` and `solution-architect-mechanical` on a new `mechanical` execution tier (Claude `sonnet` at effort `high`, Codex effort `medium`, starting values that a frozen-task A/B sets before a project opts in); the writers themselves keep their tier and their released files. `tools/validate.py` rejects a mechanical variant for a read-only reviewer or challenger and a switch that declares no writer variants.",
+  "components": {
+    "software-engineering-team": "minor"
+  }
+}

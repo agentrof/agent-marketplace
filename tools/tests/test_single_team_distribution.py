@@ -570,16 +570,25 @@ class SingleTeamDistributionTests(unittest.TestCase):
 
 CLAUDE_AUTO_MODELS = {
     "high": "opus", "medium": "sonnet", "low": "haiku", "lens": "sonnet",
-    "inherit": "inherit",
+    "mechanical": "sonnet", "inherit": "inherit",
 }
 # A tier missing here writes no Claude effort line.
-CLAUDE_AUTO_EFFORTS = {"lens": "high"}
-CODEX_AUTO_EFFORTS = {"high": "high", "medium": "medium", "low": "low", "lens": "high"}
+CLAUDE_AUTO_EFFORTS = {"lens": "high", "mechanical": "high"}
+CODEX_AUTO_EFFORTS = {
+    "high": "high", "medium": "medium", "low": "low", "lens": "high", "mechanical": "medium",
+}
 # Generated lens-tier variant: its canonical agent.
 LENS_VARIANTS = {
     "backlog-reviewer-lens": "backlog-reviewer",
     "design-system-reviewer-lens": "design-system-reviewer",
     "solution-reviewer-lens": "solution-reviewer",
+}
+# Generated mechanical-tier writer variant: its canonical agent.
+MECHANICAL_VARIANTS = {
+    "devops-engineer-mechanical": "devops-engineer",
+    "product-owner-mechanical": "product-owner",
+    "qa-engineer-mechanical": "qa-engineer",
+    "solution-architect-mechanical": "solution-architect",
 }
 REGISTRY = "skill-content/configure/data/process-switches.json"
 
@@ -631,7 +640,8 @@ class ExecutionProfileTests(unittest.TestCase):
 
     def rendered_tiers(self) -> dict[str, str]:
         """Every generated agent's tier: canonical agents and their variants."""
-        return {**self.tiers(), **{variant: "lens" for variant in LENS_VARIANTS}}
+        return {**self.tiers(), **{variant: "lens" for variant in LENS_VARIANTS},
+                **{variant: "mechanical" for variant in MECHANICAL_VARIANTS}}
 
     def edit_table(self, host: str, mutate) -> None:
         path = build_distributions.execution_profile_path(self.root, host)
@@ -738,6 +748,7 @@ class ExecutionProfileTests(unittest.TestCase):
             "medium": ['model_reasoning_effort = "medium"'],
             "low": ['model_reasoning_effort = "low"'],
             "lens": ['model_reasoning_effort = "high"'],
+            "mechanical": ['model_reasoning_effort = "medium"'],
             "inherit": [],
         }
         tiers = self.rendered_tiers()
@@ -783,7 +794,7 @@ class ExecutionProfileTests(unittest.TestCase):
             encoding="utf-8"))["reasoning_levels"])
         self.assertEqual(
             [name for _agent, name, _tier, _text in build_distributions.agent_variants(source, tiers)],
-            sorted(LENS_VARIANTS))
+            sorted(MECHANICAL_VARIANTS) + sorted(LENS_VARIANTS))
         original = self.registry().read_bytes()
         for mutate, fragment in (
                 (lambda variant, _data: variant.update(agents=["ghost-reviewer"]),
@@ -827,6 +838,78 @@ class ExecutionProfileTests(unittest.TestCase):
         self.assertNotEqual(
             build_distributions.marketplace_snapshot(self.root)["build_id"], regrouped,
         )
+
+    def test_writers_keep_their_tier_beside_their_mechanical_variants(self):
+        settings = {"claude": ["model: sonnet", "effort: high"],
+                    "codex": ["model_reasoning_effort: medium"]}
+        suffix = " Lower-tier variant for mechanical passes that apply only the fixes a review verdict names."
+        tiers = self.tiers()
+        for variant, agent in sorted(MECHANICAL_VARIANTS.items()):
+            self.assertNotEqual(tiers[agent], "mechanical")
+            for host in build_distributions.HOSTS:
+                with self.subTest(variant=variant, host=host):
+                    base_text = self.dist_agent(host, agent).read_text(encoding="utf-8")
+                    text = self.dist_agent(host, variant).read_text(encoding="utf-8")
+                    # The variant keeps the writer's body, boundaries and identity.
+                    self.assertEqual(text.split("\n---\n", 1)[1], base_text.split("\n---\n", 1)[1])
+                    base, lines = (frontmatter_lines(self.dist_agent(host, name))
+                                   for name in (agent, variant))
+                    self.assertEqual(lines[:2], [f"name: {variant}", base[1] + suffix])
+                    self.assertEqual(
+                        [line for line in lines[2:] if not line.startswith(("model", "effort"))],
+                        [line for line in base[2:] if not line.startswith(("model", "effort"))])
+                    self.assertEqual([line for line in lines if line.startswith(("model", "effort"))],
+                                     settings[host])
+        self.codex_json("apply", "--scope", "local")
+        files = self.role_files()
+        for variant, agent in sorted(MECHANICAL_VARIANTS.items()):
+            with self.subTest(codex=variant):
+                self.assertEqual(role_settings(files[variant]), ['model_reasoning_effort = "medium"'])
+                self.assertEqual(role_settings(files[agent]),
+                                 [f'model_reasoning_effort = "{CODEX_AUTO_EFFORTS[tiers[agent]]}"'])
+                self.assertNotIn("sandbox_mode", files[variant])
+                instructions = [line for line in files[variant].splitlines()
+                                if line.startswith("developer_instructions")]
+                self.assertEqual(instructions, [line for line in files[agent].splitlines()
+                                                if line.startswith("developer_instructions")])
+
+    def test_base_agents_and_role_files_do_not_depend_on_the_mechanical_switch(self):
+        def agents() -> dict:
+            return {host: {path.name: path.read_bytes() for path in sorted(
+                (self.root / "dist" / host / fixtures.PLUGIN / "agents").glob("*.md"))}
+                for host in build_distributions.HOSTS}
+
+        self.codex_json("apply", "--scope", "local")
+        with_switch, role_files = agents(), self.role_files()
+        data = json.loads(self.registry().read_text(encoding="utf-8"))
+        del data["switches"]["mechanical_pass_tier"]
+        self.registry().write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+        build_distributions.replace_generated(self.root, self.root / "dist")
+        without = agents()
+        for host in build_distributions.HOSTS:
+            with self.subTest(host=host):
+                self.assertEqual(set(with_switch[host]) - set(without[host]),
+                                 {f"{variant}.md" for variant in MECHANICAL_VARIANTS})
+                self.assertEqual({name: with_switch[host][name] for name in without[host]},
+                                 without[host])
+        self.codex_json("apply", "--scope", "local")
+        after = self.role_files()
+        self.assertEqual({name: text for name, text in role_files.items()
+                          if name not in MECHANICAL_VARIANTS},
+                         {name: after[name] for name in role_files if name not in MECHANICAL_VARIANTS})
+
+    def test_the_mechanical_mapping_is_a_build_input_that_dist_check_catches(self):
+        before = build_distributions.marketplace_snapshot(self.root)["build_id"]
+        self.assertEqual(build_distributions.check(self.root, self.root / "dist"), [])
+        self.set_tier("codex", "mechanical", {"effort": "low"})
+        self.assertNotEqual(build_distributions.marketplace_snapshot(self.root)["build_id"], before)
+        self.assertTrue(build_distributions.check(self.root, self.root / "dist"))
+        build_distributions.replace_generated(self.root, self.root / "dist")
+        self.assertEqual(build_distributions.check(self.root, self.root / "dist"), [])
+        self.assertIn("model_reasoning_effort: low",
+                      frontmatter_lines(self.dist_agent("codex", "qa-engineer-mechanical")))
+        self.assertIn("model_reasoning_effort: medium",
+                      frontmatter_lines(self.dist_agent("codex", "qa-engineer")))
 
     def test_inherit_profile_omits_role_settings_and_survives_refresh(self):
         self.set_tier("codex", "high", {"model": "gpt-test-1.5", "effort": "max"})

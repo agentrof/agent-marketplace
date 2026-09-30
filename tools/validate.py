@@ -38,7 +38,7 @@ LIMITS_CONFIG_RELPATH = "tools/data/limits.json"
 PRODUCT_CONFIG_RELPATH = "product.json"
 
 AGENT_REQUIRED_KEYS = {"name", "description", "reasoning", "output_contract"}
-AGENT_REASONING_ENUM = {"high", "medium", "low", "lens", "inherit"}
+AGENT_REASONING_ENUM = {"high", "medium", "low", "lens", "mechanical", "inherit"}
 # How the role hands results back. prose: findings/artifacts in the reply
 # text (every current persona). structured: a forced tool call. Declared so
 # a composer can refuse pairing a prose persona with schema forcing; the
@@ -2465,6 +2465,9 @@ SWITCH_REFERENCE_RE = re.compile(r"^switch-([a-z][a-z0-9_]*)-([a-z][a-z0-9_]*)\.
 PROCESS_SWITCH_KEYS = {"summary", "flows", "values", "default", "metric", "promotion"}
 PROCESS_SWITCH_OPTIONAL_KEYS = {"issue", "agent_variants"}
 AGENT_VARIANT_KEYS = {"suffix", "tier", "description", "agents"}
+MECHANICAL_PASS_SWITCH = "mechanical_pass_tier"
+MECHANICAL_PASS_VALUE = "mechanical"
+TASK_INPUT_POLICY_RELPATH = "templates/task-input-policy.json"
 
 
 def _nonblank(value: object) -> bool:
@@ -2501,6 +2504,35 @@ def agent_variant_problems(where: str, variants: object, values: list[str], defa
             problems.append(f"{at}: duplicate variant agent {agent!r}")
         for agent in sorted(set(listed) - agents):
             problems.append(f"{at}: unknown variant agent {agent!r}")
+    return problems
+
+
+def mechanical_variant_problems(plugin: Path, switches: dict) -> list[str]:
+    """A mechanical pass applies fixes as its owning writer, so the switch
+    declares writer variants and never a read-only reviewer's or challenger's:
+    every review, re-check and calibration keeps its role's tier."""
+    spec = switches.get(MECHANICAL_PASS_SWITCH)
+    if not isinstance(spec, dict):
+        return []
+    variants = spec.get("agent_variants")
+    variant = variants.get(MECHANICAL_PASS_VALUE) if isinstance(variants, dict) else None
+    listed = variant.get("agents") if isinstance(variant, dict) else None
+    if not isinstance(listed, list) or not listed:
+        return [f"switch {MECHANICAL_PASS_SWITCH!r} must declare the {MECHANICAL_PASS_VALUE!r}"
+                " agent variants of the writers whose passes it moves"]
+    try:
+        policy = json.loads(read_text(plugin / TASK_INPUT_POLICY_RELPATH))
+        read_only = {role for role in policy["read_only_roles"] if isinstance(role, str)}
+    except (OSError, json.JSONDecodeError, KeyError, TypeError):
+        read_only = set()  # task_input_catalog reports a broken task input policy
+    problems = []
+    for agent in sorted({agent for agent in listed if isinstance(agent, str)}):
+        path = plugin / "agents" / f"{agent}.md"
+        tools = parse_frontmatter(read_text(path))[0].get("tools", "") if path.is_file() else ""
+        if agent in read_only or {tool.strip() for tool in tools.split(",") if tool.strip()}:
+            problems.append(
+                f"{MECHANICAL_PASS_VALUE!r} agent variant {agent!r} is a read-only reviewer or"
+                " challenger; its reviews, re-checks and calibrations keep their tier")
     return problems
 
 
@@ -2615,6 +2647,9 @@ def check_process_switches(tree: Tree, findings: list[Finding]) -> None:
                 " default, component metric and promotion rule")
         switches = data.get("switches") if isinstance(data, dict) else None
         switches = switches if isinstance(switches, dict) else {}
+        for problem in mechanical_variant_problems(plugin, switches):
+            err(path, problem, "list only the writers whose fix passes the switch moves as"
+                " its mechanical agent variants")
         for name, owners in sorted(anchors.items()):
             spec = switches.get(name)
             listed = spec.get("flows") if isinstance(spec, dict) else None

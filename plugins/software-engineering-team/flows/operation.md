@@ -25,6 +25,10 @@ Requirement stage and it does not alter product-stage package hashes.
    `lens_panel`, review panel `operation_verification` or
    review panel `operation_environment` replaces this reviewer, as
    `skill-content/challenge-review/references/switch-review_panels-lens_panel.md`
+   defines. Switch `mechanical_pass_tier`: at `mechanical`, the writer pass
+   that applies the review's named fixes, and the `check` and `approve`
+   commands of steps 2 and 4, run as
+   `skill-content/challenge-review/references/switch-mechanical_pass_tier-mechanical.md`
    defines.
 4. Approve with `operation_compile.py approve --kind <kind>`. Return the exact
    contract receipt. Do not run a downstream product stage automatically.

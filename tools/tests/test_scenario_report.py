@@ -238,6 +238,32 @@ class ScenarioReportPlans(unittest.TestCase):
             "ST-007-TS-001", "ERP:AC-INV-001", "ST-007-TS-002", "ERP:BR-INV-002",
             "ST-005-TS-004", "ERP:AC-INV-003"])
 
+    def test_an_own_plan_scenario_cannot_be_superseded(self):
+        # A mistyped id one digit from the intended dependency scenario names
+        # the Item's own untested scenario; dropping it would pass the gate.
+        files = {"own.md": OWN_PLAN, "dependency.md": REGRESSION_PLAN, "results.xml": junit([
+            "test_receipt[ST-007-TS-001]", "test_accept[erp:AC-INV-001]",
+            "test_regression[ST-005-TS-004]", "test_other[erp:AC-INV-003]"])}
+        code, out, err = self.run_files(
+            files, "--plan", "own.md", "dependency.md", "--superseded", "ST-007-TS-002",
+            "--junit", "results.xml")
+        self.assertEqual((code, out), (2, ""), err)
+        self.assertIn("superseded ids are scenarios of the Item's own Test Plan, the first"
+                      " --plan: ST-007-TS-002", err)
+        # The own plan is the first one, whichever story it covers.
+        code, out, err = self.run_files(
+            files, "--plan", "dependency.md", "own.md", "--superseded", "ST-005-TS-003",
+            "--junit", "results.xml")
+        self.assertEqual(code, 2, out + err)
+        self.assertIn("the first --plan: ST-005-TS-003", err)
+        # Without the mistake the untested own scenario stays a NO-TEST row.
+        code, out, err = self.run_files(
+            files, "--plan", "own.md", "dependency.md", "--superseded", "ST-005-TS-003",
+            "--junit", "results.xml")
+        self.assertEqual(code, 1, out + err)
+        self.assertIn("NO-TEST", next(line for line in out.splitlines()
+                                      if line.startswith("| ST-007-TS-002")))
+
     def test_plan_inputs_that_cannot_be_audited_are_refused(self):
         files = {"own.md": OWN_PLAN, "story.md": "# Receipt\n\nCites ST-007-TS-001.\n",
                  "results.xml": junit(["test_receipt[ST-007-TS-001]"])}
@@ -245,7 +271,8 @@ class ScenarioReportPlans(unittest.TestCase):
                 (("--plan", "own.md", "--superseded", "ST-005-TS-003"),
                  "superseded ids are not scenarios the plans define: ST-005-TS-003"),
                 (("--plan", "own.md", "--superseded", "ST-007-TS-001", "ST-007-TS-002"),
-                 "the plans define no scenario that is not superseded"),
+                 "superseded ids are scenarios of the Item's own Test Plan, the first --plan:"
+                 " ST-007-TS-001, ST-007-TS-002"),
                 (("--plan", "own.md", "story.md"), "story.md defines no story scenario")):
             code, out, err = self.run_files(files, *args, "--junit", "results.xml")
             self.assertEqual(code, 2, out + err)

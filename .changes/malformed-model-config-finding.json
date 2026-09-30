@@ -1,0 +1,4 @@
+{
+  "summary": "`tools/validate.py` reports a malformed `tools/data/models.json` as a `model_config_shape` finding instead of stopping with a stack trace. A missing file, bytes that are not UTF-8, invalid JSON, a value that is not a JSON object and a `reasoning_levels` value that is not a list of tier names each give one finding while every other check still runs, and agent tiers are then checked against the builder's tiers instead of the malformed value.",
+  "components": {}
+}

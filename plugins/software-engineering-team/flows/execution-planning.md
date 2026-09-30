@@ -42,7 +42,10 @@ Test Plan pins and the Delivery's backlog and Definition of Done pins from the
 current approved sources. A sealed Item keeps the Operation bindings its
 evidence was produced against unless the approval names it with `--reopen`;
 that Item is rebound to the current contracts, stays integrated, and can then
-be reopened.
+be reopened. Publication keeps a sealed Item's review and verification records
+as the Integration holds them, and keeps its Item record unless the approval
+started from that sealed record, so take the sealed records from the
+Integration before approving a change to a sealed Item.
 
 Approval, and every re-approval, also refuses until a committed workflow will
 run on the Delivery PR, because the final merge needs a green provider check.

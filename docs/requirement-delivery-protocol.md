@@ -261,6 +261,14 @@ and the Operation contracts from the Integration, then revise inside
 `begin-plan-revision`. The first publication and a republication of the same
 plan are unchanged.
 
+Publication never moves a sealed Item back. An Item's sealed record and its
+approved review and verification records reach the Integration only through
+integration or cancellation, and nothing returns them to a checkout's package.
+For an Item the Integration holds integrated or cancelled, publication keeps
+its review and verification records, and keeps its record unless the local
+copy has the same lifecycle, base and stamp: the sealed record an approval
+started from, such as one that rebinds the Item for reopen.
+
 Closure requires successful provider checks, so execution approval also
 carries the pull request check precondition that
 `plugins/software-engineering-team/flows/execution-planning.md` states and

@@ -4323,6 +4323,45 @@ class DeliveryGitTests(unittest.TestCase):
         self.assertEqual((carried["source_hash"], carried["superseded_plan_approvals"]),
                          (again["source_hash"], again["superseded_plan_approvals"]))
 
+    def test_republication_keeps_the_records_of_an_item_the_integration_sealed(self):
+        """Publication never puts a sealed Item's record or evidence back to a checkout's earlier copy."""
+        project, docs, directory, _item, _reserved = self.prepare_execution_with_draft_reserved_contracts(False)
+        first = delivery_git.publish_execution_plan(project, "DLV-001")
+        second = self.second_checkout(project, directory, first["integration"])
+        delivery_git.claim_items(project, "DLV-001")
+        active = delivery_git.start_item(project, "DLV-001", "AUTH-01")
+        self.commit_item_product_change(active["worktree"], "def authenticate():\n    return True\n")
+        self.assertEqual(self.approve_item_evidence(active["worktree"]), 0)
+        delivery_git.push_item(project, "DLV-001", "AUTH-01")
+        integrated = delivery_git.integrate_item(project, "DLV-001", "AUTH-01")
+        records = [(directory / "items/auth-01" / name).relative_to(project).as_posix()
+                   for name in ("item.md", "code-review.md", "verification.md")]
+        sealed = delivery_git.published_plan_blobs(project, integrated["integration"], records)
+
+        def statuses(checkout: Path, oid: str) -> list:
+            return [delivery_git.split_remote_note(checkout, oid, path, delivery_compile.split_note)[0]["status"]
+                    for path in records]
+
+        self.assertEqual(statuses(project, integrated["integration"]), ["integrated", "approved", "passed"])
+        for checkout, label in ((project, "integrating checkout"), (second, "second checkout")):
+            with self.subTest(checkout=label):
+                self.assertEqual([delivery_compile.split_note(checkout / path)[0]["status"] for path in records],
+                                 ["in_scope", "draft", "draft"])
+                delivery_git.run_git(checkout, "fetch", "-q", "origin")
+                republished = delivery_git.publish_execution_plan(checkout, "DLV-001")
+                self.assertEqual(delivery_git.published_plan_blobs(checkout, republished["integration"], records), sealed)
+
+        # The sealed record an approval starts from is published, and the evidence stays sealed.
+        delivery_git.run_git(project, "fetch", "-q", "origin")
+        record = project / records[0]
+        record.write_text(sealed[records[0]], encoding="utf-8")
+        self.assertEqual(delivery_compile.approve_execution(type("Args", (), {"docs": str(docs), "delivery": "DLV-001"})), 0)
+        revised = delivery_git.publish_execution_plan(project, "DLV-001")
+        carried = delivery_git.published_plan_blobs(project, revised["integration"], records)
+        self.assertEqual(carried[records[0]], record.read_text(encoding="utf-8"))
+        self.assertEqual((carried[records[1]], carried[records[2]]), (sealed[records[1]], sealed[records[2]]))
+        self.assertEqual(statuses(project, revised["integration"]), ["integrated", "approved", "passed"])
+
     def test_execution_publication_keeps_a_terminal_item_on_its_verified_revision(self):
         """A closed Item's binding names history, not a stale current receipt."""
         project, _docs, _directory, item, _reserved = self.prepare_execution_with_draft_reserved_contracts()

@@ -68,6 +68,20 @@ RELATION_BLOCK_RE = re.compile(
 INLINE_CODE_RE = re.compile(r"`[^`]*`")
 
 
+def without_code(text: str) -> str:
+    """Return the text vault_check scans for links: a line starting with ```
+    after indentation toggles a fence, fence and fenced lines are dropped, and
+    inline code spans are removed line by line."""
+    kept: list[str] = []
+    fenced = False
+    for line in text.splitlines():
+        if line.lstrip().startswith("```"):
+            fenced = not fenced
+        elif not fenced:
+            kept.append(INLINE_CODE_RE.sub("", line))
+    return "\n".join(kept)
+
+
 def without_generated_relations(text: str) -> str:
     """Remove only the renderer-owned inverse-relation projection."""
     start, end = GENERATED_BODY_BLOCKS[0]

@@ -131,6 +131,16 @@ class AbsentInputTests(unittest.TestCase):
         note.write_text("# Job\n\nRequires [[design-system/MASTER|Design master]].\n")
         self.assertTrue(any("references absent" in error for error in self.findings()))
 
+    def test_code_that_names_an_absent_family_is_not_a_link(self):
+        self.prepare()
+        note = self.docs / "backlog/epics/job/epic.md"
+        note.parent.mkdir(parents=True)
+        note.write_text("# Job\n\nNo `[[design-system/MASTER]]` input applies.\n\n"
+                        "```text\n[[experience-design/checkout]]\n```\n")
+        self.assertEqual(self.findings(), [])
+        note.write_text(note.read_text() + "\nRequires [[design-system/MASTER|Design master]].\n")
+        self.assertTrue(any("references absent" in error for error in self.findings()))
+
     def test_failed_init_leaves_no_backlog(self):
         self.prepare()
         self.component.unlink()

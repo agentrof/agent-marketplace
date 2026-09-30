@@ -13,7 +13,7 @@ import unicodedata
 
 import backlog_compile as backlog
 import stage_package
-from ba_compile import GENERATED_BODY_BLOCKS, WIKILINK_RE
+from ba_compile import GENERATED_BODY_BLOCKS, INLINE_CODE_RE, WIKILINK_RE, without_code
 
 
 class InputError(ValueError):
@@ -49,13 +49,14 @@ def regular_file(docs: Path, relative: str) -> Path:
 
 
 def semantic_body(body: str) -> str:
+    # Code is syntax, not a link, exactly as the vault gate reads it.
+    body = without_code(body)
     for start, end in GENERATED_BODY_BLOCKS:
         if start in body:
             if end not in body:
                 raise InputError("unterminated generated knowledge block")
             body = re.sub(re.escape(start) + r".*?" + re.escape(end), "", body, flags=re.S)
-    # Navigation and fenced examples describe traversal or syntax, not evidence.
-    body = re.sub(r"(?m)^(`{3,}|~{3,})[^\n]*\n.*?^\1\s*$", "", body, flags=re.S)
+    # Navigation describes traversal, not evidence.
     return re.sub(r"(?m)^(?:##[^\n]*)?<!-- sec: nav -->[^\n]*(?:\n|$).*?(?=^## |\Z)",
                   "", body, flags=re.S)
 
@@ -71,11 +72,21 @@ def strings(value: object):
             yield from strings(item)
 
 
-def links(value: str) -> list[str]:
-    found = [match.group(0).lstrip("!") for match in WIKILINK_RE.finditer(value)]
+def backlog_authored(path: str) -> bool:
+    """Backlog rules bind backlog notes; each upstream stage gates its own notes."""
+    return path.startswith("backlog/")
+
+
+def links(value: str, source: str, unparsed: set[str]) -> list[tuple[bool, str]]:
+    found = [(bool(match.group("embed")), match.group(0).lstrip("!"))
+             for match in WIKILINK_RE.finditer(value)]
     remainder = WIKILINK_RE.sub("", value)
     if "[[" in remainder or "]]" in remainder:
-        raise InputError("malformed reviewer source wikilink")
+        # Only the owning stage can repair an approved upstream note, so the
+        # reviewer is told where a relation may have been missed.
+        if backlog_authored(source):
+            raise InputError(f"malformed reviewer source wikilink in {source}")
+        unparsed.add(source)
     return found
 
 
@@ -133,6 +144,7 @@ def manifest(docs: Path, *, epic: str | None = None, expected_hash: str | None =
         reasons = defaultdict(set)
         pending = deque()
         hashes = {}
+        unparsed: set[str] = set()
 
         def include(relative: str, reason: str) -> None:
             path = regular_file(docs, relative)
@@ -155,13 +167,24 @@ def manifest(docs: Path, *, epic: str | None = None, expected_hash: str | None =
                 include(by_epic[story["epic_id"]]["path"], reason)
                 queue.extend(sorted(adjacency[identity] - visited))
 
-        def reference(value: str, source: str) -> None:
-            errors = []
-            parsed = backlog.read_link(docs, value, source, errors)
-            if errors or parsed is None:
-                raise InputError("; ".join(errors) or f"unresolved source: {value}")
-            target = parsed[0] + ".md"
-            include(target, f"reference from {source}")
+        def reference(value: str, source: str, embed: bool = False) -> None:
+            if embed:
+                # The vault resolves an embed by the file path it names.
+                target = backlog.split_wikilink(value)[0]
+                try:
+                    include(target, f"embed from {source}")
+                except InputError as exc:
+                    raise InputError(f"{source} embeds a missing or invalid file: {value}") from exc
+            else:
+                errors = []
+                # Upstream compilers write alias-free semantic links that
+                # their own gates accept.
+                parsed = backlog.read_link(docs, value, source, errors,
+                                           require_alias=backlog_authored(source))
+                if errors or parsed is None:
+                    raise InputError("; ".join(errors) or f"unresolved source: {value}")
+                target = parsed[0] + ".md"
+                include(target, f"reference from {source}")
             if target in by_path:
                 story_context(by_path[target]["id"], f"Story context from {source}")
 
@@ -210,10 +233,10 @@ def manifest(docs: Path, *, epic: str | None = None, expected_hash: str | None =
                 continue
             props, body = backlog.parse_front_matter(path)
             for value in strings(props):
-                for link in links(value):
-                    reference(link, relative)
-            for link in links(semantic_body(body)):
-                reference(link, relative)
+                for embed, link in links(INLINE_CODE_RE.sub("", value), relative, unparsed):
+                    reference(link, relative, embed)
+            for embed, link in links(semantic_body(body), relative, unparsed):
+                reference(link, relative, embed)
             for key in ("requirement_ref", "input_package_refs", "application_ref", "process_refs"):
                 for value in backlog.values(props, key):
                     if "[[" not in value:
@@ -264,6 +287,8 @@ def manifest(docs: Path, *, epic: str | None = None, expected_hash: str | None =
                   "reasons": sorted(reasons[path])} for path in sorted(hashes)],
               "structure_hash": structure_hash, "contract_hash": contract,
               "review": {"path": current_review["path"], "expected_relations": relations}}
+    if unparsed:
+        result["unparsed_link_sources"] = sorted(unparsed)
     result["source_hash"] = digest(result)
     if expected_hash is not None and result["source_hash"] != expected_hash:
         raise InputError("review input manifest is stale; regenerate and review the changed sources")

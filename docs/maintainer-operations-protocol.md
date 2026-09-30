@@ -208,7 +208,10 @@ approval unless scope becomes ambiguous or a gate fails:
 
 1. Resolve the selected PR set. Require same-repository heads, `main` bases,
    non-draft state, intended issue linkage, required review approval, and every
-   check green on each exact head SHA.
+   check green on each exact head SHA. Require
+   `gh api 'repos/{owner}/{repo}/immutable-releases' --jq .enabled` to print
+   `true` (see [Release immutability](#release-immutability)); otherwise stop
+   before any merge, because publication would refuse to finish.
 2. Merge each selected feature PR using the repository's allowed merge method
    and request remote branch deletion. When `main` requires the merge queue
    (see [Repository settings](#repository-settings)), add every selected PR
@@ -261,14 +264,18 @@ approval unless scope becomes ambiguous or a gate fails:
    stages `stable` and the annotated version tag atomically with exact leases,
    exercises fresh Claude Code and Codex installs from the real public
    `stable` channel, creates or reconciles the immutable GitHub Release, and
-   removes remote `release/stable` with an exact lease. A pre-Release smoke
+   removes remote `release/stable` with an exact lease. Finalization requires
+   GitHub to report that Release immutable; otherwise it fails and keeps
+   `release/stable`, and the owner decides the repair. A pre-Release smoke
    failure rolls refs back atomically; an uncertain Release response is
    observed and left in a safely resumable state rather than repaired blindly.
    The candidate must be the attested merge or dispatch commit and an exact
    ancestor of the observed `main` at initial staging. A later `main` advance
    does not invalidate that already-verified release; the release commit
    remains an ancestor of `main`.
-7. Verify the GitHub Release is published and not a draft or prerelease. Require
+7. Verify the GitHub Release is published, not a draft or prerelease, and
+   immutable: `gh release view vX.Y.Z --json isDraft,isPrerelease,isImmutable`
+   must report `isDraft` and `isPrerelease` false and `isImmutable` true. Require
    the tag and `origin/stable` to resolve to the same commit, and require that
    commit to be an ancestor of `origin/main`. Audit issue states and remote
    refs before cleanup.
@@ -361,6 +368,36 @@ Two queued PRs that both regenerate the distribution provenance in
 one, which then needs `main` merged in, regenerated distributions and green
 checks before it is queued again. PRs that leave `dist/` untouched merge
 without that cycle.
+
+### Release immutability
+
+GitHub enforces an immutable Release only while the repository's release
+immutability setting is enabled, and only for Releases published after it was
+enabled. It then locks the Release's tag to its commit, forbids changing or
+deleting its assets, keeps the tag name unusable even if the Release is
+deleted, and generates a release attestation. The title and notes stay
+editable.
+
+The publication tooling never edits, deletes or re-tags a Release that exists
+and rolls refs back only before one exists, so it runs unchanged with the
+setting enabled. Both finalize steps (`Publish stable release` and the
+bootstrap in `Prepare stable release`) pass `--require-immutable`: they read
+`isImmutable` from GitHub and, when it is not true, fail before removing
+`release/stable`.
+
+The owner enables it once: Settings, General, Releases, **Enable release
+immutability**, or with admin credentials:
+
+```console
+gh api -X PUT 'repos/{owner}/{repo}/immutable-releases'
+gh api 'repos/{owner}/{repo}/immutable-releases'
+```
+
+The second call must report `"enabled": true`. Releases published before
+that stay mutable. If a Release is ever published while the setting is off,
+finalization fails with the Release already public; only the owner decides
+whether to keep it or to enable the setting, delete that Release (never its
+tag) and re-run the failed finalize job so it creates an immutable one.
 
 ## Impact and residual risk
 

@@ -4,7 +4,10 @@
 This module deliberately owns only remote publication state.  Release content
 verification and public-channel smoke tests remain separate gates.  The three
 commands make it safe for a workflow to stage refs, roll them back before a
-GitHub Release exists, or finalize/reconcile the immutable Release afterwards.
+GitHub Release exists, or finalize/reconcile the Release afterwards.  Nothing
+here edits, deletes or re-tags a Release that exists, so publication also works
+where GitHub enforces release immutability, and finalization can require that
+GitHub reports the Release immutable.
 """
 
 from __future__ import annotations
@@ -132,6 +135,7 @@ class RemoteRefs:
 class ReleaseObservation:
     state: str
     detail: str = ""
+    immutable: Optional[bool] = None
 
 
 class Publisher:
@@ -251,7 +255,7 @@ class Publisher:
     def observe_release(self, spec: ReleaseSpec) -> ReleaseObservation:
         completed = self._run([
             "gh", "release", "view", spec.tag,
-            "--json", "tagName,name,isDraft,isPrerelease",
+            "--json", "tagName,name,isDraft,isPrerelease,isImmutable",
         ])
         if completed.returncode != 0:
             detail = (_stderr(completed).strip() or _stdout(completed).strip())
@@ -272,7 +276,9 @@ class Publisher:
             ) from exc
         if not isinstance(value, dict):
             raise PublishError("GitHub Release observation must be a JSON object")
-        expected_keys = {"tagName", "name", "isDraft", "isPrerelease"}
+        expected_keys = {
+            "tagName", "name", "isDraft", "isPrerelease", "isImmutable",
+        }
         if set(value) != expected_keys:
             raise PublishError(
                 "GitHub Release observation has unknown or missing fields"
@@ -291,7 +297,9 @@ class Publisher:
             raise PublishError(
                 "GitHub Release must be published, non-draft, and non-prerelease"
             )
-        return ReleaseObservation("exists")
+        if not isinstance(value["isImmutable"], bool):
+            raise PublishError("GitHub Release immutability must be a boolean")
+        return ReleaseObservation("exists", immutable=value["isImmutable"])
 
     def _require_known_release(
         self, observation: ReleaseObservation, operation: str
@@ -553,11 +561,21 @@ class Publisher:
             )
         return "deleted", observed
 
+    @staticmethod
+    def _require_immutable(spec: ReleaseSpec, release: ReleaseObservation) -> None:
+        if release.immutable is not True:
+            raise PublishError(
+                f"GitHub Release {spec.tag} exists but GitHub does not report it "
+                "immutable; enable release immutability for the repository. "
+                "Candidate refs and release/stable were preserved"
+            )
+
     def finalize(
         self,
         spec: ReleaseSpec,
         notes_file: str,
         release_branch_sha: Optional[str] = None,
+        require_immutable: bool = False,
     ) -> dict:
         if release_branch_sha is not None:
             strict_sha(release_branch_sha, "release/stable SHA")
@@ -595,12 +613,16 @@ class Publisher:
                     f"{observed_state}; candidate refs were preserved{suffix}"
                 )
             action = "reconciled-after-create-failure" if created.returncode else "created"
+        if require_immutable:
+            self._require_immutable(spec, release)
 
         cleanup, refs = self._delete_release_branch(
             spec, release_branch_sha
         )
         release = self.observe_release(spec)
-        if release.state != "exists":
+        if release.state != "exists" or (
+            require_immutable and release.immutable is not True
+        ):
             raise PublishError(
                 "GitHub Release changed during final verification"
             )
@@ -631,6 +653,7 @@ class Publisher:
             "prior_stable_sha": spec.prior_stable_sha,
             "refs": refs.json_value(),
             "github_release": release.state,
+            "github_release_immutable": release.immutable,
         }
 
 
@@ -660,6 +683,7 @@ def build_parser() -> argparse.ArgumentParser:
     _add_spec_arguments(finalize)
     finalize.add_argument("--notes-file", required=True)
     finalize.add_argument("--release-branch-sha")
+    finalize.add_argument("--require-immutable", action="store_true")
     return parser
 
 
@@ -688,7 +712,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             if not notes.is_file():
                 raise PublishError(f"release notes file is missing: {notes}")
             result = publisher.finalize(
-                spec, str(notes), args.release_branch_sha
+                spec, str(notes), args.release_branch_sha,
+                args.require_immutable,
             )
     except PublishError as exc:
         print(json.dumps({"ok": False, "error": str(exc)}, sort_keys=True))

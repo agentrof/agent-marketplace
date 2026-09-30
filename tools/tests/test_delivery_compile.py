@@ -1481,6 +1481,43 @@ class DeliveryCompilerTests(unittest.TestCase):
         props, body = delivery_compile.split_note(review_path)
         self.assertEqual(delivery_compile.section_bodies(body)["Lessons and Follow-up"], expected)
 
+    def test_calibration_rows_never_become_open_follow_ups(self):
+        # A claim ruled invalid closes; with no minor open, the follow-up block says none.
+        self.policy("init")
+        self.policy("set", "--switch", "review_loop", "--value", "blocking_delta")
+        self.policy("approve")
+        plan_args = self.scope_ready_for_execution()
+        code, result = self.approve_execution_result(plan_args)
+        self.assertEqual(code, 0, result)
+        root = delivery_compile.find_delivery(self.docs, "DLV-001")
+        item = root / "items/auth-01/item.md"
+        props, body = delivery_compile.split_note(item)
+        props["status"] = "integrated"
+        delivery_compile.atomic_text(item, delivery_compile.frontmatter(props, body))
+        record = item.parent / "code-review.md"
+        block = (delivery_compile.table_block(
+            delivery_compile.ITEM_FOLLOW_UPS, delivery_compile.FOLLOW_UP_COLUMNS, [])
+            + "\n\n" + delivery_compile.table_block(
+                delivery_compile.ITEM_CALIBRATION, delivery_compile.CALIBRATION_COLUMNS,
+                ["| CR-1 | major | invalid | src/auth.py:12 checks the token before use. |"]))
+        record_props, record_body = delivery_compile.split_note(record)
+        delivery_compile.atomic_text(record, delivery_compile.frontmatter(
+            record_props, delivery_compile.replace_section(
+                record_body, "Deviations and Follow-ups", block)))
+        text = delivery_compile.section_bodies(
+            delivery_compile.split_note(record)[1])["Deviations and Follow-ups"]
+        self.assertEqual(delivery_compile.block_rows(text, delivery_compile.ITEM_FOLLOW_UPS), [])
+        self.assertEqual(delivery_compile.block_rows(text, delivery_compile.ITEM_CALIBRATION),
+                         ["| CR-1 | major | invalid | src/auth.py:12 checks the token before use. |"])
+        self.assertEqual(delivery_compile.delivery_follow_ups(root), [])
+        review = type("Args", (), {"docs": str(self.docs), "delivery": "DLV-001",
+                                   "reviewed_commit": "a" * 40, "reviewed_integration_commit": "b" * 40})
+        with contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(delivery_compile.approve_review(review), 0)
+        _props, body = delivery_compile.split_note(root / "delivery-review.md")
+        self.assertEqual(delivery_compile.section_bodies(body)["Lessons and Follow-up"],
+                         delivery_compile.DELIVERY_FOLLOW_UPS + " none.")
+
     def test_vault_paths_stay_posix_on_a_host_with_backslash_separators(self):
         """A vault path uses forward slashes on every host (#228)."""
         from test_delivery_git import WindowsVaultPath, windows_vault_paths

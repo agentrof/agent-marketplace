@@ -21,7 +21,8 @@ Host catalogs it reads, detected by shape:
   such as the models overview page as Markdown, whose model IDs are read in
   the host's documented ID format.
 
-Exit status: 0 without drift, 1 with drift, 2 for invalid input.
+Exit status: 0 without drift, 1 with drift, 2 for invalid input, 3 when a
+registered host went unchecked without ``--subset``.
 """
 
 from __future__ import annotations
@@ -39,7 +40,7 @@ import build_distributions
 
 ROOT = Path(__file__).resolve().parent.parent
 REPORT_SCHEMA_VERSION = 1
-EXIT_CLEAN, EXIT_DRIFT, EXIT_INVALID = 0, 1, 2
+EXIT_CLEAN, EXIT_DRIFT, EXIT_INVALID, EXIT_UNCHECKED = 0, 1, 2, 3
 AB_REFERENCE = (
     "plugins/software-engineering-team/skill-content/challenge-review/"
     "references/switch-mechanical_pass_tier-mechanical.md"
@@ -456,7 +457,8 @@ def parse_cli_arguments(values: list[str]) -> dict[str, str]:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         description=__doc__.split("\n\n", 1)[0],
-        epilog="Exit status: 0 without drift, 1 with drift, 2 for invalid input.",
+        epilog="Exit status: 0 without drift, 1 with drift, 2 for invalid input, 3 when"
+               " a registered host went unchecked without --subset.",
     )
     parser.add_argument(
         "--catalog", action="append", required=True, metavar="HOST=PATH",
@@ -472,6 +474,10 @@ def main(argv: list[str] | None = None) -> int:
         help="render the upstream issue with the bump diff and the frozen-task A/B",
     )
     parser.add_argument(
+        "--subset", action="store_true",
+        help="check only the hosts --catalog names; without it an omitted host fails the run",
+    )
+    parser.add_argument(
         "--date", default=None, metavar="YYYY-MM-DD",
         help="the verified date a bump records; defaults to today from the system clock",
     )
@@ -483,19 +489,28 @@ def main(argv: list[str] | None = None) -> int:
         datetime.date.fromisoformat(today)
         report = drift_report(root, parse_catalog_arguments(args.catalog),
                               parse_cli_arguments(args.cli_version))
+        unchecked = report["unchecked"]
+        if unchecked:
+            print(f"model-drift: not checked: {', '.join(unchecked)}" + (
+                "" if args.subset else
+                f"; pass {'its' if len(unchecked) == 1 else 'their'} catalog, or --subset"
+                " to check only the named hosts"), file=sys.stderr)
         if not args.issue_body:
             output = json.dumps(report, indent=2) + "\n"
         elif report["drift"]:
             output = issue_body(root, report, today)
         else:
             output = ""
-            print("model-drift: every pinned class matches its host catalog",
+            checked = f" of {', '.join(report['hosts'])}" if unchecked else ""
+            print(f"model-drift: every pinned class{checked} matches its host catalog",
                   file=sys.stderr)
     except ValueError as exc:
         print(f"model-drift: {exc}", file=sys.stderr)
         return EXIT_INVALID
     sys.stdout.write(output)
-    return EXIT_DRIFT if report["drift"] else EXIT_CLEAN
+    if report["drift"]:
+        return EXIT_DRIFT
+    return EXIT_UNCHECKED if unchecked and not args.subset else EXIT_CLEAN
 
 
 if __name__ == "__main__":

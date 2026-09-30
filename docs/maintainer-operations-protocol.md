@@ -342,7 +342,9 @@ DRIFT_REPORT
    use.
 2. Exit 0 means every pin is current. Exit 1 reports a pinned ID the host no
    longer lists, a newer model of a pinned family or changed effort support,
-   per class with its tiers and roles.
+   per class with its tiers and roles. Exit 3 means a registered host had no
+   catalog: `--subset` checks only the named hosts, and the unchecked ones are
+   named on stderr and in the issue.
 3. On drift, `--issue-body` renders the upstream issue: the finding in plain
    words, the catalog bump diff, the frozen-task A/B and the approval steps.
    The maintainer files it. A pinned model that is gone without a successor

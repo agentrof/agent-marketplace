@@ -24,8 +24,11 @@ approval and Requirement-flow gates keep their own gates.
    sequence and schedules, every Operation revision and Governance change the
    plan needs, the decision log so far and every queued question.
    `check-plan` reports every refusal execution approval would raise on the
-   plan; an open Operation revision that passes its own check is listed under
-   `pending_operation_revisions` instead, since gate A approves it first.
+   plan; an open Operation revision that its approval would take, checked as
+   that approval renders it, is listed under `pending_operation_revisions`
+   instead, with the `source_hash` the approval stamps, since gate A approves
+   it first. Gate A names that receipt, and an open revision its approval
+   would refuse is refused with what the approval finds.
 3. Group the questions in calls of at most four, with the recommended option
    first and the tradeoffs in the option descriptions.
 4. Record every answer, then carry out what gate A approved without asking

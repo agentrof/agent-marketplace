@@ -1546,26 +1546,36 @@ class DeliveryCompilerTests(unittest.TestCase):
         self.assertIn("At least 3 Items", switch["spec"]["promotion"]["unit"])
         self.assertIn("70%", switch["spec"]["promotion"]["threshold"])
 
-    def test_parallel_lane_policy_declares_lanes_only_on_new_items_with_two_lanes(self):
+    def test_parallel_lane_policy_declares_the_schedule_on_every_new_item(self):
+        """#327: init writes the schedule on every new Item, a one-lane Item included (rv-accept-ideas-27)."""
         self.approve_verification_contract()
         self.approve_dod()
         self.select_parallel_lanes()
-        with self.story_roles("devops_engineer", "software_architect"):
-            code, output, item = self.init_lane_delivery()
-        self.assertEqual(code, 0, output)
-        props, _body = delivery_compile.split_note(item)
-        self.assertEqual({key: props[key] for key in ("implementation_schedule", "lane_scopes", "lane_seams")},
-                         {"implementation_schedule": "parallel_lanes_v1", "lane_scopes": [], "lane_seams": []})
-        keys = list(props)
-        self.assertEqual(keys[keys.index("verification_schedule") + 1:keys.index("tags")],
-                         ["implementation_schedule", "lane_scopes", "lane_seams"])
-        # One lane has nothing to run in parallel, so the Item keeps today's bytes.
-        with self.story_roles("software_architect"):
-            code, output, single = self.init_lane_delivery("DLV-002")
-        self.assertEqual(code, 0, output)
-        self.assertFalse({"implementation_schedule", "lane_scopes", "lane_seams"}
-                         & set(delivery_compile.split_note(single)[0]))
+        fields = {"implementation_schedule": "parallel_lanes_v1", "lane_scopes": [], "lane_seams": []}
+        for delivery, supporting in (("DLV-001", ("devops_engineer", "software_architect")),
+                                     ("DLV-002", ("software_architect",))):
+            with self.subTest(supporting=supporting):
+                with self.story_roles(*supporting):
+                    code, output, item = self.init_lane_delivery(delivery)
+                self.assertEqual(code, 0, output)
+                props, _body = delivery_compile.split_note(item)
+                self.assertEqual({key: props.get(key) for key in fields}, fields)
+                keys = list(props)
+                self.assertEqual(keys[keys.index("verification_schedule") + 1:keys.index("tags")], list(fields))
         self.assert_delivery_vault_contract()
+        # The one lane owns every path claim, and an Item that only the architect
+        # implements has no lane, so it declares sequential_v1.
+        with self.story_roles("software_architect"):
+            self.assertEqual(self.lane_findings(
+                item, role_sequence=["software_architect", "backend_developer", "code_reviewer", "qa_engineer"],
+                path_claims=["workspace/apps/api"], lane_scopes=["backend_developer:workspace/apps/api"],
+                lane_seams=[]), [])
+        self.assertEqual(delivery_compile.lane_plan_findings(
+            "AUTH-01", {"implementation_schedule": "parallel_lanes_v1",
+                        "role_sequence": ["software_architect", "code_reviewer", "qa_engineer"]},
+            ["workspace/apps/api"], [], []),
+            ["AUTH-01 has no implementation role besides the Software Architect to run as a lane;"
+             " declare implementation_schedule sequential_v1"])
         self.policy("begin-revision")
         code, output, missing = self.init_lane_delivery("DLV-003")
         self.assertEqual((code, missing), (2, None))

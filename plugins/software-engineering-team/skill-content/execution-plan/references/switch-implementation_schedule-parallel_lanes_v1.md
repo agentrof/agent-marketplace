@@ -7,11 +7,11 @@ implementation roles are planned; the rest of the execution plan is unchanged.
 ## Which Items run lanes
 
 `delivery_compile.py init` writes `implementation_schedule: parallel_lanes_v1`
-with empty `lane_scopes` and `lane_seams` on each new Item that has two or more
-implementation roles besides the Software Architect. Every other Item carries
-no field and runs its roles one after another. Declare
+with empty `lane_scopes` and `lane_seams` on every new Item. An Item with one
+lane keeps the schedule and gives that lane every path claim. Declare
 `implementation_schedule: sequential_v1` on an Item whose roles cannot own
-separate files, such as one that claims contracts but no product paths.
+separate files, such as one that claims contracts but no product paths, and on
+an Item that only the Software Architect implements.
 
 ## Lane scopes
 

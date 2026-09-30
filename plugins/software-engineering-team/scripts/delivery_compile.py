@@ -788,7 +788,7 @@ def init_delivery(args) -> int:
                       "architecture_record_kinds": [], "architecture_reason": NO_ARCHITECTURE_REASON,
                       "role_sequence": execution_roles(source),
                       "verification_schedule": verification_policy()["new_schedule"],
-                      **new_item_lane_fields(source, schedule),
+                      **new_item_lane_fields(schedule),
                       "tags": ["doc/delivery-item", "status/in-scope"]}
         atomic_text(item, frontmatter(item_props, body_for("item", item_props["title"], {
             "Delivery Scope": identifier, "Navigation": link(f"delivery/deliveries/{root.name}/delivery", identifier),
@@ -1332,6 +1332,9 @@ def lane_plan_findings(story_id: str, props: dict, paths: list[str], contracts: 
         return []
     errors: list[str] = []
     lanes = lane_roles(props)
+    if not lanes:
+        return [f"{story_id} has no implementation role besides the Software Architect to run as a lane;"
+                " declare implementation_schedule sequential_v1"]
     scopes, unreadable = lane_scope_map(props)
     errors.extend(f"{story_id} lane_scope must be <role>:<normalized path>: {entry}" for entry in unreadable)
     for role in sorted(set(scopes) - set(lanes)):
@@ -1394,13 +1397,10 @@ def policy_implementation_schedule(docs: Path) -> tuple[str | None, list[str]]:
     return values.get("implementation_schedule", {}).get("value", missing), []
 
 
-def new_item_lane_fields(source: dict, schedule: str | None) -> dict:
-    """Return the lane fields a new Item declares; none keeps today's Item bytes.
-
-    Only an Item with two or more lane roles has lanes to run in parallel.
-    """
+def new_item_lane_fields(schedule: str | None) -> dict:
+    """Return the lane fields every new Item declares; none keeps today's Item bytes."""
     missing = document_contract()["document_types"]["delivery_item"]["missing_implementation_schedule"]
-    if schedule in {None, missing} or len(lane_roles({"role_sequence": execution_roles(source)})) < 2:
+    if schedule in {None, missing}:
         return {}
     return {"implementation_schedule": schedule, "lane_scopes": [], "lane_seams": []}
 

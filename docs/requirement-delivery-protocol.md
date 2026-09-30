@@ -351,13 +351,13 @@ Each Item also records its implementation schedule, which process switch
 approved order, and an approved Item without it keeps its bytes and hashes. At
 `parallel_lanes_v1`, `init` writes the schedule with empty `lane_scopes`
 (`<role>:<path>`) and `lane_seams` (`<producer> -> <consumer> via <interface>`)
-on each new Item with two or more implementation roles besides the Software
-Architect. Approval then requires lane scopes that are disjoint in both
-directions, together equal `path_claims`, reach neither `workspace/docs`,
-`.git` nor `.agentrof`, and give every implementation role except the Software
-Architect a scope; seams that join two lanes, name a contract the Item claims
-or an architecture record of a claimed kind, and form no cycle; and a Process
-Policy that still selects the schedule. Role Sequences render the phases: the
+on every new Item. Approval then requires an implementation role besides the
+Software Architect and lane scopes that are disjoint in both directions,
+together equal `path_claims`, reach neither `workspace/docs`, `.git` nor
+`.agentrof`, and give every implementation role except the Software Architect a
+scope; seams that join two lanes, name a contract the Item claims or an
+architecture record of a claimed kind, and form no cycle; and a Process Policy
+that still selects the schedule. Role Sequences render the phases: the
 Software Architect alone, the lanes in seam order, then Code Review and QA.
 `item_plan_hash` and the plan hash cover the schedule, the scopes and the
 seams. The Item keeps one worktree, Item ref, Slot and writer receipt epoch:

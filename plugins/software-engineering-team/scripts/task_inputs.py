@@ -20,6 +20,8 @@ SWITCH_REFERENCE = re.compile(r"^switch-([a-z][a-z0-9_]*)-([a-z][a-z0-9_]*)\.md$
 DELIVERY_PACKAGE = re.compile(r"^workspace/docs/delivery/deliveries/([^/]+)/")
 CATALOG_NAME_MAPS = ("role_skills", "required_role_skills", "entries",
                      "required_references", "stack_reference_by_role", "read_only_entry_roles")
+CANONICAL_SUFFIXES = {".md", ".json"}
+OPAQUE_NAMES = {"artifacts", ".obsidian", ".trash"}
 
 
 def digest(value) -> str:
@@ -44,8 +46,28 @@ def regular(root: Path, relative: str) -> Path:
     return result
 
 
-def source_inventory(root: Path) -> list[dict]:
-    """Bind incoming canonical edges without reading opaque artifact interiors."""
+def canonical_source(relative: str) -> bool:
+    """Whether the canonical source inventory holds this project-relative file."""
+    path = PurePosixPath(relative)
+    return (path.parts[:2] == ("workspace", "docs") and len(path.parts) > 2
+            and not OPAQUE_NAMES & set(path.parts[2:])
+            and path.suffix.lower() in CANONICAL_SUFFIXES)
+
+
+def outside(relative: str, bound: frozenset[str] | None) -> bool:
+    """Whether a task bound to ``bound`` leaves this path out: a canonical
+    source it does not read. Without a bound set every path stays in."""
+    return bound is not None and relative not in bound and canonical_source(relative)
+
+
+def source_inventory(root: Path, bound: frozenset[str] | None = None) -> list[dict]:
+    """Bind incoming canonical edges without reading opaque artifact interiors.
+
+    A task given ``bound``, the sources it reads, binds and reads only the
+    canonical sources among them.
+    """
+    if bound is not None:
+        return identity(root, [path for path in bound if canonical_source(path)])
     docs = root / "workspace/docs"
     for path in (docs.parent, docs):
         if path.is_symlink() or getattr(path, "is_junction", lambda: False)():
@@ -57,14 +79,14 @@ def source_inventory(root: Path) -> list[dict]:
         with os.scandir(pending.pop()) as entries:
             children = sorted(entries, key=lambda entry: entry.name)
         for entry in children:
-            if entry.name in {"artifacts", ".obsidian", ".trash"}:
+            if entry.name in OPAQUE_NAMES:
                 continue
             path = Path(entry.path)
             if path.is_symlink() or getattr(path, "is_junction", lambda: False)():
                 raise ValueError("canonical source inventory cannot traverse a symlink")
             if entry.is_dir(follow_symlinks=False):
                 pending.append(path)
-            elif path.suffix.lower() in {".md", ".json"}:
+            elif path.suffix.lower() in CANONICAL_SUFFIXES:
                 paths.append(path.relative_to(root).as_posix())
     return identity(root, paths)
 
@@ -229,8 +251,12 @@ def git_bytes(command: list[str], *args: str) -> bytes:
     return result.stdout
 
 
-def working_inventory(root: Path, command: list[str], *, unborn: bool = False) -> list[dict]:
-    """Bind dirty and new sources that a HEAD-only diff cannot describe."""
+def working_inventory(root: Path, command: list[str], *, unborn: bool = False,
+                      bound: frozenset[str] | None = None) -> list[dict]:
+    """Bind dirty and new sources that a HEAD-only diff cannot describe.
+
+    With ``bound``, a canonical source outside it is neither listed nor read.
+    """
     flags = git_bytes(command, "ls-files", "-v", "-z")
     if any(row and (row[:1].islower() or row[:1] in {b"S", b"s"})
            for row in flags.split(b"\0")):
@@ -244,7 +270,7 @@ def working_inventory(root: Path, command: list[str], *, unborn: bool = False) -
     records = []
     for name in sorted(names):
         parts = PurePosixPath(name).parts
-        if parts[:2] == ("workspace", "docs") and "artifacts" in parts[2:]:
+        if (parts[:2] == ("workspace", "docs") and "artifacts" in parts[2:]) or outside(name, bound):
             continue
         path = root / name
         if not path.exists() and not path.is_symlink():
@@ -465,8 +491,13 @@ def manifest(*, entry: str, role: str | None, mode: str, project: Path | None = 
         project_files.update("workspace/docs/" + path for path in closure["paths"])
     if project is None and project_files:
         raise ValueError("project root is required for project inputs")
+    # An exact epic's closure is derived again on every run, so a source that
+    # reaches it, an incoming dependency edge included, joins its paths. Like
+    # the epic's review manifest, the task binds those and none of the other
+    # canonical sources, which another epic's writer changes in parallel.
+    read_set = frozenset(project_files) if epic else None
     records = identity(project, project_files) if project is not None else []
-    inventory = source_inventory(project) if project is not None else []
+    inventory = source_inventory(project, read_set) if project is not None else []
     method_bindings = {}
     technology = set(skills or []) & set(policy["technology_method_skills"])
     if project is not None and technology:
@@ -515,7 +546,7 @@ def manifest(*, entry: str, role: str | None, mode: str, project: Path | None = 
         if unborn and (not route.get("allow_unborn_head", False) or base is not None):
             raise ValueError("project must have a committed Git HEAD")
         head = observed.stdout.decode("ascii").strip() if not unborn else None
-        working = working_inventory(project, command, unborn=unborn)
+        working = working_inventory(project, command, unborn=unborn, bound=read_set)
         changes = [record["path"] for record in working]
         if base is not None:
             if base.startswith("-"):
@@ -528,14 +559,15 @@ def manifest(*, entry: str, role: str | None, mode: str, project: Path | None = 
                                       "--name-only", "--no-renames", "-z", base, head, "--"], capture_output=True)
             if changed.returncode:
                 raise ValueError("cannot derive complete task change inventory")
-            changes = sorted({os.fsdecode(path) for path in changed.stdout.split(b"\0") if path}
+            changes = sorted({os.fsdecode(path) for path in changed.stdout.split(b"\0")
+                              if path and not outside(os.fsdecode(path), read_set)}
                              | {record["path"] for record in working})
-        if records != identity(project, project_files) or inventory != source_inventory(project):
+        if records != identity(project, project_files) or inventory != source_inventory(project, read_set):
             raise ValueError("project inputs changed while building task inputs")
         current = subprocess.run([*command, "rev-parse", "--verify", "HEAD"], capture_output=True)
         if bool(current.returncode) != unborn or (not unborn and current.stdout.decode("ascii").strip() != head):
             raise ValueError("project HEAD changed while building task inputs")
-        if working != working_inventory(project, command, unborn=unborn):
+        if working != working_inventory(project, command, unborn=unborn, bound=read_set):
             raise ValueError("project worktree changed while building task inputs")
     if instruction_files != identity(package, instruction_inputs):
         raise ValueError("instructions changed while building task inputs")
@@ -551,7 +583,12 @@ def manifest(*, entry: str, role: str | None, mode: str, project: Path | None = 
               "output_contract": policy["output_contract"], "approval_authority": False,
               "available_method_skills": policy["role_skills"].get(role, []),
               "selected_method_skills": sorted(skills or [])}
-    result["source_hash"] = digest(result)
+    hashed = result
+    if epic:
+        # The closure is bound as its own source_hash binds it: the stubs it
+        # lists from notes outside its paths are information, never an input.
+        hashed = dict(result, backlog_scope=backlog_review_inputs.bound_view(closure, not read_only))
+    result["source_hash"] = digest(hashed)
     if expected_hash is not None and result["source_hash"] != expected_hash:
         raise ValueError("task inputs are stale; regenerate before persisting a result")
     return result

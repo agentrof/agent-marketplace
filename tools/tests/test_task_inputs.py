@@ -20,9 +20,15 @@ sys.path.insert(0, str(ROOT / "tools/tests"))
 import backlog_compile
 import process_policy
 import task_inputs
-from backlog_fixture import make_approved_backlog
-from git_fixture import init_repository
+from backlog_fixture import CONSTRAINT, CRITERION, DESIGN, EXPERIENCE, _author_story, make_approved_backlog
+from git_fixture import init_repository, remove_temporary
 from test_default_equivalence import SWITCH_DATA, SWITCH_FILES, build_task_package, build_task_project
+
+
+def commit_all(root):
+    subprocess.run(["git", "-C", str(root), "add", "."], check=True, capture_output=True)
+    subprocess.run(["git", "-C", str(root), "-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid",
+                    "-c", "commit.gpgsign=false", "commit", "-qm", "Fixture"], check=True, capture_output=True)
 
 
 class TaskInputTests(unittest.TestCase):
@@ -54,9 +60,7 @@ class TaskInputTests(unittest.TestCase):
         self.commit(root)
 
     def commit(self, root):
-        subprocess.run(["git", "-C", str(root), "add", "."], check=True, capture_output=True)
-        subprocess.run(["git", "-C", str(root), "-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid",
-                        "-c", "commit.gpgsign=false", "commit", "-qm", "Fixture"], check=True, capture_output=True)
+        commit_all(root)
 
     def note(self, root, relative, kind, owner, extra=""):
         path = root / relative
@@ -103,7 +107,8 @@ class TaskInputTests(unittest.TestCase):
                 self.note(root, "workspace/docs/" + path, kind, owner)
             self.commit(root)
             closure = {"scope": rows[1][0], "primary_paths": [row[0] for row in rows[:4]],
-                       "paths": [row[0] for row in rows], "review": {"path": rows[4][0]}}
+                       "paths": [row[0] for row in rows], "review": {"path": rows[4][0]},
+                       "check": {}}
             unscoped = task_inputs.manifest(entry="backlog-plan", mode="revise", project=root,
                                             role="product-owner", inputs=["workspace/docs/" + row[0] for row in rows])
             self.assertEqual(unscoped["write_scope"]["status"], "unresolved")
@@ -596,6 +601,110 @@ class TaskInputTests(unittest.TestCase):
             task_inputs.manifest(entry="issue-report", role=None, mode="create", project=ROOT)
         with self.assertRaisesRegex(ValueError, "role does not belong"):
             task_inputs.manifest(entry="business-analysis", role="frontend-developer", mode="create")
+
+
+class EpicTaskScopeTests(unittest.TestCase):
+    """EP-001 holds ST-001; EP-002's writer still has to finish the stubs of ST-002."""
+
+    ROLES = (("backlog-reviewer", "review"), ("product-owner", "revise"))
+
+    def setUp(self):
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(remove_temporary, temporary)
+        self.root = Path(temporary.name).resolve()
+        self.docs = self.root / "workspace/docs"
+        (self.docs / "maps").mkdir(parents=True)
+        (self.root / "workspace/config.json").write_text(json.dumps({
+            "schema_version": 2, "team_id": "software-engineering-team",
+            "output_language": "English", "terminology_language": "English",
+        }), encoding="utf-8")
+        with contextlib.redirect_stdout(io.StringIO()):
+            make_approved_backlog(self.docs, "ST-001")
+            backlog_compile.stub_epic(SimpleNamespace(
+                docs=str(self.docs), slug="second", id="EP-002", title="Second",
+                goal="Deliver a separate customer outcome."))
+            backlog_compile.stub_story(SimpleNamespace(
+                docs=str(self.docs), epic="second", slug="st-002", id="ST-002", title=None,
+                scope=None, work_kind="feature", criterion_ref=[CRITERION],
+                experience_ref=[EXPERIENCE], evidence_ref=[], uses_design=[DESIGN],
+                constrained_by=[CONSTRAINT]))
+        init_repository(self.root)
+        subprocess.run(["git", "-C", str(self.root), "config", "core.autocrlf", "false"],
+                       check=True, capture_output=True)
+        commit_all(self.root)
+
+    def task(self, role, mode, epic="EP-001", **extra):
+        return task_inputs.manifest(entry="backlog-plan", role=role, mode=mode,
+                                    project=self.root, epic=epic, **extra)
+
+    def story(self, slug):
+        epic = "delivery-fixture" if slug == "st-001" else "second"
+        return self.docs / f"backlog/epics/{epic}/stories/{slug}"
+
+    def finish_second_story(self):
+        """EP-002's writer replaces every placeholder stub-story wrote."""
+        folder = self.story("st-002")
+        _author_story(folder / "story.md", folder / "test-plan.md", "ST-002")
+
+    def test_another_epics_writer_leaves_an_epic_task_fresh(self):
+        tasks = {role: self.task(role, mode) for role, mode in self.ROLES}
+        self.assertTrue(tasks["backlog-reviewer"]["backlog_scope"]["check"]["scaffold_findings"])
+        # The root package, bare --epic, and an unscoped writer keep every source.
+        whole = {"root": dict(role="product-owner", mode="revise", epic=""),
+                 "unscoped": dict(role="product-owner", mode="revise", epic=None)}
+        previous = {name: self.task(**kwargs) for name, kwargs in whole.items()}
+        self.finish_second_story()
+        aside = self.docs / "solution-design/aside.md"
+        aside.write_text("---\ntype: note\n---\n\n# A source no closure reads\n", encoding="utf-8")
+        outside = {self.story("st-002").relative_to(self.root).as_posix() + name
+                   for name in ("/story.md", "/test-plan.md")} | {"workspace/docs/solution-design/aside.md"}
+        for role, mode in self.ROLES:
+            with self.subTest(role=role):
+                fresh = self.task(role, mode, expected_hash=tasks[role]["source_hash"])
+                closure = {"workspace/docs/" + path for path in fresh["backlog_scope"]["paths"]}
+                self.assertLessEqual({record["path"] for record in fresh["canonical_source_inventory"]},
+                                     closure)
+                self.assertFalse(outside & {record["path"] for record in fresh["working_inputs"]})
+                self.assertFalse(outside & set(fresh["changed_paths"]))
+                self.assertFalse(fresh["backlog_scope"]["check"].get("scaffold_findings"))
+        for name, kwargs in whole.items():
+            with self.subTest(scope=name):
+                with self.assertRaisesRegex(ValueError, "stale"):
+                    self.task(**kwargs, expected_hash=previous[name]["source_hash"])
+                self.assertIn("workspace/docs/solution-design/aside.md", {
+                    record["path"] for record in self.task(**kwargs)["canonical_source_inventory"]})
+
+    def test_a_change_inside_an_epic_tasks_closure_still_makes_it_stale(self):
+        self.finish_second_story()
+        commit_all(self.root)
+        first = self.story("st-001") / "story.md"
+        for role, mode in self.ROLES:
+            with self.subTest(role=role, change="inside"):
+                previous = self.task(role, mode)
+                first.write_text(first.read_text(encoding="utf-8").replace(
+                    "Administrative bulk operations", "Administrative batch operations"),
+                    encoding="utf-8")
+                with self.assertRaisesRegex(ValueError, "stale"):
+                    self.task(role, mode, expected_hash=previous["source_hash"])
+                subprocess.run(["git", "-C", str(self.root), "checkout", "--", "."],
+                               check=True, capture_output=True)
+        # ST-002 of EP-002 gains a dependency on ST-001: a new incoming edge
+        # brings ST-002 into EP-001's closure, so every EP-001 task goes stale.
+        previous = {role: self.task(role, mode) for role, mode in self.ROLES}
+        path = self.story("st-002") / "story.md"
+        props, body = backlog_compile.parse_front_matter(path)
+        link = "[[backlog/epics/delivery-fixture/stories/st-001/story|ST-001]]"
+        props["depends_on"] = [link]
+        body = body.replace("## Dependencies\n\nNone.",
+                            "## Dependencies\n\n- " + link + ": Supplies the account boundary.")
+        path.write_text(backlog_compile.front_matter(props, body), encoding="utf-8")
+        for role, mode in self.ROLES:
+            with self.subTest(role=role, change="incoming edge"):
+                with self.assertRaisesRegex(ValueError, "stale"):
+                    self.task(role, mode, expected_hash=previous[role]["source_hash"])
+                current = self.task(role, mode)
+                self.assertIn(path.relative_to(self.root).as_posix(),
+                              {record["path"] for record in current["canonical_source_inventory"]})
 
 
 if __name__ == "__main__":

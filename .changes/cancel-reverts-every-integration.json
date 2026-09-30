@@ -1,0 +1,6 @@
+{
+  "summary": "`delivery_git.py cancel-delivery` now reverts every integration merge of the Delivery's Items, newest first, where it reverted only the newest integration of an Item whose ref recorded `integrated`. An Item that was integrated and then reopened kept its product change in the cancelled Integration, as did the first integration of an Item integrated twice, and merging the cancellation PR put that change on the target. Such a Story is now `integrated_reverted` whatever its Item ref records. The search walks the Integration's own line back to its reservation, and an Item recorded `integrated` without a merge there still refuses with `DELIVERY_COORDINATION_CORRUPT`.",
+  "components": {
+    "software-engineering-team": "patch"
+  }
+}

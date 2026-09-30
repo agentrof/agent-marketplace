@@ -528,10 +528,13 @@ unless the refetched Fence never took the authorizing candidate, so a Fence
 that may carry the intent still has the receipt its handoff needs.
 
 Cancellation is an explicit action inside `/deliver DLV-###`. Its approved
-intent freezes exact Story dispositions, quiesces active Items, reverts
-integrated Item merges in reverse order and publishes one cancellation Review
-through the same Integration branch and final PR. A scope-only or claims-free
-Delivery uses `not_started` dispositions and never fabricates Item refs,
+intent freezes exact Story dispositions, quiesces active Items, reverts every
+Item integration merge on the Integration's own line in reverse order and
+publishes one cancellation Review through the same Integration branch and
+final PR. That includes the integration a reopened Item left and each earlier
+integration of an Item integrated again, so such a Story is
+`integrated_reverted` whatever its Item ref now records. A scope-only or
+claims-free Delivery uses `not_started` dispositions and never fabricates Item refs,
 review evidence or integration bases. A cancellation is final: a Delivery
 whose published status is already `cancelled` refuses another cancellation,
 any invalidation of its cancellation Review, a publication of its execution

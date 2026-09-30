@@ -1939,6 +1939,19 @@ def cancel_delivery(project_root: Path, delivery_id: str, reason: str,
     if remote_props.get("status") == "cancelled":
         raise RuntimeError("DELIVERY_CANCELLATION_INVALID: the published Delivery is already cancelled")
     scope_hash = str(remote_props.get("scope_hash", "none"))
+    # Every integration of a Story sits on the Integration's own first-parent line after
+    # the reservation, newest first. A reopened Item leaves the integration it reopened
+    # there, and a later integration merges only what changed since, so each is reverted.
+    integrated: list[tuple[str, str]] = []
+    for oid in run_git(root, "rev-list", "--first-parent", integration_oid).splitlines():
+        message = commit_message(root, oid)
+        if trailer(message, "Delivery") != delivery_id:
+            continue
+        if trailer(message, "Record") == "delivery-reservation-v1":
+            break
+        if trailer(message, "Record") == "item-integration-v1":
+            integrated.append((trailer(message, "Story") or "", oid))
+    merged_stories = {story for story, _oid in integrated}
     all_slots = remote_slot_oids(root, remote)
     contexts: dict[str, dict] = {}
     stories: dict[str, dict[str, str]] = {}
@@ -1953,7 +1966,11 @@ def cancel_delivery(project_root: Path, delivery_id: str, reason: str,
             item_props, item_body = split_remote_note(root, item_oid, relative_item, split_note)
             if item_props.get("status") == "cancelled":
                 raise RuntimeError(f"DELIVERY_CANCELLATION_INVALID: Item is already cancelled: {story}")
-            disposition = "integrated_reverted" if item_props.get("status") == "integrated" else "unintegrated_discarded"
+            if item_props.get("status") == "integrated" and story not in merged_stories:
+                raise RuntimeError(
+                    f"DELIVERY_COORDINATION_CORRUPT: Integration history has no exact Item merge for {story}"
+                )
+            disposition = "integrated_reverted" if story in merged_stories else "unintegrated_discarded"
             context.update({"item_oid": item_oid, "slot": next((key for key, oid in all_slots.items() if oid == item_oid), None),
                             "props": item_props, "body": item_body})
             stories[story] = {"disposition": disposition, "tip": item_oid}
@@ -1981,32 +1998,11 @@ def cancel_delivery(project_root: Path, delivery_id: str, reason: str,
          "Cancellation-Intent-Hash": intent_hash},
     )
 
-    first_parent_history = run_git(
-        root, "rev-list", "--first-parent", integration_oid
-    ).splitlines()
-    first_parent_order = {
-        oid: index for index, oid in enumerate(first_parent_history)
-    }
-    integrated = []
-    for story, context in contexts.items():
-        if not context["item_oid"] or context["props"].get("status") != "integrated":
-            continue
-        merge_oid = None
-        for candidate_oid in first_parent_history:
-            message = commit_message(root, candidate_oid)
-            if (trailer(message, "Record") == "item-integration-v1"
-                    and trailer(message, "Story") == story):
-                merge_oid = candidate_oid
-                break
-        if merge_oid is None:
-            raise RuntimeError(
-                f"DELIVERY_COORDINATION_CORRUPT: Integration history has no exact Item merge for {story}"
-            )
-        integrated.append((story, merge_oid))
-    integrated.sort(key=lambda pair: first_parent_order[pair[1]])
     current = barrier
     revert_commits = []
     for story, item_oid in integrated:
+        if story not in contexts or not contexts[story]["item_oid"]:
+            continue
         current = revert_merge_candidate(
             root, current, item_oid, f"Revert Item {story} for {delivery_id}",
             {"Record": "cancellation-revert-v1", "Protocol": "1", "Delivery": delivery_id,

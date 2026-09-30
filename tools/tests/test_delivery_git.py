@@ -2240,6 +2240,34 @@ class DeliveryGitTests(unittest.TestCase):
         for commit in (cancelled["reverts"][0], cancelled["review"]):
             self.assertEqual(self.product_files(project, commit), {changed: "kayıt = 'önce'"})
 
+    def test_cancellation_reverts_every_integration_of_a_reopened_item(self):
+        """A reopened Item is active on its ref but its integration stays on the Integration, and a
+        second integration merges only what changed since. Each integration is reverted."""
+        for integrations, reopened_last in ((1, True), (2, True), (2, False)):
+            with self.subTest(integrations=integrations, reopened_last=reopened_last):
+                project, _docs, directory, _item, _reserved = self.prepare_execution_with_draft_reserved_contracts(False)
+                delivery_git.publish_execution_plan(project, "DLV-001")
+                delivery_git.claim_items(project, "DLV-001")
+                worktree = delivery_git.start_item(project, "DLV-001", "AUTH-01")["worktree"]
+                for version in range(1, integrations + 1):
+                    if version > 1:
+                        worktree = delivery_git.reopen_item(project, "DLV-001", "AUTH-01")["worktree"]
+                    self.commit_item_product_change(worktree, f"def authenticate():\n    return {version}\n")
+                    self.assertEqual(self.approve_item_evidence(worktree), 0)
+                    delivery_git.push_item(project, "DLV-001", "AUTH-01")
+                    integrated = delivery_git.integrate_item(project, "DLV-001", "AUTH-01")
+                if reopened_last:
+                    self.assertEqual(delivery_git.reopen_item(project, "DLV-001", "AUTH-01")["status"], "active")
+                self.assertEqual(self.product_files(project, integrated["integration"]),
+                                 {"src/auth.py": f"def authenticate():\n    return {integrations}"})
+                cancelled = delivery_git.cancel_delivery(project, "DLV-001", "The owner withdrew the request")
+                self.assertEqual(len(cancelled["reverts"]), integrations)
+                self.assertEqual(self.product_files(project, cancelled["review"]), {})
+                record = (directory / "items/auth-01/item.md").relative_to(project).as_posix()
+                props = delivery_git.split_remote_note(project, cancelled["review"], record, delivery_compile.split_note)[0]
+                self.assertEqual((props["status"], props["cancellation_disposition"]), ("cancelled", "integrated_reverted"))
+                self.assertEqual(delivery_git.remote_slot_oids(project, "origin"), {})
+
     def test_cancellation_reverts_an_item_rename_to_its_old_path(self):
         """Git diff detects renames by default and then lists only the new path, so the revert
         removed src/login.py, restored nothing, and left neither name in the Integration (#277)."""

@@ -232,7 +232,10 @@ class ReviewPanelFlowTests(unittest.TestCase):
             "Every lens reader receives the same returned manifest and every named path",
             "the manifest carries no lens key, so one manifest serves the whole panel",
             "--expected-hash <source_hash>",
-            "Lens readers take these facts as given and never recount them",
+            "At this value the manifest names `review_panels: lens_panel`, so a manifest"
+            " derived under another value is stale",
+            "At the default, `single_reader`, the manifest carries none of these facts",
+            "Lens readers take them as given and never recount them",
             "The Product Owner merges findings that share one root cause",
             "Findings and Verdict come from the merged panel result",
             "A re-review reruns only the lens assignments that returned the blocking findings",

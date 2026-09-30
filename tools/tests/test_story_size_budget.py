@@ -545,12 +545,15 @@ class ReviewManifestTests(unittest.TestCase):
         self.fx = Project(self, build=two_epic_backlog)
 
     def test_the_manifest_carries_the_measures_of_its_scope_as_given_facts(self):
-        released = backlog_review_inputs.manifest(self.fx.docs, epic="EP-001")
-        self.assertNotIn("story_size", released["check"])
-        self.fx.choose(("review_panels", "lens_panel"))
-        self.assertEqual(backlog_review_inputs.manifest(self.fx.docs, epic="EP-001"), released)
+        plain = backlog_review_inputs.manifest(self.fx.docs, epic="EP-001")
+        self.assertNotIn("check", plain)
+        # A switch the manifest never reads adds no measures.
+        self.fx.choose(("mechanical_pass_tier", "mechanical"))
+        self.assertEqual(backlog_review_inputs.manifest(self.fx.docs, epic="EP-001"), plain)
         self.fx.choose((SWITCH, "propose_split"), limits={"implementation_roles": 1})
         epic = backlog_review_inputs.manifest(self.fx.docs, epic="EP-001")
+        # At single_reader the measures are the whole check block.
+        self.assertEqual(sorted(epic["check"]), ["story_size"])
         self.assertEqual(sorted(epic["check"]["story_size"]["stories"]), ["ST-001", "ST-002"])
         self.assertEqual(epic["check"]["story_size"]["limits"], {"implementation_roles": 1})
         root = backlog_review_inputs.manifest(self.fx.docs)

@@ -268,9 +268,13 @@ To add a switch:
    when the project's policy selects that value, and only for a task whose
    entry runs one of the switch's owning flows. Never link it from SKILL.md
    and never write one for the default value.
-4. Keep the default path unchanged: with the switch at its default, flows,
-   skills, agents, manifests and compiler outputs stay byte-identical. Extend
-   `tools/tests/test_default_equivalence.py` when the switch touches a
+4. Keep the default path unchanged: with the switch at its default, its only
+   trace in a flow is the anchor of step 2, and skills, agents, manifests and
+   compiler outputs stay byte-identical.
+   `tools/tests/test_default_equivalence.py` compares every compiler output
+   and every shipped task's bound paths on frozen inputs with the release base
+   e47dbe0 and fails on any difference its `EXPECTED_DIFFERENCES` list does not
+   name with the issue whose fix made it. Extend it when the switch touches a
    compiler, and test each value with every other switch at its default.
 5. Inside a Delivery, read the value with
    `process_policy.py value --switch <id> --delivery DLV-###` and derive its

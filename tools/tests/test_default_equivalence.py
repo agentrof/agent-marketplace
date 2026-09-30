@@ -1,10 +1,15 @@
-"""Golden all-default runs: with no Process Policy, every compiler output is
-byte-identical to the program branch base on the same inputs.
+"""Golden all-default runs: with no Process Policy, every compiler output and
+every shipped task binding is e47dbe0's on the same inputs, apart from the
+differences EXPECTED_DIFFERENCES lists, each tied to the issue whose fix made
+it.
 
-The golden digests below were produced by running the same harness against
-the base tree's own scripts (see ``--harness`` at the end of this file). A
-change that alters an output on the default path fails here; a deliberate
-change updates the digest with its reason in the same commit.
+Every ``*_GOLDEN`` digest except DELIVERY_POLICY_GOLDEN's is e47dbe0's own
+output: this file's harness run with ``--root`` on an export of that commit
+(``git archive e47dbe0``), so it runs that tree's scripts (see ``--harness``
+at the end of this file). A test applies the listed differences to its golden
+and compares the result with this tree's run, so an unlisted difference fails,
+and so does a listed one that no longer differs. A deliberate default-path
+change adds its entry, with its issue, in the same commit.
 
 "The same inputs" is literal. The Delivery run reads its approved backlog,
 upstream notes and Verification Contract from the frozen
@@ -19,13 +24,14 @@ hides a field: a review manifest's contract_hash hashes the package scripts,
 and its source_hash covers that hash. No Delivery record or Operation receipt
 carries a package script or instruction hash, and the task manifest run hashes
 a package the harness writes byte for byte, so release changes to scripts and
-contracts reach no other golden.
+contracts reach no other golden. No golden covers a rendered agent file.
 """
 
 from __future__ import annotations
 
 import argparse
 import contextlib
+import copy
 import hashlib
 import io
 import json
@@ -47,8 +53,6 @@ GIT_ENV = {"GIT_AUTHOR_NAME": "Fixture", "GIT_AUTHOR_EMAIL": "fixture@example.in
 
 INPUTS = Path(__file__).resolve().with_name("default_equivalence_inputs.json")
 
-# Taken on frozen inputs at program tip 95298e5; 679de01, the tip before the
-# process switches, and the base e56acfb produce the same digests.
 DELIVERY_GOLDEN = {
     "files": {
         "delivery/definition-of-done.md":
@@ -58,7 +62,7 @@ DELIVERY_GOLDEN = {
         "delivery/deliveries/dlv-001-auth/delivery.md":
             "sha256:9cb7bac61dcc6a118207143170212f7f073cb3e5e983ffa02bc6f907256e44c5",
         "delivery/deliveries/dlv-001-auth/execution-plan.md":
-            "sha256:735c5ce870037268e919d5c45726bd9651417dbe2d336601b8354eb5e1ce7d39",
+            "sha256:b076320a0a9bd7134269c07b96ce35090cd06525a88298d22b20fb6fc2e67fd0",
         "delivery/deliveries/dlv-001-auth/items/auth-01/code-review.md":
             "sha256:1bab717a4131ecf98e4471801c1329db7cb418b1a5e527589795cba84f1b96ab",
         "delivery/deliveries/dlv-001-auth/items/auth-01/item.md":
@@ -86,8 +90,9 @@ DELIVERY_GOLDEN = {
 
 # The same run under an approved Process Policy that sets only review_panels,
 # so delivery_path stays at standard and every Delivery switch at its default.
-# Taken on frozen inputs with the scripts of program tip 6305138, before
-# delivery_path existed; the pins name the policy, so the Delivery records
+# e47dbe0 has no Process Policy, so this golden is this program's own output,
+# taken on frozen inputs with the scripts of program tip 6305138, before
+# delivery_path existed. The pins name the policy, so the Delivery records
 # differ from DELIVERY_GOLDEN's.
 DELIVERY_POLICY_GOLDEN = {
     "files": {
@@ -126,54 +131,42 @@ DELIVERY_POLICY_GOLDEN = {
     ],
 }
 
-# Taken on frozen inputs at program tip 18a7a35; 038daef and the base e56acfb
-# produce the same digests.
 OPERATION_GOLDEN = {
     "environment": "sha256:9997854f6d8c6eac9c2d5e72eb1162b7104d59cfbd4322acba98df123b62336b",
     "verification": "sha256:f12c13e4555da039f3b6c446795949178c3c2379895ab39949ddecf47830d251",
 }
 
-# Taken on frozen inputs at program tip 60497bf, before story_size_budget.
-# The check digests also match v0.6.0; its manifests lack the check block
-# that the review-panel change added on this branch. The epic manifest's
-# digest was retaken when its structure_hash came to bind the notes it reads
-# and the identities and edges that reach them (#340); nothing else moved.
 BACKLOG_GOLDEN = {
     "check": "sha256:2f97d3071160f3ea4d75fba6b954b0d895156f1e1ab0fd310309d2620330c385",
     "check_approved": "sha256:2f97d3071160f3ea4d75fba6b954b0d895156f1e1ab0fd310309d2620330c385",
-    "epic_manifest": "sha256:62d1898826fed3aa5ab980a5430b003ffc126a08b85ae2c082c2bc85c279ffce",
-    "root_manifest": "sha256:1a241a2cb7dc052d494515fc11339337740f5d202cd13efb88543fe785927030",
+    "epic_manifest": "sha256:15725abe32259457139fb3419218742be8fcb272a2d287182f026f80527f3609",
+    "root_manifest": "sha256:a75772637fce2c1d2d6f8521887fda8b3c2467b17602fafcca429b88f96d7cdb",
 }
 
-# Taken at program tip b83c1ba: every backlog file the fixture's approval
-# writes without a Process Policy. main e47dbe0 differs only in the story,
-# the registry and the package hash, where #306 stopped stub-story writing an
-# empty origin_mode into a legacy backlog.
+# Every backlog file the fixture's approval writes without a Process Policy.
 APPROVAL_GOLDEN = {
     "backlog/_generated/board.md":
         "sha256:ff176d94f2480cab35a308d85d448fc30f1d359df2d1c0cc1ced15bbca8bd20b",
     "backlog/_generated/dependency-map.md":
         "sha256:8d612f10319a41282d6e5f2bd220f0a7c69e194b5dfb7beb591d94fbe03684a3",
     "backlog/_generated/registry.json":
-        "sha256:7d63be2c3e3a97e2836ee9e2ed8611b9ba5e4f94793b9b7a78258b8b4b267e55",
+        "sha256:52a4a9d573986fb5c7e71e0d3aea83c66f00c1227377a2d9518b902b13b7d4b6",
     "backlog/_generated/test-coverage.md":
         "sha256:33b9e6db44f8b6c5eb1a55144e86fb45f8cd5f3de7c0c9281726462f14eeabe9",
     "backlog/backlog.md":
-        "sha256:1101f9fdf12d5758a2ec64691b222bdf63c1e8852761bcb1d49c3bbf7fc15278",
+        "sha256:e5a31a6dee03701ed38f4f7faa06b98eb50215d45ed1d2cde2eb2d5a5565f466",
     "backlog/epics/delivery-fixture/epic.md":
         "sha256:fb807f9a658b8726e0802aae30d79b145f2302246ccbd12449d76458dc240095",
     "backlog/epics/delivery-fixture/reviews/round-1-epic-review.md":
         "sha256:bd8f795acddc4dbdc9c7439d9150d1e0032b7d94efc6fed2ef715d84479cfbc9",
     "backlog/epics/delivery-fixture/stories/auth-01/story.md":
-        "sha256:c579d6ff5a1e1ab0d167f2828397f9cc2a8a770e2f3d8ea3e347793ea05419f0",
+        "sha256:cd64c339adde066db9741778b028da4f979945f1bfeadeaaa6b9be26e34a87dd",
     "backlog/epics/delivery-fixture/stories/auth-01/test-plan.md":
         "sha256:de120945533d021dc49d5f2f12598a460d37235e4d4d6244baa867ed866a656b",
     "backlog/reviews/round-1-backlog-review.md":
         "sha256:ad38462e118bc1181066a5af8cd4bc9621f5efdb5bb290c63868827f2bec89a6",
 }
 
-# Taken at program tip 95298e5; 679de01 and e56acfb produce the same digests.
-# The implementer digest was taken at program tip 0ffe0fb and matches e56acfb.
 MANIFEST_GOLDEN = {
     "entry:without_switch_files":
         "sha256:e0ca7b6f1cf42fd533887f93ac2591a4ba5de7ee44756e95eaadbe69614fc7de",
@@ -187,15 +180,90 @@ MANIFEST_GOLDEN = {
         "sha256:73d21f2c1c38e51cde995c0d6640e71687f4b9c48bdf13c1d633db9166fb4b22",
 }
 
-# Taken at program tip 5cb9217: the read, conditional and instruction paths
-# and the write scopes of all 72 shipped tasks without a project. 60497bf gave
-# sha256:8548a338c2b26281e6647b3b45f2c61de681a5bf12946d95fda69e7dfcf48db7; the
-# one difference is d64c4b7's product-planning/data/story-size-measures.json,
-# which six tasks that select product-planning hash but never read: the backlog
-# compiler's contract covers it under every story_size_budget value.
+# The read, conditional and instruction paths and the write scopes of all 72
+# shipped tasks without a project, apart from the SHIPPED_ADDITIONS paths,
+# which the harness counts instead.
 SHIPPED_GOLDEN = {
-    "tasks": "sha256:60f38c168597a290e5ca5030a304561998be0e211731009c35b7f619a254498d",
+    "additions": {},
+    "tasks": "sha256:d0b71b7ea3c7ef304458f1dbe07ef56af9ee543eecd360e3e065ee62320613ed",
 }
+
+# Instruction paths that shipped tasks hash on the default path although no
+# e47dbe0 task did: the number of tasks that bind each and why they must. A
+# task hashes every package script and every file of the skills it selects,
+# because a tool or data file it can run shapes its result.
+SHIPPED_ADDITIONS = {
+    "scripts/process_policy.py": (
+        72, "#332: the Process Policy lifecycle compiler. task_inputs.py and the backlog"
+            " and Delivery compilers resolve every switch through it, the default path"
+            " included, so every task binds it with the other package scripts."),
+    "skill-content/challenge-review/data/review-panels.json": (
+        10, "#312: the review panel lens data. Only the lens_panel and single_source_bundle"
+            " instructions read it, yet every task that selects challenge-review hashes it"
+            " (rv-switches-02)."),
+    "skill-content/configure/data/process-switches.json": (
+        6, "#332: the process switch registry. /configure process lists and changes the"
+           " switches from it and process_policy.py resolves each default from it, so every"
+           " configure task binds it with the rest of the configure skill."),
+    "skill-content/configure/references/process-policy.md": (
+        6, "#332: the /configure process procedure, the configure entry's new process"
+           " target, which every configure task binds with the rest of its skill."),
+    "skill-content/product-planning/data/story-size-measures.json": (
+        6, "#325: the story size measures. Only the backlog compiler reads them, at"
+           " story_size_budget propose_split, yet every task that selects product-planning"
+           " hashes them."),
+}
+
+# Every default-path output that differs from e47dbe0, by harness and by the
+# key path of its golden entry: the value this tree produces and the issue
+# whose fix changed it.
+EXPECTED_DIFFERENCES = {
+    "delivery": {
+        ("files", "delivery/deliveries/dlv-001-auth/execution-plan.md"): (
+            "sha256:735c5ce870037268e919d5c45726bd9651417dbe2d336601b8354eb5e1ce7d39",
+            "#322, a deliberate default-path change: execution approval records in"
+            " superseded_plan_approvals the source_hash of every earlier approval of the plan,"
+            " so publication refuses an approval the Integration has moved past instead of"
+            " rolling the Integration back. The run approves execution twice, so the second"
+            " approval lists the first, and its source_hash covers the list."),
+    },
+    "backlog": {
+        ("epic_manifest",): (
+            "sha256:a3cd4d5d032d7c19d28d8c22c32f4516304eebdb0ab6944413b6d57defe0022e",
+            "#340: an epic manifest's structure_hash binds the notes it reads and the story"
+            " identities and dependency edges that reach them, no longer every backlog byte,"
+            " so another epic's writer leaves the review fresh."),
+    },
+    "approval": {
+        ("backlog/epics/delivery-fixture/stories/auth-01/story.md",): (
+            "sha256:c579d6ff5a1e1ab0d167f2828397f9cc2a8a770e2f3d8ea3e347793ea05419f0",
+            "#306: stub-story no longer writes an empty origin_mode into a legacy backlog's"
+            " story, so the story and its source_hash change."),
+        ("backlog/backlog.md",): (
+            "sha256:1101f9fdf12d5758a2ec64691b222bdf63c1e8852761bcb1d49c3bbf7fc15278",
+            "#306: the package hash covers the story's changed source_hash."),
+        ("backlog/_generated/registry.json",): (
+            "sha256:7d63be2c3e3a97e2836ee9e2ed8611b9ba5e4f94793b9b7a78258b8b4b267e55",
+            "#306: the generated registry repeats the package hash."),
+    },
+    "shipped": {
+        ("additions",): ({path: count for path, (count, _reason) in SHIPPED_ADDITIONS.items()},
+                         "The files SHIPPED_ADDITIONS lists, each with its issue."),
+    },
+}
+
+
+def expected(kind: str, golden: dict) -> dict:
+    """Return e47dbe0's golden with this tree's listed differences in place."""
+    result = copy.deepcopy(golden)
+    for path, (value, _issue) in EXPECTED_DIFFERENCES.get(kind, {}).items():
+        target = result
+        for key in path[:-1]:
+            target = target[key]
+        if path[-1] not in target or target[path[-1]] == value:
+            raise AssertionError(f"{kind} {path} lists no difference from e47dbe0")
+        target[path[-1]] = value
+    return result
 
 
 def digest(value) -> str:
@@ -220,7 +288,7 @@ class DefaultEquivalenceTests(unittest.TestCase):
     maxDiff = None
 
     def test_delivery_compiler_outputs_match_the_base_on_frozen_inputs(self):
-        self.assertEqual(run_harness("delivery"), DELIVERY_GOLDEN,
+        self.assertEqual(run_harness("delivery"), expected("delivery", DELIVERY_GOLDEN),
                          "run this file with --harness delivery --raw to read the outputs")
 
     def test_delivery_compiler_outputs_match_the_base_under_a_policy_at_the_defaults(self):
@@ -230,36 +298,47 @@ class DefaultEquivalenceTests(unittest.TestCase):
 
     def test_operation_compiler_checks_match_the_base_on_frozen_inputs(self):
         # A contract without an Accepted Minor Findings section checks as released.
-        self.assertEqual(run_harness("operation"), OPERATION_GOLDEN,
+        self.assertEqual(run_harness("operation"), expected("operation", OPERATION_GOLDEN),
                          "run this file with --harness operation --raw to read the outputs")
 
     def test_backlog_compiler_outputs_match_the_base_on_frozen_inputs(self):
         actual = run_harness("backlog")
+        golden = expected("backlog", BACKLOG_GOLDEN)
         self.assertEqual({name: value for name, value in actual.items() if ":" not in name},
-                         BACKLOG_GOLDEN,
-                         "run this file with --harness backlog --raw to read the outputs")
-        # An approved policy that leaves story_size_budget at off reads the same.
+                         golden, "run this file with --harness backlog --raw to read the outputs")
+        # An approved policy that leaves every switch the backlog tools read at
+        # its default reads the same.
         self.assertEqual({name.split(":", 1)[1]: value for name, value in actual.items()
-                          if name.startswith("off:")}, BACKLOG_GOLDEN)
+                          if name.startswith("policy:")}, golden)
 
     def test_backlog_approval_without_a_policy_writes_the_base_bytes(self):
         # An approval records a Process Policy pin only when a policy exists.
-        self.assertEqual(run_harness("approval"), APPROVAL_GOLDEN,
+        self.assertEqual(run_harness("approval"), expected("approval", APPROVAL_GOLDEN),
                          "run this file with --harness approval --raw to read the files")
 
     def test_task_manifests_match_the_base_without_a_policy(self):
         actual = run_harness("manifests")
+        golden = expected("manifests", MANIFEST_GOLDEN)
         self.assertEqual({name: value for name, value in actual.items()
-                          if name.endswith(":without_switch_files")}, MANIFEST_GOLDEN)
+                          if name.endswith(":without_switch_files")}, golden)
         # Switch references of values no policy chose are neither read nor hashed.
         self.assertEqual({name.replace(":with_", ":without_"): value
                           for name, value in actual.items()
-                          if name.endswith(":with_switch_files")}, MANIFEST_GOLDEN)
+                          if name.endswith(":with_switch_files")}, golden)
 
     def test_shipped_tasks_bind_the_base_paths_without_a_policy(self):
         # Switch references and switch value data stay out of every default task.
-        self.assertEqual(run_harness("shipped"), SHIPPED_GOLDEN,
+        self.assertEqual(run_harness("shipped"), expected("shipped", SHIPPED_GOLDEN),
                          "run this file with --harness shipped --raw to read the tasks")
+
+    def test_every_listed_difference_names_its_issue(self):
+        for kind, entries in EXPECTED_DIFFERENCES.items():
+            for path, (_value, reason) in entries.items():
+                with self.subTest(kind=kind, path=path):
+                    self.assertRegex(reason, r"#[0-9]+|SHIPPED_ADDITIONS")
+        for path, (_count, reason) in SHIPPED_ADDITIONS.items():
+            with self.subTest(path=path):
+                self.assertRegex(reason, r"^#[0-9]+: ")
 
 
 # ---------------------------------------------------------------------------
@@ -449,7 +528,9 @@ def _backlog_harness(root: Path, raw_output: bool = False) -> dict:
     A manifest's contract_hash hashes the package scripts, which change with
     any release, and its source_hash covers that field, so both are left out.
     Where ``root`` has a Process Policy, the run repeats under an approved
-    policy that leaves story_size_budget at its default.
+    policy whose only row, mechanical_pass_tier, is a backlog-planning switch
+    that moves agent tiers and no compiler output, so story_size_budget,
+    review_panels and review_manifest_scope stay at their defaults.
     """
     sys.path[:0] = [str(root / PLUGIN / "scripts")]
     import backlog_compile
@@ -466,14 +547,15 @@ def _backlog_harness(root: Path, raw_output: bool = False) -> dict:
         docs = project / "workspace" / "docs"
         variants = [""]
         if (root / PLUGIN / "scripts/process_policy.py").is_file():
-            variants.append("off:")
+            variants.append("policy:")
         for variant in variants:
             if variant:
                 import process_policy
 
                 _freeze_clocks(process_policy)
                 _policy(process_policy, docs, "init")
-                _policy(process_policy, docs, "set", "--switch", "review_panels", "--value", "lens_panel")
+                _policy(process_policy, docs, "set", "--switch", "mechanical_pass_tier",
+                        "--value", "mechanical")
                 _policy(process_policy, docs, "approve")
             for name, flags in (("check", []), ("check_approved", ["--approved"])):
                 code, text = _quiet(backlog_compile.main,
@@ -623,25 +705,34 @@ def _shipped_harness(root: Path, raw_output: bool = False) -> dict:
 
     Only paths and write scopes are sealed: a release changes the bytes of the
     scripts, flows and contracts a task binds, never which files it reads or
-    hashes on the default path.
+    hashes on the default path. A SHIPPED_ADDITIONS path is counted per task
+    that hashes it and left out of the sealed paths, so ``tasks`` compares
+    with e47dbe0's and ``additions`` with the list.
     """
     sys.path[:0] = [str(root / PLUGIN / "scripts")]
     import task_inputs
 
     package = root / PLUGIN
     tasks = {}
+    additions: dict[str, int] = {}
     for entry, route in sorted(task_inputs.catalog(package)["entries"].items()):
         for role in route["roles"] or [None]:
             for mode in ("create", "review"):
                 manifest = task_inputs.manifest(entry=entry, role=role, mode=mode,
                                                 package=package)
+                instructions = [item["path"] for item in manifest["instructions"]]
+                for path in instructions:
+                    if path in SHIPPED_ADDITIONS:
+                        additions[path] = additions.get(path, 0) + 1
                 tasks[f"{entry}:{role}:{mode}"] = {
                     "required_reads": manifest["required_reads"],
                     "conditional_reads": [item["path"] for item in manifest["conditional_reads"]],
-                    "instructions": [item["path"] for item in manifest["instructions"]],
+                    "instructions": [path for path in instructions
+                                     if path not in SHIPPED_ADDITIONS],
                     "write_scope": manifest["write_scope"]}
     text = json.dumps(tasks, indent=2, sort_keys=True)
-    return {"tasks": text if raw_output else digest(text)}
+    return {"additions": dict(sorted(additions.items())),
+            "tasks": text if raw_output else digest(text)}
 
 
 HARNESSES = {"approval": _approval_harness, "backlog": _backlog_harness,

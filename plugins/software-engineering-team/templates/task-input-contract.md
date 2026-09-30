@@ -60,8 +60,10 @@ new or removed sources invalidate an older input. Prototype and exploratory
 artifact interiors remain opaque and are excluded from that inventory. A task
 scoped with `--epic <exact-epic>` binds its closure instead, as that epic's
 review manifest does. The closure is derived again on every run, so a new or
-removed source that reaches it, an incoming dependency edge included, still
-invalidates the task. Canonical sources outside it are left out of its
+removed source that reaches it still invalidates the task, and so does an
+incoming dependency edge to a story whose own links the closure follows; an
+edge to a story it reads only through a link, without following that story's
+links, leaves it fresh. Canonical sources outside it are left out of its
 inventory, working inputs and changed paths, and the stubs it lists from notes
 outside its paths are information, not identity, so another epic's writer
 leaves the task fresh.

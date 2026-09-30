@@ -37,11 +37,14 @@ behavior is host-neutral; Claude Code and Codex are packaging adapters.
     scope and dependency closure do, each note they link to or cite adds its
     front-matter relations one hop further, and the manifest's hash binds only
     the story identities and dependency edges that reach that closure.
-    Its `check` block carries the compiler facts for the current review note,
-    which panel lens readers take as given. Its hash must be rechecked before
+    At `review_panels` `lens_panel` it names that value and its `check` block
+    carries the compiler facts for the current review note, which the panel's
+    lens readers take as given; at the default a reader's manifest has no
+    compiler facts. Its hash must be rechecked before
     persisting a review. An epic manifest's hash binds the notes it reads and
-    the story identities and dependency edges that reach them; the root
-    manifest's binds every backlog note.
+    the story identities and dependency edges that reach them, except that at
+    `bounded` an edge that reaches a story read only through a link leaves the
+    manifest fresh; the root manifest's binds every backlog note.
 12. Every story has a sibling `test-plan.md`. Criteria and rules map to stable
     scenarios; automation-required scenarios name an executable-test target.
 13. Every story has exactly one accountable implementation owner and may name

@@ -176,15 +176,16 @@ class BoundedManifestTests(unittest.TestCase):
         self.add_scope_text(1, f"It applies [[{notes['linked'][:-3]}|Account rules]].")
         return notes
 
-    def test_default_and_a_policy_that_keeps_it_read_the_released_manifests(self):
+    def test_default_and_a_policy_that_keeps_it_read_the_default_manifests(self):
         self.depends(1, 3)
         self.refresh_reviews()
         scopes = {"reader": {"epic": "EP-001"}, "writer": {"epic": "EP-001", "writer": True},
                   "root": {}}
         plain = {name: inputs.manifest(self.docs, **kwargs) for name, kwargs in scopes.items()}
         self.assertNotIn("review_manifest_scope", plain["reader"])
-        # Another switch's value leaves every review manifest byte for byte as released.
-        choose(self.docs, "lens_panel", switch="review_panels")
+        # A switch no manifest reads leaves every review manifest byte for byte
+        # as it is without a policy.
+        choose(self.docs, "mechanical", switch="mechanical_pass_tier")
         for name, kwargs in scopes.items():
             with self.subTest(scope=name):
                 self.assertEqual(inputs.manifest(self.docs, **kwargs), plain[name])
@@ -205,7 +206,7 @@ class BoundedManifestTests(unittest.TestCase):
         self.assertNotIn(notes["far"], bounded["paths"])
         self.assertLess(set(bounded["paths"]), set(transitive["paths"]))
         self.assertEqual(bounded["review"], transitive["review"])
-        self.assertEqual(bounded["check"], transitive["check"])
+        self.assertEqual(bounded.get("check"), transitive.get("check"))
 
     def test_the_dependency_closure_keeps_its_own_links(self):
         self.depends(1, 3)

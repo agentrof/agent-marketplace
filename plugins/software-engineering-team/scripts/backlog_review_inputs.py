@@ -188,7 +188,14 @@ def compiler_check(docs: Path, record: dict, scope_epics: list[dict], review: di
             "relation_audit": audit, "counts": counts, "stories": facts}
 
 
-def manifest(docs: Path, *, epic: str | None = None, expected_hash: str | None = None) -> dict:
+def manifest(docs: Path, *, epic: str | None = None, expected_hash: str | None = None,
+             writer: bool = False) -> dict:
+    """Bound one review or writer task; only a writer may meet untouched stubs.
+
+    Filling the placeholders the stub verbs write is the writer's task, so a
+    writer manifest carries them as ``check.scaffold_findings``. Every other
+    source finding still fails, and a reader still needs complete sources.
+    """
     docs = docs.resolve()
     if not docs.is_dir():
         raise InputError("review docs directory is missing")
@@ -196,6 +203,8 @@ def manifest(docs: Path, *, epic: str | None = None, expected_hash: str | None =
     contract = contract_hash()
     with stage_package.candidate_session(), backlog.experience_validation_session():
         record, errors = backlog.collect(docs, review_inputs=True)
+        carried = record["scaffold_findings"] if writer else []
+        errors = sorted(set(errors) - set(carried))
         if errors:
             raise InputError("backlog structure is invalid: " + "; ".join(errors))
         epics = record["epics"]
@@ -356,6 +365,8 @@ def manifest(docs: Path, *, epic: str | None = None, expected_hash: str | None =
                          "dependency_refs": sorted(backlog.dependency_edges(selected["stories"], True, record))}
             scope = selected["path"]
         check = compiler_check(docs, record, owning_epics, current_review, relations, epic is None)
+        if writer:
+            check["scaffold_findings"] = carried
 
     after = snapshot(docs)
     if before != after or contract != contract_hash() or any(

@@ -502,6 +502,61 @@ class BacklogReviewInputTests(unittest.TestCase):
         self.assertFalse([finding for finding in root["review_note"]["pending_findings"]
                           if "/reviews/round-1-epic-review.md" in finding])
 
+    def stub_story(self):
+        with contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(backlog.stub_story(SimpleNamespace(
+                docs=str(self.docs), epic="delivery-fixture", slug="job-worker", id="ST-005",
+                title="Job worker", scope=None, work_kind="technical", criterion_ref=[],
+                experience_ref=[], evidence_ref=["[[solution-design/decisions/fixture-api|Fixture API]]"],
+                uses_design=[], constrained_by=[], implements=[])), 0)
+        return self.docs / "backlog/epics/delivery-fixture/stories/job-worker"
+
+    def test_writer_manifest_carries_the_stubs_a_reader_refuses(self):
+        self.assertNotIn("scaffold_findings", inputs.manifest(self.docs, epic="EP-001")["check"])
+        folder = self.stub_story()
+        story, plan = (path.relative_to(self.docs).as_posix()
+                       for path in (folder / "story.md", folder / "test-plan.md"))
+        with self.assertRaisesRegex(inputs.InputError, "untouched") as refused:
+            inputs.manifest(self.docs, epic="EP-001")
+        refused_findings = str(refused.exception).removeprefix(
+            "backlog structure is invalid: ").split("; ")
+        value = inputs.manifest(self.docs, epic="EP-001", writer=True)
+        carried = value["check"]["scaffold_findings"]
+        self.assertEqual(carried, sorted(refused_findings))
+        self.assertTrue(all(finding.startswith((story + " ", plan + " ")) for finding in carried))
+        self.assertTrue(any("scenarios are not classified" in finding for finding in carried))
+        self.assertIn(story, value["primary_paths"])
+        self.assertIn(plan, value["primary_paths"])
+        self.assertEqual(value["check"]["source_errors"], [])
+        _, errors = backlog.collect(self.docs)
+        self.assertLessEqual(set(carried), set(errors))
+        self.assertEqual(inputs.manifest(self.docs, epic="EP-001", writer=True,
+                                         expected_hash=value["source_hash"]), value)
+
+    def test_writer_manifest_still_fails_on_findings_that_are_not_stubs(self):
+        folder = self.stub_story()
+        plan = folder / "test-plan.md"
+        stub = plan.read_text(encoding="utf-8")
+        authored = stub
+        for coverage in backlog.SCENARIO_COVERAGE_CLASSES:
+            authored = authored.replace(
+                f"| {coverage} | not_applicable | - | {backlog.COVERAGE_REASON_STUB} |",
+                f"| {coverage} | not_applicable | - | The worker exposes no {coverage} behavior to verify. |")
+        plan.write_text(authored, encoding="utf-8")
+        # With no stub row left, an unclassified scenario is an authored gap.
+        with self.assertRaisesRegex(inputs.InputError, "not classified by Coverage Classes"):
+            inputs.manifest(self.docs, epic="EP-001", writer=True)
+        plan.write_text(stub.replace(
+            f"| empty | not_applicable | - | {backlog.COVERAGE_REASON_STUB} |",
+            "| empty | not_applicable | - | n/a |"), encoding="utf-8")
+        with self.assertRaisesRegex(inputs.InputError, "class empty needs a concrete reason"):
+            inputs.manifest(self.docs, epic="EP-001", writer=True)
+        plan.write_text(stub, encoding="utf-8")
+        self.depends(1, 3)
+        self.depends(3, 1)
+        with self.assertRaisesRegex(inputs.InputError, "cycle"):
+            inputs.manifest(self.docs, epic="EP-001", writer=True)
+
     def test_check_block_audits_declared_against_expected_relations(self):
         path = self.docs / "backlog/epics/delivery-fixture/reviews/round-1-epic-review.md"
         props, body = backlog.parse_front_matter(path)

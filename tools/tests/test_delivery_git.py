@@ -2074,6 +2074,69 @@ class DeliveryGitTests(unittest.TestCase):
                          self.cancelled_refusal("revise-unclaimed-scope"))
         self.assertEqual(delivery_git.run_git(project, "ls-remote", "origin"), before)
 
+    def test_a_cancelled_delivery_takes_no_plan_revision_or_upgrade(self):
+        """A barrier or an upgrade target merge would put its record on top of the cancellation Review,
+        which the PR intent and the PR need at the Integration tip, so begin-plan-revision,
+        quiesce-upgrade and upgrade-target-merge refuse a cancelled Delivery before any ref moves (#334, #337)."""
+        project, _docs, _directory, _item, _reserved = self.prepare_execution_with_draft_reserved_contracts(False)
+        delivery_git.publish_execution_plan(project, "DLV-001")
+        delivery_git.claim_items(project, "DLV-001")
+        cancelled = delivery_git.cancel_delivery(project, "DLV-001", "The owner withdrew the request")
+        for verb, refusal in (
+            ("begin-plan-revision", lambda: delivery_git.begin_plan_revision(project, "DLV-001")),
+            ("quiesce-upgrade", lambda: delivery_git.begin_upgrade(project, "DLV-001")),
+        ):
+            with self.subTest(verb=verb):
+                before = delivery_git.run_git(project, "ls-remote", "origin")
+                self.assertEqual(self.refused_finding(refusal), self.cancelled_refusal(verb))
+                self.assertEqual(delivery_git.run_git(project, "ls-remote", "origin"), before)
+        with self.subTest(verb="upgrade-target-merge"):
+            # An upgrade the project acquired meanwhile would merge the target into every Integration.
+            fence_ref, open_fence, values = delivery_git._fence_context(project, "origin")
+            target = values["Target"]
+            upgrade = delivery_git._fence_child(project, open_fence, {
+                **values, "Mode": "upgrade", "Upgrade-Phase": "acquired",
+                "Upgrade-Contract": "sha256:" + "3" * 64, "Target-Update-Intent": "sha256:" + "1" * 64,
+                "Target-Update-Attempt": delivery_git.epoch_token(), "Target-Repository": "upstream",
+                "Target-Carrier-Kind": "direct_target", "Target-Carrier-Ref": "refs/heads/main",
+                "Target-Carrier-Object": "direct", "Target-Carrier-Head": target,
+                "Target-Carrier-Base": target}, "Acquire an upgrade")
+            delivery_git.atomic_push(project, "origin", [(fence_ref, open_fence, upgrade)])
+            before = delivery_git.run_git(project, "ls-remote", "origin")
+            self.assertEqual(self.refused_finding(lambda: delivery_git.upgrade_target_merge(project, "DLV-001")),
+                             self.cancelled_refusal("upgrade-target-merge"))
+            self.assertEqual(delivery_git.run_git(project, "ls-remote", "origin"), before)
+            delivery_git.atomic_push(project, "origin", [(fence_ref, upgrade, open_fence)])
+        intent = delivery_git.prepare_pr_creation(project, "DLV-001")
+        self.assertEqual(delivery_git.run_git(project, "rev-parse", intent["intent"] + "^"), cancelled["review"])
+
+    def test_a_cancellation_waits_until_the_open_plan_revision_ends(self):
+        """A cancellation cannot release the plan revision's Fence barrier, and carrying it would keep the
+        project Fence barred after the cancellation merged, while finishing the revision afterwards would
+        put its release on top of the cancellation Review. So cancel-delivery refuses while the Fence
+        carries a barrier, naming the verbs that end it, and cancels once the revision ended (#334, #337)."""
+        project, docs, _directory, _item, _reserved = self.prepare_execution_with_draft_reserved_contracts(False)
+        delivery_git.publish_execution_plan(project, "DLV-001")
+        delivery_git.begin_plan_revision(project, "DLV-001")
+        self.revise_verification_contract(docs, "Revision 2 is the newer approved contract.")
+        with contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(delivery_compile.approve_execution(
+                type("Args", (), {"docs": str(docs), "delivery": "DLV-001"})), 0)
+        delivery_git.publish_execution_plan(project, "DLV-001")
+        before = delivery_git.run_git(project, "ls-remote", "origin")
+        self.assertEqual(self.refused_finding(lambda: delivery_git.cancel_delivery(
+            project, "DLV-001", "The owner withdrew the request")), (
+            "DELIVERY_BARRIER_ACTIVE",
+            "the Fence carries a plan-revision barrier, which a cancellation cannot release; end it with "
+            "finish-plan-revision or abort-plan-revision before cancel-delivery"))
+        self.assertEqual(delivery_git.run_git(project, "ls-remote", "origin"), before)
+        delivery_git.finish_plan_revision(project, "DLV-001")
+        cancelled = delivery_git.cancel_delivery(project, "DLV-001", "The owner withdrew the request")
+        _ref, _fence, values = delivery_git._fence_context(project, "origin")
+        self.assertEqual((values["Barrier-Kind"], values["Barrier-Epoch"]), ("none", "none"))
+        intent = delivery_git.prepare_pr_creation(project, "DLV-001")
+        self.assertEqual(delivery_git.run_git(project, "rev-parse", intent["intent"] + "^"), cancelled["review"])
+
     def test_record_pr_remote_checks_the_local_mirror_and_the_adoption_intent(self):
         """record-pr-remote refuses a URL that an existing local Review does not mirror, as it did
         before the PR record became the only source of the URL, and a PR other than the one an

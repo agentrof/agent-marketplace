@@ -94,8 +94,21 @@ coordinator commits the combined change once and freezes the candidate.
 ## Host loss
 
 Lane work stays uncommitted until that commit, so after a host loss it exists
-only in the Item worktree, as a sequential writer's uncommitted work does.
-Resume the Item in that worktree, compare each lane's scope with the committed
-head to see where each lane stood, and restart only the lanes that had not
-finished. Takeover refuses a worktree with uncommitted changes, so it cannot
-discard lane work.
+only in the Item worktree, as a sequential writer's uncommitted work does. On
+the host that holds the worktree, run `scripts/delivery_git.py lane-status
+--delivery DLV-### --story <story>`. Its observations name, against the
+worktree's committed head, each lane's changed paths inside its approved scope
+(`lane:<role>`), the lanes with work, the changed paths outside every lane
+scope, the worktree head and this host's writer receipt state. While that
+receipt is `verified`, resume in the worktree without takeover: restart each
+lane without work from its prompt and each lane with work from its reported
+paths.
+
+Takeover never discards lane work silently. While the Item worktree holds
+uncommitted lane work, `takeover-item` refuses with `DELIVERY_WORKTREE_UNSAFE`,
+names each lane's paths and the choice: keep the work, finish its lanes and
+commit it as the coordinator on this host, which its verified writer receipt
+allows; or discard it with the `git reset --hard` and `git clean -fd` commands
+the refusal names, then take over. A host without a verified writer receipt
+cannot publish the work, so there only discarding remains, after copying out
+any path to keep.

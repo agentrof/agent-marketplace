@@ -3621,6 +3621,96 @@ class DeliveryGitTests(unittest.TestCase):
         self.assertEqual(delivery_git.remote_slot_oids(project, "origin"), slots)
         self.assertTrue(Path(active["worktree"]).is_dir())
 
+    def start_lane_item(self) -> tuple[Path, Path, dict]:
+        """Start an Item whose approved plan runs backend_developer on src/api and devops_engineer on deploy."""
+        project, docs, _directory, item, _reserved = self.prepare_execution_with_draft_reserved_contracts(
+            False, "src/api", extra_path_claims=("deploy",))
+        self.change_process_policy(docs, ("implementation_schedule", "parallel_lanes_v1"))
+        props, body = delivery_compile.split_note(item)
+        props.update(implementation_schedule="parallel_lanes_v1",
+                     role_sequence=["backend_developer", "devops_engineer", "code_reviewer", "qa_engineer"],
+                     lane_scopes=["backend_developer:src/api", "devops_engineer:deploy"], lane_seams=[])
+        delivery_compile.atomic_text(item, delivery_compile.frontmatter(props, body))
+        original = delivery_compile.approved_backlog_sources
+
+        def with_devops_lane(docs_root, story_ids, **kwargs):
+            sources, snapshot, errors = original(docs_root, story_ids, **kwargs)
+            for source in sources.values():
+                source["supporting_roles"] = ["devops_engineer"]
+            return sources, snapshot, errors
+
+        # The fixture Story names no supporting role, so it gains the devops lane for this test.
+        patcher = mock.patch.object(delivery_compile, "approved_backlog_sources", with_devops_lane)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        plan = type("Args", (), {"docs": str(docs), "delivery": "DLV-001"})
+        with contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(delivery_compile.approve_execution(plan), 0)
+        delivery_git.publish_execution_plan(project, "DLV-001")
+        delivery_git.claim_items(project, "DLV-001")
+        active = delivery_git.start_item(project, "DLV-001", "AUTH-01")
+        return project, Path(active["worktree"]), active
+
+    def test_lane_status_and_takeover_report_each_lanes_uncommitted_work(self):
+        """After a host loss each lane's work exists only uncommitted in the Item worktree: status reports
+        it per lane, and takeover refuses to discard it and names the choice (rv-accept-ideas-25)."""
+        project, worktree, active = self.start_lane_item()
+        (worktree / "src/api").mkdir(parents=True)
+        (worktree / "src/api/handler.py").write_text("def handle():\n    return 1\n", encoding="utf-8")
+        (worktree / "notes.txt").write_text("not in any lane scope\n", encoding="utf-8")
+
+        def lanes() -> dict:
+            output = io.StringIO()
+            with contextlib.redirect_stdout(output):
+                code = delivery_git.main(["lane-status", "--project-root", str(project),
+                                          "--delivery", "DLV-001", "--story", "AUTH-01"])
+            envelope = json.loads(output.getvalue())
+            self.assertEqual((code, envelope["mutation_state"]), (0, "none"), envelope)
+            return {observation["target"]: observation["value"] for observation in envelope["observations"]}
+
+        self.assertEqual(lanes(), {
+            "item": active["item"], "item_worktree_head": active["item"], "writer_receipt": "verified",
+            "lane:backend_developer": ["src/api/handler.py"], "lane:devops_engineer": [],
+            "lanes_with_work": ["backend_developer"], "outside_lane_scopes": ["notes.txt"]})
+        remote_before = delivery_git.run_git(project, "ls-remote", "origin")
+        work = (f": backend_developer: src/api/handler.py; devops_engineer: no work; outside every lane scope:"
+                f" notes.txt. ")
+        discard = (f"discard it with `git -C {worktree} reset --hard {active['item']}` and"
+                   f" `git -C {worktree} clean -fd`, then run takeover-item again")
+        with self.assertRaises(RuntimeError) as refused:
+            delivery_git.takeover_item(project, "DLV-001", "AUTH-01", confirm=True)
+        self.assertEqual(str(refused.exception), (
+            "DELIVERY_WORKTREE_UNSAFE: takeover would discard the uncommitted lane work in the Item worktree"
+            f" {worktree}{work}This host still holds the Item's verified writer receipt, so the choice is to"
+            " keep it without takeover: finish the lanes that have work and commit it as the coordinator in"
+            f" {worktree}; or to {discard}"))
+        receipt_path = delivery_git.writer_receipt_paths(project, "DLV-001", "AUTH-01")[0]
+        receipt = receipt_path.read_bytes()
+        receipt_path.unlink()
+        with self.assertRaises(RuntimeError) as refused:
+            delivery_git.takeover_item(project, "DLV-001", "AUTH-01", confirm=True)
+        self.assertTrue(str(refused.exception).endswith(
+            f"{work}This host holds no verified writer receipt for the Item, so it cannot commit and publish"
+            f" that work: copy out any path to keep and {discard}"), str(refused.exception))
+        receipt_path.write_bytes(receipt)
+        # Neither refusal changed a ref or discarded a lane's file.
+        self.assertEqual(delivery_git.run_git(project, "ls-remote", "origin"), remote_before)
+        self.assertTrue((worktree / "src/api/handler.py").is_file())
+        # Keeping it: the coordinator commits the lanes' work once, and nothing is left uncommitted.
+        (worktree / "notes.txt").unlink()
+        delivery_git.run_git(worktree, "add", "--", "src/api/handler.py")
+        delivery_git.run_git(worktree, "-c", "user.name=Coordinator", "-c", "user.email=coordinator@example.com",
+                             "commit", "-qm", "Commit the lanes' work")
+        committed = lanes()
+        self.assertNotEqual(committed["item_worktree_head"], active["item"])
+        self.assertEqual((committed["lanes_with_work"], committed["lane:backend_developer"]), ([], []))
+        # Discarding it with the named commands lets takeover proceed.
+        delivery_git.run_git(worktree, "reset", "--hard", active["item"])
+        delivery_git.run_git(worktree, "clean", "-fd")
+        taken = delivery_git.takeover_item(project, "DLV-001", "AUTH-01", confirm=True)
+        self.assertNotEqual(taken["writer_epoch"], active["writer_epoch"])
+        self.assertFalse((Path(taken["worktree"]) / "src/api/handler.py").exists())
+
     def test_target_refresh_rejects_changed_descendant_of_claimed_directory(self):
         project, docs, _directory, item, _reserved = self.prepare_execution_with_draft_reserved_contracts(False, "src")
         delivery_git.publish_execution_plan(project, "DLV-001")

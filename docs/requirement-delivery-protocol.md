@@ -372,8 +372,14 @@ lane's approved full test command or environment verb in the Item worktree,
 and the readers' `run` and `environment` take the same lock. While another
 command holds it they refuse with `DELIVERY_ENVIRONMENT_BUSY` and name the
 holder from its owner record. The lock ends with its holder's process, so a
-holder that died frees it, and the next command reports it as interrupted. A
-schedule change follows normal execution revision, approval and publication.
+holder that died frees it, and the next command reports it as interrupted.
+After a host loss, `delivery_git.py lane-status` reports each lane's changed
+paths inside its approved scope against the Item worktree's committed head,
+and `takeover-item` refuses to discard uncommitted lane work: it names each
+lane's paths and the choice between committing the work as the coordinator on
+a host whose writer receipt is verified and discarding it with the commands it
+names. A schedule change follows normal execution revision, approval and
+publication.
 
 Process switch `execution_planning` decides how the facts a plan needs are
 written and reviewed. At `per_document`, the default, each Operation contract

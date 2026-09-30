@@ -4328,6 +4328,100 @@ def resume_item(project_root: Path, delivery_id: str, story_id: str,
     return start_item(root, delivery_id, story_id, remote, allowed_statuses={"paused"})
 
 
+def lane_work(root: Path, worktree: Path, item_props: dict) -> tuple[dict[str, list[str]], list[str]]:
+    """Split the Item worktree's uncommitted paths, against its committed head, by approved lane scope.
+
+    Returns each lane role's changed paths inside its scope and the changed
+    paths no lane scope holds, such as the Software Architect's records.
+    """
+    from delivery_compile import lane_roles, lane_scope_map
+    scopes, _unreadable = lane_scope_map(item_props)
+    pending = sorted(worktree_pending_paths(root, worktree))
+    lanes = {role: [path for path in pending
+                    if any(path == scope or path.startswith(scope + "/") for scope in scopes.get(role, []))]
+             for role in lane_roles(item_props)}
+    owned = {path for paths in lanes.values() for path in paths}
+    return lanes, [path for path in pending if path not in owned]
+
+
+def writer_receipt_state(root: Path, delivery_id: str, story_id: str, item_oid: str,
+                         slot_ref: str | None) -> str:
+    """Whether this host holds the Item's writer receipt: verified, pending, stale or missing.
+
+    A receipt that cannot be read, or that no longer matches the remote Item and
+    Slot pair, is stale.
+    """
+    try:
+        receipt = read_writer_receipt(root, delivery_id, story_id)
+    except RuntimeError:
+        return "stale"
+    if receipt is None or receipt.get("state") != "verified":
+        return "missing" if receipt is None else "pending"
+    try:
+        active_writer_receipt(root, delivery_id, story_id, item_oid, slot_ref or "")
+    except RuntimeError:
+        return "stale"
+    return "verified"
+
+
+def lane_status(project_root: Path, delivery_id: str, story_id: str, remote: str = "origin") -> dict:
+    """Report where each parallel lane of an Item stands in this host's Item worktree.
+
+    After a host loss the lanes' work exists only uncommitted in that worktree,
+    so each lane's state is its changed paths inside its approved scope against
+    the worktree's committed head; a lane with none has no work there.
+    """
+    root = main_worktree(project_root.resolve())
+    from delivery_compile import implementation_schedule, lane_roles, split_note
+    directory = find_delivery_dir_from_remote(root, remote, delivery_id)
+    if directory is None:
+        raise RuntimeError("local Delivery package is required for lane status")
+    refs = canonical_refs(delivery_id, story_id)
+    item_oid = remote_oid(root, remote, refs["item"])
+    relative_item = rel_posix(root, directory / "items" / story_key(story_id) / "item.md")
+    props, _body = split_remote_note(root, item_oid, relative_item, split_note)
+    if implementation_schedule(props) != "parallel_lanes_v1":
+        raise RuntimeError(f"{story_id} runs its implementation roles in sequence and has no lanes")
+    slot = next((key for key, oid in remote_slot_oids(root, remote).items() if oid == item_oid), None)
+    slot_ref = f"refs/heads/agentrof/slots/{slot}" if slot else None
+    worktree = worktree_paths(root, delivery_id, story_id)["item"]
+    head = worktree_head(root, worktree) if worktree.exists() else "absent"
+    lanes, outside = (lane_work(root, worktree, props) if worktree.exists()
+                      else ({role: [] for role in lane_roles(props)}, []))
+    observations = [
+        {"kind": "worktree", "target": "item_worktree_head", "value": head},
+        {"kind": "file", "target": "writer_receipt",
+         "value": writer_receipt_state(root, delivery_id, story_id, item_oid, slot_ref)},
+        {"kind": "worktree", "target": "lanes_with_work", "value": [role for role, paths in lanes.items() if paths]},
+        {"kind": "worktree", "target": "outside_lane_scopes", "value": outside},
+        *({"kind": "worktree", "target": f"lane:{role}", "value": paths} for role, paths in lanes.items()),
+    ]
+    return {"ok": True, "mutation_state": "none", "item": item_oid, "observations": observations}
+
+
+def refuse_to_discard_lane_work(root: Path, delivery_id: str, story_id: str, worktree: Path,
+                                item_oid: str, slot_ref: str, item_props: dict) -> None:
+    """Refuse a takeover that would discard uncommitted lane work, naming it and the owner's choice."""
+    from delivery_compile import implementation_schedule
+    if implementation_schedule(item_props) != "parallel_lanes_v1" or not worktree_pending_paths(root, worktree):
+        return
+    lanes, outside = lane_work(root, worktree, item_props)
+    report = "; ".join(f"{role}: {', '.join(paths) if paths else 'no work'}" for role, paths in lanes.items())
+    if outside:
+        report += "; outside every lane scope: " + ", ".join(outside)
+    discard = (f"discard it with `git -C {worktree} reset --hard {item_oid}` and `git -C {worktree} clean -fd`,"
+               " then run takeover-item again")
+    if writer_receipt_state(root, delivery_id, story_id, item_oid, slot_ref) == "verified":
+        choice = ("This host still holds the Item's verified writer receipt, so the choice is to keep it"
+                  " without takeover: finish the lanes that have work and commit it as the coordinator in"
+                  f" {worktree}; or to {discard}")
+    else:
+        choice = ("This host holds no verified writer receipt for the Item, so it cannot commit and publish"
+                  f" that work: copy out any path to keep and {discard}")
+    raise RuntimeError(f"DELIVERY_WORKTREE_UNSAFE: takeover would discard the uncommitted lane work in the Item"
+                       f" worktree {worktree}: {report}. {choice}")
+
+
 def takeover_item(project_root: Path, delivery_id: str, story_id: str,
                   remote: str = "origin", *, confirm: bool = False) -> dict:
     """Take over one active Item after explicit host-loss confirmation."""
@@ -4357,6 +4451,7 @@ def takeover_item(project_root: Path, delivery_id: str, story_id: str,
     worktree = worktree_paths(root, delivery_id, story_id)["item"]
     removed_worktree = worktree.exists()
     if removed_worktree:
+        refuse_to_discard_lane_work(root, delivery_id, story_id, worktree, item_oid, slot_ref, item_props)
         worktree_is_clean_and_at(root, worktree, item_oid)
         remove_item_worktree(root, delivery_id, story_id)
     writer = epoch_token()
@@ -4883,6 +4978,7 @@ def main(argv=None) -> int:
     pause = sub.add_parser("pause-item"); pause.add_argument("--project-root", default="."); pause.add_argument("--delivery", required=True); pause.add_argument("--story", required=True); pause.add_argument("--remote", default="origin"); pause.set_defaults(func="pause")
     resume = sub.add_parser("resume-item"); resume.add_argument("--project-root", default="."); resume.add_argument("--delivery", required=True); resume.add_argument("--story", required=True); resume.add_argument("--remote", default="origin"); resume.set_defaults(func="resume")
     takeover = sub.add_parser("takeover-item"); takeover.add_argument("--project-root", default="."); takeover.add_argument("--delivery", required=True); takeover.add_argument("--story", required=True); takeover.add_argument("--remote", default="origin"); takeover.add_argument("--confirm", action="store_true"); takeover.set_defaults(func="takeover")
+    lanes = sub.add_parser("lane-status"); lanes.add_argument("--project-root", default="."); lanes.add_argument("--delivery", required=True); lanes.add_argument("--story", required=True); lanes.add_argument("--remote", default="origin"); lanes.set_defaults(func="lane-status")
     push_item_parser = sub.add_parser("push-item"); push_item_parser.add_argument("--project-root", default="."); push_item_parser.add_argument("--delivery", required=True); push_item_parser.add_argument("--story", required=True); push_item_parser.add_argument("--remote", default="origin"); push_item_parser.set_defaults(func="push-item")
     integrate = sub.add_parser("integrate-item"); integrate.add_argument("--project-root", default="."); integrate.add_argument("--delivery", required=True); integrate.add_argument("--story", required=True); integrate.add_argument("--remote", default="origin"); integrate.set_defaults(func="integrate")
     publish_review = sub.add_parser("publish-delivery-review"); publish_review.add_argument("--project-root", default="."); publish_review.add_argument("--delivery", required=True); publish_review.add_argument("--remote", default="origin"); publish_review.set_defaults(func="publish-review")
@@ -4960,6 +5056,8 @@ def main(argv=None) -> int:
                 result = resume_item(Path(args.project_root), args.delivery, args.story, args.remote)
             elif args.func == "takeover":
                 result = takeover_item(Path(args.project_root), args.delivery, args.story, args.remote, confirm=args.confirm)
+            elif args.func == "lane-status":
+                result = lane_status(Path(args.project_root), args.delivery, args.story, args.remote)
             elif args.func == "push-item":
                 result = push_item(Path(args.project_root), args.delivery, args.story, args.remote)
             elif args.func == "integrate":

@@ -41,11 +41,13 @@ stops that part of its work and reports it; only the architect revises it.
   and the Item record as input. Its `write_scope` holds that lane's approved
   scope only.
 - A lane writes only inside its scope and never edits another lane's files.
-- A lane makes no Git writes: no commit, stash, checkout, restore, reset, merge,
-  rebase or branch change. The one exception is `git add -N <path>` for a file
-  the lane created inside its scope, because tools that read tracked files,
-  such as a test harness that builds fixture projects from `git ls-files`, do
-  not see an untracked file.
+- A lane makes no Git writes: no add, commit, stash, checkout, restore, reset,
+  merge, rebase or branch change. That includes `git add -N`, because the lanes
+  share one Git index and two index writers at once fail on its lock. A lane
+  reports each file it creates, and the coordinator runs `git add -N <path>`
+  for it, one Git command at a time, so that tools that read tracked files,
+  such as a test harness that builds fixture projects from `git ls-files`, see
+  it.
 - A change needed in another lane's scope goes to the coordinator as a message
   naming the file, the change and the seam. The coordinator hands it to the
   owning lane; the requesting lane continues with work that does not depend on

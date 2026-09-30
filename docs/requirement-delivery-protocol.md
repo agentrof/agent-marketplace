@@ -735,11 +735,17 @@ claims-free Delivery uses `not_started` dispositions and never fabricates Item r
 review evidence or integration bases. A cancellation is final: a Delivery
 whose published status is already `cancelled` refuses another cancellation,
 any invalidation of its cancellation Review, a publication of its execution
-plan, a revision of its scope, a target refresh and a claim of its Items with
-`DELIVERY_CANCELLATION_INVALID`, so that Review still reaches the target
-through the PR. Each of these verbs reads the status the Integration records,
-because a cancellation writes it there alone and a checkout's `delivery.md`
-keeps the status it had.
+plan, a revision of its scope, a target refresh, a claim of its Items, a plan
+revision or upgrade barrier (`begin-plan-revision`, `quiesce-upgrade`) and an
+upgrade target merge with `DELIVERY_CANCELLATION_INVALID`, so that Review
+still reaches the target through the PR. Each of these verbs reads the status
+the Integration records, because a cancellation writes it there alone and a
+checkout's `delivery.md` keeps the status it had. A cancellation never ends a
+barrier it did not install: while the Fence carries one, `cancel-delivery`
+refuses with `DELIVERY_BARRIER_ACTIVE` and names `finish-plan-revision` and
+`abort-plan-revision`, because a carried barrier would outlive the
+cancellation's merge and a release after it would bury the cancellation
+Review. End the plan revision first, then cancel.
 
 ## Setup and package upgrade
 

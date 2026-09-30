@@ -1938,6 +1938,13 @@ def cancel_delivery(project_root: Path, delivery_id: str, reason: str,
     # so the local delivery.md cannot tell that the Delivery is cancelled.
     if remote_props.get("status") == "cancelled":
         raise RuntimeError("DELIVERY_CANCELLATION_INVALID: the published Delivery is already cancelled")
+    # A barrier ends only through the finish or abort verb of its kind. The cancellation
+    # would carry it to its own Fence child, where it outlives the cancellation's merge,
+    # and a release after the cancellation would bury the Review its PR needs at the tip.
+    barrier = trailer(fence_message, "Barrier-Kind") or "none"
+    if barrier != "none":
+        raise RuntimeError(f"DELIVERY_BARRIER_ACTIVE: the Fence carries a {barrier} barrier, which a cancellation "
+                           f"cannot release; end it with finish-{barrier} or abort-{barrier} before cancel-delivery")
     scope_hash = str(remote_props.get("scope_hash", "none"))
     # Every integration of a Story sits on the Integration's own first-parent line after
     # the reservation, newest first. A reopened Item leaves the integration it reopened
@@ -2490,7 +2497,8 @@ def refuse_cancelled_delivery(root: Path, directory: Path, integration_oid: str,
     A cancellation publishes the cancelled status on the Integration alone, so a
     checkout's own delivery.md keeps the status it had and cannot say whether the
     Delivery was cancelled. A cancellation is final: its Review reaches the target
-    through its PR, and nothing publishes, revises, refreshes or claims the Delivery again.
+    through its PR, and nothing publishes, revises, refreshes, claims, bars or
+    upgrades the Delivery again.
     """
     from delivery_compile import split_note
     props, _body = split_remote_note(root, integration_oid, rel_posix(root, directory / "delivery.md"), split_note)
@@ -3049,6 +3057,10 @@ def abort_source_handoff(project_root: Path, remote: str = "origin") -> dict:
     return {"ok": True, "mode": "open", "fence": candidate}
 
 
+# The command that begins each barrier kind a Delivery takes.
+BARRIER_BEGIN_VERBS = {"plan-revision": "begin-plan-revision", "upgrade": "quiesce-upgrade"}
+
+
 def _barrier_transition(project_root: Path, kind: str, action: str,
                         delivery_id: str | None = None, remote: str = "origin") -> dict:
     """Install or release a lightweight barrier on existing coordination refs."""
@@ -3060,6 +3072,13 @@ def _barrier_transition(project_root: Path, kind: str, action: str,
     if action == "begin":
         if values["Mode"] != "open" or values["Barrier-Kind"] != "none":
             raise RuntimeError("DELIVERY_BARRIER_ACTIVE: an incompatible Fence barrier is already active")
+        if integration_ref:
+            from delivery_compile import docs_root, find_delivery
+            directory = find_delivery(docs_root(root), delivery_id)
+            if directory is None:
+                raise RuntimeError("Delivery package not found")
+            # The barrier record would bury the cancellation Review its PR needs at the tip.
+            refuse_cancelled_delivery(root, directory, integration_oid, BARRIER_BEGIN_VERBS[kind])
         epoch = epoch_token()
         values.update({"Barrier-Kind": kind, "Barrier-Epoch": epoch,
                        "Mode": "upgrade" if kind == "upgrade" else "open"})
@@ -3158,6 +3177,7 @@ def upgrade_target_merge(project_root: Path, delivery_id: str,
         raise RuntimeError("DELIVERY_UPGRADE_INCOMPATIBLE: upgrade target intent/contract is missing")
     refs = canonical_refs(delivery_id)
     integration_oid = remote_oid(root, remote, refs["integration"])
+    refuse_cancelled_delivery(root, directory, integration_oid, "upgrade-target-merge")
     _branch, target = resolve_target(root, remote)
     previous_target = values["Handoff-Target"] if values["Upgrade-Phase"] == "target_handoff" and values["Handoff-Target"] != "none" else values["Target"]
     if target == previous_target:

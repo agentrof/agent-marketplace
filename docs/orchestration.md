@@ -48,24 +48,26 @@ Process switch `review_loop` decides how a review loop treats the findings a
 review returns, with either value of `review_panels`. At `current`, the
 default, every step keeps its own loop. At `blocking_delta`, only a critical or
 major finding starts a round in the backlog, Solution Design, Design System and
-Operation contract reviews and in Delivery code review. A minor finding is fixed
-only in a writer pass that already carries a blocking fix; otherwise it becomes
-a follow-up with an owner role and a revisit trigger: in the compiler-validated
-`Accepted Minor Findings` table of a backlog review note or an Operation
-contract, at the approval gate of Solution Design and Design System, and for
-code review in result fields that `approve-item-evidence` copies into the
-Item's code review record and `approve-review` lists in the Delivery Review. A
-re-review reads only the open blocking findings, the changed text and its
-dependency context. Before a critical or major claim gates, one fresh,
+Operation contract reviews and in Delivery code review. A minor finding is
+fixed only in a writer pass that already carries a blocking fix; otherwise it
+becomes a follow-up with an owner role and a revisit trigger: in the compiler-
+validated `Accepted Minor Findings` table of a backlog review note or an
+Operation contract, at the approval gate of Solution Design and Design System,
+and for code review in result fields that `approve-item-evidence` copies into
+the Item's code review record and `approve-review` lists in the Delivery
+Review. A re-review reads only the open blocking findings, the changed text and
+its dependency context. Before a critical or major claim gates, one fresh,
 read-only calibration reader, neither the writer nor the claiming reader,
 confirms it, lowers it to minor or rules it invalid, citing the text. It runs
 as the claiming reviewer's role on that role's own tier, never as a `-lens`
-variant. A claim on an Operation contract is calibrated by the counterpart of
-the contract the claim concerns, the DevOps Engineer for the Verification
-Contract and the QA Engineer for the Environment Contract, never by that
-contract's writer. Only confirmed claims gate, each claim is ruled once, and
-the review note, the code review record or the approval gate keeps every
-ruling. The instructions live in the `challenge-review` and `code-review`
+variant. In Delivery code review it registers its rulings as a result of its
+own, and `delivery_verification.py result` refuses rulings that the claiming
+result carries itself. A claim on an Operation contract is calibrated by the
+counterpart of the contract the claim concerns, the DevOps Engineer for the
+Verification Contract and the QA Engineer for the Environment Contract, never
+by that contract's writer. Only confirmed claims gate, each claim is ruled
+once, and the review note, the code review record or the approval gate keeps
+every ruling. The instructions live in the `challenge-review` and `code-review`
 references `switch-review_loop-blocking_delta.md`.
 
 What a backlog epic reviewer reads is process switch `review_manifest_scope`.

@@ -1,6 +1,0 @@
-{
-  "summary": "Backlog review manifests read links as the vault gate does: code spans and fenced code, such as a `[[...resource]]` route file, are never review sources, embeds resolve as the vault file they name, upstream notes keep the alias-free links their compilers write, and an approved upstream note with unparsable link text is listed in `unparsed_link_sources` instead of failing every manifest; review Evidence, accepted minor findings and the headless absent-input check no longer read code as a link.",
-  "components": {
-    "software-engineering-team": "patch"
-  }
-}

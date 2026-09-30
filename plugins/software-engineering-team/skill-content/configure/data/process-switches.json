@@ -223,6 +223,9 @@
         "type": "positive_integer",
         "min_count": 1
       },
+      "value_data": {
+        "propose_split": ["skill-content/product-planning/data/story-size-measures.json"]
+      },
       "metric": "Per backlog revision run with propose_split, stories over budget, split proposals accepted and kept, criteria and scenarios moved with exact coverage, and epic review passes; per story, cycle time from start-item to integration, code review cycles, QA rounds and reopens, compared between stories within and over budget in the same period.",
       "promotion": {
         "unit": "At least 3 backlog revisions run with propose_split and 3 Deliveries that contain stories planned under it.",

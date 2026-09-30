@@ -7,6 +7,7 @@ import io
 import json
 import os
 from pathlib import Path
+import re
 import shlex
 import stat
 import subprocess
@@ -776,6 +777,120 @@ sys.exit(not unittest.TextTestRunner(verbosity=2).run(suite).wasSuccessful())
         self.freeze()
         self.settle()
         self.assertEqual(self.approve_evidence()["Deviations and Follow-ups"], delivery.ITEM_FOLLOW_UPS + " none.")
+
+    def claim(self, identifier="CR-1", severity="major", **extra):
+        return {"id": identifier, "severity": severity, "status": "open", "verification": "Rerun the regression",
+                "file": "src/product.py:1", "description": "The value can overflow its column.", **extra}
+
+    def ruling(self, finding="CR-1", claimed="major", ruling="minor",
+               reason="src/product.py:1 assigns a constant, so no input reaches the column.", **extra):
+        row = {"finding": finding, "claimed_severity": claimed, "calibrated_severity": ruling, "reason": reason}
+        if ruling == "minor":
+            row.update(owner_role="backend_developer", revisit_trigger="Revisit at the next change to src/product.py.")
+        return {**row, **extra}
+
+    def test_blocking_delta_calibrates_every_open_blocking_claim_before_it_gates(self):
+        self.review_loop()
+        self.freeze()
+        failed = self.result(verdict="failed")
+        failed["findings"] = [self.claim(), self.claim("CR-2", "critical")]
+        invalid = self.ruling("CR-2", "critical", "invalid",
+                              reason="src/product.py:1 is the only write, and it holds no secret or input.")
+        missing = "exactly one row for each open critical or major claim no earlier calibration ruled: CR-1, CR-2"
+        refusals = (
+            (missing, [self.ruling()]),
+            (missing, [self.ruling(), invalid, self.ruling()]),
+            ("CR-2 calibration must record the claimed severity critical",
+             [self.ruling(), {**invalid, "claimed_severity": "major"}]),
+            ("CR-1 calibrated_severity must confirm major or be minor or invalid",
+             [self.ruling(ruling="critical"), invalid]),
+            ("CR-1 calibration reason must cite the candidate text as path:line",
+             [self.ruling(reason="The value is a constant, so no input reaches the column."), invalid]),
+            ("CR-2 calibration reason must cite the candidate text as path:line",
+             [self.ruling(), {**invalid, "reason": "src/missing.py:1 is the only write of the value."}]),
+            ("CR-1 calibrated minor needs an owner_role of backend_developer and a concrete revisit_trigger",
+             [self.ruling(owner_role="qa_engineer"), invalid]),
+        )
+        for message, rows in refusals:
+            with self.subTest(message=message, rows=len(rows)):
+                failed["calibration"] = rows
+                with self.assertRaisesRegex(RuntimeError, re.escape(message)):
+                    verification.register_result(self.root, failed)
+        # A calibrated pass still proves that every review pass ran.
+        failed["calibration"] = [self.ruling(), invalid]
+        with self.assertRaisesRegex(RuntimeError, "a calibrated code_reviewer pass requires correctness evidence"):
+            verification.register_result(self.root, {**failed, "checks": {}})
+        # Every claim lowered or disproved: the review passes without a repair cycle.
+        verification.register_result(self.root, failed)
+        verification.register_result(self.root, self.result("qa_engineer", "qa_final"))
+        verification.validate(self.root, "DLV-001", "AUTH-01")
+        section = self.approve_evidence()["Deviations and Follow-ups"]
+        self.assertEqual(section.split("\n\n" + delivery.ITEM_CALIBRATION, 1), ["\n".join([
+            delivery.ITEM_FOLLOW_UPS, "",
+            "| finding | severity | file | description | owner_role | revisit_trigger |",
+            "|---|---|---|---|---|---|",
+            "| CR-1 | minor | src/product.py:1 | The value can overflow its column. | backend_developer "
+            "| Revisit at the next change to src/product.py. |"]), "\n".join([
+            "", "",
+            "| finding | claimed_severity | calibrated_severity | reason |",
+            "|---|---|---|---|",
+            "| CR-1 | major | minor | src/product.py:1 assigns a constant, so no input reaches the column. |",
+            "| CR-2 | critical | invalid | src/product.py:1 is the only write, and it holds no secret or input. |"])])
+
+    def test_calibration_runs_only_on_an_open_blocking_claim(self):
+        self.review_loop()
+        self.freeze()
+        result = self.result()
+        result["calibration"] = [self.ruling()]
+        with self.assertRaisesRegex(RuntimeError, "no earlier calibration ruled: none"):
+            verification.register_result(self.root, result)
+
+    def test_a_confirmed_claim_gates_and_each_ruling_carries_to_the_next_cycle(self):
+        self.review_loop()
+        self.freeze()
+        failed = self.result(verdict="failed")
+        failed["findings"] = [self.claim(), self.claim("CR-2"), self.claim("CR-3")]
+        failed["calibration"] = [
+            self.ruling(ruling="major", reason="src/product.py:1 writes the value from user input unchecked."),
+            self.ruling("CR-2"),
+            self.ruling("CR-3", ruling="invalid", reason="src/product.py:1 never reads the value it is said to read.")]
+        verification.register_result(self.root, failed)
+        verification.register_result(self.root, self.result("qa_engineer", "qa_diagnostic", "failed"))
+        with self.assertRaisesRegex(RuntimeError, "same-candidate final passed code_reviewer"):
+            verification.validate(self.root, "DLV-001", "AUTH-01")
+        self.write("src/product.py", "value = 3\n")
+        self.commit()
+        self.freeze()
+        unresolved = {finding["id"]: finding for finding in verification.manifest(
+            self.root, "DLV-001", "AUTH-01", "code_reviewer", "review_repair")["unresolved_findings"]}
+        self.assertEqual(sorted(unresolved), ["CR-1", "CR-2"])
+        self.assertEqual((unresolved["CR-1"]["severity"], unresolved["CR-1"]["calibrated_severity"]),
+                         ("major", "major"))
+        self.assertEqual((unresolved["CR-2"]["severity"], unresolved["CR-2"]["claimed_severity"],
+                          unresolved["CR-2"]["owner_role"]), ("minor", "major", "backend_developer"))
+        follow_up = {key: unresolved["CR-2"][key] for key in (
+            "id", "severity", "status", "verification", "file", "description", "owner_role", "revisit_trigger")}
+        repeat = self.result(mode="review_repair", verdict="failed")
+        repeat["findings"] = [self.claim(), follow_up]
+        repeat["calibration"] = [self.ruling(reason="src/product.py:1 assigns a constant, so no input reaches it.")]
+        with self.assertRaisesRegex(RuntimeError, "no earlier calibration ruled: none"):
+            verification.register_result(self.root, repeat)
+        with self.assertRaisesRegex(RuntimeError, "inherited finding severity must be preserved"):
+            verification.register_result(self.root, {**repeat, "calibration": [],
+                                                     "findings": [self.claim(), {**follow_up, "severity": "major"}]})
+        repair = self.result(mode="review_repair")
+        repair["findings"] = [self.claim(status="resolved"), follow_up]
+        verification.register_result(self.root, repair)
+
+    def test_current_ignores_calibration_rows(self):
+        self.freeze()
+        failed = self.result(verdict="failed")
+        failed["findings"] = [self.claim()]
+        failed["calibration"] = [self.ruling()]
+        verification.register_result(self.root, failed)
+        verification.register_result(self.root, self.result("qa_engineer", "qa_final"))
+        with self.assertRaisesRegex(RuntimeError, "same-candidate final passed code_reviewer"):
+            verification.validate(self.root, "DLV-001", "AUTH-01")
 
     def test_durable_diagnostic_or_mismatched_report_cannot_integrate(self):
         item = {"verification_schedule": "parallel_snapshot_v1"}

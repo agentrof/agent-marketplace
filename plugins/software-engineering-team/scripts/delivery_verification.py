@@ -310,7 +310,13 @@ def freeze(root: Path, delivery_id: str, story: str, *, fresh: bool = False) -> 
         retained = {(finding["role"], finding["id"]): finding
                     for finding in (previous.get("unresolved_findings", []) if previous else [])}
         for role, worker in previous_results.items():
-            for finding in worker.get("result", {}).get("findings", []):
+            result = worker.get("result", {})
+            findings = result.get("findings", [])
+            # Calibration rulings carry into the next session, so no claim is ruled twice.
+            if (role == "code_reviewer" and result.get("calibration")
+                    and review_loop(root, delivery_id) == "blocking_delta"):
+                findings = calibrated_findings(result)
+            for finding in findings:
                 key = (role, finding["id"])
                 if finding.get("status") == "resolved":
                     retained.pop(key, None)
@@ -558,6 +564,85 @@ def nonblocking(finding: dict) -> bool:
     return finding["severity"].casefold() in {value.casefold() for value in policy()["nonblocking_severities"]}
 
 
+def blocking(finding: dict) -> bool:
+    return finding["severity"].casefold() in {value.casefold() for value in policy()["blocking_severities"]}
+
+
+def calibrated_findings(result: dict) -> list[dict]:
+    """A code review result's findings with its calibration rows applied.
+
+    A confirmed claim keeps its severity, a claim calibrated minor becomes a
+    follow-up with the row's owner role and trigger, and a claim calibrated
+    invalid is closed by the row's cited evidence. Each keeps the severity it
+    was claimed at and records its ruling, so no later session rules it again.
+    """
+    rows = {row["finding"]: row for row in result.get("calibration", [])}
+    findings = []
+    for finding in result.get("findings", []):
+        row = rows.get(finding["id"])
+        if row is None:
+            findings.append(finding)
+            continue
+        ruling = row["calibrated_severity"].casefold()
+        ruled = {**finding, "claimed_severity": finding["severity"], "calibrated_severity": ruling}
+        if ruling == "invalid":
+            ruled["status"] = "resolved"
+        elif ruling == "minor":
+            ruled.update(severity="minor", owner_role=row.get("owner_role"),
+                         revisit_trigger=row.get("revisit_trigger"))
+        findings.append(ruled)
+    return findings
+
+
+def calibrated_verdict(result: dict) -> str:
+    """A failed code review whose every calibrated claim is minor or invalid passes."""
+    if result.get("verdict") != "failed" or not result.get("calibration"):
+        return str(result.get("verdict"))
+    return "failed" if any(finding["status"] == "open" and blocking(finding)
+                           for finding in calibrated_findings(result)) else "passed"
+
+
+def cites_candidate(root: Path, current: dict, reason: str) -> bool:
+    """Whether a calibration reason cites the candidate text as path:line."""
+    for path in re.findall(r"(?<![\w./-])([\w.-]+(?:/[\w.-]+)*):[1-9][0-9]*\b", reason):
+        if delivery._is_normalized_claim(path) and (path in current["changed_files"] or (root / path).is_file()):
+            return True
+    return False
+
+
+def calibration_problems(root: Path, current: dict, result: dict, ruled: set[str],
+                         roles: list[str]) -> list[str]:
+    """One row per open critical or major claim that no earlier calibration ruled."""
+    rows = result.get("calibration", [])
+    if not isinstance(rows, list) or any(not isinstance(row, dict) or not isinstance(row.get("finding"), str)
+                                         for row in rows):
+        return ["calibration must list one row object per claim"]
+    claims = {finding["id"]: finding for finding in result.get("findings", [])
+              if finding["status"] == "open" and blocking(finding) and finding["id"] not in ruled}
+    listed = [row["finding"] for row in rows]
+    if sorted(listed) != sorted(claims):
+        return ["calibration must hold exactly one row for each open critical or major claim no earlier"
+                f" calibration ruled: {', '.join(sorted(claims)) or 'none'}"]
+    problems = []
+    for row in rows:
+        claim = claims[row["finding"]]
+        label, severity = row["finding"], claim["severity"].casefold()
+        claimed, ruling = row.get("claimed_severity"), row.get("calibrated_severity")
+        if not isinstance(claimed, str) or claimed.casefold() != severity:
+            problems.append(f"{label} calibration must record the claimed severity {claim['severity']}")
+        if not isinstance(ruling, str) or ruling.casefold() not in {severity, "minor", "invalid"}:
+            problems.append(f"{label} calibrated_severity must confirm {claim['severity']} or be minor or invalid")
+        reason = row.get("reason")
+        if not isinstance(reason, str) or not meaningful_text(reason) or not cites_candidate(root, current, reason):
+            problems.append(f"{label} calibration reason must cite the candidate text as path:line")
+        if isinstance(ruling, str) and ruling.casefold() == "minor" and (
+                row.get("owner_role") not in roles or not isinstance(row.get("revisit_trigger"), str)
+                or not meaningful_text(row["revisit_trigger"])):
+            problems.append(f"{label} calibrated minor needs an owner_role of {', '.join(roles)}"
+                            " and a concrete revisit_trigger")
+    return problems
+
+
 def follow_up_roles(item: dict) -> list[str]:
     """The Item's implementation roles, which own its code review follow-ups."""
     roles = item.get("role_sequence")
@@ -584,7 +669,7 @@ def follow_up_problems(findings: list, roles: list[str]) -> list[str]:
 
 def open_follow_ups(result: dict, item: dict) -> list[dict]:
     """The open non-blocking findings of a code review result, each a complete follow-up."""
-    findings = result.get("findings", [])
+    findings = calibrated_findings(result)
     problems = follow_up_problems(findings, follow_up_roles(item))
     if problems:
         raise RuntimeError("code review follow-ups are incomplete: " + "; ".join(problems))
@@ -661,8 +746,23 @@ def register_result(root: Path, result: dict) -> dict:
             raise RuntimeError("final result must explicitly disposition every inherited finding and resolve blocking findings")
         if (role == "code_reviewer" and verdict != "cancelled"
                 and review_loop(root, current["delivery"]) == "blocking_delta"):
+            item = item_record(root, current["delivery"], current["story"])
+            ruled = {identifier for identifier, finding in inherited.items() if "calibrated_severity" in finding}
+            problems = calibration_problems(root, current, result, ruled, follow_up_roles(item))
+            if problems:
+                raise RuntimeError("severity calibration is incomplete: " + "; ".join(problems))
+            if calibrated_verdict(result) != verdict:
+                checks = result.get("checks", {})
+                for check in required_checks(root, current, role):
+                    evidence = checks.get(check, {}) if isinstance(checks, dict) else {}
+                    if not isinstance(evidence, dict) or not isinstance(evidence.get("evidence"), str) \
+                            or not evidence["evidence"].strip():
+                        raise RuntimeError(f"a calibrated {role} pass requires {check} evidence")
+                if not inherited.keys() <= dispositions.keys():
+                    raise RuntimeError("final result must explicitly disposition every inherited finding"
+                                       " and resolve blocking findings")
             # Refuses an open minor finding that is not a complete follow-up.
-            open_follow_ups(result, item_record(root, current["delivery"], current["story"]))
+            open_follow_ups(result, item)
         stored = dict(result)
         stored["result_hash"] = digest(result)
         value["workers"][role] = {"state": "cancelled" if verdict == "cancelled" else "settled", "result": stored,
@@ -718,7 +818,11 @@ def validate(root: Path, delivery_id: str, story: str) -> dict:
     for role in ROLES:
         worker = value["workers"][role]
         result = worker.get("result", {})
-        if (worker["state"] != "settled" or result.get("verdict") != "passed"
+        verdict = result.get("verdict")
+        if (role == "code_reviewer" and verdict == "failed" and result.get("calibration")
+                and review_loop(root, delivery_id) == "blocking_delta"):
+            verdict = calibrated_verdict(result)
+        if (worker["state"] != "settled" or verdict != "passed"
                 or result.get("mode") not in policy()["final_modes"][role]
                 or result.get("candidate_hash") != current["candidate_hash"]
                 or result.get("session_id") != value["session_id"]

@@ -1323,11 +1323,16 @@ class DeliveryCompilerTests(unittest.TestCase):
         record = item.parent / "code-review.md"
         row = ("| CR-2 | minor | src/auth.py:12 | The helper name hides \\| its unit. "
                "| backend_developer | Revisit at the next change to src/auth.py. |")
+        # The calibration table after the follow-ups never reaches the Delivery Review.
+        calibration = delivery_compile.table_block(
+            delivery_compile.ITEM_CALIBRATION, delivery_compile.CALIBRATION_COLUMNS,
+            ["| CR-2 | major | minor | src/auth.py:12 names a constant that no caller reads. |"])
         record_props, record_body = delivery_compile.split_note(record)
         delivery_compile.atomic_text(record, delivery_compile.frontmatter(
             record_props, delivery_compile.replace_section(
                 record_body, "Deviations and Follow-ups", delivery_compile.table_block(
-                    delivery_compile.ITEM_FOLLOW_UPS, delivery_compile.FOLLOW_UP_COLUMNS, [row]))))
+                    delivery_compile.ITEM_FOLLOW_UPS, delivery_compile.FOLLOW_UP_COLUMNS, [row])
+                + "\n\n" + calibration)))
         review_path = root / "delivery-review.md"
         review_path.write_text(delivery_compile.frontmatter(
             {"type": "delivery-review", "status": "draft"},

@@ -60,24 +60,24 @@
       }
     },
     "review_loop": {
-      "summary": "How a review loop treats the findings a review returns: which findings start a round, where a minor finding goes and what a re-review reads, for backlog, Solution Design, Design System and Operation contract reviews and Delivery code review.",
+      "summary": "How a review loop treats the findings a review returns: which findings start a round, where a minor finding goes, what a re-review reads and whether an independent reader calibrates a critical or major claim before it gates, for backlog, Solution Design, Design System and Operation contract reviews and Delivery code review.",
       "issue": 326,
       "flows": ["backlog-planning", "delivery-execution", "design-system", "operation", "solution-design"],
       "values": [
         {
           "id": "current",
-          "tradeoffs": "Every review loop runs as today, the baseline the other value is measured against. Operation and Design System reviews have no minor rule or re-review scope, so a review that approves with only minor findings can still take a fix pass and a recheck, and a code review minor stays a note with no owner."
+          "tradeoffs": "Every review loop runs as today, the baseline the other value is measured against. Operation and Design System reviews have no minor rule or re-review scope, so a review that approves with only minor findings can still take a fix pass and a recheck, a code review minor stays a note with no owner, and every critical or major claim gates as returned."
         },
         {
           "id": "blocking_delta",
-          "tradeoffs": "Only a critical or major finding starts a round. A minor finding becomes a follow-up with an owner role and a revisit trigger, and a re-review reads only the open blocking findings, the changed text and its dependency context. Shorter review loops, while a changed-text re-review can miss a knock-on effect outside the dependency context it is given."
+          "tradeoffs": "Only a critical or major finding starts a round, and only once one fresh calibration reader confirms it. A minor finding becomes a follow-up with an owner role and a revisit trigger, and a re-review reads only the open blocking findings, the changed text and its dependency context. Shorter review loops, while calibration adds a few minutes whenever a major is real, a wrong downgrade can hide a defect until the shadow judge audits it, and a changed-text re-review can miss a knock-on effect outside the dependency context it is given."
         }
       ],
       "default": "current",
-      "metric": "Per reviewed document against its matching baseline: review-loop minutes from review start to final verdict, fixes included; rounds; and minor findings fixed in a blocking pass against those recorded as follow-ups.",
+      "metric": "Per reviewed document against its matching baseline: review-loop minutes from review start to final verdict, fixes included; rounds; minor findings fixed in a blocking pass against those recorded as follow-ups; and calibration counts, claimed, confirmed, downgraded and invalid, with calibration minutes.",
       "promotion": {
         "unit": "At least 5 reviewed documents across at least 2 flows: a contract revision, an epic or root review, a Solution or Design System review, or an Item code review.",
-        "threshold": "Median review-loop minutes at most 50% of the matching baseline, zero valid critical or major findings found later in the same document and traced to a skipped minor round, and an owner role and revisit trigger on every follow-up, with every shared quality guard holding and the owner's approval."
+        "threshold": "Median review-loop minutes at most 50% of the matching baseline, zero valid critical or major findings found later in the same document and traced to a skipped minor round or a calibration downgrade, the shadow judge confirming every downgrade, and an owner role and revisit trigger on every follow-up, with every shared quality guard holding and the owner's approval."
       }
     }
   }

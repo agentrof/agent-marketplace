@@ -18,11 +18,11 @@ review follows `code-review/references/switch-review_loop-blocking_delta.md`.
 
 ## Severity
 
-Only a critical or major finding blocks. A step rates findings by its own
-table where it has one: the backlog Review findings section of
-`product-planning/references/structured-records.md` and the Solution Severity
-table of `solution-architecture/references/challenge-lenses.md`. Design System
-and Operation contract reviews use this table:
+Only a critical or major finding blocks, once calibration confirms it. A step
+rates findings by its own table where it has one: the backlog Review findings
+section of `product-planning/references/structured-records.md` and the
+Solution Severity table of `solution-architecture/references/challenge-lenses.md`.
+Design System and Operation contract reviews use this table:
 
 | severity | blocks | the reviewed document as written would |
 |---|---|---|
@@ -33,7 +33,7 @@ and Operation contract reviews use this table:
 Imprecision that could mislead a careful reader is major, never minor.
 Findings that share one root cause are one finding at the severity of that
 cause. The writer never lowers a returned severity, and a verdict requests
-changes only while a critical or major finding is open.
+changes only while a confirmed critical or major finding is open.
 
 ## Minor findings
 
@@ -102,3 +102,51 @@ A new critical or major finding continues the loop; a new minor finding
 follows the minor rule. A writer's claim that a fix is complete never replaces
 the re-review, and no clean extra round runs once no critical or major finding
 is open.
+
+## Calibration
+
+Before a verdict with an open critical or major finding becomes a gate, one
+fresh, read-only calibration reader checks every critical and major claim of
+the review. Calibration is skipped when no critical or major finding is open.
+It rules each claim once: a new critical or major finding of a re-review gets
+its own calibration before it gates.
+
+- The calibration reader is neither the writer nor a reader that returned a
+  finding of the review. Spawn a fresh instance of the step's reader role as
+  its lens-tier variant: `backlog-reviewer-lens`, `solution-reviewer-lens` or
+  `design-system-reviewer-lens`. For an Operation contract, spawn a fresh
+  instance of the non-writing counterpart on its own tier: `devops-engineer`
+  for the Verification Contract and `qa-engineer` for the Environment
+  Contract. Derive its task as the step derives its reader's, in mode
+  `review`, adding `--findings <record of the claims>`.
+- Give it each claim as returned, with its id, severity, evidence, impact and
+  cited paths, the step's severity table, the constitution and `SELF-CHECK`.
+  Never pass the writer's triage or interpretation, another reply or the
+  conversation.
+- It returns one row per claim: `finding`, `claimed_severity`,
+  `calibrated_severity` and `reason`. `calibrated_severity` is the claimed
+  severity when the claim holds, `minor` when the text as written still yields
+  the same behavior, verification and ownership, and `invalid` when the cited
+  text disproves the claim. `reason` cites the text that decides it: a
+  wikilink or path and the passage. Imprecision that could mislead a careful
+  reader stays major, and calibration never raises a severity.
+- A row that lowers or invalidates a claim without citing the text is refused:
+  that claim keeps its claimed severity.
+- Only confirmed critical and major findings keep the verdict at
+  `changes_requested` and start a writer pass. A claim calibrated `minor`
+  follows the minor rule, and one calibrated `invalid` closes with its cited
+  evidence. The writer never changes a returned or calibrated severity.
+
+Record every row. A backlog review note keeps them in an optional
+`Severity Calibration` section placed before `Verdict`:
+
+```markdown
+## Severity Calibration
+
+| finding | claimed_severity | calibrated_severity | reason |
+|---|---|---|---|
+| F-3 | major | minor | [[backlog/epics/identity/stories/sign-in/story\|ST-002]] Scope states the lockout rule twice, and both sentences name five attempts, so behavior and tests stay the same. |
+```
+
+Solution Design, Design System and Operation contract reviews keep no review
+record, so they show the rows with the verdict at the approval gate.

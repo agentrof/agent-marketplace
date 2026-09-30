@@ -198,6 +198,24 @@ Inside a Delivery a flow reads a switch with
 `process_policy.py value --switch <id> --delivery DLV-###`, which refuses a
 drifted pin instead of reading the new value.
 
+Process switch `owner_gates` decides when the owner answers a Delivery's
+questions. At `per_step`, the default, each is asked when it comes up and
+`User Decisions` keeps free text. At `two_fixed_gates`, the scope decision joins
+the execution plan and every Operation or Governance change it needs in gate A,
+whose approval authorizes the plan's writes through Item start, and the
+Delivery Review and the merge form gate B. Between them a question is queued in
+the Delivery's `User Decisions` table unless it is of an at-once class: the
+Software Architect's escalation clause or a class of
+`skill-content/deliver/data/owner-decision-classes.json`. `init` writes the
+table's header. From the proposal through the Review,
+`delivery_compile.py check` and every verb that runs its checks refuse a row
+whose id is not a unique `D-` id of at least two digits, whose class is neither
+`queued` nor an at-once class, that lists fewer than two options or a
+recommendation outside them, whose status is neither `pending` nor `answered`,
+or that is `answered` without an answer or `pending` with one. The pinned Process Policy names the
+value the Delivery ran under; a policy changed after the pin leaves the table
+unchecked, and the pin checks report that drift where it blocks.
+
 Scope approval is the handoff check for upstream bindings, and `init` runs the
 same check before it renders the proposal, so a selection that cannot be handed
 off is refused before the user decides on it. Every Requirement that a selected

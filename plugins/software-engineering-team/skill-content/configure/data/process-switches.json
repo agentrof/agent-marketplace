@@ -46,6 +46,30 @@
         "threshold": "Implementation wall time at most 70% of the lane-time sum, zero lane scope violations, seam-related critical or major findings per Item no higher than the sequential baseline and zero environment collisions, with every shared quality guard holding and the owner's approval."
       }
     },
+    "owner_gates": {
+      "summary": "When the owner answers a Delivery's questions: each as soon as it comes up, or in two fixed gates, scope and plan first and review and merge last, with every other question queued in User Decisions until then and never decided by default.",
+      "issue": 329,
+      "flows": ["delivery-execution", "delivery-governance", "delivery-planning", "execution-planning", "operation"],
+      "values": [
+        {
+          "id": "per_step",
+          "tradeoffs": "The owner is asked each question as soon as it comes up, and the run waits for the answer even when the work in progress does not depend on it. Today's behaviour and the baseline the gates are measured against: in one measured project, 53% of its first Delivery's calendar hours had nothing running and one weekend stop lasted 41.7 h, and its second Delivery's execution planning waited 61.1 min on questions with no subagent running."
+        },
+        {
+          "id": "two_fixed_gates",
+          "tradeoffs": "The owner decides the scope, the plan and every Operation or Governance change it needs in gate A, and the Delivery Review and the merge in gate B. Between them a question is queued in User Decisions, only the tasks that depend on it wait, a decision of an at-once class is still asked at once and nothing is decided by default. Fewer stops and less idle waiting, while a queued question holds its dependent tasks until the next gate, a long gate A can overload the owner and the class list can miss a decision the owner wanted asked at once."
+        }
+      ],
+      "default": "per_step",
+      "value_data": {
+        "two_fixed_gates": ["skill-content/deliver/data/owner-decision-classes.json"]
+      },
+      "metric": "Per Delivery: owner stops outside gates A and B; critical-path owner wait, question waits with no subagent running; questions queued and their time from queueing to answer; minutes dependent tasks waited; early gates forced because every remaining task depended on pending questions; idle hours that began with an open question; and status questions from the owner. Guard: every User Decisions row is answered before the work that depends on it runs.",
+      "promotion": {
+        "unit": "At least 3 Deliveries run with two_fixed_gates.",
+        "threshold": "At most 1 stop outside the two gates per Delivery, and only for an at-once class, a critical-path owner wait outside the gates of at most 15 min per Delivery and zero dependent tasks run before their question was answered, with every shared quality guard holding and the owner's approval."
+      }
+    },
     "review_panels": {
       "summary": "How backlog epic and root, Solution Design, Design System, Operation contract and execution-plan bundle reviews read the reviewed documents.",
       "issue": 312,

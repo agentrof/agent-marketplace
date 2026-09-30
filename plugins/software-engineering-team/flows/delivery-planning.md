@@ -7,6 +7,10 @@ story set, checks current Requirement and Definition of Done evidence, renders a
 temporary proposal, obtains the Delivery Scope decision and then hands the
 approved files to the explicit Git coordinator. No timebox, slot, branch,
 worktree or release field belongs in this flow.
+Switch `owner_gates`: at `two_fixed_gates`, the scope decision moves into gate A
+at the end of execution planning, and questions before it are queued, as
+`skill-content/deliver/references/switch-owner_gates-two_fixed_gates.md`
+defines.
 
 The proposal is disposable until reservation. A declined or interrupted
 proposal leaves the target checkout, refs and authored vault unchanged. After

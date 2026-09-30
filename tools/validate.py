@@ -2982,6 +2982,74 @@ def check_fact_ownership(tree: Tree, findings: list[Finding]) -> None:
                 " flow names"))
 
 
+OWNER_DECISION_CLASSES_RELPATH = "skill-content/deliver/data/owner-decision-classes.json"
+# The User Decisions table marks a question that waits for the next gate with this class.
+QUEUED_DECISION_CLASS = "queued"
+
+
+def owner_decision_class_problems(data: object, plugin: Path) -> list[str]:
+    """Return the problems of the at-once owner decision classes."""
+    if not isinstance(data, dict) or set(data) != {"schema_version", "agent_clauses", "classes"} \
+            or data.get("schema_version") != 1:
+        return ["data must hold exactly schema_version 1, agent_clauses and classes"]
+    problems: list[str] = []
+    ids: list[str] = []
+    classes = data["classes"]
+    if not isinstance(classes, list) or not classes:
+        problems.append("classes must declare at least one at-once class")
+        classes = []
+    for entry in classes:
+        if not isinstance(entry, dict) or set(entry) != {"id", "description"} \
+                or not _nonblank(entry.get("id")) or not _nonblank(entry.get("description")):
+            problems.append("empty class: every class holds an id and a description")
+            continue
+        ids.append(entry["id"])
+    clauses = data["agent_clauses"] if isinstance(data["agent_clauses"], list) else None
+    if clauses is None:
+        problems.append("agent_clauses must list the agent clauses that are asked at once")
+        clauses = []
+    for entry in clauses:
+        if not isinstance(entry, dict) or set(entry) != {"id", "agent", "clause"} \
+                or not all(_nonblank(entry.get(key)) for key in ("id", "agent", "clause")):
+            problems.append("every agent clause holds an id, an agent and its clause text")
+            continue
+        ids.append(entry["id"])
+        path = plugin / "agents" / f"{entry['agent']}.md"
+        if not path.is_file():
+            problems.append(f"agent clause {entry['id']!r} names unknown agent {entry['agent']!r}")
+        elif " ".join(entry["clause"].split()) not in " ".join(read_text(path).split()):
+            problems.append(f"agent clause {entry['id']!r} is not in agents/{entry['agent']}.md;"
+                            " the clause stays as the agent file states it")
+    for identifier in ids:
+        if not REVIEW_STEP_ID_RE.match(identifier) or identifier == QUEUED_DECISION_CLASS:
+            problems.append(f"class id {identifier!r} must be lowercase snake_case other than"
+                            f" {QUEUED_DECISION_CLASS!r}")
+    for duplicate in sorted({identifier for identifier in ids if ids.count(identifier) > 1}):
+        problems.append(f"duplicate class {duplicate!r}")
+    return problems
+
+
+def check_owner_decision_classes(tree: Tree, findings: list[Finding]) -> None:
+    """The classes asked at once under two fixed owner gates are validated data,
+    and the agent clause they keep still reads as its agent file states it."""
+    for plugin in plugin_dirs(tree):
+        path = plugin / OWNER_DECISION_CLASSES_RELPATH
+        if not path.is_file():
+            continue
+        try:
+            data = json.loads(read_text(path), object_pairs_hook=_unique_json_object)
+        except (json.JSONDecodeError, ValueError) as exc:
+            findings.append(Finding(
+                "error", rel(tree, path), 1, "owner_decision_classes",
+                f"owner decision classes are not valid unique-key JSON: {exc}",
+                "declare every class once"))
+            continue
+        for problem in owner_decision_class_problems(data, plugin):
+            findings.append(Finding(
+                "error", rel(tree, path), 1, "owner_decision_classes", problem,
+                "declare each at-once class once with an id and a description"))
+
+
 def _limits_shape_errors(config: dict) -> list[str]:
     problems: list[str] = []
     if not isinstance(config.get("schema_version"), int):
@@ -3039,6 +3107,7 @@ DELIVERY_CONTRACT_FILES = {
     "delivery-provider-contract.json",
     "delivery-receipt-contract.json",
     "delivery-result-contract.json",
+    "owner-decision-classes.json",
 }
 
 
@@ -3250,6 +3319,7 @@ CHECKS = {
     "process_switches": check_process_switches,
     "story_size_measures": check_story_size_measures,
     "fact_ownership": check_fact_ownership,
+    "owner_decision_classes": check_owner_decision_classes,
     "limits_config_shape": check_limits_config_shape,
     "delivery_contract_shape": check_delivery_contract_shape,
     "product_namespace": check_product_namespace,

@@ -941,6 +941,9 @@ VALIDATOR_BUILDERS = {
     "fact_ownership": lambda root: edit_json(
         root, f"{PLUGIN_ROOT}/skill-content/execution-plan/data/fact-ownership.json",
         lambda value: value["fact_classes"]["runtime_topology"].pop("owner")),
+    "owner_decision_classes": lambda root: edit_json(
+        root, f"{PLUGIN_ROOT}/skill-content/deliver/data/owner-decision-classes.json",
+        lambda value: value["classes"].append(dict(value["classes"][0]))),
     "limits_config_shape": lambda root: edit_json(
         root, "tools/data/limits.json",
         lambda value: value["authoring_caps"].update(ghost_cap=1)),

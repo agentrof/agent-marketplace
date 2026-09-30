@@ -28,6 +28,11 @@
   setup, workspace configuration or a Git repository.
 - Use `request_user_input` only at declared choice gates, preserving options,
   recommendation and tradeoffs.
+- Under switch `owner_gates` at `two_fixed_gates`, ask the owner inside a
+  Delivery only at gate A, gate B, an early gate or for an at-once class, and
+  queue every other question in the Delivery's `User Decisions`. Present each
+  gate through `request_user_input` in calls of at most four questions, with
+  the recommended option first and the tradeoffs in the option descriptions.
 - When the canonical workflow says `spawn`, use the matching project-scoped
   custom agent from `.codex/agents/` and wait for every required agent before
   synthesis. Never run overlapping writers concurrently.

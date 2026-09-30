@@ -767,13 +767,40 @@ def normalize_generated_text(root: Path) -> None:
             path.write_bytes(normalized)
 
 
+def render_provenance(payload: dict) -> str:
+    """Serialize package provenance so disjoint package changes merge cleanly.
+
+    Git reports changes to adjacent lines as a conflict. Each file hash
+    therefore has a line of its own between its key line and a separator
+    line, which change only when that file is added or removed. Changes to
+    different package files then merge into exactly the provenance a rebuild
+    of the merged sources writes, unless two files are added at one sort
+    position or a file is added after a changed last entry.
+    """
+    keys = sorted(payload)
+    lines = []
+    for position, key in enumerate(keys):
+        value = payload[key]
+        if key == "files" and value:
+            entries = "\n    ,\n".join(
+                f"    {json.dumps(path)}:\n      {json.dumps(value[path])}"
+                for path in sorted(value)
+            )
+            text = "{\n" + entries + "\n  }"
+        else:
+            text = json.dumps(value, indent=2, sort_keys=True).replace("\n", "\n  ")
+        separator = "," if position + 1 < len(keys) else ""
+        lines.append(f"  {json.dumps(key)}: {text}{separator}")
+    return "{\n" + "\n".join(lines) + "\n}\n"
+
+
 def write_provenance(
     target: Path,
     component: str,
     adapter: HostAdapter,
     version: str,
     provenance_name: str,
-    snapshot: dict[str, str],
+    marketplace_release: str,
     executables: set[str],
 ) -> None:
     files = {}
@@ -787,22 +814,26 @@ def write_provenance(
         files[relative] = hashlib.sha256(
             path.read_bytes()
         ).hexdigest()
-    payload = json.dumps({
-        "schema_version": 3,
+    payload = render_provenance({
+        "schema_version": 4,
         "component": component,
         "host": adapter.host_id,
         "version": version,
-        **snapshot,
+        "marketplace_release": marketplace_release,
         "files": files,
         "executables": sorted(executables),
         "runtime_contracts": adapter.module.runtime_contracts(),
         "delivery_protocol": DELIVERY_PROTOCOL_CAPABILITY,
-    }, indent=2, sort_keys=True) + "\n"
+    })
     (target / provenance_name).write_bytes(payload.encode("utf-8"))
 
 
 def marketplace_snapshot(root: Path) -> dict[str, str]:
-    """Return one deterministic identity shared by all host builds."""
+    """Return the deterministic source identity every host build shares.
+
+    Packages do not embed it: every source change would rewrite the same line
+    in each package. Release preparation records it in the release metadata.
+    """
     digest = hashlib.sha256()
     digest.update(b"agent-marketplace-snapshot-v2\0")
     for relative_root in ("plugins", "platforms"):
@@ -816,15 +847,16 @@ def marketplace_snapshot(root: Path) -> dict[str, str]:
         update_snapshot_digest(
             digest, relative, snapshot_content(path),
         )
-    versions = json.loads((root / "versions.json").read_text(encoding="utf-8"))
-    build_id = "snapshot." + digest.hexdigest()
-    return {
-        "build_id": build_id,
-        "marketplace_release": str(versions["marketplace"]),
-        "source_channel": "snapshot",
-        "source_ref": build_id,
-        "source_commit": "",
-    }
+    return {"build_id": "snapshot." + digest.hexdigest()}
+
+
+def load_marketplace_release(root: Path) -> str:
+    path = root / "versions.json"
+    try:
+        release = json.loads(path.read_text(encoding="utf-8"))["marketplace"]
+    except (OSError, json.JSONDecodeError, KeyError, TypeError) as exc:
+        raise ValueError(f"{path}: missing or invalid marketplace release") from exc
+    return str(release)
 
 
 def load_plugin_versions(root: Path) -> dict[str, str]:
@@ -855,7 +887,7 @@ def build_plugin(
     version: str,
     marker_name: str,
     provenance_name: str,
-    snapshot: dict[str, str],
+    marketplace_release: str,
     adapters: dict[str, HostAdapter],
     execution_profile: dict[str, dict[str, str]],
 ) -> None:
@@ -909,8 +941,8 @@ def build_plugin(
     executables = load_package_executables(root, source.name)
     apply_package_modes(target, executables)
     write_provenance(
-        target, source.name, adapter, version, provenance_name, snapshot,
-        executables,
+        target, source.name, adapter, version, provenance_name,
+        marketplace_release, executables,
     )
 
 
@@ -992,7 +1024,7 @@ def build(
         raise ValueError("trusted adapter set differs from the package host contract")
     marker_name, provenance_name = packaging_names(root)
     versions = load_plugin_versions(root)
-    snapshot = marketplace_snapshot(root)
+    marketplace_release = load_marketplace_release(root)
     profiles = {
         host: load_execution_profile(root, adapter)
         for host, adapter in adapters.items()
@@ -1003,7 +1035,8 @@ def build(
         for source in sorted(path for path in (root / "plugins").iterdir() if path.is_dir()):
             build_plugin(
                 root, source, adapter, host_root / source.name, versions[source.name],
-                marker_name, provenance_name, snapshot, adapters, profiles[host],
+                marker_name, provenance_name, marketplace_release, adapters,
+                profiles[host],
             )
 
 

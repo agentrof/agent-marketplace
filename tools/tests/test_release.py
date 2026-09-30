@@ -399,8 +399,9 @@ class BootstrapCandidatePolicyTests(unittest.TestCase):
         self.git("add", str(adapter.relative_to(self.root)))
         self.git("commit", "-m", "restore trusted adapter")
 
-        with self.assertRaisesRegex(release.ReleaseError, "trusted replay"):
-            self.verify(candidate)
+        # The adapter is not packaged, so the candidate's packages still equal
+        # the trusted replay, which never imports the candidate's adapter.
+        self.assertEqual(self.verify(candidate)["candidate"], candidate)
         self.assertFalse(sentinel.exists())
 
     def test_candidate_distribution_rejects_force_tracked_python_cache(self):
@@ -650,6 +651,30 @@ class ReleasePullRequestPolicyTests(unittest.TestCase):
         with self.assertRaisesRegex(release.ReleaseError, "tree differs"):
             self.verify(tampered)
 
+    def test_release_records_the_build_identity_of_its_sources(self):
+        # Packages no longer carry the shared build identity (#311); the
+        # release metadata records it and release verification recomputes it.
+        self.git("checkout", "--detach", self.head_sha)
+        # Unlike the repository, the fixture keeps no .changes/README.md, so
+        # the release checkout drops the emptied directory.
+        (self.root / ".changes").mkdir(exist_ok=True)
+        path = self.root / ".release" / "stable.json"
+        metadata = release.read_json(path)
+        self.assertEqual(
+            metadata["build_id"],
+            build_distributions.marketplace_snapshot(self.root)["build_id"],
+        )
+        self.assertEqual(release.verify_release(self.root), metadata)
+        release.write_json(path, dict(metadata, build_id="snapshot." + "0" * 64))
+        with self.assertRaisesRegex(release.ReleaseError, "build identity"):
+            release.verify_release(self.root)
+        self.git("add", ".release/stable.json")
+        self.git("commit", "--amend", "--no-edit")
+        forged = self.git("rev-parse", "HEAD")
+        self.git("checkout", "--detach", self.base_sha)
+        with self.assertRaisesRegex(release.ReleaseError, "deterministic replay"):
+            self.verify(forged)
+
     def test_abbreviated_sha_and_wrong_checkout_are_rejected(self):
         with self.assertRaisesRegex(release.ReleaseError, "40-hex"):
             release.verify_release_pr(
@@ -792,6 +817,12 @@ class MergeQueueReleasePolicyTests(unittest.TestCase):
         bumped = self.queue(release_entry, self.edit_release_metadata("version", "9.9.9"))
         with self.assertRaisesRegex(release.ReleaseError, "more than one entry"):
             self.verify(bumped)
+        rebuilt = self.queue(
+            release_entry,
+            self.edit_release_metadata("build_id", "snapshot." + "0" * 64),
+        )
+        with self.assertRaisesRegex(release.ReleaseError, "more than one entry"):
+            self.verify(rebuilt)
 
     def test_group_must_extend_its_exact_base_checkout(self):
         side = self.queue(self.stable_sha, self.feature(self.stable_sha, "side"))

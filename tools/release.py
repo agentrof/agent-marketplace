@@ -887,6 +887,7 @@ def prepare(
         "version": plan["marketplace"],
         "stable_base": stable_sha,
         "main_source": main_sha,
+        "build_id": build_distributions.marketplace_snapshot(root)["build_id"],
         "impacts": plan["impacts"],
         "summaries": plan["summaries"],
     }
@@ -904,6 +905,8 @@ def verify_release(root: Path, version: str | None = None) -> dict:
     if metadata.get("version") != expected or versions["marketplace"] != expected:
         raise ReleaseError("release metadata, requested tag, and marketplace version differ")
     parse_semver(expected, "release version")
+    if metadata.get("build_id") != build_distributions.marketplace_snapshot(root)["build_id"]:
+        raise ReleaseError("release metadata build identity differs from the release sources")
     return metadata
 
 
@@ -950,7 +953,7 @@ def verify_release_pr(
         raise ReleaseError("release PR metadata is invalid JSON") from exc
     expected_keys = {
         "schema_version", "version", "stable_base", "main_source",
-        "impacts", "summaries",
+        "build_id", "impacts", "summaries",
     }
     if not isinstance(metadata, dict) or set(metadata) != expected_keys:
         raise ReleaseError("release PR metadata has unknown or missing keys")
@@ -1060,7 +1063,10 @@ def release_identity(
     if not isinstance(value, dict):
         return raw
     # Plugin retirement may prune impacts; only a release changes these.
-    return tuple(value.get(key) for key in ("version", "stable_base", "main_source"))
+    return tuple(
+        value.get(key)
+        for key in ("version", "stable_base", "main_source", "build_id")
+    )
 
 
 def verify_merge_group(

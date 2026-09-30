@@ -126,14 +126,14 @@ class SingleTeamDistributionTests(unittest.TestCase):
                 provenance["delivery_protocol"],
                 build_distributions.DELIVERY_PROTOCOL_CAPABILITY,
             )
+            self.assertEqual(provenance["schema_version"], 4)
+            self.assertEqual(set(provenance), {
+                "schema_version", "component", "host", "version",
+                "marketplace_release", "files", "executables",
+                "runtime_contracts", "delivery_protocol",
+            })
             snapshots.append({
-                key: provenance[key] for key in (
-                    "build_id",
-                    "marketplace_release",
-                    "source_channel",
-                    "source_ref",
-                    "source_commit",
-                )
+                key: provenance[key] for key in ("marketplace_release", "version")
             })
             self.assertEqual(
                 json.loads((package / "product.json").read_text(encoding="utf-8")),
@@ -203,6 +203,64 @@ class SingleTeamDistributionTests(unittest.TestCase):
             build_distributions.build(self.root, first)
             build_distributions.build(self.root, second)
             self.assertEqual(build_distributions.compare_dirs(first, second), [])
+
+    def git(self, *args: str) -> str:
+        return subprocess.run(
+            ["git", *args], cwd=self.root, check=True,
+            capture_output=True, text=True,
+        ).stdout.strip()
+
+    def commit_source_change(self, base: str, relative: str) -> str:
+        """Commit one canonical file change with its regenerated distributions."""
+        self.git("checkout", "-q", "--detach", base)
+        source = self.root / "plugins" / fixtures.PLUGIN / relative
+        existing = source.read_bytes() if source.is_file() else b""
+        source.write_bytes(existing + b"\n# queued change\n")
+        build_distributions.replace_generated(self.root, self.root / "dist")
+        self.git("add", "--all")
+        self.git("commit", "-qm", f"change {relative}")
+        return self.git("rev-parse", "HEAD")
+
+    def test_changes_to_neighbouring_package_files_merge_without_a_conflict(self):
+        # A merge queue merges each queued pull request onto the ones ahead of
+        # it without rebuilding dist/ (#311): committed packages of changes to
+        # different files must merge into the rebuild of the merged sources.
+        git_fixture.init_repository(self.root, initial_branch="main")
+        self.git("config", "user.name", "Distribution Test")
+        self.git("config", "user.email", "distribution@example.test")
+        self.git("add", "--all")
+        self.git("commit", "-qm", "base")
+        base = self.git("rev-parse", "HEAD")
+        package = self.root / "dist" / "claude" / fixtures.PLUGIN
+        source = self.root / "plugins" / fixtures.PLUGIN
+        inventory = sorted(json.loads(
+            (package / build_distributions.PROVENANCE).read_text(encoding="utf-8")
+        )["files"])
+        first, second, added = next(
+            (left, right, left[:-len(".py")] + "_queued.py")
+            for left, right in zip(inventory, inventory[1:])
+            if left.startswith("scripts/") and left.endswith(".py")
+            and left < left[:-len(".py")] + "_queued.py" < right
+            and all(
+                (source / name).is_file()
+                and (package / name).read_bytes() == (source / name).read_bytes()
+                for name in (left, right)
+            )
+        )
+        for left, right in ((first, second), (first, added), (second, added)):
+            with self.subTest(left=left, right=right):
+                queued = self.commit_source_change(base, right)
+                self.commit_source_change(base, left)
+                merged = subprocess.run(
+                    ["git", "merge", "--no-ff", "-q", "-m", "queued merge", queued],
+                    cwd=self.root, capture_output=True, text=True, check=False,
+                )
+                if merged.returncode:
+                    self.git("merge", "--abort")
+                self.assertEqual(merged.returncode, 0, merged.stdout + merged.stderr)
+                self.assertEqual(
+                    build_distributions.check(self.root, self.root / "dist"), [],
+                )
 
     def test_snapshot_normalizes_checkout_only_eol_drift(self):
         # Exercise the snapshot normalizer independently of the repository's

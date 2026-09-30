@@ -158,6 +158,13 @@ class ReleaseScopeTests(unittest.TestCase):
         )
         self.assert_full("unsupported package provenance")
 
+    def test_retired_build_identity_requires_full_coverage(self):
+        self.mutate_json(
+            f"dist/claude/{fixtures.PLUGIN}/.agent-marketplace-package.json",
+            lambda data: data.update(build_id="snapshot." + "0" * 64),
+        )
+        self.assert_full("unsupported package provenance")
+
     def test_added_changeset_is_not_a_release_only_transformation(self):
         self.mutate(lambda: self.write_json(".changes/new.json", {
             "summary": "new input", "components": {},

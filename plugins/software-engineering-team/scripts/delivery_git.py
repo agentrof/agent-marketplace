@@ -2177,7 +2177,7 @@ def reserve_delivery(project_root: Path, delivery_id: str, remote: str = "origin
         if values["Governance-Hash"] != governed_governance_hash(root):
             raise RuntimeError("DELIVERY_FENCE_GOVERNANCE: the Fence does not carry the approved Governance; "
                                "apply it with apply-governance before reserving")
-    package = package_paths(root, directory, docs, include_map=False)
+    package = package_paths(root, directory, docs, include_map=False) + carried_policy_paths(root, directory, docs)
     integration_oid = commit_tree(
         root, target_oid, sorted(set(package)),
         f"Reserve Delivery {delivery_id}",
@@ -2232,6 +2232,32 @@ def execution_operation_inputs(root: Path, directory: Path, docs: Path) -> tuple
             raise RuntimeError(f"Execution publication requires a regular canonical {kind} contract")
         paths.append(rel_posix(root, path))
     return paths, bindings
+
+
+def pinned_policy_paths(root: Path, directory: Path, docs: Path) -> list[str]:
+    """Name the Process Policy the Delivery pins, or nothing without a pin."""
+    import process_policy
+    from delivery_compile import split_note
+    if not split_note(directory / "delivery.md")[0].get("process_policy_path"):
+        return []
+    return [rel_posix(root, process_policy.path_for(docs))]
+
+
+def carried_policy_paths(root: Path, directory: Path, docs: Path) -> list[str]:
+    """Select the pinned Process Policy that the Integration carries with the package.
+
+    An Item worktree reads the switch values from its own tree, which comes from
+    the Integration, so the pinned policy reaches the Integration with the
+    package, as a pinned Operation contract does, even before its own commit
+    reaches the target. The package checks that run first prove the checkout's
+    file is the pinned revision.
+    """
+    paths = pinned_policy_paths(root, directory, docs)
+    for relative in paths:
+        path = root / relative
+        if not path.is_file() or path.is_symlink() or path.parent.is_symlink():
+            raise RuntimeError("Delivery publication requires the pinned Process Policy as a regular file")
+    return paths
 
 
 def uncarried_operation_contracts(root: Path, docs: Path, integration_oid: str,
@@ -2399,7 +2425,7 @@ def publish_execution_plan(project_root: Path, delivery_id: str,
         raise RuntimeError("DELIVERY_FENCE_MODE: publish-execution-plan requires an open Fence")
     refuse_cancelled_delivery(root, directory, integration_oid, "publish-execution-plan")
     refuse_reviewed_delivery(root, directory, integration_oid, delivery_id)
-    package = package_paths(root, directory, docs, include_map=False)
+    package = package_paths(root, directory, docs, include_map=False) + carried_policy_paths(root, directory, docs)
     operation_paths, operation_bindings = execution_operation_inputs(root, directory, docs)
     refuse_superseded_approval(root, directory, docs, integration_oid, operation_paths)
     not_carried = uncarried_operation_contracts(root, docs, integration_oid, operation_paths)
@@ -3879,12 +3905,13 @@ ITEM_WRITER_FIELDS = ("status", "tags", "architecture_delta_hash", "integration_
 
 
 def published_plan_paths(root: Path, directory: Path, docs: Path) -> list[str]:
-    """Exactly what the published execution plan owns: its package and its contracts.
+    """Exactly what the published execution plan owns: its package, its contracts and its policy.
 
     Item evidence files are deliberately excluded. The plan owns each Item's control
     file; the writer owns the review and verification records beside it.
     """
     paths = package_paths(root, directory, docs, include_items=False, include_map=False)
+    paths += pinned_policy_paths(root, directory, docs)
     paths += [rel_posix(root, item) for item in directory.glob("items/*/item.md")]
     operation_paths, _bindings = execution_operation_inputs(root, directory, docs)
     return sorted(set(paths + operation_paths))

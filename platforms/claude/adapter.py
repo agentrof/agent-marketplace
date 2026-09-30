@@ -16,6 +16,12 @@ MODEL_ID_RE = re.compile(
 # IDs are dateless snapshots from the 4.6 generation on and dated before it,
 # where the dateless form is an alias that is not pinned.
 DATELESS_SINCE = (4, 6)
+# How a frozen-task A/B runs every role on one candidate model.
+MODEL_TRIAL = (
+    "Claude Code: set `CLAUDE_CODE_SUBAGENT_MODEL=<model ID>` and"
+    " `CLAUDE_CODE_SUBAGENT_MODEL_FORCE=1` for the session; a role's `effort`"
+    " still applies."
+)
 
 
 def model_version(model_id: str) -> tuple[str, tuple[int, ...]] | None:

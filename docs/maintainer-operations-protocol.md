@@ -305,6 +305,44 @@ If an invariant fails, stop at the current recoverable state and report the
 exact gate. Never repair a release by moving an existing tag, force-pushing
 `main` or `stable`, deleting an unmerged branch, or bypassing CI.
 
+## Model catalog bump
+
+Each host pins its role models in `platforms/<host>/model-catalog.json`.
+`tools/model_drift.py` compares those pins with the host's own model catalog.
+Like every flow here it runs only when the maintainer starts it, and it reads
+local files only: no network, no credentials, no GitHub call.
+
+```text
+DRIFT_REPORT
+  -> UPSTREAM_ISSUE
+  -> BUMP_PR_WITH_AB
+  -> AWAIT_MERGE_APPROVAL
+  -> RELEASE_REQUESTED
+```
+
+1. Capture each host's catalog. `codex debug models --bundled >
+   codex-models.json` prints the catalog bundled with the installed Codex
+   CLI, and `curl -sL
+   https://platform.claude.com/docs/en/about-claude/models/overview.md >
+   claude-models.md` saves the Claude models overview; neither needs
+   credentials. A signed-in `codex debug models` and the Anthropic Models API
+   list, `GET /v1/models`, show the models one account can use instead.
+2. Run `python3 tools/model_drift.py --catalog codex=codex-models.json
+   --catalog claude=claude-models.md`. Exit 0 means every pin is current.
+   Exit 1 reports a pinned ID the host no longer lists, a newer model of a
+   pinned family or changed effort support, per class with its tiers and
+   roles.
+3. On drift, `--issue-body` renders the upstream issue: the finding in plain
+   words, the catalog bump diff, the frozen-task A/B and the approval steps.
+   The maintainer files it. A pinned model that is gone without a successor
+   waits for the owner's decision instead of a bump.
+4. Flow A turns the issue into the pull request: the catalog change with each
+   new ID's efforts and sources confirmed on the official pages, the
+   regenerated `dist/`, a `minor` changeset and the A/B results. Quality on
+   the frozen tasks decides the bump; speed is reported beside it.
+5. The owner approves the merge in `AWAIT_MERGE_APPROVAL`, and the release
+   follows Flow B.
+
 ## Repository settings
 
 Branch protection, rulesets and security settings belong to the repository

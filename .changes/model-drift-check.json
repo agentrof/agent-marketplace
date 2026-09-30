@@ -1,0 +1,4 @@
+{
+  "summary": "`tools/model_drift.py` compares each host's pinned model classes with the host's own model catalog, read from the output of `codex debug models`, the Anthropic Models API list or the Claude models overview page, and reports a pinned ID the host no longer lists, a newer model of a pinned family and changed effort support, per class with its tiers and roles. `--issue-body` renders the upstream issue: the catalog bump diff, the frozen-task A/B that compares the pinned and the candidate model on quality and speed, and the owner's approval and release steps. It reads local files only. The maintainer protocol describes the model catalog bump from drift report to release.",
+  "components": {}
+}

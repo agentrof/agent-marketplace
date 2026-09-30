@@ -352,9 +352,13 @@ No owner gate shows a plan that execution approval would refuse.
 `approve-execution`, writes nothing and must pass before the plan gate on the
 standard path and before gate A at `owner_gates` `two_fixed_gates`;
 `light-path-check` reports the same findings as `plan_findings` before the
-light path's one gate. In gate A, an open Operation revision that passes its
-own check is listed under `pending_operation_revisions` instead of refused,
-since gate A approves it before execution approval runs.
+light path's one gate. In gate A, an open Operation revision that its
+approval would take is listed under `pending_operation_revisions` instead of
+refused, since gate A approves it before execution approval runs. The revision
+is checked as its approval renders it, so one the approval would refuse, such
+as a draft without `test_command`, is refused with what the approval finds,
+and each listed revision carries the `source_hash` the approval stamps: gate A
+approves exactly that receipt.
 
 `execution-plan.md` is a compiler-rendered aggregate of those Item records.
 Approval is local. `publish-execution-plan` is the only network writer for the

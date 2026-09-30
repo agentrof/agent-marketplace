@@ -1843,39 +1843,53 @@ def execution_approval_refusals(docs: Path, delivery_id: str, reopen: list[str] 
     return {"root": root, "props": props, "body": body, "inputs": inputs}, []
 
 
-def pending_operation_revisions(docs: Path, root: Path) -> list[dict]:
-    """Return each open Operation revision the plan binds that passes its own check.
+def pending_operation_revisions(docs: Path, root: Path) -> tuple[list[dict], dict[str, str]]:
+    """Return each open Operation revision the plan binds that its approval takes, and why it refuses the rest.
 
     Under two fixed owner gates, gate A approves such a revision before
     execution approval runs, so the gate may show the plan while it is open.
+    Each revision is checked as its approval renders it, and its entry names
+    the receipt that approval stamps, so gate A approves exact bytes. An open
+    revision that passes its own check but not its approval's is refused by
+    kind with what the approval finds.
     """
     runtime = any(split_note(path)[0].get("runtime_required", False)
                   for path in sorted(root.glob("items/*/item.md")))
-    pending = []
+    pending, refused = [], {}
     for kind in ("verification", "environment") if runtime else ("verification",):
         if not operation_compile.contract_path(docs, kind).is_file():
             continue
         receipt, errors = operation_compile.check_contract(docs, kind)
-        if receipt.get("status") == "draft" and not errors:
-            pending.append({"kind": kind, "revision": receipt["revision"]})
-    return pending
+        if receipt.get("status") != "draft" or errors:
+            continue
+        approved, errors = operation_compile.check_contract(
+            docs, kind, operation_compile.approval_text(docs, kind))
+        if errors:
+            refused[kind] = (f"approved current {kind} contract is required: revision {receipt['revision']} is"
+                             " open and its approval would refuse it: " + "; ".join(errors))
+        else:
+            pending.append({"kind": kind, "revision": approved["revision"],
+                            "source_hash": approved["source_hash"]})
+    return pending, refused
 
 
 def check_plan(args) -> int:
     """Report everything execution approval would refuse, before an owner gate shows the plan."""
     docs = docs_root(args.docs)
     root = find_delivery(docs, args.delivery)
-    status, pending = None, []
+    status, pending, refused = None, [], {}
     if root is not None:
         props, _body = split_note(root / "delivery.md")
         status = props.get("status")
         if delivery_owner_gates(docs, props) == TWO_FIXED_GATES:
-            pending = pending_operation_revisions(docs, root)
+            pending, refused = pending_operation_revisions(docs, root)
     reopen = sorted(set(str(story) for story in (args.reopen or [])))
     with stage_package.candidate_session():
+        # A refused revision is reported once, with what its approval finds.
         _approval, errors = execution_approval_refusals(
             docs, args.delivery, reopen, args.remote, PLAN_GATE_STATUSES,
-            frozenset(revision["kind"] for revision in pending))
+            frozenset(revision["kind"] for revision in pending) | frozenset(refused))
+    errors = [*refused.values(), *errors]
     print(json.dumps({"ok": not errors, "id": args.delivery, "status": status, "errors": errors,
                       "pending_operation_revisions": pending}, indent=2))
     return 0 if not errors else 1

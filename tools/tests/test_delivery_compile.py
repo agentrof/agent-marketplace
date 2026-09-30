@@ -789,9 +789,31 @@ class DeliveryCompilerTests(unittest.TestCase):
         contract = type("Args", (), {"docs": str(self.docs), "kind": "verification", "constrained_by": None})
         with contextlib.redirect_stdout(io.StringIO()):
             self.assertEqual(operation_compile.revise(contract), 0)
-        self.assertEqual(self.check_plan_result(), (0, {
-            "ok": True, "id": "DLV-001", "status": "scope_proposed", "errors": [],
-            "pending_operation_revisions": [{"kind": "verification", "revision": 2}]}))
+        code, checked = self.check_plan_result()
+        [pending] = checked["pending_operation_revisions"]
+        self.assertEqual((code, checked["ok"], checked["errors"], pending["kind"], pending["revision"]),
+                         (0, True, [], "verification", 2))
+        # The entry names the receipt the approval then stamps, so gate A approves exact bytes (#345).
+        path = operation_compile.contract_path(self.docs, "verification")
+        draft = path.read_bytes()
+        with contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(operation_compile.approve(contract), 0)
+        self.assertEqual(operation_compile.check_contract(self.docs, "verification")[0]["source_hash"],
+                         pending["source_hash"])
+        path.write_bytes(draft)
+        # A revision that passes its own check is still checked as its approval would check it.
+        props, body = operation_compile.parse(path)
+        props.pop("test_command")
+        props.pop("constrained_by")
+        operation_compile.atomic_text(path, operation_compile.render(props, body))
+        self.assertEqual(operation_compile.check_contract(self.docs, "verification")[1], [])
+        self.assertEqual(self.check_plan_result(), (1, {
+            "ok": False, "id": "DLV-001", "status": "scope_proposed",
+            "errors": ["approved current verification contract is required: revision 2 is open and its"
+                       " approval would refuse it: approved contract must cite at least one accepted Solution"
+                       " decision in constrained_by; test_command is required"],
+            "pending_operation_revisions": []}))
+        path.write_bytes(draft)
         # The standard path approves the revision before its plan gate, so the gate refuses it open.
         for argv in (("begin-revision",), ("set", "--switch", "owner_gates", "--default"), ("approve",)):
             self.policy(*argv)

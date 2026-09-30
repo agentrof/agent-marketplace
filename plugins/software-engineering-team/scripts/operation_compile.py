@@ -344,10 +344,13 @@ def revise(args) -> int:
     return 0
 
 
-def approve(args) -> int:
-    docs = docs_root(args.docs)
-    path = contract_path(docs, args.kind)
-    props, body = parse(path)
+def approval_text(docs: Path, kind: str) -> str:
+    """Render the draft contract as its approval writes it.
+
+    The approval stamps a source_hash that leaves approved_at_utc out, so the
+    receipt an approval produces is known before it runs.
+    """
+    props, body = parse(contract_path(docs, kind))
     if props.get("status") != "draft":
         raise ValueError("approve requires a draft contract")
     # The review record binds the draft its review read, before the stamp
@@ -356,15 +359,20 @@ def approve(args) -> int:
     if record_errors:
         raise ValueError("approval check failed: " + "; ".join(record_errors))
     props["status"] = "approved"
-    props["tags"] = [f"doc/{TYPE_FOR[args.kind]}", "status/approved"]
+    props["tags"] = [f"doc/{TYPE_FOR[kind]}", "status/approved"]
     props["approved_at_utc"] = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
     props["source_hash"] = source_hash(props, body)
-    text = render(props, body)
+    return render(props, body)
+
+
+def approve(args) -> int:
+    docs = docs_root(args.docs)
+    text = approval_text(docs, args.kind)
     # Check the text the file will hold before writing it, so a refusal leaves the draft as it was.
     value, errors = check_contract(docs, args.kind, text)
     if errors:
         raise ValueError("approval check failed: " + "; ".join(errors))
-    path.write_bytes(text.encode("utf-8"))
+    contract_path(docs, args.kind).write_bytes(text.encode("utf-8"))
     print(json.dumps(value, sort_keys=True))
     return 0
 

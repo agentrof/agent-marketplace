@@ -23,14 +23,16 @@ read-only lens readers, one lens assignment each, read the same inputs in
 parallel, and the read-only reviewer roles run as their `-lens` variants. The
 owning persona merges findings that share a root cause, keeping the highest
 returned severity, and the panel approves only when no lens has an open
-critical or major finding and the owning compiler checks are green. A
-re-review reruns only the assignments whose blocking findings were fixed or
-disproved, plus one changed-text check. A panel replaces the step's single
-reviewer and never stacks on top of it: the Solution primary reviewer existed
-only to stop two full panels from stacking (#293). Delivery code review and
-QA, and the Experience attestation, keep one reader per role because their
-machine interfaces accept one result per role; they join through a later
-merge step.
+critical or major finding and the owning compiler checks are green. A panel
+changes who reads, never the review loop: at `review_loop` `current` it keeps
+the step's own loop and a re-review reruns the whole panel, and at
+`blocking_delta` a re-review reruns only the assignments whose blocking
+findings were fixed or disproved, plus one changed-text check. A panel
+replaces the step's single reviewer and never stacks on top of it: the
+Solution primary reviewer existed only to stop two full panels from stacking
+(#293). Delivery code review and QA, and the Experience attestation, keep one
+reader per role because their machine interfaces accept one result per role;
+they join through a later merge step.
 
 The writer side of those backlog, Solution Design and Operation contract
 reviews runs as process switch `mechanical_pass_tier` selects. `role_tier`,

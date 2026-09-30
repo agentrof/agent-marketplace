@@ -97,7 +97,11 @@ Each rerun reader confirms that every finding it was given is closed and
 reviews the changed text; it never re-audits unchanged text. The step's own
 rule selects the rerun readers: at `single_reader` one fresh reviewer of the
 step's reader role, for Solution Design the primary reviewer with the affected
-specialists; at `lens_panel` the assignments that returned a blocking finding.
+specialists; at `lens_panel` the assignments that returned a blocking finding,
+and no other. The first of those assignments in `default_panel` order also
+reads every changed path with its dependency context through all of the
+step's lenses and names the owning lens of any new finding, and a newly
+exposed risk in a lens that did not rerun adds that lens's assignment.
 A new critical or major finding continues the loop; a new minor finding
 follows the minor rule. A writer's claim that a fix is complete never replaces
 the re-review, and no clean extra round runs once no critical or major finding

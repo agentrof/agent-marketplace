@@ -105,7 +105,8 @@
         "plugins/software-engineering-team/scripts/delivery_governance.py",
         "plugins/software-engineering-team/scripts/delivery_provider.py",
         "plugins/software-engineering-team/scripts/delivery_result.py",
-        "plugins/software-engineering-team/scripts/delivery_verification.py"
+        "plugins/software-engineering-team/scripts/delivery_verification.py",
+        "plugins/software-engineering-team/scripts/process_policy.py"
       ],
       "groups": [
         "delivery"
@@ -179,6 +180,7 @@
         "tools.tests.test_packaged_state_contract.*",
         "tools.tests.test_validator_contract.*",
         "tools.tests.test_review_panels.*",
+        "tools.tests.test_process_policy.*",
         "tools.tests.test_counts.*",
         "tools.tests.test_task_inputs.*",
         "tools.tests.test_ci_*.*"
@@ -421,6 +423,7 @@
     "tools.tests.test_package_refresh",
     "tools.tests.test_packaged_state_contract",
     "tools.tests.test_performance_contracts",
+    "tools.tests.test_process_policy",
     "tools.tests.test_project_config",
     "tools.tests.test_project_instructions",
     "tools.tests.test_project_vault_contract",

@@ -1581,7 +1581,7 @@ class DeliveryCompilerTests(unittest.TestCase):
         self.assertEqual((code, missing), (2, None))
         self.assertIn("Process Policy revision 2 is a draft", output)
 
-    def test_approval_renders_seam_ordered_lanes_and_hashes_the_lane_plan(self):
+    def test_approval_renders_each_lane_after_its_own_producers_and_hashes_the_lane_plan(self):
         self.approve_verification_contract()
         self.approve_dod()
         self.select_parallel_lanes()
@@ -1596,8 +1596,12 @@ class DeliveryCompilerTests(unittest.TestCase):
             plan = item.parents[2] / "execution-plan.md"
             first_plan, plan_body = delivery_compile.split_note(plan)
             first_item = delivery_compile.split_note(item)[0]
+            # The frontend lane consumes only the backend lane, so it starts when
+            # that lane finishes and never waits for the independent devops lane
+            # (rv-accept-ideas-26).
             self.assertIn("- AUTH-01: software_architect -> backend_developer + devops_engineer"
-                          " -> frontend_developer -> code_reviewer + qa_engineer", plan_body)
+                          " + frontend_developer (after backend_developer) -> code_reviewer + qa_engineer",
+                          plan_body)
             self.assertEqual(delivery_compile.check_delivery(plan_args), 0)
             self.assert_delivery_vault_contract()
             # The lane plan is inside the Item plan hash and so inside the plan hash.
@@ -1666,9 +1670,13 @@ class DeliveryCompilerTests(unittest.TestCase):
             self.assertEqual(self.lane_findings(item, lane_seams=[
                 "devops_engineer -> backend_developer via auth:session",
                 "backend_developer -> frontend_developer via IFC-001"]), [])
-            self.assertEqual(delivery_compile.execution_phases(delivery_compile.split_note(item)[0]), [
-                ["software_architect"], ["devops_engineer"], ["backend_developer"],
-                ["frontend_developer"], ["code_reviewer", "qa_engineer"]])
+            chained = delivery_compile.split_note(item)[0]
+            self.assertEqual(delivery_compile.execution_phases(chained), [
+                ["software_architect"], ["backend_developer", "devops_engineer", "frontend_developer"],
+                ["code_reviewer", "qa_engineer"]])
+            self.assertEqual(delivery_compile.lane_dependencies(chained), {
+                "backend_developer": ["devops_engineer"], "devops_engineer": [],
+                "frontend_developer": ["backend_developer"]})
             cases = {
                 "lane_seams contain a cycle": ["backend_developer -> frontend_developer via IFC-001",
                                                "frontend_developer -> backend_developer via auth:session"],
@@ -1703,6 +1711,25 @@ class DeliveryCompilerTests(unittest.TestCase):
             self.assertEqual(delivery_compile.execution_plan_findings(item.parents[2], sources, self.docs), [])
             self.assertTrue(delivery_compile.execution_plan_findings(
                 item.parents[2], sources, self.docs, reopen=[props["story_id"]]))
+
+    def test_host_contracts_start_a_consumer_lane_when_its_own_producers_finish(self):
+        """A consumer lane waits only for the producers its seams name, never for a whole phase
+        (rv-accept-ideas-26)."""
+        for host, start in (("claude", "Spawn every lane that waits for no producer in one message"),
+                            ("codex", "Start every lane that waits for no producer before waiting on any")):
+            text = " ".join((ROOT / "platforms" / host / "software-engineering-team"
+                             / "host-contract.md").read_text(encoding="utf-8").split())
+            bullet = text[text.index("Under switch `implementation_schedule` at `parallel_lanes_v1`"):]
+            bullet = bullet[:bullet.index(" - ")]
+            with self.subTest(host=host):
+                self.assertIn(start, bullet)
+                self.assertIn("each consumer lane as soon as every producer it waits for has finished", bullet)
+                self.assertNotIn("next phase", bullet)
+        reference = " ".join((SCRIPTS.parent / "skill-content/deliver/references"
+                              / "switch-implementation_schedule-parallel_lanes_v1.md")
+                             .read_text(encoding="utf-8").split())
+        self.assertIn("start it as soon as every producer it names has finished, without waiting for"
+                      " any other lane", reference)
 
     def test_items_without_a_schedule_keep_their_phases(self):
         roles = ["software_architect", "backend_developer", "devops_engineer", "code_reviewer", "qa_engineer"]

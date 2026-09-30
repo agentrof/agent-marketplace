@@ -358,7 +358,9 @@ together equal `path_claims`, reach neither `workspace/docs`, `.git` nor
 scope; seams that join two lanes, name a contract the Item claims or an
 architecture record of a claimed kind, and form no cycle; and a Process Policy
 that still selects the schedule. Role Sequences render the phases: the
-Software Architect alone, the lanes in seam order, then Code Review and QA.
+Software Architect alone, then the lanes, each seam consumer with the producer
+lanes it waits for, then Code Review and QA. A consumer lane starts as soon as
+its own producers finish and waits for no other lane.
 `item_plan_hash` and the plan hash cover the schedule, the scopes and the
 seams. The Item keeps one worktree, Item ref, Slot and writer receipt epoch:
 each lane role's task manifest bounds its write scope to its lane, lanes make

@@ -1278,27 +1278,45 @@ def lane_seam_edges(props: dict) -> tuple[list[tuple[str, str, str]], list[str]]
     return edges, unreadable
 
 
-def lane_phases(props: dict) -> list[list[str]]:
-    """Group implementation roles: the Software Architect alone first, then lanes by seam order.
+def lane_dependencies(props: dict) -> dict[str, list[str]]:
+    """Map each lane role to the producer lanes its seams name, in role order.
 
-    A lane starts once every producer its seams name has finished; lanes
-    without such a producer between them share a phase.
+    A consumer lane starts as soon as these producers have finished; a lane
+    that no seam of it names never holds it back.
     """
     lanes = lane_roles(props)
     edges, unreadable = lane_seam_edges(props)
     if unreadable:
         raise ValueError("lane_seams cannot be read: " + ", ".join(unreadable))
-    producers = {role: {producer for producer, consumer, _interface in edges if consumer == role}
-                 for role in lanes}
-    phases = [["software_architect"]] if "software_architect" in (props.get("role_sequence") or []) else []
+    named = {role: {producer for producer, consumer, _interface in edges if consumer == role}
+             for role in lanes}
     finished: set[str] = set()
     while len(finished) < len(lanes):
-        ready = [role for role in lanes if role not in finished and producers[role] <= finished]
+        ready = {role for role in lanes if role not in finished and named[role] <= finished}
         if not ready:
             raise ValueError("lane_seams contain a cycle or name a role without a lane")
-        phases.append(ready)
-        finished.update(ready)
-    return phases
+        finished |= ready
+    return {role: [lane for lane in lanes if lane in named[role]] for role in lanes}
+
+
+def lane_phases(props: dict) -> list[list[str]]:
+    """Group implementation roles: the Software Architect alone first, then every lane together.
+
+    Inside the lane phase each lane waits only for the producers that
+    lane_dependencies names for it.
+    """
+    lane_dependencies(props)
+    lanes = lane_roles(props)
+    phases = [["software_architect"]] if "software_architect" in (props.get("role_sequence") or []) else []
+    return phases + ([lanes] if lanes else [])
+
+
+def role_sequence_text(props: dict) -> str:
+    """Render an Item's phases for Role Sequences; a consumer lane names the producers it waits for."""
+    waits = lane_dependencies(props) if implementation_schedule(props) == "parallel_lanes_v1" else {}
+    return " -> ".join(" + ".join(
+        role + (f" (after {', '.join(waits[role])})" if waits.get(role) else "") for role in phase)
+        for phase in execution_phases(props))
 
 
 def execution_phases(props: dict) -> list[list[str]]:
@@ -1380,7 +1398,7 @@ def lane_plan_findings(story_id: str, props: dict, paths: list[str], contracts: 
                           " architecture record id of a claimed record kind")
     if not errors:
         try:
-            lane_phases(props)
+            lane_dependencies(props)
         except ValueError as exc:
             errors.append(f"{story_id} {exc}")
     return errors
@@ -1920,8 +1938,7 @@ def approve_execution(args) -> int:
         item_graph.append(
             f"{story} after " + (", ".join(item_props["execution_after"]) or "none")
         )
-        role_sequences.append(f"{story}: " + " -> ".join(
-            " + ".join(phase) for phase in execution_phases(item_props)))
+        role_sequences.append(f"{story}: " + role_sequence_text(item_props))
         path_claims.extend(f"{story}: {claim}" for claim in item_props["path_claims"])
         contract_claims.extend(f"{story}: {claim}" for claim in item_props["contract_claims"])
         operation_hashes.append(

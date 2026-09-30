@@ -882,6 +882,20 @@ def canonical_ba_process_ref(value: str) -> tuple[str, str, str] | None:
     return f"business-analysis/{space}/{relative}", space, relative
 
 
+def _session_ba_scan(space_dir: Path):
+    """Scan one BA space once per candidate session; rescan outside one."""
+    import ba_compile
+    cache = _CANDIDATE_SESSION_STACK[-1] if _CANDIDATE_SESSION_STACK else None
+    key = (space_dir, "ba-scan")
+    if cache is not None and key in cache:
+        return cache[key]
+    scanned, _findings = ba_compile.scan_space(
+        space_dir, ba_compile.load_schema(ba_compile.DEFAULT_SCHEMA))
+    if cache is not None:
+        cache[key] = scanned
+    return scanned
+
+
 def resolve_ba_process(docs: Path, value: str, *, expected_ba_ref: str = "",
                        expected_ba_hash: str = "",
                        require_committed: bool = False,
@@ -906,10 +920,7 @@ def resolve_ba_process(docs: Path, value: str, *, expected_ba_ref: str = "",
         errors.append("primary_process_ref does not resolve to a Business Analysis process note")
         return None, errors
     try:
-        import ba_compile
-        schema = ba_compile.load_schema(ba_compile.DEFAULT_SCHEMA)
-        scanned, _base = ba_compile.scan_space(
-            docs / "business-analysis" / space, schema)
+        scanned = _session_ba_scan(docs / "business-analysis" / space)
         document = scanned.docs.get(f"{relative}.md")
     except (ImportError, OSError, ValueError):
         document = None

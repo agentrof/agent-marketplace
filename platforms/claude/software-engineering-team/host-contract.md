@@ -41,9 +41,10 @@
   readers in parallel: spawn every reader of the panel in one message, then
   wait for all of them before triage.
 - Under switch `implementation_schedule` at `parallel_lanes_v1`, writers
-  overlap only when their approved lane scopes intersect. Spawn every lane of
-  an Item phase in one message, then wait for all of them before the next
-  phase.
+  overlap only when their approved lane scopes intersect. Spawn every lane
+  that waits for no producer in one message, spawn each consumer lane as soon
+  as every producer it waits for has finished, and wait for every lane before
+  the coordinator's commit.
 - Under switch `execution_planning` at `single_source_bundle`, start every
   reader of an execution-plan bundle together: spawn them in one message, then
   wait for all of them before triage.

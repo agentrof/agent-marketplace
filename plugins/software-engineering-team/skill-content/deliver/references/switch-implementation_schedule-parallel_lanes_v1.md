@@ -17,10 +17,11 @@ the evidence records and every Delivery verb keep their rules.
 Follow the phases the Execution Plan's Role Sequences render for the Item.
 
 1. The Software Architect, when the Item has one, runs alone first.
-2. The lanes run by seam order. Start every lane of a phase together, as the
-   host contract says. A lane that a seam names as consumer starts only after
-   its producer's lane has finished.
-3. After the last lane phase the coordinator commits once, then freezes the
+2. Then the lanes run. Start every lane that waits for no producer together,
+   as the host contract says. A lane rendered `(after <producers>)` consumes
+   those lanes' seams: start it as soon as every producer it names has
+   finished, without waiting for any other lane.
+3. After the last lane finishes the coordinator commits once, then freezes the
    candidate; Code Review and QA follow the Item's verification schedule.
 
 ## Seam specification first

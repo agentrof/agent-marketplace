@@ -77,8 +77,8 @@ A Delivery Item's implementation writers run as process switch
 after another in their approved order. `parallel_lanes_v1` is the one exception
 to serialized writers, for an Item whose approved plan declares it: after the
 Software Architect runs alone, roles whose approved lane scopes are disjoint
-write at the same time in the Item's one worktree, ordered only by declared
-seams. Lanes make no Git writes except intent-to-add for their own new files,
+write at the same time in the Item's one worktree, and a lane that consumes a
+declared seam starts as soon as its own producers finish. Lanes make no Git writes except intent-to-add for their own new files,
 environment verbs and vault writes stay serial, and the coordinator alone
 commits, once, before the candidate freeze.
 `execution-plan/references/switch-implementation_schedule-parallel_lanes_v1.md`

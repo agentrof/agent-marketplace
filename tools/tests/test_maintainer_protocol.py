@@ -67,6 +67,19 @@ class MaintainerProtocolTests(unittest.TestCase):
             with self.subTest(forbidden=forbidden):
                 self.assertNotIn(forbidden, workflow_text)
 
+    def test_model_catalog_captures_are_bundled_versioned_and_checked(self):
+        protocol = PROTOCOL.read_text(encoding="utf-8")
+        section = protocol.split("## Model catalog bump", 1)[1].split("\n## ", 1)[0]
+        flat = " ".join(section.split())
+        # A signed-in capture falls back to the bundled catalog and still exits 0.
+        self.assertIn("codex debug models --bundled > codex-models.json &&", section)
+        self.assertIn('--cli-version "codex=$(codex --version)"', section)
+        self.assertIn("curl -fsSL https://platform.claude.com/docs/en/about-claude/models/"
+                      "overview.md \\\n", section)
+        self.assertNotIn("curl -sL", section)
+        self.assertIn("Never use the signed-in `codex debug models`", flat)
+        self.assertNotIn("A signed-in `codex debug models` and", flat)
+
     def test_merge_and_release_authority_remain_explicit(self):
         protocol = PROTOCOL.read_text(encoding="utf-8")
         self.assertIn("Explicit user approval identifying that PR", protocol)

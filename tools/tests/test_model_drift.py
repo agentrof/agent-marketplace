@@ -26,6 +26,8 @@ import model_drift  # noqa: E402
 
 CLAUDE_LEVELS = ("low", "medium", "high", "xhigh", "max")
 TODAY = "2026-10-01"
+# The Codex capture is the catalog bundled with the CLI that printed it.
+CODEX_CLI = ("--cli-version", "codex=codex-cli 0.159.1")
 
 
 def codex_catalog(*models: tuple) -> dict:
@@ -143,12 +145,13 @@ class ModelDriftTests(unittest.TestCase):
 
     def test_a_newer_model_of_a_pinned_family_is_drift(self):
         self.pin_scenario()
-        code, report = self.report("--catalog", f"codex={self.codex_host()}")
+        code, report = self.report("--catalog", f"codex={self.codex_host()}", *CODEX_CLI)
         self.assertEqual(code, model_drift.EXIT_DRIFT)
         self.assertTrue(report["drift"])
         self.assertEqual(report["unchecked"], ["claude"])
         codex = report["hosts"]["codex"]
         self.assertEqual(codex["catalog"]["format"], "codex_models")
+        self.assertEqual(codex["catalog"]["cli_version"], "0.159.1")
         # Hidden entries and slugs without a family are not listed models.
         self.assertEqual(codex["catalog"]["models"], 4)
         strong = codex["classes"]["strong"]
@@ -185,7 +188,8 @@ class ModelDriftTests(unittest.TestCase):
         self.pin("codex", "strong", id="gpt-6.1-sol",
                  efforts=["low", "medium", "high", "xhigh", "max", "ultra"])
         code, report = self.report(
-            "--catalog", f"codex={self.codex_host(['low', 'medium', 'high', 'max', 'ultra'])}")
+            "--catalog", f"codex={self.codex_host(['low', 'medium', 'high', 'max', 'ultra'])}",
+            *CODEX_CLI)
         self.assertEqual(code, model_drift.EXIT_DRIFT)
         strong = report["hosts"]["codex"]["classes"]["strong"]
         self.assertEqual(strong["newer"], [])
@@ -209,11 +213,13 @@ class ModelDriftTests(unittest.TestCase):
             " snapshot, and `/model claude-opus-4-8[1m]` selects the 1M window.",
             f"Legacy: `claude-opus-4-20250514`. Start with {ids[0]}.",
         )))
-        code, report = self.report("--catalog", f"codex={codex}", "--catalog", f"claude={claude}")
+        code, report = self.report("--catalog", f"codex={codex}", "--catalog", f"claude={claude}",
+                                   *CODEX_CLI)
         self.assertEqual(code, model_drift.EXIT_CLEAN)
         self.assertFalse(report["drift"])
         self.assertEqual(report["unchecked"], [])
         self.assertEqual(report["hosts"]["claude"]["catalog"]["format"], "text")
+        self.assertIsNone(report["hosts"]["claude"]["catalog"]["cli_version"])
         self.assertEqual(report["hosts"]["claude"]["catalog"]["models"], len(set(ids)) + 2)
         for host, data in report["hosts"].items():
             for name, item in data["classes"].items():
@@ -221,7 +227,7 @@ class ModelDriftTests(unittest.TestCase):
                     self.assertEqual((item["listed"], item["newer"], item["drift"]),
                                      (True, [], False))
                     self.assertEqual(item["pinned"], pins[host][name]["id"])
-        code, out, err = self.run_drift("--catalog", f"codex={codex}", "--issue-body")
+        code, out, err = self.run_drift("--catalog", f"codex={codex}", "--issue-body", *CODEX_CLI)
         self.assertEqual((code, out), (model_drift.EXIT_CLEAN, ""))
         self.assertIn("every pinned class matches", err)
 
@@ -231,14 +237,17 @@ class ModelDriftTests(unittest.TestCase):
             (["--catalog", f"gemini={codex}"], "unknown host gemini"),
             (["--catalog", "codex"], "HOST=PATH"),
             (["--catalog", f"codex={codex}", "--catalog", f"codex={codex}"], "names codex twice"),
-            (["--catalog", f"codex={self.base / 'absent.json'}"], "unreadable host catalog"),
-            (["--catalog", f"codex={self.write('list.json', [])}"], "neither a Codex models"),
-            (["--catalog", f"codex={self.write('entry.json', {'models': [{'id': 'x'}]})}"],
-             "has no slug"),
+            (["--catalog", f"codex={self.base / 'absent.json'}", *CODEX_CLI],
+             "unreadable host catalog"),
+            (["--catalog", f"codex={self.write('list.json', [])}", *CODEX_CLI],
+             "neither a Codex models"),
+            (["--catalog", f"codex={self.write('entry.json', {'models': [{'id': 'x'}]})}",
+              *CODEX_CLI], "has no slug"),
             (["--catalog", f"claude={codex}"], "lists no claude model ID"),
-            (["--catalog", f"codex={self.write('prose.md', 'no model here')}"],
+            (["--catalog", f"codex={self.write('prose.md', 'no model here')}", *CODEX_CLI],
              "lists no codex model ID"),
-            (["--catalog", f"codex={codex}", "--date", "2026-13-01"], "month must be"),
+            (["--catalog", f"codex={codex}", "--date", "2026-13-01", *CODEX_CLI],
+             "month must be"),
         )
         for args, message in cases:
             with self.subTest(args=args):
@@ -246,17 +255,47 @@ class ModelDriftTests(unittest.TestCase):
                 self.assertEqual((code, out), (model_drift.EXIT_INVALID, ""))
                 self.assertIn(message, err)
         self.pin("codex", "strong", id="gpt-6.1-sol-2026-09-01")
-        code, _out, err = self.run_drift("--catalog", f"codex={codex}")
+        code, _out, err = self.run_drift("--catalog", f"codex={codex}", *CODEX_CLI)
         self.assertEqual(code, model_drift.EXIT_INVALID)
         self.assertIn("is not a pinned model ID", err)
         with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit) as raised:
             model_drift.main(["--root", str(self.root)])
         self.assertEqual(raised.exception.code, 2)
 
+    def test_the_codex_capture_names_its_cli_and_is_no_older_than_the_sources(self):
+        # `codex debug models` prints the bundled catalog of whatever CLI runs
+        # it, so the report records that CLI and refuses one older than the
+        # release whose bundled catalog the pins were verified against.
+        codex = ("--catalog", f"codex={self.listed_pins('codex')}")
+        for cli, message in (
+                ((), "--cli-version codex=<version> is required"),
+                (("--cli-version", "codex=codex-cli 0.159.0"),
+                 "the codex catalog comes from CLI 0.159.0, older than 0.159.1, the release"
+                 " the pinned sources name"),
+                (("--cli-version", "codex=0.159"), "exactly one X.Y.Z"),
+                (("--cli-version", "codex=0.159.1 (0.160.0)"), "exactly one X.Y.Z"),
+                (("--cli-version", "codex=0.159.1", "--cli-version", "codex=0.159.1"),
+                 "names codex twice"),
+                (("--cli-version", "codex=0.159.1", "--cli-version", "claude=2.1.284"),
+                 "names claude, whose catalog capture comes from no CLI")):
+            with self.subTest(cli=cli):
+                code, out, err = self.run_drift(*codex, *cli)
+                self.assertEqual((code, out), (model_drift.EXIT_INVALID, ""))
+                self.assertIn(message, err)
+        code, report = self.report(*codex, "--cli-version", "codex=codex-cli 0.160.0")
+        self.assertEqual(report["hosts"]["codex"]["catalog"]["cli_version"], "0.160.0")
+        # The floor follows the newest release a pinned source names.
+        sources = self.catalog("codex")["classes"]["fast"]["sources"]
+        self.pin("codex", "fast", sources=[*sources, sources[1].replace("0.159.1", "0.161.0")])
+        code, out, err = self.run_drift(*codex, "--cli-version", "codex=0.160.0")
+        self.assertEqual(code, model_drift.EXIT_INVALID)
+        self.assertIn("older than 0.161.0", err)
+
     def test_issue_body_renders_the_bump_diff_and_the_frozen_task_ab(self):
         self.pin_scenario()
         codex = self.codex_host(["low", "medium", "high", "max", "ultra"])
-        args = ("--catalog", f"codex={codex}", "--catalog", f"claude={self.claude_host()}")
+        args = ("--catalog", f"codex={codex}", "--catalog", f"claude={self.claude_host()}",
+                *CODEX_CLI)
         code, out, err = self.run_drift(*args, "--issue-body", "--date", TODAY)
         self.assertEqual(code, model_drift.EXIT_DRIFT, err)
         lines = out.splitlines()
@@ -292,7 +331,7 @@ class ModelDriftTests(unittest.TestCase):
         self.assertIn("`tools/data/host-cli-versions.json`", out)
         self.assertNotIn(str(self.base), out)
 
-        report = model_drift.drift_report(self.root, {"codex": codex})
+        report = model_drift.drift_report(self.root, {"codex": codex}, {"codex": "0.159.1"})
         classes = report["hosts"]["codex"]["classes"]
         path = build_distributions.model_catalog_path(self.root, "codex")
         old, new = reconstruct(model_drift.catalog_diff(
@@ -319,7 +358,7 @@ class ModelDriftTests(unittest.TestCase):
         result = subprocess.run(
             [sys.executable, str(ROOT / "tools" / "model_drift.py"), "--root", str(self.root),
              "--catalog", f"codex={self.listed_pins('codex')}",
-             "--catalog", f"claude={self.listed_pins('claude')}"],
+             "--catalog", f"claude={self.listed_pins('claude')}", *CODEX_CLI],
             capture_output=True, text=True, check=False, timeout=60,
             env=dict(os.environ, PYTHONDONTWRITEBYTECODE="1"),
         )

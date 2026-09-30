@@ -1865,9 +1865,15 @@ def collect(docs: Path, *, historical_inputs: bool = False,
                     "scope", "priority_reason"
                 } else section(authored_body, key)
                 if normalized_text(actual) == normalized_text(sentinel):
-                    scaffolds.append(
-                        f"{story_rel} has an untouched {key} stub"
-                    )
+                    finding = f"{story_rel} has an untouched {key} stub"
+                    # The navigation once hid this stub from the check, so a
+                    # story approved before keeps its approval: the stub is
+                    # advisory until the story is revised, as an empty last
+                    # section is.
+                    if key == "Delivery Notes" and not approval_stamp_findings(story_path, docs):
+                        advisories.append(f"{finding}; advisory until the approved story is revised")
+                    else:
+                        scaffolds.append(finding)
 
             owner = str(story_props.get("owner_role", ""))
             owners = set(contract["story_owner_roles"])

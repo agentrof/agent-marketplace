@@ -259,6 +259,52 @@ class BacklogCompilerTests(unittest.TestCase):
             record, errors = backlog_compile.collect(docs)
             self.assertEqual((errors, record["advisory_findings"]), ([finding], []))
 
+    def test_an_approved_story_with_an_untouched_delivery_notes_stub_is_advisory_until_revised(self):
+        import delivery_compile
+
+        with tempfile.TemporaryDirectory() as raw:
+            docs = Path(raw) / "workspace" / "docs"
+            make_approved_backlog(docs)
+            story = docs / "backlog/epics/delivery-fixture/stories/auth-01/story.md"
+            notes = "Preserve the approved API boundary and avoid delivery-state metadata."
+            # An approval from before the compiler read the stub above the
+            # navigation: the stamp is intact over the untouched stub.
+            props, body = backlog_compile.parse_front_matter(story)
+            story.write_text(backlog_compile.front_matter(
+                props, body.replace(notes, backlog_compile.STORY_STUBS["Delivery Notes"])),
+                encoding="utf-8")
+            props, body = backlog_compile.parse_front_matter(story)
+            props["source_hash"] = backlog_compile.digest(story)
+            story.write_text(backlog_compile.front_matter(props, body), encoding="utf-8")
+            root = docs / "backlog/backlog.md"
+            record, _errors = backlog_compile.collect(docs)
+            props, body = backlog_compile.parse_front_matter(root)
+            props["package_hash"] = backlog_compile.package_digest(
+                docs, backlog_compile.package_paths(record, docs))
+            root.write_text(backlog_compile.front_matter(props, body), encoding="utf-8")
+            finding = ("backlog/epics/delivery-fixture/stories/auth-01/story.md has an untouched"
+                       " Delivery Notes stub")
+            advisory = f"{finding}; advisory until the approved story is revised"
+            for historical in (False, True):
+                with self.subTest(historical_inputs=historical):
+                    record, errors = backlog_compile.collect(docs, historical_inputs=historical)
+                    self.assertEqual((errors, record["advisory_findings"]), ([], [advisory]))
+            # Delivery reads the approved backlog as it did before.
+            _selected, _sources, errors = delivery_compile.approved_backlog_sources(
+                docs, ["AUTH-01"])
+            self.assertEqual(errors, [])
+            output = StringIO()
+            with redirect_stdout(output):
+                code = backlog_compile.main(["check", "--docs", str(docs), "--approved", "--json"])
+            result = json.loads(output.getvalue())
+            self.assertEqual((code, result["ok"], result["advisories"]), (0, True, [advisory]))
+            # Revising the story ends the grace: the stub is writer work again.
+            story.write_text(story.read_text(encoding="utf-8").replace(
+                "Administrative bulk operations", "Administrative bulk imports"), encoding="utf-8")
+            record, errors = backlog_compile.collect(docs)
+            self.assertEqual((errors, record["advisory_findings"]), ([finding], []))
+            self.assertEqual(record["scaffold_findings"], [finding])
+
     def test_a_backlog_without_an_empty_last_section_checks_as_released(self):
         with tempfile.TemporaryDirectory() as raw:
             docs = Path(raw) / "workspace" / "docs"

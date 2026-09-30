@@ -241,6 +241,17 @@ class MeasureTests(unittest.TestCase):
         last = "# Story\n\n## Acceptance\n\n- [ ] One.\n\n<!-- sec: nav -->\n- [ ] Two.\n"
         self.assertEqual(measured(story(last))["acceptance_criteria"], 1)
 
+    def test_a_measure_whose_derivation_is_not_a_name_is_refused_not_a_crash(self):
+        with tempfile.TemporaryDirectory() as raw:
+            path = Path(raw) / "measures.json"
+            path.write_text(json.dumps({"schema_version": 1, "measures": {
+                "acceptance_criteria": {"summary": "Criteria.",
+                                        "derivation": ["acceptance_checklist_lines"]}}}),
+                encoding="utf-8")
+            with mock.patch.object(backlog_compile, "STORY_SIZE_MEASURES_PATH", path):
+                with self.assertRaisesRegex(RuntimeError, "acceptance_criteria"):
+                    backlog_compile.story_size_measures()
+
     def test_roles_and_contract_deltas_follow_the_role_fields(self):
         cases = (
             ((), (1, 0)),

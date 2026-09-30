@@ -1289,7 +1289,8 @@ def story_size_measures() -> dict[str, dict]:
     except (OSError, KeyError, TypeError, AttributeError, json.JSONDecodeError) as exc:
         raise RuntimeError(f"story size measures are missing or invalid: {exc}") from exc
     unknown = sorted(name for name, derivation in derivations.items()
-                     if derivation not in STORY_SIZE_DERIVATIONS)
+                     if not isinstance(derivation, str)
+                     or derivation not in STORY_SIZE_DERIVATIONS)
     if not measures or unknown:
         raise RuntimeError("story size measures name no derivation this compiler implements: "
                            + ", ".join(unknown))

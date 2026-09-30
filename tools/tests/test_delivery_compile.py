@@ -704,6 +704,88 @@ class DeliveryCompilerTests(unittest.TestCase):
         root = delivery_compile.find_delivery(self.docs, "DLV-001")
         return {path: path.read_bytes() for path in root.rglob("*") if path.is_file()}
 
+    def check_plan_result(self, *reopen: str) -> tuple[int, dict]:
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output):
+            code = delivery_compile.main(["--docs", str(self.docs), "check-plan", "--delivery", "DLV-001",
+                                          *(flag for story in reopen for flag in ("--reopen", story))])
+        return code, json.loads(output.getvalue())
+
+    def author_item(self, **fields) -> None:
+        item = delivery_compile.find_delivery(self.docs, "DLV-001") / "items" / "auth-01" / "item.md"
+        props, body = delivery_compile.split_note(item)
+        props.update(fields)
+        delivery_compile.atomic_text(item, delivery_compile.frontmatter(props, body))
+
+    def test_the_plan_gate_refuses_a_topology_that_execution_approval_would_refuse(self):
+        """#345: the standard path checks the plan before the owner sees it, with approval's own checks."""
+        plan_args = self.scope_ready_for_execution()
+        self.author_item(path_claims=["../src/auth.py"], execution_after=["AUTH-01"],
+                         role_sequence=["qa_engineer", "code_reviewer"])
+        before = self.delivery_bytes()
+        code, checked = self.check_plan_result()
+        self.assertEqual((code, checked["ok"], checked["status"]), (1, False, "scope_approved"))
+        for fragment in ("AUTH-01 path_claim is not normalized: ../src/auth.py",
+                         "AUTH-01 cannot execute after itself", "AUTH-01 role_sequence must be"):
+            with self.subTest(fragment=fragment):
+                self.assertTrue(any(fragment in error for error in checked["errors"]), checked)
+        code, refused = self.approve_execution_result(plan_args)
+        self.assertEqual((code, refused["errors"]), (1, checked["errors"]))
+        self.assertEqual(self.delivery_bytes(), before)
+        # A valid topology passes unchanged, and approval then stamps the plan the gate showed.
+        self.author_item(path_claims=["src/auth.py"], execution_after=[],
+                         role_sequence=["backend_developer", "code_reviewer", "qa_engineer"])
+        before = self.delivery_bytes()
+        self.assertEqual(self.check_plan_result(), (0, {
+            "ok": True, "id": "DLV-001", "status": "scope_approved", "errors": [],
+            "pending_operation_revisions": []}))
+        self.assertEqual(self.delivery_bytes(), before)
+        self.assertEqual(self.approve_execution_result(plan_args)[0], 0)
+        # A plan revision is checked with the reopen its approval will name.
+        self.assertEqual(self.check_plan_result("AUTH-01")[1]["errors"],
+                         ["reopen requires an integrated Item: AUTH-01"])
+
+    def test_gate_a_checks_the_proposed_plan_and_keeps_a_revision_it_approves_pending(self):
+        """#345: gate A checks the plan before the scope is approved; the revision it approves may stay open."""
+        self.approve_verification_contract()
+        self.approve_dod()
+        for argv in (("init",), ("set", "--switch", "owner_gates", "--value", "two_fixed_gates"), ("approve",)):
+            self.policy(*argv)
+        init_args = type("Args", (), {"docs": str(self.docs), "id": None, "slug": "auth",
+                                      "goal": "Authenticate", "outcome": None,
+                                      "target_branch": "main", "story": ["AUTH-01"]})
+        self.assertEqual(delivery_compile.init_delivery(init_args), 0)
+        self.assertEqual(self.check_plan_result(), (1, {
+            "ok": False, "id": "DLV-001", "status": "scope_proposed",
+            "errors": ["AUTH-01 needs at least one exact path_claim or contract_claim"],
+            "pending_operation_revisions": []}))
+        self.author_item(path_claims=["src/auth.py"], contract_claims=["auth:session"])
+        self.assertEqual(self.check_plan_result()[0], 0)
+        contract = type("Args", (), {"docs": str(self.docs), "kind": "verification", "constrained_by": None})
+        with contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(operation_compile.revise(contract), 0)
+        self.assertEqual(self.check_plan_result(), (0, {
+            "ok": True, "id": "DLV-001", "status": "scope_proposed", "errors": [],
+            "pending_operation_revisions": [{"kind": "verification", "revision": 2}]}))
+        # The standard path approves the revision before its plan gate, so the gate refuses it open.
+        for argv in (("begin-revision",), ("set", "--switch", "owner_gates", "--default"), ("approve",)):
+            self.policy(*argv)
+        code, checked = self.check_plan_result()
+        self.assertEqual((code, checked["errors"], checked["pending_operation_revisions"]),
+                         (1, ["approved current verification contract is required: "], []))
+        # A revision that fails its own check is refused in gate A too.
+        for argv in (("begin-revision",), ("set", "--switch", "owner_gates", "--value", "two_fixed_gates"),
+                     ("approve",)):
+            self.policy(*argv)
+        path = operation_compile.contract_path(self.docs, "verification")
+        props, body = operation_compile.parse(path)
+        props["mutation_disposition"] = "sometimes"
+        operation_compile.atomic_text(path, operation_compile.render(props, body))
+        code, checked = self.check_plan_result()
+        self.assertEqual((code, checked["pending_operation_revisions"]), (1, []))
+        self.assertEqual(checked["errors"], ["approved current verification contract is required:"
+                                             " mutation_disposition must be required or not_applicable"])
+
     def test_execution_approval_refuses_without_workflows_until_render_ci_adds_one(self):
         plan_args = self.scope_ready_for_execution()
         shutil.rmtree(self.root / ".github")
@@ -1624,6 +1706,23 @@ class DeliveryCompilerTests(unittest.TestCase):
              ["code_reviewer"], ["qa_engineer"]])
         with self.assertRaisesRegex(ValueError, "unsupported implementation_schedule"):
             delivery_compile.execution_phases({"role_sequence": roles, "implementation_schedule": "fast"})
+
+
+class PlanGateInstructionTests(unittest.TestCase):
+    def test_every_plan_gate_checks_the_plan_before_the_owner_sees_it(self):
+        """#345: the standard plan gate and gate A both run check-plan first."""
+        team = ROOT / "plugins" / "software-engineering-team"
+        for relative, rule in (
+            ("flows/execution-planning.md", "Show the plan to the user only once it passes"),
+            ("skill-content/execution-plan/SKILL.md", "the plan is shown only once it passes"),
+            ("skill-content/deliver/references/switch-owner_gates-two_fixed_gates.md",
+             "(`delivery_compile.py check` and `check-plan`, `operation_compile.py check`,"
+             " `delivery_governance.py check`), present gate A"),
+        ):
+            with self.subTest(path=relative):
+                text = " ".join((team / relative).read_text(encoding="utf-8").split())
+                self.assertIn("check-plan", text)
+                self.assertIn(rule, text)
 
 
 class ScopeHandoffBindingTests(unittest.TestCase):

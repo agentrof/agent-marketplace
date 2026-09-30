@@ -107,6 +107,10 @@ LIGHT_PATH_CONDITIONS = ("single_story", "no_architect_role", "architecture_not_
                          "within_story_size_budget", "topology_unchanged")
 # The light path runs from the proposal until its Items are claimed.
 LIGHT_PATH_STATUSES = ("scope_proposed", "scope_approved", "execution_approved")
+# Execution approval stamps a plan on an approved scope. A gate that shows the
+# plan runs before it, in gate A and on the light path even before scope approval.
+EXECUTION_APPROVAL_STATUSES = ("scope_approved", "execution_approved")
+PLAN_GATE_STATUSES = ("scope_proposed", *EXECUTION_APPROVAL_STATUSES)
 # init writes this before any Software Architect has stated a reason.
 NO_ARCHITECTURE_REASON = "No architecture delta is currently required."
 # What a topology pass authors on an Item; the light path's record binds them with its body.
@@ -1402,7 +1406,8 @@ def new_item_lane_fields(source: dict, schedule: str | None) -> dict:
 
 
 def execution_plan_findings(root: Path, sources: dict[str, dict], docs: Path,
-                            reopen: list[str] | tuple = ()) -> list[str]:
+                            reopen: list[str] | tuple = (),
+                            pending: frozenset | set = frozenset()) -> list[str]:
     """Validate the authored Item topology before execution approval.
 
     The Delivery compiler owns hashes and rendered plan summaries. People own
@@ -1538,11 +1543,13 @@ def execution_plan_findings(root: Path, sources: dict[str, dict], docs: Path,
         errors.append("Delivery execution_after graph contains a cycle")
     # Operation contracts are intentionally checked only at execution approval.
     # Bindings themselves are written below, after this preflight proves the
-    # current source contracts are approved and current.
-    _verification, verification_errors = operation_contract_snapshot(docs, "verification")
-    errors.extend(verification_errors)
-    if any(split_note(path)[0].get("runtime_required", False)
-           for path in sorted(root.glob("items/*/item.md"))):
+    # current source contracts are approved and current. A kind in *pending* is an
+    # open revision that the gate showing this plan approves before approval runs.
+    if "verification" not in pending:
+        _verification, verification_errors = operation_contract_snapshot(docs, "verification")
+        errors.extend(verification_errors)
+    if "environment" not in pending and any(split_note(path)[0].get("runtime_required", False)
+                                            for path in sorted(root.glob("items/*/item.md"))):
         _environment, environment_errors = operation_contract_snapshot(docs, "environment")
         errors.extend(environment_errors)
     return sorted(set(errors))
@@ -1754,14 +1761,16 @@ def pull_request_workflow_findings(docs: Path, delivery: str, remote: str = "ori
             f"(skill-content/setup/references/ci-bootstrap.md) describes{remedy}"]
 
 
-def approved_pull_request_checks(docs: Path) -> dict:
+def approved_pull_request_checks(docs: Path, pending: bool = False) -> dict:
     """Where the approved current Verification Contract declares the Delivery PR checks come from.
 
     Without such a contract, approval is refused anyway and the default stands.
+    A *pending* open revision that passes its own check is read as its approval
+    will read it.
     """
     receipt, errors = operation_compile.check_contract(docs, "verification")
     props = {}
-    if not errors and receipt.get("current"):
+    if not errors and (receipt.get("current") or (pending and receipt.get("status") == "draft")):
         props, _body = operation_compile.parse(operation_compile.contract_path(docs, "verification"))
     source, provider = operation_compile.pull_request_checks(props)
     if source != "external":
@@ -1772,44 +1781,99 @@ def approved_pull_request_checks(docs: Path) -> dict:
 
 
 def execution_approval_findings(docs: Path, root: Path, delivery_id: str, reopen: list[str] | tuple = (),
-                                remote: str = "origin") -> tuple[tuple, list[str]]:
+                                remote: str = "origin",
+                                pending: frozenset | set = frozenset()) -> tuple[tuple, list[str]]:
     """Resolve what execution approval binds, with everything it refuses in the plan."""
     item_records, sources, backlog_snapshot, dod, source_errors = delivery_source_snapshots(docs, root)
     policy, policy_errors = process_policy.approved_snapshot(docs)
     errors = source_errors + policy_errors + reopen_findings(list(reopen), item_records)
     if not errors:
-        errors = execution_plan_findings(root, sources, docs, reopen)
-    pull_request_checks = approved_pull_request_checks(docs)
+        errors = execution_plan_findings(root, sources, docs, reopen, pending)
+    pull_request_checks = approved_pull_request_checks(docs, "verification" in pending)
     if pull_request_checks["source"] != "external":
         errors += pull_request_workflow_findings(docs, delivery_id, remote)
     return (item_records, sources, backlog_snapshot, dod, policy, pull_request_checks), sorted(set(errors))
 
 
-def approve_execution(args) -> int:
-    docs = docs_root(args.docs)
-    # This verb writes the Item Operation bindings and refreshes the approved source
+def execution_approval_refusals(docs: Path, delivery_id: str, reopen: list[str] | tuple = (),
+                                remote: str = "origin", statuses: tuple = EXECUTION_APPROVAL_STATUSES,
+                                pending: frozenset | set = frozenset()) -> tuple[dict | None, list[str]]:
+    """Return what execution approval binds, or everything it refuses, in the order it reports them.
+
+    Approval runs on an approved scope. A gate that shows the plan before
+    approval passes the statuses it runs in and the Operation contract kinds
+    whose open revision it approves itself before execution approval runs.
+    """
+    # Approval writes the Item Operation bindings and refreshes the approved source
     # pins, so it cannot require either to already match. The contracts themselves are
     # still proved approved and current by execution_plan_findings before anything is
-    # written, and the sources are re-resolved from the approved backlog below.
-    root, findings = delivery_findings(docs, args.delivery, check_item_operation_bindings=False,
+    # written, and the sources are re-resolved from the approved backlog.
+    root, findings = delivery_findings(docs, delivery_id, check_item_operation_bindings=False,
                                        compare_source_pins=False)
     if root is None:
-        print(json.dumps({"ok": False, "errors": findings}, indent=2)); return 1
-    path = root / "delivery.md"
-    props, body = split_note(path)
-    if props.get("status") not in {"scope_approved", "execution_approved"}:
-        print(json.dumps({"ok": False, "errors": ["Execution approval requires a scope-approved Delivery"]}, indent=2)); return 1
+        return None, findings
+    props, body = split_note(root / "delivery.md")
+    if props.get("status") not in statuses:
+        return None, ["Execution approval requires a scope-approved Delivery"]
     if findings:
-        print(json.dumps({"ok": False, "errors": findings}, indent=2)); return 1
-    items = sorted(root.glob("items/*/item.md"))
-    if not items:
-        print(json.dumps({"ok": False, "errors": ["Execution Plan requires at least one Item"]}, indent=2)); return 1
+        return None, findings
+    if not any(root.glob("items/*/item.md")):
+        return None, ["Execution Plan requires at least one Item"]
+    inputs, errors = execution_approval_findings(docs, root, delivery_id, reopen, remote, pending)
+    if errors:
+        return None, errors
+    return {"root": root, "props": props, "body": body, "inputs": inputs}, []
+
+
+def pending_operation_revisions(docs: Path, root: Path) -> list[dict]:
+    """Return each open Operation revision the plan binds that passes its own check.
+
+    Under two fixed owner gates, gate A approves such a revision before
+    execution approval runs, so the gate may show the plan while it is open.
+    """
+    runtime = any(split_note(path)[0].get("runtime_required", False)
+                  for path in sorted(root.glob("items/*/item.md")))
+    pending = []
+    for kind in ("verification", "environment") if runtime else ("verification",):
+        if not operation_compile.contract_path(docs, kind).is_file():
+            continue
+        receipt, errors = operation_compile.check_contract(docs, kind)
+        if receipt.get("status") == "draft" and not errors:
+            pending.append({"kind": kind, "revision": receipt["revision"]})
+    return pending
+
+
+def check_plan(args) -> int:
+    """Report everything execution approval would refuse, before an owner gate shows the plan."""
+    docs = docs_root(args.docs)
+    root = find_delivery(docs, args.delivery)
+    status, pending = None, []
+    if root is not None:
+        props, _body = split_note(root / "delivery.md")
+        status = props.get("status")
+        if delivery_owner_gates(docs, props) == TWO_FIXED_GATES:
+            pending = pending_operation_revisions(docs, root)
+    reopen = sorted(set(str(story) for story in (args.reopen or [])))
+    with stage_package.candidate_session():
+        _approval, errors = execution_approval_refusals(
+            docs, args.delivery, reopen, args.remote, PLAN_GATE_STATUSES,
+            frozenset(revision["kind"] for revision in pending))
+    print(json.dumps({"ok": not errors, "id": args.delivery, "status": status, "errors": errors,
+                      "pending_operation_revisions": pending}, indent=2))
+    return 0 if not errors else 1
+
+
+def approve_execution(args) -> int:
+    docs = docs_root(args.docs)
     reopen = sorted(set(str(story) for story in (getattr(args, "reopen", None) or [])))
     remote = getattr(args, "remote", "origin")
-    inputs, plan_errors = execution_approval_findings(docs, root, args.delivery, reopen, remote)
-    _item_records, sources, backlog_snapshot, dod, policy, pull_request_checks = inputs
-    if plan_errors:
-        print(json.dumps({"ok": False, "errors": plan_errors}, indent=2)); return 1
+    approval, errors = execution_approval_refusals(docs, args.delivery, reopen, remote)
+    if approval is None:
+        print(json.dumps({"ok": False, "errors": errors}, indent=2)); return 1
+    root, props, body = approval["root"], approval["props"], approval["body"]
+    path = root / "delivery.md"
+    items = sorted(root.glob("items/*/item.md"))
+    _item_records, sources, backlog_snapshot, dod, policy, pull_request_checks = approval["inputs"]
     # Under switch delivery_path, execution approval keeps or leaves the light path record.
     path_record = delivery_path_record(docs, root, body, "approve-execution", remote)
     if path_record is not None:
@@ -2166,7 +2230,8 @@ def light_path_check(args) -> int:
     light = recorded if recorded is not None and recorded["path"] == "light" else None
     with stage_package.candidate_session():
         state = light_path_evaluation(docs, root, light, args.remote)
-        _inputs, plan_findings = execution_approval_findings(docs, root, args.delivery, remote=args.remote)
+        _approval, plan_findings = execution_approval_refusals(docs, args.delivery, remote=args.remote,
+                                                               statuses=PLAN_GATE_STATUSES)
     path = "light" if state["eligible"] and (recorded is None or light is not None) else "standard"
     result = {"ok": path == "light" and not plan_findings, "delivery": args.delivery, "status": status,
               "value": value, "path": path, "recorded": recorded["path"] if recorded else None,
@@ -2653,6 +2718,14 @@ def main(argv=None) -> int:
         "--remote", default="origin",
         help="the Git remote whose local remote-tracking refs hold the target and Integration branches")
     sub.add_parser("render").set_defaults(func=render)
+    plan_check = sub.add_parser("check-plan")
+    plan_check.add_argument("--delivery", required=True)
+    plan_check.add_argument("--reopen", action="append", default=[], metavar="STORY",
+                            help="an integrated Item the approval will name for reopen")
+    plan_check.add_argument("--remote", default="origin",
+                            help="the Git remote whose local remote-tracking refs hold the target and"
+                                 " Integration branches")
+    plan_check.set_defaults(func=check_plan)
     light = sub.add_parser("light-path-check")
     light.add_argument("--delivery", required=True)
     light.add_argument("--remote", default="origin",

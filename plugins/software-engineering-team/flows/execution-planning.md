@@ -6,7 +6,11 @@ Spawn template: paste `{{constitution}}` into every role prompt.
 stores topology on Item records and renders the Execution Plan as an exact
 aggregate. It validates dependencies, cycles, path and contract claims, role
 sequence, verification strategy and current source hashes before the user
-approves the plan.
+approves the plan: `delivery_compile.py check-plan --delivery DLV-###`, with
+each `--reopen` the approval will name, reports every refusal
+`approve-execution` would raise, from the same checks, and writes nothing.
+Show the plan to the user only once it passes; return each finding to the
+topology or contract writer first.
 Switch `owner_gates`: at `two_fixed_gates`, the owner decides the scope, the
 plan and every Operation or Governance change it needs together in gate A, whose
 approval is also the go for Item start, as

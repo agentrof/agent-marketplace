@@ -20,7 +20,8 @@ The compiler decides eligibility from the records; nothing is assumed.
 `delivery_compile.py init` reports it for the selection under `delivery_path`,
 and `delivery_compile.py light-path-check --delivery DLV-###` repeats it on the
 Delivery's records together with the `plan_findings` that execution approval
-would refuse. A Delivery is eligible only while every condition holds:
+would refuse, the findings `delivery_compile.py check-plan` reports. A Delivery
+is eligible only while every condition holds:
 
 - `single_story`: the selection holds exactly one Story.
 - `no_architect_role`: `software_architect` is neither the Story's owner nor

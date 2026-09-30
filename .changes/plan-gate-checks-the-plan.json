@@ -1,0 +1,6 @@
+{
+  "summary": "An owner gate no longer shows an execution plan that execution approval would refuse. The new read-only `delivery_compile.py check-plan --delivery DLV-###` runs the checks `approve-execution` runs, through one shared helper, and writes nothing: cycles, duplicate stories, unordered path or contract overlaps, unknown roles, stale pins, the lane and seam rules and the pull request check precondition. The execution-planning flow and entry run it before the standard plan gate, and gate A at `owner_gates` `two_fixed_gates` runs it on the proposal, where an open Operation revision that passes its own check is listed under `pending_operation_revisions` instead of refused, since gate A approves it first. `light-path-check` reports the same findings. Approval semantics do not change.",
+  "components": {
+    "software-engineering-team": "patch"
+  }
+}

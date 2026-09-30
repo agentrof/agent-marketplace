@@ -318,6 +318,15 @@ canonical owner of:
 - role sequence;
 - review and verification strategy.
 
+No owner gate shows a plan that execution approval would refuse.
+`delivery_compile.py check-plan --delivery DLV-###` runs the same checks as
+`approve-execution`, writes nothing and must pass before the plan gate on the
+standard path and before gate A at `owner_gates` `two_fixed_gates`;
+`light-path-check` reports the same findings as `plan_findings` before the
+light path's one gate. In gate A, an open Operation revision that passes its
+own check is listed under `pending_operation_revisions` instead of refused,
+since gate A approves it before execution approval runs.
+
 `execution-plan.md` is a compiler-rendered aggregate of those Item records.
 Approval is local. `publish-execution-plan` is the only network writer for the
 approved plan and creates no Item worktree or execution slot. Claims begin only

@@ -1711,9 +1711,11 @@ def collect(docs: Path, *, historical_inputs: bool = False,
                 if planning_mode == "requirement":
                     root_requirement = str(record["backlog"]["props"].get("requirement_ref", ""))
                     errors.extend(implements_findings(story_props, story_rel, root_requirement))
-            elif planning_mode and (introduced <= 0 or not origin_mode):
+            elif planning_mode and (introduced <= 0 or not (
+                    origin_mode or record["backlog"]["props"].get("legacy_contract"))):
                 # Historical records stay readable, but every new contract
-                # record identifies its intake without rewriting history.
+                # record identifies its intake without rewriting history. A
+                # story stubbed under the legacy contract has no mode to name.
                 errors.append(f"{story_rel} needs origin_mode and introduced_in_revision")
             if work_kind not in WORK_KINDS:
                 errors.append(f"{story_rel} work_kind must be feature, defect, or technical")
@@ -3122,6 +3124,10 @@ def stub_story(args) -> int:
         for key in ("uses_design", "constrained_by"):
             if not story_props[key]:
                 del story_props[key]
+        # A legacy backlog has no planning mode to record; a bare key would
+        # read back as a list.
+        if not planning_mode:
+            del story_props["origin_mode"]
         if implements:
             story_props["implements"] = implements
         if evidence:

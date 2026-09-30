@@ -410,17 +410,22 @@ At `single_source_bundle`, each fact is written once, in the section that
 `skill-content/execution-plan/data/fact-ownership.json` names, every other
 document links it, and each owner ruling gets one stable `User Decisions` id.
 `delivery_compile.py bundle-manifest --delivery DLV-###` lists every contract
-the plan revises or pins, every Item record with its Story and Test Plan and
-the fact ownership data, each with the hash of its bytes, and names the
-counterpart of every revised contract as a reader; it refuses a Delivery that
-runs `per_document`. The readers start together, the manifest is recomputed
-with `--expected-hash` before any finding is accepted, and the bundle replaces
-each revised contract's separate counterpart review. Its one verdict is
-approved only when no reader holds an open critical or major finding and the
-Operation and Delivery checks are green. A revised contract that no Item pins
-is recorded on the target branch and brought in with `refresh-target` before
-publication, because publication still carries only pinned contracts. The
-Delivery's pinned Process Policy names the value it ran under.
+the plan revises, pins or still has to carry, every Item record with its Story
+and Test Plan and the fact ownership data, each with the hash of its bytes,
+and the Delivery's `User Decisions` section with the hash of its text, and
+names the counterpart of every revised contract as a reader, in the role name
+`task_inputs.py --role` takes; it refuses a Delivery that runs
+`per_document`. The readers start together, the manifest is recomputed with
+`--expected-hash` before any finding is accepted, so a changed ruling needs a
+fresh read too, and the bundle replaces each revised contract's separate
+counterpart review. Its one verdict is approved only when no reader holds an
+open critical or major finding and the Operation and Delivery checks are
+green. A contract revision that no Item pins stays in the manifest's
+`unpinned_revisions` until the Integration, or before reservation the target,
+holds it, approval notwithstanding; it is recorded on the target branch and
+brought in with `refresh-target` before publication, because publication
+still carries only pinned contracts. The Delivery's pinned Process Policy
+names the value it ran under.
 
 Execution approval pins the approved Verification Contract on every Item. An
 Item marked `runtime_required: true` additionally pins the approved

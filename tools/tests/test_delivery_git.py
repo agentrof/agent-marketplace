@@ -4490,16 +4490,25 @@ class DeliveryGitTests(unittest.TestCase):
         manifest = delivery_compile.bundle_manifest(docs, "DLV-001")
         contract = "workspace/docs/operation/environment-contract.md"
         self.assertEqual(manifest["unpinned_revisions"], ["operation/environment-contract.md"])
-        self.assertEqual(manifest["readers"], ["qa_engineer"])
+        self.assertEqual(manifest["readers"], ["qa-engineer"])
         self.assertEqual(operation_compile.approve(args), 0)
         self.assertEqual(delivery_compile.approve_execution(scope), 0)
+        # A manifest recomputed after approval, as a resumed session does, still
+        # names the revision, and keeps it until the Integration holds it.
+        integration = "refs/remotes/origin/" + delivery_git.short_refs("DLV-001")["integration"]
+        recomputed = delivery_compile.bundle_manifest(docs, "DLV-001")
+        self.assertEqual(recomputed["unpinned_revisions"], ["operation/environment-contract.md"])
+        self.assertEqual(recomputed["held_by"], integration)
         # Skipping the step still refuses, as #321 records.
         with self.assertRaisesRegex(RuntimeError, "^DELIVERY_OPERATION_UNCARRIED: "):
             delivery_git.publish_execution_plan(project, "DLV-001")
         delivery_git.run_git(project, "add", "--", contract)
         delivery_git.run_git(project, "commit", "-qm", "Record the approved Environment Contract")
         delivery_git.run_git(project, "push", "-q", "origin", "main")
+        self.assertEqual(delivery_compile.bundle_manifest(docs, "DLV-001")["unpinned_revisions"],
+                         ["operation/environment-contract.md"])
         self.assertIn(contract, delivery_git.refresh_target(project, "DLV-001")["paths"])
+        self.assertEqual(delivery_compile.bundle_manifest(docs, "DLV-001")["unpinned_revisions"], [])
         published = delivery_git.publish_execution_plan(project, "DLV-001")
         self.assertEqual(published["operation_not_carried"], [])
         carried = delivery_git.published_plan_blobs(project, published["integration"], [contract])[contract]

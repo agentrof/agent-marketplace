@@ -8,9 +8,9 @@ flow differ on a step that names switch `mechanical_pass_tier`, this file
 governs.
 
 A mechanical pass decides nothing. It does work whose result the returned
-findings, a compiler or an approval already fix, so it runs on a lower tier or
-without a role. The review before it runs as switch `review_panels` selects,
-and every review, re-check and calibration keeps its roles and tiers.
+findings, a compiler or an approval already fix, so it runs on the mechanical
+tier or without a role. The review before it runs as switch `review_panels`
+selects, and every review, re-check and calibration keeps its roles and tiers.
 
 ## Pass kinds
 

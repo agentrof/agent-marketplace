@@ -72,7 +72,11 @@
   on the `mechanical` tier, the `fast` class (Luna) at effort `high`. Only
   switch `mechanical_pass_tier` at `mechanical` starts them, for a pass that
   applies the fixes a review names; the writers themselves keep their own
-  tier, and no review, re-check or calibration runs on a variant. For the
+  tier, and no review, re-check or calibration runs on a variant. Every
+  variant moves its writer from Sol to Luna, the lower class; its effort
+  `high` is above the `medium` of `product-owner`, `qa-engineer` and
+  `devops-engineer` and below the `xhigh` of `solution-architect`. These
+  values are placeholders until the tier's frozen-task A/B sets them. For the
   tier's frozen-task A/B, apply `--execution-profile inherit` in a scratch
   copy of the project and set the candidate model and effort as the
   session's `model` and `model_reasoning_effort`.

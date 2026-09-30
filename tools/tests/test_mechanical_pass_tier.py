@@ -1,4 +1,4 @@
-"""Process switch mechanical_pass_tier: writer fix passes on a lower tier.
+"""Process switch mechanical_pass_tier: writer fix passes on the mechanical tier.
 
 At `role_tier`, the default, nothing a task binds changes. At `mechanical`,
 the owning writer's `-mechanical` variant applies the fixes a review names and
@@ -80,8 +80,8 @@ class RegistryTests(unittest.TestCase):
     def test_the_mechanical_value_declares_one_variant_per_writer(self):
         self.assertEqual(switch()["agent_variants"], {"mechanical": {
             "suffix": "mechanical", "tier": "mechanical",
-            "description": "Lower-tier variant for mechanical passes that apply only the fixes"
-                           " a review verdict names.",
+            "description": "Mechanical-tier variant for passes that apply only the fixes a review"
+                           " verdict names.",
             "agents": sorted(WRITERS)}})
 
     def test_every_host_maps_the_mechanical_tier(self):
@@ -97,6 +97,47 @@ class RegistryTests(unittest.TestCase):
         # Starting values: the frozen-task A/B sets them before a project opts in.
         self.assertEqual(tables["claude"]["mechanical"], {"class": "strong", "effort": "high"})
         self.assertEqual(tables["codex"]["mechanical"], {"class": "fast", "effort": "high"})
+
+    def test_every_statement_of_the_tier_says_what_a_variant_changes_per_host(self):
+        # On Claude three writers already run the mechanical tier's class, so
+        # their variant changes only the effort (#330); the texts must say so.
+        tables = {host: json.loads(build_distributions.execution_profile_path(ROOT, host)
+                                   .read_text(encoding="utf-8"))["profiles"]["auto"]
+                  for host in ("claude", "codex")}
+        tiers = {agent: build_distributions.parse_frontmatter(TEAM / "agents" / f"{agent}.md")[0]
+                 ["reasoning"] for agent in WRITERS}
+        same_class = {host: {agent for agent, tier in tiers.items()
+                             if table[tier].get("class") == table["mechanical"]["class"]}
+                      for host, table in tables.items()}
+        self.assertEqual(same_class, {"claude": {"product-owner", "qa-engineer", "devops-engineer"},
+                                      "codex": set()})
+        spec = switch()
+        mechanical = next(value for value in spec["values"] if value["id"] == "mechanical")
+        for text in (mechanical["tradeoffs"], spec["agent_variants"]["mechanical"]["description"],
+                     read(REFERENCE)):
+            self.assertNotIn("lower mechanical tier", flat(text))
+            self.assertNotIn("Lower-tier", text)
+            self.assertNotIn("on a lower tier", flat(text))
+        for fragment in ("The host contract states per host what a variant changes against its"
+                         " writer's own tier", "only a fixed effort that is lower only when the"
+                         " session runs above it", "placeholders until the frozen-task A/B sets"
+                         " them"):
+            self.assertIn(fragment, mechanical["tradeoffs"])
+        contracts = {host: flat((ROOT / "platforms" / host / "software-engineering-team"
+                                 / "host-contract.md").read_text(encoding="utf-8"))
+                     .split("Every build also ships the `-mechanical` variants", 1)[1]
+                     .split(" - ", 1)[0] for host in tables}
+        authoring = flat((ROOT / "docs/authoring.md").read_text(encoding="utf-8")
+                         .split("## Mechanical passes", 1)[1].split("\n## ", 1)[0])
+        for text in (contracts["claude"], authoring):
+            self.assertIn("`product-owner`, `qa-engineer` and `devops-engineer` already run Sonnet"
+                          " at the session's effort, so their variant is lower only when the"
+                          " session runs above effort `high`", text)
+            self.assertIn("a lower model only for `solution-architect`", text)
+        for text in (contracts["codex"], authoring):
+            self.assertIn("from Sol to Luna", text)
+        for text in (*contracts.values(), authoring):
+            self.assertIn("placeholders until the tier's frozen-task A/B sets them", text)
 
 
 class InstructionTests(unittest.TestCase):

@@ -187,7 +187,10 @@ behavior is host-neutral; Claude Code and Codex are packaging adapters.
     changes. With every switch at its default, every compiler and coordinator
     output is byte-identical to the previous release on the same inputs and
     every task binds the same instructions; only script and contract hashes
-    change, and golden all-default runs prove it. A non-default value's
+    change, and golden all-default runs prove it. The one exception is role
+    models: the model and effort lines of rendered agents follow each host's
+    model catalog and execution profile, not default equivalence, so a
+    catalog change reaches every role under any policy. A non-default value's
     instructions live in switch references that `task_inputs.py` binds only
     when the project's Process Policy selects that value, together with the
     package data only that value reads. Project values live in

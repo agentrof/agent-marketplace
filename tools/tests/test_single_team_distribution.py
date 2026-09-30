@@ -1222,6 +1222,21 @@ class ExecutionProfileTests(unittest.TestCase):
                 self.assertFalse((Path(self.temporary.name) / key).exists())
         pins.write_bytes(pinned)
 
+    def test_model_and_effort_lines_are_the_named_exception_to_default_equivalence(self):
+        # Pinned models change every role's settings with no Process Policy (#344),
+        # so invariant 30 and the release note must say they follow the catalog.
+        exception = ("the model and effort lines of rendered agents follow each host's model"
+                     " catalog and execution profile, not default equivalence")
+        repository = fixtures.REAL_REPOSITORY
+        architecture = " ".join((repository / "docs/architecture.md").read_text(
+            encoding="utf-8").split())
+        invariant = architecture.split(" 30. ", 1)[1].split(" 31. ", 1)[0]
+        self.assertIn(exception, invariant)
+        summary = json.loads((repository / ".changes/pinned-role-models.json").read_text(
+            encoding="utf-8"))["summary"]
+        self.assertIn(exception, summary)
+        self.assertIn("the Codex high tier runs at `xhigh` instead of `high`", summary)
+
     def test_host_contracts_state_the_oldest_cli_the_pinned_models_need(self):
         adapters = build_distributions.load_adapters(self.root)
         for host, adapter in adapters.items():

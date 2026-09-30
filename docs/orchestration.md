@@ -103,6 +103,21 @@ non-runtime Environment rule do not change.
 `execution-plan/references/switch-execution_planning-single_source_bundle.md`
 defines the steps.
 
+When the owner answers a Delivery's questions is process switch `owner_gates`.
+At `per_step`, the default, each question is asked when it comes up. At
+`two_fixed_gates` the owner decides in two choice gates: gate A presents the
+scope, the execution plan, every Operation or Governance change it needs, the
+decision log and the queued questions, and its approval authorizes the plan's
+writes through Item start; gate B presents the Delivery Review, its follow-ups,
+the decision log since gate A and the merge. Between them a question is queued
+as a `pending` row of the Delivery's `User Decisions` table and only the tasks
+that depend on it wait; when every remaining task does, the queue is asked as an
+early gate. The Software Architect's escalation clause and the classes in
+`deliver/data/owner-decision-classes.json` are still asked at once, nothing is
+decided by default, and every gate groups its questions in calls of at most
+four, recommended option first.
+`deliver/references/switch-owner_gates-two_fixed_gates.md` defines the gates.
+
 Requirement Flow is a linear, user-gated sequence. Each required stage commits
 its approved documents before the next stage begins. The backlog compiler is
 the only machine that derives backlog indexes. All durable changes are

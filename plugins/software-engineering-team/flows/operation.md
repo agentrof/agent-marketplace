@@ -40,6 +40,10 @@ Requirement stage and it does not alter product-stage package hashes.
    defines.
 4. Approve with `operation_compile.py approve --kind <kind>`. Return the exact
    contract receipt. Do not run a downstream product stage automatically.
+   Switch `owner_gates`: at `two_fixed_gates`, a revision that a Delivery's
+   execution plan needs is approved in that Delivery's gate A, as
+   `skill-content/deliver/references/switch-owner_gates-two_fixed_gates.md`
+   defines.
 
 Verification may declare an optional `diagnostic_test_command` adapter for
 failed or affected tests, with `diagnostic_test_workdir` defaulting to `.` only

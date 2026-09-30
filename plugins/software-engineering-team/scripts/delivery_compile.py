@@ -89,6 +89,15 @@ DELIVERY_FOLLOW_UPS = "Open code review follow-ups of the integrated Items, list
 CALIBRATION_COLUMNS = ("finding", "claimed_severity", "calibrated_severity", "reason")
 ITEM_CALIBRATION = ("Severity calibration of the open critical and major claims,"
                     " recorded by approve-item-evidence:")
+OWNER_GATES = "owner_gates"
+TWO_FIXED_GATES = "two_fixed_gates"
+USER_DECISION_COLUMNS = ("id", "class", "question", "options", "recommendation", "status",
+                         "answer", "blocks", "wait_minutes")
+USER_DECISION_STATUSES = ("pending", "answered")
+USER_DECISION_ID_RE = re.compile(r"^D-[0-9]{2,}$")
+QUEUED_DECISION_CLASS = "queued"
+# The owner's questions are logged from the scope proposal through gate B.
+DECISION_LOG_STATUSES = ("scope_proposed", "scope_approved", "execution_approved", "active", "review")
 
 
 atomic_text = atomic_file.replace_text
@@ -358,6 +367,77 @@ def delivery_switch_value(docs: Path, delivery_id: str, switch: str) -> str:
     if errors:
         raise ValueError("; ".join(errors))
     return values[switch]["value"]
+
+
+def policy_owner_gates(docs: Path) -> str | None:
+    """Return the owner_gates value the Process Policy selects, or None when it cannot be read."""
+    try:
+        values, _snapshot = process_policy.effective_values(docs)
+    except ValueError:
+        return None
+    return values.get(OWNER_GATES, {}).get("value")
+
+
+def delivery_owner_gates(docs: Path, props: dict) -> str | None:
+    """Return the owner_gates value a Delivery keeps its decision log under.
+
+    Before scope approval the current policy decides. Later only a pin that
+    still names the approved policy does: a policy revised or drafted since
+    decides nothing here, and the pin checks report that drift where it
+    blocks. Outside the gate window there is no open log to check.
+    """
+    status = props.get("status")
+    if status not in DECISION_LOG_STATUSES:
+        return None
+    try:
+        values, snapshot = process_policy.effective_values(docs)
+    except ValueError:
+        return None
+    if status != "scope_proposed" and process_policy.pin_findings(props, snapshot):
+        return None
+    return values.get(OWNER_GATES, {}).get("value")
+
+
+def owner_decision_classes() -> set[str]:
+    path = Path(__file__).resolve().parents[1] / "skill-content/deliver/data/owner-decision-classes.json"
+    data = json.loads(path.read_text(encoding="utf-8"))
+    return {entry["id"] for entry in (*data["agent_clauses"], *data["classes"])}
+
+
+def user_decision_findings(body: str) -> list[str]:
+    """Validate the User Decisions table a Delivery keeps under two fixed owner gates."""
+    rows, errors = backlog_compile.structured_table(
+        section_bodies(body).get("User Decisions", ""), USER_DECISION_COLUMNS,
+        "delivery.md", "User Decisions")
+    classes = {QUEUED_DECISION_CLASS, *owner_decision_classes()}
+    seen: set[str] = set()
+    for number, row in enumerate(rows, 1):
+        label = f"delivery.md User Decisions row {number}"
+        if not USER_DECISION_ID_RE.fullmatch(row["id"]):
+            errors.append(f"{label} id must be D- and at least two digits")
+        elif row["id"] in seen:
+            errors.append(f"{label} repeats id {row['id']}; every id is unique")
+        seen.add(row["id"])
+        if row["class"] not in classes:
+            errors.append(f"{label} class must be {QUEUED_DECISION_CLASS} or an at-once class:"
+                          f" {', '.join(sorted(classes - {QUEUED_DECISION_CLASS}))}")
+        if not row["question"]:
+            errors.append(f"{label} states no question")
+        options = [option.strip() for option in row["options"].split(";") if option.strip()]
+        if len(options) < 2:
+            errors.append(f"{label} needs at least two options separated by semicolons")
+        if row["recommendation"] not in options:
+            errors.append(f"{label} recommendation must be one of its options")
+        if row["status"] not in USER_DECISION_STATUSES:
+            errors.append(f"{label} status must be {' or '.join(USER_DECISION_STATUSES)}")
+        elif row["status"] == "answered" and not row["answer"]:
+            errors.append(f"{label} is answered but records no answer")
+        elif row["status"] == "pending" and row["answer"]:
+            errors.append(f"{label} is pending but records an answer; only the owner's answer"
+                          " closes a question")
+        if row["wait_minutes"] and not re.fullmatch(r"[0-9]+", row["wait_minutes"]):
+            errors.append(f"{label} wait_minutes must be a whole number of minutes")
+    return errors
 
 
 def operation_contract_snapshot(docs: Path, kind: str) -> tuple[dict, list[str]]:
@@ -633,6 +713,7 @@ def init_delivery(args) -> int:
         dod_snapshot, dod_errors = approved_dod_source(docs)
         # New Items declare the implementation schedule the Process Policy selects.
         schedule, policy_errors = policy_implementation_schedule(docs)
+        owner_gates = policy_owner_gates(docs)
         errors = sorted(set(source_errors + dod_errors + policy_errors + budget_errors))
         # The proposal refuses a selection that scope approval, the handoff, would refuse.
         if not errors:
@@ -656,7 +737,10 @@ def init_delivery(args) -> int:
         "Scope Rationale": "Selected stories are the exact executable scope.",
         "Exclusions": "No release management or unrelated work.",
         "Definition of Done Baseline": dod_link,
-        "User Decisions": "Local scope proposal; awaiting scope approval.",
+        "User Decisions": ("\n".join(["| " + " | ".join(USER_DECISION_COLUMNS) + " |",
+                                       "|" + "---|" * len(USER_DECISION_COLUMNS)])
+                           if owner_gates == TWO_FIXED_GATES
+                           else "Local scope proposal; awaiting scope approval."),
         "Navigation": "\n".join([link("maps/delivery", "Delivery map"), *item_links]),
     })
     atomic_text(root / "delivery.md", frontmatter(props, body))
@@ -838,6 +922,8 @@ def delivery_findings(docs: Path, identifier: str, *,
             except ValueError as exc:
                 errors.append(f"{item_path}: {exc}")
         errors.extend(f"{item_path} missing section: {name}" for name in sorted(set(SECTIONS["item"]) - sections(item_body)))
+    if delivery_owner_gates(docs, props) == TWO_FIXED_GATES:
+        errors.extend(user_decision_findings(body))
     plan = root / "execution-plan.md"
     if plan.exists():
         plan_props, plan_body = split_note(plan)

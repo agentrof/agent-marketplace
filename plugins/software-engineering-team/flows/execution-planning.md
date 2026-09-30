@@ -7,6 +7,11 @@ stores topology on Item records and renders the Execution Plan as an exact
 aggregate. It validates dependencies, cycles, path and contract claims, role
 sequence, verification strategy and current source hashes before the user
 approves the plan.
+Switch `owner_gates`: at `two_fixed_gates`, the owner decides the scope, the
+plan and every Operation or Governance change it needs together in gate A, whose
+approval is also the go for Item start, as
+`skill-content/deliver/references/switch-owner_gates-two_fixed_gates.md`
+defines.
 
 New Items explicitly declare `verification_schedule: parallel_snapshot_v1`.
 Implementation roles retain their approved order; independent Code Review

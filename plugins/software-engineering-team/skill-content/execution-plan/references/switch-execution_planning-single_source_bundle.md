@@ -92,3 +92,5 @@ Record each owner ruling once, in the Delivery's `User Decisions` section, as
 a line that starts with its stable id: `D-` and at least two digits, numbered
 in the order the rulings are made. Every other document, a contract, an Item
 record or an architecture record, cites the id and never restates the ruling.
+At switch `owner_gates` `two_fixed_gates`, a ruling is the answer of its
+`answered` row in the decision table that switch keeps, under the same id.

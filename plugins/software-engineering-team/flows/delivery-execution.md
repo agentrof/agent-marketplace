@@ -26,6 +26,11 @@ Architect records decisions, alternatives and rationale and links the owning
 contract section for rule text, as
 `skill-content/software-architecture/references/switch-execution_planning-single_source_bundle.md`
 defines.
+Switch `owner_gates`: at `two_fixed_gates`, a question between gate A and gate
+B is queued in the Delivery's `User Decisions` unless it is of an at-once class,
+and the Delivery Review and the merge are decided together in gate B, as
+`skill-content/deliver/references/switch-owner_gates-two_fixed_gates.md`
+defines.
 
 ## Parallel verification
 

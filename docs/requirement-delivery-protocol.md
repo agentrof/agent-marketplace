@@ -237,6 +237,13 @@ Execution approval pins the approved Verification Contract on every Item. An
 Item marked `runtime_required: true` additionally pins the approved
 Environment Contract. Contract hash drift blocks Item start, resume, reopen and
 takeover; Operation remains outside Requirement and product-stage routing.
+Publication carries only the pinned contracts, so an Operation revision that
+no Item pins reaches the Delivery through the target branch and
+`refresh-target`. `publish-execution-plan` refuses with
+`DELIVERY_OPERATION_UNCARRIED` while such a revision is approved and current
+and the Integration does not hold it. Publication leaves out a differing local
+copy that is not approved and current, and its result names that copy as a
+`not_carried` file observation.
 
 Closure requires successful provider checks, so execution approval also
 carries the pull request check precondition that

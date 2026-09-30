@@ -2225,6 +2225,63 @@ def execution_operation_inputs(root: Path, directory: Path, docs: Path) -> tuple
     return paths, bindings
 
 
+def uncarried_operation_contracts(root: Path, docs: Path, integration_oid: str,
+                                  pinned_paths: list[str]) -> list[str]:
+    """Compare each Operation contract no Item pins with the Integration's copy.
+
+    Publication carries only the contracts the Items pin, so an unpinned revision
+    reaches the Delivery through the target branch and refresh-target. A local
+    revision that is approved and current, and that the Integration does not
+    hold, is refused. Any other local difference, such as a draft, could not be
+    published anyway: its path is returned so the result names what stays out.
+    The generated relation block and line endings are not compared, because
+    publication renders the one and a checkout may convert the other.
+    """
+    import operation_compile
+    from ba_compile import without_generated_relations
+
+    def authored(text: str | None) -> str | None:
+        return None if text is None else without_generated_relations(text.replace("\r\n", "\n")).rstrip()
+
+    def held(text: str | None, path: Path) -> str:
+        if text is None:
+            return "no copy"
+        try:
+            props = operation_compile.parse_text(text, path)[0]
+        except ValueError:
+            props = {}
+        status, revision = props.get("status"), props.get("revision")
+        if isinstance(status, str) and isinstance(revision, int):
+            return f"{status} revision {revision}"
+        return "another copy"
+
+    not_carried = []
+    for kind in sorted(operation_compile.KINDS):
+        path = operation_compile.contract_path(docs, kind)
+        relative = rel_posix(root, path)
+        if relative in pinned_paths:
+            continue
+        regular = path.is_file() and not path.is_symlink() and not path.parent.is_symlink()
+        local = path.read_text(encoding="utf-8") if regular else None
+        carried = published_plan_blobs(root, integration_oid, [relative]).get(relative)
+        if authored(local) == authored(carried):
+            continue
+        receipt = operation_compile.check_contract(docs, kind, local)[0] if local is not None else {}
+        if receipt.get("current"):
+            # Every Item pins the Verification Contract, so only a contract that
+            # runtime_required pins can be left unpinned.
+            title = operation_compile.TYPE_FOR[kind].replace("-", " ").title()
+            revision = receipt["revision"]
+            raise RuntimeError(
+                f"DELIVERY_OPERATION_UNCARRIED: no Item pins the approved {title} revision {revision}, "
+                f"and the Integration holds {held(carried, path)} at {relative}, so publication would "
+                f"leave revision {revision} out; record that revision on the target branch and run "
+                "refresh-target, or pin it with runtime_required: true on an Item that needs a live "
+                "service environment")
+        not_carried.append(relative)
+    return not_carried
+
+
 def publish_execution_plan(project_root: Path, delivery_id: str,
                            remote: str = "origin") -> dict:
     root = main_worktree(project_root.resolve())
@@ -2247,6 +2304,7 @@ def publish_execution_plan(project_root: Path, delivery_id: str,
         raise RuntimeError("DELIVERY_FENCE_MODE: publish-execution-plan requires an open Fence")
     package = package_paths(root, directory, docs, include_map=False)
     operation_paths, operation_bindings = execution_operation_inputs(root, directory, docs)
+    not_carried = uncarried_operation_contracts(root, docs, integration_oid, operation_paths)
     integration_candidate = commit_tree(
         root, integration_oid, sorted(set(package + operation_paths)), f"Publish execution plan for {delivery_id}",
         {"Record": "execution-plan-published-v1", "Protocol": "1", "Delivery": delivery_id,
@@ -2265,7 +2323,8 @@ def publish_execution_plan(project_root: Path, delivery_id: str,
     atomic_push(root, remote, [(refs["fence"], fence_oid, fence_candidate),
                                (refs["integration"], integration_oid, integration_candidate)])
     return {"ok": True, "delivery": delivery_id, "fence": fence_candidate,
-            "integration": integration_candidate, "refs": short_refs(delivery_id)}
+            "integration": integration_candidate, "operation_not_carried": not_carried,
+            "refs": short_refs(delivery_id)}
 
 
 def target_impact_hash(delivery_id: str, previous_target: str, target: str,

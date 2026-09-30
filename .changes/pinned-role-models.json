@@ -1,0 +1,6 @@
+{
+  "summary": "Role agents run on pinned, exact models on both hosts. Each host's `platforms/<host>/model-catalog.json` pins every model class to one exact model ID with its family, the efforts it supports, the official sources and the date they were verified, and `execution-profiles.json` (schema 2) maps each role tier to a class and an effort, so a model bump edits one class. Claude agents move from the `opus`, `sonnet` and `haiku` aliases to `claude-opus-5-5`, `claude-sonnet-5-5` and `claude-haiku-4-5-20251001` at unchanged efforts; a pinned ID no longer follows the main conversation's exact model or its `[1m]` context window, and `CLAUDE_CODE_SUBAGENT_MODEL_FORCE=1` in a project's settings restores that. Codex role files now carry both `model` and `model_reasoning_effort`: `gpt-6.1-sol` at `xhigh` for the high tier, at `medium` for the medium tier and at `high` for the lens readers, and `gpt-6-luna` at `high` for the mechanical and low tiers; an account, workspace or Codex version without a pinned model falls back with `generate_codex_project.py apply --execution-profile inherit`. The builder and `tools/validate.py` refuse a tier without a known class, an effort its class's model does not support and an ID outside the host's documented format or family, such as an alias.",
+  "components": {
+    "software-engineering-team": "minor"
+  }
+}

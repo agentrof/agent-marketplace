@@ -49,26 +49,28 @@
 - During setup or a package refresh, regenerate the host projection, run the
   generated project check and preserve authored vault files. The generator owns
   only portable instruction roots and local project memory.
-- Role agents use the package's `auto` execution profile, which sets each role
-  tier's reasoning effort and, when the table names one, its model. Every
-  build also ships the `-lens` variants of the read-only document reviewers on
-  the `lens` tier, effort `high` and no model, so they use the session model;
-  only review panels under switch `review_panels` at `lens_panel` start them,
-  and the reviewers themselves keep their own tier. When the user wants every
-  role to follow the parent session, run
+- Role agents use the package's `auto` execution profile: each role tier
+  runs one class of the package's model catalog, pinned to an exact model, at
+  the tier's reasoning effort, and every role file carries both `model` and
+  `model_reasoning_effort`. Every build also ships the `-lens` variants of the
+  read-only document reviewers on the `lens` tier, the `strong` class (Sol)
+  at effort `high`; only review panels under switch `review_panels` at
+  `lens_panel` start them, and the reviewers themselves keep their own tier.
+  When the account, the workspace or this Codex version cannot use a pinned
+  model, or the user wants every role to follow the parent session, run
   `<absolute-python> <absolute-package-scripts>/generate_codex_project.py apply
-  --project-root <root> --scope local --execution-profile inherit`;
-  `--execution-profile auto` restores the default. The managed agent files
-  record the choice and later refreshes keep it.
+  --project-root <root> --scope local --execution-profile inherit`, which
+  omits both keys; `--execution-profile auto` restores the default. The
+  managed agent files record the choice and later refreshes keep it.
 - Every build also ships the `-mechanical` variants of the document writers
   `product-owner`, `qa-engineer`, `devops-engineer` and `solution-architect`
-  on the `mechanical` tier, effort `medium` and no model. Only switch
-  `mechanical_pass_tier` at `mechanical` starts them, for a pass that applies
-  the fixes a review names; the writers themselves keep their own tier, and no
-  review, re-check or calibration runs on a variant. For the tier's
-  frozen-task A/B, apply `--execution-profile inherit` in a scratch copy of the
-  project and set the candidate effort as the session's
-  `model_reasoning_effort`.
+  on the `mechanical` tier, the `fast` class (Luna) at effort `high`. Only
+  switch `mechanical_pass_tier` at `mechanical` starts them, for a pass that
+  applies the fixes a review names; the writers themselves keep their own
+  tier, and no review, re-check or calibration runs on a variant. For the
+  tier's frozen-task A/B, apply `--execution-profile inherit` in a scratch
+  copy of the project and set the candidate model and effort as the
+  session's `model` and `model_reasoning_effort`.
 - Under switch `delivery_path` at `light_when_eligible`, an eligible Delivery
   is planned inside `/delivery-plan` with one owner gate, presented through
   `request_user_input`, and handed over to `/deliver DLV-###`; `/execution-plan

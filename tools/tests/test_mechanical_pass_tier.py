@@ -95,8 +95,8 @@ class RegistryTests(unittest.TestCase):
             for host in ("claude", "codex")
         }
         # Starting values: the frozen-task A/B sets them before a project opts in.
-        self.assertEqual(tables["claude"]["mechanical"], {"model": "sonnet", "effort": "high"})
-        self.assertEqual(tables["codex"]["mechanical"], {"effort": "medium"})
+        self.assertEqual(tables["claude"]["mechanical"], {"class": "strong", "effort": "high"})
+        self.assertEqual(tables["codex"]["mechanical"], {"class": "fast", "effort": "high"})
 
 
 class InstructionTests(unittest.TestCase):
@@ -231,9 +231,11 @@ class ValidatorTests(unittest.TestCase):
         cases = (
             ("claude", lambda auto: auto.pop("mechanical")),
             ("codex", lambda auto: auto.pop("mechanical")),
-            ("claude", lambda auto: auto.update(mechanical={"model": "sonnet", "effort": "extreme"})),
-            ("claude", lambda auto: auto.update(mechanical={"model": "gpt-5"})),
-            ("codex", lambda auto: auto.update(mechanical={"effort": "turbo"})),
+            ("claude", lambda auto: auto.update(mechanical={"class": "strong", "effort": "extreme"})),
+            ("claude", lambda auto: auto.update(mechanical={"class": "gpt-5"})),
+            ("claude", lambda auto: auto.update(mechanical={"model": "claude-sonnet-5-5"})),
+            ("codex", lambda auto: auto.update(mechanical={"class": "fast", "effort": "turbo"})),
+            ("codex", lambda auto: auto.update(mechanical={"class": "fast", "effort": "ultra"})),
         )
         for host, mutate in cases:
             with self.subTest(host=host, mutate=mutate):

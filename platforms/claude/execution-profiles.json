@@ -1,13 +1,13 @@
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "profiles": {
     "auto": {
-      "high": {"model": "opus"},
-      "medium": {"model": "sonnet"},
-      "low": {"model": "haiku"},
-      "lens": {"model": "sonnet", "effort": "high"},
-      "mechanical": {"model": "sonnet", "effort": "high"},
-      "inherit": {"model": "inherit"}
+      "high": {"class": "frontier"},
+      "medium": {"class": "strong"},
+      "low": {"class": "fast"},
+      "lens": {"class": "strong", "effort": "high"},
+      "mechanical": {"class": "strong", "effort": "high"},
+      "inherit": {}
     }
   }
 }

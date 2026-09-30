@@ -673,7 +673,7 @@ def check_content_bans(tree: Tree, findings: list[Finding]) -> None:
                         "error", rel(tree, path), lineno, "content_bans",
                         "model name outside agent frontmatter",
                         "host model names belong only in platforms/<host>/"
-                        "execution-profiles.json and generated distributions",
+                        "model-catalog.json and generated distributions",
                     ))
             if ABSOLUTE_PATH_RE.search(line):
                 findings.append(Finding(
@@ -2213,32 +2213,44 @@ def declared_tiers(tree: Tree) -> set[str]:
 
 
 def check_execution_profiles(tree: Tree, findings: list[Finding]) -> None:
-    """Every host maps exactly the canonical reasoning tiers to its own
-    documented model and effort values; model names stay under platforms/."""
+    """Every host pins its model classes to documented exact IDs and maps
+    exactly the canonical reasoning tiers to a class and a supported effort;
+    model names stay under platforms/."""
     try:
         adapters = build_distributions.load_adapters(tree.root)
     except ValueError:
         return  # registration and product_namespace report adapter failures
     tiers = declared_tiers(tree)
     for host, adapter in adapters.items():
-        path = build_distributions.execution_profile_path(tree.root, host)
-        try:
-            table = json.loads(read_text(path))
-        except (OSError, json.JSONDecodeError):
-            findings.append(Finding(
-                "error", rel(tree, path), 1, "execution_profiles",
-                "execution profile table is missing or not valid JSON",
-                "restore the host table that maps each reasoning tier to"
-                " model and effort",
-            ))
-            continue
-        for problem in build_distributions.execution_profile_problems(
-                table, adapter, tiers):
-            findings.append(Finding(
-                "error", rel(tree, path), 1, "execution_profiles", problem,
-                "map every reasoning tier in tools/data/models.json to the"
-                " host's documented model and effort values",
-            ))
+        tables = {}
+        for kind, path, hint in (
+                ("catalog", build_distributions.model_catalog_path(tree.root, host),
+                 "pin each model class to an exact ID the host documents, with"
+                 " its supported efforts, sources and verified date"),
+                ("profile", build_distributions.execution_profile_path(tree.root, host),
+                 "map every reasoning tier in tools/data/models.json to a class"
+                 " of the host's model catalog and an effort that class supports")):
+            try:
+                tables[kind] = (path, json.loads(read_text(path)), hint)
+            except (OSError, json.JSONDecodeError):
+                findings.append(Finding(
+                    "error", rel(tree, path), 1, "execution_profiles",
+                    f"{path.name} is missing or not valid JSON", hint,
+                ))
+        catalog = None
+        if "catalog" in tables:
+            path, value, hint = tables["catalog"]
+            problems = build_distributions.model_catalog_problems(value, adapter)
+            findings.extend(Finding(
+                "error", rel(tree, path), 1, "execution_profiles", problem, hint,
+            ) for problem in problems)
+            catalog = None if problems else value
+        if "profile" in tables:
+            path, value, hint = tables["profile"]
+            findings.extend(Finding(
+                "error", rel(tree, path), 1, "execution_profiles", problem, hint,
+            ) for problem in build_distributions.execution_profile_problems(
+                value, catalog, adapter, tiers))
 
 
 REVIEW_PANELS_RELPATH = "skill-content/challenge-review/data/review-panels.json"

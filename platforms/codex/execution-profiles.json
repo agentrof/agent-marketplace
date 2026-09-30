@@ -1,12 +1,12 @@
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "profiles": {
     "auto": {
-      "high": {"effort": "high"},
-      "medium": {"effort": "medium"},
-      "low": {"effort": "low"},
-      "lens": {"effort": "high"},
-      "mechanical": {"effort": "medium"},
+      "high": {"class": "strong", "effort": "xhigh"},
+      "medium": {"class": "strong", "effort": "medium"},
+      "low": {"class": "fast", "effort": "high"},
+      "lens": {"class": "strong", "effort": "high"},
+      "mechanical": {"class": "fast", "effort": "high"},
       "inherit": {}
     }
   }

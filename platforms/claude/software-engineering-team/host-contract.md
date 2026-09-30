@@ -50,25 +50,30 @@
 - During setup or a package refresh, regenerate the host projection, run the
   generated project check and preserve authored vault files. The generator owns
   only portable instruction roots and local project memory.
-- Role agents use the package's `auto` execution profile: `model` and, when
-  set, `effort` per role tier. Every build also ships the `-lens` variants of
-  the read-only document reviewers on the `lens` tier, `sonnet` at effort
-  `high`; only review panels under switch `review_panels` at `lens_panel`
-  spawn them, and the reviewers themselves keep their own tier. The package
-  cannot switch the profile per user. To run every role on the main
-  conversation's model, the user sets
-  `CLAUDE_CODE_SUBAGENT_MODEL_FORCE=1` in the `env` block of their settings
-  (Claude Code 2.1.257 or later). A
-  role's `effort` overrides the session level but not
-  `CLAUDE_CODE_EFFORT_LEVEL`, which pins one level for the session and every
-  subagent. Both settings reach every subagent in the session, not only this
-  team.
+- Role agents use the package's `auto` execution profile: each role tier
+  runs one class of the package's model catalog, pinned to an exact model ID,
+  and, when the tier sets one, an `effort`. A pinned ID does not follow the
+  main conversation: unlike a family alias such as `opus`, it keeps its
+  version and context window when the main conversation runs a newer model
+  or a `[1m]` variant of that family. Every build also ships the `-lens`
+  variants of the read-only document reviewers on the `lens` tier, the
+  `strong` class (Sonnet) at effort `high`; only review panels under switch
+  `review_panels` at `lens_panel` spawn them, and the reviewers themselves
+  keep their own tier. The package cannot switch the profile per user. To run
+  every role on the main conversation's model, for example when this Claude
+  Code version, the provider or the organization's model allowlist does not
+  offer a pinned model, the user sets `CLAUDE_CODE_SUBAGENT_MODEL_FORCE=1` in
+  the `env` block of the project's settings, or of their user settings for
+  every project (Claude Code 2.1.257 or later). A role's `effort` overrides
+  the session level but not `CLAUDE_CODE_EFFORT_LEVEL`, which pins one level
+  for the session and every subagent. Both settings reach every subagent in
+  the session, not only this team.
 - Every build also ships the `-mechanical` variants of the document writers
   `product-owner`, `qa-engineer`, `devops-engineer` and `solution-architect`
-  on the `mechanical` tier, `sonnet` at effort `high`. Only switch
-  `mechanical_pass_tier` at `mechanical` spawns them, for a pass that applies
-  the fixes a review names; the writers themselves keep their own tier, and no
-  review, re-check or calibration runs on a variant.
+  on the `mechanical` tier, the `strong` class (Sonnet) at effort `high`.
+  Only switch `mechanical_pass_tier` at `mechanical` spawns them, for a pass
+  that applies the fixes a review names; the writers themselves keep their
+  own tier, and no review, re-check or calibration runs on a variant.
 - Under switch `delivery_path` at `light_when_eligible`, an eligible Delivery
   is planned inside `/delivery-plan` with one owner gate, presented through
   `AskUserQuestion`, and handed over to `/deliver DLV-###`; `/execution-plan

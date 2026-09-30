@@ -80,9 +80,10 @@ behavior is host-neutral; Claude Code and Codex are packaging adapters.
     `tools/build_distributions.py`.
 19. Every host is discovered through `platforms/<host>/adapter.json` and its
     adapter module. Host-specific path names, manifests, permissions, hooks,
-    per-tier model and effort profiles, including the `lens` and `mechanical`
-    tiers that only generated agent variants use, and runtime behavior remain
-    in that platform directory; central tooling
+    the pinned model catalog and the per-tier model and effort profiles,
+    including the `lens` and `mechanical` tiers that only generated agent
+    variants use, and runtime behavior remain in that platform directory;
+    central tooling
     only orchestrates registry discovery, canonical copying, provenance, and
     owned generated-tree replacement.
 20. Requirement Flow ends at a committed, approved backlog. Delivery Flow owns

@@ -157,13 +157,19 @@ class ValidatorContractTests(unittest.TestCase):
     def test_execution_profile_tables_are_validated(self):
         for relative, mutate in (
                 ("platforms/claude/execution-profiles.json",
-                 lambda value: value["profiles"]["auto"]["high"].update(model="gpt-5")),
+                 lambda value: value["profiles"]["auto"]["high"].update({"class": "ghost"})),
                 ("platforms/claude/execution-profiles.json",
-                 lambda value: value["profiles"]["auto"]["low"].update(effort="extreme")),
+                 lambda value: value["profiles"]["auto"]["high"].update(model="claude-opus-5-5")),
+                ("platforms/claude/execution-profiles.json",
+                 lambda value: value["profiles"]["auto"]["low"].update(effort="high")),
                 ("platforms/codex/execution-profiles.json",
                  lambda value: value["profiles"]["auto"]["inherit"].update(effort="low")),
                 ("platforms/codex/execution-profiles.json",
                  lambda value: value["profiles"].update(fast={})),
+                ("platforms/claude/model-catalog.json",
+                 lambda value: value["classes"]["frontier"].update(id="opus")),
+                ("platforms/codex/model-catalog.json",
+                 lambda value: value["classes"]["fast"].update(efforts=["low", "ultra", "turbo"])),
                 ("tools/data/models.json",
                  lambda value: value["reasoning_levels"].append("extreme"))):
             with self.subTest(path=relative), \
@@ -173,7 +179,11 @@ class ValidatorContractTests(unittest.TestCase):
                 value = json.loads(path.read_text(encoding="utf-8"))
                 mutate(value)
                 path.write_text(json.dumps(value, indent=2) + "\n", encoding="utf-8")
-                self.assertIn("execution_profiles", self.checks(root))
+                findings = validate.run(root)
+                self.assertIn("execution_profiles", {finding.check for finding in findings})
+                if relative.startswith("platforms/"):
+                    self.assertIn((relative, "execution_profiles"),
+                                  {(finding.path, finding.check) for finding in findings})
 
         with tempfile.TemporaryDirectory() as temporary:
             root = self.fixture(temporary)
@@ -187,14 +197,17 @@ class ValidatorContractTests(unittest.TestCase):
                 {(finding.path, finding.check) for finding in findings},
             )
 
-        with tempfile.TemporaryDirectory() as temporary:
-            root = self.fixture(temporary)
-            (root / "platforms/codex/execution-profiles.json").unlink()
-            findings = validate.run(root)
-            self.assertIn(
-                ("platforms/codex/execution-profiles.json", "execution_profiles"),
-                {(finding.path, finding.check) for finding in findings},
-            )
+        for relative in ("platforms/codex/execution-profiles.json",
+                         "platforms/claude/model-catalog.json"):
+            with self.subTest(missing=relative), \
+                    tempfile.TemporaryDirectory() as temporary:
+                root = self.fixture(temporary)
+                (root / relative).unlink()
+                findings = validate.run(root)
+                self.assertIn(
+                    (relative, "execution_profiles"),
+                    {(finding.path, finding.check) for finding in findings},
+                )
 
     def test_malformed_model_config_is_a_finding_not_a_crash(self):
         missing = "model config is missing or not valid JSON"

@@ -165,30 +165,66 @@ kebab-case reasoning level and a snake_case key in the profile tables. A
 process switch value may declare generated agent variants on another tier,
 such as the `lens` tier of the review-panel readers or the `mechanical` tier
 of the writers' fix passes (see Process switches).
-Each host maps every tier to its own model and
-effort in `platforms/<host>/execution-profiles.json`, profile `auto`. The
-builder and `tools/validate.py` accept only the host's documented values, so
-model names stay out of `plugins/`. Claude agents receive `model:` and, when
-the table sets one, `effort:`; an omitted `effort` follows the session. Codex
-dist agents carry the resolved `model` and `model_reasoning_effort`, which
-setup renders into `.codex/agents/`.
+
+Each host keeps two tables under `platforms/<host>/`:
+
+- `model-catalog.json` pins every model class, such as `frontier`, `strong`
+  or `fast`, to one exact model ID: its `family`, its `id`, the `efforts` the
+  model supports on that host (empty when it takes none), the official
+  `sources` that document both, and the date they were `verified`.
+- `execution-profiles.json`, profile `auto`, maps every tier to a `class`
+  and, optionally, an `effort`; the `inherit` tier maps to nothing.
+
+A model bump therefore edits one class, and every tier on it follows. The
+builder and `tools/validate.py` refuse a tier without a known class, an
+effort outside its class's supported set or the host's vocabulary, and an ID
+outside the host adapter's documented format or the class's family, such as
+a Claude alias; model names stay out of `plugins/`. Claude agents receive the
+class's ID as `model:` and, when the tier sets one, `effort:`; an omitted
+`effort` follows the session. Codex dist agents carry the resolved `model` and
+`model_reasoning_effort`, which setup renders into `.codex/agents/`.
+
+The Codex defaults follow OpenAI's subagent guidance. Demanding roles run the
+`strong` class (Sol): the high tier at `xhigh`, the depth a main session at
+`ultra` reasons at per request, and the medium tier at `medium`. The low and
+mechanical tiers run the `fast` class (Luna) at `high`, OpenAI's starting
+point for Luna. Lens readers stay on the `strong` class at `high` because
+panel recall already trails the official reviewer's; their speed comes from
+running in parallel, not from a weaker model. No tier uses `ultra`, which
+delegates to further subagents.
+
+Pinning trades automatic upgrades for control. A Claude Code family alias
+such as `opus` runs on the main conversation's exact model, including its
+`[1m]` context window, when that model belongs to the family; it resolves to
+a version each provider serves; and an organization allowlist that blocks it
+substitutes the newest permitted version of the family. A pinned ID does none
+of that: the role keeps its version and window, an allowlist that blocks the
+ID runs the role on the main conversation's model, a provider that does not
+serve the ID fails the request unless a fallback model chain covers it, and
+each model needs a Claude Code version that knows it. On Codex, where roles
+named no model before, a pinned model needs an account, a workspace and a
+Codex version that offer it.
 
 `inherit` is the user override that makes every role follow the parent
 session's model and effort:
 
 - Codex: `generate_codex_project.py apply --project-root <root> --scope local
-  --execution-profile inherit` omits both keys from every role file. The managed files record the choice, later
-  refreshes keep it, and `--execution-profile auto` restores the default. It
-  is a local setup flag, not a `workspace/config.json` field: the closed
+  --execution-profile inherit` omits both keys from every role file. The
+  managed files record the choice, later refreshes keep it, and
+  `--execution-profile auto` restores the default. It is also the fallback
+  when the account, the workspace or the Codex version lacks a pinned model.
+  It is a local setup flag, not a `workspace/config.json` field: the closed
   config refuses performance knobs, and the profile is a personal host choice
   that changes only the ignored projection.
 - Claude Code: a plugin cannot switch frontmatter per user, and
   `${user_config.*}` is substituted only in the agent body. The documented
-  session setting `CLAUDE_CODE_SUBAGENT_MODEL_FORCE=1` (Claude Code 2.1.257 or
-  later) runs every role on the main conversation's model. A frontmatter `effort` overrides the session
-  level but not `CLAUDE_CODE_EFFORT_LEVEL`, which pins one level for the
-  session. Both reach every subagent in the session, not only this team.
-  Claude Code's permission modes do not select a model or effort.
+  setting `CLAUDE_CODE_SUBAGENT_MODEL_FORCE=1` (Claude Code 2.1.257 or later),
+  in the `env` block of a project's settings or of the user's settings, runs
+  every role on the main conversation's model, including its exact version
+  and context window. A frontmatter `effort` overrides the session level but
+  not `CLAUDE_CODE_EFFORT_LEVEL`, which pins one level for the session. Both
+  reach every subagent in the session, not only this team. Claude Code's
+  permission modes do not select a model or effort.
 
 ## Process switches
 

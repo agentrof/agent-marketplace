@@ -294,10 +294,12 @@ class ReviewPanelFlowTests(unittest.TestCase):
             for host in ("claude", "codex")
         }
         self.assertIn("spawn every reader of the panel in one message", contracts["claude"])
-        self.assertIn("on the `lens` tier, `sonnet` at effort `high`", contracts["claude"])
+        self.assertIn("on the `lens` tier, the `strong` class (Sonnet) at effort `high`",
+                      contracts["claude"])
         self.assertIn("start every reader of the panel before waiting on any of them",
                       contracts["codex"])
-        self.assertIn("effort `high` and no model", contracts["codex"])
+        self.assertIn("on the `lens` tier, the `strong` class (Sol) at effort `high`",
+                      contracts["codex"])
         for host, contract in contracts.items():
             with self.subTest(host=host):
                 self.assertIn("Under switch `review_panels` at `lens_panel`", contract)
@@ -322,8 +324,8 @@ class LensTierTests(unittest.TestCase):
                              .read_text(encoding="utf-8"))["profiles"]["auto"]
             for host in ("claude", "codex")
         }
-        self.assertEqual(tables["claude"]["lens"], {"model": "sonnet", "effort": "high"})
-        self.assertEqual(tables["codex"]["lens"], {"effort": "high"})
+        self.assertEqual(tables["claude"]["lens"], {"class": "strong", "effort": "high"})
+        self.assertEqual(tables["codex"]["lens"], {"class": "strong", "effort": "high"})
 
 
 if __name__ == "__main__":

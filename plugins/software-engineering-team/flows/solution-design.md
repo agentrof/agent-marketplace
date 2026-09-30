@@ -1,8 +1,7 @@
 # Solution Design Flow
 
 Spawn template: paste `{{constitution}}`, the exact BA receipt, tree paths,
-the reader's lenses or specialist risk and `SELF-CHECK` into every reviewer
-prompt.
+decision-status lens and `SELF-CHECK` into every reviewer prompt.
 
 Read this complete flow before `/solution-design` changes durable state.
 Exact `REQ-###` selects Requirement mode; its strict-current BA receipt is the only
@@ -24,20 +23,17 @@ bound as an explicit Requirement reuse, never used to author a new Solution revi
    different accepted stack than another component. Proposed, in-review,
    rejected and superseded decisions never constrain an approved topology.
 4. Follow the single review plan in
-   `skill-content/solution-architecture/references/challenge-lenses.md` in
-   the mode that `review_mode` in
-   `skill-content/challenge-review/data/review-panels.json` selects. In
-   `single` mode, the default, spawn one independent primary
-   `solution-reviewer` for all four challenge lenses plus BA allocation,
-   topology, naming, sourcing and decision status. In `panel` mode run review
-   panel `solution_design` instead: one fresh `solution-reviewer` per lens
-   assignment, in parallel, whose lenses together cover the same checks. The
-   panel replaces the single primary reviewer and never runs beside one. In
-   either mode add only the plan's risk-triggered specialist invocations;
-   they do not form a second panel. Wait for every selected reader before the
-   writer resolves blockers in canonical landscape/components/decisions.
-   Replies are transient; repeat only affected review when blocking evidence
-   changes.
+   `skill-content/solution-architecture/references/challenge-lenses.md`.
+   Spawn one independent primary `solution-reviewer` for all four required
+   lenses plus BA allocation, topology, naming, sourcing and decision status.
+   Add only the plan's risk-triggered specialist invocations; they do not form
+   a second default panel. Wait for every selected reader before the writer
+   resolves blockers in canonical landscape/components/decisions. Replies are
+   transient; repeat only affected review when blocking evidence changes.
+   Switch `review_panels`: at `lens_panel`, review panel `solution_design`
+   replaces the primary reviewer, as
+   `skill-content/challenge-review/references/switch-review_panels-lens_panel.md`
+   defines.
 5. After the owner confirms the exact topology and naming set, run
    `landscape_check.py confirm-topology`, then `check`, render
    capability/component/topology catalogs and package `approve`. Approval

@@ -2234,13 +2234,14 @@ def check_execution_profiles(tree: Tree, findings: list[Finding]) -> None:
             ))
 
 
-REVIEW_PANELS_RELPATH = build_distributions.REVIEW_PANELS_RELPATH
+REVIEW_PANELS_RELPATH = "skill-content/challenge-review/data/review-panels.json"
 VAULT_POLICY_RELPATH = "skill-content/obsidian-vault/data/vault-policy.json"
 REVIEW_PANEL_ANCHOR_RE = re.compile(r"\breview\s+panel\s+`([a-z][a-z0-9_]*)`")
 LENS_REFERENCE_RE = re.compile(r"\blens\s+`([a-z][a-z0-9-]*)`")
-REVIEW_MODE_SWITCH = "`review_mode`"
+REVIEW_PANELS_SWITCH = "review_panels"
+REVIEW_PANELS_VALUE = "lens_panel"
 REVIEW_STEP_ID_RE = re.compile(r"^[a-z][a-z0-9]*(?:_[a-z0-9]+)*$")
-REVIEW_PANEL_DATA_KEYS = {"schema_version", "review_mode", "review_modes", "review_steps"}
+REVIEW_PANEL_DATA_KEYS = {"schema_version", "review_steps"}
 REVIEW_STEP_KEYS = {"reader_role", "lenses", "default_panel"}
 LENS_KEYS = {"id", "focus"}
 
@@ -2264,40 +2265,12 @@ def _policy_list(policy: object, dotted: object) -> list[str] | None:
     return None
 
 
-def review_mode_problems(data: dict, tiers: set[str]) -> list[str]:
-    """Return the problems of the review_mode switch and its declared modes."""
-    modes = data["review_modes"]
-    expected = list(build_distributions.REVIEW_MODES)
-    if not isinstance(modes, dict) or set(modes) != set(expected):
-        return [f"review_modes must declare exactly the review modes {expected}"]
-    problems: list[str] = []
-    if not isinstance(data["review_mode"], str) or data["review_mode"] not in modes:
-        problems.append(f"review_mode must name one of the review modes {expected}")
-    for mode in expected:
-        spec = modes[mode]
-        overrides = spec.get("tier_overrides") if isinstance(spec, dict) else None
-        if not isinstance(spec, dict) or set(spec) != {"tier_overrides"} \
-                or not isinstance(overrides, dict):
-            problems.append(f"review mode {mode!r} must hold exactly a tier_overrides object")
-            continue
-        for tier, rendered in sorted(overrides.items(), key=lambda item: str(item[0])):
-            if tier not in tiers or not isinstance(rendered, str) or rendered not in tiers:
-                problems.append(
-                    f"review mode {mode!r} overrides {tier!r} with {rendered!r};"
-                    " both must be declared reasoning tiers")
-            elif tier == rendered:
-                problems.append(f"review mode {mode!r} overrides tier {tier!r} with itself")
-    return problems
-
-
-def review_panel_problems(data: object, agents: set[str], policy: object,
-                          tiers: set[str]) -> list[str]:
+def review_panel_problems(data: object, agents: set[str], policy: object) -> list[str]:
     """Return the shape problems of one plugin's review-panel lens data."""
     if not isinstance(data, dict) or set(data) != REVIEW_PANEL_DATA_KEYS \
             or data.get("schema_version") != 1:
-        return ["data must hold exactly schema_version 1, review_mode, review_modes"
-                " and review_steps"]
-    problems = review_mode_problems(data, tiers)
+        return ["data must hold exactly schema_version 1 and review_steps"]
+    problems: list[str] = []
     steps = data["review_steps"]
     if not isinstance(steps, dict) or not steps:
         return problems + ["review_steps must declare at least one review step"]
@@ -2387,12 +2360,34 @@ def review_panel_problems(data: object, agents: set[str], policy: object,
     return problems
 
 
+def lens_variant_problems(plugin: Path, steps: dict) -> list[str]:
+    """Every read-only panel reader runs as its lens_panel variant, and every
+    variant reads a declared review step."""
+    try:
+        registry = json.loads(read_text(plugin / PROCESS_SWITCHES_RELPATH))
+        variant = registry["switches"][REVIEW_PANELS_SWITCH]["agent_variants"][REVIEW_PANELS_VALUE]
+        variants = set(variant["agents"])
+    except (OSError, json.JSONDecodeError, KeyError, TypeError):
+        return [f"switch {REVIEW_PANELS_SWITCH!r} must declare the {REVIEW_PANELS_VALUE!r}"
+                " agent variants of the read-only panel readers"]
+    readers = {spec.get("reader_role") for spec in steps.values() if isinstance(spec, dict)}
+    read_only = set()
+    for reader in readers:
+        path = plugin / "agents" / f"{reader}.md"
+        tools = parse_frontmatter(read_text(path))[0].get("tools", "") if path.is_file() else ""
+        if {tool.strip() for tool in str(tools).split(",") if tool.strip()} == AGENT_READONLY_TOOLS:
+            read_only.add(reader)
+    return ([f"read-only panel reader {reader!r} has no {REVIEW_PANELS_VALUE!r} agent variant"
+             for reader in sorted(read_only - variants)]
+            + [f"{REVIEW_PANELS_VALUE!r} agent variant {agent!r} reads no read-only review step"
+               for agent in sorted(variants - read_only)])
+
+
 def check_review_panels(tree: Tree, findings: list[Finding]) -> None:
     """Review-panel lens sets are validated data. Every flow anchor names a
-    declared step, every declared step is wired into a flow that also reads
-    the review_mode switch, and every lens a prose reference names is
-    declared."""
-    tiers = declared_tiers(tree)
+    declared step, every declared step is wired into a flow that also names
+    switch `review_panels`, every read-only reader runs as its lens variant
+    and every lens a prose reference names is declared."""
     for plugin in plugin_dirs(tree):
         path = plugin / REVIEW_PANELS_RELPATH
         anchors: dict[str, list[Path]] = {}
@@ -2423,12 +2418,15 @@ def check_review_panels(tree: Tree, findings: list[Finding]) -> None:
         except (OSError, json.JSONDecodeError):
             policy = None  # vault_policy_shape reports a broken policy
         agents = {agent.stem for agent in agent_files(plugin)}
-        for problem in review_panel_problems(data, agents, policy, tiers):
-            err(path, problem, "declare the review mode switch and each review step,"
-                " lens and assignment once; a new lens or step is a data change"
-                " plus its flow anchor")
+        for problem in review_panel_problems(data, agents, policy):
+            err(path, problem, "declare each review step, lens and assignment once; a new"
+                " lens or step is a data change plus its flow anchor")
         steps = data.get("review_steps") if isinstance(data, dict) else None
         steps = steps if isinstance(steps, dict) else {}
+        for problem in lens_variant_problems(plugin, steps):
+            err(plugin / PROCESS_SWITCHES_RELPATH, problem,
+                "list every read-only panel reader, and only those, as a lens_panel"
+                " agent variant")
         declared_lenses = {
             lens["id"] for spec in steps.values() if isinstance(spec, dict)
             for lens in spec.get("lenses", []) if isinstance(spec.get("lenses"), list)
@@ -2445,17 +2443,17 @@ def check_review_panels(tree: Tree, findings: list[Finding]) -> None:
                     "anchor the step in its flow as review panel `<step>`")
         for flow in sorted({source for sources in anchors.values() for source in sources
                             if source.parent == flows}):
-            if REVIEW_MODE_SWITCH not in read_text(flow):
-                err(flow, f"flow {flow.name} runs a review panel but never reads the"
-                    f" {REVIEW_MODE_SWITCH} switch",
-                    "describe both review paths and name the switch that selects them")
+            if REVIEW_PANELS_SWITCH not in SWITCH_ANCHOR_RE.findall(read_text(flow)):
+                err(flow, f"flow {flow.name} runs a review panel but never names switch"
+                    f" `{REVIEW_PANELS_SWITCH}`",
+                    "anchor the switch that selects the panel at the review step")
         for lens, sources in sorted(lens_references.items()):
             if lens not in declared_lenses:
                 err(sources[0], f"prose names unknown lens {lens!r}",
                     "name a lens id the review-panel data declares")
 
 
-PROCESS_SWITCHES_RELPATH = "skill-content/configure/data/process-switches.json"
+PROCESS_SWITCHES_RELPATH = build_distributions.PROCESS_SWITCHES_RELPATH
 SWITCH_ANCHOR_RE = re.compile(r"\b[Ss]witch\s+`([a-z][a-z0-9_]*)`")
 SWITCH_REFERENCE_RE = re.compile(r"^switch-([a-z][a-z0-9_]*)-([a-z][a-z0-9_]*)\.md$")
 PROCESS_SWITCH_KEYS = {"summary", "flows", "values", "default", "metric", "promotion"}

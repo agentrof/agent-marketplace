@@ -305,19 +305,36 @@ class TaskInputTests(unittest.TestCase):
         qa = task_inputs.manifest(entry="deliver", role="qa-engineer", mode="create")
         self.assertEqual(qa["write_boundary"], "read_only")
 
-    def test_operation_panel_readers_bind_the_panel_protocol_and_lens_data(self):
-        for role in ("devops-engineer", "qa-engineer"):
-            with self.subTest(role=role):
-                plain = task_inputs.manifest(entry="configure", role=role, mode="review")
-                self.assertNotIn("skill-content/challenge-review/SKILL.md", plain["required_reads"])
-                result = task_inputs.manifest(entry="configure", role=role, mode="review",
-                                              skills=["challenge-review"])
-                self.assertIn("skill-content/challenge-review/SKILL.md", result["required_reads"])
-                self.assertIn("skill-content/challenge-review/references/review-panel.md",
-                              [item["path"] for item in result["conditional_reads"]])
-                self.assertIn("skill-content/challenge-review/data/review-panels.json",
-                              [item["path"] for item in result["instructions"]])
-                self.assertEqual(result["write_boundary"], "read_only")
+    def test_review_panel_protocol_is_bound_only_at_lens_panel(self):
+        protocol = "skill-content/challenge-review/references/switch-review_panels-lens_panel.md"
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw).resolve()
+            self.make_project(root)
+            tasks = (("configure", "devops-engineer", ["challenge-review"]),
+                     ("configure", "qa-engineer", ["challenge-review"]),
+                     ("backlog-plan", "backlog-reviewer", []),
+                     ("backlog-plan", "product-owner", ["challenge-review"]))
+            for entry, role, skills in tasks:
+                with self.subTest(entry=entry, role=role, policy=False):
+                    result = task_inputs.manifest(entry=entry, role=role, mode="review",
+                                                  project=root, skills=skills)
+                    self.assertIn("skill-content/challenge-review/SKILL.md", result["required_reads"])
+                    self.assertIn("skill-content/challenge-review/data/review-panels.json",
+                                  [item["path"] for item in result["instructions"]])
+                    self.assertNotIn(protocol, [item["path"] for item in result["instructions"]])
+            plain = task_inputs.manifest(entry="configure", role="devops-engineer", mode="review")
+            self.assertNotIn("skill-content/challenge-review/SKILL.md", plain["required_reads"])
+            docs = root / "workspace/docs"
+            for argv in (["init"], ["set", "--switch", "review_panels", "--value", "lens_panel"],
+                         ["approve"]):
+                with contextlib.redirect_stdout(io.StringIO()):
+                    self.assertEqual(process_policy.main([argv[0], "--docs", str(docs), *argv[1:]]), 0)
+            for entry, role, skills in tasks:
+                with self.subTest(entry=entry, role=role, policy=True):
+                    result = task_inputs.manifest(entry=entry, role=role, mode="review",
+                                                  project=root, skills=skills)
+                    self.assertIn(protocol, result["required_reads"])
+                    self.assertEqual(result["write_boundary"], "read_only")
 
     def test_process_policy_binds_only_the_chosen_switch_references(self):
         with tempfile.TemporaryDirectory() as raw:

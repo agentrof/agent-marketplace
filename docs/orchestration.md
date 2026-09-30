@@ -12,14 +12,16 @@ inputs, not project state. A later review layer starts only after the prior
 layer's writes and deterministic checks are green. Each host uses its native
 agent invocation and wait mechanism without changing these semantics.
 
-Backlog, Solution Design, Design System and Operation contract reviews run in
-the mode that `review_mode` in `challenge-review/data/review-panels.json`
-selects. `single`, the default, keeps one fresh reviewer per step. `panel`
-runs review panels, defined in `challenge-review/references/review-panel.md`:
-fresh read-only lens readers, one lens assignment each, read the same inputs
-in parallel. The owning persona merges findings that share a root cause, keeping
-the highest returned severity, and the panel approves only when no lens has an
-open critical or major finding and the owning compiler checks are green. A
+Backlog, Solution Design, Design System and Operation contract reviews run as
+process switch `review_panels` selects in the project's Process Policy.
+`single_reader`, the default, keeps one fresh reviewer per step. `lens_panel`
+runs review panels, defined in
+`challenge-review/references/switch-review_panels-lens_panel.md`: fresh
+read-only lens readers, one lens assignment each, read the same inputs in
+parallel, and the read-only reviewer roles run as their `-lens` variants. The
+owning persona merges findings that share a root cause, keeping the highest
+returned severity, and the panel approves only when no lens has an open
+critical or major finding and the owning compiler checks are green. A
 re-review reruns only the assignments whose blocking findings were fixed or
 disproved, plus one changed-text check. A panel replaces the step's single
 reviewer and never stacks on top of it: the Solution primary reviewer existed

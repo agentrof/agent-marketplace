@@ -337,57 +337,35 @@ class ReviewPanelValidatorTests(unittest.TestCase):
         data = json.loads(self.original)
         data["schema_version"] = 2
         self.panels.write_text(json.dumps(data), encoding="utf-8")
-        self.assert_rejected(
-            "data must hold exactly schema_version 1, review_mode, review_modes and review_steps")
+        self.assert_rejected("data must hold exactly schema_version 1 and review_steps")
 
-    def test_both_review_modes_are_valid_and_the_switch_is_checked(self):
-        for mode in ("single", "panel"):
-            with self.subTest(mode=mode):
-                self.write_data(lambda data: data.update(review_mode=mode))
-                self.assertEqual(self.panel_messages(), [])
+    def test_every_read_only_reader_runs_as_its_lens_variant(self):
+        registry = self.root / SWITCHES
+        original = registry.read_bytes()
 
-        def unknown_override(data):
-            data["review_modes"]["single"]["tier_overrides"]["lens"] = "ghost"
+        def variants(mutate) -> None:
+            data = json.loads(original)
+            mutate(data["switches"]["review_panels"])
+            registry.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
 
-        def self_override(data):
-            data["review_modes"]["panel"]["tier_overrides"]["high"] = "high"
+        variants(lambda switch: switch["agent_variants"]["lens_panel"]["agents"].remove(
+            "solution-reviewer"))
+        self.assert_rejected("read-only panel reader 'solution-reviewer' has no 'lens_panel'"
+                             " agent variant")
+        variants(lambda switch: switch["agent_variants"]["lens_panel"]["agents"].append(
+            "analysis-challenger"))
+        self.assert_rejected("'lens_panel' agent variant 'analysis-challenger' reads no"
+                             " read-only review step")
+        variants(lambda switch: switch.pop("agent_variants"))
+        self.assert_rejected("switch 'review_panels' must declare the 'lens_panel' agent variants")
+        registry.write_bytes(original)
+        self.assertEqual(self.panel_messages(), [])
 
-        def extra_mode_key(data):
-            data["review_modes"]["panel"]["reader_role"] = "backlog-reviewer"
-
-        cases = (
-            (lambda data: data.update(review_mode="shadow"),
-             "review_mode must name one of the review modes ['single', 'panel']"),
-            (lambda data: data.update(review_mode=["single"]),
-             "review_mode must name one of the review modes ['single', 'panel']"),
-            (lambda data: data["review_modes"].pop("panel"),
-             "review_modes must declare exactly the review modes ['single', 'panel']"),
-            (lambda data: data["review_modes"].update(shadow={"tier_overrides": {}}),
-             "review_modes must declare exactly the review modes ['single', 'panel']"),
-            (unknown_override,
-             "review mode 'single' overrides 'lens' with 'ghost'; both must be declared"
-             " reasoning tiers"),
-            (self_override, "review mode 'panel' overrides tier 'high' with itself"),
-            (extra_mode_key, "review mode 'panel' must hold exactly a tier_overrides object"),
-            (lambda data: data.pop("review_mode"),
-             "data must hold exactly schema_version 1, review_mode, review_modes and"
-             " review_steps"),
-        )
-        for mutate, fragment in cases:
-            with self.subTest(fragment=fragment):
-                self.panels.write_bytes(self.original)
-                self.write_data(mutate)
-                self.assert_rejected(fragment)
-
-    def test_a_panel_flow_must_read_the_review_mode_switch(self):
+    def test_a_panel_flow_must_name_the_review_panels_switch(self):
         flow = f"{PLUGIN_ROOT}/flows/design-system.md"
-        text = (self.root / flow).read_text(encoding="utf-8")
-        self.assertIn("`review_mode`", text)
-        (self.root / flow).write_text(text.replace("`review_mode`", "the switch"),
-                                      encoding="utf-8")
+        self.edit_text(flow, "Switch `review_panels`:", "The panel switch:")
         self.assert_rejected(
-            "flow design-system.md runs a review panel but never reads the `review_mode`"
-            " switch")
+            "flow design-system.md runs a review panel but never names switch `review_panels`")
 
     def test_duplicate_raw_json_key_is_rejected(self):
         self.edit_text(PANELS, '"reader_role": "design-system-reviewer",',
@@ -415,11 +393,12 @@ class ReviewPanelValidatorTests(unittest.TestCase):
         (self.root / flow).write_text(before, encoding="utf-8")
 
         # An anchor outside flows/ does not wire a step into a flow.
-        agent = f"{PLUGIN_ROOT}/agents/design-system-reviewer.md"
+        protocol = (f"{PLUGIN_ROOT}/skill-content/challenge-review/references/"
+                    "switch-review_panels-lens_panel.md")
         self.edit_text(f"{PLUGIN_ROOT}/flows/design-system.md",
                        "review panel `design_system`", "the design panel")
         self.assertIn("review panel `design_system`",
-                      (self.root / agent).read_text(encoding="utf-8").replace("\n", " "))
+                      (self.root / protocol).read_text(encoding="utf-8").replace("\n", " "))
         self.assert_rejected("review step 'design_system' is unknown to every flow")
 
     def test_prose_lens_names_must_be_declared(self):

@@ -2398,6 +2398,7 @@ def publish_execution_plan(project_root: Path, delivery_id: str,
     if trailer(fence_message, "Mode") != "open":
         raise RuntimeError("DELIVERY_FENCE_MODE: publish-execution-plan requires an open Fence")
     refuse_cancelled_delivery(root, directory, integration_oid, "publish-execution-plan")
+    refuse_reviewed_delivery(root, directory, integration_oid, delivery_id)
     package = package_paths(root, directory, docs, include_map=False)
     operation_paths, operation_bindings = execution_operation_inputs(root, directory, docs)
     refuse_superseded_approval(root, directory, docs, integration_oid, operation_paths)
@@ -2506,6 +2507,32 @@ def refuse_cancelled_delivery(root: Path, directory: Path, integration_oid: str,
         raise RuntimeError(f"DELIVERY_CANCELLATION_INVALID: the published Delivery is cancelled and a cancellation "
                            f"is final, so {verb} cannot continue it; its cancellation Review reaches the target "
                            "through its PR")
+
+
+# Once its Review is published, an Integration's delivery.md records the Delivery
+# past its execution plan, and the Review and PR records at its tip carry it to the PR.
+PAST_EXECUTION_STATUSES = ("review", "pr_handoff", "awaiting_merge", "merged")
+REVIEW_ROUTE_RECORDS = ("delivery-review-published-v1", "delivery-review-invalidated-v1",
+                        "pr-creation-intent-v1", "pr-adoption-intent-v1", "pr-url-recorded-v1")
+
+
+def refuse_reviewed_delivery(root: Path, directory: Path, integration_oid: str, delivery_id: str) -> None:
+    """Refuse to publish an execution plan over a Delivery its Integration records past that plan.
+
+    Publication writes the checkout's package over the Integration's, so a checkout
+    that still holds the execution_approved package would take a reviewed Delivery
+    back to execution_approved and put a plan record on top of the Review, the PR
+    intent or the PR record that the PR route reads at the tip.
+    """
+    from delivery_compile import split_note
+    status = split_remote_note(root, integration_oid, rel_posix(root, directory / "delivery.md"),
+                               split_note)[0].get("status")
+    record = trailer(commit_message(root, integration_oid), "Record")
+    if status in PAST_EXECUTION_STATUSES or record in REVIEW_ROUTE_RECORDS:
+        raise RuntimeError(f"DELIVERY_PLAN_SUPERSEDED: the Integration records {delivery_id} at {status} with "
+                           f"{record} at its tip, past its execution plan, so publication would take it back to "
+                           "execution_approved and off the route of its Review and PR; take the Delivery package "
+                           "from the Integration")
 
 
 def direct_update_took_no_effect(root: Path, remote: str, head: str) -> bool:

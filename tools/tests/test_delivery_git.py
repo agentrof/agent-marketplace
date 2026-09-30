@@ -4797,6 +4797,43 @@ class DeliveryGitTests(unittest.TestCase):
         self.assertEqual((carried[records[1]], carried[records[2]]), (sealed[records[1]], sealed[records[2]]))
         self.assertEqual(statuses(project, revised["integration"]), ["integrated", "approved", "passed"])
 
+    def test_republication_never_takes_a_reviewed_delivery_back_to_its_plan(self):
+        """A checkout that still holds the approved plan cannot publish it over the published Review,
+        the PR intent or the PR record: that would move the Integration tip off them and put its
+        delivery.md back to execution_approved. Each refusal names the Integration's state and moves
+        no ref, and the PR route goes on (#322, #331)."""
+        project, docs, directory, _item, _reserved = self.prepare_execution_with_draft_reserved_contracts(False)
+        first = delivery_git.publish_execution_plan(project, "DLV-001")
+        second = self.second_checkout(project, directory, first["integration"])
+        delivery_git.claim_items(project, "DLV-001")
+        active = delivery_git.start_item(project, "DLV-001", "AUTH-01")
+        self.commit_item_product_change(active["worktree"], "def authenticate():\n    return True\n")
+        self.assertEqual(self.approve_item_evidence(active["worktree"]), 0)
+        delivery_git.push_item(project, "DLV-001", "AUTH-01")
+        integrated = delivery_git.integrate_item(project, "DLV-001", "AUTH-01")
+        with contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(delivery_compile.approve_review(type("Args", (), {
+                "docs": str(docs), "delivery": "DLV-001", "reviewed_commit": integrated["integration"],
+                "reviewed_integration_commit": integrated["integration"]})), 0)
+        state: dict = {}
+        steps = (("review", "delivery-review-published-v1",
+                  lambda: delivery_git.publish_delivery_review(project, "DLV-001")),
+                 ("review", "pr-creation-intent-v1", lambda: delivery_git.prepare_pr_creation(project, "DLV-001")),
+                 ("awaiting_merge", "pr-url-recorded-v1", lambda: delivery_git.open_pr(project, "DLV-001")))
+        with mock.patch("delivery_provider.GitHubProvider", self.fake_provider_type(state)):
+            for status, record, step in steps:
+                with self.subTest(record=record):
+                    step()
+                    delivery_git.run_git(second, "fetch", "-q", "origin")
+                    before = delivery_git.run_git(project, "ls-remote", "origin")
+                    self.assertEqual(self.refused_finding(lambda: delivery_git.publish_execution_plan(second, "DLV-001")), (
+                        "DELIVERY_PLAN_SUPERSEDED",
+                        f"the Integration records DLV-001 at {status} with {record} at its tip, past its execution "
+                        "plan, so publication would take it back to execution_approved and off the route of its "
+                        "Review and PR; take the Delivery package from the Integration"))
+                    self.assertEqual(delivery_git.run_git(project, "ls-remote", "origin"), before)
+            self.assertEqual(delivery_git.merge_pr(project, "DLV-001")["status"], "merged")
+
     def test_execution_publication_keeps_a_terminal_item_on_its_verified_revision(self):
         """A closed Item's binding names history, not a stale current receipt."""
         project, _docs, _directory, item, _reserved = self.prepare_execution_with_draft_reserved_contracts()

@@ -456,7 +456,12 @@ Otherwise it refuses with `DELIVERY_PLAN_SUPERSEDED`, names the Integration's
 plan hash and contract revisions, and moves no ref: take the Delivery package
 and the Operation contracts from the Integration, then revise inside
 `begin-plan-revision`. The first publication and a republication of the same
-plan are unchanged.
+plan are unchanged. Once the Integration records the Delivery past its plan,
+with a `delivery.md` status of `review` or later or with the Delivery Review,
+its PR intent or its PR record at the tip, publication refuses with
+`DELIVERY_PLAN_SUPERSEDED` too and names that status and record, since it
+would take the Integration's `delivery.md` back to `execution_approved` and
+move the tip off the route of the Review and the PR.
 
 Publication never moves a sealed Item back. An Item's sealed record and its
 approved review and verification records reach the Integration only through

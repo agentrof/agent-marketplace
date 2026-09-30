@@ -185,6 +185,9 @@
     "verification_mode": "text",
     "verification_result_hash": "text",
     "verification_schedule": "text",
+    "implementation_schedule": "text",
+    "lane_scopes": "multitext",
+    "lane_seams": "multitext",
     "mutation_include_paths": "multitext"
   }
 }

@@ -1399,6 +1399,232 @@ class DeliveryCompilerTests(unittest.TestCase):
         self.assertEqual(delivery_compile.approve_scope(scope), 0)
         self.assertEqual(delivery_compile.approve_execution(scope), 1)
 
+    # Switch implementation_schedule: lane plans are declared, validated and hashed (#327).
+    LANE_COMPONENTS = {"api": {"sourcing": "build", "code_path": "workspace/apps/api"}}
+    LANES = ["backend_developer:workspace/apps/api", "devops_engineer:deploy",
+             "frontend_developer:workspace/apps/web"]
+
+    @contextlib.contextmanager
+    def story_roles(self, *supporting: str):
+        """Give AUTH-01 supporting roles without re-approving the fixture backlog."""
+        original = delivery_compile.approved_backlog_sources
+
+        def with_roles(docs, story_ids, **kwargs):
+            sources, snapshot, errors = original(docs, story_ids, **kwargs)
+            for source in sources.values():
+                source["supporting_roles"] = list(supporting)
+            return sources, snapshot, errors
+
+        with mock.patch.object(delivery_compile, "approved_backlog_sources", with_roles), \
+                mock.patch.object(architecture_compile, "solution_components",
+                                  return_value=self.LANE_COMPONENTS):
+            yield
+
+    def select_parallel_lanes(self):
+        self.policy("begin-revision" if process_policy.path_for(self.docs).exists() else "init")
+        self.policy("set", "--switch", "implementation_schedule", "--value", "parallel_lanes_v1")
+        self.policy("approve")
+
+    def init_lane_delivery(self, delivery: str = "DLV-001") -> tuple[int, str, Path]:
+        args = type("Args", (), {"docs": str(self.docs), "id": delivery, "slug": "auth",
+                                 "goal": "Authenticate", "outcome": None,
+                                 "target_branch": "main", "story": ["AUTH-01"]})
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output):
+            code = delivery_compile.init_delivery(args)
+        root = delivery_compile.find_delivery(self.docs, delivery)
+        return code, output.getvalue(), root / "items/auth-01/item.md" if root else None
+
+    def lane_item(self, item: Path, **changes) -> dict:
+        props, body = delivery_compile.split_note(item)
+        props.update({
+            "architecture_impact": "required", "architecture_components": ["api"],
+            "architecture_record_kinds": ["interface-contract"],
+            "architecture_reason": "Fix the API seam before the lanes start.",
+            "role_sequence": ["software_architect", "backend_developer", "devops_engineer",
+                              "frontend_developer", "code_reviewer", "qa_engineer"],
+            "path_claims": ["deploy", "workspace/apps/api", "workspace/apps/web"],
+            "contract_claims": ["auth:session"], "implementation_schedule": "parallel_lanes_v1",
+            "lane_scopes": list(self.LANES),
+            "lane_seams": ["backend_developer -> frontend_developer via IFC-001"], **changes})
+        delivery_compile.atomic_text(item, delivery_compile.frontmatter(props, body))
+        return props
+
+    def lane_findings(self, item: Path, **changes) -> list[str]:
+        self.lane_item(item, **changes)
+        sources, _snapshot, errors = delivery_compile.approved_backlog_sources(self.docs, ["AUTH-01"])
+        self.assertEqual(errors, [])
+        return delivery_compile.execution_plan_findings(item.parents[2], sources, self.docs)
+
+    def test_switch_is_declared_off_by_default_with_the_issue_promotion_unit(self):
+        switch = process_policy.load_registry()["implementation_schedule"]
+        self.assertEqual((switch["values"], switch["default"]),
+                         (["sequential_v1", "parallel_lanes_v1"], "sequential_v1"))
+        self.assertIn("At least 3 Items", switch["spec"]["promotion"]["unit"])
+        self.assertIn("70%", switch["spec"]["promotion"]["threshold"])
+
+    def test_parallel_lane_policy_declares_lanes_only_on_new_items_with_two_lanes(self):
+        self.approve_verification_contract()
+        self.approve_dod()
+        self.select_parallel_lanes()
+        with self.story_roles("devops_engineer", "software_architect"):
+            code, output, item = self.init_lane_delivery()
+        self.assertEqual(code, 0, output)
+        props, _body = delivery_compile.split_note(item)
+        self.assertEqual({key: props[key] for key in ("implementation_schedule", "lane_scopes", "lane_seams")},
+                         {"implementation_schedule": "parallel_lanes_v1", "lane_scopes": [], "lane_seams": []})
+        keys = list(props)
+        self.assertEqual(keys[keys.index("verification_schedule") + 1:keys.index("tags")],
+                         ["implementation_schedule", "lane_scopes", "lane_seams"])
+        # One lane has nothing to run in parallel, so the Item keeps today's bytes.
+        with self.story_roles("software_architect"):
+            code, output, single = self.init_lane_delivery("DLV-002")
+        self.assertEqual(code, 0, output)
+        self.assertFalse({"implementation_schedule", "lane_scopes", "lane_seams"}
+                         & set(delivery_compile.split_note(single)[0]))
+        self.assert_delivery_vault_contract()
+        self.policy("begin-revision")
+        code, output, missing = self.init_lane_delivery("DLV-003")
+        self.assertEqual((code, missing), (2, None))
+        self.assertIn("Process Policy revision 2 is a draft", output)
+
+    def test_approval_renders_seam_ordered_lanes_and_hashes_the_lane_plan(self):
+        self.approve_verification_contract()
+        self.approve_dod()
+        self.select_parallel_lanes()
+        plan_args = type("Args", (), {"docs": str(self.docs), "delivery": "DLV-001"})
+        with self.story_roles("devops_engineer", "frontend_developer"):
+            code, output, item = self.init_lane_delivery()
+            self.assertEqual(code, 0, output)
+            self.assertEqual(delivery_compile.approve_scope(plan_args), 0)
+            self.lane_item(item)
+            code, result = self.approve_execution_result(plan_args)
+            self.assertEqual(code, 0, result)
+            plan = item.parents[2] / "execution-plan.md"
+            first_plan, plan_body = delivery_compile.split_note(plan)
+            first_item = delivery_compile.split_note(item)[0]
+            self.assertIn("- AUTH-01: software_architect -> backend_developer + devops_engineer"
+                          " -> frontend_developer -> code_reviewer + qa_engineer", plan_body)
+            self.assertEqual(delivery_compile.check_delivery(plan_args), 0)
+            self.assert_delivery_vault_contract()
+            # The lane plan is inside the Item plan hash and so inside the plan hash.
+            self.lane_item(item, lane_seams=[])
+            code, result = self.approve_execution_result(plan_args)
+            self.assertEqual(code, 0, result)
+            second_plan, plan_body = delivery_compile.split_note(plan)
+            self.assertIn("- AUTH-01: software_architect -> backend_developer + devops_engineer"
+                          " + frontend_developer -> code_reviewer + qa_engineer", plan_body)
+            self.assertNotEqual(delivery_compile.split_note(item)[0]["item_plan_hash"],
+                                first_item["item_plan_hash"])
+            self.assertNotEqual(second_plan["plan_hash"], first_plan["plan_hash"])
+            self.lane_item(item, lane_seams=first_item["lane_seams"], lane_scopes=list(reversed(self.LANES)))
+            self.assertEqual(self.approve_execution_result(plan_args)[0], 0)
+            self.assertNotEqual(delivery_compile.split_note(item)[0]["item_plan_hash"],
+                                first_item["item_plan_hash"])
+
+    def test_approval_rejects_lane_scopes_that_overlap_miss_claims_or_reach_serial_state(self):
+        self.approve_verification_contract()
+        self.approve_dod()
+        self.select_parallel_lanes()
+        with self.story_roles("devops_engineer", "frontend_developer"):
+            item = self.init_lane_delivery()[2]
+            self.assertEqual(self.lane_findings(item), [])
+            # Near-prefix siblings are disjoint; parents and children are not.
+            self.assertEqual(self.lane_findings(
+                item, path_claims=["api", "api-tools", "deploy"],
+                lane_scopes=["backend_developer:api", "devops_engineer:deploy", "frontend_developer:api-tools"]), [])
+            cases = {
+                "lane scopes of backend_developer and frontend_developer overlap": dict(
+                    path_claims=["api", "api/web", "deploy"],
+                    lane_scopes=["backend_developer:api", "devops_engineer:deploy", "frontend_developer:api/web"]),
+                "unassigned claims: workspace/apps/web": dict(lane_scopes=self.LANES[:2] + ["frontend_developer:web"]),
+                "overlaps workspace/docs, which stays serial": dict(
+                    path_claims=["deploy", "workspace/apps/api", "workspace/docs/ui"],
+                    lane_scopes=self.LANES[:2] + ["frontend_developer:workspace/docs/ui"]),
+                "overlaps .agentrof, which stays serial": dict(
+                    path_claims=["deploy", "workspace/apps/api", ".agentrof/cache"],
+                    lane_scopes=self.LANES[:2] + ["frontend_developer:.agentrof/cache"]),
+                "implementation role frontend_developer has no lane scope": dict(
+                    path_claims=["deploy", "workspace/apps/api"], lane_scopes=self.LANES[:2]),
+                "software_architect, which runs alone before the lanes": dict(
+                    lane_scopes=self.LANES + ["software_architect:workspace/apps/api"]),
+                "qa_engineer, which is not an implementation role": dict(
+                    path_claims=["deploy", "workspace/apps/api", "workspace/apps/web", "tests"],
+                    lane_scopes=self.LANES + ["qa_engineer:tests"]),
+                "lane_scope must be <role>:<normalized path>: backend_developer:workspace\\apps\\api": dict(
+                    lane_scopes=["backend_developer:workspace\\apps\\api", *self.LANES[1:]]),
+                "lane_scope must be <role>:<normalized path>: backend_developer:C:/apps": dict(
+                    lane_scopes=["backend_developer:C:/apps", *self.LANES[1:]]),
+                "lane_scope must be <role>:<normalized path>: backend_developer: workspace/apps/api": dict(
+                    lane_scopes=["backend_developer: workspace/apps/api", *self.LANES[1:]]),
+                "lane_scopes repeat an entry": dict(lane_scopes=self.LANES + self.LANES[:1]),
+            }
+            for expected, changes in cases.items():
+                with self.subTest(expected=expected):
+                    findings = self.lane_findings(item, **changes)
+                    self.assertTrue(any(expected in finding for finding in findings), findings)
+
+    def test_approval_rejects_cyclic_or_unbound_seams_and_an_unselected_schedule(self):
+        self.approve_verification_contract()
+        self.approve_dod()
+        self.select_parallel_lanes()
+        with self.story_roles("devops_engineer", "frontend_developer"):
+            item = self.init_lane_delivery()[2]
+            self.assertEqual(self.lane_findings(item, lane_seams=[
+                "devops_engineer -> backend_developer via auth:session",
+                "backend_developer -> frontend_developer via IFC-001"]), [])
+            self.assertEqual(delivery_compile.execution_phases(delivery_compile.split_note(item)[0]), [
+                ["software_architect"], ["devops_engineer"], ["backend_developer"],
+                ["frontend_developer"], ["code_reviewer", "qa_engineer"]])
+            cases = {
+                "lane_seams contain a cycle": ["backend_developer -> frontend_developer via IFC-001",
+                                               "frontend_developer -> backend_developer via auth:session"],
+                "must name one of its contract_claims": ["backend_developer -> frontend_developer via DAT-001"],
+                "via HUB-api must name": ["backend_developer -> frontend_developer via HUB-api"],
+                "via billing:invoice must name": ["backend_developer -> frontend_developer via billing:invoice"],
+                "must join two different lane roles": ["software_architect -> backend_developer via IFC-001"],
+                "join two different lane roles": ["backend_developer -> backend_developer via IFC-001"],
+                "lane_seam must be <producer> -> <consumer> via <interface>": ["backend_developer to frontend_developer"],
+                "lane_seams repeat a seam": ["backend_developer -> frontend_developer via IFC-001"] * 2,
+            }
+            for expected, seams in cases.items():
+                with self.subTest(expected=expected):
+                    findings = self.lane_findings(item, lane_seams=seams)
+                    self.assertTrue(any(expected in finding for finding in findings), findings)
+            findings = self.lane_findings(item, implementation_schedule="parallel_lanes_v2")
+            self.assertTrue(any("unsupported implementation_schedule" in finding for finding in findings), findings)
+            findings = self.lane_findings(item, implementation_schedule="sequential_v1")
+            self.assertTrue(any("only implementation_schedule parallel_lanes_v1 reads" in finding
+                                for finding in findings), findings)
+            self.assertEqual(self.lane_findings(item, implementation_schedule="sequential_v1",
+                                                lane_scopes=[], lane_seams=[]), [])
+            # An Item that still runs lanes needs a policy that selects them.
+            self.policy("begin-revision")
+            self.policy("set", "--switch", "implementation_schedule", "--default")
+            self.policy("approve")
+            findings = self.lane_findings(item)
+            self.assertTrue(any("parallel_lanes_v1 needs the Process Policy to select it" in finding
+                                for finding in findings), findings)
+            props = self.lane_item(item, status="integrated")
+            sources = delivery_compile.approved_backlog_sources(self.docs, ["AUTH-01"])[0]
+            self.assertEqual(delivery_compile.execution_plan_findings(item.parents[2], sources, self.docs), [])
+            self.assertTrue(delivery_compile.execution_plan_findings(
+                item.parents[2], sources, self.docs, reopen=[props["story_id"]]))
+
+    def test_items_without_a_schedule_keep_their_phases(self):
+        roles = ["software_architect", "backend_developer", "devops_engineer", "code_reviewer", "qa_engineer"]
+        self.assertEqual(delivery_compile.execution_phases({"role_sequence": roles}),
+                         [[role] for role in roles])
+        self.assertEqual(delivery_compile.execution_phases(
+            {"role_sequence": roles, "verification_schedule": "parallel_snapshot_v1"}),
+            [[role] for role in roles[:3]] + [["code_reviewer", "qa_engineer"]])
+        self.assertEqual(delivery_compile.execution_phases(
+            {"role_sequence": roles, "implementation_schedule": "parallel_lanes_v1"}),
+            [["software_architect"], ["backend_developer", "devops_engineer"],
+             ["code_reviewer"], ["qa_engineer"]])
+        with self.assertRaisesRegex(ValueError, "unsupported implementation_schedule"):
+            delivery_compile.execution_phases({"role_sequence": roles, "implementation_schedule": "fast"})
+
 
 class ScopeHandoffBindingTests(unittest.TestCase):
     """The proposal and scope approval, the handoff, refuse non-current upstream bindings."""

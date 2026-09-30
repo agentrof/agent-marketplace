@@ -1,6 +1,27 @@
 {
   "schema_version": 1,
   "switches": {
+    "implementation_schedule": {
+      "summary": "How the implementation roles of one Delivery Item write: one after another in their approved order, or at the same time in lanes whose approved write scopes are disjoint.",
+      "issue": 327,
+      "flows": ["delivery-execution", "execution-planning"],
+      "values": [
+        {
+          "id": "sequential_v1",
+          "tradeoffs": "Implementation roles write one after another in their approved order in the Item worktree. Today's behaviour and the baseline lanes are measured against; the slowest path when the plan gives each role its own files."
+        },
+        {
+          "id": "parallel_lanes_v1",
+          "tradeoffs": "Implementation roles whose approved lane scopes are disjoint write at the same time in the one Item worktree, ordered only by declared seams, and the coordinator stays the only committer. Shorter implementation wall time, while the plan must declare lane scopes and seams, seam defects surface only at the frozen candidate and token cost per Item rises."
+        }
+      ],
+      "default": "sequential_v1",
+      "metric": "Per Item with 2 or more implementation roles besides the Software Architect: implementation wall time from the first implementation role's start to the candidate freeze against the sum of its lane times, mean concurrent writer lanes, lane scope violations found before the coordinator's commit, seam-related critical or major code review findings, QA failures at a seam and environment collisions.",
+      "promotion": {
+        "unit": "At least 3 Items with 2 or more implementation roles besides the Software Architect run with parallel_lanes_v1, from at least 2 Deliveries.",
+        "threshold": "Implementation wall time at most 70% of the lane-time sum, zero lane scope violations, seam-related critical or major findings per Item no higher than the sequential baseline and zero environment collisions, with every shared quality guard holding and the owner's approval."
+      }
+    },
     "review_panels": {
       "summary": "How backlog epic and root, Solution Design, Design System and Operation contract reviews read the reviewed document.",
       "issue": 312,

@@ -619,7 +619,9 @@ def init_delivery(args) -> int:
     with stage_package.candidate_session():
         sources, backlog_snapshot, source_errors = approved_backlog_sources(docs, stories)
         dod_snapshot, dod_errors = approved_dod_source(docs)
-        errors = sorted(set(source_errors + dod_errors))
+        # New Items declare the implementation schedule the Process Policy selects.
+        schedule, policy_errors = policy_implementation_schedule(docs)
+        errors = sorted(set(source_errors + dod_errors + policy_errors))
         # The proposal refuses a selection that scope approval, the handoff, would refuse.
         if not errors:
             errors = handoff_binding_findings(
@@ -663,6 +665,7 @@ def init_delivery(args) -> int:
                       "architecture_record_kinds": [], "architecture_reason": "No architecture delta is currently required.",
                       "role_sequence": execution_roles(source),
                       "verification_schedule": verification_policy()["new_schedule"],
+                      **new_item_lane_fields(source, schedule),
                       "tags": ["doc/delivery-item", "status/in-scope"]}
         atomic_text(item, frontmatter(item_props, body_for("item", item_props["title"], {
             "Delivery Scope": identifier, "Navigation": link(f"delivery/deliveries/{root.name}/delivery", identifier),
@@ -813,10 +816,11 @@ def delivery_findings(docs: Path, identifier: str, *,
         item_props, item_body = split_note(item_path)
         if item_props.get("type") != "delivery-item": errors.append(f"{item_path} type must be delivery-item")
         if item_props.get("status") not in ITEM_STATUSES: errors.append(f"{item_path} invalid Item status")
-        try:
-            verification_schedule(item_props)
-        except ValueError as exc:
-            errors.append(f"{item_path}: {exc}")
+        for read_schedule in (verification_schedule, implementation_schedule):
+            try:
+                read_schedule(item_props)
+            except ValueError as exc:
+                errors.append(f"{item_path}: {exc}")
         errors.extend(f"{item_path} missing section: {name}" for name in sorted(set(SECTIONS["item"]) - sections(item_body)))
     plan = root / "execution-plan.md"
     if plan.exists():
@@ -1079,9 +1083,91 @@ def verification_schedule(props: dict) -> str:
     return value
 
 
+def document_contract() -> dict:
+    path = Path(__file__).resolve().parents[1] / "skill-content/deliver/data/delivery-document-contract.json"
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
+def implementation_schedule(props: dict) -> str:
+    """Read an Item's implementation schedule; an Item without one runs sequentially."""
+    contract = document_contract()["document_types"]["delivery_item"]
+    value = props.get("implementation_schedule", contract["missing_implementation_schedule"])
+    if value not in contract["implementation_schedules"]:
+        raise ValueError("unsupported implementation_schedule")
+    return value
+
+
+READER_ROLES = ("code_reviewer", "qa_engineer")
+# Vault, Git and runtime state stay serial across lanes, so no lane scope reaches them.
+LANE_EXCLUDED_ROOTS = ("workspace/docs", ".git", ".agentrof")
+LANE_SEAM_RE = re.compile(r"^([a-z][a-z0-9_]*) -> ([a-z][a-z0-9_]*) via (\S(?:.*\S)?)$")
+
+
+def lane_roles(props: dict) -> list[str]:
+    """Return the Item's lane roles: its implementation roles except the Software Architect."""
+    return [role for role in props.get("role_sequence", []) or []
+            if role not in READER_ROLES and role != "software_architect"]
+
+
+def lane_scope_map(props: dict) -> tuple[dict[str, list[str]], list[str]]:
+    """Read lane_scopes, entries of `<role>:<path>`, as role to paths, with unreadable entries."""
+    scopes: dict[str, list[str]] = {}
+    unreadable: list[str] = []
+    entries = props.get("lane_scopes", [])
+    for entry in entries if isinstance(entries, list) else [entries]:
+        role, separator, path = entry.partition(":") if isinstance(entry, str) else ("", "", "")
+        if (not separator or not re.fullmatch(r"[a-z][a-z0-9_]*", role) or path != path.strip()
+                or not _is_normalized_claim(path)):
+            unreadable.append(str(entry))
+        else:
+            scopes.setdefault(role, []).append(path)
+    return scopes, unreadable
+
+
+def lane_seam_edges(props: dict) -> tuple[list[tuple[str, str, str]], list[str]]:
+    """Read lane_seams, entries of `<producer> -> <consumer> via <interface>`, with unreadable entries."""
+    edges: list[tuple[str, str, str]] = []
+    unreadable: list[str] = []
+    entries = props.get("lane_seams", [])
+    for entry in entries if isinstance(entries, list) else [entries]:
+        match = LANE_SEAM_RE.fullmatch(entry) if isinstance(entry, str) else None
+        if match is None:
+            unreadable.append(str(entry))
+        else:
+            edges.append((match.group(1), match.group(2), match.group(3)))
+    return edges, unreadable
+
+
+def lane_phases(props: dict) -> list[list[str]]:
+    """Group implementation roles: the Software Architect alone first, then lanes by seam order.
+
+    A lane starts once every producer its seams name has finished; lanes
+    without such a producer between them share a phase.
+    """
+    lanes = lane_roles(props)
+    edges, unreadable = lane_seam_edges(props)
+    if unreadable:
+        raise ValueError("lane_seams cannot be read: " + ", ".join(unreadable))
+    producers = {role: {producer for producer, consumer, _interface in edges if consumer == role}
+                 for role in lanes}
+    phases = [["software_architect"]] if "software_architect" in (props.get("role_sequence") or []) else []
+    finished: set[str] = set()
+    while len(finished) < len(lanes):
+        ready = [role for role in lanes if role not in finished and producers[role] <= finished]
+        if not ready:
+            raise ValueError("lane_seams contain a cycle or name a role without a lane")
+        phases.append(ready)
+        finished.update(ready)
+    return phases
+
+
 def execution_phases(props: dict) -> list[list[str]]:
     """Derive phase grouping without rewriting legacy plan inputs."""
     roles = list(props.get("role_sequence", []))
+    if implementation_schedule(props) == "parallel_lanes_v1":
+        readers = ([list(READER_ROLES)] if verification_schedule(props) == "parallel_snapshot_v1"
+                   else [[role] for role in roles if role in READER_ROLES])
+        return lane_phases(props) + readers
     if verification_schedule(props) == "parallel_snapshot_v1":
         return [[role] for role in roles if role not in {"code_reviewer", "qa_engineer"}] + [["code_reviewer", "qa_engineer"]]
     return [[role] for role in roles]
@@ -1092,7 +1178,95 @@ def _claims_overlap(first: str, second: str) -> bool:
     return left == right or left in right.parents or right in left.parents
 
 
-def execution_plan_findings(root: Path, sources: dict[str, dict], docs: Path) -> list[str]:
+def lane_plan_findings(story_id: str, props: dict, paths: list[str], contracts: list[str],
+                       architecture_kinds: list[str]) -> list[str]:
+    """Validate an Item's lane scopes and seams against its schedule and claims."""
+    try:
+        schedule = implementation_schedule(props)
+    except ValueError as exc:
+        return [f"{story_id} {exc}"]
+    if schedule != "parallel_lanes_v1":
+        if props.get("lane_scopes") or props.get("lane_seams"):
+            return [f"{story_id} declares lane_scopes or lane_seams, which only"
+                    " implementation_schedule parallel_lanes_v1 reads"]
+        return []
+    errors: list[str] = []
+    lanes = lane_roles(props)
+    scopes, unreadable = lane_scope_map(props)
+    errors.extend(f"{story_id} lane_scope must be <role>:<normalized path>: {entry}" for entry in unreadable)
+    for role in sorted(set(scopes) - set(lanes)):
+        errors.append(f"{story_id} lane_scopes name {role}, which "
+                      + ("runs alone before the lanes and takes no lane scope" if role == "software_architect"
+                         else "is not an implementation role of this Item"))
+    for role in lanes:
+        if role not in scopes:
+            errors.append(f"{story_id} implementation role {role} has no lane scope; give it one or"
+                          " declare implementation_schedule sequential_v1")
+    owned = [(role, path) for role in sorted(scopes) for path in scopes[role]]
+    if len(owned) != len(set(owned)):
+        errors.append(f"{story_id} lane_scopes repeat an entry")
+    for role, path in owned:
+        excluded = next((root for root in LANE_EXCLUDED_ROOTS if _claims_overlap(path, root)), None)
+        if excluded:
+            errors.append(f"{story_id} lane scope {path} of {role} overlaps {excluded}, which stays serial")
+    for index, (role, path) in enumerate(owned):
+        for other_role, other in owned[index + 1:]:
+            if role != other_role and _claims_overlap(path, other):
+                errors.append(f"{story_id} lane scopes of {role} and {other_role} overlap: {path}, {other}")
+    union = {path for _role, path in owned}
+    if union != set(paths):
+        missing, extra = sorted(set(paths) - union), sorted(union - set(paths))
+        errors.append(f"{story_id} lane scopes must together equal path_claims"
+                      + (f"; unassigned claims: {', '.join(missing)}" if missing else "")
+                      + (f"; unclaimed lane paths: {', '.join(extra)}" if extra else ""))
+    edges, unreadable = lane_seam_edges(props)
+    errors.extend(f"{story_id} lane_seam must be <producer> -> <consumer> via <interface>: {entry}"
+                  for entry in unreadable)
+    if len(edges) != len(set(edges)):
+        errors.append(f"{story_id} lane_seams repeat a seam")
+    for producer, consumer, interface in edges:
+        seam = f"{producer} -> {consumer} via {interface}"
+        if producer not in lanes or consumer not in lanes or producer == consumer:
+            errors.append(f"{story_id} lane seam {seam} must join two different lane roles")
+        if interface in contracts:
+            continue
+        import architecture_compile
+        kind = architecture_compile.kind_for_id(interface) if architecture_compile.RECORD.fullmatch(interface) else None
+        if kind is None or kind[3] not in architecture_kinds:
+            errors.append(f"{story_id} lane seam {seam} must name one of its contract_claims or an"
+                          " architecture record id of a claimed record kind")
+    if not errors:
+        try:
+            lane_phases(props)
+        except ValueError as exc:
+            errors.append(f"{story_id} {exc}")
+    return errors
+
+
+def policy_implementation_schedule(docs: Path) -> tuple[str | None, list[str]]:
+    """Return the implementation schedule the Process Policy selects, or its refusal."""
+    try:
+        values, _snapshot = process_policy.effective_values(docs)
+    except ValueError as exc:
+        return None, [str(exc)]
+    # A registry that does not declare the switch keeps today's order.
+    missing = document_contract()["document_types"]["delivery_item"]["missing_implementation_schedule"]
+    return values.get("implementation_schedule", {}).get("value", missing), []
+
+
+def new_item_lane_fields(source: dict, schedule: str | None) -> dict:
+    """Return the lane fields a new Item declares; none keeps today's Item bytes.
+
+    Only an Item with two or more lane roles has lanes to run in parallel.
+    """
+    missing = document_contract()["document_types"]["delivery_item"]["missing_implementation_schedule"]
+    if schedule in {None, missing} or len(lane_roles({"role_sequence": execution_roles(source)})) < 2:
+        return {}
+    return {"implementation_schedule": schedule, "lane_scopes": [], "lane_seams": []}
+
+
+def execution_plan_findings(root: Path, sources: dict[str, dict], docs: Path,
+                            reopen: list[str] | tuple = ()) -> list[str]:
     """Validate the authored Item topology before execution approval.
 
     The Delivery compiler owns hashes and rendered plan summaries. People own
@@ -1100,6 +1274,7 @@ def execution_plan_findings(root: Path, sources: dict[str, dict], docs: Path) ->
     contradictory execution intent rather than silently inventing defaults.
     """
     errors: list[str] = []
+    policy_schedule: str | None = None
     selected = set(sources)
     graph: dict[str, set[str]] = {}
     path_owners: dict[str, str] = {}
@@ -1177,6 +1352,18 @@ def execution_plan_findings(root: Path, sources: dict[str, dict], docs: Path) ->
             )
         if len(roles) != len(set(roles)):
             errors.append(f"{story_id} role_sequence contains duplicate roles")
+        errors.extend(lane_plan_findings(story_id, props, paths, contracts, architecture_kinds))
+        # Lane roles bind their instructions only while the Process Policy selects
+        # parallel lanes, so an Item that will still run lanes needs that value.
+        if (props.get("implementation_schedule") == "parallel_lanes_v1"
+                and (props.get("status") not in TERMINAL_ITEM_STATUSES or story_id in reopen)):
+            if policy_schedule is None:
+                policy_schedule, policy_errors = policy_implementation_schedule(docs)
+                errors.extend(policy_errors)
+            if policy_schedule not in {None, "parallel_lanes_v1"}:
+                errors.append(f"{story_id} implementation_schedule parallel_lanes_v1 needs the Process"
+                              " Policy to select it; declare sequential_v1 or set switch"
+                              " implementation_schedule with /configure process")
         # A claim reserves a path against concurrent writers. A terminal Item has
         # no writer left, so its claim is a record of what it wrote rather than a
         # reservation, and holding it would keep any later Item out of that path
@@ -1472,7 +1659,7 @@ def approve_execution(args) -> int:
     policy, policy_errors = process_policy.approved_snapshot(docs)
     plan_errors = source_errors + policy_errors + reopen_findings(reopen, item_records)
     if not plan_errors:
-        plan_errors = execution_plan_findings(root, sources, docs)
+        plan_errors = execution_plan_findings(root, sources, docs, reopen)
     pull_request_checks = approved_pull_request_checks(docs)
     if pull_request_checks["source"] != "external":
         plan_errors += pull_request_workflow_findings(docs, args.delivery, getattr(args, "remote", "origin"))

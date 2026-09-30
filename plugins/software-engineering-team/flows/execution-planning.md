@@ -15,6 +15,10 @@ and QA then run against one frozen candidate before the owner write barrier.
 older approved Item means `sequential_v1` without rewriting or rehashing it.
 Changing a schedule uses the normal execution revision, approval and publication
 path; unknown schedules are rejected.
+Switch `implementation_schedule`: at `parallel_lanes_v1`, Items declare lane
+scopes and seams and their implementation roles run in parallel lanes, as
+`skill-content/execution-plan/references/switch-implementation_schedule-parallel_lanes_v1.md`
+defines.
 For parallel verification, approved test and environment commands must work
 from an independent checkout containing tracked files. Confirm dependency
 provisioning in those commands or an explicitly supplied fixed environment;

@@ -272,7 +272,7 @@ def write_scope(project: Path | None, paths: set[str], role: str | None, route: 
             targets.append({"path": path, "coverage": "exact_file", "source": path})
             sources.append(path)
     elif spec["resolver"] == "item_claims":
-        from delivery_compile import _is_normalized_claim
+        from delivery_compile import _is_normalized_claim, implementation_schedule, lane_roles, lane_scope_map
         items = sorted(path for path in selected if re.fullmatch(
             r"workspace/docs/delivery/deliveries/[^/]+/items/[^/]+/item\.md", path))
         if len(items) != 1:
@@ -289,13 +289,30 @@ def write_scope(project: Path | None, paths: set[str], role: str | None, route: 
                 or len(claims) != len(set(claims))):
             result["reason"] = "selected Item has no valid product path claims for this implementation role"
             return result
+        try:
+            lane = (implementation_schedule(props) == "parallel_lanes_v1"
+                    and role.replace("-", "_") in lane_roles(props))
+        except ValueError:
+            result["reason"] = "selected Item declares an unsupported implementation_schedule"
+            return result
+        owned = claims
+        if lane:
+            # A lane writes only its approved lane scope; the other lanes of the
+            # Item write theirs in the same worktree at the same time.
+            scopes, unreadable = lane_scope_map(props)
+            owned = scopes.get(role.replace("-", "_"), [])
+            if unreadable or not owned or not set(owned) <= set(claims):
+                result["reason"] = "selected Item has no valid lane scope for this implementation role"
+                return result
         targets = [{"path": path, "coverage": "path_and_descendants", "source": item}
-                   for path in sorted(claims)
+                   for path in sorted(owned)
                    if not any(path == root or path.startswith(root + "/")
                               for root in ("workspace/docs", ".git", ".agentrof"))]
         sources = [item]
         result["excluded_subtrees"] = ["workspace/docs", ".git", ".agentrof"]
         result["constraints"].append("approved Item plan, current writer receipt, and completed/cancelled readers remain mandatory")
+        if lane:
+            result["constraints"].append("parallel lane: write only this lane scope; the other lanes of the Item write theirs concurrently and the coordinator alone commits")
     if targets:
         result.update(status="resolved", allowed_write_area=targets, source_records=sources,
                       reason="derived only from selected bound owner records; no new writer authority")

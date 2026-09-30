@@ -68,19 +68,20 @@ in an earlier cycle and keeps that ruling.
    `calibrated_severity` and `reason`. `calibrated_severity` is the claimed
    severity when the claim holds, `minor` when the code as written causes no
    security, correctness or contract defect, and `invalid` when the cited code
-   disproves the claim. `reason` cites the candidate as `path:line`. A `minor`
-   row adds the `owner_role` and `revisit_trigger` of the follow-up it becomes.
-   Credentials or secrets that reach a client artifact or a log stay critical.
+   disproves the claim. `reason` cites the candidate as `path:line`, a line
+   the frozen candidate holds. A `minor` row adds the `owner_role` and
+   `revisit_trigger` of the follow-up it becomes. Credentials or secrets that
+   reach a client artifact or a log stay critical.
 3. The calibration reader registers its rows as its own result with
    `delivery_verification.py calibrate --file <calibration.json>`: `role`
    `code_reviewer`, `mode` `calibration`, the session's `candidate_hash` and
    `session_id` from `status`, its `report`, the `claims` it ruled exactly as
    returned and its rows as `calibration`. `calibrate` refuses a missing,
    extra or duplicate row, a changed claimed severity, a raised severity, a
-   reason without a `path:line` citation of the candidate, a `minor` row
-   without its follow-up fields, a claim an earlier calibration ruled, a
-   second calibration in the session and one after the claiming result
-   settled.
+   reason without a `path:line` citation of a line the candidate holds, a
+   `minor` row without its follow-up fields, a claim an earlier calibration
+   ruled, a second calibration in the session and one after the claiming
+   result settled.
 4. Then register the claiming result unchanged with
    `delivery_verification.py result`. It carries no `calibration` list of its
    own, which `result` refuses, and it registers only when the session's

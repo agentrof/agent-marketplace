@@ -289,7 +289,7 @@ class ReviewLoopReferenceTests(unittest.TestCase):
             " reviewer that returned the claims",
             "The claiming reviewer's result is not registered yet, so the implementation writer"
             " stays idle",
-            "`reason` cites the candidate as `path:line`",
+            "`reason` cites the candidate as `path:line`, a line the frozen candidate holds",
             "Credentials or secrets that reach a client artifact or a log stay critical",
             "The calibration reader registers its rows as its own result with"
             " `delivery_verification.py calibrate --file <calibration.json>`",

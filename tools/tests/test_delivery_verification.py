@@ -994,6 +994,10 @@ print(sys.argv[1])
              [self.ruling(reason="The value is a constant, so no input reaches the column."), invalid]),
             ("CR-2 calibration reason must cite the candidate text as path:line",
              [self.ruling(), {**invalid, "reason": "src/missing.py:1 is the only write of the value."}]),
+            # The frozen candidate's src/product.py holds one line.
+            ("CR-1 calibration reason must cite the candidate text as path:line",
+             [self.ruling(reason="src/product.py:12 assigns a constant, so no input reaches the column."),
+              invalid]),
             ("CR-1 calibrated minor needs an owner_role of backend_developer and a concrete revisit_trigger",
              [self.ruling(owner_role="qa_engineer"), invalid]),
         )

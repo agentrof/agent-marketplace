@@ -418,11 +418,12 @@ gh api 'repos/{owner}/{repo}/rules/branches/main' --jq '.[] | select(.type == "m
 Queued PRs that change different package files merge without a `dist/`
 conflict: the package provenance in `dist/*/.agent-marketplace-package.json`
 carries no per-commit build identity, and each file hash has a line of its
-own. Two queued PRs still conflict when both change the same package file,
-both add files that sort next to each other, or one adds a file after the
-last inventory entry while the other changes that entry. The queue removes the
-later PR, which then needs `main` merged in, regenerated distributions and
-green checks before it is queued again.
+own. Two queued PRs still conflict on changes to the same package file, adds
+at one sort position, an add after a changed last entry, a removal next to
+another removal or an add, and a removal of the last entry beside a change to
+the entry before it. The queue removes the later PR, which then needs `main`
+merged in, regenerated distributions and green checks before it is queued
+again.
 
 ### Release immutability
 

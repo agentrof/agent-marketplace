@@ -105,8 +105,11 @@ recreate it without changing Requirement or Delivery state.
   byte-exact.
 - Packages carry no per-commit source identity, and each file hash has a line
   of its own, so pull requests that change different package files merge
-  without a `dist/` conflict. The deterministic snapshot `build_id` of the
-  canonical sources that every host build shares is computed instead: release
+  without a `dist/` conflict, except adds at one sort position, an add after a
+  changed last entry, a removal next to another removal or an add, and a
+  removal of the last entry beside a change to the entry before it. The
+  deterministic snapshot `build_id` of the canonical sources that every host
+  build shares is computed instead: release
   preparation records it in `.release/stable.json`, the release replay
   reproduces it, and `python3 tools/release.py verify-release` recomputes it
   at a release commit.

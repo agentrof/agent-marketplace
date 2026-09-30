@@ -262,6 +262,80 @@ class SingleTeamDistributionTests(unittest.TestCase):
                     build_distributions.check(self.root, self.root / "dist"), [],
                 )
 
+    def test_documented_provenance_conflicts_are_the_ones_git_reports(self):
+        # #311: the provenance serialization and its four descriptions must
+        # name every case in which two queued PRs conflict in dist/.
+        base = {name: "0" * 64 for name in "abcdef"}
+
+        def put(name: str, digest: str):
+            return lambda files: {**files, name: digest * 64}
+
+        def drop(name: str):
+            return lambda files: {key: value for key, value in files.items() if key != name}
+
+        cases = (
+            ("change neighbours", put("b", "1"), put("c", "2"), False),
+            ("removal beside a change", drop("c"), put("b", "2"), False),
+            ("removal before a change", drop("c"), put("d", "2"), False),
+            ("removals one entry apart", drop("b"), drop("d"), False),
+            ("last removed, earlier change", drop("f"), put("d", "2"), False),
+            ("adds at different positions", put("bb", "1"), put("cc", "2"), False),
+            ("add after the last, earlier change", put("g", "1"), put("e", "2"), False),
+            ("change one file twice", put("c", "1"), put("c", "2"), True),
+            ("adds at one sort position", put("bb", "1"), put("bc", "2"), True),
+            ("add after a changed last entry", put("g", "1"), put("f", "2"), True),
+            ("removal next to a removal", drop("b"), drop("c"), True),
+            ("removal next to an add before it", drop("c"), put("bb", "2"), True),
+            ("removal next to an add after it", drop("c"), put("cc", "2"), True),
+            ("last removed, entry before changed", drop("f"), put("e", "2"), True),
+        )
+
+        def provenance(files: dict) -> str:
+            return build_distributions.render_provenance({"component": "t", "files": files,
+                                                          "schema_version": 4})
+
+        with git_fixture.temporary_directory() as temporary:
+            for index, (name, left, right, conflicts) in enumerate(cases):
+                root = Path(temporary) / str(index)
+                git_fixture.init_repository(root, initial_branch="main")
+
+                def git(*args: str) -> subprocess.CompletedProcess:
+                    return subprocess.run(
+                        ["git", "-c", "user.name=Fixture", "-c", "user.email=f@example.invalid",
+                         "-c", "commit.gpgsign=false", *args],
+                        cwd=root, capture_output=True, text=True, check=False)
+
+                path = root / build_distributions.PROVENANCE
+                for branch, files in (("main", base), ("left", left(base)), ("right", right(base))):
+                    if branch != "main":
+                        git("checkout", "-q", "-b", branch, "main")
+                    path.write_text(provenance(files), encoding="utf-8")
+                    git("add", "--all")
+                    self.assertEqual(git("commit", "-qm", branch).returncode, 0, name)
+                merged = git("merge", "-q", "--no-edit", "left")
+                with self.subTest(case=name):
+                    self.assertEqual(bool(merged.returncode), conflicts, merged.stdout)
+                    if not conflicts:
+                        self.assertEqual(path.read_text(encoding="utf-8"),
+                                         provenance(right(left(base))))
+        documents = {
+            "render_provenance": build_distributions.render_provenance.__doc__,
+            **{relative: (fixtures.REAL_REPOSITORY / relative).read_text(encoding="utf-8")
+               for relative in ("docs/maintainer-operations-protocol.md",
+                                "docs/upgrade-protocol.md")},
+            "changeset": json.loads((fixtures.REAL_REPOSITORY
+                                     / ".changes/uncommitted-build-identity.json")
+                                    .read_text(encoding="utf-8"))["summary"],
+        }
+        for where, text in documents.items():
+            text = " ".join(text.split())
+            with self.subTest(document=where):
+                for conflict in ("adds at one sort position", "an add after a changed last entry",
+                                 "a removal next to another removal or an add",
+                                 "a removal of the last entry beside a change to the entry"
+                                 " before it"):
+                    self.assertIn(conflict, text)
+
     def test_snapshot_normalizes_checkout_only_eol_drift(self):
         # Exercise the snapshot normalizer independently of the repository's
         # fail-closed LF checkout policy.

@@ -987,8 +987,11 @@ def render_provenance(payload: dict) -> str:
     therefore has a line of its own between its key line and a separator
     line, which change only when that file is added or removed. Changes to
     different package files then merge into exactly the provenance a rebuild
-    of the merged sources writes, unless two files are added at one sort
-    position or a file is added after a changed last entry.
+    of the merged sources writes, except adds at one sort position, an add
+    after a changed last entry, a removal next to another removal or an add,
+    and a removal of the last entry beside a change to the entry before it:
+    those conflict, because the identical separator lines let Git attach a
+    removal to a neighbour's lines.
     """
     keys = sorted(payload)
     lines = []

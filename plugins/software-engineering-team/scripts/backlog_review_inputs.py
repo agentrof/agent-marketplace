@@ -520,18 +520,30 @@ def manifest(docs: Path, *, epic: str | None = None, expected_hash: str | None =
         result[SCOPE_SWITCH] = "bounded"
     if unparsed:
         result["unparsed_link_sources"] = sorted(unparsed)
-    bound = result
-    if epic is not None and "scaffold_findings" in check:
-        inside = [finding for finding in check["scaffold_findings"]
-                  if finding.split(" ", 1)[0] in hashes]
-        bound_check = {key: value for key, value in check.items() if key != "scaffold_findings"}
-        if inside or writer:
-            bound_check["scaffold_findings"] = inside
-        bound = dict(result, check=bound_check)
-    result["source_hash"] = digest(bound)
+    result["source_hash"] = digest(bound_view(result, writer))
     if expected_hash is not None and result["source_hash"] != expected_hash:
         raise InputError("review input manifest is stale; regenerate and review the changed sources")
     return result
+
+
+def bound_view(result: dict, writer: bool) -> dict:
+    """Return a manifest as its ``source_hash`` binds it.
+
+    An epic manifest lists the stubs of notes outside its paths as
+    information for its reader, never as an input, so they are left out; a
+    writer manifest keeps the stubs inside its paths. ``task_inputs.py``
+    binds an epic task's closure the same way.
+    """
+    check = result["check"]
+    if result["scope"] == "backlog" or "scaffold_findings" not in check:
+        return result
+    paths = set(result["paths"])
+    inside = [finding for finding in check["scaffold_findings"]
+              if finding.split(" ", 1)[0] in paths]
+    bound_check = {key: value for key, value in check.items() if key != "scaffold_findings"}
+    if inside or writer:
+        bound_check["scaffold_findings"] = inside
+    return dict(result, check=bound_check)
 
 
 def main(argv: list[str] | None = None) -> int:

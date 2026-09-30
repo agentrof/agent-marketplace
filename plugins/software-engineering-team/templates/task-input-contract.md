@@ -48,7 +48,14 @@ Immediately before persisting a result, rerun the same invocation with
 `--expected-hash <source_hash>`; stale inputs require refreshed work.
 The identity also includes the canonical Markdown/JSON source inventory, so
 new or removed sources invalidate an older input. Prototype and exploratory
-artifact interiors remain opaque and are excluded from that inventory.
+artifact interiors remain opaque and are excluded from that inventory. A task
+scoped with `--epic <exact-epic>` binds its closure instead, as that epic's
+review manifest does. The closure is derived again on every run, so a new or
+removed source that reaches it, an incoming dependency edge included, still
+invalidates the task. Canonical sources outside it are left out of its
+inventory, working inputs and changed paths, and the stubs it lists from notes
+outside its paths are information, not identity, so another epic's writer
+leaves the task fresh.
 
 `write_scope.allowed_write_area` is the bounded authoring area, never a writer
 grant. Read-only roles and modes have an empty area. BA derives exact selected

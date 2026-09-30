@@ -31,7 +31,9 @@ behavior is host-neutral; Claude Code and Codex are packaging adapters.
     overlap, cycles, ordering and coverage. The read-only
     `backlog_review_inputs.py` manifest narrows epic reading to that scope plus
     dependency and source closure; root review retains the complete package.
-    Its hash must be rechecked before persisting a review.
+    Its `check` block carries the compiler facts for the current review note,
+    which lens readers take as given. Its hash must be rechecked before
+    persisting a review.
 12. Every story has a sibling `test-plan.md`. Criteria and rules map to stable
     scenarios; automation-required scenarios name an executable-test target.
 13. Every story has exactly one accountable implementation owner and may name

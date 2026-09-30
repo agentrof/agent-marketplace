@@ -5,6 +5,15 @@ The golden digests below were produced by running the same harness against
 the base tree's own scripts (see ``--harness`` at the end of this file). A
 change that alters an output on the default path fails here; a deliberate
 change updates the digest with its reason in the same commit.
+
+"The same inputs" is literal. The Delivery run reads its approved backlog,
+upstream notes and Verification Contract from the frozen
+``default_equivalence_inputs.json`` instead of rebuilding them with the
+backlog and Operation compilers, whose own fixes would otherwise move every
+Delivery hash that covers them. ``--harness inputs`` rebuilds that file.
+Neither golden hides a field: no Delivery record carries a package script or
+instruction hash, and the manifest run hashes a package the harness writes
+byte for byte, so release changes to scripts and contracts reach neither.
 """
 
 from __future__ import annotations
@@ -30,46 +39,46 @@ GIT_ENV = {"GIT_AUTHOR_NAME": "Fixture", "GIT_AUTHOR_EMAIL": "fixture@example.in
            "GIT_AUTHOR_DATE": "2026-01-01T00:00:00+00:00",
            "GIT_COMMITTER_DATE": "2026-01-01T00:00:00+00:00"}
 
-# Produced from the program branch base e56acfb; see the module docstring.
+INPUTS = Path(__file__).resolve().with_name("default_equivalence_inputs.json")
+
+# Taken on frozen inputs at program tip 95298e5; 679de01, the tip before the
+# process switches, and the base e56acfb produce the same digests.
 DELIVERY_GOLDEN = {
     "files": {
         "delivery/definition-of-done.md":
             "sha256:7b766655dd95e17b5b8a8a72dacad577524c8d2010bca777e5eaf85325cde7e0",
         "delivery/deliveries/dlv-001-auth/delivery-review.md":
-            "sha256:b0a333c2ade13d09ec57af9a021cc56b262cf6eb6c5835f5306945672e58fdc2",
+            "sha256:35f3bc263ef98d690ad8ca80d40c5e34a6d36c8698e9d8e764ea0011afb1e37d",
         "delivery/deliveries/dlv-001-auth/delivery.md":
-            "sha256:1f5a115eb6d59522f9e063ed330186ee08bfbbdf5af112ea9f51e4a222f29fe7",
+            "sha256:9cb7bac61dcc6a118207143170212f7f073cb3e5e983ffa02bc6f907256e44c5",
         "delivery/deliveries/dlv-001-auth/execution-plan.md":
-            "sha256:22d150db0d113bb33be7055161746be6a5f8c902009f2dd261ff667f977b97a2",
+            "sha256:735c5ce870037268e919d5c45726bd9651417dbe2d336601b8354eb5e1ce7d39",
         "delivery/deliveries/dlv-001-auth/items/auth-01/code-review.md":
-            "sha256:086ddf31ed148d2c1841b67bcca8fa6a14e5203d1d76d15df56878998c573fdc",
+            "sha256:1bab717a4131ecf98e4471801c1329db7cb418b1a5e527589795cba84f1b96ab",
         "delivery/deliveries/dlv-001-auth/items/auth-01/item.md":
-            "sha256:1aa0e33f0c1b540b3b07e3bff6c81bb853287539f52298c96dabef7697ba8b8f",
+            "sha256:5c9a8f0191600cd81c41cb50649818a9e6e8398752e242a3026e179807ee2810",
         "delivery/deliveries/dlv-001-auth/items/auth-01/verification.md":
-            "sha256:5e5383fbd92e87158c7bb76a3cb1c149a30a21e80fe218d7cac18a17c5e08ae5",
+            "sha256:0d7ce7622e3a05777ed8c461e8a40042c4e9b5fd4cf361d87a3238913fc74231",
         "maps/delivery.md":
             "sha256:20dbcbb97fdc51571a7e1408bb24f7cab9e097958b0139060d2172267c5af1cb",
-        "operation/verification-contract.md":
-            "sha256:f3263098db23cedb76ec109061ff218e47c9b81cbea5496f10ac20d9edf6794c",
     },
     "outputs": [
-        "sha256:285cbd8ab03e626c299061e827b4f5d381785ef807e7f95344f406a57a0e1e8c",
-        "sha256:4d0c5c68d47c288dfa2df4b660aee9c69bcb5ac9b4737de15468075a7b33259f",
         "sha256:41ae602c5e6815cc3f4d31cd2e1c1cd0e458ce43bc3973c050b4921a4bc1c9b7",
         "sha256:57f15c73e2bad9e1c7647fbc2e0cb680b7cb6352dfca5d72c1738d907fadfc9d",
         "sha256:2a569505e9e63ce2543b513ce0341738f5952152c30fb3b2e1fa8ddc72aa3b29",
         "sha256:d87f2a99c3040d4ffe46ee5e1c6b81cacb5b8956ccb5c62316447138c02fdd2f",
-        "sha256:0836a78aff995e1f889b263c51db6b8a88feae3c9e57fb7a335df5818d837cb7",
-        "sha256:1180f236d23b08f6dd1778b0b57edaf5dcf25c04cfd25f6c4aae56c3e5d4d5c3",
-        "sha256:1180f236d23b08f6dd1778b0b57edaf5dcf25c04cfd25f6c4aae56c3e5d4d5c3",
+        "sha256:9da6603ffa4ef4b6eb8cc9f02f2e26ce14422b81cb749e26dd71ef1595cf82e5",
+        "sha256:6770154716253effbf45b90f5c665fd03fc2b1421c5c1dc5edb1a5558a260e11",
+        "sha256:6770154716253effbf45b90f5c665fd03fc2b1421c5c1dc5edb1a5558a260e11",
         "sha256:9fac5f29db46fe2668b73a4507b0c976eae80286547f4e3108b8c5db16799cb8",
         "sha256:241a3ca0c7944c139fa41f35293a402856d29e05317dfa8229076d6cbfda384b",
-        "sha256:da282d8ad787e098212fafd91cdf68d1c1770c094140beb07af0797e887bb037",
+        "sha256:d33f66c22f28bf98021cf733ea28cbc2234a4fca34e19a05bd647462107d7393",
         "sha256:738ab1650128715429b5c087efee1484d23ac7168b9435f0bea287291827524b",
         "sha256:3817d097b8d4f6463446b0d46ab75656dffb9da0bea7eb68731433c31d5fe0aa",
     ],
 }
 
+# Taken at program tip 95298e5; 679de01 and e56acfb produce the same digests.
 MANIFEST_GOLDEN = {
     "entry:without_switch_files":
         "sha256:e0ca7b6f1cf42fd533887f93ac2591a4ba5de7ee44756e95eaadbe69614fc7de",
@@ -98,14 +107,14 @@ def run_harness(kind: str, root: Path = ROOT) -> dict:
     return json.loads(result.stdout)
 
 
-# The shared backlog fixture writes its notes in text mode, so native Windows
-# fixtures hold CRLF bytes that POSIX digests cannot match.
+# The compilers print native absolute paths, which POSIX digests cannot match.
 @unittest.skipIf(os.name == "nt", "golden digests are taken on POSIX hosts")
 class DefaultEquivalenceTests(unittest.TestCase):
     maxDiff = None
 
-    def test_delivery_compiler_outputs_match_the_base_without_a_policy(self):
-        self.assertEqual(run_harness("delivery"), DELIVERY_GOLDEN)
+    def test_delivery_compiler_outputs_match_the_base_on_frozen_inputs(self):
+        self.assertEqual(run_harness("delivery"), DELIVERY_GOLDEN,
+                         "run this file with --harness delivery --raw to read the outputs")
 
     def test_task_manifests_match_the_base_without_a_policy(self):
         actual = run_harness("manifests")
@@ -145,40 +154,66 @@ def _quiet(call, *args):
     return code, output.getvalue()
 
 
-def _delivery_harness(root: Path, raw_output: bool = False) -> dict:
+def _input_harness(root: Path, raw_output: bool = False) -> dict:
+    """Build the Delivery run's inputs with ``root``'s fixture and Operation compiler."""
     sys.path[:0] = [str(root / PLUGIN / "scripts"), str(root / "tools/tests")]
     import backlog_compile
-    import delivery_compile
     import operation_compile
     from backlog_fixture import make_approved_backlog
-    from git_fixture import init_repository
 
-    _freeze_clocks(backlog_compile, delivery_compile, operation_compile)
-    outputs: list[str] = []
+    _freeze_clocks(backlog_compile, operation_compile)
     with tempfile.TemporaryDirectory() as raw:
         project = Path(raw).resolve()
         docs = project / "workspace" / "docs"
         (docs / "maps").mkdir(parents=True)
-        (project / "workspace" / "config.json").write_text(json.dumps({
-            "schema_version": 2, "team_id": "software-engineering-team",
-            "output_language": "English", "terminology_language": "English"}), encoding="utf-8")
         make_approved_backlog(docs)
+        # The backlog fixture already accepts a Solution decision the contract can cite.
+        contract = type("Args", (), {"docs": str(docs), "kind": "verification",
+                                     "constrained_by": ["solution-design/decisions/fixture-api"]})
+        code, text = _quiet(operation_compile.init, contract)
+        if code:
+            raise AssertionError(text)
+        path = docs / "operation" / "verification-contract.md"
+        props, body = operation_compile.parse(path)
+        props["test_command"] = "make test"
+        operation_compile.atomic_text(path, operation_compile.render(props, body))
+        code, text = _quiet(operation_compile.approve, contract)
+        if code:
+            raise AssertionError(text)
+        files = {path.relative_to(project).as_posix(): path.read_bytes().decode("utf-8")
+                 for path in sorted(docs.rglob("*")) if path.is_file()}
+    return {"schema_version": 1, "files": files}
+
+
+def _delivery_harness(root: Path, raw_output: bool = False) -> dict:
+    sys.path[:0] = [str(root / PLUGIN / "scripts"), str(root / "tools/tests")]
+    import delivery_compile
+    from git_fixture import init_repository
+
+    _freeze_clocks(delivery_compile)
+    inputs = json.loads(INPUTS.read_text(encoding="utf-8"))
+    if inputs.get("schema_version") != 1:
+        raise AssertionError(f"{INPUTS.name} has an unsupported schema")
+    outputs: list[str] = []
+    with tempfile.TemporaryDirectory() as raw:
+        project = Path(raw).resolve()
+        docs = project / "workspace" / "docs"
+        for relative, text in inputs["files"].items():
+            path = project / relative
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(text.encode("utf-8"))
+        (project / "workspace" / "config.json").write_bytes(json.dumps({
+            "schema_version": 2, "team_id": "software-engineering-team",
+            "output_language": "English", "terminology_language": "English"}).encode("utf-8"))
         workflows = project / ".github" / "workflows"
         workflows.mkdir(parents=True)
-        (workflows / "tests.yml").write_text(
-            "on:\n  pull_request:\njobs:\n  test:\n    runs-on: ubuntu-latest\n"
-            "    steps:\n      - run: make test\n", encoding="utf-8")
+        (workflows / "tests.yml").write_bytes(
+            b"on:\n  pull_request:\njobs:\n  test:\n    runs-on: ubuntu-latest\n"
+            b"    steps:\n      - run: make test\n")
         init_repository(project, initial_branch="main")
         for args in (("add", "--all"), ("commit", "-q", "-m", "fixture")):
             subprocess.run(["git", "-C", str(project), *args], check=True, capture_output=True)
 
-        # The backlog fixture already accepts a Solution decision the contract can cite.
-        decision = "solution-design/decisions/fixture-api"
-        if not (docs / f"{decision}.md").is_file():
-            raise AssertionError("the backlog fixture no longer ships its accepted decision")
-        contract = type("Args", (), {"docs": str(docs), "kind": "verification",
-                                     "constrained_by": [decision]})
-        outputs.append(_quiet(operation_compile.init, contract)[1])
         dod = type("Args", (), {"docs": str(docs), "title": "Project", "file": None})
         scope = type("Args", (), {"docs": str(docs), "id": None, "slug": "auth",
                                   "goal": "Authenticate", "outcome": "Users sign in",
@@ -187,12 +222,7 @@ def _delivery_harness(root: Path, raw_output: bool = False) -> dict:
         review = type("Args", (), {"docs": str(docs), "delivery": "DLV-001",
                                    "reviewed_commit": "1" * 40,
                                    "reviewed_integration_commit": "2" * 40})
-        path = docs / "operation" / "verification-contract.md"
-        props, body = operation_compile.parse(path)
-        props["test_command"] = "make test"
-        operation_compile.atomic_text(path, operation_compile.render(props, body))
-        for call, args in ((operation_compile.approve, contract),
-                           (delivery_compile.init_dod, dod), (delivery_compile.approve_dod, dod),
+        for call, args in ((delivery_compile.init_dod, dod), (delivery_compile.approve_dod, dod),
                            (delivery_compile.init_delivery, scope),
                            (delivery_compile.check_delivery, plan),
                            (delivery_compile.approve_scope, plan)):
@@ -213,9 +243,10 @@ def _delivery_harness(root: Path, raw_output: bool = False) -> dict:
             code, text = _quiet(call, args)
             outputs.append(f"{code}\n{text}")
         seal = (lambda data: data.decode("utf-8")) if raw_output else digest
+        # Only what the Delivery compiler writes; the frozen inputs are not outputs.
         files = {path.relative_to(docs).as_posix(): seal(path.read_bytes())
                  for path in sorted(docs.rglob("*")) if path.is_file() and (
-                     path.relative_to(docs).parts[0] in {"delivery", "operation"}
+                     path.relative_to(docs).parts[0] == "delivery"
                      or path.relative_to(docs).as_posix() == "maps/delivery.md")}
         # Paths printed by the compilers name the temporary root.
         normalized = [text.replace(str(project), "<project>").replace(raw, "<project>")
@@ -328,7 +359,8 @@ def _manifest_harness(root: Path, raw_output: bool = False) -> dict:
     return result
 
 
-HARNESSES = {"delivery": _delivery_harness, "manifests": _manifest_harness}
+HARNESSES = {"delivery": _delivery_harness, "inputs": _input_harness,
+             "manifests": _manifest_harness}
 
 
 if __name__ == "__main__":

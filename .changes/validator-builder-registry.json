@@ -1,0 +1,4 @@
+{
+  "summary": "Every `tools/validate.py` check has a deliberately broken fixture again: `VALIDATOR_BUILDERS` in `tools/tests/test_validator_contract.py` holds one builder per check that breaks the valid fixture repository so the check reports it, and a meta-test keeps the registry in lockstep with `CHECKS`, as `CONTRIBUTING.md` promised. `CONTRIBUTING.md` and the validator's docstring name that registry instead of a `tools/tests/fixtures/` folder that did not exist.",
+  "components": {}
+}

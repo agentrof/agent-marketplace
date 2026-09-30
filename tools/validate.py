@@ -8,7 +8,8 @@ findings. One error finding fails
 the run.
 
 Scope is an explicit allowlist; assets/, memory/, tools/ and .git/ are never
-scanned. Fixtures under tools/tests/fixtures/ exercise every check.
+scanned. VALIDATOR_BUILDERS in tools/tests/test_validator_contract.py breaks a
+valid fixture repository once per check, in lockstep with CHECKS.
 
 Stdlib only. Deterministic output: findings sorted by (path, line, check).
 """

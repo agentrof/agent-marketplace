@@ -2453,6 +2453,180 @@ def check_review_panels(tree: Tree, findings: list[Finding]) -> None:
                     "name a lens id the review-panel data declares")
 
 
+PROCESS_SWITCHES_RELPATH = "skill-content/configure/data/process-switches.json"
+SWITCH_ANCHOR_RE = re.compile(r"\b[Ss]witch\s+`([a-z][a-z0-9_]*)`")
+PROCESS_SWITCH_KEYS = {"summary", "flows", "values", "default", "metric", "promotion"}
+PROCESS_SWITCH_OPTIONAL_KEYS = {"issue", "agent_variants"}
+AGENT_VARIANT_KEYS = {"suffix", "tier", "description", "agents"}
+
+
+def _nonblank(value: object) -> bool:
+    return isinstance(value, str) and bool(value.strip())
+
+
+def agent_variant_problems(where: str, variants: object, values: list[str], default: object,
+                           agents: set[str], tiers: set[str]) -> list[str]:
+    """Return the problems of one switch's generated agent variants."""
+    if not isinstance(variants, dict) or not variants:
+        return [f"{where}: agent_variants must map a switch value to its variant"]
+    problems: list[str] = []
+    for value, spec in sorted(variants.items()):
+        at = f"{where} value {value!r}"
+        if value not in values or value == default:
+            problems.append(f"{at}: agent variants belong to a declared value other than the default")
+        if not isinstance(spec, dict) or set(spec) != AGENT_VARIANT_KEYS:
+            problems.append(f"{at}: an agent variant holds exactly suffix, tier, description and agents")
+            continue
+        if not isinstance(spec["suffix"], str) or not KEBAB_RE.match(spec["suffix"]):
+            problems.append(f"{at}: variant suffix must be kebab-case")
+        if spec["tier"] not in tiers:
+            problems.append(f"{at}: variant tier {spec['tier']!r} is not a declared reasoning tier")
+        # The description is rendered into agent frontmatter as one plain scalar.
+        if not _nonblank(spec["description"]) or ":" in spec["description"] \
+                or "\n" in spec["description"]:
+            problems.append(f"{at}: variant description must be one non-empty line without a colon")
+        listed = spec["agents"]
+        if not isinstance(listed, list) or not listed \
+                or not all(isinstance(agent, str) for agent in listed):
+            problems.append(f"{at}: variant agents must list at least one canonical agent")
+            continue
+        for agent in sorted({agent for agent in listed if listed.count(agent) > 1}):
+            problems.append(f"{at}: duplicate variant agent {agent!r}")
+        for agent in sorted(set(listed) - agents):
+            problems.append(f"{at}: unknown variant agent {agent!r}")
+    return problems
+
+
+def process_switch_problems(data: object, flows: set[str], agents: set[str],
+                            tiers: set[str]) -> list[str]:
+    """Return the shape problems of the package's process switch registry."""
+    if not isinstance(data, dict) or set(data) != {"schema_version", "switches"} \
+            or data.get("schema_version") != 1:
+        return ["registry must hold exactly schema_version 1 and switches"]
+    switches = data["switches"]
+    if not isinstance(switches, dict):
+        return ["switches must be an object keyed by switch id"]
+    problems: list[str] = []
+    generated: dict[str, str] = {}
+    for switch, spec in sorted(switches.items()):
+        where = f"switch {switch!r}"
+        if not REVIEW_STEP_ID_RE.match(switch):
+            problems.append(f"{where}: id must be lowercase snake_case")
+        if not isinstance(spec, dict):
+            problems.append(f"{where}: must be an object")
+            continue
+        unknown = sorted(set(spec) - PROCESS_SWITCH_KEYS - PROCESS_SWITCH_OPTIONAL_KEYS)
+        if unknown:
+            problems.append(f"{where}: unknown keys {unknown}")
+        if not _nonblank(spec.get("summary")):
+            problems.append(f"{where}: needs a summary of what it decides")
+        if not _nonblank(spec.get("metric")):
+            problems.append(f"{where}: needs a component metric")
+        promotion = spec.get("promotion")
+        if not isinstance(promotion, dict) or set(promotion) != {"unit", "threshold"} \
+                or not all(_nonblank(promotion.get(key)) for key in ("unit", "threshold")):
+            problems.append(f"{where}: needs a promotion rule with a unit and a threshold")
+        owners = spec.get("flows")
+        if not isinstance(owners, list) or not owners \
+                or not all(isinstance(flow, str) for flow in owners):
+            problems.append(f"{where}: flows must list at least one owning flow")
+        else:
+            for flow in sorted({flow for flow in owners if owners.count(flow) > 1}):
+                problems.append(f"{where}: duplicate owning flow {flow!r}")
+            for flow in sorted(set(owners) - flows):
+                problems.append(f"{where}: names unknown flow {flow!r}")
+        declared = spec.get("values")
+        ids: list[str] = []
+        if not isinstance(declared, list) or len(declared) < 2:
+            problems.append(f"{where}: values must list at least two values")
+        else:
+            for value in declared:
+                if not isinstance(value, dict) or set(value) != {"id", "tradeoffs"} \
+                        or not isinstance(value.get("id"), str) \
+                        or not _nonblank(value.get("tradeoffs")):
+                    problems.append(f"{where}: every value holds an id and non-empty tradeoffs")
+                    continue
+                if not REVIEW_STEP_ID_RE.match(value["id"]):
+                    problems.append(f"{where}: value id {value['id']!r} must be lowercase snake_case")
+                ids.append(value["id"])
+            for value in sorted({value for value in ids if ids.count(value) > 1}):
+                problems.append(f"{where}: duplicate value {value!r}")
+        default = spec.get("default")
+        if default not in ids:
+            problems.append(f"{where}: default {default!r} is not one of its values {ids}")
+        issue = spec.get("issue")
+        if "issue" in spec and (not isinstance(issue, int) or isinstance(issue, bool) or issue < 1):
+            problems.append(f"{where}: issue must be a positive issue number")
+        if "agent_variants" in spec:
+            variants = spec["agent_variants"]
+            problems.extend(agent_variant_problems(where, variants, ids, default, agents, tiers))
+            for variant in variants.values() if isinstance(variants, dict) else []:
+                if not isinstance(variant, dict) or not isinstance(variant.get("agents"), list):
+                    continue
+                for agent in variant["agents"]:
+                    name = f"{agent}-{variant.get('suffix')}"
+                    if name in agents or name in generated:
+                        problems.append(
+                            f"{where}: variant {name!r} collides with"
+                            f" {'a canonical agent' if name in agents else generated[name]}")
+                    generated.setdefault(name, where)
+    return problems
+
+
+def check_process_switches(tree: Tree, findings: list[Finding]) -> None:
+    """Process switches are declared once in the package registry, and every
+    switch is anchored in each flow that owns it as switch `<id>`."""
+    tiers = declared_tiers(tree)
+    for plugin in plugin_dirs(tree):
+        path = plugin / PROCESS_SWITCHES_RELPATH
+        flows_dir = plugin / "flows"
+        flow_paths = sorted(flows_dir.glob("*.md")) if flows_dir.is_dir() else []
+        anchors: dict[str, dict[str, Path]] = {}
+        for flow in flow_paths:
+            for name in SWITCH_ANCHOR_RE.findall(read_text(flow)):
+                anchors.setdefault(name, {})[flow.stem] = flow
+
+        def err(where: Path, message: str, fix: str) -> None:
+            findings.append(Finding("error", rel(tree, where), 1, "process_switches", message, fix))
+
+        if not path.is_file():
+            if anchors:
+                err(path, "flows name process switches but the switch registry is missing",
+                    "restore the registry the flows anchor to")
+            continue
+        try:
+            data = json.loads(read_text(path), object_pairs_hook=_unique_json_object)
+        except (json.JSONDecodeError, ValueError) as exc:
+            err(path, f"switch registry is not valid unique-key JSON: {exc}",
+                "fix the registry; every key and switch is declared once")
+            continue
+        agents = {agent.stem for agent in agent_files(plugin)}
+        for problem in process_switch_problems(data, {flow.stem for flow in flow_paths},
+                                               agents, tiers):
+            err(path, problem, "declare each switch once with its owning flows, values,"
+                " default, component metric and promotion rule")
+        switches = data.get("switches") if isinstance(data, dict) else None
+        switches = switches if isinstance(switches, dict) else {}
+        for name, owners in sorted(anchors.items()):
+            spec = switches.get(name)
+            listed = spec.get("flows") if isinstance(spec, dict) else None
+            for stem, flow in sorted(owners.items()):
+                if not isinstance(spec, dict):
+                    err(flow, f"flow {flow.name} names undeclared switch {name!r}",
+                        "declare the switch in the registry or fix the anchor")
+                elif not isinstance(listed, list) or stem not in listed:
+                    err(flow, f"flow {flow.name} names switch {name!r} but is not one of"
+                        " its owning flows", "list the flow in the switch's flows or"
+                        " remove the anchor")
+        for name, spec in sorted(switches.items()):
+            listed = spec.get("flows") if isinstance(spec, dict) else None
+            for stem in listed if isinstance(listed, list) else []:
+                if isinstance(stem, str) and (flows_dir / f"{stem}.md").is_file() \
+                        and stem not in anchors.get(name, {}):
+                    err(path, f"switch {name!r} is not named by its owning flow {stem!r}",
+                        "anchor the switch as switch `<id>` at the flow step it changes")
+
+
 def _limits_shape_errors(config: dict) -> list[str]:
     problems: list[str] = []
     if not isinstance(config.get("schema_version"), int):
@@ -2706,6 +2880,7 @@ CHECKS = {
     "model_config_shape": check_model_config_shape,
     "execution_profiles": check_execution_profiles,
     "review_panels": check_review_panels,
+    "process_switches": check_process_switches,
     "limits_config_shape": check_limits_config_shape,
     "delivery_contract_shape": check_delivery_contract_shape,
     "product_namespace": check_product_namespace,

@@ -460,5 +460,143 @@ class ReviewPanelValidatorTests(unittest.TestCase):
         self.assertEqual(validate.run(self.root), [])
 
 
+SWITCHES = f"{PLUGIN_ROOT}/skill-content/configure/data/process-switches.json"
+FIXTURE_SWITCH = {
+    "summary": "How the fixture step runs.",
+    "flows": ["operation"],
+    "values": [
+        {"id": "current", "tradeoffs": "Today's behaviour and the measured baseline."},
+        {"id": "fast", "tradeoffs": "Fewer passes; its recall is still unmeasured."},
+    ],
+    "default": "current",
+    "metric": "Minutes per fixture step against the baseline.",
+    "promotion": {"unit": "3 Deliveries", "threshold": "Median minutes at most half the baseline."},
+}
+FIXTURE_ANCHOR = "\nSwitch `fixture_mode` selects how step 3 runs.\n"
+
+
+class ProcessSwitchValidatorTests(unittest.TestCase):
+    """The package registry declares every process switch and its owning flows."""
+
+    def setUp(self) -> None:
+        self.temporary = tempfile.TemporaryDirectory()
+        self.root = Path(self.temporary.name)
+        fixtures.make_valid_root(self.root)
+        self.registry = self.root / SWITCHES
+        self.original = self.registry.read_bytes()
+        self.flow = self.root / PLUGIN_ROOT / "flows/operation.md"
+        self.flow_text = self.flow.read_text(encoding="utf-8")
+
+    def tearDown(self) -> None:
+        self.temporary.cleanup()
+
+    def messages(self) -> list[str]:
+        return [finding.message for finding in validate.run(self.root)
+                if finding.check == "process_switches"]
+
+    def declare(self, **switches) -> None:
+        data = json.loads(self.original)
+        data["switches"].update(switches)
+        self.registry.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+
+    def anchor(self, text: str = FIXTURE_ANCHOR) -> None:
+        self.flow.write_text(self.flow_text + text, encoding="utf-8")
+
+    def assert_rejected(self, fragment: str) -> None:
+        messages = self.messages()
+        self.assertTrue(any(fragment in message for message in messages), messages)
+
+    def test_shipped_registry_and_an_anchored_switch_are_clean(self):
+        self.assertEqual(self.messages(), [])
+        self.declare(fixture_mode=FIXTURE_SWITCH)
+        self.anchor()
+        self.assertEqual(validate.run(self.root), [])
+
+    def test_registry_shape_errors_are_rejected(self):
+        def switch(**changes):
+            spec = json.loads(json.dumps(FIXTURE_SWITCH))
+            spec.update(changes)
+            return {key: value for key, value in spec.items() if value is not None}
+
+        cases = (
+            (switch(default="ghost"),
+             "default 'ghost' is not one of its values ['current', 'fast']"),
+            (switch(metric=None), "needs a component metric"),
+            (switch(metric="  "), "needs a component metric"),
+            (switch(promotion=None), "needs a promotion rule with a unit and a threshold"),
+            (switch(promotion={"unit": "3 Deliveries"}),
+             "needs a promotion rule with a unit and a threshold"),
+            (switch(flows=[]), "flows must list at least one owning flow"),
+            (switch(flows=["operation", "ghost-flow"]), "names unknown flow 'ghost-flow'"),
+            (switch(values=[FIXTURE_SWITCH["values"][0]]), "values must list at least two values"),
+            (switch(values=[*FIXTURE_SWITCH["values"], dict(FIXTURE_SWITCH["values"][1])]),
+             "duplicate value 'fast'"),
+            (switch(values=[{"id": "current"}, FIXTURE_SWITCH["values"][1]]),
+             "every value holds an id and non-empty tradeoffs"),
+            (switch(summary=None), "needs a summary of what it decides"),
+            (switch(owner="qa"), "unknown keys ['owner']"),
+            (switch(issue=0), "issue must be a positive issue number"),
+        )
+        self.anchor()
+        for spec, fragment in cases:
+            with self.subTest(fragment=fragment):
+                self.declare(fixture_mode=spec)
+                self.assert_rejected(fragment)
+        self.declare(**{"Fixture-Mode": FIXTURE_SWITCH})
+        self.assert_rejected("id must be lowercase snake_case")
+        self.registry.write_text('{"schema_version": 2, "switches": {}}\n', encoding="utf-8")
+        self.assert_rejected("registry must hold exactly schema_version 1 and switches")
+        self.registry.write_text('{"schema_version": 1, "switches": {}, "switches": {}}\n',
+                                 encoding="utf-8")
+        self.assert_rejected("not valid unique-key JSON")
+
+    def test_flows_and_switches_must_name_each_other(self):
+        self.declare(fixture_mode=FIXTURE_SWITCH)
+        self.assert_rejected("switch 'fixture_mode' is not named by its owning flow 'operation'")
+
+        self.registry.write_bytes(self.original)
+        self.anchor()
+        self.assert_rejected("flow operation.md names undeclared switch 'fixture_mode'")
+
+        self.declare(fixture_mode=dict(FIXTURE_SWITCH, flows=["design-system"]))
+        messages = self.messages()
+        self.assertTrue(any("flow operation.md names switch 'fixture_mode' but is not one of"
+                            " its owning flows" in message for message in messages), messages)
+        self.assertTrue(any("is not named by its owning flow 'design-system'" in message
+                            for message in messages), messages)
+
+        self.registry.unlink()
+        self.assert_rejected("flows name process switches but the switch registry is missing")
+
+    def test_agent_variants_are_validated(self):
+        variant = {"suffix": "quick", "tier": "medium", "description": "Quick variant.",
+                   "agents": ["backlog-reviewer"]}
+        self.anchor()
+        self.declare(fixture_mode=dict(FIXTURE_SWITCH, agent_variants={"fast": variant}))
+        self.assertEqual(self.messages(), [])
+        cases = (
+            ({"current": variant}, "agent variants belong to a declared value other than the default"),
+            ({"fast": dict(variant, tier="extreme")},
+             "variant tier 'extreme' is not a declared reasoning tier"),
+            ({"fast": dict(variant, agents=["ghost-reviewer"])}, "unknown variant agent 'ghost-reviewer'"),
+            ({"fast": dict(variant, agents=[])}, "variant agents must list at least one canonical agent"),
+            ({"fast": dict(variant, suffix="Quick_Pass")}, "variant suffix must be kebab-case"),
+            ({"fast": dict(variant, description="Runs as: quick")},
+             "variant description must be one non-empty line without a colon"),
+            ({"fast": dict(variant, model="fast")},
+             "an agent variant holds exactly suffix, tier, description and agents"),
+            ({}, "agent_variants must map a switch value to its variant"),
+        )
+        for variants, fragment in cases:
+            with self.subTest(fragment=fragment):
+                self.declare(fixture_mode=dict(FIXTURE_SWITCH, agent_variants=variants))
+                self.assert_rejected(fragment)
+        second = dict(FIXTURE_SWITCH, agent_variants={"fast": variant})
+        self.declare(fixture_mode=dict(FIXTURE_SWITCH, agent_variants={"fast": variant}),
+                     other_mode=second)
+        self.anchor(FIXTURE_ANCHOR + "Switch `other_mode` selects the same step.\n")
+        self.assert_rejected("variant 'backlog-reviewer-quick' collides with switch 'fixture_mode'")
+
+
 if __name__ == "__main__":
     unittest.main()

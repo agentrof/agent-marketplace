@@ -27,7 +27,10 @@ configuration remain the source of truth.
    schema replacement. It refreshes only policy-asserted Obsidian JSON keys
    and preserves user-owned instruction companions through the separate host
    projection choice gate. A Codex projection keeps its recorded execution
-   profile.
+   profile. A release that moves a model class to a newer pinned model
+   rewrites the role files of an `auto` projection on this refresh and leaves
+   an `inherit` projection unchanged; Claude Code roles change with the plugin
+   update itself.
 5. Config schema v2 has only team identity and language settings. An upgrade
    removes every field outside that closed shape without editing Markdown,
    aliases or links. Taxonomy additions and graph-color changes therefore never

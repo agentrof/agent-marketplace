@@ -9,6 +9,7 @@ Host manifests, contracts, overlays, and append-only fragments live under
 from __future__ import annotations
 
 import argparse
+import datetime
 import hashlib
 import importlib.util
 import json
@@ -26,8 +27,14 @@ ADAPTER_API_VERSION = 1
 FEATURE_BRANCH_PREFIX_RE = re.compile(r"[a-z0-9]+(?:-[a-z0-9]+)*/")
 CANONICAL_REASONING_LEVELS = {"high", "medium", "low", "lens", "mechanical", "inherit"}
 EXECUTION_PROFILE_FILE = "execution-profiles.json"
+EXECUTION_PROFILE_SCHEMA_VERSION = 2
 AUTO_EXECUTION_PROFILE = "auto"
-EXECUTION_SETTING_KEYS = {"model", "effort"}
+INHERIT_TIER = "inherit"
+EXECUTION_SETTING_KEYS = {"class", "effort"}
+MODEL_CATALOG_FILE = "model-catalog.json"
+MODEL_CLASS_KEYS = ("family", "id", "efforts", "sources", "verified")
+MODEL_CLASS_NAME_RE = re.compile(r"[a-z][a-z0-9]*(?:_[a-z0-9]+)*")
+VERIFIED_DATE_RE = re.compile(r"[0-9]{4}-[0-9]{2}-[0-9]{2}")
 PROCESS_SWITCHES_RELPATH = "skill-content/configure/data/process-switches.json"
 DELIVERY_PROTOCOL_CAPABILITY = {
     "read_min": 1,
@@ -292,11 +299,15 @@ def load_adapters(root: Path) -> dict[str, HostAdapter]:
             raise ValueError(f"{path}: adapter.py is missing")
         module = _load_adapter_module(module_path, host_id)
         required = ("skill_artifacts", "agent_artifacts", "native_manifest_directory",
-                    "instruction_surface", "runtime_contracts",
-                    "execution_setting_problems")
+                    "instruction_surface", "runtime_contracts", "model_version")
         missing = [name for name in required if not callable(getattr(module, name, None))]
         if missing:
             raise ValueError(f"{module_path}: missing adapter functions: {', '.join(missing)}")
+        efforts = getattr(module, "EFFORT_LEVELS", None)
+        if not isinstance(efforts, tuple) or not efforts \
+                or not all(isinstance(value, str) and value for value in efforts) \
+                or len(set(efforts)) != len(efforts):
+            raise ValueError(f"{module_path}: EFFORT_LEVELS must be distinct effort names")
         result[host_id] = HostAdapter(host_id, metadata, module)
     if set(result) != set(contract["hosts"]):
         raise ValueError(
@@ -434,13 +445,99 @@ def execution_profile_path(root: Path, host_id: str) -> Path:
     return root / "platforms" / host_id / EXECUTION_PROFILE_FILE
 
 
+def model_catalog_path(root: Path, host_id: str) -> Path:
+    return root / "platforms" / host_id / MODEL_CATALOG_FILE
+
+
+def _is_iso_date(value: object) -> bool:
+    if not isinstance(value, str) or VERIFIED_DATE_RE.fullmatch(value) is None:
+        return False
+    try:
+        datetime.date.fromisoformat(value)
+    except ValueError:
+        return False
+    return True
+
+
+def model_class_problems(entry: object, adapter: HostAdapter) -> list[str]:
+    """Return the problems of one catalog class against the host vocabulary."""
+    if not isinstance(entry, dict) or set(entry) != set(MODEL_CLASS_KEYS):
+        return [f"must hold exactly {', '.join(MODEL_CLASS_KEYS)}"]
+    problems = []
+    family, model_id = entry["family"], entry["id"]
+    parsed = adapter.module.model_version(model_id) \
+        if isinstance(model_id, str) else None
+    if parsed is None:
+        problems.append(
+            f"id {model_id!r} is not a pinned model ID in the host's documented"
+            " format; aliases and unknown names are refused"
+        )
+    elif parsed[0] != family:
+        problems.append(f"id {model_id!r} belongs to family {parsed[0]!r}, not {family!r}")
+    efforts = entry["efforts"]
+    vocabulary = adapter.module.EFFORT_LEVELS
+    if not isinstance(efforts, list) \
+            or not all(effort in vocabulary for effort in efforts) \
+            or len(set(efforts)) != len(efforts):
+        problems.append(
+            f"efforts must list distinct values of {', '.join(vocabulary)};"
+            " an empty list means the model takes no effort"
+        )
+    sources = entry["sources"]
+    if not isinstance(sources, list) or not sources or not all(
+            isinstance(source, str) and source.startswith("https://")
+            for source in sources):
+        problems.append(
+            "sources must list the official https pages that document the id"
+            " and its efforts"
+        )
+    if not _is_iso_date(entry["verified"]):
+        problems.append("verified must be the YYYY-MM-DD date the sources were checked")
+    return problems
+
+
+def model_catalog_problems(catalog: object, adapter: HostAdapter) -> list[str]:
+    """Return the shape and host-vocabulary problems of one model catalog."""
+    if not isinstance(catalog, dict) or set(catalog) != {"schema_version", "classes"} \
+            or catalog.get("schema_version") != 1:
+        return ["catalog must hold exactly schema_version 1 and classes"]
+    classes = catalog["classes"]
+    if not isinstance(classes, dict) or not classes:
+        return ["classes must map at least one class name to its pinned model"]
+    problems: list[str] = []
+    pinned: dict[str, str] = {}
+    for name, entry in classes.items():
+        where = f"classes.{name}"
+        if MODEL_CLASS_NAME_RE.fullmatch(name) is None:
+            problems.append(f"{where}: class names are snake_case")
+        problems.extend(
+            f"{where}: {problem}" for problem in model_class_problems(entry, adapter)
+        )
+        model_id = entry.get("id") if isinstance(entry, dict) else None
+        if isinstance(model_id, str) and model_id in pinned:
+            problems.append(
+                f"{where}: pins {model_id!r} like classes.{pinned[model_id]};"
+                " one class per model keeps a bump to one edit"
+            )
+        elif isinstance(model_id, str):
+            pinned[model_id] = name
+    return problems
+
+
 def execution_profile_problems(
-    table: object, adapter: HostAdapter, tiers: set[str],
+    table: object, catalog: dict | None, adapter: HostAdapter, tiers: set[str],
 ) -> list[str]:
-    """Return the shape and host-vocabulary problems of one profile table."""
+    """Return the shape and catalog problems of one profile table.
+
+    A ``None`` catalog skips the class checks: its own problems are reported
+    against the catalog file.
+    """
     if not isinstance(table, dict) or set(table) != {"schema_version", "profiles"} \
-            or table.get("schema_version") != 1:
-        return ["table must hold exactly schema_version 1 and profiles"]
+            or table.get("schema_version") != EXECUTION_PROFILE_SCHEMA_VERSION:
+        return [
+            "table must hold exactly schema_version"
+            f" {EXECUTION_PROFILE_SCHEMA_VERSION} and profiles"
+        ]
     profiles = table["profiles"]
     if not isinstance(profiles, dict) or set(profiles) != {AUTO_EXECUTION_PROFILE}:
         return [
@@ -453,6 +550,8 @@ def execution_profile_problems(
             f"{AUTO_EXECUTION_PROFILE} must map exactly the reasoning tiers"
             f" {sorted(tiers)}"
         ]
+    classes = catalog["classes"] if catalog is not None else None
+    vocabulary = adapter.module.EFFORT_LEVELS
     problems: list[str] = []
     for tier in sorted(tiers):
         setting = settings[tier]
@@ -462,35 +561,85 @@ def execution_profile_problems(
                 or not all(isinstance(value, str) and value
                            for value in setting.values()):
             problems.append(
-                f"{where} may hold only non-empty string model and effort values"
+                f"{where} may hold only non-empty string class and effort values"
             )
             continue
-        problems.extend(
-            f"{where}: {problem}"
-            for problem in adapter.module.execution_setting_problems(
-                tier, dict(setting)
+        if tier == INHERIT_TIER:
+            if setting:
+                problems.append(
+                    f"{where}: the inherit tier sets neither class nor effort,"
+                    " so its roles follow the session"
+                )
+            continue
+        name, effort = setting.get("class"), setting.get("effort")
+        if name is None:
+            problems.append(f"{where} must name a class of the host's model catalog")
+        if effort is not None and effort not in vocabulary:
+            problems.append(
+                f"{where}: effort must be one of {', '.join(vocabulary)} or absent"
             )
-        )
+        if name is None or classes is None:
+            continue
+        entry = classes.get(name)
+        if entry is None:
+            problems.append(
+                f"{where}: unknown model class {name!r}; classes are"
+                f" {', '.join(sorted(classes))}"
+            )
+        elif effort in vocabulary and effort not in entry["efforts"]:
+            supported = ", ".join(entry["efforts"]) or "no effort"
+            problems.append(
+                f"{where}: effort {effort!r} is not supported by {entry['id']},"
+                f" which takes {supported}"
+            )
     return problems
+
+
+def _read_table(path: Path, what: str) -> object:
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise ValueError(f"{path}: missing or invalid {what}") from exc
+
+
+def load_model_tables(
+    root: Path, adapter: HostAdapter,
+    tiers: set[str] = CANONICAL_REASONING_LEVELS,
+) -> tuple[dict, dict]:
+    """Load one host's validated model catalog and execution profile table."""
+    catalog_path = model_catalog_path(root, adapter.host_id)
+    profile_path = execution_profile_path(root, adapter.host_id)
+    catalog = _read_table(catalog_path, "model catalog")
+    table = _read_table(profile_path, "execution profile table")
+    catalog_problems = model_catalog_problems(catalog, adapter)
+    problems = [f"{catalog_path}: {problem}" for problem in catalog_problems]
+    problems.extend(
+        f"{profile_path}: {problem}"
+        for problem in execution_profile_problems(
+            table, None if catalog_problems else catalog, adapter, set(tiers),
+        )
+    )
+    if problems:
+        raise ValueError("\n".join(problems))
+    return catalog, table
 
 
 def load_execution_profile(
     root: Path, adapter: HostAdapter,
     tiers: set[str] = CANONICAL_REASONING_LEVELS,
 ) -> dict[str, dict[str, str]]:
-    """Load one host's validated tier settings for the default profile."""
-    path = execution_profile_path(root, adapter.host_id)
-    try:
-        table = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError) as exc:
-        raise ValueError(f"{path}: missing or invalid execution profile table") from exc
-    problems = execution_profile_problems(table, adapter, set(tiers))
-    if problems:
-        raise ValueError("\n".join(f"{path}: {problem}" for problem in problems))
-    return {
-        tier: dict(setting)
-        for tier, setting in table["profiles"][AUTO_EXECUTION_PROFILE].items()
-    }
+    """Resolve one host's default profile to each tier's model and effort."""
+    catalog, table = load_model_tables(root, adapter, tiers)
+    classes = catalog["classes"]
+    resolved = {}
+    for tier, setting in table["profiles"][AUTO_EXECUTION_PROFILE].items():
+        value = {}
+        if "class" in setting:
+            value["model"] = classes[setting["class"]]["id"]
+        if "effort" in setting:
+            value["effort"] = setting["effort"]
+        resolved[tier] = value
+    return resolved
 
 
 def agent_variants(source: Path, tiers: set[str]) -> list[tuple[str, str, str, str]]:

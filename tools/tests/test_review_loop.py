@@ -212,13 +212,16 @@ class ReviewLoopReferenceTests(unittest.TestCase):
     def test_re_review_reads_only_blocking_findings_changed_text_and_context(self):
         text = flat(DOCUMENT)
         for rule in (
-            "commit the candidate before its first review",
             "the open critical and major findings, as returned, with their evidence",
             "the changed text: the diff between the reviewed revision and the fixed one",
             "its dependency context",
             "`--findings <record>`, `--base <reviewed commit>` and one `--input` per changed"
             " path and dependency-context note, and no other document of the step",
-            "A backlog re-review keeps its regenerated manifest",
+            "Commit the candidate before its first review",
+            "A backlog rerun reader's task takes no `--epic`, so it binds no epic or root review"
+            " manifest and never the whole closure again",
+            "the epic, test plan and dependency stories of each changed story",
+            "the re-review needs no narrower backlog manifest with a second freshness contract",
             "it never re-audits unchanged text",
             "at `single_reader` one fresh reviewer of the step's reader role",
             "at `lens_panel` the assignments that returned a blocking finding",
@@ -419,31 +422,68 @@ class ReviewLoopTaskInputTests(unittest.TestCase):
                                   result["required_reads"])
 
     def test_re_review_task_binds_only_the_findings_the_diff_and_the_context(self):
-        contract = write(self.root, "workspace/docs/operation/verification-contract.md",
-                         "---\ntype: verification-contract\n---\n\n# Contract\n\nRun make test.\n")
-        decision = write(self.root, "workspace/docs/solution-design/decisions/api.md",
-                         "---\ntype: decision\n---\n\n# API\n")
-        other = write(self.root, "workspace/docs/operation/environment-contract.md",
-                      "---\ntype: environment-contract\n---\n\n# Environment\n")
+        docs = "workspace/docs/"
+        # step: (entry, rerun reader role, added skills, the changed note, its
+        # dependency context, a note of the step outside that context)
+        steps = {
+            "operation_verification": (
+                "configure", "devops-engineer", ["challenge-review"],
+                "operation/verification-contract.md", ["solution-design/decisions/api.md"],
+                "operation/environment-contract.md"),
+            "backlog": (
+                "backlog-plan", "backlog-reviewer", [],
+                "backlog/epics/identity/stories/sign-in/story.md",
+                ["backlog/epics/identity/epic.md",
+                 "backlog/epics/identity/stories/sign-in/test-plan.md",
+                 "backlog/epics/identity/reviews/round-1-epic-review.md"],
+                "backlog/epics/billing/stories/invoice/story.md"),
+            "solution_design": (
+                "solution-design", "solution-reviewer", [],
+                "solution-design/decisions/api-decision.md",
+                ["solution-design/landscape.md", "solution-design/engagements/api.md"],
+                "solution-design/components/web/component.md"),
+            "design_system": (
+                "design-system", "design-system-reviewer", [],
+                "design-system/MASTER.md", ["design-system/pages/sign-in.md"],
+                "design-system/pages/billing.md"),
+        }
+        for _entry, _role, _skills, changed, context, other in steps.values():
+            for path in (changed, *context, other):
+                write(self.root, docs + path, f"---\ntype: note\n---\n\n# {Path(path).stem}\n")
         policy(self.docs, "init")
         policy(self.docs, "set", "--switch", "review_loop", "--value", "blocking_delta")
         policy(self.docs, "approve")
         reviewed = commit(self.root)
-        write(self.root, contract, "---\ntype: verification-contract\n---\n\n# Contract\n\n"
-                                   "Run make test from the repository root.\n")
-        findings = write(self.root, ".agentrof/agent-marketplace/.runtime/review-loop/open.md",
-                         "| id | severity | evidence |\n|---|---|---|\n"
-                         "| OP-1 | major | The test workdir is unstated. |\n")
-        result = task_inputs.manifest(entry="configure", role="devops-engineer", mode="review",
-                                      project=self.root, skills=["challenge-review"],
-                                      findings=findings, base=reviewed, inputs=[contract, decision])
-        self.assertEqual({record["path"] for record in result["project_inputs"]},
-                         {contract, decision, findings, "workspace/docs/delivery/process-policy.md"})
-        self.assertNotIn(other, {record["path"] for record in result["project_inputs"]})
-        self.assertEqual(result["changed_paths"], [contract])
-        self.assertEqual((result["base"], result["open_findings"]), (reviewed, findings))
-        self.assertEqual(result["write_boundary"], "read_only")
-        self.assertIn(DOCUMENT, result["required_reads"])
+        for step, (entry, role, skills, changed, context, other) in steps.items():
+            with self.subTest(step=step):
+                write(self.root, docs + changed, "---\ntype: note\n---\n\n# Fixed\n\nThe fix.\n")
+                findings = write(self.root, f".agentrof/agent-marketplace/.runtime/review-loop/{step}.md",
+                                 "| id | severity | evidence |\n|---|---|---|\n"
+                                 "| F-1 | major | The rule is unstated. |\n")
+                inputs = [docs + path for path in (changed, *context)]
+                result = task_inputs.manifest(entry=entry, role=role, mode="review",
+                                              project=self.root, skills=skills, findings=findings,
+                                              base=reviewed, inputs=inputs)
+                bound = {record["path"] for record in result["project_inputs"]}
+                self.assertEqual(bound, {*inputs, findings,
+                                         "workspace/docs/delivery/process-policy.md"})
+                self.assertNotIn(docs + other, bound)
+                self.assertIsNone(result["backlog_scope"])
+                self.assertEqual(result["changed_paths"], [docs + changed])
+                self.assertEqual((result["base"], result["open_findings"]), (reviewed, findings))
+                self.assertEqual(result["write_boundary"], "read_only")
+                self.assertIn(DOCUMENT, result["required_reads"])
+                # The task's own freshness check binds exactly these inputs.
+                self.assertEqual(task_inputs.manifest(
+                    entry=entry, role=role, mode="review", project=self.root, skills=skills,
+                    findings=findings, base=reviewed, inputs=inputs,
+                    expected_hash=result["source_hash"])["source_hash"], result["source_hash"])
+                write(self.root, docs + context[0], "---\ntype: note\n---\n\n# Moved\n")
+                with self.assertRaisesRegex(ValueError, "task inputs are stale"):
+                    task_inputs.manifest(entry=entry, role=role, mode="review", project=self.root,
+                                         skills=skills, findings=findings, base=reviewed,
+                                         inputs=inputs, expected_hash=result["source_hash"])
+                git(self.root, "checkout", "--", docs + changed, docs + context[0])
 
 
 if __name__ == "__main__":

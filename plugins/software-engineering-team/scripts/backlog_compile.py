@@ -71,21 +71,40 @@ REVIEW_PLACEHOLDER_RE = re.compile(
 
 _EXPERIENCE_APPLICATION_CACHE_STACK: list[dict[Path, tuple[dict, list[str]]]] = []
 _EXPERIENCE_PACKAGE_CACHE_STACK: list[dict[Path, tuple[dict, list[str]]]] = []
+_READ_CACHE_STACK: list[dict[tuple, object]] = []
 
 
 @contextlib.contextmanager
 def experience_validation_session():
-    """Reuse immutable Experience validation results during one backlog read."""
+    """Reuse immutable validation results during one backlog read.
+
+    A session never spans a write: every post-write read opens a fresh one.
+    """
     if _EXPERIENCE_APPLICATION_CACHE_STACK:
         yield
         return
     _EXPERIENCE_APPLICATION_CACHE_STACK.append({})
     _EXPERIENCE_PACKAGE_CACHE_STACK.append({})
+    _READ_CACHE_STACK.append({})
     try:
         yield
     finally:
+        _READ_CACHE_STACK.pop()
         _EXPERIENCE_PACKAGE_CACHE_STACK.pop()
         _EXPERIENCE_APPLICATION_CACHE_STACK.pop()
+
+
+def session_read(key: tuple, compute):
+    """Return one successful result per key within a read session.
+
+    Outside a session every call recomputes. A raised error is never cached.
+    """
+    cache = _READ_CACHE_STACK[-1] if _READ_CACHE_STACK else None
+    if cache is None:
+        return compute()
+    if key not in cache:
+        cache[key] = compute()
+    return cache[key]
 
 
 def current_experience_application(root: Path) -> tuple[dict, list[str]]:
@@ -415,7 +434,10 @@ def validate_criterion_ref(docs: Path, value: str, label: str,
         return parsed
     registry_path = docs / "business-analysis" / space / "_generated" / "registry.json"
     try:
-        registry = json.loads(registry_path.read_text(encoding="utf-8"))
+        registry = session_read(
+            ("ba-registry", registry_path),
+            lambda: json.loads(registry_path.read_text(encoding="utf-8")),
+        )
         entry = (registry.get("ids") or {}).get(criterion_id)
     except (OSError, json.JSONDecodeError):
         entry = None
@@ -836,10 +858,11 @@ def validate_experience_ref(docs: Path, value: str, label: str,
         return
     try:
         import experience_application_check
-        application_rows, application_findings = (
-            experience_application_check.verified_application_ledger(
+        application_rows, application_findings = session_read(
+            ("application-ledger", experience_root),
+            lambda: experience_application_check.verified_application_ledger(
                 experience_root,
-            )
+            ),
         )
     except (ImportError, OSError, ValueError) as exc:
         errors.append(f"{label} application history cannot be verified: {exc}")
@@ -872,8 +895,11 @@ def validate_experience_ref(docs: Path, value: str, label: str,
     if type(current_revision) is not int or current_revision < 1:
         errors.append(f"{label} owning Experience has an invalid revision")
         return
-    history, history_findings = experience_compile.validate_process_ledger(
-        package, current_revision,
+    history, history_findings = session_read(
+        ("process-ledger", package, current_revision),
+        lambda: experience_compile.validate_process_ledger(
+            package, current_revision,
+        ),
     )
     if history_findings:
         errors.extend(f"{label} owning Experience history: {finding}"
@@ -882,8 +908,11 @@ def validate_experience_ref(docs: Path, value: str, label: str,
     registries = list(history)
     if props.get("status") == "approved":
         try:
-            current, current_findings = experience_compile.compile_package(
-                package, True, allow_stale_inputs=True,
+            current, current_findings = session_read(
+                ("stale-input-package", package),
+                lambda: experience_compile.compile_package(
+                    package, True, allow_stale_inputs=True,
+                ),
             )
         except (OSError, ValueError) as exc:
             errors.append(f"{label} owning Experience registry is missing: {exc}")

@@ -147,11 +147,12 @@ def manifest(docs: Path, *, epic: str | None = None, expected_hash: str | None =
         unparsed: set[str] = set()
 
         def include(relative: str, reason: str) -> None:
-            path = regular_file(docs, relative)
-            reasons[relative].add(reason)
+            # A path is validated and hashed once per run; the closing
+            # freshness check re-validates every included path.
             if relative not in hashes:
-                hashes[relative] = file_hash(path)
+                hashes[relative] = file_hash(regular_file(docs, relative))
                 pending.append(relative)
+            reasons[relative].add(reason)
 
         def story_context(story_id: str, reason: str) -> None:
             queue = deque([story_id])

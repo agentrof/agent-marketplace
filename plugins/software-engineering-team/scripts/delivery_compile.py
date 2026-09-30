@@ -2269,14 +2269,69 @@ def _file_record(docs: Path, relative: str) -> dict:
     return {"path": relative, "sha256": "sha256:" + hashlib.sha256(path.read_bytes()).hexdigest()}
 
 
-def bundle_manifest(docs: Path, delivery_id: str) -> dict:
+def operation_holder(docs: Path, delivery_id: str, remote: str) -> tuple[Path, str | None] | None:
+    """Name the checkout and the ref whose Operation contracts a Delivery's publication meets.
+
+    Publication refuses an approved contract that no Item pins while the
+    Integration lacks it, so the Integration's remote-tracking ref answers once
+    reservation has cut it. Before that the target's does, since reservation
+    cuts the Integration from it, and HEAD stands in for a target without one.
+    Only local refs are read, as current as the last fetch or push. None
+    outside a Git checkout.
+    """
+    checkout = next((parent for parent in (docs, *docs.parents) if (parent / ".git").exists()), None)
+    if checkout is None:
+        return None
+    from delivery_git import resolve_target_branch, short_refs
+    refs = [f"refs/remotes/{remote}/{short_refs(delivery_id)['integration']}"]
+    try:
+        refs.append(f"refs/remotes/{remote}/{resolve_target_branch(checkout, remote)}")
+    except RuntimeError:
+        pass
+    for ref in (*refs, "HEAD"):
+        if not subprocess.run(["git", "-C", str(checkout), "rev-parse", "--verify", "--quiet",
+                               ref + "^{commit}"], capture_output=True, check=False).returncode:
+            return checkout, ref
+    return checkout, None
+
+
+def operation_held(holder: tuple[Path, str | None], path: Path, text: str) -> bool:
+    """Whether the holder's copy of a contract has the local authored text.
+
+    As publication compares them, the generated relation block and line
+    endings do not count.
+    """
+    checkout, ref = holder
+    if ref is None:
+        return False
+    relative = path.resolve().relative_to(checkout.resolve()).as_posix()
+    shown = subprocess.run(["git", "--no-replace-objects", "-C", str(checkout), "cat-file", "blob",
+                            f"{ref}:{relative}"], capture_output=True, check=False)
+    if shown.returncode:
+        return False
+
+    def authored(value: str) -> str:
+        return without_generated_relations(value.replace("\r\n", "\n")).rstrip()
+
+    try:
+        return authored(shown.stdout.decode("utf-8")) == authored(text)
+    except UnicodeDecodeError:
+        return False
+
+
+def bundle_manifest(docs: Path, delivery_id: str, remote: str = "origin") -> dict:
     """Return the contract and topology bundle one execution plan is reviewed on.
 
     Only a Delivery that runs switch execution_planning at single_source_bundle
-    has one. It lists every Operation contract the plan revises or pins, every
-    Item record with its Story and Test Plan and the switch value's package
-    data, each with the hash of its bytes, and names the counterpart reader of
-    every revised contract. It changes nothing.
+    has one. It lists every Operation contract the plan revises, pins or has
+    to carry, every Item record with its Story and Test Plan and the switch
+    value's package data, each with the hash of its bytes, and the Delivery's
+    User Decisions section, which owns every owner ruling, with the hash of its
+    text. It names the counterpart reader of every revised contract as
+    task_inputs.py --role takes it. An unpinned revision is one no open Item
+    pins that the Integration, or before reservation the target, does not hold:
+    approval does not end it, only the target and refresh-target do. It
+    changes nothing.
     """
     root = find_delivery(docs, delivery_id)
     if root is None:
@@ -2285,10 +2340,16 @@ def bundle_manifest(docs: Path, delivery_id: str) -> dict:
     if value != SINGLE_SOURCE_BUNDLE:
         raise ValueError(f"{delivery_id} runs switch {EXECUTION_PLANNING} at {value}; only"
                          f" {SINGLE_SOURCE_BUNDLE} reviews an execution-plan bundle")
-    props, _body = split_note(root / "delivery.md")
+    props, body = split_note(root / "delivery.md")
     if props.get("status") not in BUNDLE_STATUSES:
         raise ValueError(f"{delivery_id} is {props.get('status')}; its bundle is reviewed"
                          " during execution planning")
+    delivery = (root / "delivery.md").relative_to(docs).as_posix()
+    rulings = section_bodies(body).get("User Decisions")
+    if rulings is None:
+        raise ValueError(f"bundle input is missing: {delivery} User Decisions")
+    decisions = {"path": delivery, "section": "User Decisions",
+                 "sha256": "sha256:" + hashlib.sha256(rulings.encode("utf-8")).hexdigest()}
     items, sources = [], []
     for item_path in sorted(root.glob("items/*/item.md")):
         item, _item_body = split_note(item_path)
@@ -2300,6 +2361,7 @@ def bundle_manifest(docs: Path, delivery_id: str) -> dict:
         raise ValueError("Delivery must contain at least one Item")
     # A sealed Item keeps the bindings its evidence was produced against.
     open_items = [item for item in items if item["status"] not in TERMINAL_ITEM_STATUSES]
+    holder = operation_holder(docs, delivery_id, remote)
     contracts = []
     for kind in ("verification", "environment"):
         path = operation_compile.contract_path(docs, kind)
@@ -2307,29 +2369,33 @@ def bundle_manifest(docs: Path, delivery_id: str) -> dict:
             if kind == "verification":
                 raise ValueError("bundle input is missing: operation/verification-contract.md")
             continue
-        contract, _contract_body = operation_compile.parse(path)
+        text = path.read_text(encoding="utf-8")
+        contract, _contract_body = operation_compile.parse_text(text, path)
         pinned = bool(open_items) and (kind == "verification"
                                        or any(item["runtime_required"] for item in open_items))
         revised = contract.get("status") == "draft"
-        if pinned or revised:
+        # Outside Git only the draft status tells a revision apart.
+        held = operation_held(holder, path, text) if holder is not None else not revised
+        if pinned or revised or not held:
             writer = operation_compile.WRITER_ROLES[kind]
+            counterpart = next(role for role in operation_compile.WRITER_ROLES.values() if role != writer)
             contracts.append({**_file_record(docs, path.relative_to(docs).as_posix()),
                               "kind": kind, "status": contract.get("status"),
                               "revision": contract.get("revision"), "revised": revised,
-                              "pinned": pinned, "writer": writer,
-                              "counterpart": next(role for role in operation_compile.WRITER_ROLES.values()
-                                                  if role != writer)})
+                              "pinned": pinned, "held": held, "writer": writer.replace("_", "-"),
+                              "counterpart": counterpart.replace("_", "-")})
     package = Path(__file__).resolve().parents[1]
     spec = process_policy.load_registry()[EXECUTION_PLANNING]["spec"]
     data = [{"path": relative, "sha256": "sha256:" + hashlib.sha256(
         (package / relative).read_bytes()).hexdigest()}
         for relative in spec.get("value_data", {}).get(SINGLE_SOURCE_BUNDLE, [])]
-    files = [record["path"] for record in (*contracts, *items, *sources)]
+    files = [record["path"] for record in (*contracts, *items, *sources, decisions)]
     result = {"delivery": delivery_id, "contracts": contracts, "items": items,
-              "sources": sources, "data": data,
+              "sources": sources, "user_decisions": decisions, "data": data,
+              "held_by": holder[1] if holder is not None else None,
               "readers": [contract["counterpart"] for contract in contracts if contract["revised"]],
               "unpinned_revisions": [contract["path"] for contract in contracts
-                                     if contract["revised"] and not contract["pinned"]],
+                                     if not contract["pinned"] and not contract["held"]],
               "inputs": sorted(dict.fromkeys(f"workspace/docs/{path}" for path in files))}
     result["source_hash"] = "sha256:" + hashlib.sha256(json.dumps(
         result, sort_keys=True, ensure_ascii=True, separators=(",", ":")).encode()).hexdigest()
@@ -2339,7 +2405,7 @@ def bundle_manifest(docs: Path, delivery_id: str) -> dict:
 def bundle(args) -> int:
     docs = docs_root(args.docs)
     try:
-        result = bundle_manifest(docs, args.delivery)
+        result = bundle_manifest(docs, args.delivery, getattr(args, "remote", "origin"))
     except (OSError, ValueError) as exc:
         print(json.dumps({"ok": False, "errors": [str(exc)]}, indent=2)); return 1
     expected = getattr(args, "expected_hash", None)
@@ -2757,6 +2823,9 @@ def main(argv=None) -> int:
     light.set_defaults(func=light_path_check)
     bundle_cmd = sub.add_parser("bundle-manifest")
     bundle_cmd.add_argument("--delivery", required=True); bundle_cmd.add_argument("--expected-hash")
+    bundle_cmd.add_argument("--remote", default="origin",
+                            help="the Git remote whose local remote-tracking refs hold the target and"
+                                 " Integration branches")
     bundle_cmd.set_defaults(func=bundle)
     transition = sub.add_parser("prepare-item-transition")
     transition.add_argument("--delivery", required=True); transition.add_argument("--story", required=True)

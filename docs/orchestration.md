@@ -123,7 +123,8 @@ document, section and writer role that `execution-plan/data/fact-ownership.json`
 names, and every other document links it: the architect's planning output is a
 transient handoff to the contract writers, and the revised contracts, the Item
 records and their Stories and Test Plans take one review layer over one
-hash-checked bundle manifest. Each revised contract's counterpart reads the
+hash-checked bundle manifest, which also binds the owner rulings in the
+Delivery's `User Decisions`. Each revised contract's counterpart reads the
 whole bundle in parallel, or review panel `execution_bundle` does at
 `review_panels` `lens_panel`, and the bundle gets one verdict. Writer
 ownership, architecture inside the active Item, pinned-only publication and the

@@ -6,6 +6,7 @@ owned and reviews the revised contracts with the Item topology in one bundle."""
 from __future__ import annotations
 
 import contextlib
+import hashlib
 import io
 import json
 import os
@@ -438,6 +439,32 @@ class BundleManifestTests(unittest.TestCase):
         delivery_compile.atomic_text(item, delivery_compile.frontmatter(props, body))
         return item
 
+    def section(self, title: str, text: str) -> None:
+        """Replace one section of delivery.md, as the Delivery Coordinator edits it."""
+        path = delivery_compile.find_delivery(self.docs, "DLV-001") / "delivery.md"
+        props, body = delivery_compile.split_note(path)
+        body = delivery_compile.replace_section(body, title, text)
+        delivery_compile.atomic_text(path, delivery_compile.frontmatter(props, body))
+
+    def decisions(self) -> str:
+        path = delivery_compile.find_delivery(self.docs, "DLV-001") / "delivery.md"
+        return delivery_compile.section_bodies(delivery_compile.split_note(path)[1])["User Decisions"]
+
+    def draft_environment_contract(self) -> type:
+        environment = type("Args", (), {"docs": str(self.docs), "kind": "environment",
+                                        "constrained_by": ["solution-design/decisions/fixture-api"]})
+        self.assertEqual(quiet(operation_compile.init, environment)[0], 0)
+        path = operation_compile.contract_path(self.docs, "environment")
+        props, body = operation_compile.parse(path)
+        props["env_command"] = "make env"
+        operation_compile.atomic_text(path, operation_compile.render(props, body))
+        return environment
+
+    def commit(self, *paths: str) -> None:
+        for args in (("add", "--", *paths), ("commit", "-qm", "record")):
+            subprocess.run(["git", "-C", str(self.root), *args], check=True, capture_output=True,
+                           env={**os.environ, **GIT_IDENTITY})
+
     def test_only_single_source_bundle_has_a_bundle(self):
         self.scope()
         code, result = self.run_bundle()
@@ -479,10 +506,11 @@ class BundleManifestTests(unittest.TestCase):
         self.assertEqual([record["path"] for record in result["data"]], [OWNERSHIP, PANELS])
         self.assertTrue(all(record["sha256"].startswith("sha256:") for record in
                             (*result["contracts"], *result["items"], *result["sources"],
-                             *result["data"])))
+                             *result["data"], result["user_decisions"])))
         self.assertEqual(result["inputs"], sorted(
             f"workspace/docs/{record['path']}"
-            for record in (*result["contracts"], *result["items"], *result["sources"])))
+            for record in (*result["contracts"], *result["items"], *result["sources"],
+                           result["user_decisions"])))
 
         self.assertEqual(quiet(operation_compile.revise, self.contract)[0], 0)
         environment = type("Args", (), {"docs": str(self.docs), "kind": "environment",
@@ -491,9 +519,9 @@ class BundleManifestTests(unittest.TestCase):
         result = self.run_bundle()[1]
         self.assertEqual([(contract["kind"], contract["revised"], contract["pinned"],
                            contract["counterpart"]) for contract in result["contracts"]],
-                         [("verification", True, True, "devops_engineer"),
-                          ("environment", True, False, "qa_engineer")])
-        self.assertEqual(result["readers"], ["devops_engineer", "qa_engineer"])
+                         [("verification", True, True, "devops-engineer"),
+                          ("environment", True, False, "qa-engineer")])
+        self.assertEqual(result["readers"], ["devops-engineer", "qa-engineer"])
         self.assertEqual(result["unpinned_revisions"], ["operation/environment-contract.md"])
         self.item(runtime_required=True)
         self.assertEqual(self.run_bundle()[1]["unpinned_revisions"], [])
@@ -507,6 +535,76 @@ class BundleManifestTests(unittest.TestCase):
         code, result = self.run_bundle(first["source_hash"])
         self.assertEqual(code, 1)
         self.assertIn("bundle manifest is stale", result["errors"][0])
+
+    def test_the_manifest_binds_the_owner_rulings_and_a_changed_ruling_makes_it_stale(self):
+        """Every reader reads User Decisions, which owns each ruling (rv-accept-ideas-09)."""
+        choose(self.docs, "single_source_bundle")
+        self.scope()
+        self.section("User Decisions", "D-01 Verification caches live under one fixed root.")
+        first = self.run_bundle()[1]
+        delivery = (delivery_compile.find_delivery(self.docs, "DLV-001") / "delivery.md"
+                    ).relative_to(self.docs).as_posix()
+        self.assertEqual(first["user_decisions"], {
+            "path": delivery, "section": "User Decisions",
+            "sha256": "sha256:" + hashlib.sha256(self.decisions().encode("utf-8")).hexdigest()})
+        self.assertIn(f"workspace/docs/{delivery}", first["inputs"])
+        # Only the section binds: other delivery.md text is no bundle input.
+        self.section("Exclusions", "No release management, no unrelated work.")
+        self.assertEqual(self.run_bundle(first["source_hash"])[0], 0)
+        self.section("User Decisions", "D-01 Verification caches live under one root per run.")
+        code, result = self.run_bundle(first["source_hash"])
+        self.assertEqual(code, 1)
+        self.assertIn("bundle manifest is stale", result["errors"][0])
+
+    def test_each_reader_derives_its_task_with_the_documented_command(self):
+        """`readers` holds the role names task_inputs.py --role takes (rv-accept-ideas-12)."""
+        choose(self.docs, "single_source_bundle")
+        self.scope()
+        self.assertEqual(quiet(operation_compile.revise, self.contract)[0], 0)
+        self.draft_environment_contract()
+        code, manifest = self.run_bundle()
+        self.assertEqual(code, 0, manifest)
+        self.assertEqual(manifest["readers"], ["devops-engineer", "qa-engineer"])
+        self.assertEqual([(contract["writer"], contract["counterpart"])
+                          for contract in manifest["contracts"]],
+                         [("qa-engineer", "devops-engineer"), ("devops-engineer", "qa-engineer")])
+        inputs = [argument for path in manifest["inputs"] for argument in ("--input", path)]
+        for reader in manifest["readers"]:
+            with self.subTest(reader=reader):
+                code, output = quiet(task_inputs.main, [
+                    "--entry", "configure", "--role", reader, "--mode", "review",
+                    "--skill", "challenge-review", "--delivery", "DLV-001",
+                    "--project-root", str(self.root), *inputs])
+                self.assertEqual(code, 0, output)
+                task = json.loads(output)
+                self.assertEqual(task["role"], reader)
+                self.assertEqual({record["path"] for record in task["project_inputs"]}
+                                 - {"workspace/docs/delivery/process-policy.md"},
+                                 set(manifest["inputs"]))
+
+    def test_an_approved_revision_no_item_pins_stays_listed_until_the_target_holds_it(self):
+        """A manifest recomputed after approval still names the revision to carry (rv-accept-ideas-11)."""
+        choose(self.docs, "single_source_bundle")
+        self.scope()
+        environment = self.draft_environment_contract()
+        contract = "operation/environment-contract.md"
+        self.assertEqual(self.run_bundle()[1]["unpinned_revisions"], [contract])
+        self.assertEqual(quiet(operation_compile.approve, environment)[0], 0)
+        # A resumed session regenerates the manifest after approval, for
+        # example after an --expected-hash mismatch; the revision stays listed.
+        result = self.run_bundle()[1]
+        self.assertEqual(result["unpinned_revisions"], [contract])
+        self.assertEqual([(record["kind"], record["status"], record["revised"], record["pinned"],
+                           record["held"]) for record in result["contracts"]],
+                         [("verification", "approved", False, True, False),
+                          ("environment", "approved", False, False, False)])
+        # This checkout has no remote, so HEAD stands in for the target: once
+        # it holds the approved bytes, no revision is left to carry.
+        self.commit(f"workspace/docs/{contract}")
+        result = self.run_bundle()[1]
+        self.assertEqual(result["unpinned_revisions"], [])
+        self.assertEqual(result["held_by"], "HEAD")
+        self.assertEqual([record["kind"] for record in result["contracts"]], ["verification"])
 
     def test_the_bundle_belongs_to_execution_planning(self):
         choose(self.docs, "single_source_bundle")

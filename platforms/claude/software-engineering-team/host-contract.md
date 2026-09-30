@@ -28,7 +28,8 @@
 - A canonical entry with `project_scope: external` does not require project
   setup, workspace configuration or a Git repository.
 - Present canonical choice gates through `AskUserQuestion`, preserving options,
-  recommendation and tradeoffs.
+  recommendation and tradeoffs. `AskUserQuestion` takes at most four questions
+  per call.
 - Under switch `owner_gates` at `two_fixed_gates`, ask the owner inside a
   Delivery only at gate A, gate B, an early gate or for an at-once class, and
   queue every other question in the Delivery's `User Decisions`. Present each

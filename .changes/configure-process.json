@@ -1,5 +1,5 @@
 {
-  "summary": "`/configure process` changes the project's process switches through the Process Policy lifecycle. It lists every declared switch with the value in force, asks one choice-gate question per switch with the package default recommended first and each value's registry tradeoffs in its description, and writes nothing when no value changes or the delta is rejected. On approval it runs `init` or `begin-revision`, `set`, `check` and `approve`. The configuration contract states that `workspace/config.json` accepts no process switch field and names the Process Policy as the one place for process choices.",
+  "summary": "`/configure process` changes the project's process switches through the Process Policy lifecycle. It lists every declared switch with the value in force, asks one choice-gate question per switch, in host calls of at most four questions on Claude Code and three on Codex, with the package default recommended first and each value's registry tradeoffs in its description, and writes nothing when no value changes or the delta is rejected. On approval it runs `init` or `begin-revision`, `set`, `check` and `approve`. The configuration contract states that `workspace/config.json` accepts no process switch field and names the Process Policy as the one place for process choices.",
   "components": {
     "software-engineering-team": "minor"
   }

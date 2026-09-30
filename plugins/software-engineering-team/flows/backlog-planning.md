@@ -259,7 +259,10 @@ design, intra-epic dependencies, role ownership, findings and verdict. Run
 `backlog_compile.py check --docs <workspace>/docs --json` after these serialized
 writes and resolve all source and completed epic-review findings. Only the
 still-unwritten root review's completion findings remain pending until its
-reader returns; they do not authorize ignoring any source finding.
+reader returns; they do not authorize ignoring any source finding. An entry
+in `advisories` names an empty last section of a story approved before the
+compiler read that section above the navigation; it never fails the check,
+and the Product Owner fills the section whenever that story is revised.
 
 Only after every epic package and review is green, run
 `backlog_review_inputs.py --docs <workspace>/docs --root`. Invoke one fresh

@@ -190,6 +190,85 @@ class BacklogCompilerTests(unittest.TestCase):
             self.assertNotIn(delivery_notes, errors)
             self.assertIn(f"{prefix} Non-Goals stub", record["scaffold_findings"])
 
+    def test_an_empty_last_section_of_a_new_story_is_reported(self):
+        with tempfile.TemporaryDirectory() as raw:
+            docs = Path(raw) / "workspace" / "docs"
+            make_approved_backlog(docs)
+            args = SimpleNamespace(
+                docs=docs, epic="delivery-fixture", slug="job-worker", id="AUTH-02", title="job-worker",
+                scope="Run the job.", work_kind="technical", criterion_ref=[], experience_ref=[],
+                evidence_ref=[], uses_design=[], constrained_by=[], implements=[],
+            )
+            with redirect_stdout(StringIO()):
+                self.assertEqual(backlog_compile.stub_story(args), 0)
+            story = docs / "backlog/epics/delivery-fixture/stories/job-worker/story.md"
+            text = story.read_text(encoding="utf-8")
+            prefix = "backlog/epics/delivery-fixture/stories/job-worker/story.md"
+            # The writer clears the Delivery Notes stub and writes nothing in its place.
+            story.write_text(text.replace(backlog_compile.STORY_STUBS["Delivery Notes"] + "\n", ""),
+                             encoding="utf-8")
+            record, errors = backlog_compile.collect(docs)
+            self.assertIn(f"{prefix} required section is empty: Delivery Notes", errors)
+            self.assertNotIn(f"{prefix} required section is empty: Delivery Notes",
+                             record["scaffold_findings"])
+            self.assertEqual(record["advisory_findings"], [])
+            # A middle section was always read up to the next heading.
+            story.write_text(text.replace(backlog_compile.STORY_STUBS["Non-Goals"], ""),
+                             encoding="utf-8")
+            _record, errors = backlog_compile.collect(docs)
+            self.assertIn(f"{prefix} required section is empty: Non-Goals", errors)
+            self.assertNotIn(f"{prefix} required section is empty: Delivery Notes", errors)
+
+    def test_an_approved_story_with_an_empty_last_section_is_advisory_until_revised(self):
+        with tempfile.TemporaryDirectory() as raw:
+            docs = Path(raw) / "workspace" / "docs"
+            make_approved_backlog(docs)
+            story = docs / "backlog/epics/delivery-fixture/stories/auth-01/story.md"
+            notes = "Preserve the approved API boundary and avoid delivery-state metadata.\n"
+            # An approval from before the compiler read the last section above
+            # the navigation: the stamp is intact over an empty Delivery Notes.
+            props, body = backlog_compile.parse_front_matter(story)
+            story.write_text(backlog_compile.front_matter(props, body.replace(notes, "")),
+                             encoding="utf-8")
+            props, body = backlog_compile.parse_front_matter(story)
+            props["source_hash"] = backlog_compile.digest(story)
+            story.write_text(backlog_compile.front_matter(props, body), encoding="utf-8")
+            root = docs / "backlog/backlog.md"
+            record, _errors = backlog_compile.collect(docs)
+            props, body = backlog_compile.parse_front_matter(root)
+            props["package_hash"] = backlog_compile.package_digest(
+                docs, backlog_compile.package_paths(record, docs))
+            root.write_text(backlog_compile.front_matter(props, body), encoding="utf-8")
+            finding = ("backlog/epics/delivery-fixture/stories/auth-01/story.md required section"
+                       " is empty: Delivery Notes")
+            advisory = f"{finding}; advisory until the approved story is revised"
+            record, errors = backlog_compile.collect(docs)
+            self.assertEqual((errors, record["advisory_findings"]), ([], [advisory]))
+            output = StringIO()
+            with redirect_stdout(output):
+                code = backlog_compile.main(["check", "--docs", str(docs), "--approved", "--json"])
+            result = json.loads(output.getvalue())
+            self.assertEqual((code, result["ok"], result["advisories"]), (0, True, [advisory]))
+            output = StringIO()
+            with redirect_stdout(output):
+                self.assertEqual(backlog_compile.main(["check", "--docs", str(docs)]), 0)
+            self.assertEqual(output.getvalue(), f"ADVISORY [backlog] {advisory}\nbacklog ok\n")
+            # Revising the story ends the grace: its stamp no longer matches.
+            story.write_text(story.read_text(encoding="utf-8").replace(
+                "Administrative bulk operations", "Administrative bulk imports"), encoding="utf-8")
+            record, errors = backlog_compile.collect(docs)
+            self.assertEqual((errors, record["advisory_findings"]), ([finding], []))
+
+    def test_a_backlog_without_an_empty_last_section_checks_as_released(self):
+        with tempfile.TemporaryDirectory() as raw:
+            docs = Path(raw) / "workspace" / "docs"
+            make_approved_backlog(docs)
+            output = StringIO()
+            with redirect_stdout(output):
+                code = backlog_compile.main(["check", "--docs", str(docs), "--json"])
+            self.assertEqual(code, 0)
+            self.assertNotIn("advisories", json.loads(output.getvalue()))
+
     def test_changes_requested_status_tag_uses_kebab_case(self):
         props = {
             "status": "changes_requested",

@@ -406,11 +406,12 @@ publication.
 Process switch `execution_planning` decides how the facts a plan needs are
 written and reviewed. At `per_document`, the default, each Operation contract
 the plan needs is revised and reviewed through the Operation flow on its own.
-At `single_source_bundle`, each fact is written once, in the section that
-`skill-content/execution-plan/data/fact-ownership.json` names, every other
-document links it, and each owner ruling gets one stable `User Decisions` id;
-`delivery_compile.py check` refuses a malformed id and one id that starts two
-rulings, at every `owner_gates` value.
+At `single_source_bundle`, each fact is written once, in the section or
+front-matter keys that `skill-content/execution-plan/data/fact-ownership.json`
+names; `tools/validate.py` checks each against what the owning document's
+compiler writes. Every other document links it, and each owner ruling gets one
+stable `User Decisions` id; `delivery_compile.py check` refuses a malformed id
+and one id that starts two rulings, at every `owner_gates` value.
 `delivery_compile.py bundle-manifest --delivery DLV-###` lists every contract
 the plan revises, pins or still has to carry, every Item record with its Story
 and Test Plan and the fact ownership data, each with the hash of its bytes,

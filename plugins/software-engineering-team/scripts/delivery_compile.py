@@ -218,13 +218,15 @@ def approved_backlog_sources(
     story_ids: list[str],
     *,
     historical_inputs: bool = False,
+    story_size: dict | None = None,
 ) -> tuple[dict[str, dict], dict, list[str]]:
     """Resolve the exact approved Story/Test Plan snapshots a Delivery may use.
 
     Delivery is deliberately a consumer of the canonical backlog.  It must not
     accept caller-provided hashes or treat a generated registry as a source of
     truth, so this resolver checks the authored package and its approval stamps
-    before exposing one selected Story.
+    before exposing one selected Story. With a story size budget, each selected
+    Story also carries its measures under ``story_size`` for display only.
     """
     errors: list[str] = []
     if not story_ids:
@@ -290,6 +292,10 @@ def approved_backlog_sources(
         }
     if errors:
         return {}, {}, sorted(set(errors))
+    if story_size is not None:
+        entries = backlog_compile.story_size_entries(record, docs, story_size, set(selected))
+        for story_id, entry in entries.items():
+            selected[story_id]["story_size"] = entry
     backlog_props = record["backlog"]["props"]
     snapshot = {
         "backlog_path": str(record["backlog"]["path"]),
@@ -617,11 +623,17 @@ def init_delivery(args) -> int:
     stories = list(args.story or [])
     # One read-only candidate snapshot serves the strict read and the handoff check.
     with stage_package.candidate_session():
-        sources, backlog_snapshot, source_errors = approved_backlog_sources(docs, stories)
+        # The proposal shows story sizes under story_size_budget; never a scope rule.
+        try:
+            budget, budget_errors = backlog_compile.story_size_budget(docs), []
+        except ValueError as exc:
+            budget, budget_errors = None, [str(exc)]
+        sources, backlog_snapshot, source_errors = approved_backlog_sources(
+            docs, stories, story_size=budget)
         dod_snapshot, dod_errors = approved_dod_source(docs)
         # New Items declare the implementation schedule the Process Policy selects.
         schedule, policy_errors = policy_implementation_schedule(docs)
-        errors = sorted(set(source_errors + dod_errors + policy_errors))
+        errors = sorted(set(source_errors + dod_errors + policy_errors + budget_errors))
         # The proposal refuses a selection that scope approval, the handoff, would refuse.
         if not errors:
             errors = handoff_binding_findings(
@@ -671,7 +683,11 @@ def init_delivery(args) -> int:
             "Delivery Scope": identifier, "Navigation": link(f"delivery/deliveries/{root.name}/delivery", identifier),
         })))
     render_map(docs)
-    print(json.dumps({"ok": True, "id": identifier, "slug": slug, "path": str(root), "stories": stories}, indent=2))
+    result = {"ok": True, "id": identifier, "slug": slug, "path": str(root), "stories": stories}
+    if budget is not None:
+        result["story_size"] = backlog_compile.story_size_block(
+            budget, {story: sources[story]["story_size"] for story in stories})
+    print(json.dumps(result, indent=2))
     return 0
 
 

@@ -258,6 +258,193 @@ class ProcessPolicyLifecycleTests(unittest.TestCase):
             self.assertEqual(types.get(key), policy["property_types"][key], key)
 
 
+LIMITS = "skill-content/fixture-method/data/limits.json"
+PARAMETERIZED_SWITCH = {
+    "summary": "Whether the fixture step is capped.",
+    "flows": ["operation"],
+    "values": [
+        {"id": "open", "tradeoffs": "Today's behaviour."},
+        {"id": "capped", "tradeoffs": "Capped by owner-set limits."},
+    ],
+    "default": "open",
+    "parameters": {
+        "summary": "Owner-set limit per fixture measure.",
+        "values": ["capped"],
+        "declared_by": {"path": LIMITS, "key": "measures"},
+        "type": "positive_integer",
+        "min_count": 1,
+    },
+    "metric": "Minutes per capped step.",
+    "promotion": {"unit": "3 Deliveries", "threshold": "Half the baseline minutes."},
+}
+
+
+class ProcessPolicyParameterTests(unittest.TestCase):
+    """A switch value may take owner-set parameters, validated against the
+    registry's declaration; every other switch reads as it did before."""
+
+    # The lifecycle tests' fixture, reused without inheriting their tests.
+    tearDown = ProcessPolicyLifecycleTests.tearDown
+    write_registry = ProcessPolicyLifecycleTests.write_registry
+    cli = ProcessPolicyLifecycleTests.cli
+    path = ProcessPolicyLifecycleTests.path
+
+    def setUp(self) -> None:
+        ProcessPolicyLifecycleTests.setUp(self)
+        registry = json.loads(json.dumps(FIXTURE_REGISTRY))
+        registry["switches"]["limit_mode"] = json.loads(json.dumps(PARAMETERIZED_SWITCH))
+        self.write_registry(registry)
+        limits = self.package / LIMITS
+        limits.parent.mkdir(parents=True, exist_ok=True)
+        limits.write_text(json.dumps({"schema_version": 1, "measures": {
+            "criteria": {"summary": "Criteria per story.", "derivation": "count"},
+            "scenarios": {"summary": "Scenarios per plan.", "derivation": "count"},
+        }}), encoding="utf-8")
+
+    def refused(self, *argv: str) -> str:
+        code, result = self.cli(*argv)
+        self.assertEqual(code, 1, result)
+        return result["errors"][0]
+
+    def test_a_value_that_takes_parameters_needs_its_minimum_and_valid_ids(self):
+        self.assertEqual(self.cli("init")[0], 0)
+        self.assertIn("apply only at capped; set its value first", self.refused(
+            "set", "--switch", "limit_mode", "--parameter", "criteria", "--value", "12"))
+        self.assertEqual(self.cli("set", "--switch", "limit_mode", "--value", "capped")[0], 0)
+        self.assertIn("switch 'limit_mode' at 'capped' needs at least 1 of its parameters"
+                      " ['criteria', 'scenarios']", self.refused("approve"))
+        for value, fragment in (("0", "must be a positive integer, not '0'"),
+                                ("-3", "must be a positive integer, not '-3'"),
+                                ("1.5", "must be a positive integer, not '1.5'"),
+                                ("twelve", "must be a positive integer, not 'twelve'")):
+            with self.subTest(value=value):
+                self.assertIn(fragment, self.refused(
+                    "set", "--switch", "limit_mode", "--parameter", "criteria", "--value", value))
+        self.assertIn("switch 'limit_mode' has no parameter 'ghost'; its parameters are"
+                      " ['criteria', 'scenarios']", self.refused(
+                          "set", "--switch", "limit_mode", "--parameter", "ghost", "--value", "3"))
+        self.assertIn("switch 'fixture_mode' declares no parameters", self.refused(
+            "set", "--switch", "fixture_mode", "--parameter", "criteria", "--value", "3"))
+        code, result = self.cli("set", "--switch", "limit_mode", "--parameter", "criteria",
+                                "--value", "12")
+        self.assertEqual((code, result["value"], result["source"], result["changed"]),
+                         (0, 12, "policy", True))
+        self.assertIn("| `limit_mode` | `criteria` | `12` |", self.path.read_text(encoding="utf-8"))
+        self.assertEqual(self.cli("approve")[0], 0)
+        code, result = self.cli("value", "--switch", "limit_mode")
+        self.assertEqual((code, result["value"], result["parameters"]),
+                         (0, "capped", {"criteria": 12}))
+        # A switch without parameters reports exactly what it reported before.
+        code, result = self.cli("value", "--switch", "fixture_mode")
+        self.assertNotIn("parameters", result)
+        values, _snapshot = process_policy.effective_values(self.docs, self.package)
+        self.assertEqual(values["limit_mode"]["parameters"], {"criteria": 12})
+        self.assertEqual(sorted(key for key, value in values.items() if "parameters" in value),
+                         ["limit_mode"])
+
+    def test_a_value_without_parameters_removes_their_rows(self):
+        self.assertEqual(self.cli("init")[0], 0)
+        self.cli("set", "--switch", "limit_mode", "--value", "capped")
+        self.cli("set", "--switch", "limit_mode", "--parameter", "criteria", "--value", "12")
+        self.cli("set", "--switch", "limit_mode", "--parameter", "scenarios", "--value", "30")
+        self.assertEqual(self.cli("approve")[0], 0)
+        approved = self.path.read_text(encoding="utf-8")
+        self.cli("begin-revision")
+        code, result = self.cli("set", "--switch", "limit_mode", "--parameter", "scenarios",
+                                "--default")
+        self.assertEqual((code, result["value"], result["source"]), (0, None, "unset"))
+        code, result = self.cli("set", "--switch", "limit_mode", "--default")
+        self.assertEqual((code, result["value"], result["removed_parameters"]),
+                         (0, "open", {"criteria": 12}))
+        text = self.path.read_text(encoding="utf-8")
+        self.assertNotIn("## Parameters", text)
+        self.assertEqual(self.cli("approve")[0], 0)
+        self.assertNotEqual(approved, self.path.read_text(encoding="utf-8"))
+        code, result = self.cli("value", "--switch", "limit_mode")
+        self.assertEqual((result["value"], result["source"], result["parameters"]),
+                         ("open", "default", {}))
+
+    def test_parameters_are_hashed_and_hand_edits_are_refused(self):
+        self.assertEqual(self.cli("init")[0], 0)
+        self.cli("set", "--switch", "limit_mode", "--value", "capped")
+        self.cli("set", "--switch", "limit_mode", "--parameter", "criteria", "--value", "12")
+        self.assertEqual(self.cli("approve")[0], 0)
+        original = self.path.read_text(encoding="utf-8")
+        row = "| `limit_mode` | `criteria` | `12` |"
+        cases = (
+            (original.replace("`12`", "`13`"), "approved Process Policy source_hash is stale"),
+            (original.replace(row, row + "\n" + row),
+             "parameter 'criteria' of switch 'limit_mode' has more than one row"),
+            (original.replace("| Switch | Parameter | Value |", "| Switch | Name | Value |"),
+             "Parameters table must start with the header | Switch | Parameter | Value |"),
+            (original.replace(row, "| `limit_mode` | `criteria` |"),
+             "Parameters row must hold a switch, a parameter and a value"),
+            (original.replace("| `limit_mode` | `capped` |\n", ""),
+             "parameters of switch 'limit_mode' apply only at capped; its value is 'open'"),
+            (original.replace(row, "| `ghost_mode` | `criteria` | `12` |"),
+             "parameter 'criteria' names switch 'ghost_mode', which this package does not declare"),
+        )
+        for text, fragment in cases:
+            with self.subTest(fragment=fragment):
+                self.path.write_text(text, encoding="utf-8")
+                code, result = self.cli("check")
+                self.assertEqual(code, 1)
+                self.assertTrue(any(fragment in error for error in result["errors"]),
+                                result["errors"])
+                with self.assertRaises(ValueError):
+                    process_policy.effective_values(self.docs, self.package)
+        self.path.write_text(original, encoding="utf-8")
+        code, result = self.cli("check")
+        self.assertEqual((code, result["parameters"]), (0, {"limit_mode": {"criteria": "12"}}))
+
+    def test_switches_lists_the_parameter_declaration_and_the_values_set(self):
+        self.assertEqual(self.cli("init")[0], 0)
+        self.cli("set", "--switch", "limit_mode", "--value", "capped")
+        self.cli("set", "--switch", "limit_mode", "--parameter", "scenarios", "--value", "30")
+        self.assertEqual(self.cli("approve")[0], 0)
+        code, result = self.cli("switches")
+        listed = {item["switch"]: item for item in result["switches"]}
+        self.assertEqual(listed["limit_mode"]["parameters"], {
+            "summary": "Owner-set limit per fixture measure.", "values": ["capped"],
+            "type": "positive_integer", "min_count": 1,
+            "declared": [{"id": "criteria", "summary": "Criteria per story."},
+                         {"id": "scenarios", "summary": "Scenarios per plan."}],
+            "in_force": {"scenarios": 30}})
+        self.assertNotIn("parameters", listed["fixture_mode"])
+
+    def test_an_invalid_parameter_declaration_fails_the_registry(self):
+        cases = (
+            ({"declared_by": {"path": "../outside.json", "key": "measures"}}, "cannot be read"),
+            ({"declared_by": {"path": LIMITS, "key": "ghost"}}, "cannot be read"),
+            ({"type": "fraction"}, "declares invalid parameters"),
+            ({"values": ["open"]}, "declares invalid parameters"),
+            ({"min_count": 3}, "declares invalid parameters"),
+        )
+        for change, fragment in cases:
+            with self.subTest(change=change):
+                registry = json.loads(json.dumps(FIXTURE_REGISTRY))
+                registry["switches"]["limit_mode"] = json.loads(json.dumps(PARAMETERIZED_SWITCH))
+                registry["switches"]["limit_mode"]["parameters"].update(change)
+                self.write_registry(registry)
+                with self.assertRaisesRegex(ValueError, fragment):
+                    process_policy.load_registry(self.package)
+
+    def test_a_policy_with_parameters_is_a_legal_linked_vault_note(self):
+        policy = vault_check.load_policy(vault_check.DEFAULT_POLICY)
+        self.assertEqual(self.cli("init")[0], 0)
+        self.cli("set", "--switch", "limit_mode", "--value", "capped")
+        self.cli("set", "--switch", "limit_mode", "--parameter", "criteria", "--value", "12")
+        self.assertEqual(self.cli("approve")[0], 0)
+        vault = vault_check.build_vault(self.docs, policy)
+        findings = []
+        for check in (vault_check.check_frontmatter_props, vault_check.check_nav_footer,
+                      vault_check.check_wikilink_resolution, vault_check.check_orphans,
+                      vault_check.check_title_shape):
+            check(vault, findings)
+        self.assertEqual([finding for finding in findings
+                          if finding.path == "delivery/process-policy.md"], [])
+
+
 def flat(relative: str) -> str:
     return " ".join((TEAM / relative).read_text(encoding="utf-8").split())
 

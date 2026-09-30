@@ -7,6 +7,12 @@ project document ``workspace/docs/delivery/process-policy.md`` records only
 the project's explicit choices, one table row per switch. A missing document
 or a switch without a row follows the package default, including a default
 that a later release promotes.
+
+A switch may declare owner-set parameters for the values that take them: the
+registry names their type, how many a value needs and the package data file
+that declares their ids. The package sets no parameter value. The optional
+Parameters table holds one row per parameter the owner sets, and a parameter
+exists only while its switch is at a value that takes it.
 """
 
 from __future__ import annotations
@@ -42,6 +48,12 @@ TABLE_SEPARATOR_RE = re.compile(r"^\|\s*:?-{3,}:?\s*\|\s*:?-{3,}:?\s*\|$")
 NAME_RE = re.compile(r"^[a-z][a-z0-9]*(?:_[a-z0-9]+)*$")
 ROWS_NOTE = ("Each row is an explicit project choice. A switch without a row follows its"
              " package default.")
+PARAMETER_HEADER = ("Switch", "Parameter", "Value")
+PARAMETER_SEPARATOR_RE = re.compile(r"^\|(?:\s*:?-{3,}:?\s*\|){3}$")
+PARAMETERS_NOTE = ("Each row is an owner-set parameter of the switch value in force. The package"
+                   " sets no parameter value, so a declared parameter without a row is unset.")
+# Each parameter type: the pattern its cell must match and its typed value.
+PARAMETER_TYPES = {"positive_integer": (re.compile(r"^[1-9][0-9]*$"), int)}
 
 
 def docs_root(value: str | Path | None) -> Path:
@@ -60,8 +72,9 @@ def path_for(docs: Path) -> Path:
 
 
 def load_registry(package: Path | None = None) -> dict[str, dict]:
-    """Return the declared switches, each with its value ids and default."""
-    path = (package or PACKAGE) / REGISTRY
+    """Return the declared switches, each with its value ids, default and parameters."""
+    root = package or PACKAGE
+    path = root / REGISTRY
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as exc:
@@ -76,7 +89,32 @@ def load_registry(package: Path | None = None) -> dict[str, dict]:
         if not values or spec.get("default") not in values:
             raise ValueError(f"process switch {name!r} has no valid values and default")
         registry[name] = {"values": values, "default": spec["default"], "spec": spec}
+        if "parameters" in spec:
+            registry[name]["parameters"] = parameter_declaration(root, name, spec, values)
     return registry
+
+
+def parameter_declaration(package: Path, name: str, spec: dict, values: list[str]) -> dict:
+    """Resolve a switch's parameters: the values that take them, their ids and type."""
+    declared = spec["parameters"]
+    try:
+        source = declared["declared_by"]
+        relative = str(source["path"])
+        if relative.startswith("/") or "\\" in relative or ".." in relative.split("/"):
+            raise ValueError(f"declared_by path must stay inside the package: {relative}")
+        items = json.loads((package / relative).read_text(encoding="utf-8"))[source["key"]]
+        ids = {key: str(item["summary"]) for key, item in items.items()}
+        result = {"summary": str(declared["summary"]), "values": list(declared["values"]),
+                  "ids": ids, "type": declared["type"], "min_count": declared["min_count"]}
+    except (OSError, json.JSONDecodeError, KeyError, TypeError, AttributeError, ValueError) as exc:
+        raise ValueError(f"process switch {name!r} parameters cannot be read: {exc}") from exc
+    if (not ids or not all(NAME_RE.match(key) for key in ids)
+            or result["type"] not in PARAMETER_TYPES
+            or not result["values"] or not set(result["values"]) <= set(values) - {spec["default"]}
+            or not isinstance(result["min_count"], int) or isinstance(result["min_count"], bool)
+            or not 0 <= result["min_count"] <= len(ids)):
+        raise ValueError(f"process switch {name!r} declares invalid parameters")
+    return result
 
 
 def parse_text(text: str, path: Path) -> tuple[dict, str]:
@@ -171,6 +209,103 @@ def render_rows(body: str, rows: dict[str, str]) -> str:
     return "\n".join([*lines[:start + 1], "", ROWS_NOTE, "", *table, "", *lines[end:]])
 
 
+def parameter_rows(body: str) -> tuple[dict[tuple[str, str], str], list[str]]:
+    """Read the optional Parameters table as (switch, parameter) to its value cell."""
+    lines = section_lines(body, "Parameters")
+    if lines is None:
+        return {}, []
+    table = [line.strip() for line in lines if line.strip().startswith("|")]
+    if not table:
+        return {}, ["Parameters must hold the parameter table"]
+    if tuple(cells(table[0])) != PARAMETER_HEADER or len(table) < 2 \
+            or not PARAMETER_SEPARATOR_RE.match(table[1]):
+        return {}, ["Parameters table must start with the header | Switch | Parameter | Value |"]
+    rows: dict[tuple[str, str], str] = {}
+    errors: list[str] = []
+    for line in table[2:]:
+        row = cells(line)
+        if len(row) != 3 or not all(row):
+            errors.append(f"Parameters row must hold a switch, a parameter and a value: {line}")
+            continue
+        switch, parameter, value = (unquote(cell) for cell in row)
+        if not NAME_RE.match(switch) or not NAME_RE.match(parameter) or not value:
+            errors.append("Parameters row must name a switch id, a parameter id and a value:"
+                          f" {line}")
+        elif (switch, parameter) in rows:
+            errors.append(f"parameter {parameter!r} of switch {switch!r} has more than one row")
+        else:
+            rows[(switch, parameter)] = value
+    return rows, errors
+
+
+def render_parameters(body: str, parameters: dict[tuple[str, str], str]) -> str:
+    """Write the Parameters section after Switches, or drop it when no row remains."""
+    lines = body.splitlines()
+    start = next((index for index, line in enumerate(lines)
+                  if re.fullmatch(r"## Parameters\s*", line)), None)
+    if start is not None:
+        end = next((later for later in range(start + 1, len(lines))
+                    if lines[later].startswith("## ")), len(lines))
+        lines = lines[:start] + lines[end:]
+    if not parameters:
+        return "\n".join(lines)
+    anchor = next(index for index, line in enumerate(lines)
+                  if re.fullmatch(r"## Switches\s*", line))
+    end = next((later for later in range(anchor + 1, len(lines))
+                if lines[later].startswith("## ")), len(lines))
+    table = ["## Parameters", "", PARAMETERS_NOTE, "",
+             "| Switch | Parameter | Value |", "| --- | --- | --- |",
+             *(f"| `{switch}` | `{parameter}` | `{parameters[(switch, parameter)]}` |"
+               for switch, parameter in sorted(parameters)), ""]
+    return "\n".join([*lines[:end], *table, *lines[end:]])
+
+
+def parameter_value(declared: dict, raw: str):
+    """Return a parameter cell as its declared type, or None when it does not match it."""
+    pattern, convert = PARAMETER_TYPES[declared["type"]]
+    return convert(raw) if pattern.match(raw) else None
+
+
+def parameter_findings(rows: dict[str, str], parameters: dict[tuple[str, str], str],
+                       registry: dict[str, dict]) -> list[str]:
+    """Check the parameter rows against the registry and the switch values in force."""
+    errors = []
+    for (switch, parameter), raw in sorted(parameters.items()):
+        declared = registry.get(switch, {}).get("parameters")
+        if switch not in registry:
+            errors.append(f"parameter {parameter!r} names switch {switch!r}, which this package"
+                          " does not declare")
+        elif declared is None:
+            errors.append(f"switch {switch!r} declares no parameters")
+        elif parameter not in declared["ids"]:
+            errors.append(f"switch {switch!r} has no parameter {parameter!r}; its parameters are"
+                          f" {sorted(declared['ids'])}")
+        elif parameter_value(declared, raw) is None:
+            errors.append(f"parameter {parameter!r} of switch {switch!r} must be a"
+                          f" {declared['type'].replace('_', ' ')}, not {raw!r}")
+    for switch, spec in sorted(registry.items()):
+        declared = spec.get("parameters")
+        if declared is None:
+            continue
+        value = rows.get(switch, spec["default"])
+        present = [parameter for (name, parameter) in parameters
+                   if name == switch and parameter in declared["ids"]]
+        if value not in declared["values"]:
+            if present:
+                errors.append(f"parameters of switch {switch!r} apply only at"
+                              f" {' or '.join(declared['values'])}; its value is {value!r}")
+        elif len(present) < declared["min_count"]:
+            errors.append(f"switch {switch!r} at {value!r} needs at least {declared['min_count']}"
+                          f" of its parameters {sorted(declared['ids'])}")
+    return errors
+
+
+def typed_parameters(switch: str, spec: dict, parameters: dict[tuple[str, str], str]) -> dict:
+    """Return one switch's parameter values in force as their declared types."""
+    return {parameter: parameter_value(spec["parameters"], raw)
+            for (name, parameter), raw in sorted(parameters.items()) if name == switch}
+
+
 def integrity_findings(props: dict, body: str) -> list[str]:
     """Check the document's own lifecycle integrity, independent of the registry."""
     errors: list[str] = []
@@ -187,6 +322,7 @@ def integrity_findings(props: dict, body: str) -> list[str]:
     if missing:
         errors.append(f"Process Policy missing sections: {', '.join(missing)}")
     errors.extend(table_rows(body)[1])
+    errors.extend(parameter_rows(body)[1])
     if props.get("status") == "approved":
         if props.get("source_hash") != policy_hash(props, body):
             errors.append("approved Process Policy source_hash is stale")
@@ -216,9 +352,16 @@ def read_state(docs: Path, registry: dict[str, dict]) -> tuple[dict | None, list
     except (OSError, ValueError) as exc:
         return {"path": RELATIVE}, [str(exc)]
     rows, _row_errors = table_rows(body)
-    errors = integrity_findings(props, body) + registry_findings(rows, registry)
-    return {"path": RELATIVE, "status": props.get("status"), "revision": props.get("revision"),
-            "source_hash": props.get("source_hash"), "rows": rows}, errors
+    parameters, _parameter_errors = parameter_rows(body)
+    errors = (integrity_findings(props, body) + registry_findings(rows, registry)
+              + parameter_findings(rows, parameters, registry))
+    state = {"path": RELATIVE, "status": props.get("status"), "revision": props.get("revision"),
+             "source_hash": props.get("source_hash"), "rows": rows}
+    if parameters:
+        state["parameters"] = {}
+        for (switch, parameter), raw in sorted(parameters.items()):
+            state["parameters"].setdefault(switch, {})[parameter] = raw
+    return state, errors
 
 
 def approved_snapshot(docs: Path, package: Path | None = None) -> tuple[dict, list[str]]:
@@ -252,11 +395,20 @@ def effective_values(docs: Path | None, package: Path | None = None) -> tuple[di
     snapshot, errors = approved_snapshot(docs, package) if docs is not None else ({}, [])
     if errors:
         raise ValueError("; ".join(errors))
-    rows = read_state(docs, registry)[0]["rows"] if snapshot else {}
-    values = {switch: {"value": rows.get(switch, spec["default"]),
-                       "source": "policy" if switch in rows else "default",
-                       "default": spec["default"]}
-              for switch, spec in sorted(registry.items())}
+    state = read_state(docs, registry)[0] if snapshot else {}
+    rows = state.get("rows", {})
+    parameters = {(switch, parameter): raw
+                  for switch, named in state.get("parameters", {}).items()
+                  for parameter, raw in named.items()}
+    values = {}
+    for switch, spec in sorted(registry.items()):
+        values[switch] = {"value": rows.get(switch, spec["default"]),
+                          "source": "policy" if switch in rows else "default",
+                          "default": spec["default"]}
+        # Only a switch that declares parameters reports them, so every other
+        # switch reads exactly as before parameters existed.
+        if "parameters" in spec:
+            values[switch]["parameters"] = typed_parameters(switch, spec, parameters)
     return values, snapshot
 
 
@@ -346,6 +498,8 @@ def set_value(args) -> int:
     errors = integrity_findings(props, body)
     if not errors and props.get("status") != "draft":
         errors = ["approved Process Policy changes only in a revision; run begin-revision"]
+    if not errors and args.parameter:
+        return set_parameter(args, path, props, body, registry)
     rows = table_rows(body)[0]
     if not errors and args.default:
         if args.switch not in rows and args.switch not in registry:
@@ -365,12 +519,73 @@ def set_value(args) -> int:
         rows.pop(args.switch, None)
     else:
         rows[args.switch] = args.value
-    if rows != before:
-        write(path, props, render_rows(body, rows))
     value = rows.get(args.switch, registry.get(args.switch, {}).get("default"))
-    return emit({"ok": True, "switch": args.switch, "value": value,
-                 "source": "policy" if args.switch in rows else "default",
-                 "changed": rows != before})
+    # A value that takes no parameters keeps none: the owner's limits would
+    # mean nothing there, and approval would refuse them.
+    parameters = parameter_rows(body)[0]
+    declared = registry.get(args.switch, {}).get("parameters")
+    removed = {parameter: raw for (switch, parameter), raw in sorted(parameters.items())
+               if switch == args.switch and (declared is None or value not in declared["values"])}
+    if rows != before or removed:
+        kept = {key: raw for key, raw in parameters.items()
+                if key[0] != args.switch or key[1] not in removed}
+        write(path, props, render_parameters(render_rows(body, rows), kept))
+    result = {"ok": True, "switch": args.switch, "value": value,
+              "source": "policy" if args.switch in rows else "default",
+              "changed": rows != before or bool(removed)}
+    if removed:
+        result["removed_parameters"] = {
+            parameter: shown_parameter(declared, parameter, raw)
+            for parameter, raw in removed.items()}
+    return emit(result)
+
+
+def shown_parameter(declared: dict | None, parameter: str, raw: str):
+    """Show a parameter cell as its declared type, or as written when it is invalid."""
+    typed = (parameter_value(declared, raw)
+             if declared is not None and parameter in declared["ids"] else None)
+    return raw if typed is None else typed
+
+
+def set_parameter(args, path: Path, props: dict, body: str, registry: dict[str, dict]) -> int:
+    """Set or unset one owner-set parameter of a switch's value in force."""
+    rows = table_rows(body)[0]
+    parameters = parameter_rows(body)[0]
+    key = (args.switch, args.parameter)
+    spec = registry.get(args.switch)
+    declared = spec.get("parameters") if spec else None
+    errors = []
+    if args.default:
+        # Unsetting also repairs a row that a later package no longer declares.
+        if key not in parameters and (declared is None or args.parameter not in declared["ids"]):
+            errors = [f"parameter {args.parameter!r} of switch {args.switch!r} has no row and is"
+                      " not declared by this package"]
+    elif spec is None:
+        errors = [f"switch {args.switch!r} is not declared by this package"]
+    elif declared is None:
+        errors = [f"switch {args.switch!r} declares no parameters"]
+    elif args.parameter not in declared["ids"]:
+        errors = [f"switch {args.switch!r} has no parameter {args.parameter!r}; its parameters are"
+                  f" {sorted(declared['ids'])}"]
+    elif parameter_value(declared, args.value) is None:
+        errors = [f"parameter {args.parameter!r} of switch {args.switch!r} must be a"
+                  f" {declared['type'].replace('_', ' ')}, not {args.value!r}"]
+    elif rows.get(args.switch, spec["default"]) not in declared["values"]:
+        errors = [f"parameters of switch {args.switch!r} apply only at"
+                  f" {' or '.join(declared['values'])}; set its value first"]
+    if errors:
+        return emit({"ok": False, "errors": errors}, 1)
+    before = dict(parameters)
+    if args.default:
+        parameters.pop(key, None)
+    else:
+        parameters[key] = args.value
+    if parameters != before:
+        write(path, props, render_parameters(body, parameters))
+    return emit({"ok": True, "switch": args.switch, "parameter": args.parameter,
+                 "value": parameter_value(declared, parameters[key]) if key in parameters else None,
+                 "source": "policy" if key in parameters else "unset",
+                 "changed": parameters != before})
 
 
 def approve(args) -> int:
@@ -380,7 +595,9 @@ def approve(args) -> int:
     if not path.exists():
         return emit({"ok": False, "errors": ["Process Policy does not exist; run init"]}, 1)
     props, body = parse(path)
-    errors = integrity_findings(props, body) + registry_findings(table_rows(body)[0], registry)
+    rows = table_rows(body)[0]
+    errors = (integrity_findings(props, body) + registry_findings(rows, registry)
+              + parameter_findings(rows, parameter_rows(body)[0], registry))
     if not errors and props.get("status") != "draft":
         errors = ["approve requires a draft Process Policy"]
     if errors:
@@ -443,6 +660,7 @@ def switches(args) -> int:
     registry = load_registry()
     state, errors = read_state(docs, registry)
     rows = (state or {}).get("rows", {})
+    set_parameters = (state or {}).get("parameters", {})
     listed = []
     for name, entry in sorted(registry.items()):
         spec = entry["spec"]
@@ -454,6 +672,17 @@ def switches(args) -> int:
             "source": "policy" if name in rows else "default",
             "metric": spec.get("metric"), "promotion": spec.get("promotion"),
         })
+        declared = entry.get("parameters")
+        if declared is not None:
+            in_force = {parameter: shown_parameter(declared, parameter, raw)
+                        for parameter, raw in sorted(set_parameters.get(name, {}).items())}
+            listed[-1]["parameters"] = {
+                "summary": declared["summary"], "values": declared["values"],
+                "type": declared["type"], "min_count": declared["min_count"],
+                "declared": [{"id": key, "summary": text}
+                             for key, text in sorted(declared["ids"].items())],
+                "in_force": in_force,
+            }
     policy = None if state is None else {key: state.get(key) for key in
                                          ("path", "status", "revision", "source_hash")}
     return emit({"ok": not errors, "policy": policy, "switches": listed, "errors": errors},
@@ -475,7 +704,10 @@ def main(argv: list[str] | None = None) -> int:
     choice = selected.add_mutually_exclusive_group(required=True)
     choice.add_argument("--value")
     choice.add_argument("--default", action="store_true",
-                        help="remove the switch's row so it follows the package default")
+                        help="remove the switch's row so it follows the package default, or with"
+                             " --parameter unset that parameter")
+    selected.add_argument("--parameter",
+                          help="set one owner-set parameter of the switch's value in force")
     sub.choices["value"].add_argument("--switch", required=True)
     sub.choices["value"].add_argument("--delivery")
     args = parser.parse_args(argv)

@@ -10,11 +10,14 @@ change updates the digest with its reason in the same commit.
 upstream notes and Verification Contract from the frozen
 ``default_equivalence_inputs.json`` instead of rebuilding them with the
 backlog and Operation compilers, whose own fixes would otherwise move every
-Delivery hash that covers them; the Operation run checks the same contract.
-``--harness inputs`` rebuilds that file. No golden hides a field: no Delivery
-record or Operation receipt carries a package script or instruction hash, and
-the manifest run hashes a package the harness writes byte for byte, so
-release changes to scripts and contracts reach none of them.
+Delivery hash that covers them; the Operation run checks the same contract,
+and the backlog run checks the same backlog and derives its review manifests.
+``--harness inputs`` rebuilds that file. Only the backlog golden hides a
+field: a review manifest's contract_hash hashes the package scripts, and its
+source_hash covers that hash. No Delivery record or Operation receipt carries
+a package script or instruction hash, and the task manifest run hashes a
+package the harness writes byte for byte, so release changes to scripts and
+contracts reach no other golden.
 """
 
 from __future__ import annotations
@@ -86,6 +89,16 @@ OPERATION_GOLDEN = {
     "verification": "sha256:f12c13e4555da039f3b6c446795949178c3c2379895ab39949ddecf47830d251",
 }
 
+# Taken on frozen inputs at program tip 60497bf, before story_size_budget.
+# The check digests also match v0.6.0; its manifests lack the check block
+# that the review-panel change added on this branch.
+BACKLOG_GOLDEN = {
+    "check": "sha256:2f97d3071160f3ea4d75fba6b954b0d895156f1e1ab0fd310309d2620330c385",
+    "check_approved": "sha256:2f97d3071160f3ea4d75fba6b954b0d895156f1e1ab0fd310309d2620330c385",
+    "epic_manifest": "sha256:05c762760dd8915272c6aae26865d1a3e9edbb8b7da28c7bad47eace6fa028dd",
+    "root_manifest": "sha256:1a241a2cb7dc052d494515fc11339337740f5d202cd13efb88543fe785927030",
+}
+
 # Taken at program tip 95298e5; 679de01 and e56acfb produce the same digests.
 # The implementer digest was taken at program tip 0ffe0fb and matches e56acfb.
 MANIFEST_GOLDEN = {
@@ -131,6 +144,15 @@ class DefaultEquivalenceTests(unittest.TestCase):
         # A contract without an Accepted Minor Findings section checks as released.
         self.assertEqual(run_harness("operation"), OPERATION_GOLDEN,
                          "run this file with --harness operation --raw to read the outputs")
+
+    def test_backlog_compiler_outputs_match_the_base_on_frozen_inputs(self):
+        actual = run_harness("backlog")
+        self.assertEqual({name: value for name, value in actual.items() if ":" not in name},
+                         BACKLOG_GOLDEN,
+                         "run this file with --harness backlog --raw to read the outputs")
+        # An approved policy that leaves story_size_budget at off reads the same.
+        self.assertEqual({name.split(":", 1)[1]: value for name, value in actual.items()
+                          if name.startswith("off:")}, BACKLOG_GOLDEN)
 
     def test_task_manifests_match_the_base_without_a_policy(self):
         actual = run_harness("manifests")
@@ -292,6 +314,52 @@ def _operation_harness(root: Path, raw_output: bool = False) -> dict:
     return outputs
 
 
+def _backlog_harness(root: Path, raw_output: bool = False) -> dict:
+    """Check the frozen approved backlog and derive its review manifests.
+
+    A manifest's contract_hash hashes the package scripts, which change with
+    any release, and its source_hash covers that field, so both are left out.
+    Where ``root`` has a Process Policy, the run repeats under an approved
+    policy that leaves story_size_budget at its default.
+    """
+    sys.path[:0] = [str(root / PLUGIN / "scripts")]
+    import backlog_compile
+    import backlog_review_inputs
+
+    inputs = json.loads(INPUTS.read_text(encoding="utf-8"))
+    outputs = {}
+    with tempfile.TemporaryDirectory() as raw:
+        project = Path(raw).resolve()
+        for relative, text in inputs["files"].items():
+            path = project / relative
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(text.encode("utf-8"))
+        docs = project / "workspace" / "docs"
+        variants = [""]
+        if (root / PLUGIN / "scripts/process_policy.py").is_file():
+            variants.append("off:")
+        for variant in variants:
+            if variant:
+                import process_policy
+
+                _freeze_clocks(process_policy)
+                for argv in (["init"], ["set", "--switch", "review_panels", "--value", "lens_panel"],
+                             ["approve"]):
+                    code, text = _quiet(process_policy.main, [argv[0], "--docs", str(docs), *argv[1:]])
+                    if code:
+                        raise AssertionError(text)
+            for name, flags in (("check", []), ("check_approved", ["--approved"])):
+                code, text = _quiet(backlog_compile.main,
+                                    ["check", "--docs", str(docs), "--json", *flags])
+                outputs[variant + name] = f"{code}\n" + text.replace(str(project), "<project>")
+            for name, epic in (("epic_manifest", "EP-001"), ("root_manifest", None)):
+                value = backlog_review_inputs.manifest(docs, epic=epic)
+                value = {key: item for key, item in value.items()
+                         if key not in {"contract_hash", "source_hash"}}
+                outputs[variant + name] = json.dumps(value, indent=2, sort_keys=True)
+    return {name: text if raw_output else digest(text) for name, text in sorted(outputs.items())}
+
+
 FIXTURE_SWITCHES = {"schema_version": 1, "switches": {"fixture_mode": {
     "summary": "How the fixture step runs.", "flows": ["fixture-flow"],
     "values": [{"id": "current", "tradeoffs": "Today's behaviour."},
@@ -416,8 +484,9 @@ def _manifest_harness(root: Path, raw_output: bool = False) -> dict:
     return result
 
 
-HARNESSES = {"delivery": _delivery_harness, "inputs": _input_harness,
-             "manifests": _manifest_harness, "operation": _operation_harness}
+HARNESSES = {"backlog": _backlog_harness, "delivery": _delivery_harness,
+             "inputs": _input_harness, "manifests": _manifest_harness,
+             "operation": _operation_harness}
 
 
 if __name__ == "__main__":

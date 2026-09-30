@@ -140,6 +140,13 @@ GENERIC_REVIEW_RE = re.compile(
 )
 ACCEPTED_MINOR_FINDINGS = "Accepted Minor Findings"
 ACCEPTED_MINOR_COLUMNS = ("finding", "owner_role", "reason", "revisit_trigger")
+STORY_SIZE_SWITCH = "story_size_budget"
+STORY_SIZE_VALUE = "propose_split"
+STORY_SIZE_MEASURES_PATH = (Path(__file__).resolve().parent.parent / "skill-content"
+                            / "product-planning" / "data" / "story-size-measures.json")
+SIZE_EXCEPTIONS = "Size Exceptions"
+SIZE_EXCEPTION_COLUMNS = ("story", "measure", "reason")
+CHECKLIST_LINE_RE = re.compile(r"^\s*[-*+]\s+\[[ xX]\](?:\s|$)")
 EPIC_GOAL_STUB = "Define the customer outcome and boundary."
 STORY_STUBS = {
     "scope": "Describe the smallest valuable behavior.",
@@ -1220,6 +1227,159 @@ def accepted_minor_findings(docs: Path, body: str, path: str,
         if not meaningful_text(row["revisit_trigger"]):
             errors.append(f"{label} needs a concrete revisit_trigger")
     return errors
+
+
+def acceptance_checklist_lines(story: dict) -> int:
+    """Count the checklist criteria of the Acceptance section, outside code blocks."""
+    text = section(story["body"].split(NAV_MARKER, 1)[0], "Acceptance")
+    count, fenced = 0, False
+    for line in text.splitlines():
+        if line.lstrip().startswith("```"):
+            fenced = not fenced
+        elif not fenced and CHECKLIST_LINE_RE.match(line):
+            count += 1
+    return count
+
+
+def plan_scenario_blocks(story: dict) -> int:
+    """Count the scenarios the Test Plan defines; an id it only cites defines none."""
+    return len(story["scenario_ids"])
+
+
+def story_roles(story: dict) -> set[str]:
+    owner = str(story["props"].get("owner_role", "")).strip()
+    return ({owner} if owner else set()) | set(values(story["props"], "supporting_roles"))
+
+
+def owner_and_supporting_roles(story: dict) -> int:
+    return len(story_roles(story))
+
+
+def architecture_role(story: dict) -> int:
+    return int("software_architect" in story_roles(story))
+
+
+# Every derivation a story size measure may name; tools/validate.py reads
+# these keys and rejects a measure whose derivation is not one of them.
+STORY_SIZE_DERIVATIONS = {
+    "acceptance_checklist_lines": acceptance_checklist_lines,
+    "plan_scenario_blocks": plan_scenario_blocks,
+    "owner_and_supporting_roles": owner_and_supporting_roles,
+    "architecture_role": architecture_role,
+}
+
+
+def story_size_measures() -> dict[str, dict]:
+    """Return the declared story size measures, each with a derivation this compiler has."""
+    try:
+        data = json.loads(STORY_SIZE_MEASURES_PATH.read_text(encoding="utf-8"))
+        measures = data["measures"]
+        derivations = {name: spec["derivation"] for name, spec in measures.items()}
+    except (OSError, KeyError, TypeError, AttributeError, json.JSONDecodeError) as exc:
+        raise RuntimeError(f"story size measures are missing or invalid: {exc}") from exc
+    unknown = sorted(name for name, derivation in derivations.items()
+                     if derivation not in STORY_SIZE_DERIVATIONS)
+    if not measures or unknown:
+        raise RuntimeError("story size measures name no derivation this compiler implements: "
+                           + ", ".join(unknown))
+    return measures
+
+
+def story_size_budget(docs: Path) -> dict | None:
+    """Return the story size limits in force, or None while the switch is off.
+
+    Without a Process Policy, or at the switch's default, nothing is measured
+    or shown. A draft or invalid policy raises ValueError: it is refused, never
+    read.
+    """
+    import process_policy
+
+    values, _snapshot = process_policy.effective_values(docs)
+    budget = values.get(STORY_SIZE_SWITCH)
+    if budget is None or budget["value"] != STORY_SIZE_VALUE:
+        return None
+    return {"value": budget["value"], "limits": dict(sorted(budget.get("parameters", {}).items()))}
+
+
+def size_exception_rows(docs: Path, epic: dict, review: dict) -> tuple[set[tuple[str, str]],
+                                                                      list[str]]:
+    """Read an epic review's optional Size Exceptions: each kept (story, measure)."""
+    body, path = review["body"], review["path"]
+    if SIZE_EXCEPTIONS not in headings(body):
+        return set(), []
+    rows, errors = structured_table(section(body, SIZE_EXCEPTIONS), SIZE_EXCEPTION_COLUMNS,
+                                    path, SIZE_EXCEPTIONS)
+    measures = story_size_measures()
+    stories = {story["path"].removesuffix(".md"): story for story in epic["stories"]}
+    kept: set[tuple[str, str]] = set()
+    for number, row in enumerate(rows, 1):
+        label = f"{path} size exception {number}"
+        parsed = read_link(docs, row["story"], label, errors)
+        story = stories.get(parsed[0]) if parsed is not None else None
+        if parsed is not None and story is None:
+            errors.append(f"{label} must link a story of {epic['id']}: {row['story']}")
+        elif story is not None and parsed[2] != story["id"]:
+            errors.append(f"{label} story alias must be {story['id']}")
+        measure = row["measure"].strip("`")
+        if measure not in measures:
+            errors.append(f"{label} names undeclared measure {measure or '(missing)'};"
+                          f" the measures are {', '.join(sorted(measures))}")
+        if not meaningful_text(row["reason"]) or generic_review_text(row["reason"]):
+            errors.append(f"{label} needs a concrete reason")
+        if story is not None and measure in measures:
+            if (story["id"], measure) in kept:
+                errors.append(f"{path} repeats the size exception of {story['id']} for {measure}")
+            kept.add((story["id"], measure))
+    return kept, errors
+
+
+def size_exception_findings(record: dict, docs: Path) -> list[str]:
+    """Validate the Size Exceptions of each epic's current review round."""
+    errors: list[str] = []
+    for epic in record["epics"]:
+        review = latest(epic["reviews"])
+        if review is not None:
+            errors.extend(size_exception_rows(docs, epic, review)[1])
+    return errors
+
+
+def story_size_entries(record: dict, docs: Path, budget: dict,
+                       story_ids: set[str] | None = None) -> dict[str, dict]:
+    """Measure each story against the limits; the result never fails a check."""
+    measures = story_size_measures()
+    limits = budget["limits"]
+    kept: set[tuple[str, str]] = set()
+    for epic in record["epics"]:
+        review = latest(epic["reviews"])
+        if review is not None:
+            kept |= size_exception_rows(docs, epic, review)[0]
+    entries = {}
+    for story in record["stories"]:
+        if story_ids is not None and story["id"] not in story_ids:
+            continue
+        counted = {name: STORY_SIZE_DERIVATIONS[spec["derivation"]](story)
+                   for name, spec in sorted(measures.items())}
+        entries[story["id"]] = {
+            "measures": {name: ({"value": value, "limit": limits[name]} if name in limits
+                                else {"value": value}) for name, value in counted.items()},
+            "over_budget": sorted(name for name, value in counted.items()
+                                  if name in limits and value > limits[name]),
+            "size_exceptions": sorted(measure for story_id, measure in kept
+                                      if story_id == story["id"]),
+        }
+    return entries
+
+
+def story_size_block(budget: dict, entries: dict[str, dict]) -> dict:
+    return {"switch": STORY_SIZE_SWITCH, "value": budget["value"], "limits": budget["limits"],
+            "stories": {story_id: entries[story_id] for story_id in sorted(entries)},
+            "over_budget_stories": sorted(story_id for story_id, entry in entries.items()
+                                          if entry["over_budget"])}
+
+
+def story_size_report(record: dict, docs: Path, budget: dict,
+                      story_ids: set[str] | None = None) -> dict:
+    return story_size_block(budget, story_size_entries(record, docs, budget, story_ids))
 
 
 def status_tag_name(status: str) -> str:
@@ -2637,6 +2797,17 @@ def check(args) -> int:
         errors = [str(exc)]
     if args.approved and record["backlog"]:
         errors.extend(approval_findings(record, docs))
+    # A story over budget is advisory: the block adds no error of its own.
+    # Only the Size Exceptions a review records are checked, and only while
+    # the budget is on; at the default nothing is read.
+    story_size = None
+    try:
+        budget = story_size_budget(docs)
+        if budget is not None:
+            story_size = story_size_report(record, docs, budget)
+            errors.extend(size_exception_findings(record, docs))
+    except (ValueError, RuntimeError) as exc:
+        errors.append(str(exc))
     errors = sorted(set(errors))
     result = {
         "ok": not errors, "errors": errors,
@@ -2646,6 +2817,8 @@ def check(args) -> int:
                    "backlog_reviews": len(record["backlog_reviews"]),
                    "epic_reviews": len(record["epic_reviews"])},
     }
+    if story_size is not None:
+        result["story_size"] = story_size
     if args.render and not errors:
         try:
             render(record, docs)

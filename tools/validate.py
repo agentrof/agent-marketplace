@@ -17,6 +17,7 @@ Stdlib only. Deterministic output: findings sorted by (path, line, check).
 from __future__ import annotations
 
 import argparse
+import ast
 import json
 import re
 import sys
@@ -2463,7 +2464,9 @@ PROCESS_SWITCHES_RELPATH = build_distributions.PROCESS_SWITCHES_RELPATH
 SWITCH_ANCHOR_RE = re.compile(r"\b[Ss]witch\s+`([a-z][a-z0-9_]*)`")
 SWITCH_REFERENCE_RE = re.compile(r"^switch-([a-z][a-z0-9_]*)-([a-z][a-z0-9_]*)\.md$")
 PROCESS_SWITCH_KEYS = {"summary", "flows", "values", "default", "metric", "promotion"}
-PROCESS_SWITCH_OPTIONAL_KEYS = {"issue", "agent_variants"}
+PROCESS_SWITCH_OPTIONAL_KEYS = {"issue", "agent_variants", "parameters"}
+SWITCH_PARAMETER_KEYS = {"summary", "values", "declared_by", "type", "min_count"}
+SWITCH_PARAMETER_TYPES = {"positive_integer"}
 AGENT_VARIANT_KEYS = {"suffix", "tier", "description", "agents"}
 MECHANICAL_PASS_SWITCH = "mechanical_pass_tier"
 MECHANICAL_PASS_VALUE = "mechanical"
@@ -2536,8 +2539,58 @@ def mechanical_variant_problems(plugin: Path, switches: dict) -> list[str]:
     return problems
 
 
+def parameter_problems(where: str, parameters: object, values: list[str], default: object,
+                       plugin: Path | None) -> list[str]:
+    """Return the problems of one switch's owner-set parameter declaration."""
+    if not isinstance(parameters, dict) or set(parameters) != SWITCH_PARAMETER_KEYS:
+        return [f"{where}: parameters hold exactly summary, values, declared_by, type and min_count"]
+    problems: list[str] = []
+    if not _nonblank(parameters["summary"]):
+        problems.append(f"{where}: parameters need a summary the choice gate shows")
+    taking = parameters["values"]
+    if not isinstance(taking, list) or not taking or len(taking) != len(set(map(str, taking))):
+        problems.append(f"{where}: parameters must list the values that take them, each once")
+    else:
+        for value in taking:
+            if value not in values or value == default:
+                problems.append(f"{where}: parameters belong to a declared value other than the"
+                                f" default, not {value!r}")
+    if parameters["type"] not in SWITCH_PARAMETER_TYPES:
+        problems.append(f"{where}: parameter type {parameters['type']!r} is not one of"
+                        f" {sorted(SWITCH_PARAMETER_TYPES)}")
+    source = parameters["declared_by"]
+    declared = None
+    if not isinstance(source, dict) or set(source) != {"path", "key"} \
+            or not all(_nonblank(source.get(key)) for key in ("path", "key")):
+        problems.append(f"{where}: declared_by must name the package data file and the key that"
+                        " declare the parameter ids")
+    elif plugin is not None:
+        relative = source["path"]
+        target = plugin / relative
+        if relative.startswith("/") or "\\" in relative or ".." in relative.split("/") \
+                or not target.is_file():
+            problems.append(f"{where}: declared_by path {relative!r} is not a file of the package")
+        else:
+            try:
+                declared = json.loads(read_text(target)).get(source["key"])
+            except (json.JSONDecodeError, AttributeError):
+                declared = None
+            if not isinstance(declared, dict) or not declared or not all(
+                    REVIEW_STEP_ID_RE.match(key) and isinstance(item, dict)
+                    and _nonblank(item.get("summary")) for key, item in declared.items()):
+                problems.append(f"{where}: declared_by {relative} key {source['key']!r} must map"
+                                " snake_case parameter ids to a summary")
+                declared = None
+    minimum = parameters["min_count"]
+    if not isinstance(minimum, int) or isinstance(minimum, bool) or minimum < 0 \
+            or (declared is not None and minimum > len(declared)):
+        problems.append(f"{where}: min_count must be a whole number no larger than the declared"
+                        " parameters")
+    return problems
+
+
 def process_switch_problems(data: object, flows: set[str], agents: set[str],
-                            tiers: set[str]) -> list[str]:
+                            tiers: set[str], plugin: Path | None = None) -> list[str]:
     """Return the shape problems of the package's process switch registry."""
     if not isinstance(data, dict) or set(data) != {"schema_version", "switches"} \
             or data.get("schema_version") != 1:
@@ -2596,6 +2649,8 @@ def process_switch_problems(data: object, flows: set[str], agents: set[str],
         issue = spec.get("issue")
         if "issue" in spec and (not isinstance(issue, int) or isinstance(issue, bool) or issue < 1):
             problems.append(f"{where}: issue must be a positive issue number")
+        if "parameters" in spec:
+            problems.extend(parameter_problems(where, spec["parameters"], ids, default, plugin))
         if "agent_variants" in spec:
             variants = spec["agent_variants"]
             problems.extend(agent_variant_problems(where, variants, ids, default, agents, tiers))
@@ -2642,7 +2697,7 @@ def check_process_switches(tree: Tree, findings: list[Finding]) -> None:
             continue
         agents = {agent.stem for agent in agent_files(plugin)}
         for problem in process_switch_problems(data, {flow.stem for flow in flow_paths},
-                                               agents, tiers):
+                                               agents, tiers, plugin):
             err(path, problem, "declare each switch once with its owning flows, values,"
                 " default, component metric and promotion rule")
         switches = data.get("switches") if isinstance(data, dict) else None
@@ -2707,6 +2762,77 @@ def check_switch_references(plugin: Path, switches: dict, err) -> None:
                            and relative in read_text(flows_dir / f"{flow}.md") for flow in owners):
                     err(reference, f"switch reference {relative} is named by no owning flow of"
                         f" switch {name!r}", "name the reference in the owning flow step it replaces")
+
+
+STORY_SIZE_MEASURES_RELPATH = "skill-content/product-planning/data/story-size-measures.json"
+BACKLOG_COMPILER_RELPATH = "scripts/backlog_compile.py"
+
+
+def implemented_derivations(source: str) -> set[str] | None:
+    """Return the keys of the backlog compiler's STORY_SIZE_DERIVATIONS, read
+    from its source so the validator never imports a plugin script."""
+    try:
+        module = ast.parse(source)
+    except SyntaxError:
+        return None
+    for node in module.body:
+        if isinstance(node, ast.Assign) and isinstance(node.value, ast.Dict) and any(
+                isinstance(target, ast.Name) and target.id == "STORY_SIZE_DERIVATIONS"
+                for target in node.targets):
+            return {key.value for key in node.value.keys
+                    if isinstance(key, ast.Constant) and isinstance(key.value, str)}
+    return None
+
+
+def check_story_size_measures(tree: Tree, findings: list[Finding]) -> None:
+    """Each story size measure is declared once, with a derivation the backlog
+    compiler implements, so a limit the owner sets always has a count."""
+    for plugin in plugin_dirs(tree):
+        path = plugin / STORY_SIZE_MEASURES_RELPATH
+        if not path.is_file():
+            continue
+
+        def err(message: str, fix: str) -> None:
+            findings.append(Finding("error", rel(tree, path), 1, "story_size_measures", message, fix))
+
+        try:
+            data = json.loads(read_text(path), object_pairs_hook=_unique_json_object)
+        except (json.JSONDecodeError, ValueError) as exc:
+            err(f"story size measures are not valid unique-key JSON: {exc}",
+                "declare each measure once in valid JSON")
+            continue
+        if not isinstance(data, dict) or set(data) != {"schema_version", "measures"} \
+                or data.get("schema_version") != 1 or not isinstance(data.get("measures"), dict) \
+                or not data["measures"]:
+            err("story size measures must hold exactly schema_version 1 and a non-empty measures"
+                " object", "restore the measures object keyed by measure id")
+            continue
+        compiler = plugin / BACKLOG_COMPILER_RELPATH
+        derivations = implemented_derivations(read_text(compiler)) if compiler.is_file() else None
+        if derivations is None:
+            err(f"{BACKLOG_COMPILER_RELPATH} declares no STORY_SIZE_DERIVATIONS registry",
+                "keep the compiler's derivation registry beside the measures it counts")
+            derivations = set()
+        owners: dict[str, str] = {}
+        for name, spec in sorted(data["measures"].items()):
+            where = f"measure {name!r}"
+            if not REVIEW_STEP_ID_RE.match(name):
+                err(f"{where}: id must be lowercase snake_case", "rename the measure")
+            if not isinstance(spec, dict) or set(spec) != {"summary", "derivation"} \
+                    or not _nonblank(spec.get("summary")):
+                err(f"{where}: holds exactly a non-empty summary and a derivation",
+                    "state what the measure counts and how the compiler derives it")
+                continue
+            derivation = spec["derivation"]
+            if derivation not in derivations:
+                err(f"{where}: derivation {derivation!r} is not one the backlog compiler implements",
+                    "name a key of STORY_SIZE_DERIVATIONS in scripts/backlog_compile.py, or"
+                    " implement the derivation there first")
+            elif derivation in owners:
+                err(f"{where}: repeats the derivation of measure {owners[derivation]!r}",
+                    "give each measure its own derivation")
+            else:
+                owners[derivation] = name
 
 
 def _limits_shape_errors(config: dict) -> list[str]:
@@ -2975,6 +3101,7 @@ CHECKS = {
     "execution_profiles": check_execution_profiles,
     "review_panels": check_review_panels,
     "process_switches": check_process_switches,
+    "story_size_measures": check_story_size_measures,
     "limits_config_shape": check_limits_config_shape,
     "delivery_contract_shape": check_delivery_contract_shape,
     "product_namespace": check_product_namespace,

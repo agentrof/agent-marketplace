@@ -29,3 +29,9 @@ through `/requirement REQ-###`, or, when that Requirement marks Experience
 revision, a requirement-mode backlog approved before it carried
 `input_bindings` binds through its root Requirement's Experience Stage Results
 instead. A reserved Delivery keeps verifying its pinned inputs historically.
+
+Switch `story_size_budget`: at `propose_split`, `init` also prints each
+selected Story's size measures and over-budget flags as `story_size`, which
+the proposal shows read-only, as
+`skill-content/product-planning/references/switch-story_size_budget-propose_split.md`
+defines.

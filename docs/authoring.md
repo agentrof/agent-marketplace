@@ -207,7 +207,13 @@ To add a switch:
    its `unit` and `threshold`; `issue` names its idea issue. A value that runs
    a role on another tier declares `agent_variants` (`suffix`, `tier`,
    `description`, `agents`), and every build then ships `<agent>-<suffix>`
-   with the base agent's body.
+   with the base agent's body. A value that needs owner-set numbers declares
+   `parameters` (`summary`, the `values` that take them, `declared_by` naming
+   the package data file and key that declare their ids, `type` and
+   `min_count`). The package sets no parameter value: the owner sets each one
+   in the policy's Parameters table through `/configure process`, a parameter
+   exists only while its switch is at a value that takes it, and
+   `process_policy.py value` reports the typed values beside the switch's.
 2. Anchor it as switch `<id>` at each step it changes in its owning flows.
    The anchor names the switch reference that the other value follows and
    adds nothing else to the flow.
@@ -227,9 +233,9 @@ To add a switch:
 The `process_switches` validator check rejects a default outside the values,
 a switch that an owning flow does not name, a flow that names an undeclared
 switch or one it does not own, a switch without a metric or promotion rule,
-malformed agent variants, and a switch reference that names an undeclared
-switch or value or the default, that no owning flow names, or that a SKILL.md
-links.
+malformed agent variants or parameters, and a switch reference that names an
+undeclared switch or value or the default, that no owning flow names, or that
+a SKILL.md links.
 
 ### Promotion rule
 
@@ -291,3 +297,25 @@ writer's body, boundaries and identity, so writer ownership is unchanged. The
 validator requires the switch to declare these variants and rejects one for a
 read-only reviewer or challenger, so every review, re-check and calibration
 keeps its tier under both values.
+
+## Story size budget
+
+`plugins/software-engineering-team/skill-content/product-planning/data/story-size-measures.json`
+declares each story size measure: its `summary` and the `derivation` that the
+backlog compiler implements in `STORY_SIZE_DERIVATIONS`. The
+`story_size_measures` validator check rejects a measure whose derivation the
+compiler does not implement, a derivation two measures share and a malformed
+measure. Process switch `story_size_budget` declares its parameters
+`declared_by` that file, so a new measure is a data change plus its
+derivation, and the owner can set a limit for it at once.
+
+At `off`, the default, nothing is measured or shown. At `propose_split`,
+`backlog_compile.py check --json`, the review manifests and
+`delivery_compile.py init` report each story's measures against the owner's
+limits, and the Product Owner proposes a split for a story over budget before
+its epic review, as
+`product-planning/references/switch-story_size_budget-propose_split.md`
+defines. The budget is advisory and adds no story field. The switch's flip
+rule: at least 3 backlog revisions and 3 Deliveries, the owner accepting at
+least half of the split proposals, and stories within budget reaching
+integration with a median cycle time at most half that of stories over budget.

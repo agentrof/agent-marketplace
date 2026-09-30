@@ -104,7 +104,9 @@ def contract_hash() -> str:
     scripts = Path(__file__).resolve().parent
     files = [Path(__file__), scripts / "backlog_compile.py", scripts / "backlog_input_policy.py", scripts / "stage_package.py",
              scripts / "ba_compile.py", scripts / "requirement_compile.py", scripts / "requirement_route.py",
-             backlog.POLICY_PATH]
+             backlog.POLICY_PATH, scripts / "process_policy.py",
+             scripts.parent / "skill-content/configure/data/process-switches.json",
+             backlog.STORY_SIZE_MEASURES_PATH]
     return digest([[path.name, file_hash(path)] for path in files])
 
 
@@ -138,17 +140,22 @@ def source_scenarios(story: dict) -> dict[str, list[str]]:
 
 
 def compiler_check(docs: Path, record: dict, scope_epics: list[dict], review: dict,
-                   relations: dict[str, list[str]], root: bool) -> dict:
+                   relations: dict[str, list[str]], root: bool,
+                   budget: dict | None = None) -> dict:
     """Report the compiler facts a reader would otherwise re-derive.
 
     Source errors already failed the manifest, so they are empty here. The
     current review note gets the findings the final gate will report for it.
+    Under story_size_budget at propose_split, the story size measures of the
+    stories in scope are given facts as well.
     """
     contract = backlog.backlog_contract()
     sections = contract["required_backlog_review_sections" if root
                         else "required_epic_review_sections"]
     pending = backlog.review_section_findings(review["body"], sections, review["path"], docs)
     pending += backlog.accepted_minor_findings(docs, review["body"], review["path"], contract)
+    if budget is not None and not root:
+        pending += backlog.size_exception_rows(docs, scope_epics[0], review)[1]
     # The coverage check reads every current review; hand it only this one.
     if root:
         scoped = dict(record, epics=[dict(item, reviews=[]) for item in record["epics"]])
@@ -183,9 +190,12 @@ def compiler_check(docs: Path, record: dict, scope_epics: list[dict], review: di
     if root:
         deferred, _findings = backlog.deferred_criteria(docs, review["body"], review["path"])
         counts["deferred_criteria"] = len(deferred)
-    return {"source_errors": [], "review_note": {"path": review["path"],
-                                                 "pending_findings": sorted(set(pending))},
-            "relation_audit": audit, "counts": counts, "stories": facts}
+    result = {"source_errors": [], "review_note": {"path": review["path"],
+                                                   "pending_findings": sorted(set(pending))},
+              "relation_audit": audit, "counts": counts, "stories": facts}
+    if budget is not None:
+        result["story_size"] = backlog.story_size_report(record, docs, budget, set(facts))
+    return result
 
 
 def manifest(docs: Path, *, epic: str | None = None, expected_hash: str | None = None,
@@ -380,7 +390,12 @@ def manifest(docs: Path, *, epic: str | None = None, expected_hash: str | None =
                          "scenario_refs": sorted(scenario for story in selected["stories"] for scenario in story["scenario_ids"]),
                          "dependency_refs": sorted(backlog.dependency_edges(selected["stories"], True, record))}
             scope = selected["path"]
-        check = compiler_check(docs, record, owning_epics, current_review, relations, epic is None)
+        try:
+            budget = backlog.story_size_budget(docs)
+        except ValueError as exc:
+            raise InputError(str(exc)) from exc
+        check = compiler_check(docs, record, owning_epics, current_review, relations, epic is None,
+                               budget)
         if writer or carried:
             check["scaffold_findings"] = carried
 

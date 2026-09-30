@@ -73,6 +73,20 @@ commits, once, before the candidate freeze.
 and `deliver/references/switch-implementation_schedule-parallel_lanes_v1.md`
 define the lanes.
 
+Backlog planning measures story size as process switch `story_size_budget`
+selects. At `off`, the default, nothing is measured or shown. At
+`propose_split`, `backlog_compile.py check --json` reports each story's
+measures, derived from the story and its Test Plan, against the limits the
+owner sets in the Process Policy. Before the first epic review the Product
+Owner proposes a split for each story over budget, and the owner accepts it or
+keeps the story with a compiler-validated `Size Exceptions` row in the epic
+review note. The budget is advisory: it never fails a check, blocks an
+approval or rewrites a criterion, and a split moves criteria and scenarios
+verbatim. Review manifests carry the measures as given facts, and
+`/delivery-plan` shows them read-only.
+`product-planning/references/switch-story_size_budget-propose_split.md`
+defines the steps.
+
 Requirement Flow is a linear, user-gated sequence. Each required stage commits
 its approved documents before the next stage begins. The backlog compiler is
 the only machine that derives backlog indexes. All durable changes are

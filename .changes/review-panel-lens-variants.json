@@ -1,0 +1,6 @@
+{
+  "summary": "Every build ships three generated agents, `backlog-reviewer-lens`, `solution-reviewer-lens` and `design-system-reviewer-lens`: the read-only reviewers' bodies and boundaries on a new `lens` execution tier (Claude `sonnet` at effort `high`, Codex effort `high`), which review panels spawn at `review_panels: lens_panel`. The reviewers themselves keep their tier and their released files. A process switch value declares such variants as `agent_variants` in the switch registry, and the build refuses an unknown agent or tier, a colliding name and a description that agent frontmatter would misread before it touches the generated tree.",
+  "components": {
+    "software-engineering-team": "minor"
+  }
+}

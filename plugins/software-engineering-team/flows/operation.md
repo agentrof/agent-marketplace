@@ -1,9 +1,8 @@
 # Operation Contract Flow
 
 Spawn template: paste `{{constitution}}`, the exact contract path, accepted
-Solution decision bindings, the command-safety lens or the reader's lens
-assignment and `SELF-CHECK` into every reviewer prompt. Load the
-`obsidian-vault` skill before writing vault truth.
+Solution decision bindings, command-safety lens and `SELF-CHECK` into every
+reviewer prompt. Load the `obsidian-vault` skill before writing vault truth.
 
 Read this complete flow before `/configure operation verification` or
 `/configure operation environment` changes durable state. Operation is
@@ -19,21 +18,14 @@ Requirement stage and it does not alter product-stage package hashes.
 2. Run `operation_compile.py check --kind <kind> --json`. An approved contract
    changes only after `begin-revision`; a changed or superseded cited Solution
    decision makes the contract unusable until it is revised and re-approved.
-3. When the contract crosses test/runtime boundaries or changes where
-   Delivery PR checks come from, review it in the mode that `review_mode` in
-   `skill-content/challenge-review/data/review-panels.json` selects. In
-   `single` mode, the default, spawn the non-writing counterpart as a
-   read-only reviewer; the review prompt includes the exact contract path,
-   accepted Solution references, command safety lens and `SELF-CHECK`. In
-   `panel` mode run review panel `operation_verification` for a Verification
-   Contract or review panel `operation_environment` for an Environment
-   Contract, as `skill-content/challenge-review/references/review-panel.md`
-   defines. Its lens readers are the non-writing counterpart role, read-only
-   and on that role's own tier. Derive each reader's inputs with
-   `task_inputs.py --entry configure --role <counterpart> --mode review
-   --skill challenge-review`. Every prompt includes the exact contract path,
-   accepted Solution references, the reader's lens assignment and
-   `SELF-CHECK`. Resolve every critical or major finding before approval.
+3. Spawn the non-writing counterpart as a read-only reviewer when the contract
+   crosses test/runtime boundaries or changes where Delivery PR checks come
+   from. The review prompt includes the exact contract path, accepted Solution
+   references, command safety lens and `SELF-CHECK`. Switch `review_panels`: at
+   `lens_panel`, review panel `operation_verification` or
+   review panel `operation_environment` replaces this reviewer, as
+   `skill-content/challenge-review/references/switch-review_panels-lens_panel.md`
+   defines.
 4. Approve with `operation_compile.py approve --kind <kind>`. Return the exact
    contract receipt. Do not run a downstream product stage automatically.
 

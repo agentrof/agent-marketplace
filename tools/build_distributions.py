@@ -28,8 +28,7 @@ CANONICAL_REASONING_LEVELS = {"high", "medium", "low", "lens", "inherit"}
 EXECUTION_PROFILE_FILE = "execution-profiles.json"
 AUTO_EXECUTION_PROFILE = "auto"
 EXECUTION_SETTING_KEYS = {"model", "effort"}
-REVIEW_PANELS_RELPATH = "skill-content/challenge-review/data/review-panels.json"
-REVIEW_MODES = ("single", "panel")
+PROCESS_SWITCHES_RELPATH = "skill-content/configure/data/process-switches.json"
 DELIVERY_PROTOCOL_CAPABILITY = {
     "read_min": 1,
     "read_max": 1,
@@ -494,45 +493,58 @@ def load_execution_profile(
     }
 
 
-def review_mode_tier_overrides(source: Path) -> dict[str, str]:
-    """Return the tier overrides of the plugin's selected review mode.
+def agent_variants(source: Path, tiers: set[str]) -> list[tuple[str, str, str, str]]:
+    """Return every generated agent variant the process switch registry declares.
 
-    The review_mode switch in the review-panel data also selects the tier the
-    read-only document readers render with. A plugin without that data renders
-    every tier as declared; tools/validate.py reports the data's full shape.
+    Each entry is (canonical agent, variant name, tier, description suffix). A
+    variant exists in every build whether or not a project selects its switch
+    value; tools/validate.py reports the registry's full shape.
     """
-    path = source / REVIEW_PANELS_RELPATH
+    path = source / PROCESS_SWITCHES_RELPATH
     if not path.is_file():
-        return {}
+        return []
     try:
-        data = json.loads(path.read_text(encoding="utf-8"))
-        overrides = data["review_modes"][data["review_mode"]]["tier_overrides"]
-    except (OSError, json.JSONDecodeError, KeyError, TypeError) as exc:
-        raise ValueError(
-            f"{path}: review_mode must select a review_modes entry with tier_overrides"
-        ) from exc
-    if not isinstance(overrides, dict) or not all(
-        isinstance(tier, str) and isinstance(rendered, str)
-        for tier, rendered in overrides.items()
-    ):
-        raise ValueError(f"{path}: tier_overrides must map tier names to tier names")
-    return dict(overrides)
+        switches = json.loads(path.read_text(encoding="utf-8"))["switches"]
+        declared = [
+            (agent, f"{agent}-{variant['suffix']}", variant["tier"], variant["description"])
+            for _switch, spec in sorted(switches.items())
+            for _value, variant in sorted((spec.get("agent_variants") or {}).items())
+            for agent in variant["agents"]
+        ]
+    except (OSError, json.JSONDecodeError, KeyError, TypeError, AttributeError) as exc:
+        raise ValueError(f"{path}: agent_variants must declare suffix, tier, description and agents") from exc
+    canonical = {agent.stem for agent in (source / "agents").glob("*.md")}
+    names = [name for _agent, name, _tier, _description in declared]
+    for agent, name, tier, description in declared:
+        if agent not in canonical:
+            raise ValueError(f"{path}: agent variant names unknown agent {agent!r}")
+        if tier not in tiers:
+            raise ValueError(f"{path}: agent variant {name!r} names unknown tier {tier!r}")
+        if name in canonical or names.count(name) > 1:
+            raise ValueError(f"{path}: agent variant {name!r} collides with another agent")
+        if not isinstance(description, str) or not description.strip() \
+                or ":" in description or "\n" in description:
+            raise ValueError(f"{path}: agent variant {name!r} needs a one-line description without a colon")
+    return declared
 
 
-def review_mode_execution_profile(
-    source: Path, execution_profile: dict[str, dict[str, str]],
-) -> dict[str, dict[str, str]]:
-    """Resolve each tier to the host setting the selected review mode renders."""
-    overrides = review_mode_tier_overrides(source)
-    unknown = sorted((set(overrides) | set(overrides.values())) - set(execution_profile))
-    if unknown:
-        raise ValueError(
-            f"{source / REVIEW_PANELS_RELPATH}: tier_overrides name unknown tiers {unknown}"
-        )
-    return {
-        tier: dict(execution_profile[overrides.get(tier, tier)])
-        for tier in execution_profile
-    }
+def variant_source(path: Path, name: str, tier: str, description: str) -> str:
+    """Return a canonical agent's text renamed onto its variant's tier."""
+    text = path.read_text(encoding="utf-8")
+    match = FRONTMATTER_RE.match(text)
+    if match is None:
+        raise ValueError(f"{path}: missing YAML frontmatter")
+    lines = []
+    for line in match.group(1).splitlines():
+        key = line.split(":", 1)[0].strip()
+        if key == "name":
+            line = f"name: {name}"
+        elif key == "reasoning":
+            line = f"reasoning: {tier}"
+        elif key == "description":
+            line = f"{line.rstrip()} {description.strip()}"
+        lines.append(line)
+    return "---\n" + "\n".join(lines) + "\n---\n" + text[match.end():]
 
 
 def generate_agents(
@@ -544,10 +556,19 @@ def generate_agents(
         return
     context = {
         "parse_frontmatter": parse_frontmatter,
-        "execution_profile": review_mode_execution_profile(source, execution_profile),
+        "execution_profile": execution_profile,
     }
     for path in sorted(agents.glob("*.md")):
         write_artifacts(target, adapter.module.agent_artifacts(context, path))
+    variants = agent_variants(source, set(execution_profile))
+    if not variants:
+        return
+    with tempfile.TemporaryDirectory(prefix="agent-marketplace-variants-") as raw:
+        for agent, name, tier, description in variants:
+            variant = Path(raw) / f"{name}.md"
+            variant.write_bytes(variant_source(
+                agents / f"{agent}.md", name, tier, description).encode("utf-8"))
+            write_artifacts(target, adapter.module.agent_artifacts(context, variant))
 
 
 def compose_project_instructions(
@@ -941,6 +962,10 @@ def validate_canonical(root: Path) -> None:
                 )
             if "model" in fields:
                 problems.append(f"{agent}: canonical agents use reasoning, not model")
+        try:
+            agent_variants(source, CANONICAL_REASONING_LEVELS)
+        except ValueError as exc:
+            problems.append(str(exc))
         for path in sorted(
             candidate for candidate in source.rglob("*")
             if candidate.is_file() and not candidate.is_symlink()

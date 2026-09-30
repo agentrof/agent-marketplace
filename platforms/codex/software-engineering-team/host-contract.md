@@ -31,19 +31,19 @@
 - When the canonical workflow says `spawn`, use the matching project-scoped
   custom agent from `.codex/agents/` and wait for every required agent before
   synthesis. Never run overlapping writers concurrently.
-- Run a review panel's lens readers in parallel: start every reader of the
-  panel before waiting on any of them, then wait for all of them before
-  triage.
+- Under switch `review_panels` at `lens_panel`, run a review panel's lens
+  readers in parallel: start every reader of the panel before waiting on any
+  of them, then wait for all of them before triage.
 - During setup or a package refresh, regenerate the host projection, run the
   generated project check and preserve authored vault files. The generator owns
   only portable instruction roots and local project memory.
 - Role agents use the package's `auto` execution profile, which sets each role
-  tier's reasoning effort and, when the table names one, its model. The `lens`
-  tier of the read-only document lens readers sets effort `high` and no model,
-  so those readers use the session model; the default `single` review mode
-  renders them on the tier that `tier_overrides` in
-  `skill-content/challenge-review/data/review-panels.json` names instead. When
-  the user wants every role to follow the parent session, run
+  tier's reasoning effort and, when the table names one, its model. Every
+  build also ships the `-lens` variants of the read-only document reviewers on
+  the `lens` tier, effort `high` and no model, so they use the session model;
+  only review panels under switch `review_panels` at `lens_panel` start them,
+  and the reviewers themselves keep their own tier. When the user wants every
+  role to follow the parent session, run
   `<absolute-python> <absolute-package-scripts>/generate_codex_project.py apply
   --project-root <root> --scope local --execution-profile inherit`;
   `--execution-profile auto` restores the default. The managed agent files

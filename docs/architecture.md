@@ -140,14 +140,15 @@ behavior is host-neutral; Claude Code and Codex are packaging adapters.
     and executable set. Public stable installs, exact-lease ref transactions,
     immutable Release reconciliation and clean-ref completion remain mandatory.
 29. Backlog, Solution Design, Design System and Operation contract reviews
-    run in the mode that `review_mode` in
-    `challenge-review/data/review-panels.json` selects: one reviewer per step,
-    the default, or a review panel of parallel, read-only lens readers. Lens
-    sets are validated data in that file; a panel replaces a step's single
-    reviewer and never stacks on top of it, and the mode also selects the
-    tier of the read-only document readers. Review steps whose machine
-    interface accepts one result per role keep one reader until a merge step
-    exists.
+    run as process switch `review_panels` selects in the project's Process
+    Policy: one reviewer per step at the default, `single_reader`, or at
+    `lens_panel` a review panel of parallel, read-only lens readers. Lens sets
+    are validated data in `challenge-review/data/review-panels.json`; a panel
+    replaces a step's single reviewer and never stacks on top of it. The
+    read-only document reviewers keep their own tier, and every build ships
+    their generated `-lens` variants on the `lens` tier for panel readers.
+    Review steps whose machine interface accepts one result per role keep one
+    reader until a merge step exists.
 
 The normative Requirement and Delivery lifecycle is documented in
 [requirement-delivery-protocol.md](requirement-delivery-protocol.md).

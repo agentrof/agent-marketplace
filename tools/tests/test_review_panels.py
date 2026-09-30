@@ -1,5 +1,6 @@
-"""Review panels: one shared protocol, lens data per step, the review mode
-switch that keeps the single reviewer by default, and the lens tier."""
+"""Review panels: lens data per step, one protocol that a task binds only at
+switch `review_panels: lens_panel`, and lens-tier reader variants that leave
+the single reviewers and every default-path instruction as released."""
 
 from __future__ import annotations
 
@@ -12,7 +13,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 TEAM = ROOT / "plugins" / "software-engineering-team"
 PANELS = "skill-content/challenge-review/data/review-panels.json"
-PROTOCOL = "skill-content/challenge-review/references/review-panel.md"
+PROTOCOL = "skill-content/challenge-review/references/switch-review_panels-lens_panel.md"
+REGISTRY = "skill-content/configure/data/process-switches.json"
 BACKLOG_LENSES = [
     "scope-and-slicing",
     "criteria-coverage-and-test-design",
@@ -36,29 +38,23 @@ APPROVED_PANELS = {
     "operation_verification": ("operation", "devops-engineer", ["command-safety", "boundary-fit"]),
     "operation_environment": ("operation", "qa-engineer", ["command-safety", "boundary-fit"]),
 }
-LENS_READERS = {
-    "analysis-challenger", "backlog-reviewer", "design-system-reviewer",
-    "domain-expert", "solution-reviewer",
-}
-# flow: the single-reviewer path that stays the default until promotion.
+LENS_VARIANTS = ["backlog-reviewer", "design-system-reviewer", "solution-reviewer"]
+# flow: the released single-reviewer path, which stays the default path.
 SINGLE_PATHS = {
     "backlog-planning": (
-        "In `single` mode give one fresh `backlog-reviewer` the returned manifest",
-        "In `single` mode invoke one fresh `backlog-reviewer` with that manifest",
-        "In `single` mode rerun only the affected reviewer",
+        "Give one fresh `backlog-reviewer` the returned manifest and every named path",
+        "Invoke one fresh `backlog-reviewer` with that manifest",
+        "rerun only the affected reviewer",
     ),
     "solution-design": (
-        "In `single` mode, the default, spawn one independent primary"
-        " `solution-reviewer` for all four challenge lenses",
+        "Spawn one independent primary `solution-reviewer` for all four required lenses",
     ),
     "design-system": (
-        "In `single` mode, the default, spawn `design-system-reviewer` read-only with"
-        " MASTER, catalog, page overrides and the semantic token, accessibility and"
-        " contradiction lens",
+        "Spawn `design-system-reviewer` read-only with MASTER, catalog, page overrides and"
+        " the semantic token, accessibility and contradiction lens",
     ),
     "operation": (
-        "In `single` mode, the default, spawn the non-writing counterpart as a"
-        " read-only reviewer",
+        "Spawn the non-writing counterpart as a read-only reviewer",
         "command safety lens and `SELF-CHECK`",
     ),
 }
@@ -79,6 +75,19 @@ def tier(agent: str) -> str:
 
 
 class ReviewPanelProtocolTests(unittest.TestCase):
+    def test_protocol_applies_only_at_the_lens_panel_value(self):
+        protocol = flat(PROTOCOL)
+        for rule in (
+            "These are the instructions of process switch `review_panels` at `lens_panel`",
+            "A task binds this file only when the project's Process Policy selects that value",
+            "at the default, `single_reader`, every review runs as its flow and role files"
+            " describe",
+        ):
+            with self.subTest(rule=rule):
+                self.assertIn(rule, protocol)
+        # A link would make the protocol a conditional read on the default path.
+        self.assertNotIn("switch-review_panels", read("skill-content/challenge-review/SKILL.md"))
+
     def test_protocol_defines_parallel_single_assignment_readers(self):
         protocol = flat(PROTOCOL)
         for rule in (
@@ -89,9 +98,18 @@ class ReviewPanelProtocolTests(unittest.TestCase):
             "Start every reader of the panel together through the host's parallel agent invocation",
             "Wait for every reader before any writer action",
             "every lens belongs to exactly one assignment",
+            "Its assignment narrows the coverage its role file describes",
         ):
             with self.subTest(rule=rule):
                 self.assertIn(rule, protocol)
+
+    def test_readers_run_as_lens_variants_and_bind_the_protocol(self):
+        protocol = flat(PROTOCOL)
+        self.assertIn("spawn `backlog-reviewer-lens`, `solution-reviewer-lens` or"
+                      " `design-system-reviewer-lens`", protocol)
+        self.assertIn("The Operation counterparts run as themselves, on their own tier", protocol)
+        self.assertIn("A reader role that does not bind this skill, and the step's writer, add"
+                      " `--skill challenge-review`", protocol)
 
     def test_merge_keeps_every_severity_and_mints_no_identity(self):
         protocol = flat(PROTOCOL)
@@ -133,46 +151,31 @@ class ReviewPanelProtocolTests(unittest.TestCase):
             with self.subTest(flow=flow):
                 self.assertNotRegex(read(f"flows/{flow}.md"), r"review\s+panel\s+`")
 
-    def test_challenge_review_skill_links_the_protocol(self):
-        skill = read("skill-content/challenge-review/SKILL.md")
-        self.assertIn("[review-panel](references/review-panel.md)", skill)
-        self.assertIn("Read when a flow reaches a review step that"
-                      " `data/review-panels.json` declares", skill)
-        self.assertIn("data/review-panels.json", skill)
-        self.assertIn("its flow's single reviewer by default, or its review panel",
-                      " ".join(skill.split()))
-
-    def test_review_mode_switch_selects_the_single_reviewer_by_default(self):
-        protocol = flat(PROTOCOL)
-        for rule in (
-            "`review_mode` in `data/review-panels.json` is the one switch between the two"
-            " review paths of every declared step",
-            "A flow reads it before each review step",
-            "`single`, the default: the step runs the one reviewer its flow names, on that"
-            " flow's single-reviewer path. The rest of this file does not apply.",
-            "`panel`: the step runs its review panel as this file defines",
-            "so the mode also selects the tier of the read-only document readers",
-            "never a per-project edit",
-        ):
-            with self.subTest(rule=rule):
-                self.assertIn(rule, protocol)
-
 
 class ReviewPanelDataTests(unittest.TestCase):
     def setUp(self) -> None:
         self.data = json.loads(read(PANELS))
         self.steps = self.data["review_steps"]
+        self.switch = json.loads(read(REGISTRY))["switches"]["review_panels"]
 
-    def test_switch_ships_single_and_keeps_readers_on_their_pre_panel_tier(self):
-        # Owner rule: the single reviewer stays the default until at least 5
-        # panel passes across 2 flows match its valid-major recall in at most
-        # half its wall time. Promotion edits review_mode, never this test's
-        # expectation of the other mode.
-        self.assertEqual(self.data["review_mode"], "single")
-        self.assertEqual(self.data["review_modes"], {
-            "single": {"tier_overrides": {"lens": "high"}},
-            "panel": {"tier_overrides": {}},
-        })
+    def test_switch_defaults_to_the_single_reader_under_the_owner_flip_rule(self):
+        # The single reviewer stays the default until at least 5 panel passes
+        # across 2 flows match its valid-major recall in at most half its wall
+        # time and the owner approves the flip.
+        self.assertEqual(self.switch["default"], "single_reader")
+        self.assertEqual([value["id"] for value in self.switch["values"]],
+                         ["single_reader", "lens_panel"])
+        self.assertEqual(self.switch["flows"],
+                         sorted({flow for flow, _role, _lenses in APPROVED_PANELS.values()}))
+        self.assertEqual(self.switch["promotion"]["unit"],
+                         "At least 5 panel review passes across at least 2 flows.")
+        self.assertIn("Panel valid-major recall at least equal to the official review's and panel"
+                      " wall time at most 50% of it", self.switch["promotion"]["threshold"])
+        self.assertEqual(self.switch["agent_variants"], {"lens_panel": {
+            "suffix": "lens", "tier": "lens",
+            "description": "Lens-tier reader variant for review panels.",
+            "agents": LENS_VARIANTS}})
+        self.assertEqual(set(self.data), {"schema_version", "review_steps"})
 
     def test_default_panels_match_the_approved_scope(self):
         self.assertEqual(set(self.steps), set(APPROVED_PANELS))
@@ -184,20 +187,15 @@ class ReviewPanelDataTests(unittest.TestCase):
                 self.assertEqual(spec["default_panel"], [[lens] for lens in lenses])
                 self.assertTrue(all(lens["focus"].strip() for lens in spec["lenses"]))
 
-    def test_every_step_is_anchored_in_its_own_flow(self):
-        # Solution Design binds the protocol through its single review plan.
-        plan = "skill-content/solution-architecture/references/challenge-lenses.md"
+    def test_every_step_is_anchored_in_its_flow_beside_the_switch(self):
         for step, (flow, _role, _lenses) in APPROVED_PANELS.items():
             with self.subTest(step=step):
-                text = read(f"flows/{flow}.md")
-                self.assertIn(f"review panel `{step}`", " ".join(text.split()))
-                self.assertIn("`review_mode` in", text)
-                if flow == "solution-design":
-                    self.assertIn(plan, text)
-                    text = read(plan)
-                self.assertIn("challenge-review/references/review-panel.md", text)
+                text = flat(f"flows/{flow}.md")
+                self.assertIn(f"review panel `{step}`", text)
+                self.assertIn("Switch `review_panels`: at `lens_panel`", text)
+                self.assertIn(PROTOCOL, text)
 
-    def test_every_panel_flow_keeps_its_single_reviewer_path(self):
+    def test_every_panel_flow_keeps_its_released_single_reviewer_path(self):
         for flow, rules in SINGLE_PATHS.items():
             text = flat(f"flows/{flow}.md")
             for rule in rules:
@@ -220,81 +218,67 @@ class ReviewPanelDataTests(unittest.TestCase):
 
 class ReviewPanelFlowTests(unittest.TestCase):
     def test_backlog_panels_share_one_manifest_and_one_writer(self):
-        flow = flat("flows/backlog-planning.md")
+        protocol = flat(PROTOCOL)
         for rule in (
-            "Every lens reader receives the same returned manifest",
-            "it carries no lens key, so one manifest serves the whole panel",
-            "Wait for every epic reviewer to return before any writer action",
-            "Wait for every root reviewer to return",
+            "The review panel `backlog_epic` runs for each epic and review panel `backlog_root`"
+            " for the root, in place of the single `backlog-reviewer`",
+            "Every lens reader receives the same returned manifest and every named path",
+            "the manifest carries no lens key, so one manifest serves the whole panel",
             "--expected-hash <source_hash>",
-            "Panel lens readers take these facts as given",
-            "In `panel` mode it merges findings that share one root cause",
+            "Lens readers take these facts as given and never recount them",
+            "The Product Owner merges findings that share one root cause",
             "Findings and Verdict come from the merged panel result",
-            "rerun only the lens assignments that returned those findings",
+            "A re-review reruns only the lens assignments that returned the blocking findings",
+            "The metadata-recovery root review is a `backlog_root` panel",
+            "report `relation_audit` as `confirmed`",
         ):
             with self.subTest(rule=rule):
-                self.assertIn(rule, flow)
-        reviewer = flat("agents/backlog-reviewer.md")
-        for rule in (
-            "One reviewer covers every step below in `single` review mode, the default",
-            "In `panel` mode a reader holds one lens assignment of review panel"
-            " `backlog_epic` or `backlog_root`",
-            "The manifest's `check` block is compiler fact: a lens reader takes it as"
-            " given and never recounts or re-derives it",
-            "- `lens`: a lens reader's assigned lens ids; the single reviewer omits it.",
-            "expected, actual, missing and extra source target sets per typed relation",
-        ):
-            with self.subTest(rule=rule):
-                self.assertIn(rule, reviewer)
+                self.assertIn(rule, protocol)
 
     def test_solution_panel_replaces_the_primary_and_keeps_its_guard(self):
-        flow = flat("flows/solution-design.md")
-        self.assertIn("The panel replaces the single primary reviewer and never runs beside one", flow)
-        self.assertIn("they do not form a second panel", flow)
-        plan = flat("skill-content/solution-architecture/references/challenge-lenses.md")
-        self.assertNotIn("## Required primary lenses", plan)
-        self.assertIn("could not start two full panels", plan)
-        self.assertIn("a specialist is never a second panel", plan)
-
-    def test_design_system_and_operation_panels(self):
-        design = flat("flows/design-system.md")
-        self.assertIn("one read-only `design-system-reviewer` per lens assignment, in parallel", design)
-        self.assertIn("Resolve every critical or major finding before approval", design)
-        self.assertIn("severity (`critical`, `major` or `minor` from the panel protocol's table)",
-                      flat("agents/design-system-reviewer.md"))
-        operation = flat("flows/operation.md")
+        protocol = flat(PROTOCOL)
         for rule in (
-            "review panel `operation_verification` for a Verification Contract",
-            "review panel `operation_environment` for an Environment Contract",
-            "read-only and on that role's own tier",
-            "--mode review --skill challenge-review",
+            "The review panel `solution_design` replaces the single primary `solution-reviewer`",
+            "run exactly one primary reviewer or one panel per review, never both",
+            "a specialist is never a second panel",
         ):
             with self.subTest(rule=rule):
-                self.assertIn(rule, operation)
-        self.assertIn("adds `--skill challenge-review`", flat("templates/task-input-contract.md"))
+                self.assertIn(rule, protocol)
+        plan = flat("skill-content/solution-architecture/references/challenge-lenses.md")
+        self.assertIn("## Required primary lenses", plan)
+        self.assertNotIn("panel", plan.replace("second full panel", ""))
 
-    def test_skills_describe_both_review_paths(self):
-        for path, rule in (
-            ("skill-content/backlog-plan/SKILL.md",
-             "fresh read-only reviews in the flow's review mode"),
-            ("skill-content/design-system/SKILL.md",
-             "in the flow's review mode, one reviewer or its review panel"),
-            ("skill-content/solution-design/SKILL.md",
-             "one independent primary `solution-reviewer`, or in `panel` review mode one"
-             " panel of `solution-reviewer` lens readers"),
-            ("skill-content/solution-design/references/engagement-session.md",
-             "its primary reviewer, or in `panel` review mode its panel of lens readers"),
-            ("skill-content/product-planning/references/structured-records.md",
-             "reruns only the affected reviewer or, in `panel` review mode, only the lens"
-             " assignments that returned those findings"),
-            ("skill-content/solution-architecture/references/challenge-lenses.md",
-             "`single`, the default: one fresh, read-only `solution-reviewer` is the"
-             " primary reviewer"),
+    def test_solution_panel_lenses_are_the_primary_reviewer_lenses(self):
+        plan = read("skill-content/solution-architecture/references/challenge-lenses.md")
+        primary = plan.split("## Required primary lenses", 1)[1].split("## Targeted specialists", 1)[0]
+        self.assertEqual(
+            re.findall(r"^- \*\*([^:]+):\*\*", primary, re.MULTILINE),
+            [lens["id"] for lens in json.loads(read(PANELS))["review_steps"]["solution_design"]["lenses"]],
+        )
+
+    def test_design_system_and_operation_panels(self):
+        protocol = flat(PROTOCOL)
+        for rule in (
+            "The review panel `design_system` runs one read-only reader per lens assignment, in"
+            " parallel",
+            "review panel `operation_environment` an Environment Contract",
+            "read-only and on that role's own tier",
+            "--mode review --skill challenge-review",
+            "Resolve every critical or major finding before approval",
         ):
-            with self.subTest(path=path):
-                self.assertIn(rule, flat(path))
+            with self.subTest(rule=rule):
+                self.assertIn(rule, protocol)
 
-    def test_host_contracts_dispatch_panels_in_parallel_on_the_lens_tier(self):
+    def test_default_path_instructions_name_no_panel_mode(self):
+        default_path = [path for path in TEAM.rglob("*.md")
+                        if not path.name.startswith("switch-")]
+        for path in default_path:
+            text = path.read_text(encoding="utf-8")
+            with self.subTest(path=path.relative_to(TEAM).as_posix()):
+                self.assertNotIn("review_mode", text)
+                self.assertNotRegex(text, r"`(?:single|panel)`\s+(?:review\s+)?mode")
+
+    def test_host_contracts_dispatch_panels_in_parallel_on_the_lens_variants(self):
         contracts = {
             host: " ".join(
                 (ROOT / "platforms" / host / "software-engineering-team" / "host-contract.md")
@@ -303,30 +287,25 @@ class ReviewPanelFlowTests(unittest.TestCase):
             for host in ("claude", "codex")
         }
         self.assertIn("spawn every reader of the panel in one message", contracts["claude"])
-        self.assertIn("The `lens` tier of the read-only document lens readers is `sonnet` at"
-                      " effort `high`", contracts["claude"])
+        self.assertIn("on the `lens` tier, `sonnet` at effort `high`", contracts["claude"])
         self.assertIn("start every reader of the panel before waiting on any of them",
                       contracts["codex"])
-        self.assertIn("sets effort `high` and no model", contracts["codex"])
+        self.assertIn("effort `high` and no model", contracts["codex"])
         for host, contract in contracts.items():
             with self.subTest(host=host):
-                self.assertIn("the default `single` review mode renders", contract)
-                self.assertIn("`tier_overrides` in"
-                              " `skill-content/challenge-review/data/review-panels.json`",
-                              contract)
+                self.assertIn("Under switch `review_panels` at `lens_panel`", contract)
+                self.assertIn("the reviewers themselves keep their own tier", contract)
+                self.assertNotIn("tier_overrides", contract)
 
 
 class LensTierTests(unittest.TestCase):
-    def test_only_the_read_only_document_readers_use_the_lens_tier(self):
+    def test_canonical_readers_keep_their_released_tier(self):
         agents = {path.stem for path in (TEAM / "agents").glob("*.md")}
-        self.assertEqual({agent for agent in agents if tier(agent) == "lens"}, LENS_READERS)
-        for agent in sorted(LENS_READERS):
+        self.assertEqual({agent for agent in agents if tier(agent) == "lens"}, set())
+        for agent in (*LENS_VARIANTS, "analysis-challenger", "domain-expert"):
             with self.subTest(agent=agent):
+                self.assertEqual(tier(agent), "high")
                 self.assertIn("tools: Read, Grep, Glob", read(f"agents/{agent}.md"))
-        for agent, expected in (("experience-reviewer", "high"), ("code-reviewer", "high"),
-                                ("qa-engineer", "medium"), ("devops-engineer", "medium")):
-            with self.subTest(agent=agent):
-                self.assertEqual(tier(agent), expected)
 
     def test_lens_tier_is_declared_for_every_host(self):
         models = json.loads((ROOT / "tools/data/models.json").read_text(encoding="utf-8"))

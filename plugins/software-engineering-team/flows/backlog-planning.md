@@ -172,12 +172,10 @@ belong to delivery.
 
 ## 4. Challenge and render
 
-Every review in this section runs in the mode that `review_mode` in
-`skill-content/challenge-review/data/review-panels.json` selects. In `single`
-mode, the default, one fresh `backlog-reviewer` reviews each epic and one
-reviews the root. In `panel` mode review panel `backlog_epic` or review panel
-`backlog_root` runs instead, as
-`skill-content/challenge-review/references/review-panel.md` defines.
+Switch `review_panels`: at `lens_panel`, review panel `backlog_epic` and review
+panel `backlog_root` replace this section's epic and root reviewers, as
+`skill-content/challenge-review/references/switch-review_panels-lens_panel.md`
+defines.
 
 ### Recovery that removes only operating-system metadata
 
@@ -198,10 +196,9 @@ root review's existing epic targets. The full vault gate must prove that block
 is the exact generated projection. Authored relation, dependency, role,
 coverage and scenario sets remain identical. Only the backlog root's receipt
 bindings/lifecycle and a fresh root review may otherwise change. Run the full
-compiler and vault gates. A fresh root review, in `panel` mode each reader
-through its lens, independently verifies these conditions and the exact
-recovery delta before ordinary user approval, atomic approval and commit.
-Reused epic reviews retain their original bytes, stamps and hashes;
+compiler and vault gates. A fresh root reviewer independently verifies these conditions
+and the exact recovery delta before ordinary user approval, atomic approval
+and commit. Reused epic reviews retain their original bytes, stamps and hashes;
 do not create new epic approval claims. Any missing proof or meaningful delta
 returns to the normal review flow below. This exception does not apply to
 other application-only revisions or general artifact loss.
@@ -216,26 +213,16 @@ dependency inputs while leaving review-completion checks to the final gate:
 backlog_review_inputs.py --docs <workspace>/docs --epic <EP-ID>
 ```
 
-The manifest's `check` block carries the compiler facts readers would
-otherwise re-derive: source errors, which are empty in any returned manifest,
-the current review note's pending final-gate findings, the audit of its
-declared against expected relations, counts and each story's
-source-to-scenario map. Panel lens readers take these facts as given.
-
-In `single` mode give one fresh `backlog-reviewer` the returned manifest and
-every named path. In `panel` mode run review panel `backlog_epic` for each
-epic instead. Every lens reader receives the same returned manifest and every
-named path. The named paths are the root backlog, that epic, its child stories
-and test plans, and the incoming and outgoing dependency closure with shared
-contract/source context. Include
+Give one fresh `backlog-reviewer` the returned manifest and every named path:
+the root backlog, that epic, its child stories and test plans, and the incoming
+and outgoing dependency closure with shared contract/source context. Include
 the expected `derives_from` and `verifies` sets and any `unparsed_link_sources`:
 approved upstream notes whose link text does not parse, which the reader checks
 for a missed source instead of failing dispatch. The manifest is disposable
-review input, never a second backlog or approval record; it carries no lens
-key, so one manifest serves the whole panel. Unresolved closure fails before
-dispatch; evidence outside the manifest requires an expanded input set.
-Independent epic reviews may run in parallel against unchanged inputs. Wait
-for every epic reviewer to return before any writer action.
+review input, never a second backlog or approval record. Unresolved closure
+fails before dispatch; evidence outside the manifest requires an expanded
+input set. Independent epic reviewers may run in parallel against unchanged
+inputs. Wait for every epic reviewer to return before any writer action.
 Recompute each manifest with `--expected-hash <source_hash>` before accepting
 its findings for the writer. Changed inputs require a fresh affected review;
 never use a stale manifest to justify omitting a dependency.
@@ -248,11 +235,7 @@ remain findings. The final compiler requires the exact written relation sets
 and complete review prose before approval.
 
 The Product Owner is the single writer: it triages the returned findings,
-repairs source documents, and writes each designated epic review note. In
-`panel` mode it merges findings that share one root cause as the panel
-protocol defines; each lens section takes its evidence and conclusion from
-the lens that covers it, and Findings and Verdict come from the merged panel
-result. An epic
+repairs source documents, and writes each designated epic review note. An epic
 review uses `derives_from` for its owning epic and `verifies` for the exact
 child story and test-plan set. Its body covers scope, slicing, criteria, test
 design, intra-epic dependencies, role ownership, findings and verdict. Run
@@ -262,12 +245,10 @@ still-unwritten root review's completion findings remain pending until its
 reader returns; they do not authorize ignoring any source finding.
 
 Only after every epic package and review is green, run
-`backlog_review_inputs.py --docs <workspace>/docs --root`. In `single` mode
-invoke one fresh `backlog-reviewer` with that manifest; in `panel` mode run
-review panel `backlog_root`, whose every lens reader receives that manifest.
-Root reviewers receive the root backlog, every epic, every story and every
-test plan, its declared context, any `unparsed_link_sources` and the exact
-expected `derives_from` and `related_to` sets. Wait for every root reviewer to
+`backlog_review_inputs.py --docs <workspace>/docs --root`. Invoke one fresh
+`backlog-reviewer` with that manifest: the root backlog, every epic, every
+story and every test plan, its declared context, any `unparsed_link_sources`
+and the exact expected `derives_from` and `related_to` sets. Wait for its
 return. Recompute the root
 manifest with `--expected-hash <source_hash>` before accepting its findings;
 a changed input requires a fresh affected review. The Product Owner then
@@ -284,13 +265,10 @@ Severity, dispositions and re-review scope follow the Review findings section
 of `skill-content/product-planning/references/structured-records.md`: only a
 critical or major finding blocks, and the Product Owner preserves every
 returned severity. After a blocking fix or disproof, regenerate the affected
-manifest. In `single` mode rerun only the affected reviewer; in `panel` mode
-rerun only the lens assignments that returned those findings. Each rerun
-reader receives its findings, any cited evidence and the changed paths, which
-are the manifest files whose `sha256` changed, and confirms its findings are
-closed. The single reviewer, or the first rerun assignment through every
-lens, also reviews the changed text with its dependency context. Then re-run
-the compiler. A writer's assertion that
+manifest and rerun only the affected reviewer with those findings, any cited
+evidence and the changed paths, which are the manifest files whose `sha256`
+changed. It confirms each finding is closed and reviews the changed text with
+its dependency context. Then re-run the compiler. A writer's assertion that
 the fix is complete does not replace that recheck. A minor finding never
 blocks or starts another round: fix it only in a pass that already carries a
 blocking fix, otherwise record it in the review note's

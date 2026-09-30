@@ -1,4 +1,34 @@
 {
   "schema_version": 1,
-  "switches": {}
+  "switches": {
+    "review_panels": {
+      "summary": "How backlog epic and root, Solution Design, Design System and Operation contract reviews read the reviewed document.",
+      "issue": 312,
+      "flows": ["backlog-planning", "design-system", "operation", "solution-design"],
+      "values": [
+        {
+          "id": "single_reader",
+          "tradeoffs": "One fresh reviewer per review step reads every lens on its role's own tier. Today's behaviour and the baseline the panel is measured against; the slowest path, since one reader works through every lens in turn."
+        },
+        {
+          "id": "lens_panel",
+          "tradeoffs": "One fresh read-only reader per lens assignment runs in parallel and replaces the step's reviewer; the read-only reviewer roles run as their lens-tier variants. Shorter review wall time, while valid-major recall is still measured against the single reader and a panel major can be overrated."
+        }
+      ],
+      "default": "single_reader",
+      "agent_variants": {
+        "lens_panel": {
+          "suffix": "lens",
+          "tier": "lens",
+          "description": "Lens-tier reader variant for review panels.",
+          "agents": ["backlog-reviewer", "design-system-reviewer", "solution-reviewer"]
+        }
+      },
+      "metric": "Per review pass on the same document, the panel's valid critical and major findings against the official single-reader review's, and the panel's wall time against the official review's.",
+      "promotion": {
+        "unit": "At least 5 panel review passes across at least 2 flows.",
+        "threshold": "Panel valid-major recall at least equal to the official review's and panel wall time at most 50% of it, with every shared quality guard holding and the owner's approval."
+      }
+    }
+  }
 }

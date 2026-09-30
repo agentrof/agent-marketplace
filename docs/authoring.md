@@ -160,11 +160,11 @@ platform, installation or release checks.
 ## Execution profiles
 
 Canonical agents declare only a host-neutral `reasoning` tier from
-`tools/data/models.json`. The read-only document lens readers use the `lens`
-tier; tier names are single words because each is both a kebab-case reasoning
-level and a snake_case key in the profile tables. The selected review mode
-can render a tier as another one (see Review panels). Each host maps every
-tier to its own model and
+`tools/data/models.json`. Tier names are single words because each is both a
+kebab-case reasoning level and a snake_case key in the profile tables. A
+process switch value may declare generated agent variants on another tier,
+such as the `lens` tier of the review-panel readers (see Review panels).
+Each host maps every tier to its own model and
 effort in `platforms/<host>/execution-profiles.json`, profile `auto`. The
 builder and `tools/validate.py` accept only the host's documented values, so
 model names stay out of `plugins/`. Claude agents receive `model:` and, when
@@ -202,15 +202,17 @@ duplicate or unassigned lens ids, empty panels or assignments, and review-note
 sections that no lens or more than one owner covers. Adding a lens or a
 review step needs only a data change plus its anchor.
 
-`review_mode` in the same file is the one switch between each step's single
-reviewer and its review panel. Every flow that anchors a review panel names
-the switch and describes both paths; the validator rejects a flow that
-anchors a panel without naming `review_mode`. `review_modes` declares the
-`tier_overrides` each mode applies when the builder renders agents: `single`
-renders the `lens` tier as `high`, the tier the read-only document readers
-used before panels, so the official reviews keep their model and effort until
-the switch changes. The switch stays `single` until the owner's promotion
-rule is met: at least 5 panel passes across at least 2 flows, panel
-valid-major recall at least equal to the official review's, and panel wall
-time at most 50% of the official one. Promotion is then a one-line data
-change to `panel`, released like any other package change.
+Process switch `review_panels` selects between each step's single reviewer,
+the default `single_reader`, and its review panel, `lens_panel`. Every flow
+that anchors a review panel names the switch, and the validator rejects one
+that does not. The panel instructions live in
+`challenge-review/references/switch-review_panels-lens_panel.md`, which a
+task binds only at `lens_panel`, so the single-reviewer path keeps its
+released instructions. The switch's `agent_variants` make every build ship
+`backlog-reviewer-lens`, `solution-reviewer-lens` and
+`design-system-reviewer-lens` on the `lens` tier; the reviewers themselves
+keep their own tier, and the validator requires a variant for every
+read-only panel reader. The switch's flip rule is the owner's condition for
+#312: at least 5 panel passes across at least 2 flows, panel valid-major
+recall at least equal to the official review's, and panel wall time at most
+50% of the official one.

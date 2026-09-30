@@ -97,13 +97,15 @@ once no critical or major finding is open.
   panel finding. The metadata-recovery root review is a `backlog_root`
   panel: each reader verifies the recovery conditions and the exact delta
   through its lens.
-- The manifest's `check` block carries the compiler facts readers would
-  otherwise re-derive: source errors, which are empty in any returned
-  manifest, the current review note's pending final-gate findings, the audit
-  of its declared against expected relations, counts and each story's
-  source-to-scenario map. Lens readers take these facts as given and never
-  recount them; a reader audits source membership through
-  `check.relation_audit`.
+- At this value the manifest names `review_panels: lens_panel`, so a
+  manifest derived under another value is stale, and its `check` block
+  carries the compiler facts readers would otherwise re-derive: source
+  errors, which are empty in any returned manifest, the current review note's
+  pending final-gate findings, the audit of its declared against expected
+  relations, counts and each story's source-to-scenario map. At the default,
+  `single_reader`, the manifest carries none of these facts. Lens readers take
+  them as given and never recount them; a reader audits source membership
+  through `check.relation_audit`.
 - The Product Owner merges findings that share one root cause as above. Each
   lens section of the review note takes its evidence and conclusion from the
   lens that covers it; Findings and Verdict come from the merged panel

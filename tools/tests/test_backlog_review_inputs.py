@@ -18,7 +18,26 @@ sys.path.insert(0, str(ROOT / "plugins/software-engineering-team/scripts"))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import backlog_compile as backlog
 import backlog_review_inputs as inputs
+import process_policy
 from backlog_fixture import _complete_review_body, make_approved_backlog
+
+
+def policy(docs: Path, *argv: str) -> None:
+    output = io.StringIO()
+    with contextlib.redirect_stdout(output):
+        code = process_policy.main([argv[0], "--docs", str(docs), *argv[1:]])
+    if code:
+        raise AssertionError(output.getvalue())
+
+
+def choose_panels(docs: Path, value: str | None = "lens_panel") -> None:
+    """Approve a policy revision that sets review_panels to ``value``, or its default."""
+    policy(docs, "begin-revision" if process_policy.path_for(docs).exists() else "init")
+    if value is None:
+        policy(docs, "set", "--switch", "review_panels", "--default")
+    else:
+        policy(docs, "set", "--switch", "review_panels", "--value", value)
+    policy(docs, "approve")
 
 
 class ReadSessionTests(unittest.TestCase):
@@ -470,7 +489,35 @@ class BacklogReviewInputTests(unittest.TestCase):
             with self.assertRaisesRegex(inputs.InputError, "changed during"):
                 inputs.manifest(self.docs, epic="EP-001")
 
+    def test_only_a_lens_panel_manifest_carries_the_compiler_facts_and_names_the_switch(self):
+        epic = inputs.manifest(self.docs, epic="EP-001")
+        root = inputs.manifest(self.docs)
+        # With no Process Policy a reader receives the manifest it received
+        # before review panels existed; a writer's check lists only stubs.
+        for value in (epic, root):
+            self.assertNotIn("check", value)
+            self.assertNotIn("review_panels", value)
+        self.assertEqual(inputs.manifest(self.docs, epic="EP-001", writer=True)["check"],
+                         {"scaffold_findings": []})
+        choose_panels(self.docs)
+        facts = ["counts", "relation_audit", "review_note", "source_errors", "stories"]
+        panel = inputs.manifest(self.docs, epic="EP-001")
+        self.assertEqual(panel["review_panels"], "lens_panel")
+        self.assertEqual(sorted(panel["check"]), facts)
+        self.assertEqual(sorted(inputs.manifest(self.docs)["check"]), facts)
+        self.assertEqual(sorted(inputs.manifest(self.docs, epic="EP-001", writer=True)["check"]),
+                         sorted([*facts, "scaffold_findings"]))
+        # A switch change stales every manifest the other value derived.
+        with self.assertRaisesRegex(inputs.InputError, "stale"):
+            inputs.manifest(self.docs, epic="EP-001", expected_hash=epic["source_hash"])
+        choose_panels(self.docs, None)
+        self.assertEqual(inputs.manifest(self.docs, epic="EP-001"), epic)
+        self.assertEqual(inputs.manifest(self.docs), root)
+        with self.assertRaisesRegex(inputs.InputError, "stale"):
+            inputs.manifest(self.docs, epic="EP-001", expected_hash=panel["source_hash"])
+
     def test_check_block_carries_compiler_facts_for_the_current_review(self):
+        choose_panels(self.docs)
         value = inputs.manifest(self.docs, epic="EP-001")
         check = value["check"]
         self.assertEqual(check["source_errors"], [])
@@ -509,6 +556,7 @@ class BacklogReviewInputTests(unittest.TestCase):
         text = review.read_text(encoding="utf-8")
         self.assertIn(header, text)
         review.write_text(text.replace(header, header + row, 1), encoding="utf-8")
+        choose_panels(self.docs)
         check = inputs.manifest(self.docs)["check"]
         self.assertEqual(check["review_note"], {
             "path": "backlog/reviews/round-1-backlog-review.md", "pending_findings": []})
@@ -524,6 +572,7 @@ class BacklogReviewInputTests(unittest.TestCase):
 
     def test_draft_review_check_reports_pending_writer_work_for_that_note_only(self):
         self.draft_reviews()
+        choose_panels(self.docs)
         epic = inputs.manifest(self.docs, epic="EP-001")["check"]
         self.assertEqual(epic["source_errors"], [])
         self.assertEqual(epic["relation_audit"]["verifies"], {"state": "pending"})
@@ -559,7 +608,7 @@ class BacklogReviewInputTests(unittest.TestCase):
         self.assertTrue(all(finding.startswith((story + " ", plan + " ")) for finding in carried))
         self.assertNotIn(story, value["paths"])
         self.assertNotIn(plan, value["paths"])
-        self.assertEqual(value["check"]["source_errors"], [])
+        self.assertEqual(sorted(value["check"]), ["scaffold_findings"])
         self.assertEqual(inputs.manifest(self.docs, epic="EP-001", expected_hash=value["source_hash"]), value)
         # The epic that holds the stub, the root package and approval still wait for it.
         for scope in ("EP-002", None):
@@ -583,7 +632,7 @@ class BacklogReviewInputTests(unittest.TestCase):
         _, errors = backlog.collect(self.docs)
         self.assertEqual([error for error in errors if "untouched" in error], [])
         fresh = inputs.manifest(self.docs, epic="EP-001", expected_hash=reader["source_hash"])
-        self.assertNotIn("scaffold_findings", fresh["check"])
+        self.assertNotIn("check", fresh)
         self.assertEqual(inputs.manifest(self.docs, epic="EP-001", writer=True,
                                          expected_hash=writer["source_hash"])["check"]
                          ["scaffold_findings"], [])
@@ -607,7 +656,7 @@ class BacklogReviewInputTests(unittest.TestCase):
             inputs.manifest(self.docs, epic="EP-001")
 
     def test_writer_manifest_carries_the_stubs_a_reader_refuses(self):
-        self.assertNotIn("scaffold_findings", inputs.manifest(self.docs, epic="EP-001")["check"])
+        self.assertNotIn("check", inputs.manifest(self.docs, epic="EP-001"))
         folder = self.stub_story()
         story, plan = (path.relative_to(self.docs).as_posix()
                        for path in (folder / "story.md", folder / "test-plan.md"))
@@ -622,7 +671,7 @@ class BacklogReviewInputTests(unittest.TestCase):
         self.assertTrue(any("scenarios are not classified" in finding for finding in carried))
         self.assertIn(story, value["primary_paths"])
         self.assertIn(plan, value["primary_paths"])
-        self.assertEqual(value["check"]["source_errors"], [])
+        self.assertEqual(sorted(value["check"]), ["scaffold_findings"])
         _, errors = backlog.collect(self.docs)
         self.assertLessEqual(set(carried), set(errors))
         self.assertEqual(inputs.manifest(self.docs, epic="EP-001", writer=True,
@@ -658,6 +707,7 @@ class BacklogReviewInputTests(unittest.TestCase):
         props["verifies"] = props["verifies"][:-1] + props["verifies"][:1] + [
             "[[backlog/epics/second/stories/st-003/story|ST-003]]"]
         path.write_text(backlog.front_matter(props, body), encoding="utf-8")
+        choose_panels(self.docs)
         value = inputs.manifest(self.docs, epic="EP-001")
         self.assertEqual(value["check"]["relation_audit"]["verifies"], {
             "state": "differs",

@@ -704,7 +704,7 @@ class EpicTaskScopeTests(unittest.TestCase):
                                      closure)
                 self.assertFalse(outside & {record["path"] for record in fresh["working_inputs"]})
                 self.assertFalse(outside & set(fresh["changed_paths"]))
-                self.assertFalse(fresh["backlog_scope"]["check"].get("scaffold_findings"))
+                self.assertFalse(fresh["backlog_scope"].get("check", {}).get("scaffold_findings"))
         for name, kwargs in whole.items():
             with self.subTest(scope=name):
                 with self.assertRaisesRegex(ValueError, "stale"):

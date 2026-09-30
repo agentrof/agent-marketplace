@@ -1160,6 +1160,16 @@ class ExecutionProfileTests(unittest.TestCase):
             ("claude", pin("strong", sources=["http://example.com"]), "sources must list"),
             ("claude", pin("strong", verified="01.10.2026"), "verified must be"),
             ("claude", pin("strong", verified="2026-02-30"), "verified must be"),
+            ("claude", pin("fast", min_cli_version="2.1"), "min_cli_version must be"),
+            ("codex", pin("fast", min_cli_version="v0.157.0"), "min_cli_version must be"),
+            ("codex", lambda c: c["classes"]["strong"].pop("min_cli_version"),
+             "must hold exactly"),
+            # CI installs the pinned CLI and starts no role, so the build refuses
+            # a pin below the oldest CLI that runs a class's model.
+            ("codex", pin("strong", min_cli_version="9.0.0"),
+             "is below 9.0.0, the minimum of codex class 'strong'"),
+            ("claude", pin("frontier", min_cli_version="3.0.0"),
+             "is below 3.0.0, the minimum of claude class 'frontier'"),
             ("codex", lambda c: c["classes"]["strong"].pop("verified"), "must hold exactly"),
             ("codex", lambda c: c["classes"].update(Strong=c["classes"].pop("strong")),
              "class names are snake_case"),
@@ -1188,16 +1198,43 @@ class ExecutionProfileTests(unittest.TestCase):
                     )
                 self.assertFalse((Path(self.temporary.name) / f"out-{index}").exists())
 
+        pins = self.root / build_distributions.HOST_CLI_VERSIONS_RELPATH
+        pinned = pins.read_bytes()
         for path, message in (
                 (build_distributions.execution_profile_path(self.root, "codex"),
                  "missing or invalid execution profile"),
                 (build_distributions.model_catalog_path(self.root, "claude"),
-                 "missing or invalid model catalog")):
+                 "missing or invalid model catalog"),
+                (pins, "missing or invalid host CLI versions")):
             with self.subTest(missing=path.name):
                 restore()
+                pins.write_bytes(pinned)
                 path.unlink()
                 with self.assertRaisesRegex(ValueError, message):
                     build_distributions.build(self.root, Path(self.temporary.name) / "missing")
+        pins.write_bytes(pinned)
+        for key, version in (("claude_code", "2.1.283"), ("codex", "0.157.0")):
+            with self.subTest(pin=key):
+                restore()
+                pins.write_text(json.dumps({**json.loads(pinned), key: version}), encoding="utf-8")
+                with self.assertRaisesRegex(ValueError, f"{key} {version} is below"):
+                    build_distributions.build(self.root, Path(self.temporary.name) / key)
+                self.assertFalse((Path(self.temporary.name) / key).exists())
+        pins.write_bytes(pinned)
+
+    def test_host_contracts_state_the_oldest_cli_the_pinned_models_need(self):
+        adapters = build_distributions.load_adapters(self.root)
+        for host, adapter in adapters.items():
+            catalog = json.loads(self.catalogs[host])
+            minimums = [entry["min_cli_version"] for entry in catalog["classes"].values()]
+            newest = max(minimums, key=build_distributions.cli_version)
+            contract = " ".join((self.root / "platforms" / host / fixtures.PLUGIN
+                                 / "host-contract.md").read_text(encoding="utf-8").split())
+            with self.subTest(host=host):
+                self.assertIn(f"The pinned models need {adapter.metadata['display_name']}"
+                              f" {newest} or later", contract)
+                for minimum in minimums:
+                    self.assertIn(minimum, contract)
 
     def test_each_adapter_accepts_only_its_documented_pinned_ids(self):
         adapters = build_distributions.load_adapters(self.root)

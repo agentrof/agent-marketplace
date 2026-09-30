@@ -170,8 +170,9 @@ Each host keeps two tables under `platforms/<host>/`:
 
 - `model-catalog.json` pins every model class, such as `frontier`, `strong`
   or `fast`, to one exact model ID: its `family`, its `id`, the `efforts` the
-  model supports on that host (empty when it takes none), the official
-  `sources` that document both, and the date they were `verified`.
+  model supports on that host (empty when it takes none), the oldest host CLI
+  release that runs it as a role's model (`min_cli_version`), the official
+  `sources` that document them, and the date they were `verified`.
 - `execution-profiles.json`, profile `auto`, maps every tier to a `class`
   and, optionally, an `effort`; the `inherit` tier maps to nothing.
 
@@ -179,10 +180,14 @@ A model bump therefore edits one class, and every tier on it follows. The
 builder and `tools/validate.py` refuse a tier without a known class, an
 effort outside its class's supported set or the host's vocabulary, and an ID
 outside the host adapter's documented format or the class's family, such as
-a Claude alias; model names stay out of `plugins/`. Claude agents receive the
-class's ID as `model:` and, when the tier sets one, `effort:`; an omitted
-`effort` follows the session. Codex dist agents carry the resolved `model` and
-`model_reasoning_effort`, which setup renders into `.codex/agents/`.
+a Claude alias. They also refuse a CI host CLI in
+`tools/data/host-cli-versions.json` older than any class's `min_cli_version`:
+the host gates install that version and start no role, so a lower pin would
+pass on a CLI whose roles cannot run their model. Model names stay out of
+`plugins/`. Claude agents receive the class's ID as `model:` and, when the
+tier sets one, `effort:`; an omitted `effort` follows the session. Codex dist
+agents carry the resolved `model` and `model_reasoning_effort`, which setup
+renders into `.codex/agents/`.
 
 The Codex defaults follow OpenAI's subagent guidance. Demanding roles run the
 `strong` class (Sol): the high tier at `xhigh`, the depth a main session at

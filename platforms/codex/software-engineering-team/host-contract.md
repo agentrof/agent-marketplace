@@ -57,6 +57,9 @@
   read-only document reviewers on the `lens` tier, the `strong` class (Sol)
   at effort `high`; only review panels under switch `review_panels` at
   `lens_panel` start them, and the reviewers themselves keep their own tier.
+  The pinned models need Codex 0.159.1 or later, the first release whose
+  bundled model catalog lists `gpt-6.1-sol`; `gpt-6-luna` is bundled from
+  0.157.0.
   When the account, the workspace or this Codex version cannot use a pinned
   model, or the user wants every role to follow the parent session, run
   `<absolute-python> <absolute-package-scripts>/generate_codex_project.py apply

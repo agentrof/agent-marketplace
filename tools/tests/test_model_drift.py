@@ -287,6 +287,9 @@ class ModelDriftTests(unittest.TestCase):
         self.assertIn("Quality decides", out)
         self.assertIn("Flow B of `docs/maintainer-operations-protocol.md`", out)
         self.assertIn("at `minor` for `software-engineering-team`", out)
+        # A new model can need a newer host CLI than the class records.
+        self.assertIn("its `min_cli_version`", out)
+        self.assertIn("`tools/data/host-cli-versions.json`", out)
         self.assertNotIn(str(self.base), out)
 
         report = model_drift.drift_report(self.root, {"codex": codex})

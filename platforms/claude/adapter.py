@@ -16,6 +16,9 @@ MODEL_ID_RE = re.compile(
 # IDs are dateless snapshots from the 4.6 generation on and dated before it,
 # where the dateless form is an alias that is not pinned.
 DATELESS_SINCE = (4, 6)
+# This host's CLI in tools/data/host-cli-versions.json, the exact version CI
+# installs; no model class's min_cli_version may be newer.
+HOST_CLI_KEY = "claude_code"
 # How a frozen-task A/B runs every role on one candidate model.
 MODEL_TRIAL = (
     "Claude Code: set `CLAUDE_CODE_SUBAGENT_MODEL=<model ID>` and"

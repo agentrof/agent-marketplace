@@ -12,9 +12,11 @@
         "max",
         "ultra"
       ],
+      "min_cli_version": "0.159.1",
       "sources": [
         "https://learn.chatgpt.com/docs/models",
-        "https://github.com/openai/codex/blob/rust-v0.159.1/codex-rs/models-manager/models.json"
+        "https://github.com/openai/codex/blob/rust-v0.159.1/codex-rs/models-manager/models.json",
+        "https://github.com/openai/codex/releases/tag/rust-v0.159.1"
       ],
       "verified": "2026-10-01"
     },
@@ -28,9 +30,11 @@
         "xhigh",
         "max"
       ],
+      "min_cli_version": "0.157.0",
       "sources": [
         "https://learn.chatgpt.com/docs/models",
-        "https://github.com/openai/codex/blob/rust-v0.159.1/codex-rs/models-manager/models.json"
+        "https://github.com/openai/codex/blob/rust-v0.159.1/codex-rs/models-manager/models.json",
+        "https://github.com/openai/codex/releases/tag/rust-v0.157.0"
       ],
       "verified": "2026-10-01"
     }

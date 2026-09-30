@@ -32,9 +32,11 @@ AUTO_EXECUTION_PROFILE = "auto"
 INHERIT_TIER = "inherit"
 EXECUTION_SETTING_KEYS = {"class", "effort"}
 MODEL_CATALOG_FILE = "model-catalog.json"
-MODEL_CLASS_KEYS = ("family", "id", "efforts", "sources", "verified")
+MODEL_CLASS_KEYS = ("family", "id", "efforts", "min_cli_version", "sources", "verified")
 MODEL_CLASS_NAME_RE = re.compile(r"[a-z][a-z0-9]*(?:_[a-z0-9]+)*")
 VERIFIED_DATE_RE = re.compile(r"[0-9]{4}-[0-9]{2}-[0-9]{2}")
+CLI_VERSION_RE = re.compile(r"[0-9]+\.[0-9]+\.[0-9]+")
+HOST_CLI_VERSIONS_RELPATH = "tools/data/host-cli-versions.json"
 PROCESS_SWITCHES_RELPATH = "skill-content/configure/data/process-switches.json"
 DELIVERY_PROTOCOL_CAPABILITY = {
     "read_min": 1,
@@ -459,6 +461,63 @@ def _is_iso_date(value: object) -> bool:
     return True
 
 
+def cli_version(value: object) -> tuple[int, ...] | None:
+    """Return an exact X.Y.Z host CLI release as a comparable tuple."""
+    if not isinstance(value, str) or CLI_VERSION_RE.fullmatch(value) is None:
+        return None
+    return tuple(int(part) for part in value.split("."))
+
+
+def host_cli_problems(
+    pins: object, catalogs: dict[str, object], adapters: dict[str, HostAdapter],
+) -> list[str]:
+    """Return every host CLI that CI pins below a model class's minimum.
+
+    CI installs the pinned CLIs and starts no role, so a pin below a class's
+    ``min_cli_version`` would pass the host gates on a version whose roles
+    cannot run that class's model. A catalog with problems of its own is
+    skipped: they are reported against the catalog file.
+    """
+    if not isinstance(pins, dict):
+        return ["host CLI versions must be a JSON object"]
+    problems = []
+    for host, adapter in adapters.items():
+        key = getattr(adapter.module, "HOST_CLI_KEY", None)
+        pinned = pins.get(key) if isinstance(key, str) else None
+        version = cli_version(pinned)
+        if version is None:
+            problems.append(
+                f"{key!r} must pin the exact X.Y.Z {host} CLI version CI installs"
+                if isinstance(key, str) else
+                f"the {host} adapter must name its CLI's key as HOST_CLI_KEY"
+            )
+            continue
+        catalog = catalogs.get(host)
+        if model_catalog_problems(catalog, adapter):
+            continue
+        for name, entry in catalog["classes"].items():
+            minimum = entry["min_cli_version"]
+            if version < cli_version(minimum):
+                problems.append(
+                    f"{key} {pinned} is below {minimum}, the minimum of {host} class"
+                    f" {name!r} ({entry['id']}); CI would pass a host version on"
+                    " which that class's roles cannot run"
+                )
+    return problems
+
+
+def require_host_cli_versions(root: Path, adapters: dict[str, HostAdapter]) -> None:
+    """Refuse a build whose CI-pinned host CLI is below a class minimum."""
+    path = root / HOST_CLI_VERSIONS_RELPATH
+    pins = _read_table(path, "host CLI versions")
+    catalogs = {
+        host: load_model_tables(root, adapter)[0] for host, adapter in adapters.items()
+    }
+    problems = host_cli_problems(pins, catalogs, adapters)
+    if problems:
+        raise ValueError("\n".join(f"{path}: {problem}" for problem in problems))
+
+
 def model_class_problems(entry: object, adapter: HostAdapter) -> list[str]:
     """Return the problems of one catalog class against the host vocabulary."""
     if not isinstance(entry, dict) or set(entry) != set(MODEL_CLASS_KEYS):
@@ -483,13 +542,18 @@ def model_class_problems(entry: object, adapter: HostAdapter) -> list[str]:
             f"efforts must list distinct values of {', '.join(vocabulary)};"
             " an empty list means the model takes no effort"
         )
+    if cli_version(entry["min_cli_version"]) is None:
+        problems.append(
+            "min_cli_version must be the exact X.Y.Z release of the oldest host"
+            " CLI that runs the id as a role's model"
+        )
     sources = entry["sources"]
     if not isinstance(sources, list) or not sources or not all(
             isinstance(source, str) and source.startswith("https://")
             for source in sources):
         problems.append(
-            "sources must list the official https pages that document the id"
-            " and its efforts"
+            "sources must list the official https pages that document the id,"
+            " its efforts and its min_cli_version"
         )
     if not _is_iso_date(entry["verified"]):
         problems.append("verified must be the YYYY-MM-DD date the sources were checked")
@@ -1178,6 +1242,7 @@ def build(
         host: load_execution_profile(root, adapter)
         for host, adapter in adapters.items()
     }
+    require_host_cli_versions(root, adapters)
     for host, adapter in adapters.items():
         host_root = output / host
         host_root.mkdir(parents=True)

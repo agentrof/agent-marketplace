@@ -170,6 +170,10 @@ class ValidatorContractTests(unittest.TestCase):
                  lambda value: value["classes"]["frontier"].update(id="opus")),
                 ("platforms/codex/model-catalog.json",
                  lambda value: value["classes"]["fast"].update(efforts=["low", "ultra", "turbo"])),
+                ("platforms/codex/model-catalog.json",
+                 lambda value: value["classes"]["fast"].update(min_cli_version="0.157")),
+                ("platforms/claude/model-catalog.json",
+                 lambda value: value["classes"]["strong"].pop("min_cli_version")),
                 ("tools/data/models.json",
                  lambda value: value["reasoning_levels"].append("extreme"))):
             with self.subTest(path=relative), \
@@ -208,6 +212,42 @@ class ValidatorContractTests(unittest.TestCase):
                     (relative, "execution_profiles"),
                     {(finding.path, finding.check) for finding in findings},
                 )
+
+    def test_ci_host_cli_versions_meet_every_model_class_minimum(self):
+        pins = "tools/data/host-cli-versions.json"
+
+        def run(relative: str, mutate) -> set:
+            with tempfile.TemporaryDirectory() as temporary:
+                root = self.fixture(temporary)
+                path = root / relative
+                if mutate is None:
+                    path.unlink()
+                else:
+                    value = json.loads(path.read_text(encoding="utf-8"))
+                    mutate(value)
+                    path.write_text(json.dumps(value, indent=2) + "\n", encoding="utf-8")
+                return {(finding.path, finding.message) for finding in validate.run(root)
+                        if finding.check == "host_cli_versions"}
+
+        below = run(pins, lambda value: value.update(claude_code="2.1.283", codex="0.158.9"))
+        self.assertEqual({message.split(";")[0] for _path, message in below}, {
+            "claude_code 2.1.283 is below 2.1.284, the minimum of claude class 'strong'"
+            " (claude-sonnet-5-5)",
+            "codex 0.158.9 is below 0.159.1, the minimum of codex class 'strong' (gpt-6.1-sol)",
+        })
+        self.assertEqual({path for path, _message in below}, {pins})
+        for relative, mutate, fragment in (
+                (pins, None, "host CLI versions are missing or not valid JSON"),
+                (pins, lambda value: value.update(codex="0.159"),
+                 "'codex' must pin the exact X.Y.Z codex CLI version CI installs"),
+                ("platforms/claude/model-catalog.json",
+                 lambda value: value["classes"]["fast"].update(min_cli_version="2.1.285"),
+                 "claude_code 2.1.284 is below 2.1.285, the minimum of claude class 'fast'")):
+            with self.subTest(fragment=fragment):
+                self.assertTrue(any(fragment in message for _path, message in run(relative, mutate)))
+        # A pin at a class's exact minimum, or above it, is clean.
+        self.assertEqual(run(pins, lambda value: value.update(claude_code="2.1.284")), set())
+        self.assertEqual(run(pins, lambda value: value.update(codex="0.160.0")), set())
 
     def test_malformed_model_config_is_a_finding_not_a_crash(self):
         missing = "model config is missing or not valid JSON"
@@ -966,6 +1006,8 @@ VALIDATOR_BUILDERS = {
     "execution_profiles": lambda root: edit_json(
         root, "platforms/codex/execution-profiles.json",
         lambda value: value["profiles"].update(fast={})),
+    "host_cli_versions": lambda root: edit_json(
+        root, "tools/data/host-cli-versions.json", lambda value: value.update(codex="0.157.0")),
     "review_panels": lambda root: edit_json(
         root, PANELS, lambda value: value["review_steps"]["design_system"].update(lenses=[])),
     "process_switches": lambda root: edit_json(

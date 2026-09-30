@@ -1,0 +1,6 @@
+{
+  "summary": "`backlog_compile.py` now reports a story whose `Delivery Notes` still holds the `stub-story` placeholder. The navigation links written under the last section, which has no heading of its own, made that untouched placeholder read as authored text, so a story could pass the backlog checks with its delivery constraints unwritten. Story stubs are now compared with the story text above its navigation block, and no story file changes.",
+  "components": {
+    "software-engineering-team": "patch"
+  }
+}

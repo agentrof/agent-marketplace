@@ -1658,10 +1658,13 @@ def collect(docs: Path, *, historical_inputs: bool = False,
                     errors.append(f"{story_rel} needs {key}")
             errors.extend(required_section_findings(
                 story_body, contract["required_story_sections"], story_rel))
+            # Navigation has no heading and extends the last section, which
+            # is Delivery Notes in a stubbed story.
+            authored_body = story_body.split(NAV_MARKER, 1)[0]
             for key, sentinel in STORY_STUBS.items():
                 actual = story_props.get(key, "") if key in {
                     "scope", "priority_reason"
-                } else section(story_body, key)
+                } else section(authored_body, key)
                 if normalized_text(actual) == normalized_text(sentinel):
                     scaffolds.append(
                         f"{story_rel} has an untouched {key} stub"

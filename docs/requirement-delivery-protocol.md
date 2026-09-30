@@ -185,15 +185,23 @@ approved backlog package and selected Story/Test Plan bytes historically; it
 does not silently adopt or become blocked by a later unrelated upstream
 application receipt.
 
-When the project has a Process Policy, backlog approval records the pin a
-Delivery takes at scope approval, the policy's path, revision and source hash,
-in `backlog.md` and in each review note it approves, so a backlog revision and
-its reviews name the process switch values they ran under outside any
-Delivery. The pin is a record and is never compared: a later policy revision
-leaves the approved backlog current, a review approved earlier keeps its own
-pin, and `begin-revision` drops the pin from the new draft until its own
-approval. Without a policy nothing is recorded and the approval writes the
-bytes it wrote before; a draft or invalid policy refuses the approval.
+When the project has a Process Policy, each backlog review round records the
+pin a Delivery takes at scope approval, the policy's path, revision and source
+hash, as the policy in force when the round is written: `init`, `stub-epic`
+and `begin-revision` write their rounds with it, and `check` pins a draft round
+the Product Owner writes the first time it sees it, never an approved round.
+Backlog approval records the same pin in `backlog.md` and refuses a review it
+approves whose round records another policy, naming the remedy: rerun that
+review in a new round under the current policy, or restore the policy it ran
+under. So a backlog revision and its reviews name the process switch values
+they ran under outside any Delivery. Once approved, the pin is a record and is
+never compared: a later policy revision leaves the approved backlog current, a
+round approved earlier keeps its own pin, and `begin-revision` drops the pin
+from the new draft root until its own approval. A round written while the
+policy is a draft records nothing and is pinned by the first check after the
+policy's approval. Without a policy nothing is recorded and the approval
+writes the bytes it wrote before; a draft or invalid policy refuses the
+approval.
 
 ## Delivery Planning
 

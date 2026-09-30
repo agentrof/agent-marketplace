@@ -2762,7 +2762,7 @@ def init(args) -> int:
              "status": "draft", "owner_role": "product_owner", "round": 1,
              "derives_from": [f"[[backlog/backlog|{backlog_title}]]"],
              "tags": ["doc/backlog-review", "status/draft"],
-             "aliases": ["BACKLOG-REVIEW-001"]},
+             "aliases": ["BACKLOG-REVIEW-001"], **round_pin(docs)},
             review_body(review_title,
                         backlog_contract()["required_backlog_review_sections"])),
     }
@@ -2820,6 +2820,10 @@ def check(args) -> int:
         record = {"epics": [], "stories": [], "test_plans": [],
                   "backlog_reviews": [], "epic_reviews": [], "backlog": None}
         errors = [str(exc)]
+    # A review round the Product Owner wrote records the Process Policy in
+    # force the first time the compiler sees it.
+    pinned_reviews = (pin_first_seen_reviews(docs, record)
+                      if record["backlog"] and getattr(args, "pin_reviews", True) else [])
     if args.approved and record["backlog"]:
         errors.extend(approval_findings(record, docs))
     # A story over budget is advisory: the block adds no error of its own.
@@ -2844,6 +2848,8 @@ def check(args) -> int:
     }
     if story_size is not None:
         result["story_size"] = story_size
+    if pinned_reviews:
+        result["pinned_reviews"] = pinned_reviews
     # Only a backlog that has one gains the key, so every other output is unchanged.
     advisories = record.get("advisory_findings", [])
     if advisories:
@@ -2901,7 +2907,8 @@ def restore_tree(root: Path, snapshot: tuple[dict[Path, bytes], set[Path]]) -> N
 
 
 def policy_pin(docs: Path) -> tuple[dict, list[str]]:
-    """Return the Process Policy pin an approval records, the one a Delivery takes.
+    """Return the Process Policy pin a review round and an approval record,
+    the one a Delivery takes.
 
     Outside a Delivery nothing else records the switch values a backlog
     revision and its reviews ran under. No policy means no pin; a draft or
@@ -2910,6 +2917,104 @@ def policy_pin(docs: Path) -> tuple[dict, list[str]]:
     import process_policy
 
     return process_policy.approved_snapshot(docs)
+
+
+def round_pin(docs: Path) -> dict:
+    """Return the pin a review round records as it is written, or none.
+
+    A round written while the policy is a draft or invalid records nothing;
+    no review can run until the policy is approved, and the first check
+    after that pins the round.
+    """
+    pin, errors = policy_pin(docs)
+    return {} if errors else pin
+
+
+def recorded_pin(props: dict) -> dict:
+    import process_policy
+
+    return {key: props[key] for key in process_policy.PIN_FIELDS if key in props}
+
+
+def pin_label(pin: dict) -> str:
+    if not pin:
+        return "no Process Policy"
+    return f"Process Policy revision {pin.get('process_policy_revision')}"
+
+
+def draft_review_rounds(record: dict) -> list[dict]:
+    """Return every review round that no approval has stamped."""
+    return [review for review in (*record["backlog_reviews"], *record["epic_reviews"])
+            if not (review["props"].get("approved_at_utc") or review["props"].get("source_hash"))]
+
+
+class RoundChanged(RuntimeError):
+    """Raised when a review round changes while the compiler pins it."""
+
+
+def pin_first_seen_reviews(docs: Path, record: dict) -> list[str]:
+    """Pin each draft review round that records no Process Policy yet.
+
+    A round records the policy in force when it is written: init, stub-epic
+    and begin-revision write theirs with it, and a round the Product Owner
+    writes is pinned here, the first time the compiler sees it. A pinned or
+    approved round is never touched, and without an approved policy nothing
+    is written. A round that changes while it is pinned is left for the next
+    check.
+    """
+    import atomic_file
+
+    pin = round_pin(docs)
+    if not pin:
+        return []
+    pinned = []
+    for review in draft_review_rounds(record):
+        if recorded_pin(review["props"]):
+            continue
+        path = docs / review["path"]
+        original = path.read_bytes()
+        props, body = parse_front_matter_text(original.decode("utf-8"))
+        if recorded_pin(props) or props.get("approved_at_utc") or props.get("source_hash"):
+            continue
+
+        def unchanged(path: Path = path, original: bytes = original) -> None:
+            if path.read_bytes() != original:
+                raise RoundChanged(path)
+
+        try:
+            atomic_file.replace_bytes(
+                path, front_matter({**props, **pin}, body).encode("utf-8"), unchanged)
+        except RoundChanged:
+            continue
+        review["props"].update(pin)
+        pinned.append(review["path"])
+    return pinned
+
+
+def review_pin_findings(record: dict, docs: Path, pin: dict,
+                        preserved: dict[Path, bytes]) -> list[str]:
+    """Refuse a review the approval stamps whose round records another policy.
+
+    The root backlog records the policy in force at approval, so every review
+    the approval stamps must have run under it. A round that records no
+    policy is pinned by this approval, the first compiler step to see it
+    under one. A review approved in an earlier revision keeps its own pin and
+    is not compared.
+    """
+    findings = []
+    reviews = [latest(record["backlog_reviews"])] + [latest(epic["reviews"])
+                                                      for epic in record["epics"]]
+    for review in reviews:
+        if review is None or docs / review["path"] in preserved:
+            continue
+        recorded = recorded_pin(review["props"])
+        if recorded and recorded != pin:
+            findings.append(
+                f"{review['path']} records {pin_label(recorded)}, but the approval runs under"
+                f" {pin_label(pin)}; write a new review round and rerun its review under the"
+                f" current Process Policy, or restore {pin_label(recorded)} if that review"
+                " ran under it")
+    return findings
 
 
 def without_policy_pin(props: dict) -> dict:
@@ -2955,6 +3060,8 @@ def approve(args) -> int:
             errors.extend(preserve_errors)
             pin, pin_errors = policy_pin(docs)
             errors.extend(pin_errors)
+            if not pin_errors:
+                errors.extend(review_pin_findings(record, docs, pin, preserved))
     errors = sorted(set(errors))
     if errors:
         print(json.dumps({"ok": False, "errors": errors}, indent=2,
@@ -2973,6 +3080,10 @@ def approve(args) -> int:
         reviews = [docs / latest(record["backlog_reviews"])["path"]]
         reviews += [docs / latest(epic["reviews"])["path"] for epic in record["epics"]]
         pinned = {docs / record["backlog"]["path"], *reviews}
+        # A round no compiler step has seen under the policy is pinned now;
+        # every other round keeps the pin it recorded when it was written.
+        first_seen = {docs / review["path"] for review in draft_review_rounds(record)
+                      if not recorded_pin(review["props"])} if pin else set()
         transition_paths = [docs / record["backlog"]["path"]]
         transition_paths += [docs / epic["path"] for epic in record["epics"]]
         transition_paths += reviews
@@ -3008,6 +3119,8 @@ def approve(args) -> int:
             props["approved_at_utc"] = now
             props.pop("source_hash", None)
             props.pop("package_hash", None)
+            if path in first_seen and path not in pinned:
+                props = with_policy_pin(props, pin)
             path.write_bytes(front_matter(props, body).encode("utf-8"))
         for path in paths:
             if path in preserved:
@@ -3166,6 +3279,8 @@ def begin_revision(args) -> int:
     review_props["tags"] = [
         tag for tag in values(review_props, "tags") if not tag.startswith("status/")
     ] + ["status/draft"]
+    # The new round records the Process Policy in force as it is written.
+    review_props.update(round_pin(docs))
     review_body_text, headings_replaced = re.subn(
         r"^# [^\n]*$", lambda _match: f"# {review_title}",
         latest_review["body"], count=1, flags=re.MULTILINE,
@@ -3290,7 +3405,7 @@ def stub_epic(args) -> int:
              "round": 1, "owner_role": "product_owner",
              "derives_from": [f"[[backlog/epics/{args.slug}/epic|{epic_id}]]"],
              "tags": ["doc/epic-review", "status/draft"],
-             "aliases": [f"{epic_id}-REVIEW-001"]},
+             "aliases": [f"{epic_id}-REVIEW-001"], **round_pin(docs)},
             review_body(review_title,
                         backlog_contract()["required_epic_review_sections"])).encode("utf-8"))
     append_nav(path, [
@@ -3461,7 +3576,7 @@ def main(argv=None) -> int:
     command.add_argument("--docs", default=None)
     command.add_argument("--json", action="store_true")
     command.set_defaults(func=lambda args: check(argparse.Namespace(
-        docs=args.docs, approved=False, render=False, json=args.json)))
+        docs=args.docs, approved=False, render=False, json=args.json, pin_reviews=False)))
     command = sub.add_parser("approve")
     command.add_argument("--docs", default=None)
     command.set_defaults(func=approve)

@@ -566,7 +566,43 @@ class ProcessSwitchValidatorTests(unittest.TestCase):
                             for message in messages), messages)
 
         self.registry.unlink()
-        self.assert_rejected("flows name process switches but the switch registry is missing")
+        self.assert_rejected("process switches are named but the switch registry is missing")
+
+    def test_switch_references_are_bound_by_the_policy_never_linked(self):
+        reference = "skill-content/challenge-review/references/switch-fixture_mode-fast.md"
+        path = self.root / PLUGIN_ROOT / reference
+        self.declare(fixture_mode=FIXTURE_SWITCH)
+        self.anchor(FIXTURE_ANCHOR + f"At `fast` follow `{reference}`.\n")
+        path.write_text("# Fast fixture step\n", encoding="utf-8")
+        # No SKILL.md links it, and no unlinked-reference warning is raised for it.
+        self.assertEqual(validate.run(self.root), [])
+
+        self.anchor()
+        self.assert_rejected(f"switch reference {reference} is named by no owning flow of"
+                             " switch 'fixture_mode'")
+        self.anchor(FIXTURE_ANCHOR + f"At `fast` follow `{reference}`.\n")
+        cases = (
+            ("switch-ghost_mode-fast.md", "switch reference names undeclared switch 'ghost_mode'"),
+            ("switch-fixture_mode-slow.md",
+             "switch reference names undeclared value 'slow' of switch 'fixture_mode'"),
+            ("switch-fixture_mode-current.md",
+             "switch reference names the default value 'current' of switch 'fixture_mode'"),
+            ("switch-fixture.md", "switch reference must be named switch-<switch>-<value>.md"),
+        )
+        for name, fragment in cases:
+            with self.subTest(name=name):
+                extra = path.with_name(name)
+                extra.write_text("# Other\n", encoding="utf-8")
+                self.assert_rejected(fragment)
+                extra.unlink()
+        skill = self.root / PLUGIN_ROOT / "skill-content/challenge-review/SKILL.md"
+        skill.write_text(skill.read_text(encoding="utf-8")
+                         + "\n- [fast](references/switch-fixture_mode-fast.md): fast mode."
+                           " Read when fast.\n", encoding="utf-8")
+        self.assert_rejected("SKILL.md links a switch reference")
+        self.registry.unlink()
+        self.flow.write_text(self.flow_text, encoding="utf-8")
+        self.assert_rejected("process switches are named but the switch registry is missing")
 
     def test_agent_variants_are_validated(self):
         variant = {"suffix": "quick", "tier": "medium", "description": "Quick variant.",

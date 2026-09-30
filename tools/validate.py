@@ -750,6 +750,8 @@ def check_dead_links(tree: Tree, findings: list[Finding]) -> None:
             body = read_text(skill_md)
             for ref in sorted(refs.rglob("*.md")):
                 rel_ref = ref.relative_to(sdir).as_posix()
+                if ref.parent == refs and SWITCH_REFERENCE_RE.match(ref.name):
+                    continue  # the Process Policy binds it; check_switch_references owns it
                 if rel_ref not in body:
                     findings.append(Finding(
                         "warning", rel(tree, ref), 1, "dead_links",
@@ -2455,6 +2457,7 @@ def check_review_panels(tree: Tree, findings: list[Finding]) -> None:
 
 PROCESS_SWITCHES_RELPATH = "skill-content/configure/data/process-switches.json"
 SWITCH_ANCHOR_RE = re.compile(r"\b[Ss]witch\s+`([a-z][a-z0-9_]*)`")
+SWITCH_REFERENCE_RE = re.compile(r"^switch-([a-z][a-z0-9_]*)-([a-z][a-z0-9_]*)\.md$")
 PROCESS_SWITCH_KEYS = {"summary", "flows", "values", "default", "metric", "promotion"}
 PROCESS_SWITCH_OPTIONAL_KEYS = {"issue", "agent_variants"}
 AGENT_VARIANT_KEYS = {"suffix", "tier", "description", "agents"}
@@ -2590,9 +2593,10 @@ def check_process_switches(tree: Tree, findings: list[Finding]) -> None:
             findings.append(Finding("error", rel(tree, where), 1, "process_switches", message, fix))
 
         if not path.is_file():
-            if anchors:
-                err(path, "flows name process switches but the switch registry is missing",
-                    "restore the registry the flows anchor to")
+            if anchors or any((skill / "references").glob("switch-*.md")
+                              for skill in skill_dirs(plugin)):
+                err(path, "process switches are named but the switch registry is missing",
+                    "restore the registry the flows and switch references name")
             continue
         try:
             data = json.loads(read_text(path), object_pairs_hook=_unique_json_object)
@@ -2625,6 +2629,45 @@ def check_process_switches(tree: Tree, findings: list[Finding]) -> None:
                         and stem not in anchors.get(name, {}):
                     err(path, f"switch {name!r} is not named by its owning flow {stem!r}",
                         "anchor the switch as switch `<id>` at the flow step it changes")
+        check_switch_references(plugin, switches, err)
+
+
+def check_switch_references(plugin: Path, switches: dict, err) -> None:
+    """A switch reference holds the instructions of one non-default switch
+    value. The Process Policy binds it, so no SKILL.md links it, and an owning
+    flow names its path so the orchestrating entry finds it."""
+    flows_dir = plugin / "flows"
+    for skill in skill_dirs(plugin):
+        skill_md = skill / "SKILL.md"
+        if skill_md.is_file() and "](references/switch-" in read_text(skill_md):
+            err(skill_md, "SKILL.md links a switch reference",
+                "switch references are bound by the Process Policy; never link one from SKILL.md")
+        for reference in sorted((skill / "references").glob("switch-*.md")):
+            match = SWITCH_REFERENCE_RE.match(reference.name)
+            if match is None:
+                err(reference, "switch reference must be named switch-<switch>-<value>.md",
+                    "name the file for one declared switch and value")
+                continue
+            name, value = match.groups()
+            spec = switches.get(name)
+            ids = [item.get("id") for item in spec.get("values", []) if isinstance(item, dict)] \
+                if isinstance(spec, dict) and isinstance(spec.get("values"), list) else []
+            if not isinstance(spec, dict):
+                err(reference, f"switch reference names undeclared switch {name!r}",
+                    "declare the switch in the registry or rename the reference")
+            elif value not in ids:
+                err(reference, f"switch reference names undeclared value {value!r} of switch {name!r}",
+                    "name one of the switch's declared values")
+            elif value == spec.get("default"):
+                err(reference, f"switch reference names the default value {value!r} of switch {name!r}",
+                    "the default path keeps its instructions in the ordinary files")
+            else:
+                relative = reference.relative_to(plugin).as_posix()
+                owners = spec.get("flows") if isinstance(spec.get("flows"), list) else []
+                if not any(isinstance(flow, str) and (flows_dir / f"{flow}.md").is_file()
+                           and relative in read_text(flows_dir / f"{flow}.md") for flow in owners):
+                    err(reference, f"switch reference {relative} is named by no owning flow of"
+                        f" switch {name!r}", "name the reference in the owning flow step it replaces")
 
 
 def _limits_shape_errors(config: dict) -> list[str]:

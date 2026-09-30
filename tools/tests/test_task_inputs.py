@@ -18,9 +18,11 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "plugins/software-engineering-team/scripts"))
 sys.path.insert(0, str(ROOT / "tools/tests"))
 import backlog_compile
+import process_policy
 import task_inputs
 from backlog_fixture import make_approved_backlog
 from git_fixture import init_repository
+from test_default_equivalence import SWITCH_FILES, build_task_package, build_task_project
 
 
 class TaskInputTests(unittest.TestCase):
@@ -316,6 +318,60 @@ class TaskInputTests(unittest.TestCase):
                 self.assertIn("skill-content/challenge-review/data/review-panels.json",
                               [item["path"] for item in result["instructions"]])
                 self.assertEqual(result["write_boundary"], "read_only")
+
+    def test_process_policy_binds_only_the_chosen_switch_references(self):
+        with tempfile.TemporaryDirectory() as raw:
+            base = Path(raw).resolve()
+            package, project = base / "package", base / "project"
+            build_task_package(package, switch_files=True)
+            build_task_project(project)
+            docs = project / "workspace/docs"
+            reader = dict(entry="fixture-entry", role="fixture-reader", mode="review",
+                          project=project, package=package)
+            plain = task_inputs.manifest(**reader)
+
+            def policy(*argv):
+                output = io.StringIO()
+                with mock.patch.object(process_policy, "PACKAGE", package), \
+                        contextlib.redirect_stdout(output):
+                    self.assertEqual(process_policy.main([argv[0], "--docs", str(docs), *argv[1:]]),
+                                     0, output.getvalue())
+
+            policy("init")
+            policy("set", "--switch", "fixture_mode", "--value", "fast")
+            with self.assertRaisesRegex(ValueError, "Process Policy revision 1 is a draft"):
+                task_inputs.manifest(**reader)
+            policy("approve")
+            chosen = task_inputs.manifest(**reader)
+            self.assertEqual(sorted(set(chosen["required_reads"]) - set(plain["required_reads"])),
+                             sorted(SWITCH_FILES))
+            self.assertEqual(chosen["conditional_reads"], plain["conditional_reads"])
+            self.assertIn("workspace/docs/delivery/process-policy.md",
+                          [record["path"] for record in chosen["project_inputs"]])
+            self.assertTrue(set(SWITCH_FILES) <= {record["path"] for record in chosen["instructions"]})
+
+            policy("begin-revision")
+            policy("set", "--switch", "fixture_mode", "--default")
+            policy("approve")
+            default = task_inputs.manifest(**reader)
+            self.assertEqual(default["required_reads"], plain["required_reads"])
+            self.assertEqual(default["instructions"], plain["instructions"])
+            self.assertEqual([record["path"] for record in default["project_inputs"]],
+                             ["workspace/docs/delivery/process-policy.md"])
+            (docs / "delivery/process-policy.md").write_text("changed\n", encoding="utf-8")
+            with self.assertRaisesRegex(ValueError, "process policy cannot bind switch instructions"):
+                task_inputs.manifest(**reader, expected_hash=default["source_hash"])
+
+    def test_no_shipped_manifest_binds_a_switch_reference_without_a_policy(self):
+        policy = task_inputs.catalog()
+        for entry, route in policy["entries"].items():
+            for role in route["roles"] or [None]:
+                with self.subTest(entry=entry, role=role):
+                    result = task_inputs.manifest(entry=entry, role=role, mode="review")
+                    paths = [*result["required_reads"],
+                             *(item["path"] for item in result["conditional_reads"]),
+                             *(item["path"] for item in result["instructions"])]
+                    self.assertFalse([path for path in paths if "/references/switch-" in path])
 
     def test_changed_project_input_invalidates_manifest_without_runtime_writes(self):
         with tempfile.TemporaryDirectory() as raw:

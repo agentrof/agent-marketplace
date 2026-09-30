@@ -17,6 +17,18 @@ the complete committed and working change inventory; it does not infer a baselin
 Initial Setup may bind an initialized repository before its first commit;
 its initial files are still hashed, and the first commit invalidates that input.
 
+A skill may carry `references/switch-<switch>-<value>.md`: the instructions of
+one value of a process switch declared in
+`skill-content/configure/data/process-switches.json`. The manifest binds it as
+a required read only when the project's approved Process Policy,
+`workspace/docs/delivery/process-policy.md`, sets that switch to that value;
+otherwise the file is neither read nor hashed. A switch at its default binds
+nothing, so the default path keeps its instructions. When the policy exists it
+is a project input, and a draft or invalid policy fails the derivation. Before
+the flow step that names switch `<id>`, the entry reads its value with
+`process_policy.py value --switch <id>`, adding `--delivery DLV-###` inside a
+Delivery.
+
 Use the owning compiler's resolved source set. For Backlog review,
 `--epic <exact-epic>` derives the existing scoped dependency and source
 closure; bare `--epic` retains the full root package. Other stage compilers'

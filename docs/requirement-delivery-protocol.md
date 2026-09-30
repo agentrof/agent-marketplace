@@ -535,7 +535,7 @@ Delivery uses `not_started` dispositions and never fabricates Item refs,
 review evidence or integration bases. A cancellation is final: a Delivery
 whose published status is already `cancelled` refuses another cancellation,
 any invalidation of its cancellation Review, a publication of its execution
-plan, a revision of its scope and a claim of its Items with
+plan, a revision of its scope, a target refresh and a claim of its Items with
 `DELIVERY_CANCELLATION_INVALID`, so that Review still reaches the target
 through the PR. Each of these verbs reads the status the Integration records,
 because a cancellation writes it there alone and a checkout's `delivery.md`

@@ -2042,6 +2042,27 @@ class DeliveryGitTests(unittest.TestCase):
         intent = delivery_git.prepare_pr_creation(project, "DLV-001")
         self.assertEqual(delivery_git.run_git(project, "rev-parse", intent["intent"] + "^"), cancelled["review"])
 
+    def test_a_cancelled_delivery_is_not_refreshed_off_its_pr_route(self):
+        """A target refresh would put a commit on top of the cancellation Review, which the PR intent
+        and the PR need at the Integration tip, so it refuses whether or not the target moved."""
+        project, _docs, _directory, _item, _reserved = self.prepare_execution_with_draft_reserved_contracts(False)
+        delivery_git.publish_execution_plan(project, "DLV-001")
+        delivery_git.claim_items(project, "DLV-001")
+        cancelled = delivery_git.cancel_delivery(project, "DLV-001", "The owner withdrew the request")
+        for moment in ("target unchanged", "target advanced"):
+            with self.subTest(moment=moment):
+                if moment == "target advanced":
+                    (project / "NOTES.md").write_text("Unrelated target change\n", encoding="utf-8")
+                    delivery_git.run_git(project, "add", "NOTES.md")
+                    delivery_git.run_git(project, "commit", "-qm", "Advance the target")
+                    delivery_git.run_git(project, "push", "-q", "origin", "HEAD:main")
+                before = delivery_git.run_git(project, "ls-remote", "origin")
+                self.assertEqual(self.refused_finding(lambda: delivery_git.refresh_target(project, "DLV-001")),
+                                 self.cancelled_refusal("refresh-target"))
+                self.assertEqual(delivery_git.run_git(project, "ls-remote", "origin"), before)
+        intent = delivery_git.prepare_pr_creation(project, "DLV-001")
+        self.assertEqual(delivery_git.run_git(project, "rev-parse", intent["intent"] + "^"), cancelled["review"])
+
     def test_a_delivery_cancelled_at_its_scope_is_not_revised_again(self):
         """revise-unclaimed-scope reads the published status too: the local delivery.md still says scope_approved."""
         temporary, project, _docs = self.reserve_scope()

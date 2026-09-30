@@ -163,6 +163,33 @@ class BacklogCompilerTests(unittest.TestCase):
             backlog.write_text(backlog_compile.front_matter(props, body), encoding="utf-8")
             self.assertIn(f"{story} needs origin_mode and introduced_in_revision", origin_findings())
 
+    def test_an_untouched_delivery_notes_stub_is_reported_above_the_navigation(self):
+        with tempfile.TemporaryDirectory() as raw:
+            docs = Path(raw) / "workspace" / "docs"
+            make_approved_backlog(docs)
+            args = SimpleNamespace(
+                docs=docs, epic="delivery-fixture", slug="job-worker", id="AUTH-02", title="job-worker",
+                scope="Run the job.", work_kind="technical", criterion_ref=[], experience_ref=[],
+                evidence_ref=[], uses_design=[], constrained_by=[], implements=[],
+            )
+            with redirect_stdout(StringIO()):
+                self.assertEqual(backlog_compile.stub_story(args), 0)
+            story = docs / "backlog/epics/delivery-fixture/stories/job-worker/story.md"
+            stub = backlog_compile.STORY_STUBS["Delivery Notes"]
+            text = story.read_text(encoding="utf-8")
+            # The stub is the last section, so navigation lands right under it.
+            self.assertLess(text.index(stub), text.index(backlog_compile.NAV_MARKER))
+            prefix = "backlog/epics/delivery-fixture/stories/job-worker/story.md has an untouched"
+            delivery_notes = f"{prefix} Delivery Notes stub"
+            record, errors = backlog_compile.collect(docs)
+            self.assertIn(delivery_notes, record["scaffold_findings"])
+            self.assertIn(delivery_notes, errors)
+            story.write_text(text.replace(stub, "Run the worker beside the approved API only."),
+                             encoding="utf-8")
+            record, errors = backlog_compile.collect(docs)
+            self.assertNotIn(delivery_notes, errors)
+            self.assertIn(f"{prefix} Non-Goals stub", record["scaffold_findings"])
+
     def test_changes_requested_status_tag_uses_kebab_case(self):
         props = {
             "status": "changes_requested",

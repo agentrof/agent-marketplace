@@ -583,5 +583,96 @@ class OperationGovernanceTests(unittest.TestCase):
                     self.assertNotEqual(operation_compile.receipt_hash(draft, draft_body), draft["source_hash"])
 
 
+class AcceptedMinorFindingsTests(unittest.TestCase):
+    """Switch `review_loop` at `blocking_delta` records an Operation review's minor
+    findings in an optional contract section, validated like the backlog table."""
+
+    invoke = OperationGovernanceTests.invoke
+    approved_solution = OperationGovernanceTests.approved_solution
+    HEADER = "| finding | owner_role | reason | revisit_trigger |"
+    CITE = "[[operation/verification-contract\\|Verification Contract]]"
+    VALID = (f"| {CITE} The Contract section states the test workdir twice in different words. "
+             "| qa_engineer | Both sentences name one directory, so the test command runs the same "
+             "way. | Revisit at the next revision of the Verification Contract. |")
+    LABEL = "operation/verification-contract.md accepted minor finding 1"
+
+    def setUp(self) -> None:
+        sys.path.insert(0, str(SCRIPTS))
+        import operation_compile
+
+        self.operation = operation_compile
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        self.docs = Path(temporary.name) / "workspace" / "docs"
+        ref = self.approved_solution(self.docs)
+        self.args = ("--docs", str(self.docs), "--kind", "verification")
+        initialized = self.invoke(OPERATION, "init", *self.args, "--constrained-by", ref)
+        self.assertEqual(initialized.returncode, 0, initialized.stdout + initialized.stderr)
+        self.path = operation_compile.contract_path(self.docs, "verification")
+        declare(self.path, test_command="make test")
+        self.draft = self.path.read_text(encoding="utf-8")
+
+    def accept(self, *rows: str, header: str = HEADER) -> None:
+        separator = "|" + "---|" * (header.count("|") - 1)
+        section = "\n".join(["## Accepted Minor Findings", "", header, separator, *rows, "", ""])
+        self.path.write_text(self.draft.replace("## Navigation", section + "## Navigation", 1),
+                             encoding="utf-8")
+
+    def errors(self) -> list[str]:
+        return self.operation.check_contract(self.docs, "verification")[1]
+
+    def test_a_contract_without_the_section_is_unchanged(self):
+        self.assertEqual(self.errors(), [])
+        approved = self.invoke(OPERATION, "approve", *self.args)
+        self.assertEqual(approved.returncode, 0, approved.stdout + approved.stderr)
+
+    def test_complete_rows_approve_and_stay_current(self):
+        other = self.VALID.replace("qa_engineer", "devops_engineer").replace(
+            "the test workdir twice", "the test command origin twice")
+        self.accept(self.VALID, other)
+        self.assertEqual(self.errors(), [])
+        approved = self.invoke(OPERATION, "approve", *self.args)
+        self.assertEqual(approved.returncode, 0, approved.stdout + approved.stderr)
+        receipt, errors = self.operation.check_contract(self.docs, "verification")
+        self.assertEqual((errors, receipt["current"]), ([], True))
+
+    def test_incomplete_rows_fail_with_the_missing_follow_up(self):
+        cases = {
+            "must cite the affected vault note": self.VALID.replace(self.CITE + " ", ""),
+            "targets missing note: operation/missing":
+                self.VALID.replace("operation/verification-contract", "operation/missing"),
+            "needs a concrete finding": self.VALID.replace(
+                "The Contract section states the test workdir twice in different words.", "typo"),
+            "owner_role must be one of: qa_engineer, devops_engineer":
+                self.VALID.replace("qa_engineer", "product_owner"),
+            "needs a concrete reason": self.VALID.replace(
+                "Both sentences name one directory, so the test command runs the same way.", "TODO"),
+            "needs a concrete revisit_trigger": self.VALID.replace(
+                "Revisit at the next revision of the Verification Contract.", "later"),
+        }
+        for expected, row in cases.items():
+            with self.subTest(expected=expected):
+                self.accept(row)
+                self.assertEqual(self.errors(), [f"{self.LABEL} {expected}"])
+        self.accept(self.VALID, self.VALID)
+        self.assertEqual(self.errors(), ["operation/verification-contract.md repeats accepted minor finding 2"])
+
+    def test_a_blocking_finding_cannot_enter_the_section(self):
+        # The table has no severity: only a finding the review rated minor fits it.
+        self.accept(self.VALID.replace("| qa_engineer |", "| major | qa_engineer |"),
+                    header="| finding | severity | owner_role | reason | revisit_trigger |")
+        self.assertEqual(self.errors(), [
+            "operation/verification-contract.md Accepted Minor Findings columns must be: finding,"
+            " owner_role, reason, revisit_trigger"])
+
+    def test_refused_approval_leaves_the_draft_byte_identical(self):
+        self.accept(self.VALID.replace("qa_engineer", "product_owner"))
+        draft = self.path.read_bytes()
+        refused = self.invoke(OPERATION, "approve", *self.args)
+        self.assertEqual(refused.returncode, 2, refused.stdout + refused.stderr)
+        self.assertIn("owner_role must be one of: qa_engineer, devops_engineer", refused.stdout)
+        self.assertEqual(self.path.read_bytes(), draft)
+
+
 if __name__ == "__main__":
     unittest.main()

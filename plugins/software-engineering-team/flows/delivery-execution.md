@@ -81,6 +81,8 @@ covers the full Item diff; re-review covers the new delta, open findings and
 affected consumers. Correctness, conformance and security remain mandatory.
 An unchanged candidate with unchanged source bindings and instructions reuses
 its existing independent role results without another dispatch.
+Switch `review_loop`: at `blocking_delta`, the code review loop follows
+`skill-content/code-review/references/switch-review_loop-blocking_delta.md`.
 
 `validate --delivery DLV-### --story <story>` must accept both final results
 before evidence approval. The existing compiler derives actual product HEAD

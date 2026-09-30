@@ -81,6 +81,11 @@ PROCESS_POLICY_SOURCE_FIELDS = process_policy.PIN_FIELDS
 GIT_OID_RE = re.compile(r"^[0-9a-f]{40,64}$")
 # The record of the "Record PR" commit that delivery_git writes as the PR head.
 PR_RECORDED = "pr-url-recorded-v1"
+REVIEW_LOOP = "review_loop"
+FOLLOW_UP_COLUMNS = ("finding", "severity", "file", "description", "owner_role", "revisit_trigger")
+# Each compiler-owned block starts at its marker line, after any authored text.
+ITEM_FOLLOW_UPS = "Open code review follow-ups, copied by approve-item-evidence:"
+DELIVERY_FOLLOW_UPS = "Open code review follow-ups of the integrated Items, listed by approve-review:"
 
 
 atomic_text = atomic_file.replace_text
@@ -330,6 +335,20 @@ def with_process_policy_pin(props: dict, policy: dict) -> dict:
     if anchor is None:
         result.update(policy)
     return result
+
+
+def delivery_switch_value(docs: Path, delivery_id: str, switch: str) -> str:
+    """Return the value of a process switch that a Delivery runs under.
+
+    Without a Process Policy the switch is at its package default. A draft or
+    invalid policy, or a pin that drifted while the pin is enforced, raises
+    ValueError, as process_policy.py value --delivery refuses it.
+    """
+    values, snapshot = process_policy.effective_values(docs)
+    errors = process_policy.delivery_pin_findings(docs, delivery_id, snapshot)
+    if errors:
+        raise ValueError("; ".join(errors))
+    return values[switch]["value"]
 
 
 def operation_contract_snapshot(docs: Path, kind: str) -> tuple[dict, list[str]]:
@@ -1670,6 +1689,57 @@ def item_evidence_file_findings(worktree: Path, head: str, paths: tuple[Path, Pa
     return []
 
 
+def table_cell(value: object) -> str:
+    """One Markdown table cell: a single line with its pipes escaped."""
+    return " ".join(str(value).split()).replace("|", "\\|")
+
+
+def table_block(marker: str, columns: tuple[str, ...], rows: list[str]) -> str:
+    """A compiler-owned block: its marker line and a table of rendered rows."""
+    if not rows:
+        return f"{marker} none."
+    return "\n".join([marker, "", "| " + " | ".join(columns) + " |",
+                      "|" + "---|" * len(columns), *rows])
+
+
+def block_rows(text: str, marker: str) -> list[str]:
+    """The table rows of the compiler-owned block that starts at ``marker``."""
+    lines = text.split(marker, 1)[1].splitlines() if marker in text else []
+    return [line.strip() for line in lines if line.strip().startswith("|")][2:]
+
+
+def replace_section(body: str, title: str, content: str) -> str:
+    """Replace the content of one `## title` section and keep every other byte."""
+    heading = re.search(rf"(?m)^## {re.escape(title)}[ \t]*$", body)
+    if heading is None:
+        raise ValueError(f"section {title} is missing")
+    following = re.search(r"(?m)^## ", body[heading.end():])
+    end = heading.end() + following.start() if following else len(body)
+    return body[:heading.end()] + "\n\n" + content.strip() + "\n\n" + body[end:]
+
+
+def with_compiler_block(body: str, title: str, marker: str, block: str) -> str:
+    """Keep a section's authored text and replace the compiler-owned block after it."""
+    authored = section_bodies(body).get(title, "").split(marker, 1)[0].strip()
+    if authored == SECTION_PLACEHOLDER:
+        authored = ""
+    return replace_section(body, title, f"{authored}\n\n{block}" if authored else block)
+
+
+def delivery_follow_ups(root: Path) -> list[str]:
+    """The follow-up rows of every integrated Item's code review record."""
+    rows: list[str] = []
+    for item in sorted(root.glob("items/*/item.md")):
+        props, _ = split_note(item)
+        review = item.parent / "code-review.md"
+        if props.get("status") != "integrated" or not review.is_file():
+            continue
+        text = section_bodies(split_note(review)[1]).get("Deviations and Follow-ups", "")
+        story = table_cell(props.get("story_id", item.parent.name))
+        rows.extend(f"| {story} {row}" for row in block_rows(text, ITEM_FOLLOW_UPS))
+    return rows
+
+
 def approve_item_evidence(args) -> int:
     value = getattr(args, "worktree", None)
     if isinstance(value, str) and value.strip():
@@ -1747,6 +1817,15 @@ def _approve_item_evidence(args) -> int:
                 review_body = review_result["report"]
             if set(SECTIONS["item"]).issubset(sections(verification_result["report"])):
                 verification_body = verification_result["report"]
+            if delivery_switch_value(docs, args.delivery, REVIEW_LOOP) == "blocking_delta":
+                # The Item record keeps its approved bytes; its code review record
+                # carries the follow-ups, since evidence approval writes only the reports.
+                rows = ["| " + " | ".join(table_cell({**finding, "finding": finding["id"]}[column])
+                                          for column in FOLLOW_UP_COLUMNS) + " |"
+                        for finding in delivery_verification.open_follow_ups(review_result, item_props)]
+                review_body = with_compiler_block(review_body, "Deviations and Follow-ups",
+                                                  ITEM_FOLLOW_UPS,
+                                                  table_block(ITEM_FOLLOW_UPS, FOLLOW_UP_COLUMNS, rows))
             for target, result in ((review_props, review_result), (verification_props, verification_result)):
                 target["verification_candidate_hash"] = session["candidate"]["candidate_hash"]
                 target["verification_mode"] = result["mode"]
@@ -1783,6 +1862,10 @@ def approve_review(args) -> int:
         ]}, indent=2)); return 2
     delivery_path_value = root / "delivery.md"
     delivery_props, _ = split_note(delivery_path_value)
+    try:
+        review_loop = delivery_switch_value(docs, args.delivery, REVIEW_LOOP)
+    except ValueError as exc:
+        print(json.dumps({"ok": False, "errors": [str(exc)]}, indent=2)); return 1
     review_path = root / "delivery-review.md"
     review_subject = str(delivery_props.get("goal", args.delivery)).strip()
     review_props = {"type": "delivery-review", "id": f"{args.delivery}-REVIEW",
@@ -1804,6 +1887,10 @@ def approve_review(args) -> int:
     review_body = body_for("delivery-review", review_props["title"], {
         "Goal Outcome": delivery_props.get("goal", ""), "Verdict": "Approved for PR handoff.", **authored,
         "Navigation": link(delivery_path_value.relative_to(docs).as_posix(), args.delivery)})
+    if review_loop == "blocking_delta":
+        review_body = with_compiler_block(
+            review_body, "Lessons and Follow-up", DELIVERY_FOLLOW_UPS,
+            table_block(DELIVERY_FOLLOW_UPS, ("item", *FOLLOW_UP_COLUMNS), delivery_follow_ups(root)))
     review_props["approval_hash"] = content_hash(review_props, review_body, exclude=MUTABLE | {"approval_hash"})
     review_props["source_hash"] = content_hash(review_props, review_body)
     atomic_text(review_path, frontmatter(review_props, review_body))

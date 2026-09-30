@@ -44,7 +44,13 @@ behavior is host-neutral; Claude Code and Codex are packaging adapters.
     major finding; an accepted minor finding is recorded in the review note's
     optional, compiler-validated `Accepted Minor Findings` table with an owner
     role and revisit trigger. Test execution, JUnit evidence and release
-    readiness are delivery concerns.
+    readiness are delivery concerns. Process switch `review_loop` sets how far
+    this rule reaches: at the default, `current`, every other review step keeps
+    its own loop; at `blocking_delta`, Operation contracts record accepted minor
+    findings in their own compiler-validated `Accepted Minor Findings` section,
+    Delivery code review minors carry an owner role and revisit trigger into the
+    Item's code review record and the Delivery Review, and a re-review reads only
+    the open blocking findings, the changed text and its dependency context.
 15. File names are stable slugs; membership is path-derived. A story does not
     duplicate its epic relationship in front matter.
 16. Authored titles are direct, natural phrases in the configured output

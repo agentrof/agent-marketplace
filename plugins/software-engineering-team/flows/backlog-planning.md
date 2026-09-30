@@ -180,6 +180,9 @@ that only applies the fixes returned findings name, and the compiler commands
 of this section and section 5, run as
 `skill-content/challenge-review/references/switch-mechanical_pass_tier-mechanical.md`
 defines.
+Switch `review_loop`: at `blocking_delta`, this section's review loops
+follow
+`skill-content/challenge-review/references/switch-review_loop-blocking_delta.md`.
 
 ### Recovery that removes only operating-system metadata
 

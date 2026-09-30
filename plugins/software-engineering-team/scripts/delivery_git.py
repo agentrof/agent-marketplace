@@ -1398,6 +1398,7 @@ def prepare_pr_creation(project_root: Path, delivery_id: str,
     fence_oid = remote_oid(root, remote, refs["fence"])
     integration_oid = remote_oid(root, remote, refs["integration"])
     fence_message = commit_message(root, fence_oid)
+    require_fence_record(fence_message)
     integration_message = commit_message(root, integration_oid)
     if trailer(integration_message, "Record") != "delivery-review-published-v1":
         raise RuntimeError("PR creation requires a published Delivery Review")
@@ -1448,6 +1449,8 @@ def record_pr_remote(project_root: Path, delivery_id: str, url: str,
         raise RuntimeError("local Delivery Review URL does not match the requested PR")
     refs = canonical_refs(delivery_id)
     fence_oid = remote_oid(root, remote, refs["fence"])
+    fence_message = commit_message(root, fence_oid)
+    require_fence_record(fence_message)
     integration_oid = remote_oid(root, remote, refs["integration"])
     intent_message = commit_message(root, integration_oid)
     intent_record = trailer(intent_message, "Record")
@@ -1473,7 +1476,6 @@ def record_pr_remote(project_root: Path, delivery_id: str, url: str,
          "URL-Hash": pr_url_hash(canonical_url)},
         delivery_projections=recorded is not None,
     )
-    fence_message = commit_message(root, fence_oid)
     fence_candidate = commit_tree(
         root, fence_oid, [], "Fence project in open mode",
         {"Record": "project-fence-v2", "Protocol": "2", "Mode": "open",
@@ -1520,6 +1522,7 @@ def open_pr(project_root: Path, delivery_id: str, remote: str = "origin") -> dic
                 "pull_request_url": recorded_pr_url(root, integration_oid, review_path),
                 "reused": True, "provider_call": False}
     refuse_merged_delivery(root, delivery_id, remote)
+    require_fence_record(commit_message(root, remote_oid(root, remote, refs["fence"])))
     provider = GitHubProvider(root, remote)
     target_branch, _ = resolve_target(root, remote)
     head = short_refs(delivery_id)["integration"]
@@ -1723,6 +1726,7 @@ def invalidate_delivery_review(project_root: Path, delivery_id: str,
     fence_oid = remote_oid(root, remote, refs["fence"])
     integration_oid = remote_oid(root, remote, refs["integration"])
     fence_message = commit_message(root, fence_oid)
+    require_fence_record(fence_message)
     integration_message = commit_message(root, integration_oid)
     if trailer(fence_message, "Mode") != "open":
         raise RuntimeError("DELIVERY_FENCE_MODE: review invalidation requires an open Fence")
@@ -1922,6 +1926,7 @@ def cancel_delivery(project_root: Path, delivery_id: str, reason: str,
     fence_oid = remote_oid(root, remote, refs["fence"])
     integration_oid = remote_oid(root, remote, refs["integration"])
     fence_message = commit_message(root, fence_oid)
+    require_fence_record(fence_message)
     integration_message = commit_message(root, integration_oid)
     if trailer(fence_message, "Mode") != "open" or trailer(integration_message, "Record") in {
             "cancellation-intent-v1", "delivery-barrier-v1", "cancellation-finalized-v1"}:
@@ -2721,6 +2726,7 @@ def revise_unclaimed_scope(project_root: Path, delivery_id: str,
     fence_oid = remote_oid(root, remote, refs["fence"])
     integration_oid = remote_oid(root, remote, refs["integration"])
     fence_message = commit_message(root, fence_oid)
+    require_fence_record(fence_message)
     if trailer(fence_message, "Mode") != "open":
         raise RuntimeError("DELIVERY_FENCE_MODE: revise-unclaimed-scope requires an open Fence")
     for item_path in sorted(directory.glob("items/*/item.md")):
@@ -4138,6 +4144,7 @@ def reopen_item(project_root: Path, delivery_id: str, story_id: str,
     integration_oid = remote_oid(root, remote, refs["integration"])
     item_oid = remote_oid(root, remote, refs["item"])
     fence_message = commit_message(root, fence_oid)
+    require_fence_record(fence_message)
     if trailer(fence_message, "Mode") != "open":
         raise RuntimeError("DELIVERY_FENCE_MODE: reopen-item requires an open Fence")
     if not is_ancestor(root, item_oid, integration_oid):
@@ -4224,6 +4231,8 @@ def pause_item(project_root: Path, delivery_id: str, story_id: str,
         raise RuntimeError("local Delivery package is required for Item pause")
     refs = canonical_refs(delivery_id, story_id)
     fence_oid = remote_oid(root, remote, refs["fence"])
+    fence_message = commit_message(root, fence_oid)
+    require_fence_record(fence_message)
     item_oid = remote_oid(root, remote, refs["item"])
     slots = remote_slot_oids(root, remote)
     slot = next((key for key, oid in slots.items() if oid == item_oid), None)
@@ -4245,7 +4254,6 @@ def pause_item(project_root: Path, delivery_id: str, story_id: str,
         {"Record": "item-quiesce-v1", "Protocol": "1", "Delivery": delivery_id,
          "Story": story_id, "Kind": "pause", "Previous-Tip": item_oid, "Slot": slot},
     )
-    fence_message = commit_message(root, fence_oid)
     fence_candidate = commit_tree(
         root, fence_oid, [], f"Fence project in open mode",
         {"Record": "project-fence-v2", "Protocol": "2", "Mode": "open",

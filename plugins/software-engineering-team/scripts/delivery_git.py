@@ -2342,6 +2342,32 @@ def refuse_superseded_approval(root: Path, directory: Path, docs: Path, integrat
                                f"with {replacement}; {remedy}")
 
 
+def sealed_item_records(root: Path, directory: Path, integration_oid: str) -> set[str]:
+    """Name the Item records publication must leave as the Integration holds them.
+
+    A sealed Item record, with its lifecycle, base and stamp, and its approved
+    review and verification records reach the Integration only when the Item is
+    integrated or cancelled, and nothing brings them back into a checkout's
+    package. For an Item the Integration holds that way, publication keeps the
+    review and verification records, and keeps the Item record unless the
+    checkout's copy has the same lifecycle, base and stamp: the sealed record an
+    approval started from, as one that rebinds it for reopen does. The sealed
+    evidence binds the whole record, so nothing is merged into it.
+    """
+    from delivery_compile import TERMINAL_ITEM_STATUSES, split_note
+    kept = set()
+    for item in integration_item_paths(root, directory, integration_oid):
+        relative = rel_posix(root, item)
+        sealed, _body = split_remote_note(root, integration_oid, relative, split_note)
+        if sealed.get("status") not in TERMINAL_ITEM_STATUSES:
+            continue
+        kept.update(rel_posix(root, item.parent / name) for name in ("code-review.md", "verification.md"))
+        local = split_note(item)[0] if item.is_file() else {}
+        if any(local.get(key) != sealed.get(key) for key in ITEM_WRITER_FIELDS):
+            kept.add(relative)
+    return kept
+
+
 def publish_execution_plan(project_root: Path, delivery_id: str,
                            remote: str = "origin") -> dict:
     root = main_worktree(project_root.resolve())
@@ -2367,13 +2393,15 @@ def publish_execution_plan(project_root: Path, delivery_id: str,
     operation_paths, operation_bindings = execution_operation_inputs(root, directory, docs)
     refuse_superseded_approval(root, directory, docs, integration_oid, operation_paths)
     not_carried = uncarried_operation_contracts(root, docs, integration_oid, operation_paths)
+    sealed = sealed_item_records(root, directory, integration_oid)
     integration_candidate = commit_tree(
-        root, integration_oid, sorted(set(package + operation_paths)), f"Publish execution plan for {delivery_id}",
+        root, integration_oid, sorted(set(package + operation_paths) - sealed), f"Publish execution plan for {delivery_id}",
         {"Record": "execution-plan-published-v1", "Protocol": "1", "Delivery": delivery_id,
          "Scope-Hash": str(props.get("scope_hash", "none")),
          "Plan-Hash": str(props.get("plan_hash", "none")), "Target": trailer(fence_message, "Target") or "none"},
         delivery_projections=True,
-        operation_bindings=operation_bindings,
+        operation_bindings={relative: binding for relative, binding in operation_bindings.items()
+                            if rel_posix(root, docs / relative) not in sealed},
     )
     epoch = trailer(fence_message, "Epoch") or epoch_token()
     fence_candidate = commit_tree(

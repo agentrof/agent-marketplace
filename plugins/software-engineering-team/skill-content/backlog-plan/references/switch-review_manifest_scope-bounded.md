@@ -26,9 +26,10 @@ Policy for a reader's manifest and records it in the manifest's
 Nothing else is expanded. A note two hops out is read without its links, and a
 story reached through a link is read without its test plan or dependency
 closure. The root backlog and the review notes are read as notes two hops out
-unless an epic, story or test plan above links to them. A `stub-epic` or
-`stub-story` placeholder in a note the manifest does not read is listed in
-`check.scaffold_findings` and does not fail it. The root manifest and a
+unless an epic, story or test plan above links to them. A source finding in
+a backlog note the manifest does not read, a `stub-epic` or `stub-story`
+placeholder included, is listed in `check.scaffold_findings` and does not fail
+it. The root manifest and a
 writer's manifest keep the transitive read set, and backlog approval still
 checks the whole backlog.
 

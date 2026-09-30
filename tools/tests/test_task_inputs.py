@@ -714,6 +714,25 @@ class EpicTaskScopeTests(unittest.TestCase):
                 self.assertIn("workspace/docs/solution-design/aside.md", {
                     record["path"] for record in self.task(**kwargs)["canonical_source_inventory"]})
 
+    def test_another_epics_partial_edit_leaves_an_epic_task_fresh(self):
+        tasks = {role: self.task(role, mode) for role, mode in self.ROLES}
+        # EP-002's writer replaces the coverage-row stubs and nothing else.
+        plan = self.story("st-002") / "test-plan.md"
+        text = plan.read_text(encoding="utf-8")
+        for coverage in backlog_compile.SCENARIO_COVERAGE_CLASSES:
+            text = text.replace(
+                f"| {coverage} | not_applicable | - | {backlog_compile.COVERAGE_REASON_STUB} |",
+                f"| {coverage} | not_applicable | - | ST-002 exposes no {coverage} behavior. |")
+        plan.write_text(text, encoding="utf-8")
+        unclassified = ("backlog/epics/second/stories/st-002/test-plan.md scenarios are not"
+                        " classified by Coverage Classes: ST-002-TS-001")
+        for role, mode in self.ROLES:
+            with self.subTest(role=role):
+                fresh = self.task(role, mode, expected_hash=tasks[role]["source_hash"])
+                self.assertIn(unclassified, fresh["backlog_scope"]["check"]["scaffold_findings"])
+        with self.assertRaisesRegex(ValueError, "not classified by Coverage Classes"):
+            self.task("backlog-reviewer", "review", epic="EP-002")
+
     def test_a_change_inside_an_epic_tasks_closure_still_makes_it_stale(self):
         self.finish_second_story()
         commit_all(self.root)

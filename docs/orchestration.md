@@ -60,6 +60,17 @@ code review record or the approval gate keeps every ruling. The instructions
 live in the `challenge-review` and `code-review` references
 `switch-review_loop-blocking_delta.md`.
 
+What a backlog epic reviewer reads is process switch `review_manifest_scope`.
+At `transitive`, the default, every note the epic's manifest includes expands
+its own links, so the read set follows the vault. At `bounded`, links are
+followed only from the epics, stories and test plans of the epic and its
+dependency closure; each note they link to or cite is read with its
+front-matter relations one hop further, and nothing beyond is expanded. The
+root review and writer manifests keep the transitive read set, and a reviewer
+that needs evidence outside its manifest reports it and is rerun with it.
+`backlog-plan/references/switch-review_manifest_scope-bounded.md` defines the
+read set.
+
 A Delivery Item's implementation writers run as process switch
 `implementation_schedule` selects. `sequential_v1`, the default, runs them one
 after another in their approved order. `parallel_lanes_v1` is the one exception

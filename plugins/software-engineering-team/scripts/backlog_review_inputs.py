@@ -77,6 +77,33 @@ def backlog_authored(path: str) -> bool:
     return path.startswith("backlog/")
 
 
+SCOPE_SWITCH = "review_manifest_scope"
+# Under the bounded scope a note this many links away from the scope's
+# epics, stories and test plans is read without expanding it.
+LEAF_HOP = 2
+EXPERIENCE_RECORD_RE = re.compile(
+    r"(?P<experience>[a-z0-9]+(?:-[a-z0-9]+)*):(?P<id>(?:JRN|FLW|SCR|STA|TRN)-[0-9]{3,})"
+    r"@r[1-9][0-9]*")
+
+
+def read_scope(docs: Path) -> str:
+    """Return the review_manifest_scope value the project's Process Policy sets.
+
+    At ``transitive``, the default, every note a manifest includes expands its
+    own links. At ``bounded`` an epic reader's links are followed only from the
+    epics, stories and test plans of its scope and dependency closure; a note
+    they link to is read with its front-matter relations one hop further, and
+    a note reached that way is read without expanding it.
+    """
+    import process_policy
+
+    try:
+        values, _snapshot = process_policy.effective_values(docs)
+    except ValueError as exc:
+        raise InputError(f"process policy cannot set the review manifest scope: {exc}") from exc
+    return values[SCOPE_SWITCH]["value"]
+
+
 def links(value: str, source: str, unparsed: set[str]) -> list[tuple[bool, str]]:
     found = [(bool(match.group("embed")), match.group(0).lstrip("!"))
              for match in WIKILINK_RE.finditer(value)]
@@ -237,6 +264,9 @@ def manifest(docs: Path, *, epic: str | None = None, expected_hash: str | None =
         raise InputError("review docs directory is missing")
     before = snapshot(docs)
     contract = contract_hash()
+    # Only an epic reader follows the switch; a writer and the root reader
+    # keep the transitive closure.
+    bounded = epic is not None and not writer and read_scope(docs) == "bounded"
     with stage_package.candidate_session(), backlog.experience_validation_session():
         record, errors = backlog.collect(docs, review_inputs=True)
         stubs = record["scaffold_findings"]
@@ -272,13 +302,20 @@ def manifest(docs: Path, *, epic: str | None = None, expected_hash: str | None =
         reasons = defaultdict(set)
         pending = deque()
         hashes = {}
+        # A note's link distance from the scope; every hop is 0 unless bounded.
+        hops: dict[str, int] = {}
         unparsed: set[str] = set()
 
-        def include(relative: str, reason: str) -> None:
+        def include(relative: str, reason: str, hop: int = 0) -> None:
             # A path is validated and hashed once per run; the closing
             # freshness check re-validates every included path.
             if relative not in hashes:
                 hashes[relative] = file_hash(regular_file(docs, relative))
+                pending.append(relative)
+                hops[relative] = hop
+            elif hop < hops[relative]:
+                # Reached closer to the scope, the note follows more of its links.
+                hops[relative] = hop
                 pending.append(relative)
             reasons[relative].add(reason)
 
@@ -296,12 +333,12 @@ def manifest(docs: Path, *, epic: str | None = None, expected_hash: str | None =
                 include(by_epic[story["epic_id"]]["path"], reason)
                 queue.extend(sorted(adjacency[identity] - visited))
 
-        def reference(value: str, source: str, embed: bool = False) -> None:
+        def reference(value: str, source: str, embed: bool = False, hop: int = 0) -> None:
             if embed:
                 # The vault resolves an embed by the file path it names.
                 target = backlog.split_wikilink(value)[0]
                 try:
-                    include(target, f"embed from {source}")
+                    include(target, f"embed from {source}", hop)
                 except InputError as exc:
                     raise InputError(f"{source} embeds a missing or invalid file: {value}") from exc
             else:
@@ -313,23 +350,26 @@ def manifest(docs: Path, *, epic: str | None = None, expected_hash: str | None =
                 if errors or parsed is None:
                     raise InputError("; ".join(errors) or f"unresolved source: {value}")
                 target = parsed[0] + ".md"
-                include(target, f"reference from {source}")
-            if target in by_path:
+                include(target, f"reference from {source}", hop)
+            # The bounded scope's dependency closure is complete before any
+            # link is read, so a linked story is read alone.
+            if target in by_path and not bounded:
                 story_context(by_path[target]["id"], f"Story context from {source}")
 
-        def package_reference(value: str, source: str, stage: str | None = None) -> None:
+        def package_reference(value: str, source: str, stage: str | None = None,
+                              hop: int = 0) -> None:
             if value.startswith("[["):
-                reference(value, source)
+                reference(value, source, hop=hop)
                 return
             if value.startswith(("business-analysis/", "solution-design/", "design-system/")):
-                reference(f"[[{value}|{value}]]", source)
+                reference(f"[[{value}|{value}]]", source, hop=hop)
                 return
             if re.fullmatch(r"REQ-[0-9]{3,}", value):
                 matches = [path for path in before if path.startswith("requirements/")
                            and backlog.parse_front_matter(docs / path)[0].get("id") == value]
                 if len(matches) != 1:
                     raise InputError(f"Requirement reference must resolve uniquely: {value}")
-                include(matches[0], f"Requirement from {source}")
+                include(matches[0], f"Requirement from {source}", hop)
                 return
             if re.fullmatch(r"[a-z0-9]+(?:-[a-z0-9]+)*@r[1-9][0-9]*", value):
                 candidates = [item for item in stage_package.candidates(docs, stage or "experience-design")
@@ -341,40 +381,72 @@ def manifest(docs: Path, *, epic: str | None = None, expected_hash: str | None =
                     relative = path.relative_to(docs).as_posix()
                 except ValueError as exc:
                     raise InputError("package receipt escapes the docs directory") from exc
-                include(relative, f"package receipt from {source}")
+                include(relative, f"package receipt from {source}", hop)
                 return
             raise InputError(f"unsupported semantic source reference in {source}: {value}")
 
+        experience_records: dict[str, dict[str, str]] = {}
+
+        def record_reference(value: str, source: str, hop: int) -> None:
+            # A bounded read set never reaches a package through the backlog
+            # root, so a record cited by id is read as its package's note.
+            match = EXPERIENCE_RECORD_RE.fullmatch(value)
+            experience = match["experience"]
+            if experience not in experience_records:
+                import experience_compile
+                try:
+                    package = experience_compile.resolve_package(docs / "experience-design", experience)
+                except ValueError as exc:
+                    raise InputError(f"{source} cites an unresolvable Experience: {value}") from exc
+                if package is None:
+                    raise InputError(f"{source} cites an unresolvable Experience: {value}")
+                experience_records[experience] = {
+                    str(row.get("id")): (package / row["path"]).relative_to(docs).as_posix()
+                    for row in experience_compile.records(package, [])}
+            target = experience_records[experience].get(match["id"])
+            if target is None:
+                raise InputError(f"{source} cites a missing Experience record: {value}")
+            include(target, f"record reference from {source}", hop)
+
+        # The bounded scope reads the backlog root and the review history
+        # without following their links; the root review reads them in full.
+        context_hop = LEAF_HOP if bounded else 0
         for path in sorted(primary):
-            include(path, "primary review scope")
+            include(path, "primary review scope",
+                    context_hop if path == record["backlog"]["path"] else 0)
         for story_id in sorted(selected_stories):
             story_context(story_id, "incoming/outgoing dependency closure")
         review_notes = [review for item in owning_epics for review in item["reviews"]]
         if epic is None:
             review_notes += record["backlog_reviews"]
         for review in review_notes:
-            include(review["path"], "review history and current findings")
+            include(review["path"], "review history and current findings", context_hop)
 
         while pending:
             relative = pending.popleft()
             path = docs / relative
-            if path.suffix != ".md":
+            if path.suffix != ".md" or hops[relative] >= LEAF_HOP:
                 continue
+            hop = hops[relative] + 1 if bounded else 0
             props, body = backlog.parse_front_matter(path)
             for value in strings(props):
                 for embed, link in links(INLINE_CODE_RE.sub("", value), relative, unparsed):
-                    reference(link, relative, embed)
-            for embed, link in links(semantic_body(body), relative, unparsed):
-                reference(link, relative, embed)
+                    reference(link, relative, embed, hop)
+                if bounded and EXPERIENCE_RECORD_RE.fullmatch(value):
+                    record_reference(value, relative, hop)
+            # A note one hop out adds only its front-matter relations.
+            if hops[relative] == 0:
+                for embed, link in links(semantic_body(body), relative, unparsed):
+                    reference(link, relative, embed, hop)
             for key in ("requirement_ref", "input_package_refs", "application_ref", "process_refs"):
                 for value in backlog.values(props, key):
                     if "[[" not in value:
-                        package_reference(value, relative)
+                        package_reference(value, relative, hop=hop)
             for binding in backlog.values(props, "input_bindings"):
                 parts = binding.split("|")
                 if len(parts) != 3:
                     raise InputError(f"malformed input binding in {relative}")
-                package_reference(parts[1], relative, parts[0])
+                package_reference(parts[1], relative, parts[0], hop)
             for scope in backlog.values(props, "analysis_scopes"):
                 parsed = backlog.ANALYSIS_SCOPE_RE.fullmatch(scope)
                 if parsed is None:
@@ -386,7 +458,7 @@ def manifest(docs: Path, *, epic: str | None = None, expected_hash: str | None =
                 if not matches:
                     raise InputError(f"empty analysis scope: {scope}")
                 for match in matches:
-                    include(match, f"declared analysis scope from {relative}")
+                    include(match, f"declared analysis scope from {relative}", hop)
 
         if deferred and errors:
             notes = {item["path"] for item in epics} | {
@@ -432,7 +504,11 @@ def manifest(docs: Path, *, epic: str | None = None, expected_hash: str | None =
         structure_hash = digest({path: value for path, value in before.items()
                                  if path.startswith("backlog/")})
     else:
-        structure_hash = digest(epic_structure(record, set(hashes)))
+        # A bounded reader follows dependency edges only from its closure, the
+        # notes at hop 0, so an edge that reaches a story it reads through a
+        # link alone leaves its read set unchanged.
+        expanded = {path for path, hop in hops.items() if hop == 0} if bounded else set(hashes)
+        structure_hash = digest(epic_structure(record, expanded))
     result = {"ok": True, "schema_version": 1, "scope": scope,
               "primary_paths": sorted(primary), "context_paths": sorted(set(hashes) - primary),
               "paths": sorted(hashes), "files": [{"path": path, "sha256": hashes[path],
@@ -440,6 +516,8 @@ def manifest(docs: Path, *, epic: str | None = None, expected_hash: str | None =
               "structure_hash": structure_hash, "contract_hash": contract,
               "review": {"path": current_review["path"], "expected_relations": relations},
               "check": check}
+    if bounded:
+        result[SCOPE_SWITCH] = "bounded"
     if unparsed:
         result["unparsed_link_sources"] = sorted(unparsed)
     bound = result

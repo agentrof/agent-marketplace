@@ -477,8 +477,8 @@ class BacklogApprovalPreservationTests(unittest.TestCase):
         self.assert_full_gate()
         self.assertEqual(self.pin_of(self.root), pin)
 
-    def test_a_new_revision_drops_the_pin_until_its_own_approval(self):
-        self.approve_under_policy()
+    def test_a_new_revision_drops_the_root_pin_and_pins_its_new_round(self):
+        pin, _reviews = self.approve_under_policy()
         self.commit()
         output = io.StringIO()
         with self.fixture_input_selection(), contextlib.redirect_stdout(output):
@@ -487,8 +487,135 @@ class BacklogApprovalPreservationTests(unittest.TestCase):
                 requirement_ref="", input_ref=["ba", "solution", "design", "application"],
             ))
         self.assertEqual(code, 0, output.getvalue())
+        # The root's pin belongs to the approval stamp; the new round records
+        # the policy in force as begin-revision writes it.
         self.assertEqual(self.pin_of(self.root), {})
-        self.assertEqual(self.pin_of(self.docs / "backlog/reviews/round-3-backlog-review.md"), {})
+        self.assertEqual(self.pin_of(self.docs / "backlog/reviews/round-3-backlog-review.md"), pin)
+
+    def next_round(self, review):
+        """Write the next round of a review as the Product Owner does, by hand."""
+        props, body = compiler.parse_front_matter(review)
+        number = int(props["round"]) + 1
+        props = compiler.without_policy_pin(props)
+        props["round"] = number
+        props["aliases"] = [props["aliases"][0].rsplit("-", 1)[0] + f"-{number:03d}"]
+        compiler.status_tag(props, "draft")
+        for key in ("approved_at_utc", "source_hash"):
+            props.pop(key, None)
+        path = review.with_name(review.name.replace(f"round-{number - 1}-", f"round-{number}-"))
+        path.write_text(compiler.front_matter(props, body))
+        return path
+
+    def check(self):
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output):
+            code = compiler.main(["check", "--docs", str(self.docs), "--json"])
+        return code, json.loads(output.getvalue())
+
+    def approve_policy(self, *row):
+        self.policy("begin-revision" if process_policy.path_for(self.docs).exists() else "init")
+        for switch in process_policy.table_rows(
+                process_policy.parse(process_policy.path_for(self.docs))[1])[0]:
+            self.policy("set", "--switch", switch, "--default")
+        if row:
+            self.policy("set", "--switch", row[0], "--value", row[1])
+        self.policy("approve")
+        pin, errors = process_policy.approved_snapshot(self.docs)
+        self.assertEqual(errors, [])
+        return pin
+
+    def test_a_round_the_owner_writes_is_pinned_when_a_check_first_sees_it(self):
+        reviews = [self.revise(), self.new_epic_review_round()]
+        # Without a policy a check writes nothing.
+        before = compiler.snapshot_tree(self.docs)
+        code, result = self.check()
+        self.assertEqual(code, 0, result)
+        self.assertNotIn("pinned_reviews", result)
+        self.assertEqual(compiler.snapshot_tree(self.docs), before)
+        first = self.approve_policy("review_panels", "lens_panel")
+        approved = {path: path.read_bytes() for path in (self.old_review, self.epic_review)}
+        code, result = self.check()
+        self.assertEqual(code, 0, result)
+        self.assertEqual(result["pinned_reviews"],
+                         [path.relative_to(self.docs).as_posix() for path in reviews])
+        for path in reviews:
+            self.assertEqual(self.pin_of(path), first, path)
+        # An approved round is never touched, and a pinned one is never pinned again.
+        for path, data in approved.items():
+            self.assertEqual(path.read_bytes(), data)
+        second = self.approve_policy()
+        pinned = {path: path.read_bytes() for path in reviews}
+        code, result = self.check()
+        self.assertNotIn("pinned_reviews", result)
+        self.assertEqual({path: path.read_bytes() for path in reviews}, pinned)
+        self.assertNotEqual(first, second)
+        # The status reader never writes.
+        with contextlib.redirect_stdout(io.StringIO()):
+            compiler.main(["status", "--docs", str(self.docs), "--json"])
+        self.assertEqual({path: path.read_bytes() for path in reviews}, pinned)
+
+    def test_an_approval_refuses_a_review_that_ran_under_another_policy(self):
+        first = self.approve_policy("review_panels", "lens_panel")
+        self.commit()
+        reviews = [self.revise(), self.new_epic_review_round()]
+        code, result = self.check()
+        self.assertEqual(code, 0, result)
+        # The owner revises the policy after the reviews ran and before approval.
+        second = self.approve_policy()
+        before = compiler.snapshot_tree(self.docs)
+        result, output = self.approve()
+        self.assertEqual(result, 1, output)
+        for path in reviews:
+            self.assertIn(f"{path.relative_to(self.docs).as_posix()} records Process Policy"
+                          " revision 1, but the approval runs under Process Policy revision 2;"
+                          " write a new review round and rerun its review under the current"
+                          " Process Policy", output)
+        self.assertEqual(compiler.snapshot_tree(self.docs), before)
+        # New rounds rerun under the current policy approve; the earlier
+        # rounds keep the pin of the policy they ran under.
+        rerun = [self.next_round(path) for path in reviews]
+        code, result = self.check()
+        self.assertEqual(result["pinned_reviews"],
+                         [path.relative_to(self.docs).as_posix() for path in rerun])
+        result, output = self.approve()
+        self.assertEqual(result, 0, output)
+        self.assert_full_gate()
+        for path in (self.root, *rerun):
+            self.assertEqual(self.pin_of(path), second, path)
+        for path in reviews:
+            self.assertEqual(self.pin_of(path), first, path)
+
+    def test_rounds_the_compiler_writes_record_the_policy_in_force(self):
+        pin = self.approve_policy("review_panels", "lens_panel")
+        with contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(compiler.stub_epic(SimpleNamespace(
+                docs=str(self.docs), slug="second", id="EP-002", title="Second",
+                goal="Deliver a separate customer outcome.")), 0)
+        self.assertEqual(self.pin_of(self.docs / "backlog/epics/second/reviews/round-1-epic-review.md"),
+                         pin)
+        fresh = self.project / "fresh" / "workspace" / "docs"
+        (fresh / "maps").mkdir(parents=True)
+        self.policy_at(fresh, "init")
+        self.policy_at(fresh, "set", "--switch", "review_panels", "--value", "lens_panel")
+        self.policy_at(fresh, "approve")
+        with contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(compiler.init(SimpleNamespace(docs=str(fresh))), 0)
+        self.assertEqual(self.pin_of(fresh / "backlog/reviews/round-1-backlog-review.md"),
+                         process_policy.approved_snapshot(fresh)[0])
+        # A draft policy records nothing; the first check after its approval pins the round.
+        self.policy("begin-revision")
+        with contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(compiler.stub_epic(SimpleNamespace(
+                docs=str(self.docs), slug="third", id="EP-003", title="Third",
+                goal="Deliver a third customer outcome.")), 0)
+        self.assertEqual(self.pin_of(self.docs / "backlog/epics/third/reviews/round-1-epic-review.md"),
+                         {})
+
+    def policy_at(self, docs, *argv):
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output):
+            code = process_policy.main([argv[0], "--docs", str(docs), *argv[1:]])
+        self.assertEqual(code, 0, output.getvalue())
 
     def test_a_draft_process_policy_refuses_a_new_approval_before_any_write(self):
         self.policy("init")

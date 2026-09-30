@@ -101,9 +101,9 @@ raises a finding for a count alone. In its slicing lens it checks that each
 split moved its criteria and scenarios verbatim and that each kept story is
 still one review unit with a concrete Size Exceptions reason; a kept story
 over budget without its row is a minor finding. The epic review note's
-Slicing evidence names the limits its review ran under; the backlog approval
-records the Process Policy's path, revision and source hash in that note, as
-it does for every review it approves.
+Slicing evidence names the limits its review ran under; the note records the
+Process Policy's path, revision and source hash of the round, as every review
+round does.
 
 ## Delivery proposal
 

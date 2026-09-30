@@ -2360,6 +2360,28 @@ class DeliveryGitTests(unittest.TestCase):
                 finally:
                     delivery_git.atomic_push(project, "origin", [(ref, oid, resting[ref]) for ref, oid in held.items()])
 
+    def test_item_start_names_apply_governance_after_a_governance_revision(self):
+        """An approved Governance the Fence does not carry yet refuses activation with its remedy (#317)."""
+        project, docs, _directory, _item, _reserved = self.prepare_execution_with_draft_reserved_contracts(False)
+        delivery_git.publish_execution_plan(project, "DLV-001")
+        delivery_git.claim_items(project, "DLV-001")
+        args = type("Args", (), {"docs": str(docs)})
+        self.assertEqual(delivery_governance.begin_revision(args), 0)
+        governance = delivery_governance.path_for(docs)
+        props, body = delivery_governance.read(governance)
+        props["max_parallel"] += 1
+        governance.write_text(delivery_governance.render(props, body), encoding="utf-8")
+        self.assertEqual(delivery_governance.approve(args), 0)
+        _ref, _fence, values = delivery_git._fence_context(project, "origin")
+        self.assertNotEqual(values["Governance-Hash"], delivery_git.governed_governance_hash(project))
+        before = delivery_git.run_git(project, "ls-remote", "origin")
+        self.assertEqual(self.refused_finding(lambda: delivery_git.start_item(project, "DLV-001", "AUTH-01")), (
+            "DELIVERY_FENCE_GOVERNANCE", "the Fence does not carry the approved Governance; "
+                                         "apply it with apply-governance before Item activation"))
+        self.assertEqual(delivery_git.run_git(project, "ls-remote", "origin"), before)
+        self.assertIsNone(delivery_git.read_writer_receipt(project, "DLV-001", "AUTH-01"))
+        self.assertFalse(delivery_git.worktree_paths(project, "DLV-001", "AUTH-01")["item"].exists())
+
     def test_candidate_map_excludes_unpublished_local_governance(self):
         temporary, project = self.make_project()
         self.addCleanup(remove_temporary, temporary)

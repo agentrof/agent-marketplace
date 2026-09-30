@@ -323,7 +323,10 @@ number of simultaneously active Items. Slot refs `001..N` enforce that limit acr
 machines. Activation advances the Item and selected Slot to the same candidate
 OID. Normal Item writes advance both refs together. Pause or integration
 deletes the Slot under an exact lease. A Slot is coordination evidence, not a
-schedule or backlog property.
+schedule or backlog property. Activation reads that limit only while the Fence
+carries the approved Governance: after a Governance revision, `start-item` and
+`resume-item` refuse with `DELIVERY_FENCE_GOVERNANCE` until `apply-governance`
+binds the revision to the Fence.
 
 A protocol-1 Fence is accepted only by the dedicated quiescent migration path.
 It must be open with every Slot free; `upgrade-fence-v1` writes the

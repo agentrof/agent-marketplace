@@ -31,6 +31,12 @@ behavior is host-neutral; Claude Code and Codex are packaging adapters.
     overlap, cycles, ordering and coverage. The read-only
     `backlog_review_inputs.py` manifest narrows epic reading to that scope plus
     dependency and source closure; root review retains the complete package.
+    Process switch `review_manifest_scope` sets how far an epic reader's source
+    closure reaches: at the default, `transitive`, every included note expands
+    its own links; at `bounded`, only the epics, stories and test plans of the
+    scope and dependency closure do, each note they link to or cite adds its
+    front-matter relations one hop further, and the manifest's hash binds only
+    the story identities and dependency edges that reach that closure.
     Its `check` block carries the compiler facts for the current review note,
     which panel lens readers take as given. Its hash must be rechecked before
     persisting a review. An epic manifest's hash binds the notes it reads and

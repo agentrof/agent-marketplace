@@ -230,6 +230,12 @@ root manifest and approval still need every source finished:
 backlog_review_inputs.py --docs <workspace>/docs --epic <EP-ID>
 ```
 
+Switch `review_manifest_scope`: at `bounded`, an epic reader's manifest reads
+the epic's dependency closure, the notes it links to or cites and their
+front-matter relations, as
+`skill-content/backlog-plan/references/switch-review_manifest_scope-bounded.md`
+defines.
+
 Give one fresh `backlog-reviewer` the returned manifest and every named path:
 the root backlog, that epic, its child stories and test plans, and the incoming
 and outgoing dependency closure with shared contract/source context. Include

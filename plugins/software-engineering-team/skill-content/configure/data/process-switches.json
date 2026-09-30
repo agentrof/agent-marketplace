@@ -128,6 +128,27 @@
         "threshold": "Median apply_findings wall time at most 50% of the base writer's median for the same pass kind, a rework rate no higher than role_tier's over the same period and zero accepted unrelated edits, with every shared quality guard holding and the owner's approval."
       }
     },
+    "review_manifest_scope": {
+      "summary": "How far a backlog epic review's input manifest reads beyond the epic: every note reached through the links of the notes it includes, or only the epic's dependency closure, the notes that closure links to or cites and their front-matter relations.",
+      "issue": 303,
+      "flows": ["backlog-planning"],
+      "values": [
+        {
+          "id": "transitive",
+          "tradeoffs": "Every note an epic manifest includes expands its own links, so the read set grows with the vault instead of the epic and a small epic is handed about as many paths as a large one. Today's behaviour and the baseline bounded is measured against."
+        },
+        {
+          "id": "bounded",
+          "tradeoffs": "An epic manifest follows links only from the epics, stories and test plans of the epic and its dependency closure, reads each note they link to or cite with that note's front-matter relations one hop further, and expands nothing beyond; the backlog root and the review history are read without their links. A smaller manifest, while evidence behind a linked note's body links or two links out is outside it until the reviewer asks for it, and only the root review, which keeps the transitive read set, reads the whole closure."
+        }
+      ],
+      "default": "transitive",
+      "metric": "Per epic review pass, against the transitive manifest of the same epic and backlog revision: manifest path count, JSON bytes and build seconds; reviewer wall time; valid findings by severity against a transitive shadow review of the same epic and revision, as recall; and each request for evidence outside the manifest.",
+      "promotion": {
+        "unit": "At least 5 epic review passes run with bounded across at least 2 backlog revisions, each beside a transitive shadow review of the same epic and revision. The switch changes only backlog planning, which runs outside any Delivery, so review passes replace the 3-Delivery default.",
+        "threshold": "Valid critical and major recall at least equal to the transitive shadow review's, zero valid critical or major findings found later in the same epic whose evidence lay outside the bounded manifest, and median reviewer wall time at most 70% of the transitive review's, with every shared quality guard holding and the owner's approval."
+      }
+    },
     "review_loop": {
       "summary": "How a review loop treats the findings a review returns: which findings start a round, where a minor finding goes, what a re-review reads and whether an independent reader calibrates a critical or major claim before it gates, for backlog, Solution Design, Design System and Operation contract reviews and Delivery code review.",
       "issue": 326,

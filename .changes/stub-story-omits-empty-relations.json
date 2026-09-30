@@ -1,6 +1,0 @@
-{
-  "summary": "`backlog_compile.py stub-story` writes `uses_design` and `constrained_by` only when they have a value, so the per-write vault check no longer rejects the compiler's own stub of a story without design or constraint references as an empty typed relation list.",
-  "components": {
-    "software-engineering-team": "patch"
-  }
-}

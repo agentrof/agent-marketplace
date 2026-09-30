@@ -53,9 +53,8 @@
 - Role agents use the package's `auto` execution profile: `model` and, when
   set, `effort` per role tier. Every build also ships the `-lens` variants of
   the read-only document reviewers on the `lens` tier, `sonnet` at effort
-  `high`; only review panels under switch `review_panels` at `lens_panel` and
-  the calibration reader under switch `review_loop` at `blocking_delta` spawn
-  them, and the reviewers themselves keep their own tier. The package
+  `high`; only review panels under switch `review_panels` at `lens_panel`
+  spawn them, and the reviewers themselves keep their own tier. The package
   cannot switch the profile per user. To run every role on the main
   conversation's model, the user sets
   `CLAUDE_CODE_SUBAGENT_MODEL_FORCE=1` in the `env` block of their settings

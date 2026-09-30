@@ -8,6 +8,7 @@ from __future__ import annotations
 import contextlib
 import io
 import json
+import re
 import subprocess
 import sys
 import tempfile
@@ -232,9 +233,12 @@ class ReviewLoopReferenceTests(unittest.TestCase):
             "a new critical or major finding of a re-review gets its own calibration before it gates",
             "The calibration reader is neither the writer nor a reader that returned a finding of"
             " the review",
-            "`backlog-reviewer-lens`, `solution-reviewer-lens` or `design-system-reviewer-lens`",
+            "Spawn a fresh instance of the claiming reviewer's role on that role's own tier:"
+            " `backlog-reviewer`, `solution-reviewer` or `design-system-reviewer`",
             "`devops-engineer` for the Verification Contract and `qa-engineer` for the Environment"
             " Contract",
+            "Never spawn a `-lens` variant for calibration, also when a lens panel returned the"
+            " claims: a lower calibration tier needs its own data first",
             "adding `--findings <record of the claims>`",
             "Never pass the writer's triage or interpretation, another reply or the conversation",
             "`finding`, `claimed_severity`, `calibrated_severity` and `reason`",
@@ -268,16 +272,38 @@ class ReviewLoopReferenceTests(unittest.TestCase):
             with self.subTest(rule=rule):
                 self.assertIn(rule, text)
 
-    def test_host_contracts_start_the_calibration_reader_on_the_lens_variants(self):
+    def test_calibration_runs_on_the_claiming_reviewers_own_tier(self):
+        # The only calibration evidence comes from a judge on the strongest tier;
+        # a lower calibration tier needs its own data first (#326, 30 Sep 2026).
+        calibration = flat(DOCUMENT).split("## Calibration", 1)[1]
+        self.assertNotRegex(calibration, r"`[a-z-]+-lens`")
+        switch = json.loads(read(REGISTRY))["switches"]["review_loop"]
+        self.assertNotIn("agent_variants", switch)
+        self.assertIn("one fresh calibration reader of the claiming reviewer's role, on that"
+                      " role's own tier, confirms it", switch["values"][1]["tradeoffs"])
+        orchestration = " ".join((ROOT / "docs/orchestration.md").read_text(encoding="utf-8").split())
+        self.assertIn("It runs as the claiming reviewer's role on that role's own tier, never as a"
+                      " `-lens` variant", orchestration)
+        for step, (_entry, role, _skills, _writers) in CALIBRATION_READERS.items():
+            with self.subTest(step=step):
+                tier = re.search(r"(?m)^reasoning: (\S+)$", read(f"agents/{role}.md")).group(1)
+                self.assertNotIn(tier, {"lens", "mechanical"})
+
+    def test_only_review_panels_start_the_lens_variants(self):
         variants = json.loads(read(REGISTRY))["switches"]["review_panels"]["agent_variants"]
         self.assertEqual(variants["lens_panel"]["agents"],
                          ["backlog-reviewer", "design-system-reviewer", "solution-reviewer"])
-        for host in ("claude", "codex"):
+        self.assertEqual(variants["lens_panel"]["description"],
+                         "Lens-tier reader variant for review panels.")
+        verbs = {"claude": "spawn", "codex": "start"}
+        for host, verb in verbs.items():
             contract = " ".join((ROOT / "platforms" / host / "software-engineering-team"
                                  / "host-contract.md").read_text(encoding="utf-8").split())
             with self.subTest(host=host):
-                self.assertIn("the calibration reader under switch `review_loop` at `blocking_delta`",
+                self.assertIn(f"only review panels under switch `review_panels` at `lens_panel`"
+                              f" {verb} them, and the reviewers themselves keep their own tier",
                               contract)
+                self.assertNotIn("calibration reader", contract)
 
     def test_default_path_instructions_name_no_review_loop_value(self):
         for path in TEAM.rglob("*.md"):

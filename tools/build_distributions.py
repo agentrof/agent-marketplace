@@ -24,7 +24,7 @@ from types import ModuleType
 
 ADAPTER_API_VERSION = 1
 FEATURE_BRANCH_PREFIX_RE = re.compile(r"[a-z0-9]+(?:-[a-z0-9]+)*/")
-CANONICAL_REASONING_LEVELS = {"high", "medium", "low", "inherit"}
+CANONICAL_REASONING_LEVELS = {"high", "medium", "low", "lens", "inherit"}
 EXECUTION_PROFILE_FILE = "execution-profiles.json"
 AUTO_EXECUTION_PROFILE = "auto"
 EXECUTION_SETTING_KEYS = {"model", "effort"}
@@ -892,7 +892,10 @@ def validate_canonical(root: Path) -> None:
         for agent in sorted((source / "agents").glob("*.md")):
             fields, _ = parse_frontmatter(agent)
             if fields.get("reasoning") not in CANONICAL_REASONING_LEVELS:
-                problems.append(f"{agent}: reasoning must be high/medium/low/inherit")
+                problems.append(
+                    f"{agent}: reasoning must be one of"
+                    f" {', '.join(sorted(CANONICAL_REASONING_LEVELS))}"
+                )
             if "model" in fields:
                 problems.append(f"{agent}: canonical agents use reasoning, not model")
         for path in sorted(

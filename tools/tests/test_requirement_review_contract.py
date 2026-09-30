@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-import re
+import json
 import unittest
 from pathlib import Path
 
@@ -29,7 +29,7 @@ class RequirementReviewContracts(unittest.TestCase):
         epic_wait = flow.index("Wait for every epic reviewer")
         epic_writer = flow.index("The Product Owner is the single writer")
         root_start = flow.index("Only after every epic package and review is green")
-        root_wait = flow.index("Wait for its return", root_start)
+        root_wait = flow.index("Wait for every root reviewer to return", root_start)
         self.assertLess(epic_wait, epic_writer)
         self.assertLess(epic_writer, root_start)
         self.assertLess(root_start, root_wait)
@@ -84,12 +84,14 @@ class RequirementReviewContracts(unittest.TestCase):
         self.assertIn("complete review prose before approval", flow)
 
     def test_solution_entries_share_one_plan_with_all_required_lenses(self):
-        plan = read("skill-content/solution-architecture/references/challenge-lenses.md")
-        primary = plan.split("## Required primary lenses", 1)[1].split(
-            "## Targeted specialists", 1
-        )[0]
+        plan = " ".join(
+            read("skill-content/solution-architecture/references/challenge-lenses.md").split()
+        )
+        panels = json.loads(read("skill-content/challenge-review/data/review-panels.json"))
+        step = panels["review_steps"]["solution_design"]
+        self.assertEqual(step["reader_role"], "solution-reviewer")
         self.assertEqual(
-            set(re.findall(r"^- \*\*([^:]+):\*\*", primary, re.MULTILINE)),
+            {lens["id"] for lens in step["lenses"]},
             {
                 "technology-fit-and-traceability",
                 "sustainability-and-operability",
@@ -106,9 +108,17 @@ class RequirementReviewContracts(unittest.TestCase):
             with self.subTest(path=path):
                 text = read(path)
                 self.assertIn("solution-architecture/references/challenge-lenses.md", text)
-                self.assertIn("primary", text)
+                self.assertIn("panel", text)
+        for rule in (
+            "review panel `solution_design`",
+            "replaces the former single primary reviewer",
+            "was never a quality measurement",
+            "never a primary reviewer beside it",
+            "never a second panel because both sources were loaded",
+        ):
+            with self.subTest(rule=rule):
+                self.assertIn(rule, plan)
         self.assertNotIn("one fresh, read-only challenger per lens", plan)
-        self.assertIn("not four additional reviewer assignments", plan)
 
     def test_solution_specialists_preserve_independence_and_unknown_risk(self):
         plan = " ".join(
@@ -120,7 +130,7 @@ class RequirementReviewContracts(unittest.TestCase):
         ):
             with self.subTest(risk=risk):
                 self.assertIn(risk, plan)
-        self.assertIn("independent of both the writer and the primary reviewer", plan)
+        self.assertIn("independent of the writer and of every panel reader", plan)
         self.assertIn("Unknown impact is an unresolved question", plan)
         self.assertIn("full affected contracts and dependency context", plan)
         self.assertIn("wait for every selected reader before", plan)

@@ -84,7 +84,7 @@ Before delegation, follow `templates/task-input-contract.md` using `scripts/task
    property/graph fragment and renders
    the map and backlog navigation. Outgoing wikilinks provide graph and
    backlink relations without rewriting approved upstream notes. Challenge the
-   whole package through fresh read-only backlog reviewers. Only the exact
+   whole package through the flow's backlog review panels. Only the exact
    metadata-recovery exception in `flows/backlog-planning.md` may reuse existing
    epic reviews after a complete unchanged-source proof and a fresh root review.
    Historical review, story and test-plan bytes remain exact; epic authored
@@ -99,8 +99,8 @@ Before delegation, follow `templates/task-input-contract.md` using `scripts/task
    expected relation sets and verify its `source_hash` again before accepting
    findings. Wait for all epic reviewers before the Product Owner writes any
    epic review or fix. The Product Owner is the only backlog writer. After epic
-   packages are green, derive a fresh root manifest, invoke and wait for the
-   root reviewer, then let the Product Owner write the root review. The root
+   packages are green, derive a fresh root manifest, run and wait for the
+   root panel, then let the Product Owner write the root review. The root
    review covers the exact epic set, global scope, dependencies, delivery
    sequencing and coverage. Its structured `Deferred Criteria` table carries
    an escaped-table vault wikilink `criterion_ref`, `owner_role`, `reason` and

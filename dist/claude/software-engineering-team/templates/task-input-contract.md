@@ -7,7 +7,10 @@ the packaged `scripts/task_inputs.py`. Use `--entry <entry> --role <agent>
 repeated `--skill <method-skill>` from accepted Solution or Item bindings.
 Technology skills are selected from those bindings, never from a role name;
 include the committed, accepted Solution decision in `--input` when selecting
-a technology method for a project. Delivery's specialized manifest retains
+a technology method for a project. A review-panel lens reader whose role does
+not bind `challenge-review`, such as an Operation counterpart, adds
+`--skill challenge-review` so the panel protocol and lens data are bound.
+Delivery's specialized manifest retains
 the Item's historical approved bindings.
 `--findings <record>` binds the existing finding set. `--base <commit>` binds
 the complete committed and working change inventory; it does not infer a baseline.

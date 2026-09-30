@@ -31,11 +31,16 @@
 - When the canonical workflow says `spawn`, use the matching project-scoped
   custom agent from `.codex/agents/` and wait for every required agent before
   synthesis. Never run overlapping writers concurrently.
+- Run a review panel's lens readers in parallel: start every reader of the
+  panel before waiting on any of them, then wait for all of them before
+  triage.
 - During setup or a package refresh, regenerate the host projection, run the
   generated project check and preserve authored vault files. The generator owns
   only portable instruction roots and local project memory.
 - Role agents use the package's `auto` execution profile, which sets each role
-  tier's reasoning effort and, when the table names one, its model. When the
+  tier's reasoning effort and, when the table names one, its model. The `lens`
+  tier of the read-only document lens readers sets effort `high` and no model,
+  so those readers use the session model. When the
   user wants every role to follow the parent session, run
   `<absolute-python> <absolute-package-scripts>/generate_codex_project.py apply
   --project-root <root> --scope local --execution-profile inherit`;

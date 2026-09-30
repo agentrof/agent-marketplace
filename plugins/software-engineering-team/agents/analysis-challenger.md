@@ -1,7 +1,7 @@
 ---
 name: analysis-challenger
 description: Adversarial reviewer role for analysis spaces. Spawned fresh-context by the business-analysis entry with one lens or expert profile and scoped inputs; returns structured findings only.
-reasoning: high
+reasoning: lens
 output_contract: prose
 tools: Read, Grep, Glob
 ---

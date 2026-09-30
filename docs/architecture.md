@@ -139,6 +139,12 @@ behavior is host-neutral; Claude Code and Codex are packaging adapters.
     modes. Schema-v3 package provenance binds the closed file inventory, hashes
     and executable set. Public stable installs, exact-lease ref transactions,
     immutable Release reconciliation and clean-ref completion remain mandatory.
+29. Backlog, Solution Design, Design System and Operation contract reviews
+    run as review panels of parallel, read-only lens readers. Lens sets are
+    validated data in `challenge-review/data/review-panels.json`; a panel
+    replaces a step's single reviewer and never stacks on top of it. Review
+    steps whose machine interface accepts one result per role keep one reader
+    until a merge step exists.
 
 The normative Requirement and Delivery lifecycle is documented in
 [requirement-delivery-protocol.md](requirement-delivery-protocol.md).

@@ -277,9 +277,11 @@ section is present; a review without accepted minor findings omits it. The
 section never holds a critical or major finding, which closes only through a
 confirmed fix or disproof.
 
-A re-review after a blocking fix or disproof reads the regenerated manifest
-together with those findings, any cited evidence and the changed paths. It
-confirms that each finding is closed and reviews the changed text with its
-dependency context. It does not re-audit unchanged text that an earlier pass
-for the same review note already reviewed. A new critical or major finding
-continues the loop; a new minor finding follows the record rule above.
+A re-review after a blocking fix or disproof reruns only the lens
+assignments that returned those findings. Each reads the regenerated manifest
+together with its findings, any cited evidence and the changed paths, and
+confirms that each finding is closed. The first rerun assignment also reviews
+the changed text with its dependency context through every lens. It does not
+re-audit unchanged text that an earlier pass for the same review note already
+reviewed. A new critical or major finding continues the loop; a new minor
+finding follows the record rule above.

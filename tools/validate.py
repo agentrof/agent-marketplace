@@ -37,7 +37,7 @@ LIMITS_CONFIG_RELPATH = "tools/data/limits.json"
 PRODUCT_CONFIG_RELPATH = "product.json"
 
 AGENT_REQUIRED_KEYS = {"name", "description", "reasoning", "output_contract"}
-AGENT_REASONING_ENUM = {"high", "medium", "low", "inherit"}
+AGENT_REASONING_ENUM = {"high", "medium", "low", "lens", "inherit"}
 # How the role hands results back. prose: findings/artifacts in the reply
 # text (every current persona). structured: a forced tool call. Declared so
 # a composer can refuse pairing a prose persona with schema forcing; the
@@ -2227,6 +2227,188 @@ def check_execution_profiles(tree: Tree, findings: list[Finding]) -> None:
             ))
 
 
+REVIEW_PANELS_RELPATH = "skill-content/challenge-review/data/review-panels.json"
+VAULT_POLICY_RELPATH = "skill-content/obsidian-vault/data/vault-policy.json"
+REVIEW_PANEL_ANCHOR_RE = re.compile(r"\breview\s+panel\s+`([a-z][a-z0-9_]*)`")
+LENS_REFERENCE_RE = re.compile(r"\blens\s+`([a-z][a-z0-9-]*)`")
+REVIEW_STEP_ID_RE = re.compile(r"^[a-z][a-z0-9]*(?:_[a-z0-9]+)*$")
+REVIEW_STEP_KEYS = {"reader_role", "lenses", "default_panel"}
+LENS_KEYS = {"id", "focus"}
+
+
+def _unique_json_object(pairs: list[tuple[str, object]]) -> dict:
+    keys = [key for key, _value in pairs]
+    duplicates = sorted({key for key in keys if keys.count(key) > 1})
+    if duplicates:
+        raise ValueError(f"duplicate keys {duplicates}")
+    return dict(pairs)
+
+
+def _policy_list(policy: object, dotted: object) -> list[str] | None:
+    value = policy
+    for part in dotted.split(".") if isinstance(dotted, str) and dotted else [None]:
+        if not isinstance(value, dict) or part not in value:
+            return None
+        value = value[part]
+    if isinstance(value, list) and value and all(isinstance(item, str) for item in value):
+        return value
+    return None
+
+
+def review_panel_problems(data: object, agents: set[str], policy: object) -> list[str]:
+    """Return the shape problems of one plugin's review-panel lens data."""
+    if not isinstance(data, dict) or set(data) != {"schema_version", "review_steps"} \
+            or data.get("schema_version") != 1:
+        return ["data must hold exactly schema_version 1 and review_steps"]
+    steps = data["review_steps"]
+    if not isinstance(steps, dict) or not steps:
+        return ["review_steps must declare at least one review step"]
+    problems: list[str] = []
+    for step, spec in sorted(steps.items()):
+        where = f"review step {step!r}"
+        if not REVIEW_STEP_ID_RE.match(step):
+            problems.append(f"{where}: id must be lowercase snake_case")
+        if not isinstance(spec, dict) or not REVIEW_STEP_KEYS <= set(spec) \
+                or not set(spec) <= REVIEW_STEP_KEYS | {"review_note"}:
+            problems.append(
+                f"{where}: must hold reader_role, lenses, default_panel and"
+                " optionally review_note")
+            continue
+        if spec["reader_role"] not in agents:
+            problems.append(f"{where}: unknown reader_role {spec['reader_role']!r}")
+        lenses = spec["lenses"]
+        if not isinstance(lenses, list) or not lenses:
+            problems.append(f"{where}: empty panel, lenses declares no lens")
+            continue
+        ids: list[str] = []
+        for lens in lenses:
+            if not isinstance(lens, dict) or not LENS_KEYS <= set(lens) \
+                    or not set(lens) <= LENS_KEYS | {"covers"} \
+                    or not isinstance(lens.get("id"), str) \
+                    or not isinstance(lens.get("focus"), str) \
+                    or not lens["focus"].strip():
+                problems.append(
+                    f"{where}: every lens holds an id, non-empty focus text and"
+                    " optionally covers")
+                continue
+            if not KEBAB_RE.match(lens["id"]):
+                problems.append(f"{where}: lens id {lens['id']!r} must be kebab-case")
+            ids.append(lens["id"])
+        for duplicate in sorted({lens for lens in ids if ids.count(lens) > 1}):
+            problems.append(f"{where}: duplicate lens id {duplicate!r}")
+        panel = spec["default_panel"]
+        if not isinstance(panel, list) or not panel:
+            problems.append(f"{where}: empty panel, default_panel has no assignment")
+        else:
+            assigned: list[str] = []
+            for assignment in panel:
+                if not isinstance(assignment, list) or not assignment \
+                        or not all(isinstance(lens, str) for lens in assignment):
+                    problems.append(
+                        f"{where}: empty panel assignment; each assignment lists"
+                        " one or more lens ids")
+                    continue
+                assigned.extend(assignment)
+            for lens in sorted(set(assigned) - set(ids)):
+                problems.append(f"{where}: default_panel names unknown lens id {lens!r}")
+            for lens in sorted({lens for lens in assigned if assigned.count(lens) > 1}):
+                problems.append(
+                    f"{where}: duplicate lens id {lens!r} across default_panel assignments")
+            for lens in sorted(set(ids) - set(assigned)):
+                problems.append(f"{where}: lens {lens!r} is in no default_panel assignment")
+        covers = {lens["id"]: lens["covers"] for lens in lenses
+                  if isinstance(lens, dict) and "covers" in lens and isinstance(lens.get("id"), str)}
+        note = spec.get("review_note")
+        if note is None:
+            if covers:
+                problems.append(f"{where}: covers needs a review_note declaration")
+            continue
+        sections = _policy_list(policy, note.get("sections")) \
+            if isinstance(note, dict) and set(note) == {"sections", "panel_sections"} else None
+        panel_sections = note.get("panel_sections") if isinstance(note, dict) else None
+        if sections is None or not isinstance(panel_sections, list) \
+                or not all(isinstance(item, str) for item in panel_sections):
+            problems.append(
+                f"{where}: review_note needs sections, a dotted vault-policy path to a"
+                " section list, and a panel_sections list")
+            continue
+        covered: list[str] = []
+        for lens in ids:
+            value = covers.get(lens)
+            if not isinstance(value, list) or not value \
+                    or not all(isinstance(item, str) for item in value):
+                problems.append(f"{where}: lens {lens!r} must list the note sections it covers")
+                continue
+            covered.extend(value)
+        for section in sorted(set(covered + panel_sections) - set(sections)):
+            problems.append(f"{where}: unknown review-note section {section!r}")
+        for section in sorted({item for item in covered if covered.count(item) > 1}
+                              | (set(covered) & set(panel_sections))):
+            problems.append(f"{where}: review-note section {section!r} has more than one owner")
+        for section in sorted(set(sections) - set(covered) - set(panel_sections)):
+            problems.append(f"{where}: no lens covers review-note section {section!r}")
+    return problems
+
+
+def check_review_panels(tree: Tree, findings: list[Finding]) -> None:
+    """Review-panel lens sets are validated data. Every flow anchor names a
+    declared step, every declared step is wired into a flow, and every lens a
+    prose reference names is declared."""
+    for plugin in plugin_dirs(tree):
+        path = plugin / REVIEW_PANELS_RELPATH
+        anchors: dict[str, list[Path]] = {}
+        lens_references: dict[str, list[Path]] = {}
+        for source in sorted(plugin.rglob("*.md")):
+            text = read_text(source)
+            for step in REVIEW_PANEL_ANCHOR_RE.findall(text):
+                anchors.setdefault(step, []).append(source)
+            for lens in LENS_REFERENCE_RE.findall(text):
+                lens_references.setdefault(lens, []).append(source)
+
+        def err(where: Path, message: str, fix: str) -> None:
+            findings.append(Finding("error", rel(tree, where), 1, "review_panels", message, fix))
+
+        if not path.is_file():
+            if anchors or lens_references:
+                err(path, "review panels are referenced but their lens data is missing",
+                    "restore the review-panel data file the flows anchor to")
+            continue
+        try:
+            data = json.loads(read_text(path), object_pairs_hook=_unique_json_object)
+        except (json.JSONDecodeError, ValueError) as exc:
+            err(path, f"review-panel data is not valid unique-key JSON: {exc}",
+                "fix the data file; every key and lens id is declared once")
+            continue
+        try:
+            policy = json.loads(read_text(plugin / VAULT_POLICY_RELPATH))
+        except (OSError, json.JSONDecodeError):
+            policy = None  # vault_policy_shape reports a broken policy
+        agents = {agent.stem for agent in agent_files(plugin)}
+        for problem in review_panel_problems(data, agents, policy):
+            err(path, problem, "declare each review step, lens and assignment once;"
+                " a new lens or step is a data change plus its flow anchor")
+        steps = data.get("review_steps") if isinstance(data, dict) else None
+        steps = steps if isinstance(steps, dict) else {}
+        declared_lenses = {
+            lens["id"] for spec in steps.values() if isinstance(spec, dict)
+            for lens in spec.get("lenses", []) if isinstance(spec.get("lenses"), list)
+            and isinstance(lens, dict) and isinstance(lens.get("id"), str)
+        }
+        flows = plugin / "flows"
+        for step, sources in sorted(anchors.items()):
+            if step not in steps:
+                err(sources[0], f"review panel {step!r} is missing from the lens data",
+                    "declare the step in the review-panel data or fix the anchor")
+        for step in sorted(steps):
+            if not any(source.parent == flows for source in anchors.get(step, [])):
+                err(path, f"review step {step!r} is unknown to every flow",
+                    "anchor the step in its flow as review panel `<step>`")
+        for lens, sources in sorted(lens_references.items()):
+            if lens not in declared_lenses:
+                err(sources[0], f"prose names unknown lens {lens!r}",
+                    "name a lens id the review-panel data declares")
+
+
 def _limits_shape_errors(config: dict) -> list[str]:
     problems: list[str] = []
     if not isinstance(config.get("schema_version"), int):
@@ -2479,6 +2661,7 @@ CHECKS = {
     "vault_wiring": check_vault_wiring,
     "model_config_shape": check_model_config_shape,
     "execution_profiles": check_execution_profiles,
+    "review_panels": check_review_panels,
     "limits_config_shape": check_limits_config_shape,
     "delivery_contract_shape": check_delivery_contract_shape,
     "product_namespace": check_product_namespace,

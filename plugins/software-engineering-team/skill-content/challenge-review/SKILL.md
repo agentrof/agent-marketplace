@@ -1,6 +1,6 @@
 ---
 name: challenge-review
-description: Read-only adversarial review method for project-local analysis and solution documents.
+description: Read-only adversarial review method and parallel lens panels for project-local document reviews.
 exposure: internal
 ---
 
@@ -13,17 +13,18 @@ history. The approved canonical documents are the lasting evidence.
 ## When to Use
 
 - A Business Analysis domain is approaching an approval gate.
-- A solution-design engagement is approaching an approval gate; use its single
-  review plan in `solution-architecture/references/challenge-lenses.md` for
-  reader selection and lens coverage, and this skill for triage.
+- A backlog, Solution Design, Design System or Operation contract review runs
+  its review panel from `data/review-panels.json`; Solution adds only the
+  risk-triggered specialists of
+  `solution-architecture/references/challenge-lenses.md`.
 - An earlier challenge left blocking findings that need targeted re-review.
 
 ## The Loop
 
 1. Select proportionate lenses from the owning stage's review plan; Business
-   Analysis uses the lens bank and topic experts, while Solution uses its
-   named primary reviewer and risk-triggered specialists. Include each lens
-   and its reason in that reviewer's explicit input.
+   Analysis uses the lens bank and topic experts, while a panel step takes its
+   default lens assignments from `data/review-panels.json`. Include each
+   lens and its focus in that reviewer's explicit input.
 2. Give each challenger only the named files, the constitution and its assigned
    lens coverage. Never pass conversation history or an interpretation of the
    author intent.
@@ -50,6 +51,7 @@ history. The approved canonical documents are the lasting evidence.
 
 ## References
 
-- [lens-bank](references/lens-bank.md): standard lenses and panel sizing. Read when selecting a challenge panel.
+- [lens-bank](references/lens-bank.md): standard lenses and panel sizing. Read when selecting a Business Analysis challenge panel.
+- [review-panel](references/review-panel.md): parallel lens readers, merged findings, panel verdict and targeted re-review. Read when a flow runs a review panel or when you are one of its lens readers.
 - [expert-casting](references/expert-casting.md): grounded practitioner questions. Read when a named domain question needs an expert.
 - [triage](references/triage.md): live finding disposition and durable-resolution rules. Read when challenge findings return.

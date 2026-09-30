@@ -1,0 +1,6 @@
+{
+  "summary": "Backlog epic and root, Solution Design, Design System and Operation contract reviews run as review panels: parallel read-only lens readers declared as validated data in `challenge-review/data/review-panels.json`, merged by root cause, approved only without an open critical or major finding and re-reviewed by lens. The Solution panel replaces the single primary reviewer. Read-only document readers move to a new `lens` execution tier (Claude `sonnet` at effort `high`, Codex effort `high`). The backlog review manifest carries a `check` block of compiler facts that readers take as given, and validates each input once per run: on a backlog of about 1,000 paths an epic manifest takes 11 to 12 s instead of 126 to 157 s and the root 12 s instead of 170 s, with an unchanged read set.",
+  "components": {
+    "software-engineering-team": "minor"
+  }
+}

@@ -1,6 +1,6 @@
 ---
 name: challenge-review
-description: Read-only adversarial review method for project-local analysis and solution documents.
+description: Read-only adversarial review method and parallel lens panels for project-local document reviews.
 user-invocable: false
 ---
 

@@ -268,6 +268,20 @@ class TaskInputTests(unittest.TestCase):
         qa = task_inputs.manifest(entry="deliver", role="qa-engineer", mode="create")
         self.assertEqual(qa["write_boundary"], "read_only")
 
+    def test_operation_panel_readers_bind_the_panel_protocol_and_lens_data(self):
+        for role in ("devops-engineer", "qa-engineer"):
+            with self.subTest(role=role):
+                plain = task_inputs.manifest(entry="configure", role=role, mode="review")
+                self.assertNotIn("skill-content/challenge-review/SKILL.md", plain["required_reads"])
+                result = task_inputs.manifest(entry="configure", role=role, mode="review",
+                                              skills=["challenge-review"])
+                self.assertIn("skill-content/challenge-review/SKILL.md", result["required_reads"])
+                self.assertIn("skill-content/challenge-review/references/review-panel.md",
+                              [item["path"] for item in result["conditional_reads"]])
+                self.assertIn("skill-content/challenge-review/data/review-panels.json",
+                              [item["path"] for item in result["instructions"]])
+                self.assertEqual(result["write_boundary"], "read_only")
+
     def test_changed_project_input_invalidates_manifest_without_runtime_writes(self):
         with tempfile.TemporaryDirectory() as raw:
             root = Path(raw)

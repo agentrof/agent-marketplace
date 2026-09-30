@@ -1,7 +1,8 @@
 # Solution Design Flow
 
 Spawn template: paste `{{constitution}}`, the exact BA receipt, tree paths,
-decision-status lens and `SELF-CHECK` into every reviewer prompt.
+the reader's lens assignment or specialist risk and `SELF-CHECK` into every
+reviewer prompt.
 
 Read this complete flow before `/solution-design` changes durable state.
 Exact `REQ-###` selects Requirement mode; its strict-current BA receipt is the only
@@ -24,12 +25,14 @@ bound as an explicit Requirement reuse, never used to author a new Solution revi
    rejected and superseded decisions never constrain an approved topology.
 4. Follow the single review plan in
    `skill-content/solution-architecture/references/challenge-lenses.md`.
-   Spawn one independent primary `solution-reviewer` for all four required
-   lenses plus BA allocation, topology, naming, sourcing and decision status.
-   Add only the plan's risk-triggered specialist invocations; they do not form
-   a second default panel. Wait for every selected reader before the writer
-   resolves blockers in canonical landscape/components/decisions. Replies are
-   transient; repeat only affected review when blocking evidence changes.
+   Run review panel `solution_design`: one fresh `solution-reviewer` per lens
+   assignment, in parallel, whose lenses together cover BA allocation,
+   topology, naming, sourcing and decision status. The panel replaces the
+   single primary reviewer and never runs beside one. Add only the plan's
+   risk-triggered specialist invocations; they do not form a second panel.
+   Wait for every selected reader before the writer resolves blockers in
+   canonical landscape/components/decisions. Replies are transient; repeat
+   only affected review when blocking evidence changes.
 5. After the owner confirms the exact topology and naming set, run
    `landscape_check.py confirm-topology`, then `check`, render
    capability/component/topology catalogs and package `approve`. Approval

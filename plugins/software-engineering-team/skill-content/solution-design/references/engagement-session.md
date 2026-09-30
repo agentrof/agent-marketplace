@@ -25,8 +25,8 @@ studies one topic; accepted decisions are written back to the landscape.
 2. Link the landscape, analysis criteria and decisions in front matter. Every
    decision records its accepted alternative and the reason for rejection.
 3. Use the one review plan in
-   `solution-architecture/references/challenge-lenses.md`: the named primary
-   reviewer covers every required lens, with independent specialists only for
+   `solution-architecture/references/challenge-lenses.md`: its panel of lens
+   readers covers every challenge lens, with independent specialists only for
    its risk triggers. Wait for all selected readers, resolve accepted findings
    in the engagement or decision documents and keep replies transient. This
    session adds no separate default challenge panel.

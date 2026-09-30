@@ -1,27 +1,25 @@
 # Solution Review Plan
 
-Use one fresh, read-only `solution-reviewer` as the primary reviewer for the
-candidate engagement and package. The primary is independent of the Solution
-Architect and covers all four lenses below together with the role's allocation,
-topology, naming, sourcing and decision-status checks. Lenses are coverage
-obligations within this review, not four additional reviewer assignments.
+Run review panel `solution_design` as
+`challenge-review/references/review-panel.md` defines it.
+`challenge-review/data/review-panels.json` declares its four challenge lenses,
+their focus and the default panel of one fresh, read-only `solution-reviewer`
+per lens. Together the lenses also cover BA allocation, topology, naming,
+sourcing and decision status. Every reader is independent of the Solution
+Architect and of the other readers.
 
-Give each reviewer exact engagement, landscape, component, decision and cited
-analysis paths, their current evidence, the constitution and its assigned
-coverage. Use canonical files, never conversation history or the author's
-interpretation as a substitute for evidence. This plan is transient invocation
-input, not a new project artifact or approval record.
+The panel replaces the former single primary reviewer. That primary existed
+only so that loading both the entry skill and this reference could not start
+two full panels; it saved reader invocations and was never a quality
+measurement. The guard stays: run exactly one panel per review, never a
+primary reviewer beside it and never a second panel because both sources were
+loaded.
 
-## Required primary lenses
-
-- **technology-fit-and-traceability:** Does every verdict trace to an approved
-  requirement or budget? Are assumptions and unverified cells named?
-- **sustainability-and-operability:** Who owns each component, failure mode,
-  observability concern and future change cost?
-- **cost-and-lock-in:** Is cost judged at the stated scale and is the exit path
-  concrete rather than a slogan?
-- **security-and-compliance:** Which trust boundaries, data obligations and
-  deferred security decisions are present?
+Give every reader the same exact engagement, landscape, component, decision
+and cited analysis paths, their current evidence, the constitution and its one
+lens assignment. Use canonical files, never conversation history or the
+author's interpretation as a substitute for evidence. This plan is transient
+invocation input, not a new project artifact or approval record.
 
 ## Targeted specialists
 
@@ -35,14 +33,14 @@ exact supporting evidence when the candidate changes any of these risks:
 - scale, availability or operating-cost commitments with unresolved or
   unquantified constraints.
 
-The specialist is independent of both the writer and the primary reviewer.
-Give it the full affected contracts and dependency context, not just the
-primary's conclusions. One specialist may cover related risks explicitly;
-unrelated risks need the appropriate focused perspectives. Unknown impact is
-an unresolved question: obtain the missing evidence and broaden the review
-where needed, never silently declare it outside scope. The primary retains
-all four lenses even when a specialist is selected. Do not add a second full
-panel merely because both the entry skill and this reference were loaded.
+The specialist is independent of the writer and of every panel reader. Give
+it the full affected contracts and dependency context, not just the panel's
+conclusions. One specialist may cover related risks explicitly; unrelated
+risks need the appropriate focused perspectives. Unknown impact is an
+unresolved question: obtain the missing evidence and broaden the review where
+needed, never silently declare it outside scope. The panel keeps every lens
+assignment even when a specialist is selected, and a specialist is never a
+second panel.
 
 ## Severity
 
@@ -63,14 +61,14 @@ cause are one finding at the severity of that cause.
 
 ## Return and disposition
 
-The primary returns a verdict, findings with severity, evidence, impact and
-required resolution, and a coverage statement for every required lens. Each
-specialist returns its assigned scope, lens coverage, verdict and findings
-with severity. A verdict requests changes only while a critical or major
-finding is open. Reviewers never edit project files and their replies are not
-durable audit records. Independent readers may run in parallel against
-unchanged inputs; wait for every selected reader before the Solution Architect
-writes.
+Each panel reader returns its lens, a verdict and findings with severity,
+evidence, impact and required resolution. Each specialist returns its assigned
+scope, lens coverage, verdict and findings with severity. A verdict requests
+changes only while a critical or major finding is open. Reviewers never edit
+project files and their replies are not durable audit records. Independent
+readers may run in parallel against unchanged inputs; wait for every selected
+reader before the Solution Architect writes, then merge findings that share
+one root cause as the panel protocol defines.
 
 The Solution Architect resolves each critical or major finding: it fixes the
 finding in the final landscape, engagement or decision documents, rejects it
@@ -78,8 +76,9 @@ with a concrete reason shown at the approval gate, or records a genuine
 product risk with a named revisit trigger. A minor finding never blocks and
 never starts another review. Fix it only in a writer pass that already carries
 a blocking fix, otherwise show it with its acceptance reason at the approval
-gate. Run the mechanical compilers after serialized writes. Re-run only
-readers affected by a blocking fix, meaning a fix for a critical or major
-finding, and any newly exposed dependency or risk. A first review with no
-blocking findings needs no extra clean round. No fixed retry count, reviewer
-artifact, digest or lock is part of the project contract.
+gate. Run the mechanical compilers after serialized writes. Re-run only the
+lens assignments and specialists affected by a blocking fix, meaning a fix for
+a critical or major finding, with the panel's changed-text check and any newly
+exposed dependency or risk. A first review with no blocking findings needs no
+extra clean round. No fixed retry count, reviewer artifact, digest or lock is
+part of the project contract.

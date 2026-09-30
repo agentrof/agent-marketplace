@@ -190,11 +190,13 @@ def compiler_check(docs: Path, record: dict, scope_epics: list[dict], review: di
 
 def manifest(docs: Path, *, epic: str | None = None, expected_hash: str | None = None,
              writer: bool = False) -> dict:
-    """Bound one review or writer task; only a writer may meet untouched stubs.
+    """Bound one review or writer task; a reader never reads an untouched stub.
 
     Filling the placeholders the stub verbs write is the writer's task, so a
-    writer manifest carries them as ``check.scaffold_findings``. Every other
-    source finding still fails, and a reader still needs complete sources.
+    writer manifest carries them as ``check.scaffold_findings``. An epic
+    reader carries there only the stubs in notes outside its paths, so an
+    unfinished epic holds back only the reviews that read it. Every other
+    source finding still fails, and the root reader needs complete sources.
     """
     docs = docs.resolve()
     if not docs.is_dir():
@@ -203,9 +205,12 @@ def manifest(docs: Path, *, epic: str | None = None, expected_hash: str | None =
     contract = contract_hash()
     with stage_package.candidate_session(), backlog.experience_validation_session():
         record, errors = backlog.collect(docs, review_inputs=True)
-        carried = record["scaffold_findings"] if writer else []
+        stubs = record["scaffold_findings"]
+        carried = stubs if writer else []
         errors = sorted(set(errors) - set(carried))
-        if errors:
+        # Which stubs an epic reader reads is known once its closure is.
+        deferred = epic is not None and not writer and set(errors) <= set(stubs)
+        if errors and not deferred:
             raise InputError("backlog structure is invalid: " + "; ".join(errors))
         epics = record["epics"]
         if epic is not None:
@@ -349,6 +354,17 @@ def manifest(docs: Path, *, epic: str | None = None, expected_hash: str | None =
                 for match in matches:
                     include(match, f"declared analysis scope from {relative}")
 
+        if deferred and errors:
+            notes = {item["path"] for item in epics} | {
+                path for story in record["stories"] for path in (story["path"], story["test_plan"])}
+            # Every stub finding starts with its note's path; one that names no
+            # backlog note outside the read set still fails.
+            carried = [finding for finding in errors
+                       if finding.split(" ", 1)[0] in notes - set(hashes)]
+            blocking = sorted(set(errors) - set(carried))
+            if blocking:
+                raise InputError("backlog structure is invalid: " + "; ".join(blocking))
+
         if epic is None:
             current_review = backlog.latest(record["backlog_reviews"])
             relations = {"derives_from": [record["backlog"]["path"][:-3]],
@@ -365,7 +381,7 @@ def manifest(docs: Path, *, epic: str | None = None, expected_hash: str | None =
                          "dependency_refs": sorted(backlog.dependency_edges(selected["stories"], True, record))}
             scope = selected["path"]
         check = compiler_check(docs, record, owning_epics, current_review, relations, epic is None)
-        if writer:
+        if writer or carried:
             check["scaffold_findings"] = carried
 
     after = snapshot(docs)

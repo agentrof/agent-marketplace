@@ -50,8 +50,10 @@ backlog source and review paths from the existing `--epic` closure (bare `--epic
 selects the root package); an epic closure excludes dependency context and
 the global backlog record. A writer task's closure lists the untouched
 `stub-epic` and `stub-story` placeholders in `check.scaffold_findings` instead
-of failing on them; any other source finding still fails, and a read-only
-task still needs complete sources. Story implementation ownership and QA
+of failing on them; any other source finding still fails. A read-only epic
+task fails on such a placeholder only in a path it reads and lists the others
+in `check.scaffold_findings`; a read-only root task still needs complete
+sources. Story implementation ownership and QA
 contribution ownership do not transfer canonical backlog writing authority.
 Delivery implementation derives literal path-and-descendant claims from one
 selected Item and its role sequence; vault, Git, and runtime authority paths

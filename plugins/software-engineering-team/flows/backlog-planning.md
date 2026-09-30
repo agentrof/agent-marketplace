@@ -207,7 +207,11 @@ The Product Owner finishes the candidate source documents. Review notes may
 still contain their initialized placeholders: requiring completed reviews
 before their readers run would prevent the first review. For each epic, run
 the packaged read-only manifest helper; it validates source, coverage and
-dependency inputs while leaving review-completion checks to the final gate:
+dependency inputs while leaving review-completion checks to the final gate.
+An epic's manifest fails on a `stub-epic` or `stub-story` placeholder only in
+a path it names and lists the others in `check.scaffold_findings`, so a
+finished epic's review can start while another epic's writer still works. The
+root manifest and approval still need every source finished:
 
 ```text
 backlog_review_inputs.py --docs <workspace>/docs --epic <EP-ID>

@@ -1,0 +1,6 @@
+{
+  "summary": "`backlog_review_inputs.py --epic <EP-ID>` no longer fails because another epic still holds untouched `stub-epic` or `stub-story` placeholders. An epic reviewer's manifest fails on such a placeholder only in a note it reads, its epic and that epic's dependency and source closure, and lists the placeholders of every other note in `check.scaffold_findings`, so one epic's unfinished writer no longer holds back the review of each finished epic. Every other source finding anywhere in the backlog still fails the manifest, and the root manifest, `backlog_compile.py check` and approval still require every source finished.",
+  "components": {
+    "software-engineering-team": "patch"
+  }
+}

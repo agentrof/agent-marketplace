@@ -853,8 +853,9 @@ class DeliveryGitTests(unittest.TestCase):
             self.assertEqual(values["Target-Update-Intent"], "none")
         finally:
             remove_temporary(temporary)
-    def push_protocol_1_fence(self, project: Path) -> str:
-        """Push the open Fence a protocol-1 project left on the target tip and return it."""
+    def push_protocol_1_fence(self, project: Path, replacing: str = "") -> str:
+        """Push the open Fence a protocol-1 project left on the target tip, in place of the
+        Fence *replacing* names, and return it."""
         target = delivery_git.remote_oid(project, "origin", "refs/heads/main")
         v1 = delivery_git.commit_tree(
             project, target, [], "Open legacy Agentrof Fence", {
@@ -869,7 +870,7 @@ class DeliveryGitTests(unittest.TestCase):
                 "Barrier-Kind": "none", "Barrier-Epoch": "none",
             },
         )
-        delivery_git.atomic_push(project, "origin", [(delivery_git.canonical_refs("DLV-000")["fence"], "", v1)])
+        delivery_git.atomic_push(project, "origin", [(delivery_git.canonical_refs("DLV-000")["fence"], replacing, v1)])
         return v1
 
     def test_a_protocol_1_fence_points_each_reader_to_upgrade_fence_v1(self):
@@ -911,6 +912,69 @@ class DeliveryGitTests(unittest.TestCase):
         reserved = delivery_git.reserve_delivery(project, "DLV-001")
         self.assertEqual(delivery_git.trailer(delivery_git.commit_message(project, reserved["fence"]), "Record"),
                          "project-fence-v2")
+
+    PROTOCOL_1_REFUSAL = ("DELIVERY_PROTOCOL_UNSUPPORTED",
+                          "the Fence is protocol 1; migrate it with upgrade-fence-v1 before new mutations")
+
+    def test_delivery_verbs_never_write_a_protocol_2_fence_over_a_protocol_1_one(self):
+        """Scope, cancellation, review and PR verbs refuse a protocol-1 Fence before any write (#333)."""
+        project, docs = self.two_story_project()
+        self.scope_delivery(docs, "DLV-001", "auth", "AUTH-01")
+        reserved = delivery_git.reserve_delivery(project, "DLV-001")
+        v1 = self.push_protocol_1_fence(project, reserved["fence"])
+        before = delivery_git.run_git(project, "ls-remote", "origin")
+        provider = mock.Mock()
+        with mock.patch("delivery_provider.GitHubProvider", provider):
+            for verb, refusal in (
+                ("revise-unclaimed-scope", lambda: delivery_git.revise_unclaimed_scope(project, "DLV-001")),
+                ("cancel-delivery", lambda: delivery_git.cancel_delivery(project, "DLV-001", "Stop")),
+                ("prepare-pr-creation", lambda: delivery_git.prepare_pr_creation(project, "DLV-001")),
+                ("invalidate-delivery-review", lambda: delivery_git.invalidate_delivery_review(
+                    project, "DLV-001", "REVIEW_FINDING", "sha256:" + "0" * 64)),
+                ("record-pr-remote", lambda: delivery_git.record_pr_remote(
+                    project, "DLV-001", "https://github.com/agentrof/example/pull/17")),
+                ("open-pr", lambda: delivery_git.open_pr(project, "DLV-001")),
+            ):
+                with self.subTest(verb=verb):
+                    self.assertEqual(self.refused_finding(refusal), self.PROTOCOL_1_REFUSAL)
+                    self.assertEqual(delivery_git.run_git(project, "ls-remote", "origin"), before)
+        provider.assert_not_called()
+
+        # After the migration the scope revision writes a Fence that carries the approved Governance.
+        migrated = delivery_git.upgrade_fence_v1(project)
+        self.assertEqual(delivery_git.run_git(project, "rev-parse", migrated["fence"] + "^"), v1)
+        revised = delivery_git.revise_unclaimed_scope(project, "DLV-001")
+        message = delivery_git.commit_message(project, revised["fence"])
+        self.assertEqual([delivery_git.trailer(message, key) for key in ("Record", "Governance-Hash")],
+                         ["project-fence-v2", delivery_git.governed_governance_hash(project)])
+
+    def test_item_verbs_never_write_a_protocol_2_fence_over_a_protocol_1_one(self):
+        """Pause and reopen refuse a protocol-1 Fence before any write, leaving the writer's state (#333)."""
+        project, _docs, _directory, _item, _reserved = self.prepare_execution_with_draft_reserved_contracts(False)
+        refs = delivery_git.canonical_refs("DLV-001", "AUTH-01")
+        delivery_git.publish_execution_plan(project, "DLV-001")
+        delivery_git.claim_items(project, "DLV-001")
+        active = delivery_git.start_item(project, "DLV-001", "AUTH-01")
+        fence = delivery_git.remote_oid(project, "origin", refs["fence"])
+        v1 = self.push_protocol_1_fence(project, fence)
+        before = delivery_git.run_git(project, "ls-remote", "origin")
+        self.assertEqual(self.refused_finding(lambda: delivery_git.pause_item(project, "DLV-001", "AUTH-01")),
+                         self.PROTOCOL_1_REFUSAL)
+        self.assertEqual(delivery_git.run_git(project, "ls-remote", "origin"), before)
+        self.assertTrue(Path(active["worktree"]).is_dir())
+        self.assertEqual(delivery_git.read_writer_receipt(project, "DLV-001", "AUTH-01")["state"], "verified")
+
+        delivery_git.atomic_push(project, "origin", [(refs["fence"], v1, fence)])
+        self.commit_item_product_change(active["worktree"], "def authenticate():\n    return True\n")
+        self.assertEqual(self.approve_item_evidence(active["worktree"]), 0)
+        delivery_git.push_item(project, "DLV-001", "AUTH-01")
+        delivery_git.integrate_item(project, "DLV-001", "AUTH-01")
+        self.push_protocol_1_fence(project, fence)
+        before = delivery_git.run_git(project, "ls-remote", "origin")
+        self.assertEqual(self.refused_finding(lambda: delivery_git.reopen_item(project, "DLV-001", "AUTH-01")),
+                         self.PROTOCOL_1_REFUSAL)
+        self.assertEqual(delivery_git.run_git(project, "ls-remote", "origin"), before)
+        self.assertIsNone(delivery_git.read_writer_receipt(project, "DLV-001", "AUTH-01"))
 
     def test_quiescent_v1_fence_upgrades_to_governed_v2(self):
         temporary, project = self.make_project()

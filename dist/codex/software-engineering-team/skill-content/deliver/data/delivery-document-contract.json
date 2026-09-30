@@ -23,6 +23,8 @@
       "required_properties": ["type", "status", "derives_from", "related_to", "tags"],
       "verification_schedules": ["sequential_v1", "parallel_snapshot_v1"],
       "missing_verification_schedule": "sequential_v1",
+      "implementation_schedules": ["sequential_v1", "parallel_lanes_v1"],
+      "missing_implementation_schedule": "sequential_v1",
       "cancellation_properties": ["cancellation_disposition", "cancellation_previous_tip", "cancellation_intent_hash"]
     },
     "code_review": {

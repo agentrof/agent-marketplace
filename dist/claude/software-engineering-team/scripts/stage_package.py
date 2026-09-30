@@ -186,6 +186,31 @@ def tree_hash(root: Path, omitted_fields: set[str]) -> str:
     return "sha256:" + digest.hexdigest()
 
 
+def matches_head_except_relations(root: Path, path: Path) -> bool:
+    """Whether a Markdown note equals its HEAD blob once generated relations are removed.
+
+    Inverse relation blocks are compiler-owned projections that every semantic
+    hash excludes, so rendering one is never authored drift. A symlink is never
+    followed.
+    """
+    from vault_check import rel_posix
+
+    try:
+        if path.suffix != ".md" or path.is_symlink() or not path.is_file():
+            return False
+        head = subprocess.run(
+            ["git", "--no-replace-objects", "show", f"HEAD:{rel_posix(root, path)}"],
+            cwd=root, capture_output=True, check=False,
+        )
+        if head.returncode != 0:
+            return False
+        current = path.read_text(encoding="utf-8")
+    except (OSError, ValueError):
+        return False
+    previous = head.stdout.decode("utf-8", errors="surrogateescape")
+    return without_generated_relations(current) == without_generated_relations(previous)
+
+
 def is_committed(package_root: Path) -> bool:
     """Ignore generated relations and safe policy metadata, never authored drift."""
     import experience_application_check
@@ -249,17 +274,7 @@ def is_committed(package_root: Path) -> bool:
             path = root / os.fsdecode(raw)
             if safe_metadata(path, missing=True):
                 continue
-            if path.suffix != ".md" or path.is_symlink() or not path.is_file():
-                return False
-            head = subprocess.run(
-                ["git", "--no-replace-objects", "show", f"HEAD:{rel_posix(root, path)}"],
-                cwd=root, capture_output=True, check=False,
-            )
-            if head.returncode != 0:
-                return False
-            current = path.read_text(encoding="utf-8")
-            previous = head.stdout.decode("utf-8", errors="surrogateescape")
-            if without_generated_relations(current) != without_generated_relations(previous):
+            if not matches_head_except_relations(root, path):
                 return False
         artifacts = package_root / "artifacts"
         if artifacts.is_symlink():
@@ -882,6 +897,20 @@ def canonical_ba_process_ref(value: str) -> tuple[str, str, str] | None:
     return f"business-analysis/{space}/{relative}", space, relative
 
 
+def _session_ba_scan(space_dir: Path):
+    """Scan one BA space once per candidate session; rescan outside one."""
+    import ba_compile
+    cache = _CANDIDATE_SESSION_STACK[-1] if _CANDIDATE_SESSION_STACK else None
+    key = (space_dir, "ba-scan")
+    if cache is not None and key in cache:
+        return cache[key]
+    scanned, _findings = ba_compile.scan_space(
+        space_dir, ba_compile.load_schema(ba_compile.DEFAULT_SCHEMA))
+    if cache is not None:
+        cache[key] = scanned
+    return scanned
+
+
 def resolve_ba_process(docs: Path, value: str, *, expected_ba_ref: str = "",
                        expected_ba_hash: str = "",
                        require_committed: bool = False,
@@ -906,10 +935,7 @@ def resolve_ba_process(docs: Path, value: str, *, expected_ba_ref: str = "",
         errors.append("primary_process_ref does not resolve to a Business Analysis process note")
         return None, errors
     try:
-        import ba_compile
-        schema = ba_compile.load_schema(ba_compile.DEFAULT_SCHEMA)
-        scanned, _base = ba_compile.scan_space(
-            docs / "business-analysis" / space, schema)
+        scanned = _session_ba_scan(docs / "business-analysis" / space)
         document = scanned.docs.get(f"{relative}.md")
     except (ImportError, OSError, ValueError):
         document = None

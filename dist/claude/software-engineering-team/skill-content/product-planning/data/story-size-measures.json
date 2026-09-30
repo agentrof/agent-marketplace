@@ -1,0 +1,21 @@
+{
+  "schema_version": 1,
+  "measures": {
+    "acceptance_criteria": {
+      "summary": "Checklist criteria in the story's Acceptance section; a checklist-like line in any other section or in a code block counts nothing.",
+      "derivation": "acceptance_checklist_lines"
+    },
+    "test_scenarios": {
+      "summary": "Scenarios the story's Test Plan defines under its <story-id>-TS-### headings; a scenario id the plan only cites in prose counts nothing.",
+      "derivation": "plan_scenario_blocks"
+    },
+    "implementation_roles": {
+      "summary": "The owner role plus every supporting role, the implementation roles a Delivery Item runs before code review and QA.",
+      "derivation": "owner_and_supporting_roles"
+    },
+    "contract_deltas": {
+      "summary": "Expected contract deltas: 1 when software_architect is among the story's roles, an expected architecture delta. An expected Operation contract revision counts once the owner adopts a story classification for it.",
+      "derivation": "architecture_role"
+    }
+  }
+}

@@ -17,6 +17,20 @@ claimed, or one its Delivery cancelled, refuses the start with
 `DELIVERY_DEPENDENCY_UNMET` and names a backlog revision as the way out.
 Product and test changes stay on the Item worktree; Integration accepts only
 reviewed, verified Item handoffs and compiler-owned projections.
+Switch `implementation_schedule`: at `parallel_lanes_v1`, an Item whose approved
+plan declares it runs its implementation roles in parallel lanes, as
+`skill-content/deliver/references/switch-implementation_schedule-parallel_lanes_v1.md`
+defines.
+Switch `execution_planning`: at `single_source_bundle`, the Item's Software
+Architect records decisions, alternatives and rationale and links the owning
+contract section for rule text, as
+`skill-content/software-architecture/references/switch-execution_planning-single_source_bundle.md`
+defines.
+Switch `owner_gates`: at `two_fixed_gates`, a question between gate A and gate
+B is queued in the Delivery's `User Decisions` unless it is of an at-once class,
+and the Delivery Review and the merge are decided together in gate B, as
+`skill-content/deliver/references/switch-owner_gates-two_fixed_gates.md`
+defines.
 
 ## Parallel verification
 
@@ -81,6 +95,8 @@ covers the full Item diff; re-review covers the new delta, open findings and
 affected consumers. Correctness, conformance and security remain mandatory.
 An unchanged candidate with unchanged source bindings and instructions reuses
 its existing independent role results without another dispatch.
+Switch `review_loop`: at `blocking_delta`, the code review loop follows
+`skill-content/code-review/references/switch-review_loop-blocking_delta.md`.
 
 `validate --delivery DLV-### --story <story>` must accept both final results
 before evidence approval. The existing compiler derives actual product HEAD

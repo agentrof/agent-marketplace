@@ -1,7 +1,7 @@
 ---
 name: software-architect
 description: Software architect role. Spawned by software-engineering-team flows to evolve the living architecture documents delta-first; never auto-triggered.
-model: opus
+model: claude-opus-5-5
 output_contract: prose
 ---
 

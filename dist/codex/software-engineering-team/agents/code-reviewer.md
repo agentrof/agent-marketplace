@@ -1,7 +1,8 @@
 ---
 name: code-reviewer
 description: Code reviewer role. Spawned by software-engineering-team flows after implementation to audit the change and emit a verdict; never auto-triggered.
-model_reasoning_effort: high
+model: gpt-6.1-sol
+model_reasoning_effort: xhigh
 output_contract: prose
 ---
 

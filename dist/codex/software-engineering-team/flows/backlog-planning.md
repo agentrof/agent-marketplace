@@ -172,6 +172,24 @@ belong to delivery.
 
 ## 4. Challenge and render
 
+Switch `review_panels`: at `lens_panel`, review panel `backlog_epic` and review
+panel `backlog_root` replace this section's epic and root reviewers, as
+`skill-content/challenge-review/references/switch-review_panels-lens_panel.md`
+defines. Switch `mechanical_pass_tier`: at `mechanical`, a Product Owner pass
+that only applies the fixes returned findings name, and the compiler commands
+of this section and section 5, run as
+`skill-content/challenge-review/references/switch-mechanical_pass_tier-mechanical.md`
+defines.
+Switch `review_loop`: at `blocking_delta`, this section's review loops
+follow
+`skill-content/challenge-review/references/switch-review_loop-blocking_delta.md`.
+Switch `story_size_budget`: at `propose_split`, `check --json` also reports
+each story's size against the owner-set limits, and before the first epic
+review manifest the Product Owner proposes a split for each story over budget,
+which the owner accepts or keeps, as
+`skill-content/product-planning/references/switch-story_size_budget-propose_split.md`
+defines.
+
 ### Recovery that removes only operating-system metadata
 
 An approved backlog may reuse its existing epic review evidence when the only
@@ -202,11 +220,21 @@ The Product Owner finishes the candidate source documents. Review notes may
 still contain their initialized placeholders: requiring completed reviews
 before their readers run would prevent the first review. For each epic, run
 the packaged read-only manifest helper; it validates source, coverage and
-dependency inputs while leaving review-completion checks to the final gate:
+dependency inputs while leaving review-completion checks to the final gate.
+An epic's manifest fails on a `stub-epic` or `stub-story` placeholder only in
+a path it names and lists the others in `check.scaffold_findings`, so a
+finished epic's review can start while another epic's writer still works. The
+root manifest and approval still need every source finished:
 
 ```text
 backlog_review_inputs.py --docs <workspace>/docs --epic <EP-ID>
 ```
+
+Switch `review_manifest_scope`: at `bounded`, an epic reader's manifest reads
+the epic's dependency closure, the notes it links to or cites and their
+front-matter relations, as
+`skill-content/backlog-plan/references/switch-review_manifest_scope-bounded.md`
+defines.
 
 Give one fresh `backlog-reviewer` the returned manifest and every named path:
 the root backlog, that epic, its child stories and test plans, and the incoming
@@ -220,7 +248,10 @@ input set. Independent epic reviewers may run in parallel against unchanged
 inputs. Wait for every epic reviewer to return before any writer action.
 Recompute each manifest with `--expected-hash <source_hash>` before accepting
 its findings for the writer. Changed inputs require a fresh affected review;
-never use a stale manifest to justify omitting a dependency.
+never use a stale manifest to justify omitting a dependency. An epic
+manifest's hash binds the notes it names and the story identities and
+dependency edges that reach them, so another epic's writer finishing its own
+notes leaves it fresh; the root manifest's hash binds every backlog note.
 
 Readers audit source membership against the manifest's expected relation sets.
 Empty draft review fields and placeholder prose await the writer and do not
@@ -237,7 +268,10 @@ design, intra-epic dependencies, role ownership, findings and verdict. Run
 `backlog_compile.py check --docs <workspace>/docs --json` after these serialized
 writes and resolve all source and completed epic-review findings. Only the
 still-unwritten root review's completion findings remain pending until its
-reader returns; they do not authorize ignoring any source finding.
+reader returns; they do not authorize ignoring any source finding. An entry
+in `advisories` names an empty last section of a story approved before the
+compiler read that section above the navigation; it never fails the check,
+and the Product Owner fills the section whenever that story is revised.
 
 Only after every epic package and review is green, run
 `backlog_review_inputs.py --docs <workspace>/docs --root`. Invoke one fresh
@@ -305,9 +339,14 @@ backlog_compile.py check --docs <workspace>/docs --approved --render --json
 ```
 
 Approval stamps the package, root backlog, epics, reviews and test plans while
-stories remain `planned`. Existing valid unchanged source approvals retain
-their timestamps, hashes and bytes; previously approved reviews are immutable
-and changes require a new review round. Setup's managed `.gitattributes` rule
+stories remain `planned`. When the project has a Process Policy, the approval
+also records the pin a Delivery takes at scope approval, that policy's path,
+revision and source hash, in the root backlog and in each review it approves,
+so a revision and its reviews name the switch values they ran under. Without a
+policy nothing is recorded; a draft or invalid policy refuses the approval.
+Existing valid unchanged source approvals retain their timestamps, hashes and
+bytes; previously approved reviews are immutable and changes require a new
+review round. Setup's managed `.gitattributes` rule
 checks `workspace/docs/` out without line-ending conversion, which keeps these
 bytes exact on Windows. Commit `workspace/docs/backlog/` and the updated
 `workspace/config.json` in the same project change. Report the package hash

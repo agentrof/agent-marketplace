@@ -1,11 +1,18 @@
 #!/usr/bin/env python3
 """Deterministic coverage audit: planned identities vs JUnit test results.
 
-Extracts canonical qualified or unqualified BA identities and story-scenario
-identities from planned Markdown files, maps them to test cases in JUnit XML
-files (identity present in the test name, class name, or property values,
-case-insensitive), and prints a coverage matrix with PASS/FAIL/NO-TEST per
-identity plus a machine-readable summary line.
+Planned identities come from one of two inputs. ``--plan`` reads approved
+story Test Plans: each scenario a plan defines under a ``<story-id>-TS-###``
+heading, followed by the qualified BA identities its ``source_refs`` cite. An
+identity a plan only mentions, such as another story's scenario named in a
+Given clause, is not planned. ``--brief`` reads an explicit id list and takes
+every canonical qualified or unqualified BA identity and story-scenario
+identity in its text, so a Test Plan never goes through it.
+
+Planned identities map to test cases in JUnit XML files (identity present in
+the test name, class name, or property values, case-insensitive). The script
+prints a coverage matrix with PASS/FAIL/NO-TEST per identity plus a
+machine-readable summary line.
 
 Exit code 0 when every id has at least one passing, non-skipped test and no
 mapped test failed; exit code 1 when any NO-TEST or FAIL row exists; exit
@@ -32,6 +39,19 @@ ID_RE = re.compile(
 )
 
 
+# The Test Plan grammar of the backlog compiler (scripts/backlog_compile.py:
+# parse_front_matter_text, scenario_blocks, scenario_fields, split_wikilink,
+# BA_ID_RE). A skill script imports only the standard library, so the grammar
+# is mirrored here and a parity test pins it to the compiler.
+SCENARIO_HEADING_RE = re.compile(
+    r"^##\s+([A-Z][A-Z0-9]*-[0-9]{2,}-TS-[0-9]{3})\s*$", re.MULTILINE)
+FIELD_RE = re.compile(r"^-\s+([A-Za-z_]+):\s*(.*)$")
+NESTED_ITEM_RE = re.compile(r"^\s{2,}-\s+(.+?)\s*$")
+SOURCE_LINK_RE = re.compile(r"\[\[([^\[\]\n]+)\]\]")
+BA_IDENTITY_RE = re.compile(
+    r"^[a-z0-9]+(?:-[a-z0-9]+)*:(?:AC|BR)-[A-Z]{2,4}-[0-9]{3,}$")
+
+
 def extract_ids(brief_paths: list[Path]) -> list[str]:
     """Return planned identities in first-seen order, normalized to upper case."""
     seen: dict[str, None] = {}
@@ -39,6 +59,72 @@ def extract_ids(brief_paths: list[Path]) -> list[str]:
         text = path.read_text(encoding="utf-8", errors="replace")
         for match in ID_RE.finditer(text):
             seen.setdefault(match.group(0).upper(), None)
+    return list(seen)
+
+
+def plan_body(text: str) -> str:
+    """Return the Markdown after a Test Plan's front matter."""
+    lines = text.splitlines()
+    if not lines or lines[0].strip() != "---":
+        return text
+    end = next((index for index, line in enumerate(lines[1:], 1)
+                if line.strip() == "---"), -1)
+    return text if end < 0 else "\n".join(lines[end + 1:])
+
+
+def source_refs(block: str) -> str:
+    """Return one scenario's source_refs value, nested items comma-joined."""
+    fields: dict[str, str] = {}
+    active = ""
+    for raw in block.splitlines():
+        match = FIELD_RE.match(raw)
+        if match:
+            fields[match.group(1)] = match.group(2).strip()
+            active = match.group(1)
+            continue
+        nested = NESTED_ITEM_RE.match(raw)
+        if nested and active == "source_refs":
+            fields[active] = (fields[active] + ", " + nested.group(1)).strip(", ")
+    return fields.get("source_refs", "")
+
+
+def link_alias(inner: str) -> str:
+    for separator in ("\\|", "|"):
+        if separator in inner:
+            return inner.split(separator, 1)[1].strip()
+    return ""
+
+
+def plan_scenarios(text: str) -> list[tuple[str, list[str]]]:
+    """Return each defined scenario with the BA identities it traces, in order."""
+    body = plan_body(text)
+    headings = list(SCENARIO_HEADING_RE.finditer(body))
+    scenarios = []
+    for index, heading in enumerate(headings):
+        end = (headings[index + 1].start() if index + 1 < len(headings)
+               else len(body))
+        aliases = [link_alias(inner) for inner in
+                   SOURCE_LINK_RE.findall(source_refs(body[heading.end():end]))]
+        scenarios.append((heading.group(1), [
+            alias for alias in aliases if BA_IDENTITY_RE.fullmatch(alias)]))
+    return scenarios
+
+
+def extract_plan_ids(plans: list[list[tuple[str, list[str]]]],
+                     superseded: set[str]) -> list[str]:
+    """Return the identities the plans define in first-seen order.
+
+    A superseded scenario leaves the audit together with each BA identity
+    that no remaining scenario traces.
+    """
+    seen: dict[str, None] = {}
+    for scenarios in plans:
+        for scenario_id, traced in scenarios:
+            if scenario_id in superseded:
+                continue
+            seen.setdefault(scenario_id, None)
+            for identity in traced:
+                seen.setdefault(identity.upper(), None)
     return list(seen)
 
 
@@ -121,13 +207,44 @@ def print_matrix(rows) -> None:
         print(f"| {req_id.ljust(id_w)} | {result.ljust(res_w)} | {shown}")
 
 
+def plan_ids(paths: list[Path], superseded: list[str]) -> tuple[list[str], str]:
+    """Return the planned identities of ``--plan``, or an input error."""
+    plans = []
+    for path in paths:
+        scenarios = plan_scenarios(
+            path.read_text(encoding="utf-8", errors="replace"))
+        if not scenarios:
+            return [], f"{path} defines no story scenario"
+        plans.append(scenarios)
+    defined = {scenario_id for scenarios in plans for scenario_id, _ in scenarios}
+    dropped = {value.upper() for value in superseded}
+    unknown = sorted(dropped - defined)
+    if unknown:
+        return [], ("superseded ids are not scenarios the plans define: "
+                    + ", ".join(unknown))
+    ids = extract_plan_ids(plans, dropped)
+    return ids, "" if ids else "the plans define no scenario that is not superseded"
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
-        description="Coverage matrix: brief requirement ids vs JUnit results.",
+        description="Coverage matrix: planned requirement ids vs JUnit results.",
+    )
+    planned = parser.add_mutually_exclusive_group(required=True)
+    planned.add_argument(
+        "--plan", nargs="+", type=Path, metavar="MD",
+        help="approved story Test Plan(s): the scenarios each defines and the"
+             " qualified AC/BR ids their source_refs cite",
+    )
+    planned.add_argument(
+        "--brief", nargs="+", type=Path, metavar="MD",
+        help="explicit id list(s): every qualified AC/BR or story scenario id"
+             " in the text, so never a Test Plan",
     )
     parser.add_argument(
-        "--brief", nargs="+", required=True, type=Path, metavar="MD",
-        help="markdown file(s) containing qualified AC/BR or story scenario ids",
+        "--superseded", nargs="+", default=[], metavar="ID",
+        help="with --plan: scenario ids a dependent Test Plan supersedes; they"
+             " and the BA ids only they cite leave the audit",
     )
     parser.add_argument(
         "--junit", nargs="+", required=True, type=Path, metavar="XML",
@@ -139,16 +256,21 @@ def main(argv: list[str] | None = None) -> int:
              " the backlog coverage compiler consumes)",
     )
     args = parser.parse_args(argv)
+    if args.superseded and not args.plan:
+        parser.error("--superseded requires --plan")
 
-    for path in list(args.brief) + list(args.junit):
+    for path in list(args.plan or args.brief) + list(args.junit):
         if not path.is_file():
             print(f"error: no such file: {path}", file=sys.stderr)
             return 2
 
-    ids = extract_ids(args.brief)
-    if not ids:
-        print("error: no AC/BR or story scenario ids found in the brief(s)",
-              file=sys.stderr)
+    if args.plan:
+        ids, problem = plan_ids(args.plan, args.superseded)
+    else:
+        ids = extract_ids(args.brief)
+        problem = "" if ids else "no AC/BR or story scenario ids found in the brief(s)"
+    if problem:
+        print(f"error: {problem}", file=sys.stderr)
         return 2
 
     tests = collect_tests(args.junit)

@@ -71,21 +71,40 @@ REVIEW_PLACEHOLDER_RE = re.compile(
 
 _EXPERIENCE_APPLICATION_CACHE_STACK: list[dict[Path, tuple[dict, list[str]]]] = []
 _EXPERIENCE_PACKAGE_CACHE_STACK: list[dict[Path, tuple[dict, list[str]]]] = []
+_READ_CACHE_STACK: list[dict[tuple, object]] = []
 
 
 @contextlib.contextmanager
 def experience_validation_session():
-    """Reuse immutable Experience validation results during one backlog read."""
+    """Reuse immutable validation results during one backlog read.
+
+    A session never spans a write: every post-write read opens a fresh one.
+    """
     if _EXPERIENCE_APPLICATION_CACHE_STACK:
         yield
         return
     _EXPERIENCE_APPLICATION_CACHE_STACK.append({})
     _EXPERIENCE_PACKAGE_CACHE_STACK.append({})
+    _READ_CACHE_STACK.append({})
     try:
         yield
     finally:
+        _READ_CACHE_STACK.pop()
         _EXPERIENCE_PACKAGE_CACHE_STACK.pop()
         _EXPERIENCE_APPLICATION_CACHE_STACK.pop()
+
+
+def session_read(key: tuple, compute):
+    """Return one successful result per key within a read session.
+
+    Outside a session every call recomputes. A raised error is never cached.
+    """
+    cache = _READ_CACHE_STACK[-1] if _READ_CACHE_STACK else None
+    if cache is None:
+        return compute()
+    if key not in cache:
+        cache[key] = compute()
+    return cache[key]
 
 
 def current_experience_application(root: Path) -> tuple[dict, list[str]]:
@@ -121,6 +140,13 @@ GENERIC_REVIEW_RE = re.compile(
 )
 ACCEPTED_MINOR_FINDINGS = "Accepted Minor Findings"
 ACCEPTED_MINOR_COLUMNS = ("finding", "owner_role", "reason", "revisit_trigger")
+STORY_SIZE_SWITCH = "story_size_budget"
+STORY_SIZE_VALUE = "propose_split"
+STORY_SIZE_MEASURES_PATH = (Path(__file__).resolve().parent.parent / "skill-content"
+                            / "product-planning" / "data" / "story-size-measures.json")
+SIZE_EXCEPTIONS = "Size Exceptions"
+SIZE_EXCEPTION_COLUMNS = ("story", "measure", "reason")
+CHECKLIST_LINE_RE = re.compile(r"^\s*[-*+]\s+\[[ xX]\](?:\s|$)")
 EPIC_GOAL_STUB = "Define the customer outcome and boundary."
 STORY_STUBS = {
     "scope": "Describe the smallest valuable behavior.",
@@ -138,6 +164,7 @@ SCENARIO_STUBS = {
     "When": "the user performs the story action",
     "Then": "the expected outcome is observable",
 }
+COVERAGE_REASON_STUB = "TODO: assess this coverage class."
 
 
 class ApprovalFailure(RuntimeError):
@@ -415,7 +442,10 @@ def validate_criterion_ref(docs: Path, value: str, label: str,
         return parsed
     registry_path = docs / "business-analysis" / space / "_generated" / "registry.json"
     try:
-        registry = json.loads(registry_path.read_text(encoding="utf-8"))
+        registry = session_read(
+            ("ba-registry", registry_path),
+            lambda: json.loads(registry_path.read_text(encoding="utf-8")),
+        )
         entry = (registry.get("ids") or {}).get(criterion_id)
     except (OSError, json.JSONDecodeError):
         entry = None
@@ -836,10 +866,11 @@ def validate_experience_ref(docs: Path, value: str, label: str,
         return
     try:
         import experience_application_check
-        application_rows, application_findings = (
-            experience_application_check.verified_application_ledger(
+        application_rows, application_findings = session_read(
+            ("application-ledger", experience_root),
+            lambda: experience_application_check.verified_application_ledger(
                 experience_root,
-            )
+            ),
         )
     except (ImportError, OSError, ValueError) as exc:
         errors.append(f"{label} application history cannot be verified: {exc}")
@@ -872,8 +903,11 @@ def validate_experience_ref(docs: Path, value: str, label: str,
     if type(current_revision) is not int or current_revision < 1:
         errors.append(f"{label} owning Experience has an invalid revision")
         return
-    history, history_findings = experience_compile.validate_process_ledger(
-        package, current_revision,
+    history, history_findings = session_read(
+        ("process-ledger", package, current_revision),
+        lambda: experience_compile.validate_process_ledger(
+            package, current_revision,
+        ),
     )
     if history_findings:
         errors.extend(f"{label} owning Experience history: {finding}"
@@ -882,8 +916,11 @@ def validate_experience_ref(docs: Path, value: str, label: str,
     registries = list(history)
     if props.get("status") == "approved":
         try:
-            current, current_findings = experience_compile.compile_package(
-                package, True, allow_stale_inputs=True,
+            current, current_findings = session_read(
+                ("stale-input-package", package),
+                lambda: experience_compile.compile_package(
+                    package, True, allow_stale_inputs=True,
+                ),
             )
         except (OSError, ValueError) as exc:
             errors.append(f"{label} owning Experience registry is missing: {exc}")
@@ -937,6 +974,17 @@ def required_section_findings(body: str, required: list[str], path: str) -> list
         if title in present and not section(body, title):
             errors.append(f"{path} required section is empty: {title}")
     return errors
+
+
+def navigation_only_sections(body: str, required: list[str]) -> list[str]:
+    """Return the required sections whose only text is the navigation block.
+
+    Navigation has no heading of its own, so section() reads it as the body of
+    the last section, and required_section_findings never sees that section as
+    empty.
+    """
+    return [title for title in required
+            if (content := section(body, title)) and not content.split(NAV_MARKER, 1)[0].strip()]
 
 
 def meaningful_text(value: str) -> bool:
@@ -1192,6 +1240,159 @@ def accepted_minor_findings(docs: Path, body: str, path: str,
     return errors
 
 
+def acceptance_checklist_lines(story: dict) -> int:
+    """Count the checklist criteria of the Acceptance section, outside code blocks."""
+    text = section(story["body"].split(NAV_MARKER, 1)[0], "Acceptance")
+    count, fenced = 0, False
+    for line in text.splitlines():
+        if line.lstrip().startswith("```"):
+            fenced = not fenced
+        elif not fenced and CHECKLIST_LINE_RE.match(line):
+            count += 1
+    return count
+
+
+def plan_scenario_blocks(story: dict) -> int:
+    """Count the scenarios the Test Plan defines; an id it only cites defines none."""
+    return len(story["scenario_ids"])
+
+
+def story_roles(story: dict) -> set[str]:
+    owner = str(story["props"].get("owner_role", "")).strip()
+    return ({owner} if owner else set()) | set(values(story["props"], "supporting_roles"))
+
+
+def owner_and_supporting_roles(story: dict) -> int:
+    return len(story_roles(story))
+
+
+def architecture_role(story: dict) -> int:
+    return int("software_architect" in story_roles(story))
+
+
+# Every derivation a story size measure may name; tools/validate.py reads
+# these keys and rejects a measure whose derivation is not one of them.
+STORY_SIZE_DERIVATIONS = {
+    "acceptance_checklist_lines": acceptance_checklist_lines,
+    "plan_scenario_blocks": plan_scenario_blocks,
+    "owner_and_supporting_roles": owner_and_supporting_roles,
+    "architecture_role": architecture_role,
+}
+
+
+def story_size_measures() -> dict[str, dict]:
+    """Return the declared story size measures, each with a derivation this compiler has."""
+    try:
+        data = json.loads(STORY_SIZE_MEASURES_PATH.read_text(encoding="utf-8"))
+        measures = data["measures"]
+        derivations = {name: spec["derivation"] for name, spec in measures.items()}
+    except (OSError, KeyError, TypeError, AttributeError, json.JSONDecodeError) as exc:
+        raise RuntimeError(f"story size measures are missing or invalid: {exc}") from exc
+    unknown = sorted(name for name, derivation in derivations.items()
+                     if derivation not in STORY_SIZE_DERIVATIONS)
+    if not measures or unknown:
+        raise RuntimeError("story size measures name no derivation this compiler implements: "
+                           + ", ".join(unknown))
+    return measures
+
+
+def story_size_budget(docs: Path) -> dict | None:
+    """Return the story size limits in force, or None while the switch is off.
+
+    Without a Process Policy, or at the switch's default, nothing is measured
+    or shown. A draft or invalid policy raises ValueError: it is refused, never
+    read.
+    """
+    import process_policy
+
+    values, _snapshot = process_policy.effective_values(docs)
+    budget = values.get(STORY_SIZE_SWITCH)
+    if budget is None or budget["value"] != STORY_SIZE_VALUE:
+        return None
+    return {"value": budget["value"], "limits": dict(sorted(budget.get("parameters", {}).items()))}
+
+
+def size_exception_rows(docs: Path, epic: dict, review: dict) -> tuple[set[tuple[str, str]],
+                                                                      list[str]]:
+    """Read an epic review's optional Size Exceptions: each kept (story, measure)."""
+    body, path = review["body"], review["path"]
+    if SIZE_EXCEPTIONS not in headings(body):
+        return set(), []
+    rows, errors = structured_table(section(body, SIZE_EXCEPTIONS), SIZE_EXCEPTION_COLUMNS,
+                                    path, SIZE_EXCEPTIONS)
+    measures = story_size_measures()
+    stories = {story["path"].removesuffix(".md"): story for story in epic["stories"]}
+    kept: set[tuple[str, str]] = set()
+    for number, row in enumerate(rows, 1):
+        label = f"{path} size exception {number}"
+        parsed = read_link(docs, row["story"], label, errors)
+        story = stories.get(parsed[0]) if parsed is not None else None
+        if parsed is not None and story is None:
+            errors.append(f"{label} must link a story of {epic['id']}: {row['story']}")
+        elif story is not None and parsed[2] != story["id"]:
+            errors.append(f"{label} story alias must be {story['id']}")
+        measure = row["measure"].strip("`")
+        if measure not in measures:
+            errors.append(f"{label} names undeclared measure {measure or '(missing)'};"
+                          f" the measures are {', '.join(sorted(measures))}")
+        if not meaningful_text(row["reason"]) or generic_review_text(row["reason"]):
+            errors.append(f"{label} needs a concrete reason")
+        if story is not None and measure in measures:
+            if (story["id"], measure) in kept:
+                errors.append(f"{path} repeats the size exception of {story['id']} for {measure}")
+            kept.add((story["id"], measure))
+    return kept, errors
+
+
+def size_exception_findings(record: dict, docs: Path) -> list[str]:
+    """Validate the Size Exceptions of each epic's current review round."""
+    errors: list[str] = []
+    for epic in record["epics"]:
+        review = latest(epic["reviews"])
+        if review is not None:
+            errors.extend(size_exception_rows(docs, epic, review)[1])
+    return errors
+
+
+def story_size_entries(record: dict, docs: Path, budget: dict,
+                       story_ids: set[str] | None = None) -> dict[str, dict]:
+    """Measure each story against the limits; the result never fails a check."""
+    measures = story_size_measures()
+    limits = budget["limits"]
+    kept: set[tuple[str, str]] = set()
+    for epic in record["epics"]:
+        review = latest(epic["reviews"])
+        if review is not None:
+            kept |= size_exception_rows(docs, epic, review)[0]
+    entries = {}
+    for story in record["stories"]:
+        if story_ids is not None and story["id"] not in story_ids:
+            continue
+        counted = {name: STORY_SIZE_DERIVATIONS[spec["derivation"]](story)
+                   for name, spec in sorted(measures.items())}
+        entries[story["id"]] = {
+            "measures": {name: ({"value": value, "limit": limits[name]} if name in limits
+                                else {"value": value}) for name, value in counted.items()},
+            "over_budget": sorted(name for name, value in counted.items()
+                                  if name in limits and value > limits[name]),
+            "size_exceptions": sorted(measure for story_id, measure in kept
+                                      if story_id == story["id"]),
+        }
+    return entries
+
+
+def story_size_block(budget: dict, entries: dict[str, dict]) -> dict:
+    return {"switch": STORY_SIZE_SWITCH, "value": budget["value"], "limits": budget["limits"],
+            "stories": {story_id: entries[story_id] for story_id in sorted(entries)},
+            "over_budget_stories": sorted(story_id for story_id, entry in entries.items()
+                                          if entry["over_budget"])}
+
+
+def story_size_report(record: dict, docs: Path, budget: dict,
+                      story_ids: set[str] | None = None) -> dict:
+    return story_size_block(budget, story_size_entries(record, docs, budget, story_ids))
+
+
 def status_tag_name(status: str) -> str:
     return f"status/{status.replace('_', '-')}"
 
@@ -1254,8 +1455,11 @@ def ref_identity(value: str) -> tuple[str, str, str] | None:
 
 def scenario_findings(docs: Path, body: str, story_id: str,
                       criteria: list[str], evidence: list[str],
-                      work_kind: str, path: str) -> tuple[list[str], list[str]]:
+                      work_kind: str, path: str,
+                      scaffolds: list[str] | None = None) -> tuple[list[str], list[str]]:
+    """Validate a test plan; ``scaffolds`` receives untouched stub findings."""
     errors: list[str] = []
+    stubs = errors if scaffolds is None else scaffolds
     for candidate in re.findall(
         r"(?im)^##\s+(\S+-ts-\S+)\s*$", body
     ):
@@ -1292,7 +1496,7 @@ def scenario_findings(docs: Path, body: str, story_id: str,
         for field, sentinel in SCENARIO_STUBS.items():
             if normalized_text(fields.get(field, "")) == normalized_text(
                     sentinel):
-                errors.append(
+                stubs.append(
                     f"{path} scenario {scenario_id} has an untouched "
                     f"{field} stub"
                 )
@@ -1329,17 +1533,20 @@ def scenario_findings(docs: Path, body: str, story_id: str,
     for source in (criteria if work_kind == "feature" else criteria + evidence):
         if ref_identity(source) not in covered:
             errors.append(f"{path} does not map planning source {source} to a scenario")
-    errors.extend(scenario_coverage_findings(body, ids, path))
+    errors.extend(scenario_coverage_findings(body, ids, path, scaffolds))
     return errors, ids
 
 
 def scenario_coverage_findings(body: str, scenario_ids: list[str],
-                               path: str) -> list[str]:
+                               path: str,
+                               scaffolds: list[str] | None = None) -> list[str]:
     rows, errors = structured_table(
         section(body, "Coverage Classes"),
         ("class", "disposition", "scenario_refs", "reason"),
         path, "Coverage Classes",
     )
+    stubs = errors if scaffolds is None else scaffolds
+    stub_rows = False
     by_class: dict[str, dict[str, str]] = {}
     known_scenarios = set(scenario_ids)
     classified_scenarios: set[str] = set()
@@ -1371,13 +1578,18 @@ def scenario_coverage_findings(body: str, scenario_ids: list[str],
             if refs:
                 errors.append(f"{path} not_applicable class {class_name or number} must not cite scenarios")
             if not meaningful_text(row["reason"]):
-                errors.append(f"{path} not_applicable class {class_name or number} needs a concrete reason")
+                stub = normalized_text(row["reason"]) == normalized_text(COVERAGE_REASON_STUB)
+                stub_rows = stub_rows or stub
+                (stubs if stub else errors).append(
+                    f"{path} not_applicable class {class_name or number} needs a concrete reason")
     missing = sorted(set(SCENARIO_COVERAGE_CLASSES) - set(by_class))
     if missing:
         errors.append(f"{path} is missing coverage classes: {', '.join(missing)}")
     unclassified = sorted(known_scenarios - classified_scenarios)
     if unclassified:
-        errors.append(
+        # The stub table classifies nothing; while one of its rows is left,
+        # classifying the scenarios is still pending writer work.
+        (stubs if stub_rows else errors).append(
             f"{path} scenarios are not classified by Coverage Classes: "
             + ", ".join(unclassified)
         )
@@ -1471,12 +1683,22 @@ def round_number(path: Path, props: dict, suffix: str, errors: list[str]) -> int
 @experience_validation_session()
 def collect(docs: Path, *, historical_inputs: bool = False,
             review_inputs: bool = False) -> tuple[dict, list[str]]:
-    """Validate sources; input discovery may precede authored review findings."""
+    """Validate sources; input discovery may precede authored review findings.
+
+    ``record["scaffold_findings"]`` names the returned errors that exist only
+    because a placeholder the stub verbs write is still untouched.
+    ``record["advisory_findings"]`` names what is reported but never returned
+    as an error: the empty last section of a story approved before the
+    compiler read that section above the navigation.
+    """
     contract = backlog_contract()
     root = docs / "backlog"
     errors: list[str] = []
+    scaffolds: list[str] = []
+    advisories: list[str] = []
     record = {"backlog": None, "backlog_reviews": [], "epics": [],
-              "stories": [], "test_plans": [], "epic_reviews": []}
+              "stories": [], "test_plans": [], "epic_reviews": [],
+              "scaffold_findings": [], "advisory_findings": []}
     root_note = root / "backlog.md"
     if not root_note.is_file():
         return record, ["backlog/backlog.md is missing"]
@@ -1548,7 +1770,7 @@ def collect(docs: Path, *, historical_inputs: bool = False,
             errors.append(f"{epic_rel} needs a goal")
         elif normalized_text(epic_props.get("goal")) == normalized_text(
                 EPIC_GOAL_STUB):
-            errors.append(f"{epic_rel} has an untouched goal stub")
+            scaffolds.append(f"{epic_rel} has an untouched goal stub")
         if "assignee" in epic_props:
             errors.append(f"{epic_rel} must not contain assignee")
         epic = {"path": epic_rel, "folder": epic_dir.name, "id": epic_id,
@@ -1611,12 +1833,24 @@ def collect(docs: Path, *, historical_inputs: bool = False,
                     errors.append(f"{story_rel} needs {key}")
             errors.extend(required_section_findings(
                 story_body, contract["required_story_sections"], story_rel))
+            for title in navigation_only_sections(
+                    story_body, contract["required_story_sections"]):
+                finding = f"{story_rel} required section is empty: {title}"
+                # A story approved before this check keeps its approval: its
+                # empty section is advisory until the story is revised.
+                if approval_stamp_findings(story_path, docs):
+                    errors.append(finding)
+                else:
+                    advisories.append(f"{finding}; advisory until the approved story is revised")
+            # Navigation has no heading and extends the last section, which
+            # is Delivery Notes in a stubbed story.
+            authored_body = story_body.split(NAV_MARKER, 1)[0]
             for key, sentinel in STORY_STUBS.items():
                 actual = story_props.get(key, "") if key in {
                     "scope", "priority_reason"
-                } else section(story_body, key)
+                } else section(authored_body, key)
                 if normalized_text(actual) == normalized_text(sentinel):
-                    errors.append(
+                    scaffolds.append(
                         f"{story_rel} has an untouched {key} stub"
                     )
 
@@ -1636,7 +1870,7 @@ def collect(docs: Path, *, historical_inputs: bool = False,
             responsibilities = section(story_body, "Implementation Responsibilities")
             if normalized_text(RESPONSIBILITY_STUB) in normalized_text(
                     responsibilities):
-                errors.append(
+                scaffolds.append(
                     f"{story_rel} has an untouched implementation "
                     "responsibility stub"
                 )
@@ -1664,9 +1898,11 @@ def collect(docs: Path, *, historical_inputs: bool = False,
                 if planning_mode == "requirement":
                     root_requirement = str(record["backlog"]["props"].get("requirement_ref", ""))
                     errors.extend(implements_findings(story_props, story_rel, root_requirement))
-            elif planning_mode and (introduced <= 0 or not origin_mode):
+            elif planning_mode and (introduced <= 0 or not (
+                    origin_mode or record["backlog"]["props"].get("legacy_contract"))):
                 # Historical records stay readable, but every new contract
-                # record identifies its intake without rewriting history.
+                # record identifies its intake without rewriting history. A
+                # story stubbed under the legacy contract has no mode to name.
                 errors.append(f"{story_rel} needs origin_mode and introduced_in_revision")
             if work_kind not in WORK_KINDS:
                 errors.append(f"{story_rel} work_kind must be feature, defect, or technical")
@@ -1760,7 +1996,7 @@ def collect(docs: Path, *, historical_inputs: bool = False,
                     errors.append(f"{test_rel} must verify exactly {story_rel}")
                 scenario_errors, ids = scenario_findings(
                     docs, test_body, story_id, criteria, evidence,
-                    work_kind, test_rel)
+                    work_kind, test_rel, scaffolds)
                 errors.extend(scenario_errors)
             story = {
                 "path": story_rel,
@@ -1823,7 +2059,9 @@ def collect(docs: Path, *, historical_inputs: bool = False,
     errors.extend(global_criterion_coverage_findings(record, docs))
     if historical_inputs and {"input_contract", "absent_input_stages"}.intersection(record["backlog"]["props"]):
         errors.extend(backlog_input_policy.historical_absence_findings(docs, record))
-    return record, sorted(set(errors))
+    record["scaffold_findings"] = sorted(set(scaffolds))
+    record["advisory_findings"] = sorted(set(advisories))
+    return record, sorted(set(errors) | set(scaffolds))
 
 
 def latest(items: list[dict]) -> dict | None:
@@ -2430,8 +2668,7 @@ def coverage_class_table() -> str:
     ]
     for class_name in SCENARIO_COVERAGE_CLASSES:
         lines.append(
-            f"| {class_name} | not_applicable | - | "
-            "TODO: assess this coverage class. |"
+            f"| {class_name} | not_applicable | - | {COVERAGE_REASON_STUB} |"
         )
     return "\n".join(lines)
 
@@ -2585,6 +2822,17 @@ def check(args) -> int:
         errors = [str(exc)]
     if args.approved and record["backlog"]:
         errors.extend(approval_findings(record, docs))
+    # A story over budget is advisory: the block adds no error of its own.
+    # Only the Size Exceptions a review records are checked, and only while
+    # the budget is on; at the default nothing is read.
+    story_size = None
+    try:
+        budget = story_size_budget(docs)
+        if budget is not None:
+            story_size = story_size_report(record, docs, budget)
+            errors.extend(size_exception_findings(record, docs))
+    except (ValueError, RuntimeError) as exc:
+        errors.append(str(exc))
     errors = sorted(set(errors))
     result = {
         "ok": not errors, "errors": errors,
@@ -2594,6 +2842,12 @@ def check(args) -> int:
                    "backlog_reviews": len(record["backlog_reviews"]),
                    "epic_reviews": len(record["epic_reviews"])},
     }
+    if story_size is not None:
+        result["story_size"] = story_size
+    # Only a backlog that has one gains the key, so every other output is unchanged.
+    advisories = record.get("advisory_findings", [])
+    if advisories:
+        result["advisories"] = advisories
     if args.render and not errors:
         try:
             render(record, docs)
@@ -2614,6 +2868,8 @@ def check(args) -> int:
     else:
         for error in errors:
             print(f"ERROR [backlog] {error}")
+        for advisory in advisories:
+            print(f"ADVISORY [backlog] {advisory}")
         if not errors:
             print("backlog ok")
     return 1 if errors else 0
@@ -2644,6 +2900,38 @@ def restore_tree(root: Path, snapshot: tuple[dict[Path, bytes], set[Path]]) -> N
                 pass
 
 
+def policy_pin(docs: Path) -> tuple[dict, list[str]]:
+    """Return the Process Policy pin an approval records, the one a Delivery takes.
+
+    Outside a Delivery nothing else records the switch values a backlog
+    revision and its reviews ran under. No policy means no pin; a draft or
+    invalid policy is refused, never recorded.
+    """
+    import process_policy
+
+    return process_policy.approved_snapshot(docs)
+
+
+def without_policy_pin(props: dict) -> dict:
+    import process_policy
+
+    return {key: value for key, value in props.items() if key not in process_policy.PIN_FIELDS}
+
+
+def with_policy_pin(props: dict, pin: dict) -> dict:
+    """Return approval front matter that records ``pin`` after approved_at_utc.
+
+    An earlier pin is dropped first, so an empty pin leaves the bytes the
+    note had before approvals recorded a pin.
+    """
+    result = {}
+    for key, value in without_policy_pin(props).items():
+        result[key] = value
+        if key == "approved_at_utc":
+            result.update(pin)
+    return result
+
+
 def approve(args) -> int:
     docs = docs_root(args.docs)
     # Experience receipt validation is expensive but immutable during this
@@ -2654,7 +2942,7 @@ def approve(args) -> int:
         record, errors = collect(docs)
     errors.extend(approval_readiness_findings(record))
     already_approved = record.get("backlog", {}).get("props", {}).get("status") == "approved"
-    preserved = {}
+    preserved, pin = {}, {}
     if not errors:
         if already_approved:
             errors.extend(approval_findings(record, docs))
@@ -2665,6 +2953,8 @@ def approve(args) -> int:
         else:
             preserved, preserve_errors = preserved_approval_sources(record, docs)
             errors.extend(preserve_errors)
+            pin, pin_errors = policy_pin(docs)
+            errors.extend(pin_errors)
     errors = sorted(set(errors))
     if errors:
         print(json.dumps({"ok": False, "errors": errors}, indent=2,
@@ -2680,11 +2970,12 @@ def approve(args) -> int:
     snapshot = snapshot_tree(docs)
     now = datetime.now(timezone.utc).replace(microsecond=0).isoformat()
     try:
+        reviews = [docs / latest(record["backlog_reviews"])["path"]]
+        reviews += [docs / latest(epic["reviews"])["path"] for epic in record["epics"]]
+        pinned = {docs / record["backlog"]["path"], *reviews}
         transition_paths = [docs / record["backlog"]["path"]]
         transition_paths += [docs / epic["path"] for epic in record["epics"]]
-        transition_paths += [docs / latest(record["backlog_reviews"])["path"]]
-        transition_paths += [docs / latest(epic["reviews"])["path"]
-                             for epic in record["epics"]]
+        transition_paths += reviews
         transition_paths += [docs / story["test_plan"]
                              for story in record["stories"]]
         for path in sorted(set(transition_paths)):
@@ -2695,6 +2986,8 @@ def approve(args) -> int:
             props["approved_at_utc"] = now
             props.pop("source_hash", None)
             props.pop("package_hash", None)
+            if path in pinned:
+                props = with_policy_pin(props, pin)
             path.write_bytes(front_matter(props, body).encode("utf-8"))
 
         with stage_package.candidate_session(), experience_validation_session():
@@ -2856,10 +3149,12 @@ def begin_revision(args) -> int:
     root_props["input_bindings"] = input_bindings
     for key in ("approved_at_utc", "source_hash", "package_hash"):
         root_props.pop(key, None)
+    # The Process Policy pin belongs to the approval stamp it follows.
+    root_props = without_policy_pin(root_props)
 
     latest_review = latest(record["backlog_reviews"])
     next_round = int(latest_review["props"].get("round", 0) or 0) + 1
-    review_props = dict(latest_review["props"])
+    review_props = without_policy_pin(latest_review["props"])
     backlog_title = str(root_props.get("title", DEFAULT_BACKLOG_TITLE))
     review_title = f"Backlog review round {next_round} for {backlog_title}"
     review_props["title"] = review_title
@@ -3075,6 +3370,10 @@ def stub_story(args) -> int:
         for key in ("uses_design", "constrained_by"):
             if not story_props[key]:
                 del story_props[key]
+        # A legacy backlog has no planning mode to record; a bare key would
+        # read back as a list.
+        if not planning_mode:
+            del story_props["origin_mode"]
         if implements:
             story_props["implements"] = implements
         if evidence:

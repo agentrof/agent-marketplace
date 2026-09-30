@@ -81,6 +81,12 @@ class ReleaseRepositoryTests(unittest.TestCase):
             "components": components,
         }, indent=2))
 
+    def git(self, *args: str) -> str:
+        return subprocess.run(
+            ["git", *args], cwd=self.root, capture_output=True, text=True,
+            check=True,
+        ).stdout.strip()
+
     def test_fixture_has_one_canonical_version_on_every_host_surface(self):
         self.assertEqual(release.validate_version_surfaces(self.root), [])
 
@@ -169,15 +175,38 @@ class ReleaseRepositoryTests(unittest.TestCase):
             with self.assertRaisesRegex(release.ReleaseError, fixtures.PLUGIN):
                 release.check_pr_changeset(self.root, "origin/main")
 
-    def test_derived_provenance_only_change_is_release_free(self):
-        self.write_changeset("ci-hardening", {})
+    def test_runtime_contract_change_without_its_component_is_refused(self):
+        # A host runtime contract changes only the package provenance, yet it
+        # changes what the package declares, so it needs its impact (#343).
+        git_fixture.init_repository(self.root, initial_branch="main")
+        self.git("config", "user.name", "Release Test")
+        self.git("config", "user.email", "release@example.test")
+        self.git("add", "--all")
+        self.git("commit", "-qm", "base")
+        base = self.git("rev-parse", "HEAD")
+        adapter = self.root / "platforms" / "claude" / "adapter.py"
+        current = 'return ["in_use_pid_marker_v1"]'
+        self.assertIn(current, adapter.read_text(encoding="utf-8"))
+        adapter.write_text(adapter.read_text(encoding="utf-8").replace(
+            current, 'return ["in_use_pid_marker_v1", "future_marker_v2"]',
+        ), encoding="utf-8")
+        build_distributions.replace_generated(self.root, self.root / "dist")
+        self.write_changeset("runtime-contract", {})
+        self.git("add", "--all")
+        self.git("commit", "-qm", "change a runtime contract")
         provenance = build_distributions.packaging_names(self.root)[1]
-        with mock.patch.object(release, "changed_paths", return_value=[
-            ("A", ".changes/ci-hardening.json"),
-            ("M", f"dist/claude/{fixtures.PLUGIN}/{provenance}"),
-            ("M", f"dist/codex/{fixtures.PLUGIN}/{provenance}"),
-        ]):
-            release.check_pr_changeset(self.root, "origin/main")
+        self.assertEqual(
+            [path for _status, path in release.changed_paths(self.root, base)
+             if path.startswith("dist/")],
+            [f"dist/claude/{fixtures.PLUGIN}/{provenance}"],
+        )
+        with self.assertRaisesRegex(
+            release.ReleaseError, f"omits changed release components: {fixtures.PLUGIN}",
+        ):
+            release.check_pr_changeset(self.root, base)
+        self.write_changeset("runtime-contract", {fixtures.PLUGIN: "patch"})
+        self.git("commit", "-qam", "declare the package impact")
+        release.check_pr_changeset(self.root, base)
 
     def test_non_provenance_distribution_change_requires_component(self):
         self.write_changeset("ci-hardening", {})

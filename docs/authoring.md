@@ -231,8 +231,9 @@ To add a switch:
    `tools/tests/test_default_equivalence.py` when the switch touches a
    compiler, and test each value with every other switch at its default.
 5. Inside a Delivery, read the value with
-   `process_policy.py value --switch <id> --delivery DLV-###`, which refuses a
-   Delivery whose pinned policy has drifted.
+   `process_policy.py value --switch <id> --delivery DLV-###` and derive its
+   tasks with `task_inputs.py --delivery DLV-###`; both refuse a Delivery whose
+   pinned policy has drifted.
 
 The `process_switches` validator check rejects a default outside the values,
 a switch that an owning flow does not name, a flow that names an undeclared

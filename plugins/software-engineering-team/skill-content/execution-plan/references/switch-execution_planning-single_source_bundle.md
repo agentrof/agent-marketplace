@@ -37,9 +37,10 @@ Four deliberate rules stay exactly as they are:
 2. Contract drafts. Each contract the plan revises is drafted by its
    writer through `flows/operation.md` steps 1 and 2. Derive the writer's task
    with `task_inputs.py --entry configure --role <writer> --mode revise
-   --skill challenge-review --input <handoff>`, so it binds the handoff, the
-   fact ownership data and this switch's writer instructions. The two writers
-   may draft at the same time: each writes only its own contract.
+   --skill challenge-review --input <handoff> --delivery DLV-###`, so it binds
+   the handoff, the fact ownership data and this switch's writer instructions
+   under the Delivery's pinned policy. The two writers may draft at the same
+   time: each writes only its own contract.
 3. Bundle manifest. Once the drafts and the Item topology are ready, run
    `delivery_compile.py bundle-manifest --delivery DLV-###`. It lists every
    contract the plan revises, or the current revision an Item pins, every Item
@@ -52,8 +53,8 @@ Four deliberate rules stay exactly as they are:
 4. Bundle review. One review layer reads the bundle. Start every reader
    together on the same manifest, as the host contract says, and derive each
    reader's task with `task_inputs.py --entry configure --role <counterpart>
-   --mode review --skill challenge-review` and one `--input` per path in the
-   manifest's `inputs`. Each prompt carries the manifest, the contract the
+   --mode review --skill challenge-review --delivery DLV-###` and one `--input`
+   per path in the manifest's `inputs`. Each prompt carries the manifest, the contract the
    reader counterparts and `SELF-CHECK`. No separate counterpart review runs
    for a contract inside the bundle. At `review_panels` `lens_panel`, review
    panel `execution_bundle` replaces these readers. Recompute the manifest

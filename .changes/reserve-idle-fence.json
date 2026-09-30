@@ -1,0 +1,6 @@
+{
+  "summary": "`delivery_git.py reserve-delivery` now reserves the next Delivery on the project Fence that a merged Delivery leaves, where it refused every reservation after the first with `DELIVERY_REF_COLLISION`. It takes over only an open Fence without a barrier or handoff intent that carries the approved Governance while no other Delivery or Slot exists, writes a Fence child with a new Epoch and the target tip as its Target, and pushes it with the new Integration ref under the Fence lease. Any other Fence state or holder is refused with `DELIVERY_REF_COLLISION`, a Fence without the approved Governance with the newly declared `DELIVERY_FENCE_GOVERNANCE`, and a Delivery the target already merged with `DELIVERY_POST_MERGE_TRANSITION`; one Delivery stays open at a time.",
+  "components": {
+    "software-engineering-team": "patch"
+  }
+}

@@ -1,0 +1,6 @@
+{
+  "summary": "`delivery_git.py publish-execution-plan`, `revise-unclaimed-scope` and `claim-items` now refuse a Delivery that the Integration records as cancelled with `DELIVERY_CANCELLATION_INVALID`. A cancellation writes the cancelled status on the Integration alone, and these verbs decided from the checkout's own `delivery.md`, so publishing the plan or revising the scope again put the Integration's `delivery.md` back to `execution_approved` or `scope_approved`, which left the cancellation Review unable to reach the target through its PR, and a Delivery cancelled before its claims could be claimed and started again. The message names finality and the PR route; the refusal comes before any ref moves.",
+  "components": {
+    "software-engineering-team": "patch"
+  }
+}

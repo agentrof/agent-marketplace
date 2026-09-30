@@ -533,10 +533,13 @@ integrated Item merges in reverse order and publishes one cancellation Review
 through the same Integration branch and final PR. A scope-only or claims-free
 Delivery uses `not_started` dispositions and never fabricates Item refs,
 review evidence or integration bases. A cancellation is final: a Delivery
-whose published status is already `cancelled` refuses another cancellation and
-any invalidation of its cancellation Review with
+whose published status is already `cancelled` refuses another cancellation,
+any invalidation of its cancellation Review, a publication of its execution
+plan, a revision of its scope and a claim of its Items with
 `DELIVERY_CANCELLATION_INVALID`, so that Review still reaches the target
-through the PR.
+through the PR. Each of these verbs reads the status the Integration records,
+because a cancellation writes it there alone and a checkout's `delivery.md`
+keeps the status it had.
 
 ## Setup and package upgrade
 

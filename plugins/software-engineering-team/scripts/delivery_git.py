@@ -2394,6 +2394,7 @@ def publish_execution_plan(project_root: Path, delivery_id: str,
     require_fence_record(fence_message)
     if trailer(fence_message, "Mode") != "open":
         raise RuntimeError("DELIVERY_FENCE_MODE: publish-execution-plan requires an open Fence")
+    refuse_cancelled_delivery(root, directory, integration_oid, "publish-execution-plan")
     package = package_paths(root, directory, docs, include_map=False)
     operation_paths, operation_bindings = execution_operation_inputs(root, directory, docs)
     refuse_superseded_approval(root, directory, docs, integration_oid, operation_paths)
@@ -2485,6 +2486,22 @@ def refuse_merged_delivery(root: Path, delivery_id: str, remote: str = "origin")
     if merged:
         raise RuntimeError(f"DELIVERY_POST_MERGE_TRANSITION: the target has merged the PR of {delivery_id}, "
                            "so the Delivery is closed")
+
+
+def refuse_cancelled_delivery(root: Path, directory: Path, integration_oid: str, verb: str) -> None:
+    """Refuse to continue a Delivery its Integration records as cancelled.
+
+    A cancellation publishes the cancelled status on the Integration alone, so a
+    checkout's own delivery.md keeps the status it had and cannot say whether the
+    Delivery was cancelled. A cancellation is final: its Review reaches the target
+    through its PR, and nothing publishes, revises or claims the Delivery again.
+    """
+    from delivery_compile import split_note
+    props, _body = split_remote_note(root, integration_oid, rel_posix(root, directory / "delivery.md"), split_note)
+    if props.get("status") == "cancelled":
+        raise RuntimeError(f"DELIVERY_CANCELLATION_INVALID: the published Delivery is cancelled and a cancellation "
+                           f"is final, so {verb} cannot continue it; its cancellation Review reaches the target "
+                           "through its PR")
 
 
 def direct_update_took_no_effect(root: Path, remote: str, head: str) -> bool:
@@ -2729,6 +2746,7 @@ def revise_unclaimed_scope(project_root: Path, delivery_id: str,
     require_fence_record(fence_message)
     if trailer(fence_message, "Mode") != "open":
         raise RuntimeError("DELIVERY_FENCE_MODE: revise-unclaimed-scope requires an open Fence")
+    refuse_cancelled_delivery(root, directory, integration_oid, "revise-unclaimed-scope")
     for item_path in sorted(directory.glob("items/*/item.md")):
         story = item_path.parent.name.upper()
         if own_item_tip(root, remote, delivery_id, story):
@@ -3477,6 +3495,7 @@ def claim_items(project_root: Path, delivery_id: str, remote: str = "origin") ->
     require_fence_record(fence_message)
     if trailer(fence_message, "Mode") != "open":
         raise RuntimeError("DELIVERY_FENCE_MODE: claim-items requires an open Fence")
+    refuse_cancelled_delivery(root, directory, integration_oid, "claim-items")
     require_target_ancestry(root, remote, fence_message, integration_oid)
     marker = commit_tree(root, integration_oid, [], f"Establish claims for {delivery_id}",
                          {"Record": "claims-established-v1", "Protocol": "1", "Delivery": delivery_id,

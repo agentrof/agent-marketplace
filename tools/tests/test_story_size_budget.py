@@ -241,6 +241,25 @@ class MeasureTests(unittest.TestCase):
         last = "# Story\n\n## Acceptance\n\n- [ ] One.\n\n<!-- sec: nav -->\n- [ ] Two.\n"
         self.assertEqual(measured(story(last))["acceptance_criteria"], 1)
 
+    def test_no_code_block_form_counts_a_criterion(self):
+        cases = (
+            ("~~~markdown\n- [ ] Inside a tilde fence.\n~~~\n- [ ] One result.", 1),
+            # A shorter or other fence inside a fence does not close it.
+            ("````text\n```\n- [ ] Inside.\n```\n~~~\n- [ ] Still inside.\n````\n"
+             "- [ ] One result.", 1),
+            ("An example checklist:\n\n    - [ ] Indented code.\n    - [ ] More code.\n\n"
+             "- [ ] One result.", 1),
+            ("\t- [ ] A tab-indented code line.\n\n- [ ] One result.", 1),
+            ("    - [ ] Indented code as the section's first line.", 0),
+            # Inside a list, a deeper indentation is a nested criterion, not code.
+            ("- [ ] One result.\n    - [ ] A nested result.\n\n    - [ ] A loose nested result.",
+             3),
+        )
+        for acceptance, expected in cases:
+            with self.subTest(acceptance=acceptance):
+                value = story(STORY_BODY.format(acceptance=acceptance))
+                self.assertEqual(measured(value)["acceptance_criteria"], expected)
+
     def test_a_measure_whose_derivation_is_not_a_name_is_refused_not_a_crash(self):
         with tempfile.TemporaryDirectory() as raw:
             path = Path(raw) / "measures.json"

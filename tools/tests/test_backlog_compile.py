@@ -98,7 +98,7 @@ class BacklogCompilerTests(unittest.TestCase):
                 "output_language": "English", "terminology_language": "English",
             }), encoding="utf-8")
             make_approved_backlog(docs)
-            # Without a planning mode the legacy fixture stubs an empty origin_mode.
+            # A planning mode makes the stub carry origin_mode; the legacy shape has its own test.
             backlog = docs / "backlog" / "backlog.md"
             props, body = backlog_compile.parse_front_matter(backlog)
             props["planning_mode"] = "manual"
@@ -119,6 +119,49 @@ class BacklogCompilerTests(unittest.TestCase):
                 self.assertEqual(props.get("constrained_by"), constrained_by or None)
                 vault = vault_check.build_vault(docs, vault_check.load_policy(vault_check.DEFAULT_POLICY))
                 self.assertEqual(vault_check.changed_findings(vault, [story])[story], [])
+
+    def test_stub_story_in_a_legacy_backlog_writes_no_origin_mode(self):
+        import vault_check
+        with tempfile.TemporaryDirectory() as raw:
+            docs = Path(raw) / "workspace" / "docs"
+            (docs / "maps").mkdir(parents=True)
+            (docs.parent / "config.json").write_text(json.dumps({
+                "schema_version": 2, "team_id": "software-engineering-team",
+                "output_language": "English", "terminology_language": "English",
+            }), encoding="utf-8")
+            make_approved_backlog(docs)
+            backlog = docs / "backlog" / "backlog.md"
+            props, body = backlog_compile.parse_front_matter(backlog)
+            self.assertNotIn("planning_mode", props)
+            self.assertTrue(props["legacy_contract"])
+            args = SimpleNamespace(
+                docs=docs, epic="delivery-fixture", slug="job-worker", id="AUTH-02", title="job-worker",
+                scope="Run the job.", work_kind="technical", criterion_ref=[], experience_ref=[],
+                evidence_ref=[], uses_design=[], constrained_by=[], implements=[],
+            )
+            with redirect_stdout(StringIO()):
+                self.assertEqual(backlog_compile.stub_story(args), 0)
+            story = "backlog/epics/delivery-fixture/stories/job-worker/story.md"
+            story_props, _body = backlog_compile.parse_front_matter(docs / story)
+            self.assertNotIn("origin_mode", story_props)
+            revision = int(props.get("revision", 1) or 1)
+            self.assertEqual(story_props["introduced_in_revision"], revision)
+            vault = vault_check.build_vault(docs, vault_check.load_policy(vault_check.DEFAULT_POLICY))
+            self.assertEqual(vault_check.changed_findings(vault, [story])[story], [])
+
+            def origin_findings():
+                _record, errors = backlog_compile.collect(docs)
+                return [error for error in errors if "origin_mode" in error]
+
+            self.assertEqual(origin_findings(), [])
+            # A later revision picks a planning mode. The legacy story stays
+            # readable only while the backlog carries its legacy contract.
+            props.update(planning_mode="manual", revision=revision + 1)
+            backlog.write_text(backlog_compile.front_matter(props, body), encoding="utf-8")
+            self.assertEqual(origin_findings(), [])
+            del props["legacy_contract"]
+            backlog.write_text(backlog_compile.front_matter(props, body), encoding="utf-8")
+            self.assertIn(f"{story} needs origin_mode and introduced_in_revision", origin_findings())
 
     def test_changes_requested_status_tag_uses_kebab_case(self):
         props = {

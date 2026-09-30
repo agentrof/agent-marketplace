@@ -31,7 +31,9 @@ behavior is host-neutral; Claude Code and Codex are packaging adapters.
     overlap, cycles, ordering and coverage. The read-only
     `backlog_review_inputs.py` manifest narrows epic reading to that scope plus
     dependency and source closure; root review retains the complete package.
-    Its hash must be rechecked before persisting a review.
+    Its `check` block carries the compiler facts for the current review note,
+    which panel lens readers take as given. Its hash must be rechecked before
+    persisting a review.
 12. Every story has a sibling `test-plan.md`. Criteria and rules map to stable
     scenarios; automation-required scenarios name an executable-test target.
 13. Every story has exactly one accountable implementation owner and may name
@@ -137,6 +139,15 @@ behavior is host-neutral; Claude Code and Codex are packaging adapters.
     modes. Schema-v3 package provenance binds the closed file inventory, hashes
     and executable set. Public stable installs, exact-lease ref transactions,
     immutable Release reconciliation and clean-ref completion remain mandatory.
+29. Backlog, Solution Design, Design System and Operation contract reviews
+    run in the mode that `review_mode` in
+    `challenge-review/data/review-panels.json` selects: one reviewer per step,
+    the default, or a review panel of parallel, read-only lens readers. Lens
+    sets are validated data in that file; a panel replaces a step's single
+    reviewer and never stacks on top of it, and the mode also selects the
+    tier of the read-only document readers. Review steps whose machine
+    interface accepts one result per role keep one reader until a merge step
+    exists.
 
 The normative Requirement and Delivery lifecycle is documented in
 [requirement-delivery-protocol.md](requirement-delivery-protocol.md).

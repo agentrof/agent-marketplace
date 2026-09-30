@@ -178,6 +178,7 @@
         "tools.tests.test_single_team_distribution.*",
         "tools.tests.test_packaged_state_contract.*",
         "tools.tests.test_validator_contract.*",
+        "tools.tests.test_review_panels.*",
         "tools.tests.test_counts.*",
         "tools.tests.test_task_inputs.*",
         "tools.tests.test_ci_*.*"
@@ -430,6 +431,7 @@
     "tools.tests.test_requirement_compile",
     "tools.tests.test_requirement_flow",
     "tools.tests.test_requirement_review_contract",
+    "tools.tests.test_review_panels",
     "tools.tests.test_runtime_scripts",
     "tools.tests.test_scaffold",
     "tools.tests.test_scenario_report",

@@ -12,6 +12,22 @@ inputs, not project state. A later review layer starts only after the prior
 layer's writes and deterministic checks are green. Each host uses its native
 agent invocation and wait mechanism without changing these semantics.
 
+Backlog, Solution Design, Design System and Operation contract reviews run in
+the mode that `review_mode` in `challenge-review/data/review-panels.json`
+selects. `single`, the default, keeps one fresh reviewer per step. `panel`
+runs review panels, defined in `challenge-review/references/review-panel.md`:
+fresh read-only lens readers, one lens assignment each, read the same inputs
+in parallel. The owning persona merges findings that share a root cause, keeping
+the highest returned severity, and the panel approves only when no lens has an
+open critical or major finding and the owning compiler checks are green. A
+re-review reruns only the assignments whose blocking findings were fixed or
+disproved, plus one changed-text check. A panel replaces the step's single
+reviewer and never stacks on top of it: the Solution primary reviewer existed
+only to stop two full panels from stacking (#293). Delivery code review and
+QA, and the Experience attestation, keep one reader per role because their
+machine interfaces accept one result per role; they join through a later
+merge step.
+
 Requirement Flow is a linear, user-gated sequence. Each required stage commits
 its approved documents before the next stage begins. The backlog compiler is
 the only machine that derives backlog indexes. All durable changes are

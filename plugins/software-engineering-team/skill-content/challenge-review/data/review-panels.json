@@ -1,0 +1,151 @@
+{
+  "schema_version": 1,
+  "review_mode": "single",
+  "review_modes": {
+    "single": {"tier_overrides": {"lens": "high"}},
+    "panel": {"tier_overrides": {}}
+  },
+  "review_steps": {
+    "backlog_epic": {
+      "reader_role": "backlog-reviewer",
+      "review_note": {
+        "sections": "backlog_contract.required_epic_review_sections",
+        "panel_sections": ["Findings", "Verdict"]
+      },
+      "lenses": [
+        {
+          "id": "scope-and-slicing",
+          "covers": ["Scope", "Slicing"],
+          "focus": "Each story stays inside the epic goal and its cited approved sources, states real non-goals and is one vertical slice that can be delivered and demonstrated alone. No two stories deliver the same behavior, and no approved scope of the epic falls between them."
+        },
+        {
+          "id": "criteria-coverage-and-test-design",
+          "covers": ["Criteria Coverage", "Test Design"],
+          "focus": "Every cited criterion and rule is exercised: a scenario can fail it, its Given can be arranged in the named target, its Then observes the criterion's outcome and its automation target can run it. Every coverage-class disposition and not-applicable reason holds. The manifest check block already maps each source to its scenarios; judge whether those scenarios test it."
+        },
+        {
+          "id": "dependencies-and-role-ownership",
+          "covers": ["Dependencies", "Role Ownership"],
+          "focus": "Every declared dependency is real, points the right way and has a reason that says what it supplies, and no needed dependency inside or outside the epic is missing. Each obligation has one accountable owner role, each supporting role has a concrete responsibility and nothing falls between stories or roles."
+        }
+      ],
+      "default_panel": [
+        ["scope-and-slicing"],
+        ["criteria-coverage-and-test-design"],
+        ["dependencies-and-role-ownership"]
+      ]
+    },
+    "backlog_root": {
+      "reader_role": "backlog-reviewer",
+      "review_note": {
+        "sections": "backlog_contract.required_backlog_review_sections",
+        "panel_sections": ["Findings", "Verdict"]
+      },
+      "lenses": [
+        {
+          "id": "scope-and-slicing",
+          "covers": ["Epic Coverage", "Cross-Epic Overlap"],
+          "focus": "The epic set covers the selected approved scope exactly once: each epic states one outcome, no two epics or their stories deliver the same behavior and no approved scope falls between epics."
+        },
+        {
+          "id": "criteria-coverage-and-test-design",
+          "covers": ["Deferred Criteria", "Global Test Coverage"],
+          "focus": "Every selected criterion and rule is covered by a story or deferred with a concrete reason and revisit trigger, and no deferral strands a story that needs it. Coverage across epics leaves no criterion unverifiable and plans adjacent regression wherever stories share behavior."
+        },
+        {
+          "id": "dependencies-and-role-ownership",
+          "covers": ["Cross-Epic Dependencies", "Delivery Sequencing", "Shared Contracts"],
+          "focus": "Cross-epic dependencies are real, point the right way and form no cycle, and the delivery order they imply can be executed. Each shared contract has one owning story, and every consuming story depends on it."
+        }
+      ],
+      "default_panel": [
+        ["scope-and-slicing"],
+        ["criteria-coverage-and-test-design"],
+        ["dependencies-and-role-ownership"]
+      ]
+    },
+    "solution_design": {
+      "reader_role": "solution-reviewer",
+      "lenses": [
+        {
+          "id": "technology-fit-and-traceability",
+          "focus": "Every verdict and accepted decision traces to an approved requirement, rule or budget, and assumptions and unverified cells are named. Every active BA process is allocated to a component or carries a not-technical rationale, only accepted decisions constrain the topology and decision status is consistent across the package."
+        },
+        {
+          "id": "sustainability-and-operability",
+          "focus": "Each component has an owner, a bounded responsibility and a declared dependency direction. App ids are lower-kebab with exact future app paths, failure modes, observability and future change cost are stated, and the target and transition topology close."
+        },
+        {
+          "id": "cost-and-lock-in",
+          "focus": "Cost is judged at the stated scale, build versus external sourcing is justified, the exit path from each external dependency is concrete and every open or parked engagement carries its rationale."
+        },
+        {
+          "id": "security-and-compliance",
+          "focus": "Trust boundaries, authentication and authorization placement, data obligations such as privacy, retention and residency, and deferred security decisions are explicit and owned."
+        }
+      ],
+      "default_panel": [
+        ["technology-fit-and-traceability"],
+        ["sustainability-and-operability"],
+        ["cost-and-lock-in"],
+        ["security-and-compliance"]
+      ]
+    },
+    "design_system": {
+      "reader_role": "design-system-reviewer",
+      "lenses": [
+        {
+          "id": "token-system-and-catalog",
+          "focus": "Semantic tokens form one coherent system: MASTER's token block and the synced standalone catalog agree, light and dark tokens pair, and the typography, spacing, radius, layout, shadow, motion and breakpoint scales are complete. One icon set is used, and a brand asset is exact or its absence is stated."
+        },
+        {
+          "id": "accessibility-and-states",
+          "focus": "Contrast, focus visibility, keyboard reach and reduced motion hold in every component state. Render and challenge the desktop, mobile and reduced-motion states, and check that each component specification defines every interactive state."
+        },
+        {
+          "id": "contradictions-and-upstream-fit",
+          "focus": "No page override contradicts MASTER, named anti-patterns are avoided and the exact BA derives_from and Solution constrained_by bindings are honored. An upstream constraint always wins over a design preference."
+        }
+      ],
+      "default_panel": [
+        ["token-system-and-catalog"],
+        ["accessibility-and-states"],
+        ["contradictions-and-upstream-fit"]
+      ]
+    },
+    "operation_verification": {
+      "reader_role": "devops-engineer",
+      "lenses": [
+        {
+          "id": "command-safety",
+          "focus": "Each command runs as written from its repository-relative workdir, passes data such as test ids as arguments rather than through shell interpolation, has no destructive, network or credential side effect beyond the contract and reports failure through its exit status."
+        },
+        {
+          "id": "boundary-fit",
+          "focus": "Every service, version, port, seed and teardown the commands assume exists in the approved environment or the private candidate checkout, the cited accepted Solution decisions justify each command and the stated source of Delivery PR checks matches the CI bootstrap contract."
+        }
+      ],
+      "default_panel": [
+        ["command-safety"],
+        ["boundary-fit"]
+      ]
+    },
+    "operation_environment": {
+      "reader_role": "qa-engineer",
+      "lenses": [
+        {
+          "id": "command-safety",
+          "focus": "Each lifecycle command runs as written from its repository-relative workdir, is safe to repeat, never removes data outside its own instance and reports failure through its exit status."
+        },
+        {
+          "id": "boundary-fit",
+          "focus": "Verification can run against this environment: health checks, deterministic seeds, isolation between parallel runs, clean teardown and the runtime entry points the Verification Contract needs exist, and the cited accepted Solution decisions justify each service."
+        }
+      ],
+      "default_panel": [
+        ["command-safety"],
+        ["boundary-fit"]
+      ]
+    }
+  }
+}

@@ -24,10 +24,12 @@ from types import ModuleType
 
 ADAPTER_API_VERSION = 1
 FEATURE_BRANCH_PREFIX_RE = re.compile(r"[a-z0-9]+(?:-[a-z0-9]+)*/")
-CANONICAL_REASONING_LEVELS = {"high", "medium", "low", "inherit"}
+CANONICAL_REASONING_LEVELS = {"high", "medium", "low", "lens", "inherit"}
 EXECUTION_PROFILE_FILE = "execution-profiles.json"
 AUTO_EXECUTION_PROFILE = "auto"
 EXECUTION_SETTING_KEYS = {"model", "effort"}
+REVIEW_PANELS_RELPATH = "skill-content/challenge-review/data/review-panels.json"
+REVIEW_MODES = ("single", "panel")
 DELIVERY_PROTOCOL_CAPABILITY = {
     "read_min": 1,
     "read_max": 1,
@@ -492,6 +494,47 @@ def load_execution_profile(
     }
 
 
+def review_mode_tier_overrides(source: Path) -> dict[str, str]:
+    """Return the tier overrides of the plugin's selected review mode.
+
+    The review_mode switch in the review-panel data also selects the tier the
+    read-only document readers render with. A plugin without that data renders
+    every tier as declared; tools/validate.py reports the data's full shape.
+    """
+    path = source / REVIEW_PANELS_RELPATH
+    if not path.is_file():
+        return {}
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+        overrides = data["review_modes"][data["review_mode"]]["tier_overrides"]
+    except (OSError, json.JSONDecodeError, KeyError, TypeError) as exc:
+        raise ValueError(
+            f"{path}: review_mode must select a review_modes entry with tier_overrides"
+        ) from exc
+    if not isinstance(overrides, dict) or not all(
+        isinstance(tier, str) and isinstance(rendered, str)
+        for tier, rendered in overrides.items()
+    ):
+        raise ValueError(f"{path}: tier_overrides must map tier names to tier names")
+    return dict(overrides)
+
+
+def review_mode_execution_profile(
+    source: Path, execution_profile: dict[str, dict[str, str]],
+) -> dict[str, dict[str, str]]:
+    """Resolve each tier to the host setting the selected review mode renders."""
+    overrides = review_mode_tier_overrides(source)
+    unknown = sorted((set(overrides) | set(overrides.values())) - set(execution_profile))
+    if unknown:
+        raise ValueError(
+            f"{source / REVIEW_PANELS_RELPATH}: tier_overrides name unknown tiers {unknown}"
+        )
+    return {
+        tier: dict(execution_profile[overrides.get(tier, tier)])
+        for tier in execution_profile
+    }
+
+
 def generate_agents(
     source: Path, target: Path, adapter: HostAdapter,
     execution_profile: dict[str, dict[str, str]],
@@ -501,7 +544,7 @@ def generate_agents(
         return
     context = {
         "parse_frontmatter": parse_frontmatter,
-        "execution_profile": execution_profile,
+        "execution_profile": review_mode_execution_profile(source, execution_profile),
     }
     for path in sorted(agents.glob("*.md")):
         write_artifacts(target, adapter.module.agent_artifacts(context, path))
@@ -892,7 +935,10 @@ def validate_canonical(root: Path) -> None:
         for agent in sorted((source / "agents").glob("*.md")):
             fields, _ = parse_frontmatter(agent)
             if fields.get("reasoning") not in CANONICAL_REASONING_LEVELS:
-                problems.append(f"{agent}: reasoning must be high/medium/low/inherit")
+                problems.append(
+                    f"{agent}: reasoning must be one of"
+                    f" {', '.join(sorted(CANONICAL_REASONING_LEVELS))}"
+                )
             if "model" in fields:
                 problems.append(f"{agent}: canonical agents use reasoning, not model")
         for path in sorted(

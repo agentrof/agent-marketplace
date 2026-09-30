@@ -203,7 +203,10 @@ ID runs the role on the main conversation's model, a provider that does not
 serve the ID fails the request unless a fallback model chain covers it, and
 each model needs a Claude Code version that knows it. On Codex, where roles
 named no model before, a pinned model needs an account, a workspace and a
-Codex version that offer it.
+Codex version that offer it. `tools/model_drift.py` finds newer models of the
+pinned families in each host's own catalog, and the model catalog bump in
+[the maintainer protocol](maintainer-operations-protocol.md) turns one into
+a reviewed pin.
 
 `inherit` is the user override that makes every role follow the parent
 session's model and effort:

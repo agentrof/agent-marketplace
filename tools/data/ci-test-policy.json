@@ -100,6 +100,14 @@
     },
     {
       "paths": [
+        "tools/model_drift.py"
+      ],
+      "groups": [
+        "contracts"
+      ]
+    },
+    {
+      "paths": [
         "plugins/software-engineering-team/scripts/delivery_compile.py",
         "plugins/software-engineering-team/scripts/delivery_git.py",
         "plugins/software-engineering-team/scripts/delivery_governance.py",
@@ -181,6 +189,7 @@
         "tools.tests.test_validator_contract.*",
         "tools.tests.test_review_panels.*",
         "tools.tests.test_mechanical_pass_tier.*",
+        "tools.tests.test_model_drift.*",
         "tools.tests.test_story_size_budget.*",
         "tools.tests.test_review_loop.*",
         "tools.tests.test_execution_planning.*",
@@ -431,6 +440,7 @@
     "tools.tests.test_living_experience_flow",
     "tools.tests.test_maintainer_protocol",
     "tools.tests.test_mechanical_pass_tier",
+    "tools.tests.test_model_drift",
     "tools.tests.test_operation_governance",
     "tools.tests.test_owner_gates",
     "tools.tests.test_package_refresh",

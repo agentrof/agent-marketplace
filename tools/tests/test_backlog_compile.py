@@ -88,6 +88,38 @@ class BacklogCompilerTests(unittest.TestCase):
             self.assertEqual(props["implements"], ["[[requirements/req-002-tiered-verification-gates|REQ-002]]"])
             self.assertEqual(backlog_compile.implements_findings(props, "story.md", "REQ-002"), [])
 
+    def test_stub_story_passes_the_per_write_vault_check(self):
+        import vault_check
+        with tempfile.TemporaryDirectory() as raw:
+            docs = Path(raw) / "workspace" / "docs"
+            (docs / "maps").mkdir(parents=True)
+            (docs.parent / "config.json").write_text(json.dumps({
+                "schema_version": 2, "team_id": "software-engineering-team",
+                "output_language": "English", "terminology_language": "English",
+            }), encoding="utf-8")
+            make_approved_backlog(docs)
+            # Without a planning mode the legacy fixture stubs an empty origin_mode.
+            backlog = docs / "backlog" / "backlog.md"
+            props, body = backlog_compile.parse_front_matter(backlog)
+            props["planning_mode"] = "manual"
+            backlog.write_text(backlog_compile.front_matter(props, body), encoding="utf-8")
+            constraint = "[[solution-design/landscape|Solution Landscape]]"
+            for slug, identity, constrained_by in (("job-worker", "AUTH-02", []),
+                                                   ("job-api", "AUTH-03", [constraint])):
+                args = SimpleNamespace(
+                    docs=docs, epic="delivery-fixture", slug=slug, id=identity, title=slug,
+                    scope="Run the job.", work_kind="technical", criterion_ref=[], experience_ref=[],
+                    evidence_ref=[], uses_design=[], constrained_by=constrained_by, implements=[],
+                )
+                with redirect_stdout(StringIO()):
+                    self.assertEqual(backlog_compile.stub_story(args), 0)
+                story = f"backlog/epics/delivery-fixture/stories/{slug}/story.md"
+                props, _body = backlog_compile.parse_front_matter(docs / story)
+                self.assertNotIn("uses_design", props)
+                self.assertEqual(props.get("constrained_by"), constrained_by or None)
+                vault = vault_check.build_vault(docs, vault_check.load_policy(vault_check.DEFAULT_POLICY))
+                self.assertEqual(vault_check.changed_findings(vault, [story])[story], [])
+
     def test_changes_requested_status_tag_uses_kebab_case(self):
         props = {
             "status": "changes_requested",
@@ -683,6 +715,21 @@ class AcceptedMinorFindingsTests(unittest.TestCase):
         self.assertIn("backlog/epics/delivery-fixture/reviews/round-1-epic-review.md "
                       "Accepted Minor Findings columns must be: finding, owner_role, "
                       "reason, revisit_trigger", self.errors())
+
+    def test_code_spans_in_review_citations_are_not_links(self):
+        code = "`pages/api/v1/health-checks/[[...resource]].ts`"
+        props, body = backlog_compile.parse_front_matter(self.root_review)
+        evidence = next(line for line in body.splitlines() if line.startswith("Evidence ["))
+        self.root_review.write_text(backlog_compile.front_matter(
+            props, body.replace(evidence, f"{evidence} It routes {code}.", 1)), encoding="utf-8")
+        self.accept(self.epic_review, self.VALID.replace("twice", f"for {code} twice"))
+        self.assertEqual(self.errors(), [])
+        self.accept(self.epic_review, self.VALID.replace(self.STORY, code))
+        self.assertTrue(any("must cite the affected vault note" in error for error in self.errors()))
+        self.root_review.write_text(backlog_compile.front_matter(
+            props, body.replace(evidence, evidence.split("[[", 1)[0] + f"{code} records the inputs.", 1)),
+            encoding="utf-8")
+        self.assertTrue(any("review Evidence must cite a vault note" in error for error in self.errors()))
 
     def test_review_input_discovery_leaves_the_record_to_the_final_gate(self):
         self.accept(self.epic_review, self.VALID.replace("product_owner", "backend_developer"))

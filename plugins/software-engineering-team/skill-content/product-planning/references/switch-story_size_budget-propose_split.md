@@ -91,7 +91,9 @@ that note from the owner's decision:
 
 `story` links a story of that epic with its id as the alias and the table
 pipe escaped, `measure` is a declared measure id and `reason` is concrete.
-The compiler validates every row and rejects a repeated story and measure.
+The compiler validates every row and rejects a repeated story and measure:
+`check` reports an invalid row, and `approve` refuses one before any write,
+since an approved review can no longer change.
 
 ## Reviews
 

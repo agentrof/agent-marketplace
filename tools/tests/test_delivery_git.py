@@ -35,7 +35,7 @@ import setup_check  # noqa: E402
 import stage_package  # noqa: E402
 import vault_check  # noqa: E402
 from backlog_fixture import make_approved_backlog  # noqa: E402
-from git_fixture import init_repository, remove_temporary, temporary_directory  # noqa: E402
+from git_fixture import disable_automatic_maintenance, init_repository, remove_temporary, temporary_directory  # noqa: E402
 from fixture_cache import RepositorySeedCache  # noqa: E402
 
 
@@ -4099,6 +4099,163 @@ class DeliveryGitTests(unittest.TestCase):
                               delivery_result.from_raw("publish-execution-plan", published)["observations"])
                 self.assertEqual(delivery_git.run_git(project, "show", published["integration"] + ":" + contract),
                                  delivery_git.run_git(project, "show", reserved["integration"] + ":" + contract))
+
+    SUPERSEDED_REMEDY = ("take the Delivery package and the Operation contracts from the Integration, "
+                         "then revise inside begin-plan-revision")
+
+    def second_checkout(self, project: Path, directory: Path, publication: str) -> Path:
+        """Clone the project as a second host and take the package and Operation contracts of one publication."""
+        holder = tempfile.TemporaryDirectory()
+        self.addCleanup(remove_temporary, holder)
+        clone = Path(holder.name) / "checkout"
+        delivery_git.run_git(project, "clone", "-q", str(project / "remote.git"), str(clone))
+        disable_automatic_maintenance(clone / ".git")
+        delivery_git.run_git(clone, "config", "user.email", "second@example.com")
+        delivery_git.run_git(clone, "config", "user.name", "Second host")
+        delivery_git.run_git(clone, "checkout", publication, "--",
+                             directory.relative_to(project).as_posix(), "workspace/docs/operation")
+        delivery_git.run_git(clone, "reset", "-q")
+        return clone
+
+    def revise_verification_contract(self, docs: Path, note: str) -> dict:
+        """Approve the next Verification Contract revision and return its receipt."""
+        kind = type("Args", (), {"docs": str(docs), "kind": "verification"})
+        self.assertEqual(operation_compile.revise(kind), 0)
+        path = operation_compile.contract_path(docs, "verification")
+        props, body = operation_compile.parse(path)
+        operation_compile.atomic_text(path, operation_compile.render(props, body + "\n\n" + note + "\n"))
+        self.assertEqual(operation_compile.approve(kind), 0)
+        receipt, errors = operation_compile.check_contract(docs, "verification")
+        self.assertEqual(errors, [])
+        return receipt
+
+    def test_a_checkout_holding_an_earlier_approval_cannot_publish_over_a_revised_plan(self):
+        """An earlier approval, or one re-approved from it, never replaces the plan that revised it (#322)."""
+        project, docs, directory, _item, _reserved = self.prepare_execution_with_draft_reserved_contracts(False)
+        scope = type("Args", (), {"docs": str(docs), "delivery": "DLV-001"})
+        refs = delivery_git.canonical_refs("DLV-001")
+        first = delivery_git.publish_execution_plan(project, "DLV-001")
+        second = self.second_checkout(project, directory, first["integration"])
+        second_docs = second / "workspace/docs"
+        second_delivery = second_docs / directory.relative_to(docs) / "delivery.md"
+        earlier = delivery_compile.split_note(second_delivery)[0]["plan_hash"]
+        delivery_git.begin_plan_revision(project, "DLV-001")
+        self.assertEqual(self.revise_verification_contract(docs, "Revision 2 is the newer approved contract.")["revision"], 2)
+        self.assertEqual(delivery_compile.approve_execution(scope), 0)
+        delivery_git.publish_execution_plan(project, "DLV-001")
+        revised = delivery_compile.split_note(directory / "delivery.md")[0]["plan_hash"]
+        self.assertNotEqual(revised, earlier)
+
+        def refused(plan_hash: str) -> tuple[str, str]:
+            return ("DELIVERY_PLAN_SUPERSEDED",
+                    f"the Integration holds execution plan {revised} and the Verification Contract approved at "
+                    f"revision 2, which this checkout's approval of execution plan {plan_hash} does not supersede; "
+                    + self.SUPERSEDED_REMEDY)
+
+        for moment in ("inside the plan revision", "after the plan revision"):
+            with self.subTest(moment=moment):
+                if moment == "after the plan revision":
+                    delivery_git.finish_plan_revision(project, "DLV-001")
+                delivery_git.run_git(second, "fetch", "-q", "origin")
+                before = delivery_git.remote_ref_oids(project, "origin", [refs["fence"], refs["integration"]])
+                self.assertEqual(self.refused_finding(lambda: delivery_git.publish_execution_plan(second, "DLV-001")),
+                                 refused(earlier))
+                self.assertEqual(delivery_git.remote_ref_oids(project, "origin", [refs["fence"], refs["integration"]]), before)
+
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output):
+            exit_code = delivery_git.main(["publish-execution-plan", "--project-root", str(second), "--delivery", "DLV-001"])
+        envelope = json.loads(output.getvalue())
+        self.assertEqual((exit_code, envelope["ok"], envelope["mutation_state"]), (1, False, "none"))
+        self.assertEqual([finding["code"] for finding in envelope["findings"]], ["DELIVERY_PLAN_SUPERSEDED"])
+
+        # Re-approving the earlier package supersedes only that approval, not the revision.
+        second_plan = second_delivery.parent / "execution-plan.md"
+        earlier_approval = delivery_compile.split_note(second_plan)[0]["source_hash"]
+        self.assertEqual(delivery_compile.approve_execution(type("Args", (), {"docs": str(second_docs), "delivery": "DLV-001"})), 0)
+        self.assertEqual(delivery_compile.split_note(second_plan)[0]["superseded_plan_approvals"], [earlier_approval])
+        reapproved = delivery_compile.split_note(second_delivery)[0]["plan_hash"]
+        before = delivery_git.remote_ref_oids(project, "origin", [refs["fence"], refs["integration"]])
+        self.assertEqual(self.refused_finding(lambda: delivery_git.publish_execution_plan(second, "DLV-001")),
+                         refused(reapproved))
+        self.assertEqual(delivery_git.remote_ref_oids(project, "origin", [refs["fence"], refs["integration"]]), before)
+
+    def test_a_checkout_holding_an_earlier_contract_cannot_publish_it_under_a_sealed_plan(self):
+        """A sealed Item keeps its bindings and so the plan hash, which cannot show the older contract (#322)."""
+        project, docs, directory, _item, _reserved = self.prepare_execution_with_draft_reserved_contracts(False)
+        scope = type("Args", (), {"docs": str(docs), "delivery": "DLV-001"})
+        refs = delivery_git.canonical_refs("DLV-001")
+        delivery_git.publish_execution_plan(project, "DLV-001")
+        delivery_git.claim_items(project, "DLV-001")
+        active = delivery_git.start_item(project, "DLV-001", "AUTH-01")
+        self.commit_item_product_change(active["worktree"], "def authenticate():\n    return True\n")
+        self.assertEqual(self.approve_item_evidence(active["worktree"]), 0)
+        delivery_git.push_item(project, "DLV-001", "AUTH-01")
+        integrated = delivery_git.integrate_item(project, "DLV-001", "AUTH-01")
+        # The plan revision compiles the tracked package as the Integration sealed it.
+        for name in ("item.md", "code-review.md", "verification.md"):
+            relative = (directory / "items/auth-01" / name).relative_to(project).as_posix()
+            props, body = delivery_git.split_remote_note(project, integrated["integration"], relative, delivery_compile.split_note)
+            delivery_compile.atomic_text(project / relative, delivery_compile.frontmatter(props, body))
+        self.assertEqual(delivery_compile.approve_execution(scope), 0)
+        sealed = delivery_git.publish_execution_plan(project, "DLV-001")
+        second = self.second_checkout(project, directory, sealed["integration"])
+        second_docs = second / "workspace/docs"
+        plan_hash = delivery_compile.split_note(directory / "delivery.md")[0]["plan_hash"]
+        delivery_git.begin_plan_revision(project, "DLV-001")
+        self.revise_verification_contract(docs, "Revision 2 is the newer approved contract.")
+        self.assertEqual(delivery_compile.approve_execution(scope), 0)
+        self.assertEqual(delivery_compile.split_note(directory / "delivery.md")[0]["plan_hash"], plan_hash)
+        delivery_git.publish_execution_plan(project, "DLV-001")
+        delivery_git.finish_plan_revision(project, "DLV-001")
+        delivery_git.run_git(second, "fetch", "-q", "origin")
+        self.assertEqual(delivery_compile.split_note(second_docs / directory.relative_to(docs) / "delivery.md")[0]["plan_hash"],
+                         plan_hash)
+        for local in ("revision 1", "another revision 2"):
+            with self.subTest(local=local):
+                if local == "another revision 2":
+                    self.revise_verification_contract(second_docs, "Revision 2 as the second host approved it.")
+                replacement = "its approved revision 1" if local == "revision 1" else "a different approved revision 2"
+                before = delivery_git.remote_ref_oids(project, "origin", [refs["fence"], refs["integration"]])
+                self.assertEqual(self.refused_finding(lambda: delivery_git.publish_execution_plan(second, "DLV-001")), (
+                    "DELIVERY_PLAN_SUPERSEDED",
+                    f"the Integration holds execution plan {plan_hash} and the Verification Contract approved at "
+                    f"revision 2, which this checkout would replace with {replacement}; " + self.SUPERSEDED_REMEDY))
+                self.assertEqual(delivery_git.remote_ref_oids(project, "origin", [refs["fence"], refs["integration"]]), before)
+
+    def test_publication_takes_a_first_an_identical_and_a_superseding_approval(self):
+        """Only an approval that revises the Integration's, directly or through unpublished ones, replaces it."""
+        project, docs, directory, _item, _reserved = self.prepare_execution_with_draft_reserved_contracts(False)
+        scope = type("Args", (), {"docs": str(docs), "delivery": "DLV-001"})
+        plan = directory / "execution-plan.md"
+        refs = delivery_git.canonical_refs("DLV-001")
+        first = delivery_compile.split_note(plan)[0]
+        self.assertEqual(first["superseded_plan_approvals"], [])
+        published = delivery_git.publish_execution_plan(project, "DLV-001")
+        republished = delivery_git.publish_execution_plan(project, "DLV-001")
+        self.assertEqual(delivery_git.remote_oid(project, "origin", refs["integration"]), republished["integration"])
+        # A second host holding the same approval publishes it again, as before.
+        second = self.second_checkout(project, directory, published["integration"])
+        delivery_git.run_git(second, "fetch", "-q", "origin")
+        delivery_git.publish_execution_plan(second, "DLV-001")
+        delivery_git.run_git(project, "fetch", "-q", "origin")
+
+        delivery_git.begin_plan_revision(project, "DLV-001")
+        self.revise_verification_contract(docs, "Revision 2 is the newer approved contract.")
+        self.assertEqual(delivery_compile.approve_execution(scope), 0)
+        revision = delivery_compile.split_note(plan)[0]
+        self.assertEqual(revision["superseded_plan_approvals"], [first["source_hash"]])
+        # Approval is offline, so one approved again before it is published still names the published one.
+        self.assertEqual(delivery_compile.approve_execution(scope), 0)
+        again = delivery_compile.split_note(plan)[0]
+        self.assertEqual(again["plan_hash"], revision["plan_hash"])
+        self.assertEqual(again["superseded_plan_approvals"], [revision["source_hash"], first["source_hash"]])
+        revised = delivery_git.publish_execution_plan(project, "DLV-001")
+        delivery_git.finish_plan_revision(project, "DLV-001")
+        carried = delivery_git.split_remote_note(project, revised["integration"], plan.relative_to(project).as_posix(),
+                                                 delivery_compile.split_note)[0]
+        self.assertEqual((carried["source_hash"], carried["superseded_plan_approvals"]),
+                         (again["source_hash"], again["superseded_plan_approvals"]))
 
     def test_execution_publication_keeps_a_terminal_item_on_its_verified_revision(self):
         """A closed Item's binding names history, not a stale current receipt."""

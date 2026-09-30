@@ -2282,6 +2282,65 @@ def uncarried_operation_contracts(root: Path, docs: Path, integration_oid: str,
     return not_carried
 
 
+def refuse_superseded_approval(root: Path, directory: Path, docs: Path, integration_oid: str,
+                               pinned_paths: list[str]) -> None:
+    """Refuse to publish an approval the Integration has already moved past.
+
+    The leases publication takes stop only a concurrent publisher, so a checkout
+    that still holds an earlier approval would otherwise put it back. The
+    Integration's plan gives way only to the same plan or to an approval that
+    lists the Integration's among those it supersedes. A sealed Item keeps its
+    Operation bindings, so its plan hash cannot show an older contract: each
+    contract the Items pin gives way only to the same approval or a later
+    revision.
+    """
+    import operation_compile
+    from ba_compile import parse_frontmatter
+    from delivery_compile import split_note
+
+    def front_matter(text: str | None) -> dict | None:
+        if text is None:
+            return None
+        props, _line, error = parse_frontmatter(text)
+        return {} if error else props
+
+    plan = directory / "execution-plan.md"
+    kinds = {rel_posix(root, operation_compile.contract_path(docs, kind)): kind for kind in operation_compile.KINDS}
+    held = published_plan_blobs(root, integration_oid, [rel_posix(root, plan), *pinned_paths])
+    published = front_matter(held.get(rel_posix(root, plan)))
+    contracts = {path: front_matter(held.get(path)) for path in pinned_paths}
+
+    def holds(paths: list[str]) -> str:
+        described = []
+        for path in paths:
+            title = operation_compile.TYPE_FOR[kinds[path]].replace("-", " ").title()
+            copy = contracts[path]
+            described.append(f"no {title}" if copy is None
+                             else f"the {title} {copy.get('status')} at revision {copy.get('revision')}")
+        plan_held = "no execution plan" if published is None else f"execution plan {published.get('plan_hash')}"
+        return f"the Integration holds {plan_held} and " + " and ".join(described)
+
+    remedy = ("take the Delivery package and the Operation contracts from the Integration, "
+              "then revise inside begin-plan-revision")
+    local = split_note(plan)[0] if plan.is_file() else {}
+    lineage = local.get("superseded_plan_approvals")
+    if (published is not None and published.get("plan_hash") != local.get("plan_hash")
+            and published.get("source_hash") not in (lineage if isinstance(lineage, list) else [])):
+        raise RuntimeError(f"DELIVERY_PLAN_SUPERSEDED: {holds(pinned_paths)}, which this checkout's approval of "
+                           f"execution plan {local.get('plan_hash')} does not supersede; {remedy}")
+    for path in pinned_paths:
+        copy = contracts[path]
+        if not copy or copy.get("status") != "approved" or not isinstance(copy.get("revision"), int):
+            continue
+        props = operation_compile.parse(root / path)[0]
+        revision = props.get("revision") if isinstance(props.get("revision"), int) else 0
+        if copy["revision"] > revision or (copy["revision"] == revision
+                                           and copy.get("source_hash") != props.get("source_hash")):
+            replacement = ("a different " if copy["revision"] == revision else "its ") + f"{props.get('status')} revision {revision}"
+            raise RuntimeError(f"DELIVERY_PLAN_SUPERSEDED: {holds([path])}, which this checkout would replace "
+                               f"with {replacement}; {remedy}")
+
+
 def publish_execution_plan(project_root: Path, delivery_id: str,
                            remote: str = "origin") -> dict:
     root = main_worktree(project_root.resolve())
@@ -2304,6 +2363,7 @@ def publish_execution_plan(project_root: Path, delivery_id: str,
         raise RuntimeError("DELIVERY_FENCE_MODE: publish-execution-plan requires an open Fence")
     package = package_paths(root, directory, docs, include_map=False)
     operation_paths, operation_bindings = execution_operation_inputs(root, directory, docs)
+    refuse_superseded_approval(root, directory, docs, integration_oid, operation_paths)
     not_carried = uncarried_operation_contracts(root, docs, integration_oid, operation_paths)
     integration_candidate = commit_tree(
         root, integration_oid, sorted(set(package + operation_paths)), f"Publish execution plan for {delivery_id}",

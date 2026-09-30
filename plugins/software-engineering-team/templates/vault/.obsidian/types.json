@@ -103,6 +103,7 @@
     "environment_contract_ref": "text",
     "environment_contract_hash": "text",
     "operation_contract_hashes": "multitext",
+    "superseded_plan_approvals": "multitext",
     "role_sequence": "multitext",
     "reviewed_commit": "text",
     "reviewed_integration_commit": "text",

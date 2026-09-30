@@ -258,5 +258,51 @@ class ProcessPolicyLifecycleTests(unittest.TestCase):
             self.assertEqual(types.get(key), policy["property_types"][key], key)
 
 
+def flat(relative: str) -> str:
+    return " ".join((TEAM / relative).read_text(encoding="utf-8").split())
+
+
+class ConfigureProcessContractTests(unittest.TestCase):
+    """/configure process changes switch values only through the policy lifecycle."""
+
+    def test_configure_routes_process_to_its_reference_and_compiler(self):
+        skill = flat("skill-content/configure/SKILL.md")
+        for rule in ("or a process switch (`process`)",
+                     "`references/process-policy.md` for `process` before durable changes",
+                     "for `process`, use `process_policy.py`. Never hand-edit their lifecycle fields"):
+            with self.subTest(rule=rule):
+                self.assertIn(rule, skill)
+
+    def test_one_choice_gate_per_switch_with_the_default_recommended_first(self):
+        reference = flat("skill-content/configure/references/process-policy.md")
+        for rule in (
+                "Ask one choice-gate question per switch, at most four per host call",
+                "The package default is the recommended option and comes first",
+                "Each option's description carries that value's registry tradeoffs",
+                "the question names the switch's metric and promotion unit",
+                "Never choose for the user and never skip a switch",
+                "When no answer changes a value in force, write nothing and stop",
+                "ask the approval choice gate. On rejection write nothing",
+                "Choosing the default removes the switch's row",
+                "`workspace/config.json` never holds a process choice",
+                "never hand-edit the Switches table or the lifecycle fields",
+                "a project row is never a promotion"):
+            with self.subTest(rule=rule):
+                self.assertIn(rule, reference)
+        order = [reference.index(verb) for verb in (
+            "`process_policy.py switches", "`init`", "`begin-revision`", "`set --switch",
+            "`check`", "`approve`")]
+        self.assertEqual(order, sorted(order))
+
+    def test_config_stays_closed_and_names_the_process_policy(self):
+        contract = flat("skill-content/configure/references/config-contract.md")
+        self.assertIn("| Process switch values | `workspace/docs/delivery/process-policy.md` over"
+                      " the package registry `data/process-switches.json` | Process Policy"
+                      " lifecycle, `/configure process` |", contract)
+        self.assertIn("No `scale`, `limits`, stack, source-directory, command or process switch"
+                      " field is accepted in config: the config stays closed, and the Process"
+                      " Policy is the one place for process choices", contract)
+
+
 if __name__ == "__main__":
     unittest.main()

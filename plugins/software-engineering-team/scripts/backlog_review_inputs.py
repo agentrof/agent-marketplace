@@ -198,6 +198,23 @@ def compiler_check(docs: Path, record: dict, scope_epics: list[dict], review: di
     return result
 
 
+def epic_structure(record: dict, read: set[str]) -> dict:
+    """Return the backlog structure an epic manifest derives its read set from.
+
+    Every note the manifest reads is bound by its own hash. A note outside the
+    read set can change the read set only through a story identity or a
+    dependency edge that reaches a story inside it, and those are bound here.
+    """
+    stories = [story for story in record["stories"] if story["path"] in read]
+    inside = {story["id"] for story in stories}
+    return {"epics": sorted([item["id"], item["path"]] for item in record["epics"]
+                            if item["path"] in read),
+            "stories": sorted([story["id"], story["epic_id"], story["path"], story["test_plan"]]
+                              for story in stories),
+            "dependencies": sorted(edge for edge in backlog.dependency_edges(
+                record["stories"], None, record) if set(edge.split(" -> ")) & inside)}
+
+
 def manifest(docs: Path, *, epic: str | None = None, expected_hash: str | None = None,
              writer: bool = False) -> dict:
     """Bound one review or writer task; a reader never reads an untouched stub.
@@ -207,6 +224,13 @@ def manifest(docs: Path, *, epic: str | None = None, expected_hash: str | None =
     reader carries there only the stubs in notes outside its paths, so an
     unfinished epic holds back only the reviews that read it. Every other
     source finding still fails, and the root reader needs complete sources.
+
+    ``source_hash`` binds what the task reads. The root manifest binds every
+    backlog note. An epic manifest binds the notes it names and the story
+    identities and dependency edges that reach them, not the bytes of notes
+    it never reads, so another epic's writer finishing its own notes leaves
+    the epic's review fresh; the stubs it lists from outside its paths are
+    information, not an input.
     """
     docs = docs.resolve()
     if not docs.is_dir():
@@ -403,9 +427,12 @@ def manifest(docs: Path, *, epic: str | None = None, expected_hash: str | None =
     if before != after or contract != contract_hash() or any(
             file_hash(regular_file(docs, path)) != value for path, value in hashes.items()):
         raise InputError("review sources changed during manifest generation; retry from current sources")
-    # An edited outside Story can introduce a new incoming edge. Bind all backlog
-    # sources, while keeping unrelated documents out of the reviewer's read set.
-    structure_hash = digest({path: value for path, value in before.items() if path.startswith("backlog/")})
+    if epic is None:
+        # The root review reads the complete package: every backlog byte binds it.
+        structure_hash = digest({path: value for path, value in before.items()
+                                 if path.startswith("backlog/")})
+    else:
+        structure_hash = digest(epic_structure(record, set(hashes)))
     result = {"ok": True, "schema_version": 1, "scope": scope,
               "primary_paths": sorted(primary), "context_paths": sorted(set(hashes) - primary),
               "paths": sorted(hashes), "files": [{"path": path, "sha256": hashes[path],
@@ -415,7 +442,15 @@ def manifest(docs: Path, *, epic: str | None = None, expected_hash: str | None =
               "check": check}
     if unparsed:
         result["unparsed_link_sources"] = sorted(unparsed)
-    result["source_hash"] = digest(result)
+    bound = result
+    if epic is not None and "scaffold_findings" in check:
+        inside = [finding for finding in check["scaffold_findings"]
+                  if finding.split(" ", 1)[0] in hashes]
+        bound_check = {key: value for key, value in check.items() if key != "scaffold_findings"}
+        if inside or writer:
+            bound_check["scaffold_findings"] = inside
+        bound = dict(result, check=bound_check)
+    result["source_hash"] = digest(bound)
     if expected_hash is not None and result["source_hash"] != expected_hash:
         raise InputError("review input manifest is stale; regenerate and review the changed sources")
     return result

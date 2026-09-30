@@ -381,12 +381,50 @@ class BacklogReviewInputTests(unittest.TestCase):
         self.assertEqual(first, second)
         self.assertEqual(before, {str(path): path.read_bytes() for path in self.docs.rglob("*") if path.is_file()})
 
-    def test_outside_epic_edit_invalidates_a_previous_manifest(self):
-        previous = inputs.manifest(self.docs, epic="EP-001")
+    def test_an_outside_edit_keeps_an_epic_manifest_fresh_and_stales_the_root(self):
+        epic = inputs.manifest(self.docs, epic="EP-001")
+        root = inputs.manifest(self.docs)
+        self.assertNotIn(self.story(4).relative_to(self.docs).as_posix(), epic["paths"])
         with self.story(4).open("a", encoding="utf-8") as handle:
-            handle.write("\nA changed external story may change review context.\n")
+            handle.write("\nA changed external story outside every EP-001 dependency.\n")
+        self.add_scope_text(3, "Another external edit that reaches no EP-001 story.")
+        self.assertEqual(inputs.manifest(self.docs, epic="EP-001",
+                                         expected_hash=epic["source_hash"]), epic)
+        # The root review reads the complete package, so every backlog byte binds it.
         with self.assertRaisesRegex(inputs.InputError, "stale"):
-            inputs.manifest(self.docs, epic="EP-001", expected_hash=previous["source_hash"])
+            inputs.manifest(self.docs, expected_hash=root["source_hash"])
+
+    def test_a_change_inside_its_closure_makes_an_epic_manifest_stale(self):
+        self.depends(1, 3)
+        self.refresh_reviews()
+        previous = inputs.manifest(self.docs, epic="EP-001")
+        self.assertIn(self.story(3).relative_to(self.docs).as_posix(), previous["context_paths"])
+        for number in (1, 3):
+            with self.subTest(story=number):
+                current = inputs.manifest(self.docs, epic="EP-001")
+                self.add_scope_text(number, f"A changed story {number} inside the EP-001 closure.")
+                with self.assertRaisesRegex(inputs.InputError, "stale"):
+                    inputs.manifest(self.docs, epic="EP-001", expected_hash=current["source_hash"])
+
+    def finish_stubs(self, folder: Path) -> None:
+        """Author every placeholder stub-story wrote, as the writer of that epic does."""
+        story, plan = folder / "story.md", folder / "test-plan.md"
+        text = story.read_text(encoding="utf-8")
+        for key, stub in backlog.STORY_STUBS.items():
+            text = text.replace(stub, f"The job worker {key.replace('_', ' ').lower()} is"
+                                      " authored for this slice.")
+        story.write_text(text.replace(backlog.RESPONSIBILITY_STUB, "- backend_developer: Run the"
+                                      " job worker beside the approved API."), encoding="utf-8")
+        text = plan.read_text(encoding="utf-8")
+        for field, stub in backlog.SCENARIO_STUBS.items():
+            text = text.replace(stub, f"the job worker {field.lower()} clause is authored")
+        for coverage in backlog.SCENARIO_COVERAGE_CLASSES:
+            text = text.replace(
+                f"| {coverage} | not_applicable | - | {backlog.COVERAGE_REASON_STUB} |",
+                f"| {coverage} | covered | ST-005-TS-001 | |" if coverage == "empty" else
+                f"| {coverage} | not_applicable | - | The job worker exposes no {coverage}"
+                " behavior to verify. |")
+        plan.write_text(text, encoding="utf-8")
 
     def test_input_policy_helper_change_invalidates_previous_manifest(self):
         previous = inputs.manifest(self.docs, epic="EP-001")
@@ -535,6 +573,27 @@ class BacklogReviewInputTests(unittest.TestCase):
         self.story(3).write_text(backlog.front_matter(props, body), encoding="utf-8")
         with self.assertRaisesRegex(inputs.InputError, "targets missing note: solution-design/missing"):
             inputs.manifest(self.docs, epic="EP-001")
+
+    def test_finishing_another_epics_stubs_keeps_an_epic_manifest_fresh(self):
+        folder = self.stub_story("second")
+        reader = inputs.manifest(self.docs, epic="EP-001")
+        writer = inputs.manifest(self.docs, epic="EP-001", writer=True)
+        self.assertTrue(reader["check"]["scaffold_findings"])
+        self.finish_stubs(folder)
+        _, errors = backlog.collect(self.docs)
+        self.assertEqual([error for error in errors if "untouched" in error], [])
+        fresh = inputs.manifest(self.docs, epic="EP-001", expected_hash=reader["source_hash"])
+        self.assertNotIn("scaffold_findings", fresh["check"])
+        self.assertEqual(inputs.manifest(self.docs, epic="EP-001", writer=True,
+                                         expected_hash=writer["source_hash"])["check"]
+                         ["scaffold_findings"], [])
+        # The epic that holds the story still reads every change to it.
+        second = inputs.manifest(self.docs, epic="EP-002")
+        story = folder / "story.md"
+        story.write_text(story.read_text(encoding="utf-8").replace("is authored", "is written"),
+                         encoding="utf-8")
+        with self.assertRaisesRegex(inputs.InputError, "stale"):
+            inputs.manifest(self.docs, epic="EP-002", expected_hash=second["source_hash"])
 
     def test_a_stub_in_an_epic_readers_dependency_closure_still_fails_it(self):
         self.stub_story("second")

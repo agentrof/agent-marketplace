@@ -239,6 +239,32 @@ def compiler_check(docs: Path, record: dict, scope_epics: list[dict], review: di
             "relation_audit": audit, "counts": counts, "stories": facts}
 
 
+def finding_notes(record: dict) -> dict[str, str]:
+    """Map each backlog note's path, and each epic and story id, to that note."""
+    notes: dict[str, str] = {}
+    if record["backlog"] is not None:
+        notes[record["backlog"]["path"]] = record["backlog"]["path"]
+    for review in record["backlog_reviews"]:
+        notes[review["path"]] = review["path"]
+    for item in record["epics"]:
+        notes[item["id"]] = notes[item["path"]] = item["path"]
+        for review in item["reviews"]:
+            notes[review["path"]] = review["path"]
+    for story in record["stories"]:
+        notes[story["id"]] = notes[story["path"]] = story["path"]
+        notes[story["test_plan"]] = story["test_plan"]
+    return notes
+
+
+def finding_note(finding: str, notes: dict[str, str]) -> str | None:
+    """Return the backlog note a finding starts with, by its path or its id.
+
+    None marks a finding about the backlog as a whole, such as a dependency
+    cycle or a duplicate id, or about a file the backlog does not hold.
+    """
+    return notes.get(finding.split(" ", 1)[0])
+
+
 def epic_structure(record: dict, read: set[str]) -> dict:
     """Return the backlog structure an epic manifest derives its read set from.
 
@@ -260,11 +286,15 @@ def manifest(docs: Path, *, epic: str | None = None, expected_hash: str | None =
              writer: bool = False) -> dict:
     """Bound one review or writer task; a reader never reads an untouched stub.
 
-    Filling the placeholders the stub verbs write is the writer's task, so a
-    writer manifest carries them as ``check.scaffold_findings``. An epic
-    reader carries there only the stubs in notes outside its paths, so an
-    unfinished epic holds back only the reviews that read it. Every other
-    source finding still fails, and the root reader needs complete sources.
+    An epic manifest fails only on a finding in a note it reads, or on one
+    about the backlog as a whole: a dependency cycle, a duplicate id, the
+    backlog root or a file the backlog does not hold. A finding in a backlog
+    note outside its paths, stub or not, is another writer's work in
+    progress, listed in ``check.scaffold_findings`` as context, so an
+    unfinished epic holds back only the reviews that read it. Filling the
+    placeholders the stub verbs write is the writer's task, so a writer
+    manifest also carries the stubs in its own paths there. The root manifest
+    needs complete sources and fails on every finding.
 
     ``check`` holds only what a switch or those stubs put there: the compiler
     facts at review_panels ``lens_panel``, which the manifest then names, and
@@ -289,13 +319,21 @@ def manifest(docs: Path, *, epic: str | None = None, expected_hash: str | None =
     panels = read_panels(docs)
     with stage_package.candidate_session(), backlog.experience_validation_session():
         record, errors = backlog.collect(docs, review_inputs=True)
-        stubs = record["scaffold_findings"]
-        carried = stubs if writer else []
-        errors = sorted(set(errors) - set(carried))
-        # Which stubs an epic reader reads is known once its closure is.
-        deferred = epic is not None and not writer and set(errors) <= set(stubs)
-        if errors and not deferred:
-            raise InputError("backlog structure is invalid: " + "; ".join(errors))
+        errors = sorted(set(errors))
+        stubs = set(record["scaffold_findings"])
+        notes = finding_notes(record)
+        # The root reads every note, so it fails on every finding but the
+        # stubs its writer carries. An epic manifest defers each finding that
+        # names a backlog note until its read set is known; a finding about
+        # the backlog as a whole fails every epic at once.
+        if epic is None:
+            carried = [finding for finding in errors if writer and finding in stubs]
+            blocking = [finding for finding in errors if finding not in carried]
+        else:
+            carried = []
+            blocking = [finding for finding in errors if finding_note(finding, notes) is None]
+        if blocking:
+            raise InputError("backlog structure is invalid: " + "; ".join(blocking))
         epics = record["epics"]
         if epic is not None:
             matches = [item for item in epics if epic in {item["id"], item["path"], item["folder"]}]
@@ -316,6 +354,9 @@ def manifest(docs: Path, *, epic: str | None = None, expected_hash: str | None =
         adjacency = defaultdict(set)
         for story in record["stories"]:
             for target in story["dependency_targets"]:
+                # A target that is no story is its source story's finding.
+                if target + ".md" not in by_path:
+                    continue
                 dependency = by_path[target + ".md"]["id"]
                 adjacency[story["id"]].add(dependency)
                 adjacency[dependency].add(story["id"])
@@ -480,16 +521,18 @@ def manifest(docs: Path, *, epic: str | None = None, expected_hash: str | None =
                 for match in matches:
                     include(match, f"declared analysis scope from {relative}", hop)
 
-        if deferred and errors:
-            notes = {item["path"] for item in epics} | {
-                path for story in record["stories"] for path in (story["path"], story["test_plan"])}
-            # Every stub finding starts with its note's path; one that names no
-            # backlog note outside the read set still fails.
-            carried = [finding for finding in errors
-                       if finding.split(" ", 1)[0] in notes - set(hashes)]
-            blocking = sorted(set(errors) - set(carried))
+        if epic is not None and errors:
+            # A finding in a note the manifest does not read is another
+            # writer's work: it is listed as context, never an input. A finding
+            # in a note it reads fails it, except an untouched stub, which a
+            # writer carries because filling it is the writer's task.
+            outside = [finding for finding in errors
+                       if finding_note(finding, notes) not in hashes]
+            inside = [finding for finding in errors if finding not in outside]
+            blocking = [finding for finding in inside if not (writer and finding in stubs)]
             if blocking:
                 raise InputError("backlog structure is invalid: " + "; ".join(blocking))
+            carried = sorted(outside + [finding for finding in inside if finding in stubs])
 
         if epic is None:
             current_review = backlog.latest(record["backlog_reviews"])

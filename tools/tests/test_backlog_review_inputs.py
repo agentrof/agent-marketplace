@@ -616,11 +616,86 @@ class BacklogReviewInputTests(unittest.TestCase):
                 inputs.manifest(self.docs, epic=scope)
         _, errors = backlog.collect(self.docs)
         self.assertLessEqual(set(carried), set(errors))
-        # An authored finding outside the epic's paths still fails it.
+        # An authored finding outside the epic's paths is listed as well ...
+        missing = "[[solution-design/missing|Missing]]"
         props, body = backlog.parse_front_matter(self.story(3))
-        props["constrained_by"] = ["[[solution-design/missing|Missing]]"]
+        props["constrained_by"] = [missing]
         self.story(3).write_text(backlog.front_matter(props, body), encoding="utf-8")
-        with self.assertRaisesRegex(inputs.InputError, "targets missing note: solution-design/missing"):
+        outside = inputs.manifest(self.docs, epic="EP-001")
+        self.assertIn("backlog/epics/second/stories/st-003/story.md constrained_by targets"
+                      " missing note: solution-design/missing",
+                      outside["check"]["scaffold_findings"])
+        self.assertEqual(outside["source_hash"], value["source_hash"])
+        # ... while the same finding in a note the epic reads fails it.
+        props, body = backlog.parse_front_matter(self.story(1))
+        props["constrained_by"] = [missing]
+        self.story(1).write_text(backlog.front_matter(props, body), encoding="utf-8")
+        with self.assertRaisesRegex(inputs.InputError,
+                                    "st-001/story.md .*targets missing note"):
+            inputs.manifest(self.docs, epic="EP-001")
+
+    def test_another_epics_writer_mid_edit_holds_back_only_the_reviews_that_read_it(self):
+        folder = self.stub_story("second")
+        reader = inputs.manifest(self.docs, epic="EP-001")
+        writer = inputs.manifest(self.docs, epic="EP-001", writer=True)
+        # EP-002's writer replaces the coverage-row stubs and nothing else, so
+        # its still unclassified scenario becomes an authored finding.
+        plan = folder / "test-plan.md"
+        text = plan.read_text(encoding="utf-8")
+        for coverage in backlog.SCENARIO_COVERAGE_CLASSES:
+            text = text.replace(
+                f"| {coverage} | not_applicable | - | {backlog.COVERAGE_REASON_STUB} |",
+                f"| {coverage} | not_applicable | - | The job worker exposes no {coverage}"
+                " behavior to verify. |")
+        plan.write_text(text, encoding="utf-8")
+        _record, errors = backlog.collect(self.docs)
+        unclassified = ("backlog/epics/second/stories/job-worker/test-plan.md scenarios are not"
+                        " classified by Coverage Classes: ST-005-TS-001")
+        self.assertIn(unclassified, errors)
+        for kwargs, previous in (({}, reader), ({"writer": True}, writer)):
+            with self.subTest(**kwargs):
+                value = inputs.manifest(self.docs, epic="EP-001", **kwargs)
+                listed = value["check"]["scaffold_findings"]
+                self.assertIn(unclassified, listed)
+                self.assertTrue(all(finding.startswith("backlog/epics/second/stories/job-worker/")
+                                    for finding in listed))
+                # Another epic's partial edit leaves the epic's review fresh.
+                self.assertEqual(value["source_hash"], previous["source_hash"])
+                self.assertEqual(inputs.manifest(self.docs, epic="EP-001",
+                                                 expected_hash=previous["source_hash"], **kwargs),
+                                 value)
+        # The epic that holds the edit, its writer and the root still fail on it.
+        for kwargs in ({"epic": "EP-002"}, {"epic": "EP-002", "writer": True}, {}):
+            with self.subTest(**kwargs):
+                with self.assertRaisesRegex(inputs.InputError, "not classified by Coverage Classes"):
+                    inputs.manifest(self.docs, **kwargs)
+
+    def test_a_finding_about_the_whole_backlog_or_an_edge_into_the_closure_fails_every_epic(self):
+        self.stub_story("second")
+        # A dependency cycle anywhere fails every epic manifest.
+        self.depends(3, 4)
+        self.depends(4, 3)
+        for kwargs in ({}, {"writer": True}):
+            with self.subTest(**kwargs):
+                with self.assertRaisesRegex(inputs.InputError, "cycle"):
+                    inputs.manifest(self.docs, epic="EP-001", **kwargs)
+        self.depends(4, 4)
+        path = self.story(4)
+        props, body = backlog.parse_front_matter(path)
+        props.pop("depends_on")
+        path.write_text(backlog.front_matter(props, body.replace(
+            "- [[backlog/epics/second/stories/st-004/story|ST-004]]: Supplies the required input.",
+            "None.")), encoding="utf-8")
+        _record, errors = backlog.collect(self.docs)
+        self.assertFalse([error for error in errors if "cycle" in error])
+        # An edge from another epic's story into the closure makes that story
+        # a note the epic reads, so its finding fails the epic too.
+        path = self.story(3)
+        props, body = backlog.parse_front_matter(path)
+        props["depends_on"] = ["[[backlog/epics/delivery-fixture/stories/st-001/story|ST-001]]"]
+        path.write_text(backlog.front_matter(props, body), encoding="utf-8")
+        with self.assertRaisesRegex(inputs.InputError, "st-003/story.md dependencies missing"
+                                                       " reasons"):
             inputs.manifest(self.docs, epic="EP-001")
 
     def test_finishing_another_epics_stubs_keeps_an_epic_manifest_fresh(self):

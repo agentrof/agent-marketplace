@@ -15,6 +15,8 @@ import subprocess
 
 PACKAGE = Path(__file__).resolve().parents[1]
 POLICY = "templates/task-input-policy.json"
+# process_policy.REGISTRY; the catalog reads it without importing the compiler.
+SWITCH_REGISTRY = "skill-content/configure/data/process-switches.json"
 REFERENCE = re.compile(r"\[[^\]]+\]\((references/[^)#]+)(?:#[^)]*)?\)")
 SWITCH_REFERENCE = re.compile(r"^switch-([a-z][a-z0-9_]*)-([a-z][a-z0-9_]*)\.md$")
 DELIVERY_PACKAGE = re.compile(r"^workspace/docs/delivery/deliveries/([^/]+)/")
@@ -109,6 +111,25 @@ def identity(root: Path, paths) -> list[dict]:
     return records
 
 
+def agent_variants(package: Path) -> dict[str, str]:
+    """Return each generated agent variant the switch registry declares, with its base role.
+
+    A build writes the variants beside their base agents, but a task always
+    runs as the base role, so the role catalog leaves the variants out.
+    """
+    path = package / SWITCH_REGISTRY
+    if not path.is_file():
+        return {}
+    try:
+        switches = json.loads(path.read_text(encoding="utf-8"))["switches"]
+        return {f"{agent}-{variant['suffix']}": agent
+                for _switch, spec in sorted(switches.items())
+                for _value, variant in sorted((spec.get("agent_variants") or {}).items())
+                for agent in variant["agents"]}
+    except (json.JSONDecodeError, KeyError, TypeError, AttributeError) as exc:
+        raise ValueError(f"process switch registry cannot be read: {exc}") from exc
+
+
 def catalog(package: Path = PACKAGE) -> dict:
     policy = json.loads(regular(package, POLICY).read_text(encoding="utf-8"))
     if policy.get("schema_version") != 1:
@@ -119,7 +140,7 @@ def catalog(package: Path = PACKAGE) -> dict:
         if any(not re.fullmatch(r"[a-z][a-z0-9_]*", key) for key in policy[name]):
             raise ValueError(f"{name} keys must use snake_case")
         policy[name] = {key.replace("_", "-"): value for key, value in policy[name].items()}
-    agents = {path.stem for path in (package / "agents").glob("*.md")}
+    agents = {path.stem for path in (package / "agents").glob("*.md")} - set(agent_variants(package))
     skills = {path.parent.name for path in (package / "skill-content").glob("*/SKILL.md")}
     entries = {path.parent.name for path in (package / "skill-content").glob("*/SKILL.md")
                if re.search(r"^exposure: entry$", path.read_text(encoding="utf-8"), re.M)}
@@ -413,6 +434,10 @@ def manifest(*, entry: str, role: str | None, mode: str, project: Path | None = 
     if entry not in policy["entries"] or mode not in policy["modes"]:
         raise ValueError("unknown entry or task mode")
     route = policy["entries"][entry]
+    variants = agent_variants(package)
+    if role in variants:
+        raise ValueError(f"{role} is a generated variant of {variants[role]}; derive its task as"
+                         f" {variants[role]}")
     if role is not None and role not in route["roles"]:
         raise ValueError("role does not belong to the selected entry")
     if not route["project_state"] and (project is not None or inputs or findings or base or epic):

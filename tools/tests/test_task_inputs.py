@@ -5,6 +5,7 @@ from __future__ import annotations
 import contextlib
 import io
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -709,6 +710,46 @@ class EpicTaskScopeTests(unittest.TestCase):
                 current = self.task(role, mode)
                 self.assertIn(path.relative_to(self.root).as_posix(),
                               {record["path"] for record in current["canonical_source_inventory"]})
+
+
+class BuiltPackageTaskInputTests(unittest.TestCase):
+    """A built host package derives tasks with its own scripts and agents."""
+
+    def test_every_built_package_checks_its_catalog_and_derives_a_role_task(self):
+        # The catalog reads the switch registry without importing its compiler.
+        self.assertEqual(task_inputs.SWITCH_REGISTRY, process_policy.REGISTRY)
+        sys.path.insert(0, str(ROOT / "tools"))
+        try:
+            import build_distributions as builder
+        finally:
+            sys.path.remove(str(ROOT / "tools"))
+        with tempfile.TemporaryDirectory() as raw:
+            output = Path(raw) / "dist"
+            builder.build(ROOT, output)
+            for host in builder.HOSTS:
+                package = output / host / "software-engineering-team"
+                # The build writes each switch's agent variants beside their base agents.
+                self.assertTrue((package / "agents/product-owner-mechanical.md").is_file())
+                self.assertTrue((package / "agents/backlog-reviewer-lens.md").is_file())
+                for argv in (["--check-catalog"],
+                             ["--entry", "backlog-plan", "--role", "backlog-reviewer",
+                              "--mode", "review"]):
+                    with self.subTest(host=host, argv=argv):
+                        result = subprocess.run(
+                            [sys.executable, str(package / "scripts/task_inputs.py"), *argv],
+                            capture_output=True, text=True, check=False,
+                            env={**os.environ, "PYTHONDONTWRITEBYTECODE": "1"})
+                        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+                        self.assertNotEqual(json.loads(result.stdout).get("ok"), False)
+            # A variant is never a task role: its task is derived as its base role.
+            script = output / "claude/software-engineering-team/scripts/task_inputs.py"
+            refused = subprocess.run(
+                [sys.executable, str(script), "--entry", "backlog-plan",
+                 "--role", "product-owner-mechanical", "--mode", "revise"],
+                capture_output=True, text=True, check=False,
+                env={**os.environ, "PYTHONDONTWRITEBYTECODE": "1"})
+            self.assertEqual(refused.returncode, 1)
+            self.assertIn("derive its task as product-owner", json.loads(refused.stdout)["error"])
 
 
 if __name__ == "__main__":

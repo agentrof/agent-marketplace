@@ -83,6 +83,8 @@ class RegistryAndInstructionTests(unittest.TestCase):
             "summary": spec["parameters"]["summary"], "values": ["propose_split"],
             "declared_by": {"path": MEASURES, "key": "measures"},
             "type": "positive_integer", "min_count": 1})
+        # Only the propose_split instructions and the compiler read the measures.
+        self.assertEqual(spec["value_data"], {"propose_split": [MEASURES]})
         self.assertIn("never over budget", spec["parameters"]["summary"])
         self.assertEqual(spec["promotion"]["unit"], "At least 3 backlog revisions run with"
                          " propose_split and 3 Deliveries that contain stories planned under it.")
@@ -779,7 +781,8 @@ def committed_brief(fixture: Project) -> None:
 
 
 class TaskBindingTests(unittest.TestCase):
-    """Only an approved policy at `propose_split` binds the reference."""
+    """Only an approved policy at `propose_split` binds the reference and the
+    measures it reads."""
 
     TASKS = (("backlog-plan", "product-owner", "revise"),
              ("backlog-plan", "backlog-reviewer", "review"),
@@ -793,17 +796,19 @@ class TaskBindingTests(unittest.TestCase):
                                            project=self.fx.root)
                 for task in self.TASKS}
 
-    def test_the_reference_binds_only_at_propose_split(self):
+    def test_the_reference_and_the_measures_bind_only_at_propose_split(self):
         plain = self.manifests()
         for task, result in plain.items():
             with self.subTest(task=task, policy="missing"):
-                self.assertNotIn(REFERENCE, result["required_reads"])
-                self.assertNotIn(REFERENCE, [item["path"] for item in result["instructions"]])
+                for path in (REFERENCE, MEASURES):
+                    self.assertNotIn(path, result["required_reads"])
+                    self.assertNotIn(path, [item["path"] for item in result["instructions"]])
         self.fx.choose((SWITCH, "propose_split"), limits={"acceptance_criteria": 12})
         for task, result in self.manifests().items():
             with self.subTest(task=task, policy="propose_split"):
                 self.assertEqual(sorted(set(result["required_reads"])
-                                        - set(plain[task]["required_reads"])), [REFERENCE])
+                                        - set(plain[task]["required_reads"])),
+                                 sorted([MEASURES, REFERENCE]))
         self.fx.choose()
         for task, result in self.manifests().items():
             with self.subTest(task=task, policy="off"):

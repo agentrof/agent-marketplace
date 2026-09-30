@@ -204,10 +204,6 @@ SHIPPED_ADDITIONS = {
     "skill-content/configure/references/process-policy.md": (
         6, "#332: the /configure process procedure, the configure entry's new process"
            " target, which every configure task binds with the rest of its skill."),
-    "skill-content/product-planning/data/story-size-measures.json": (
-        6, "#325: the story size measures. Only the backlog compiler reads them, at"
-           " story_size_budget propose_split, yet every task that selects product-planning"
-           " hashes them."),
 }
 
 # Every default-path output that differs from e47dbe0, by harness and by the

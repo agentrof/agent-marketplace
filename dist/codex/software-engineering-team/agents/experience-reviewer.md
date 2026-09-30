@@ -1,7 +1,7 @@
 ---
 name: experience-reviewer
 description: Independent read-only challenger for living, process-owned Experience packages and author-owned prototype snapshots. Invoked explicitly by the Experience Design flow.
-reasoning: high
+model_reasoning_effort: high
 output_contract: prose
 ---
 

@@ -1,7 +1,7 @@
 ---
 name: backend-developer
 description: Backend developer role. Spawned by software-engineering-team flows to implement server-side work against approved contracts; never auto-triggered.
-reasoning: medium
+model_reasoning_effort: medium
 output_contract: prose
 ---
 

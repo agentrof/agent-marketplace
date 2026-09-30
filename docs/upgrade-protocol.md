@@ -26,7 +26,8 @@ configuration remain the source of truth.
    setup removes unknown or retired configuration keys as part of the closed
    schema replacement. It refreshes only policy-asserted Obsidian JSON keys
    and preserves user-owned instruction companions through the separate host
-   projection choice gate.
+   projection choice gate. A Codex projection keeps its recorded execution
+   profile.
 5. Config schema v2 has only team identity and language settings. An upgrade
    removes every field outside that closed shape without editing Markdown,
    aliases or links. Taxonomy additions and graph-color changes therefore never

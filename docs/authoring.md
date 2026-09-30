@@ -156,3 +156,31 @@ local evidence for exactly that candidate. Unknown/shared inputs select full
 coverage. Verify again immediately before commit. `make check` remains the
 exhaustive sequential oracle; local receipts never replace required remote
 platform, installation or release checks.
+
+## Execution profiles
+
+Canonical agents declare only a host-neutral `reasoning` tier from
+`tools/data/models.json`. Each host maps every tier to its own model and
+effort in `platforms/<host>/execution-profiles.json`, profile `auto`. The
+builder and `tools/validate.py` accept only the host's documented values, so
+model names stay out of `plugins/`. Claude agents receive `model:` and, when
+the table sets one, `effort:`; an omitted `effort` follows the session. Codex
+dist agents carry the resolved `model` and `model_reasoning_effort`, which
+setup renders into `.codex/agents/`.
+
+`inherit` is the user override that makes every role follow the parent
+session's model and effort:
+
+- Codex: `generate_codex_project.py apply --project-root <root> --scope local
+  --execution-profile inherit` omits both keys from every role file. The managed files record the choice, later
+  refreshes keep it, and `--execution-profile auto` restores the default. It
+  is a local setup flag, not a `workspace/config.json` field: the closed
+  config refuses performance knobs, and the profile is a personal host choice
+  that changes only the ignored projection.
+- Claude Code: a plugin cannot switch frontmatter per user, and
+  `${user_config.*}` is substituted only in the agent body. The documented
+  session setting `CLAUDE_CODE_SUBAGENT_MODEL_FORCE=1` (Claude Code 2.1.257 or
+  later) runs every role on the main conversation's model. A frontmatter `effort` overrides the session
+  level but not `CLAUDE_CODE_EFFORT_LEVEL`, which pins one level for the
+  session. Both reach every subagent in the session, not only this team.
+  Claude Code's permission modes do not select a model or effort.

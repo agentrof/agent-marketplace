@@ -35,5 +35,14 @@
 - During setup or a package refresh, regenerate the host projection, run the
   generated project check and preserve authored vault files. The generator owns
   only portable instruction roots and local project memory.
+- Role agents use the package's `auto` execution profile: `model` and, when
+  set, `effort` per role tier. The package cannot switch it per user. To run
+  every role on the main conversation's model, the user sets
+  `CLAUDE_CODE_SUBAGENT_MODEL_FORCE=1` in the `env` block of their settings
+  (Claude Code 2.1.257 or later). A
+  role's `effort` overrides the session level but not
+  `CLAUDE_CODE_EFFORT_LEVEL`, which pins one level for the session and every
+  subagent. Both settings reach every subagent in the session, not only this
+  team.
 - Delivery execution is available only through the exact public entries
   `/delivery-plan`, `/execution-plan DLV-###` and `/deliver DLV-###`.

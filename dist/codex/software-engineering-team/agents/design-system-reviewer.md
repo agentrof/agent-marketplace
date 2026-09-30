@@ -1,7 +1,7 @@
 ---
 name: design-system-reviewer
 description: Read-only challenger for the approved Design System package.
-reasoning: high
+model_reasoning_effort: high
 output_contract: prose
 tools: Read, Grep, Glob
 ---

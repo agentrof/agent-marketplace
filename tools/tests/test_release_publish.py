@@ -502,11 +502,20 @@ class ReleaseImmutabilityTests(unittest.TestCase):
         fake = self.staged(immutable=False)
         with self.assertRaisesRegex(
             release_publish.PublishError, "does not report it immutable"
-        ):
+        ) as raised:
             release_publish.Publisher(fake).finalize(
                 spec(), "release-notes.md", RELEASE_BRANCH,
                 require_immutable=True,
             )
+        # Enabling the setting never locks a Release published before it, so
+        # the remedy replaces the Release and keeps its tag.
+        message = str(raised.exception)
+        for remedy in ("enable release immutability for the repository",
+                       f"delete this mutable Release (never its tag {spec().tag})",
+                       "re-run finalize"):
+            self.assertIn(remedy, message)
+        self.assertLess(message.index("enable release immutability"),
+                        message.index("delete this mutable Release"))
         self.assertEqual(fake.release, "exists")
         self.assertEqual(fake.release_branch, RELEASE_BRANCH)
         self.assertEqual((fake.stable, fake.tag_target), (CANDIDATE, CANDIDATE))
@@ -550,6 +559,25 @@ class ReleaseImmutabilityTests(unittest.TestCase):
         )
         self.assertIs(result["github_release_immutable"], False)
         self.assertEqual(result["release_branch_cleanup"], "deleted")
+
+    def test_a_kept_mutable_release_completes_without_the_requirement(self):
+        # The maintainer protocol's "keep it" path: finalize without
+        # --require-immutable reconciles the Release and removes release/stable.
+        fake = self.staged(release="exists", immutable=False)
+        with self.assertRaisesRegex(release_publish.PublishError, "does not report it immutable"):
+            release_publish.Publisher(fake).finalize(
+                spec(), "release-notes.md", RELEASE_BRANCH, require_immutable=True,
+            )
+        result = release_publish.Publisher(fake).finalize(
+            spec(), "release-notes.md", RELEASE_BRANCH,
+        )
+        self.assertEqual((result["action"], result["release_branch_cleanup"]),
+                         ("reconciled", "deleted"))
+        self.assertIs(result["github_release_immutable"], False)
+        self.assertIsNone(fake.release_branch)
+        self.assertFalse(any(command[:3] == ("gh", "release", "create")
+                             for command in fake.commands))
+        self.assert_release_untouched(fake)
 
     def test_cli_passes_the_immutability_requirement(self):
         args = release_publish.build_parser().parse_args([

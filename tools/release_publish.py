@@ -566,8 +566,11 @@ class Publisher:
         if release.immutable is not True:
             raise PublishError(
                 f"GitHub Release {spec.tag} exists but GitHub does not report it "
-                "immutable; enable release immutability for the repository. "
-                "Candidate refs and release/stable were preserved"
+                "immutable, and the setting never locks a Release published "
+                "before it: enable release immutability for the repository, "
+                f"delete this mutable Release (never its tag {spec.tag}) and "
+                "re-run finalize to create an immutable one. Candidate refs and "
+                "release/stable were preserved"
             )
 
     def finalize(

@@ -183,6 +183,12 @@ defines.
 Switch `review_loop`: at `blocking_delta`, this section's review loops
 follow
 `skill-content/challenge-review/references/switch-review_loop-blocking_delta.md`.
+Switch `story_size_budget`: at `propose_split`, `check --json` also reports
+each story's size against the owner-set limits, and before the first epic
+review manifest the Product Owner proposes a split for each story over budget,
+which the owner accepts or keeps, as
+`skill-content/product-planning/references/switch-story_size_budget-propose_split.md`
+defines.
 
 ### Recovery that removes only operating-system metadata
 

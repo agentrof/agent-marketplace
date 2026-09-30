@@ -38,7 +38,11 @@ behavior is host-neutral; Claude Code and Codex are packaging adapters.
     scenarios; automation-required scenarios name an executable-test target.
 13. Every story has exactly one accountable implementation owner and may name
     supporting implementation roles with concrete body responsibilities.
-    Runtime identities are not backlog properties.
+    Runtime identities are not backlog properties. Process switch
+    `story_size_budget` at `propose_split` compares measures the compiler
+    derives from a story and its Test Plan with owner-set limits from the
+    Process Policy; it adds no story field, never fails a check and never
+    rewrites a criterion.
 14. Backlog approval checks structural coverage, exact relation sets and
     review approval. A review requests changes only for an open critical or
     major finding; an accepted minor finding is recorded in the review note's

@@ -100,6 +100,37 @@
         "unit": "At least 5 reviewed documents across at least 2 flows: a contract revision, an epic or root review, a Solution or Design System review, or an Item code review.",
         "threshold": "Median review-loop minutes at most 50% of the matching baseline, zero valid critical or major findings found later in the same document and traced to a skipped minor round or a calibration downgrade, the shadow judge confirming every downgrade, and an owner role and revisit trigger on every follow-up, with every shared quality guard holding and the owner's approval."
       }
+    },
+    "story_size_budget": {
+      "summary": "Whether backlog planning measures each story against owner-set size limits and proposes a split for a story over them, before its epic review.",
+      "issue": 325,
+      "flows": ["backlog-planning", "delivery-planning"],
+      "values": [
+        {
+          "id": "off",
+          "tradeoffs": "Nothing is measured or shown, and the one-review-unit rule stays a reviewer's judgement. Today's behaviour and the baseline the budget is measured against; a story can grow far past one review unit before a Delivery plans it."
+        },
+        {
+          "id": "propose_split",
+          "tradeoffs": "The backlog compiler reports each story's measures against the owner's limits, and the Product Owner proposes a split for each story over budget before its epic review; the owner accepts it or keeps the story with a recorded reason. Advisory only: it never fails a check, blocks an approval or rewrites a criterion. More, smaller stories each carry their own planning, review and gate overhead, and a count is only a proxy for one review unit."
+        }
+      ],
+      "default": "off",
+      "parameters": {
+        "summary": "Owner-set limit per story size measure. The package sets no limit: a measure without a limit is reported but never over budget.",
+        "values": ["propose_split"],
+        "declared_by": {
+          "path": "skill-content/product-planning/data/story-size-measures.json",
+          "key": "measures"
+        },
+        "type": "positive_integer",
+        "min_count": 1
+      },
+      "metric": "Per backlog revision run with propose_split, stories over budget, split proposals accepted and kept, criteria and scenarios moved with exact coverage, and epic review passes; per story, cycle time from start-item to integration, code review cycles, QA rounds and reopens, compared between stories within and over budget in the same period.",
+      "promotion": {
+        "unit": "At least 3 backlog revisions run with propose_split and 3 Deliveries that contain stories planned under it.",
+        "threshold": "The owner accepts at least half of the split proposals, stories within budget reach integration with a median cycle time at most half that of stories over budget in the same period, and no split loses, merges or rewords a criterion, creates a dependency cycle or yields a story verifiable only after a sibling lands, with every shared quality guard holding and the owner's approval."
+      }
     }
   }
 }

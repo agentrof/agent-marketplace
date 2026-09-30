@@ -589,6 +589,39 @@ class ProcessSwitchValidatorTests(unittest.TestCase):
                                  encoding="utf-8")
         self.assert_rejected("not valid unique-key JSON")
 
+    def test_switch_parameters_are_validated(self):
+        declared = {"summary": "Owner-set limit per fixture measure.", "values": ["fast"],
+                    "declared_by": {"path": MEASURES_RELPATH, "key": "measures"},
+                    "type": "positive_integer", "min_count": 1}
+        self.anchor()
+        self.declare(fixture_mode=dict(FIXTURE_SWITCH, parameters=declared))
+        self.assertEqual(self.messages(), [])
+        cases = (
+            (dict(declared, values=["current"]),
+             "parameters belong to a declared value other than the default, not 'current'"),
+            (dict(declared, values=["ghost"]),
+             "parameters belong to a declared value other than the default, not 'ghost'"),
+            (dict(declared, values=[]), "parameters must list the values that take them"),
+            (dict(declared, type="fraction"), "parameter type 'fraction' is not one of"),
+            (dict(declared, declared_by={"path": "skill-content/ghost.json", "key": "measures"}),
+             "declared_by path 'skill-content/ghost.json' is not a file of the package"),
+            (dict(declared, declared_by={"path": "../outside.json", "key": "measures"}),
+             "is not a file of the package"),
+            (dict(declared, declared_by={"path": MEASURES_RELPATH, "key": "ghost"}),
+             "key 'ghost' must map snake_case parameter ids to a summary"),
+            (dict(declared, declared_by=MEASURES_RELPATH),
+             "declared_by must name the package data file and the key"),
+            (dict(declared, min_count=5), "min_count must be a whole number no larger than"),
+            (dict(declared, min_count=True), "min_count must be a whole number no larger than"),
+            (dict(declared, summary=" "), "parameters need a summary"),
+            ({key: value for key, value in declared.items() if key != "type"},
+             "parameters hold exactly summary, values, declared_by, type and min_count"),
+        )
+        for parameters, fragment in cases:
+            with self.subTest(fragment=fragment):
+                self.declare(fixture_mode=dict(FIXTURE_SWITCH, parameters=parameters))
+                self.assert_rejected(fragment)
+
     def test_flows_and_switches_must_name_each_other(self):
         self.declare(fixture_mode=FIXTURE_SWITCH)
         self.assert_rejected("switch 'fixture_mode' is not named by its owning flow 'operation'")
@@ -671,6 +704,76 @@ class ProcessSwitchValidatorTests(unittest.TestCase):
                      other_mode=second)
         self.anchor(FIXTURE_ANCHOR + "Switch `other_mode` selects the same step.\n")
         self.assert_rejected("variant 'backlog-reviewer-quick' collides with switch 'fixture_mode'")
+
+
+MEASURES_RELPATH = "skill-content/product-planning/data/story-size-measures.json"
+MEASURES = f"{PLUGIN_ROOT}/{MEASURES_RELPATH}"
+
+
+class StorySizeMeasureValidatorTests(unittest.TestCase):
+    """Every story size measure names a derivation the backlog compiler has."""
+
+    def setUp(self) -> None:
+        self.temporary = tempfile.TemporaryDirectory()
+        self.root = Path(self.temporary.name)
+        fixtures.make_valid_root(self.root)
+        self.path = self.root / MEASURES
+        self.original = json.loads(self.path.read_text(encoding="utf-8"))
+
+    def tearDown(self) -> None:
+        self.temporary.cleanup()
+
+    def messages(self) -> list[str]:
+        return [finding.message for finding in validate.run(self.root)
+                if finding.check == "story_size_measures"]
+
+    def write(self, mutate) -> None:
+        value = json.loads(json.dumps(self.original))
+        mutate(value)
+        self.path.write_text(json.dumps(value, indent=2) + "\n", encoding="utf-8")
+
+    def test_shipped_measures_are_clean(self):
+        self.assertEqual(self.messages(), [])
+
+    def test_measure_shape_and_derivation_errors_are_rejected(self):
+        def measure(name, **changes):
+            return lambda value: value["measures"][name].update(changes)
+
+        def extra(value):
+            value["measures"]["acceptance_criteria"]["limit"] = 12
+
+        def rename(value):
+            value["measures"]["Test-Scenarios"] = value["measures"].pop("test_scenarios")
+
+        cases = (
+            (measure("acceptance_criteria", derivation="ghost_count"),
+             "measure 'acceptance_criteria': derivation 'ghost_count' is not one the backlog"
+             " compiler implements"),
+            (measure("contract_deltas", derivation="owner_and_supporting_roles"),
+             "measure 'implementation_roles': repeats the derivation of measure"
+             " 'contract_deltas'"),
+            (measure("test_scenarios", summary=" "), "holds exactly a non-empty summary and a"
+             " derivation"),
+            (extra, "holds exactly a non-empty summary and a derivation"),
+            (rename, "measure 'Test-Scenarios': id must be lowercase snake_case"),
+            (lambda value: value.update(schema_version=2), "must hold exactly schema_version 1"),
+            (lambda value: value.update(measures={}), "must hold exactly schema_version 1"),
+        )
+        for mutate, fragment in cases:
+            with self.subTest(fragment=fragment):
+                self.write(mutate)
+                messages = self.messages()
+                self.assertTrue(any(fragment in message for message in messages), messages)
+        self.path.write_text('{"schema_version": 1, "measures": {}, "measures": {}}\n',
+                             encoding="utf-8")
+        self.assertTrue(any("not valid unique-key JSON" in message for message in self.messages()))
+
+    def test_a_compiler_without_the_derivation_registry_is_rejected(self):
+        compiler = self.root / PLUGIN_ROOT / "scripts/backlog_compile.py"
+        compiler.write_text(compiler.read_text(encoding="utf-8").replace(
+            "STORY_SIZE_DERIVATIONS = {", "STORY_SIZE_COUNTS = {", 1), encoding="utf-8")
+        self.assertIn("scripts/backlog_compile.py declares no STORY_SIZE_DERIVATIONS registry",
+                      self.messages())
 
 
 # ---------------------------------------------------------------------------
@@ -804,6 +907,9 @@ VALIDATOR_BUILDERS = {
         root, PANELS, lambda value: value["review_steps"]["design_system"].update(lenses=[])),
     "process_switches": lambda root: edit_json(
         root, SWITCHES, lambda value: value["switches"]["review_panels"].update(default="ghost")),
+    "story_size_measures": lambda root: edit_json(
+        root, MEASURES,
+        lambda value: value["measures"]["acceptance_criteria"].update(derivation="ghost_count")),
     "limits_config_shape": lambda root: edit_json(
         root, "tools/data/limits.json",
         lambda value: value["authoring_caps"].update(ghost_cap=1)),

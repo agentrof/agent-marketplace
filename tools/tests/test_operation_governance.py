@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import contextlib
+import io
 import json
 import hashlib
 import subprocess
@@ -35,6 +37,20 @@ def declare(path: Path, **fields: object) -> None:
 
     props, body = operation_compile.parse(path)
     path.write_text(operation_compile.render({**props, **fields}, body), encoding="utf-8")
+
+
+def set_review_loop(docs: Path, value: str) -> None:
+    """Approve a Process Policy revision that sets switch review_loop to ``value``."""
+    sys.path.insert(0, str(SCRIPTS))
+    import process_policy
+
+    first = "begin-revision" if process_policy.path_for(docs).exists() else "init"
+    for step in ((first,), ("set", "--switch", "review_loop", "--value", value), ("approve",)):
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output):
+            code = process_policy.main([step[0], "--docs", str(docs), *step[1:]])
+        if code:
+            raise AssertionError(output.getvalue())
 
 
 def operation_findings(docs: Path) -> list[tuple[str, str]]:
@@ -611,10 +627,14 @@ class AcceptedMinorFindingsTests(unittest.TestCase):
         self.path = operation_compile.contract_path(self.docs, "verification")
         declare(self.path, test_command="make test")
         self.draft = self.path.read_text(encoding="utf-8")
+        set_review_loop(self.docs, "blocking_delta")
 
     def accept(self, *rows: str, header: str = HEADER) -> None:
         separator = "|" + "---|" * (header.count("|") - 1)
         section = "\n".join(["## Accepted Minor Findings", "", header, separator, *rows, "", ""])
+        self.write_section(section)
+
+    def write_section(self, section: str) -> None:
         self.path.write_text(self.draft.replace("## Navigation", section + "## Navigation", 1),
                              encoding="utf-8")
 
@@ -625,6 +645,40 @@ class AcceptedMinorFindingsTests(unittest.TestCase):
         self.assertEqual(self.errors(), [])
         approved = self.invoke(OPERATION, "approve", *self.args)
         self.assertEqual(approved.returncode, 0, approved.stdout + approved.stderr)
+
+    def test_the_section_is_authored_text_unless_the_loop_is_blocking_delta(self):
+        # Only the blocking_delta loop writes the table; before the switch a
+        # section of that name was prose that checked and approved.
+        prose = "## Accepted Minor Findings\n\nThe owner accepts the repeated workdir sentence.\n\n"
+        self.write_section(prose)
+        self.assertEqual(self.errors(), [f"operation/verification-contract.md Accepted Minor"
+                                         f" Findings must be a Markdown table"])
+        for policy in ("current", None):
+            with self.subTest(policy=policy):
+                if policy is None:
+                    (self.docs / "delivery/process-policy.md").unlink()
+                else:
+                    set_review_loop(self.docs, policy)
+                self.write_section(prose)
+                self.assertEqual(self.errors(), [])
+                self.accept(self.VALID.replace("qa_engineer", "product_owner"))
+                self.assertEqual(self.errors(), [])
+        self.write_section(prose)
+        approved = self.invoke(OPERATION, "approve", *self.args)
+        self.assertEqual(approved.returncode, 0, approved.stdout + approved.stderr)
+        receipt, errors = self.operation.check_contract(self.docs, "verification")
+        self.assertEqual((errors, receipt["current"], receipt["source_hash"]),
+                         ([], True, json.loads(approved.stdout)["source_hash"]))
+        # A policy that cannot be read is refused, never read as the default.
+        set_review_loop(self.docs, "blocking_delta")
+        begun = self.invoke(OPERATION, "begin-revision", *self.args)
+        self.assertEqual(begun.returncode, 0, begun.stdout + begun.stderr)
+        sys.path.insert(0, str(SCRIPTS))
+        import process_policy
+        with contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(process_policy.main(["begin-revision", "--docs", str(self.docs)]), 0)
+        self.assertEqual(len(self.errors()), 1)
+        self.assertIn("Process Policy revision 2 is a draft", self.errors()[0])
 
     def test_complete_rows_approve_and_stay_current(self):
         other = self.VALID.replace("qa_engineer", "devops_engineer").replace(
